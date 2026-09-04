@@ -27907,6 +27907,14 @@ async function toolPlanEmpat(env, tid, caps2, args) {
     unresolved: bad
   };
 }
+function toIsoDate(v) {
+  const s = String(v || "").trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+  return null;
+}
 function dueSummary(dueJson) {
   let due = {};
   try {
@@ -27915,8 +27923,9 @@ function dueSummary(dueJson) {
   }
   const t0 = Date.parse(londonToday() + "T12:00:00Z");
   const out = [];
-  for (const [type, date] of Object.entries(due || {})) {
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) continue;
+  for (const [type, raw] of Object.entries(due || {})) {
+    const date = toIsoDate(raw);
+    if (!date) continue;
     const days = Math.round((Date.parse(date + "T12:00:00Z") - t0) / 864e5);
     out.push({ type, date, daysUntil: days, state: days < 0 ? "OVERDUE" : days <= 30 ? "due soon" : "ok" });
   }
@@ -28254,16 +28263,22 @@ async function handle29(request, env, ctx, url, sess) {
       ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "\u26A0\uFE0F " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter((c) => c.type === "tool_use");
-      const term = uses.find((u) => !READ.has(u.name));
+      const isEmptyAction = (u) => u.name === "draft_jobs" && !(Array.isArray(u.input && u.input.jobs) && u.input.jobs.length) || u.name === "assign_jobs" && !(Array.isArray(u.input && u.input.assignments) && u.input.assignments.length);
+      const term = uses.find((u) => !READ.has(u.name) && !isEmptyAction(u));
       if (term) {
         t = term;
         break;
       }
+      const hasEmptyTerm = uses.some((u) => !READ.has(u.name) && isEmptyAction(u));
       const reads = last ? [] : uses.filter((c) => READ.has(c.name));
-      if (reads.length) {
+      if (reads.length || hasEmptyTerm && !last) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
         for (const u of uses) {
+          if (!READ.has(u.name)) {
+            out.push({ type: "tool_result", tool_use_id: u.id, content: "You called " + u.name + " with an EMPTY list, so nothing can be created. Re-call " + u.name + " NOW re-listing EVERY job you proposed, each in full \u2014 for a NEW job: site (store number), engineer, date, start time, description (for an EM/PAT day include the interleaved briefing in the description); for an ASSIGN: the jobId (or jobRef), engineer and date. Never send an empty list, and never describe the jobs only in text." });
+            continue;
+          }
           let data;
           try {
             if (u.name === "find_jobs") {
