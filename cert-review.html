@@ -94,7 +94,11 @@
         const me = await authFetch("/auth/me").then(r=>r.json());
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
-      loadList();
+      // Deep-link from the certificate tracker: ?open=<certId> opens that cert
+      // straight away (issued certs included, so a filed one can be re-opened).
+      const OPEN_ID = new URLSearchParams(location.search).get("open") || "";
+      if (OPEN_ID) { SHOW_ISSUED = true; await loadList(); openCert(OPEN_ID); }
+      else loadList();
     })();
 
     var SHOW_ISSUED = false;

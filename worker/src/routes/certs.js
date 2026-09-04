@@ -1000,6 +1000,87 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
   }
 
+  // ── EM/PAT certificate TRACKER (office) — every expected certificate and where
+  // it's up to, so the office can see what's still outstanding. One row per
+  // (EM/PAT job × type it needs), joined to its certificate: notstarted (no cert
+  // row yet — with the engineer), draft (being filled), review (submitted — office
+  // to finalise), final (uploaded/filed to the compliance chart). Filter by the
+  // certificate's activity day: today (default) / 7d / 30d / all. `count=1` returns
+  // just the tallies (for the home-page hub card). ─────────────────────────────
+  if (sub === "/status" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const range = String(q.get("range") || "today").toLowerCase();
+    const countOnly = q.get("count") === "1";
+    // London calendar-day strings (YYYY-MM-DD) so the window matches the working day.
+    const londonDay = (d) => { try { const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return ""; } };
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); };
+    let from = null;
+    if (range === "7d") from = daysAgo(6);
+    else if (range === "30d") from = daysAgo(29);
+    else if (range !== "all") from = today;   // default = today
+
+    // Every live EM/PAT job (dormant fallback templates + archive already excluded).
+    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat));
+    // Certificate rows for those jobs, keyed job_id::type.
+    const certByKey = {};
+    const jobIds = jobs.map(j => String(j.id));
+    for (let i = 0; i < jobIds.length; i += 100) {
+      const chunk = jobIds.slice(i, i + 100);
+      if (!chunk.length) break;
+      const ph = chunk.map(() => "?").join(",");
+      const rows = (await env.DB.prepare(
+        `SELECT id,type,status,job_id,cert_number,engineer,created_at,updated_at,submitted_at,finalised_at FROM certificates WHERE tenant_id=? AND job_id IN (${ph})`
+      ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of rows) certByKey[String(r.job_id) + "::" + r.type] = r;
+    }
+
+    const isCancelled = s => /cancel/i.test(String(s || ""));
+    const items = [];
+    for (const j of jobs) {
+      if (isCancelled(j.status)) continue;
+      const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean)
+        : (j.assignedTo ? [j.assignedTo] : []);
+      const types = [];
+      if (j.emTest) types.push("em");
+      if (j.pat) types.push("pat");
+      for (const type of types) {
+        const cert = certByKey[String(j.id) + "::" + type] || null;
+        const status = cert ? cert.status : "notstarted";
+        // The certificate's "activity" day: the timestamp of its current state
+        // (finalised → submitted → last-edited), else the job's scheduled day.
+        const activity = cert
+          ? (cert.finalised_at || cert.submitted_at || cert.updated_at || cert.created_at)
+          : (j.scheduledAt || j.createdAt || "");
+        const day = londonDay(activity);
+        if (day && day > today) continue;              // never show future/not-yet-due work
+        if (from && (!day || day < from)) continue;    // outside the chosen window
+        items.push({
+          jobId: j.id, type,
+          site: j.siteName || j.helpdeskRef || j.reference || "",
+          siteCode: j.siteCode || "",
+          engineers: engs,
+          engineer: (cert && cert.engineer) || engs[0] || "",
+          status,
+          certId: cert ? cert.id : "",
+          certNumber: (cert && cert.cert_number) || "",
+          scheduledAt: j.scheduledAt || "",
+          submittedAt: cert ? (cert.submitted_at || "") : "",
+          finalisedAt: cert ? (cert.finalised_at || "") : "",
+          activityAt: activity || "",
+        });
+      }
+    }
+    items.sort((a, b) => String(b.activityAt || "").localeCompare(String(a.activityAt || "")));
+    const counts = {
+      expected: items.length,
+      uploaded: items.filter(i => i.status === "final").length,
+      toReview: items.filter(i => i.status === "review").length,
+      withEngineers: items.filter(i => i.status === "draft" || i.status === "notstarted").length,
+    };
+    return json({ ok: true, range, counts, items: countOnly ? [] : items }, {}, env, request);
+  }
+
   // ── A site's issued history ──────────────────────────────────────────────────
   if (sub === "/list" && method === "GET") {
     const code = padCode(q.get("code")), type = T(q.get("type"));

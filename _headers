@@ -171,5 +171,7 @@
   Cache-Control: no-cache
 /cert-review.html
   Cache-Control: no-cache
+/cert-status.html
+  Cache-Control: no-cache
 /cert-form.js
   Cache-Control: no-cache

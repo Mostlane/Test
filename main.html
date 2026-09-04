@@ -1746,6 +1746,31 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
+    // ── Widget: EM & PAT certificates — how many you're waiting on (with the
+    //    engineers, or in your review queue). Opens the certificate tracker. ────
+    HUB.register({
+      id: "certs", emoji: "📄", title: "EM & PAT certificates", area: "compliance",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance); },
+      load: function (card) {
+        return jget("/certs/status?range=30d&count=1").then(function (d) {
+          if (!d || !d.ok || !d.counts) throw new Error("bad");
+          var c = d.counts;
+          var outstanding = (c.toReview || 0) + (c.withEngineers || 0);
+          var rows = "";
+          if (c.withEngineers) rows += metric("Awaiting from engineers", c.withEngineers, "warn");
+          if (c.toReview) rows += metric("In your review queue", c.toReview, "warn");
+          if (c.uploaded) rows += metric("Uploaded (last 30 days)", c.uploaded, "ok");
+          card.innerHTML = cardHtml({
+            emoji: "📄", title: "EM & PAT certificates",
+            big: outstanding, sub: "certificate" + (outstanding === 1 ? "" : "s") + " outstanding",
+            tone: outstanding ? "warn" : "",
+            ok: outstanding ? "" : (c.expected ? "All EM & PAT certificates received & filed." : "No EM/PAT certificates recently."),
+            rows: rows, actions: act("cert-status.html", "Open certificate tracker", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Purchase orders — POs raised but not yet priced, + review flags ─
     HUB.register({
       id: "po", emoji: "🧾", title: "Purchase orders", area: "purchaseorders",
@@ -1899,6 +1924,8 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (a) { if (!Array.isArray(a)) return null; return { n: a.filter(function (h) { return h.status === "Pending"; }).length, label: "holidays to approve", bad: false }; } },
         { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
           calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
+        { area: "compliance", ok: yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance), emoji: "📄", href: "cert-status.html", get: "/certs/status?range=30d&count=1",
+          calc: function (d) { if (!d || !d.ok || !d.counts) return null; return { n: (d.counts.toReview || 0) + (d.counts.withEngineers || 0), label: "EM/PAT certs outstanding", bad: false }; } },
         { area: "memos", ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
           calc: function (d) { if (!d || !d.ok) return null; var n = (d.memos || []).filter(function (m) { return m.status === "sent" && (m.total - m.signed) > 0; }).length; return { n: n, label: "memos unsigned", bad: false }; } },
         { area: "timesheets", ok: yes(p.FullAccess) || yes(p.TimesheetAdmin), emoji: "⏱️", href: "timesheets-admin.html", get: "/ts/admin/overview",
