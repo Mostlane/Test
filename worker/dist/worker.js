@@ -15827,6 +15827,12 @@ async function handle10(request, env, ctx, url, sess) {
     if (!siteNumber) return error("siteNumber required", 400, env, request);
     site.siteNumber = siteNumber;
     const oldNum = q.get("oldSiteNumber");
+    if (client !== "projects" && /^p\d/i.test(siteNumber))
+      return error(`"${siteNumber}" uses the project number format (P####), reserved for projects. Give this ${client} site a different number.`, 400, env, request);
+    if (path === "/add-site" || oldNum && oldNum !== siteNumber) {
+      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(db.tenantId, siteNumber).first();
+      if (dup) return error(`Site number ${siteNumber} is already used by "${dup.site_name}"${dup.client && dup.client !== client ? " (" + dup.client + ")" : ""}. Site numbers must be unique.`, 400, env, request);
+    }
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
@@ -16160,12 +16166,14 @@ async function setPOSiteActive(env, name, active) {
 async function nextProjectNumber(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare(
-    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
+    "SELECT job_number, site_number FROM sites WHERE tenant_id=?"
   ).bind(db.tenantId).all();
   let max = 0;
   for (const r of results || []) {
-    const m = String(r.job_number).match(/(\d+)\s*$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+    for (const v of [r.job_number, r.site_number]) {
+      const m = String(v || "").match(/^P0*(\d+)$/i);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
   }
   return "P" + String(max + 1).padStart(4, "0");
 }
