@@ -601,7 +601,22 @@
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
       if (t.dataset.approve) {
-        const r = await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }).then(x => x.json()).catch(() => ({}));
+        const id = t.dataset.approve, astype = t.dataset.astype || undefined;
+        const rec = ALL.find(h => h.id === id);
+        const who = rec ? nm(rec) : "This person";
+        let r = await post("/holiday/approve", { id, type: astype }).then(x => x.json()).catch(() => ({}));
+        // Server found jobs booked on those days — warn + confirm before forcing.
+        if (r && r.clash && Array.isArray(r.jobs) && r.jobs.length) {
+          const n = r.jobs.length;
+          const list = r.jobs.map(j => {
+            const d = j.date ? new Date(j.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : "";
+            return `${d} — ${j.ref || "job"}${j.site ? " (" + j.site + ")" : ""} [${j.status || "Scheduled"}]`;
+          }).join("  ·  ");
+          const msg = `${who} has ${n} job${n === 1 ? "" : "s"} booked on those days:  ${list}.  Approve the holiday anyway? You'll still need to move or reassign ${n === 1 ? "it" : "them"}.`;
+          const ok = window.MLUI ? await MLUI.confirm(msg, { title: "⚠ Jobs booked on those days", okLabel: "Approve holiday", cancelLabel: "Not yet", danger: true }) : confirm(msg);
+          if (!ok) return;
+          r = await post("/holiday/approve", { id, type: astype, force: true }).then(x => x.json()).catch(() => ({}));
+        }
         if (r && r.warning) alert(r.warning + "\n\nApproved anyway — check the calendar for a possible duplicate.");
         loadAll();
       }
