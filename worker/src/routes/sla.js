@@ -558,6 +558,7 @@ export async function handle(request, env, ctx, url, sess) {
       .replace(/\s+/g, " ").trim();
     const payload = {
       reference: cleanRef || undefined,
+      dedupeByRef: true,   // machine intake: a re-sent email UPDATES the same job (dedupe by reference)
       description: String(b.description || "").trim() || undefined,
       priority, raisedAt,
       status: b.status || undefined,
@@ -3391,7 +3392,14 @@ async function saveJob(env, tenantId, job) {
 
 export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
-  const id = body.id || body.reference || crypto.randomUUID();
+  // The job id is an explicit id (stable-id callers: series, fleet, reopen, …),
+  // else the REFERENCE only when the caller explicitly wants dedupe-by-reference
+  // (the email/Zapier intake, so a re-sent email updates the same job), else a
+  // fresh UUID. NEVER derive the id from the reference for a normal create — the
+  // reference is a display label and two jobs at the SAME site share it, so that
+  // silently upserted (overwrote) an existing job (e.g. a second job at Frome
+  // wiping the electrical-test job).
+  const id = body.id || ((body.dedupeByRef || body.upsertByRef) && body.reference) || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now = new Date().toISOString();
 
