@@ -17808,6 +17808,38 @@ async function handle16(request, env, ctx, url, sess) {
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "hs:rams:library", JSON.stringify({ hazards: b.hazards, workTypes: b.workTypes })).run();
     return json({ ok: true }, {}, env, request);
   }
+  if (path === "/hs/ai-rams" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!env.ANTHROPIC_API_KEY) return error("AI autofill isn't set up \u2014 ask an admin to add the ANTHROPIC_API_KEY secret to the worker.", 400, env, request);
+    const notes = String(b.notes || "").slice(0, 8e3);
+    const docText = String(b.text || "").slice(0, 12e4);
+    const types = Array.isArray(b.types) ? b.types.slice(0, 400) : [];
+    const typeList = types.map((t) => `[${t.i}] ${String(t.group || "")} \u2014 ${String(t.label || "")}`).join("\n").slice(0, 2e4);
+    if (!notes.trim() && !docText.trim() && !b.pdfBase64) return error("Add a description or drop a document first.", 400, env, request);
+    const schema = {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short title / activity for the risk assessment" },
+        site: { type: "string", description: "Project or site name, if stated" },
+        location: { type: "string", description: "Location of the activity on site, if stated" },
+        description: { type: "string", description: "A concise description of the activity/works" },
+        persons: { type: "string", description: "Persons affected, comma-separated (e.g. Operatives, Visitors, Members of the public)" },
+        ppe: { type: "array", items: { type: "string" }, description: "Required PPE items" },
+        workTypes: { type: "array", items: { type: "integer" }, description: "Indexes (the [N] numbers) of the work-types from the provided list that this job involves \u2014 pick every one that applies" },
+        extraHazards: { type: "array", items: { type: "object", properties: { name: { type: "string" }, control: { type: "string" } }, required: ["name"] }, description: "Hazards specific to this job that the picked work-types wouldn't already cover (leave empty if none)" }
+      },
+      required: ["title", "description", "workTypes"]
+    };
+    const system = "You help a UK construction company (Mostlane) prepare a Risk Assessment. Read the supplied job document(s) and notes and extract the details. Choose the work-types ONLY from the numbered list provided (return their [N] index numbers) \u2014 pick every type the works involve, and none that they don't. Suggest a short title, the site/location if stated, a concise activity description, the persons affected, and required PPE. Only add extraHazards for genuine job-specific hazards the chosen work-types wouldn't already bring in. Be accurate and conservative \u2014 the office will verify everything.";
+    const userContent = [];
+    if (b.pdfBase64 && typeof b.pdfBase64 === "string" && b.pdfBase64.length < 8e6) {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: b.pdfBase64 } });
+    }
+    userContent.push({ type: "text", text: "WORK-TYPE LIST (pick from these by index):\n" + (typeList || "(none provided)") + "\n\n--- OFFICE NOTES ---\n" + (notes || "(none)") + "\n\n--- DOCUMENT TEXT ---\n" + (docText || "(none \u2014 see attached PDF)") });
+    const res = await hsAnthropicTool(env, { system, userContent, schema, toolName: "build_rams" });
+    if (!res.ok) return error(res.error, res.code || 502, env, request);
+    return json({ ok: true, result: res.input }, {}, env, request);
+  }
   if (path === "/hs/attention" && method === "GET") {
     const { results } = await db.prepare(
       "SELECT id, ref, site, data, created_by FROM hs_documents WHERE tenant_id=? AND doc_type='hotworks' AND status='open'"
@@ -17843,6 +17875,47 @@ var SEQ = {
   induction: { prefix: "IND", sep: "-", pad: 4, floor: 1 },
   incident: { prefix: "INC", sep: "-", pad: 4, floor: 1 }
 };
+async function hsAnthropicTool(env, { system, userContent, schema, toolName, maxTokens }) {
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens || 4e3,
+        system,
+        tools: [{ name: toolName, description: "Return the result.", input_schema: schema }],
+        tool_choice: { type: "tool", name: toolName },
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+  } catch {
+    return { ok: false, code: 502, error: "Couldn't reach the AI service. Try again in a moment." };
+  }
+  if (!resp.ok) {
+    let detail = "";
+    try {
+      const j = await resp.json();
+      detail = j?.error?.message || "";
+    } catch {
+    }
+    if (resp.status === 401 || resp.status === 403) return { ok: false, code: 400, error: "The AI key was rejected \u2014 check the ANTHROPIC_API_KEY secret on the worker." };
+    if (resp.status === 404 && /model/i.test(detail)) return { ok: false, code: 400, error: `The AI model "${model}" isn't available on this key. Set ANTHROPIC_MODEL on the worker.` };
+    return { ok: false, code: 502, error: "The AI service returned an error" + (detail ? ": " + detail : ".") };
+  }
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return { ok: false, code: 502, error: "The AI service returned an unreadable response." };
+  }
+  if (payload.stop_reason === "refusal") return { ok: false, code: 400, error: "The AI declined that request." };
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
+  return { ok: true, input: block.input };
+}
 async function mintRef(db, docType, site) {
   if (docType === "hotworks") {
     const prefix2 = PREFIX[docType];
