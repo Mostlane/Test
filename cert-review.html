@@ -174,17 +174,54 @@
 
       // Fetch the finalised cert PDF and hand it to the browser as a download.
       async function downloadCertPdf(cid, num, ctype){
-        try {
-          const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid));
-          if (!r.ok) throw new Error("http");
-          const blob = await r.blob();
-          const u = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = u;
-          a.download = ((ctype==="pat"?"PAT":"EM")+" certificate "+(num||cid)+".pdf").replace(/[\/\\:*?"<>|]+/g,"-");
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
-        } catch(e) { setMsg("Issued ✓ — but the copy didn't download. Open it from the compliance chart's 📄 link.", true); }
+        const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid));
+        if (!r.ok) throw new Error("http");
+        const blob = await r.blob();
+        const u = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = u;
+        a.download = ((ctype==="pat"?"PAT":"EM")+" certificate "+(num||cid)+".pdf").replace(/[\/\\:*?"<>|]+/g,"-");
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+      }
+      // DD/MM/YY HH:MM in local (London) time.
+      function fmtDT(iso){
+        if (!iso) return "—";
+        const d = new Date(iso); if (isNaN(d)) return "—";
+        const p = n => String(n).padStart(2,"0");
+        return p(d.getDate())+"/"+p(d.getMonth()+1)+"/"+String(d.getFullYear()).slice(-2)+" "+p(d.getHours())+":"+p(d.getMinutes());
+      }
+      // Details modal after "Yes, download" — shows site, cert number & completed
+      // time, with a Download button.
+      function certDownloadModal(info){
+        const esc2 = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+        const ov = document.createElement("div");
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+        const row = (k,v) => '<div style="display:flex;gap:10px;justify-content:space-between;padding:6px 0;border-top:1px solid #eef1f5;"><span style="color:#64748b;">'+k+'</span><b style="text-align:right;">'+esc2(v)+'</b></div>';
+        const btn = "padding:11px 16px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;";
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
+          + '<h3 style="margin:0 0 4px;color:#0f2438;font-size:17px;">✓ Certificate issued</h3>'
+          + '<div style="margin:6px 0 12px;">'
+            + row("Site", info.site)
+            + row("Certificate no.", info.number)
+            + row("Completed", info.completed)
+          + '</div>'
+          + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button data-x="close" style="'+btn+'background:#fff;color:#334;">Close</button>'
+            + '<button data-x="dl" style="'+btn+'background:#0f2438;color:#fff;border-color:#0f2438;">⬇ Download copy</button>'
+          + '</div></div>';
+        document.body.appendChild(ov);
+        return new Promise(resolve => {
+          ov.addEventListener("click", async e => {
+            const b = e.target.closest("[data-x]");
+            if (e.target === ov || (b && b.dataset.x === "close")) { ov.remove(); resolve(); return; }
+            if (b && b.dataset.x === "dl") {
+              b.disabled = true; b.textContent = "Downloading…";
+              try { await downloadCertPdf(info.cid, info.number, info.ctype); ov.remove(); resolve(); }
+              catch { b.disabled = false; b.textContent = "⬇ Download copy"; setMsg("Couldn't download — open it from the compliance chart's 📄 link.", true); }
+            }
+          });
+        });
       }
 
       if (g("finBtn")) g("finBtn").onclick = async function(){
@@ -196,7 +233,11 @@
             setMsg("Issued as "+d.number+" and filed to compliance ✓" + (d.remedial && d.remedial.count ? " — "+d.remedial.count+" fitting(s) failed, £"+d.remedial.charge+" to charge" : ""));
             // Offer a copy of the issued certificate to download.
             const wantDl = window.MLUI ? await MLUI.confirm("Download a copy of certificate "+d.number+"?", { title:"Certificate issued ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Download a copy of certificate "+d.number+"?");
-            if (wantDl) await downloadCertPdf(id, d.number, cert.type);
+            if (wantDl) {
+              const site = (cert.installation && cert.installation.name) || cert.siteCode || "—";
+              const completed = fmtDT(cert.submittedAt || cert.finalisedAt || Date.now());
+              await certDownloadModal({ cid: id, number: d.number, ctype: cert.type, site: site, completed: completed });
+            }
             // Pop the charge/quote confirmation immediately for a cert with remedials.
             if (d.remedial && d.remedial.count && window.mlRemedialCheck) setTimeout(window.mlRemedialCheck, 400);
             setTimeout(loadList, wantDl ? 1600 : 1300);
