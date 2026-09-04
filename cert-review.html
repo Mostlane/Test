@@ -287,11 +287,19 @@
       if (c.onsite) bits.push(c.onsite + " done on site");
       if (c.pending) bits.push(c.pending + " to attend");
       let acts = '';
-      if (c.stage === "to_quote") acts += '<button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
-      else if (c.stage === "quoted") acts += '<button class="btn sm" data-adv="approved" data-c="'+esc(c.certId)+'">'+(c.pending ? "📦 Order received → raise job" : "✓ Approved")+'</button>';
-      else if (c.stage === "approved") acts += '<button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
-      if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
-      if (c.jobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.jobId)+'" style="text-decoration:none">Open job →</a>';
+      // LIGHTS (agreed £50/light — no supplier, no approval): copy the client quote
+      // + raise the works job on demand.
+      if (c.charge) acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy client quote (£50/light)</button>';
+      if (c.lightsPending && !c.lightsJobId && c.stage !== "invoiced") acts += ' <button class="btn sm" data-raiselights="'+esc(c.certId)+'">🔧 Raise lights job</button>';
+      // Stage pipeline — the approval/order steps apply to BATTERIES; a lights-only
+      // case goes straight to invoiced (no order needed).
+      if (c.stage === "to_quote") acts += ' <button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
+      else if (c.stage === "quoted") acts += (c.batteries
+        ? ' <button class="btn sm" data-adv="approved" data-c="'+esc(c.certId)+'">📦 Order received → raise batteries job</button>'
+        : ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>');
+      else if (c.stage === "approved") acts += ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
+      if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
+      if (c.jobId || c.lightsJobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.lightsJobId||c.jobId)+'" style="text-decoration:none">Open job →</a>';
       if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open">↩</button>';
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -319,6 +327,29 @@
         try { const r = await authFetch("/certs/remedials/stage", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid, to }) }).then(x=>x.json());
           if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
         catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-quote]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.quote; setMsg(cid, "Building quote…");
+        try {
+          const r = await authFetch("/certs/remedials/quote-text?certId="+encodeURIComponent(cid)).then(x=>x.json());
+          if (!r || !r.ok || !r.text) { setMsg(cid, (r&&r.message)||"No light remedials to quote.", true); return; }
+          let copied = false;
+          try { await navigator.clipboard.writeText(r.text); copied = true; } catch(e) {}
+          const m = g("rmBody").querySelector('[data-msg="'+CSS.escape(cid)+'"]');
+          if (m) {
+            m.className = "rcase-msg msg ok";
+            m.innerHTML = (copied ? "✓ Copied to clipboard — paste into your quote:" : "Select & copy this quote:")
+              + '<textarea readonly style="width:100%;margin-top:6px;font:inherit;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;min-height:60px;">'+esc(r.text)+'</textarea>';
+            const ta = m.querySelector("textarea"); if (ta && !copied) { ta.focus(); ta.select(); }
+          }
+        } catch { setMsg(cid, "Couldn't build the quote.", true); }
+      });
+      g("rmBody").querySelectorAll("[data-raiselights]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.raiselights; b.disabled = true; setMsg(cid, "Raising lights job…");
+        try {
+          const r = await authFetch("/certs/remedials/raise-lights", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't raise the job.", true); b.disabled=false; }
+        } catch { setMsg(cid, "Couldn't raise the job.", true); b.disabled=false; }
       });
       g("rmBody").querySelectorAll("[data-battpdf]").forEach(b => b.onclick = async () => {
         const cid = b.dataset.battpdf; const w = window.open("", "_blank");
