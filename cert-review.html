@@ -363,6 +363,11 @@
       else if (c.stage === "approved") acts += ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
       if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
       if (c.jobId || c.lightsJobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.lightsJobId||c.jobId)+'" style="text-decoration:none">Open job →</a>';
+      // Once the works are done → generate the clean certificate (failures → Pass,
+      // marked "(Replaced)"). Auto-fires when the works job completes; this is the
+      // on-demand control. Hidden once already reissued.
+      if ((c.jobId || c.lightsJobId) && !c.reissueCertId) acts += ' <button class="btn sm" data-reissue="'+esc(c.certId)+'" title="Generate the clean certificate — failures become Pass, marked (Replaced)">♻ Issue updated cert</button>';
+      if (c.reissueCertId) acts += ' <a class="btn ghost sm" href="cert-review.html?open='+encodeURIComponent(c.reissueCertId)+'" style="text-decoration:none">♻ Updated cert →</a>';
       if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open">↩</button>';
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -413,6 +418,14 @@
           const r = await authFetch("/certs/remedials/raise-lights", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
           if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't raise the job.", true); b.disabled=false; }
         } catch { setMsg(cid, "Couldn't raise the job.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-reissue]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.reissue; b.disabled = true; setMsg(cid, "Generating updated certificate…");
+        try {
+          const r = await authFetch("/certs/remedials/reissue", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok && r.id) location.href = "cert-review.html?open=" + encodeURIComponent(r.id);
+          else { setMsg(cid, (r&&r.error)||"Couldn't generate the updated certificate.", true); b.disabled=false; }
+        } catch { setMsg(cid, "Couldn't generate the updated certificate.", true); b.disabled=false; }
       });
       g("rmBody").querySelectorAll("[data-battpdf]").forEach(b => b.onclick = async () => {
         const cid = b.dataset.battpdf; const w = window.open("", "_blank");
