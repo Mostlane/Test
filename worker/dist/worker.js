@@ -209,6 +209,166 @@ var init_tenantdb = __esm({
   }
 });
 
+// src/lib/email.js
+function appBase(env) {
+  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
+}
+async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const expires = new Date(Date.now() + ttlHours * 3600 * 1e3).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO password_resets (token, username, tenant_id, expires_at) VALUES (?,?,?,?)"
+  ).bind(token, username, tenantId, expires).run();
+  return token;
+}
+async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
+  if (!to) return { ok: false, skipped: true, reason: "no recipient" };
+  const body = text || stripHtml(html);
+  if (env.RESEND_API_KEY) {
+    const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
+    try {
+      const payload = { from, to, subject, html, text: body };
+      if (replyTo) payload.reply_to = replyTo;
+      if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error("Resend send failed:", res.status, errBody);
+        return { ok: false, status: res.status, error: errBody };
+      }
+      return { ok: true, via: "resend" };
+    } catch (e) {
+      console.error("Resend send error:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  if (env.RESET_EMAIL_WEBHOOK) {
+    try {
+      await fetch(env.RESET_EMAIL_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, html, text: body })
+      });
+      return { ok: true, via: "webhook" };
+    } catch (e) {
+      console.error("Email webhook failed:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
+  return { ok: false, skipped: true, reason: "no provider" };
+}
+function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
+  return {
+    subject: `Welcome to ${BRAND} \u2014 set your password`,
+    html: shell(`
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
+      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
+        <tr><td style="padding:12px 16px;">
+          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
+          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
+        </td></tr>
+      </table>
+      <p style="margin:0 0 6px;">Set your password to get started:</p>
+      ${button(setUrl, "Set your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
+      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
+      ${installSection(base)}
+    `, appUrl)
+  };
+}
+function installSection(base) {
+  const steps = (title, sub, rows) => `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 12px;background:#f7f9fc;border:1px solid #e4ebf4;border-radius:10px;">
+      <tr><td style="padding:13px 16px;">
+        <div style="font-size:14.5px;font-weight:700;color:#0f2a52;">${title} <span style="font-weight:500;color:#8a94a3;">\u2014 ${sub}</span></div>
+        <div style="margin-top:8px;color:#41505f;font-size:14px;line-height:1.85;">${rows}</div>
+      </td></tr>
+    </table>`;
+  const n = (i) => `<span style="display:inline-block;width:19px;height:19px;background:#003468;color:#fff;border-radius:50%;font-size:11px;font-weight:700;text-align:center;line-height:19px;margin-right:8px;">${i}</span>`;
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0 0;border-top:1px solid #e8edf3;">
+      <tr><td style="padding:20px 0 0;">
+        <h2 style="margin:0 0 6px;font-size:18px;font-weight:700;color:#003b82;">\u{1F4F2} Add Mostlane to your phone</h2>
+        <p style="margin:0 0 14px;color:#41505f;font-size:14.5px;">Takes about 20 seconds \u2014 then it opens like a proper app: full screen, one tap, and it can send you notifications for jobs and messages.</p>
+        ${steps("iPhone &amp; iPad", "in Safari", `
+          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Safari</b><br>
+          ${n(2)}Tap the <b>Share</b> button in the bottom bar<br>
+          ${n(3)}Choose <b>Add to Home Screen</b><br>
+          ${n(4)}Tap <b>Add</b> \u2014 the blue &ldquo;M&rdquo; is now on your home screen`)}
+        ${steps("Android", "in Chrome", `
+          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Chrome</b><br>
+          ${n(2)}Tap the <b>&#8942; menu</b> at the top-right<br>
+          ${n(3)}Tap <b>Install app</b> (or &ldquo;Add to Home screen&rdquo;)<br>
+          ${n(4)}Tap <b>Install</b> \u2014 done`)}
+        <p style="margin:4px 0 8px;color:#41505f;font-size:14px;">Prefer pictures? The step-by-step guide shows every tap:</p>
+        ${button(base + "/install.html", "\u{1F4F2} Open the picture guide")}
+      </td></tr>
+    </table>`;
+}
+function resetEmail({ name, resetUrl, appUrl }) {
+  return {
+    subject: `${BRAND} \u2014 password reset`,
+    html: shell(`
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
+      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
+      ${button(resetUrl, "Reset your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
+      ignore this email &mdash; your password won&rsquo;t change.</p>
+    `, appUrl)
+  };
+}
+function shell(inner, appUrl) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
+  const logo = `${base}/mostlane-logo.jpg`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f4;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
+        <tr><td align="center" style="padding:26px 24px 6px;">
+          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
+        </td></tr>
+        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
+        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
+          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
+        </td></tr>
+      </table>
+      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+function button(href, label) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
+    <td align="center" style="border-radius:8px;background:#1e66ff;">
+      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
+    </td></tr></table>`;
+}
+function stripHtml(html = "") {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function esc(s = "") {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+var BRAND;
+var init_email = __esm({
+  "src/lib/email.js"() {
+    BRAND = "Mostlane";
+  }
+});
+
 // src/lib/webpush.js
 function b64urlToBytes(s) {
   s = String(s).replace(/-/g, "+").replace(/_/g, "/");
@@ -657,2772 +817,6 @@ var init_push = __esm({
   }
 });
 
-// src/routes/holidays.js
-var holidays_exports = {};
-__export(holidays_exports, {
-  approvedLeaveInRange: () => approvedLeaveInRange,
-  bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle5,
-  remindPendingHolidays: () => remindPendingHolidays
-});
-async function approvedLeaveInRange(env, tid, from, to, username) {
-  const out = {};
-  try {
-    const sql = "SELECT username, start_date, end_date, type, half FROM holidays WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
-    const binds = username ? [tid, to, from, username] : [tid, to, from];
-    const { results } = await env.DB.prepare(sql).bind(...binds).all();
-    for (const r of results || []) {
-      if (!r.start_date || !r.end_date) continue;
-      let d = /* @__PURE__ */ new Date(r.start_date + "T12:00:00Z");
-      const end = /* @__PURE__ */ new Date(r.end_date + "T12:00:00Z");
-      let guard = 0;
-      while (d <= end && guard++ < 400) {
-        const ds = d.toISOString().slice(0, 10);
-        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
-        d.setUTCDate(d.getUTCDate() + 1);
-      }
-    }
-  } catch {
-  }
-  return out;
-}
-async function bankHolidaysInRange(env, tid, from, to) {
-  const out = {};
-  try {
-    const years = /* @__PURE__ */ new Set();
-    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
-    for (const y of years) {
-      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
-        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
-        if (!row || !row.value) continue;
-        let arr = [];
-        try {
-          arr = JSON.parse(row.value) || [];
-        } catch {
-        }
-        for (const b of arr) {
-          const date = b && b.date;
-          if (date && date >= from && date <= to)
-            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
-        }
-      }
-    }
-  } catch {
-  }
-  return out;
-}
-async function remindPendingHolidays(env, tid = 1) {
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
-    ).bind(tid).all();
-    const rows = results || [];
-    if (!rows.length) return;
-    for (const r of rows) {
-      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
-        title: "Holiday still awaiting approval",
-        body: `${r.username}'s request (${r.start_date} \u2192 ${r.end_date}) hasn't been actioned yet.`,
-        url: "/holiday-admin.html",
-        tag: "holiday-admin:" + r.id
-      }).catch(() => {
-      });
-    }
-  } catch {
-  }
-}
-async function handle5(request, env, ctx, url, sess) {
-  const headers = corsHeaders(env, request);
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  const json4 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
-  const text = (msg, status = 200) => new Response(msg, { status, headers });
-  const path = url.pathname;
-  const method = request.method.toUpperCase();
-  let user = null;
-  let role = "Engineer";
-  {
-    const s = sess || await requireSession(env, request);
-    if (s) {
-      user = s.user.username;
-      const perms = await permissionsFor(env, tenantId, user);
-      role = perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes" ? "Admin" : "Engineer";
-    }
-  }
-  if (!user) return text("Unauthorised", 401);
-  const year = getYear(url);
-  const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet2(key) {
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
-    return row ? JSON.parse(row.value) : null;
-  }
-  async function cfgPut(key, val) {
-    await db.prepare(
-      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).bind(db.tenantId, key, JSON.stringify(val)).run();
-  }
-  async function getYearConfig() {
-    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
-  }
-  async function getDefaultAllowance() {
-    return Number((await getYearConfig()).defaultAllowance ?? 28);
-  }
-  async function getBankHolidays() {
-    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
-  }
-  async function getShutdownDays() {
-    return await cfgGet2(`holiday:shutdown:${year}`) || [];
-  }
-  async function getUserAllowance(username) {
-    const row = await db.prepare(
-      "SELECT allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
-    ).bind(db.tenantId, year, username).first();
-    if (row && Number.isFinite(Number(row.allowance))) return Number(row.allowance);
-    return getDefaultAllowance();
-  }
-  async function listAllowancesMap() {
-    const { results } = await db.prepare(
-      "SELECT username, allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
-    ).bind(db.tenantId, year).all();
-    const out = {};
-    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
-    return out;
-  }
-  async function getActiveUsers() {
-    const { results } = await db.prepare(
-      "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
-    ).bind(db.tenantId).all();
-    return (results || []).map((r) => r.username).filter(Boolean);
-  }
-  async function getInactiveUsers() {
-    const { results } = await db.prepare(
-      "SELECT username, status FROM users WHERE tenant_id = ? AND COALESCE(status,'') NOT IN ('Active','')"
-    ).bind(db.tenantId).all();
-    return (results || []).map((r) => ({ username: r.username, status: r.status || "Disabled" })).filter((x) => x.username);
-  }
-  async function logAction(requestId, action, by) {
-    await db.prepare(
-      "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
-    ).bind(db.tenantId, requestId, action, by, (/* @__PURE__ */ new Date()).toISOString()).run();
-  }
-  async function overlappingBookings(username, start, end, excludeId) {
-    const binds = [db.tenantId, username, end, start];
-    let sql = "SELECT id, start_date, end_date, days, type, status FROM holidays WHERE tenant_id=? AND username=? AND status NOT IN ('Cancelled','Rejected') AND start_date<=? AND end_date>=?";
-    if (excludeId) {
-      sql += " AND id<>?";
-      binds.push(excludeId);
-    }
-    const { results } = await db.prepare(sql).bind(...binds).all();
-    return (results || []).map((r) => ({ id: r.id, start: r.start_date, end: r.end_date, days: r.days, type: r.type, status: r.status }));
-  }
-  const overlapWarning = (clashes) => clashes.length ? `\u26A0 Overlaps ${clashes.length} existing booking${clashes.length === 1 ? "" : "s"} on the calendar: ` + clashes.map((c) => `${c.start}${c.end !== c.start ? "\u2192" + c.end : ""} (${c.status})`).join(", ") : null;
-  async function ensureSystemDaysBulk(usernames) {
-    if (!usernames.length) return;
-    const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
-    if (!bank.length && !shut.length) return;
-    const { results } = await db.prepare(
-      "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
-    ).bind(db.tenantId, year).all();
-    const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const stmts = [];
-    const ins = db.prepare(`
-      INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
-      ON CONFLICT(kind, year, date, username) DO NOTHING
-    `);
-    for (const u of usernames) {
-      for (const b of bank) {
-        if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
-      }
-      for (const s of shut) {
-        if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
-      }
-    }
-    if (stmts.length) await db.batch(stmts);
-  }
-  async function ensureSystemDaysForUser(username) {
-    return ensureSystemDaysBulk([username]);
-  }
-  async function listHolidayRequestsForYear() {
-    const { results } = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
-    return (results || []).map(reqOut);
-  }
-  async function getHolidayById(id) {
-    const row = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).first();
-    return row ? reqOut(row) : null;
-  }
-  async function listSystemRecordsForYear() {
-    const { results } = await db.prepare("SELECT * FROM holiday_system_days WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
-    return (results || []).map(sysOut);
-  }
-  function bookedHolidayDates(all, username) {
-    const set = /* @__PURE__ */ new Set();
-    for (const h of all) {
-      if (h.username !== username || h.status !== "Approved") continue;
-      if (h.type === "Other" || h.type === "Unpaid") continue;
-      if (!h.start) continue;
-      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
-      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-        const wd = d.getUTCDay();
-        if (wd === 0 || wd === 6) continue;
-        set.add(d.toISOString().slice(0, 10));
-      }
-    }
-    return set;
-  }
-  function computeUsage(all, sys, username, allowance, todayISO) {
-    const dayMap = {};
-    for (const h of all) {
-      if (h.username !== username || h.status !== "Approved") continue;
-      if (h.type === "Other" || h.type === "Unpaid") continue;
-      if (!h.start) continue;
-      const isHalf = Number(h.days) === 0.5 && (h.end || h.start) === h.start;
-      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
-      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-        const wd = d.getUTCDay();
-        if (wd === 0 || wd === 6) continue;
-        const di = d.toISOString().slice(0, 10);
-        const m = dayMap[di] || (dayMap[di] = { full: false, am: false, pm: false, half: false });
-        if (isHalf) {
-          if (h.half === "AM") m.am = true;
-          else if (h.half === "PM") m.pm = true;
-          else m.half = true;
-        } else m.full = true;
-      }
-    }
-    let booked = 0, bookedTD = 0;
-    for (const di of Object.keys(dayMap)) {
-      const m = dayMap[di];
-      const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
-      booked += v;
-      if (di <= todayISO) bookedTD += v;
-    }
-    const covered = bookedHolidayDates(all, username);
-    let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
-    for (const s of sys) {
-      if (s.username !== username) continue;
-      if (!isWeekdayISO(s.date)) continue;
-      if (s.worked === true || s.status === "Credited") {
-        credited += s.days || 1;
-        continue;
-      }
-      if (covered.has(s.date)) continue;
-      const passed = (s.date || "") <= todayISO;
-      if (s.kind === "shutdown") {
-        shut += s.days || 1;
-        if (passed) shutTD += s.days || 1;
-      } else {
-        bank += s.days || 1;
-        if (passed) bankTD += s.days || 1;
-      }
-    }
-    const committed = booked + bank + shut - credited;
-    const usedToDate = bookedTD + bankTD + shutTD - credited;
-    return {
-      allowance,
-      booked,
-      bank,
-      shutdown: shut,
-      credited,
-      committed,
-      used: committed,
-      usedToDate,
-      remaining: Math.round((allowance - committed) * 100) / 100
-    };
-  }
-  if (path === "/holiday/request" && method === "POST") {
-    const body = await request.json();
-    const id = `H-${Date.now()}`;
-    const start = body.start, end = body.end;
-    if (!start || !end) return text("Missing start/end", 400);
-    if (new Date(end) < new Date(start)) return text("End before start", 400);
-    const note = String(body.notes || "").trim();
-    if (!note) return text("Notes (reminder) required", 400);
-    const half = ["AM", "PM"].includes(body.half) ? body.half : null;
-    if (half && start !== end) return text("Half days are for a single day", 400);
-    let days = countWeekdaysInclusive(start, end);
-    if (days <= 0) return text("No weekdays in range", 400);
-    if (half) days = 0.5;
-    const clashes = await overlappingBookings(user, start, end, null);
-    await db.prepare(`
-      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
-    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
-    await logAction(id, "Submitted", user);
-    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
-      title: "Holiday request",
-      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
-      url: "/holiday-admin.html",
-      tag: "holiday-admin:" + id,
-      actionable: true
-    }, user));
-    return json4({ success: true, id, warning: overlapWarning(clashes) || void 0 });
-  }
-  if (path === "/holiday/cancel" && method === "POST") {
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.username !== user) return text("Forbidden", 403);
-    if (!["Pending", "Approved"].includes(record.status))
-      return text("Only pending or approved requests can be cancelled", 409);
-    const wasApproved = record.status === "Approved";
-    await db.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
-    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
-    await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
-    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
-      title: "Holiday cancelled",
-      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} \u2192 ${record.end_date}).`,
-      url: "/holiday-admin.html",
-      tag: "holiday-admin"
-    }, user));
-    return json4({ success: true, wasApproved });
-  }
-  if (path === "/holiday/delete-own" && method === "POST") {
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.username !== user) return text("Forbidden", 403);
-    if (!["Cancelled", "Rejected"].includes(record.status)) {
-      return text("Can only delete cancelled or rejected requests", 409);
-    }
-    await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
-    await logAction(id, "Deleted by engineer", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/cancel-approved" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.status !== "Approved") return text("Only approved holidays can be cancelled here", 409);
-    await db.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
-    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
-    await logAction(id, "Approval cancelled by admin", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/admin-edit" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const b = await request.json();
-    const id = b.id;
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (b.action === "delete") {
-      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
-      await logAction(id, `Deleted by admin (${record.start} \u2192 ${record.end})`, user);
-      return json4({ success: true, deleted: true });
-    }
-    const sets = [], vals = [];
-    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) {
-      sets.push("type=?");
-      vals.push(b.type);
-    }
-    if (b.start) {
-      sets.push("start_date=?");
-      vals.push(b.start);
-      sets.push("year=?");
-      vals.push(Number(String(b.start).slice(0, 4)) || record.year);
-    }
-    if (b.end) {
-      sets.push("end_date=?");
-      vals.push(b.end);
-    }
-    if (b.days != null && !Number.isNaN(Number(b.days))) {
-      sets.push("days=?");
-      vals.push(Number(b.days));
-    }
-    if (b.half !== void 0) {
-      sets.push("half=?");
-      vals.push(b.half || null);
-    }
-    if (!sets.length) return json4({ success: true, unchanged: true });
-    vals.push(db.tenantId, id);
-    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
-    await logAction(id, `Edited by admin (${b.type || record.type} \xB7 ${b.start || record.start} \u2192 ${b.end || record.end})`, user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/my" && method === "GET") {
-    await ensureSystemDaysForUser(user);
-    const reqs = (await listHolidayRequestsForYear()).filter((h) => h.username === user);
-    const sys = (await listSystemRecordsForYear()).filter((s) => s.username === user);
-    const results = [...reqs, ...sys];
-    results.sort((a, b) => {
-      const da = a.date || a.start || "9999-12-31";
-      const db2 = b.date || b.start || "9999-12-31";
-      return da.localeCompare(db2);
-    });
-    return json4(results);
-  }
-  if (path === "/holiday/summary" && method === "GET") {
-    await ensureSystemDaysForUser(user);
-    const allowance = await getUserAllowance(user);
-    const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const u = computeUsage(all, sys, user, allowance, today);
-    return json4({
-      allowance,
-      used: u.usedToDate,
-      // headline = used TO DATE
-      committed: u.committed,
-      // full-year commitment
-      remaining: u.remaining,
-      accrualMode: !!cfg.accrualMode,
-      breakdown: { booked: u.booked, bankHolidays: u.bank, shutdown: u.shutdown, usedToDate: u.usedToDate, committed: u.committed }
-    });
-  }
-  if (path === "/holiday/all" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    return json4(await listHolidayRequestsForYear());
-  }
-  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
-    if (!sess) return text("Not authenticated", 401);
-    const q = url.searchParams;
-    const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const from = iso(q.get("from")) || today;
-    const to = iso(q.get("to")) || from;
-    const days = await approvedLeaveInRange(env, tenantId, from, to);
-    return json4({ ok: true, from, to, days });
-  }
-  if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const { id } = body;
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    const status = path.endsWith("approve") ? "Approved" : "Rejected";
-    const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
-    await db.prepare(
-      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
-    ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
-    await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
-    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
-      title: `Holiday ${status.toLowerCase()}`,
-      body: `Your holiday ${record.start_date} \u2192 ${record.end_date} was ${status.toLowerCase()}.`,
-      url: "/holiday.html",
-      tag: "holiday-decision"
-    }));
-    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
-      title: `Holiday ${status.toLowerCase()}`,
-      body: `${record.username}'s holiday ${record.start_date} \u2192 ${record.end_date} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
-    }));
-    let warning;
-    if (status === "Approved") {
-      const clashes = (await overlappingBookings(record.username, record.start, record.end, id)).filter((c) => c.status === "Approved");
-      warning = overlapWarning(clashes) || void 0;
-    }
-    return json4({ success: true, warning });
-  }
-  if (path === "/holiday/config" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const cfg = await getYearConfig();
-    const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
-    return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
-  }
-  if (path === "/holiday/set-year-config" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const defaultAllowance = Number(body.defaultAllowance);
-    if (!Number.isFinite(defaultAllowance)) return text("Bad payload", 400);
-    const prev = await getYearConfig();
-    await cfgPut(`holiday:config:${year}`, {
-      defaultAllowance,
-      accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
-    });
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-allowance" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const username = body.username;
-    const allowance = Number(body.allowance);
-    if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
-    await db.prepare(
-      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
-    ).bind(db.tenantId, year, username, allowance).run();
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-bankholidays" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const days = Array.isArray(body.days) ? body.days : null;
-    if (!days) return text("Bad payload", 400);
-    const oldDays = await getBankHolidays();
-    const newDates = new Set(days.map((d) => d.date));
-    const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
-    if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
-    await cfgPut(`holiday:bankholidays:${year}`, days);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-shutdown" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const days = Array.isArray(body.days) ? body.days : null;
-    if (!days) return text("Bad payload", 400);
-    const oldDays = await getShutdownDays();
-    const newDates = new Set(days.map((d) => d.date));
-    const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
-    if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
-    await cfgPut(`holiday:shutdown:${year}`, days);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/toggle-worked" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const kind = body.kind, username = body.username, date = body.date, worked = !!body.worked;
-    if (!["bankholiday", "shutdown"].includes(kind) || !username || !date) return text("Bad payload", 400);
-    await ensureSystemDaysForUser(username);
-    const row = await db.prepare(
-      "SELECT id FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
-    ).bind(db.tenantId, kind, year, date, username).first();
-    if (!row) return text("Not found", 404);
-    await db.prepare(
-      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
-    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
-    await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/admin-summary" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const includeInactive = url.searchParams.get("all") === "1";
-    const activeUsers2 = await getActiveUsers();
-    await ensureSystemDaysBulk(activeUsers2);
-    const inactiveMap = {};
-    let usernames = activeUsers2.slice();
-    if (includeInactive) {
-      for (const iu of await getInactiveUsers()) {
-        usernames.push(iu.username);
-        inactiveMap[iu.username] = iu.status;
-      }
-    }
-    const [all, sys, allowMap, dflt] = await Promise.all([
-      listHolidayRequestsForYear(),
-      listSystemRecordsForYear(),
-      listAllowancesMap(),
-      getDefaultAllowance()
-    ]);
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const list = [];
-    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
-      const c = computeUsage(all, sys, u, allowance, today);
-      list.push({
-        username: u,
-        name: u.replace(".", " "),
-        allowance,
-        used: c.usedToDate,
-        // used TO DATE
-        committed: c.committed,
-        // full-year commitment
-        remaining: c.remaining,
-        booked: c.booked,
-        bankHolidays: c.bank,
-        shutdown: c.shutdown,
-        active: !inactiveMap[u],
-        status: inactiveMap[u] || "Active"
-      });
-    }
-    return json4({ year, engineers: list });
-  }
-  if (path === "/holiday/calendar" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const month = getMonth(url);
-    const monthStart = new Date(Date.UTC(year, month - 1, 1));
-    const monthEnd = new Date(Date.UTC(year, month, 0));
-    const daysInMonth = monthEnd.getUTCDate();
-    const includeInactive = url.searchParams.get("all") === "1";
-    const activeUsers2 = await getActiveUsers();
-    await ensureSystemDaysBulk(activeUsers2);
-    const inactiveMap = {};
-    let usernames = activeUsers2.slice();
-    if (includeInactive) {
-      for (const iu of await getInactiveUsers()) {
-        usernames.push(iu.username);
-        inactiveMap[iu.username] = iu.status;
-      }
-    }
-    const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
-    const engineers = [];
-    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const cells = {};
-      for (const h of all) {
-        if (h.username !== u || h.status !== "Approved") continue;
-        const overlap = weekdayOverlapCount(h.start, h.end, monthStart, monthEnd);
-        if (!overlap) continue;
-        const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z");
-        const e = /* @__PURE__ */ new Date(h.end + "T00:00:00Z");
-        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-          const day = d.getUTCDay();
-          if (day === 0 || day === 6) continue;
-          if (d < monthStart || d > monthEnd) continue;
-          const di = isoDate(d);
-          cells[di] = {
-            kind: "holiday",
-            type: h.type || "Annual Leave",
-            note: h.notes || "",
-            label: "Holiday",
-            username: u,
-            requestId: h.id,
-            rangeStart: h.start,
-            rangeEnd: h.end,
-            days: h.days,
-            half: h.half || (Number(h.days) === 0.5 && h.start === h.end ? "HALF" : null)
-          };
-        }
-      }
-      for (const s of sys) {
-        if (s.username !== u) continue;
-        const di = s.date;
-        if (!di) continue;
-        const d = /* @__PURE__ */ new Date(di + "T00:00:00Z");
-        if (d < monthStart || d > monthEnd) continue;
-        if (!isWeekdayISO(di)) continue;
-        if (!cells[di]) {
-          cells[di] = {
-            kind: s.category === "Shutdown" ? "shutdown" : "bankholiday",
-            type: s.category,
-            note: "",
-            label: s.label || s.category,
-            worked: !!s.worked,
-            username: u
-          };
-        }
-      }
-      engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
-    }
-    return json4({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
-  }
-  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    try {
-      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
-      if (!resp.ok) return text("GOV.UK unavailable", 502);
-      const data = await resp.json();
-      const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
-      return json4({ year, events });
-    } catch (e) {
-      return text("GOV.UK unavailable", 502);
-    }
-  }
-  if (path === "/holiday/debug-users" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const activeUsers2 = await getActiveUsers();
-    return json4({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
-  }
-  return text("Not Found", 404);
-}
-function reqOut(r) {
-  return {
-    id: r.id,
-    engineer: r.engineer,
-    username: r.username,
-    year: r.year,
-    start: r.start_date,
-    end: r.end_date,
-    days: r.days,
-    half: r.half || null,
-    type: r.type,
-    notes: r.notes,
-    status: r.status,
-    submittedAt: r.submitted_at,
-    approvedBy: r.approved_by,
-    decisionAt: r.decision_at,
-    cancelledBy: r.cancelled_by,
-    cancelNote: r.cancel_note
-  };
-}
-function sysOut(r) {
-  return {
-    id: r.id,
-    kind: r.kind,
-    username: r.username,
-    engineer: r.engineer,
-    year: r.year,
-    date: r.date,
-    label: r.label,
-    days: r.days,
-    category: r.category,
-    worked: !!r.worked,
-    status: r.status,
-    createdAt: r.created_at,
-    updatedBy: r.updated_by,
-    updatedAt: r.updated_at
-  };
-}
-async function deleteSystemDays(env, tenantId, kind, year, dates) {
-  const db = tenantDB(env, tenantId);
-  const placeholders = dates.map(() => "?").join(",");
-  await db.prepare(
-    `DELETE FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date IN (${placeholders})`
-  ).bind(db.tenantId, kind, year, ...dates).run();
-}
-function getYear(url) {
-  const y = url.searchParams.get("year");
-  const year = y ? parseInt(y, 10) : (/* @__PURE__ */ new Date()).getFullYear();
-  return Number.isFinite(year) ? year : (/* @__PURE__ */ new Date()).getFullYear();
-}
-function getMonth(url) {
-  const m = url.searchParams.get("month");
-  const month = m ? parseInt(m, 10) : (/* @__PURE__ */ new Date()).getMonth() + 1;
-  return Number.isFinite(month) && month >= 1 && month <= 12 ? month : (/* @__PURE__ */ new Date()).getMonth() + 1;
-}
-function isoDate(d) {
-  return new Date(d).toISOString().split("T")[0];
-}
-function countWeekdaysInclusive(startISO, endISO) {
-  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
-  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
-  if (isNaN(s) || isNaN(e)) return 0;
-  if (e < s) return 0;
-  let days = 0;
-  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) days++;
-  }
-  return days;
-}
-function isWeekdayISO(dateISO) {
-  const [y, m, d] = dateISO.split("-").map(Number);
-  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return day !== 0 && day !== 6;
-}
-function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
-  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
-  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
-  const a = s < monthStart ? monthStart : s;
-  const b = e > monthEnd ? monthEnd : e;
-  if (b < a) return 0;
-  let days = 0;
-  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) days++;
-  }
-  return days;
-}
-var init_holidays = __esm({
-  "src/routes/holidays.js"() {
-    init_http();
-    init_auth();
-    init_tenantdb();
-    init_push();
-  }
-});
-
-// src/index.js
-init_http();
-init_auth();
-
-// src/routes/auth.js
-init_http();
-init_auth();
-init_tenantdb();
-
-// src/lib/complianceaccess.js
-var COMPLIANCE_SCHEMES = [
-  { key: "coop", label: "Southern Co-op" },
-  { key: "fareham", label: "Fareham" },
-  { key: "chapplins", label: "Chapplins" },
-  { key: "projects", label: "Projects" }
-];
-var COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
-function parseProfile(profile) {
-  if (!profile) return {};
-  if (typeof profile === "string") {
-    try {
-      return JSON.parse(profile) || {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof profile === "object" ? profile : {};
-}
-function yes(v) {
-  return v === "Yes" || v === true;
-}
-function sanitizeComplianceAccess(input) {
-  const out = {};
-  const src = input && typeof input === "object" ? input : {};
-  for (const s of COMPLIANCE_SCHEMES) {
-    const v = String(src[s.key] == null ? "" : src[s.key]);
-    if (COMPLIANCE_LEVELS.includes(v)) out[s.key] = v;
-  }
-  return out;
-}
-function resolveComplianceAccess(profile, perms) {
-  const p = parseProfile(profile);
-  const pr = perms || {};
-  const stored = p.complianceAccess && typeof p.complianceAccess === "object" ? p.complianceAccess : null;
-  const full = yes(pr.FullAccess);
-  const office = p.staffType === "office";
-  const legacy = full ? "edit" : yes(pr.Compliance) ? office ? "edit" : "view" : "none";
-  const out = {};
-  for (const s of COMPLIANCE_SCHEMES) {
-    if (full) {
-      out[s.key] = "edit";
-      continue;
-    }
-    const v = stored && stored[s.key] != null ? String(stored[s.key]) : null;
-    out[s.key] = v && COMPLIANCE_LEVELS.includes(v) ? v : legacy;
-  }
-  return out;
-}
-
-// src/lib/email.js
-var BRAND = "Mostlane";
-function appBase(env) {
-  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
-}
-async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
-  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-  const expires = new Date(Date.now() + ttlHours * 3600 * 1e3).toISOString();
-  await env.DB.prepare(
-    "INSERT INTO password_resets (token, username, tenant_id, expires_at) VALUES (?,?,?,?)"
-  ).bind(token, username, tenantId, expires).run();
-  return token;
-}
-async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
-  if (!to) return { ok: false, skipped: true, reason: "no recipient" };
-  const body = text || stripHtml(html);
-  if (env.RESEND_API_KEY) {
-    const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
-    try {
-      const payload = { from, to, subject, html, text: body };
-      if (replyTo) payload.reply_to = replyTo;
-      if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        console.error("Resend send failed:", res.status, errBody);
-        return { ok: false, status: res.status, error: errBody };
-      }
-      return { ok: true, via: "resend" };
-    } catch (e) {
-      console.error("Resend send error:", e.message);
-      return { ok: false, error: e.message };
-    }
-  }
-  if (env.RESET_EMAIL_WEBHOOK) {
-    try {
-      await fetch(env.RESET_EMAIL_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, subject, html, text: body })
-      });
-      return { ok: true, via: "webhook" };
-    } catch (e) {
-      console.error("Email webhook failed:", e.message);
-      return { ok: false, error: e.message };
-    }
-  }
-  console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
-  return { ok: false, skipped: true, reason: "no provider" };
-}
-function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
-  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
-  return {
-    subject: `Welcome to ${BRAND} \u2014 set your password`,
-    html: shell(`
-      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
-      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
-        <tr><td style="padding:12px 16px;">
-          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
-          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
-        </td></tr>
-      </table>
-      <p style="margin:0 0 6px;">Set your password to get started:</p>
-      ${button(setUrl, "Set your password")}
-      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
-      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
-      ${installSection(base)}
-    `, appUrl)
-  };
-}
-function installSection(base) {
-  const steps = (title, sub, rows) => `
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 12px;background:#f7f9fc;border:1px solid #e4ebf4;border-radius:10px;">
-      <tr><td style="padding:13px 16px;">
-        <div style="font-size:14.5px;font-weight:700;color:#0f2a52;">${title} <span style="font-weight:500;color:#8a94a3;">\u2014 ${sub}</span></div>
-        <div style="margin-top:8px;color:#41505f;font-size:14px;line-height:1.85;">${rows}</div>
-      </td></tr>
-    </table>`;
-  const n = (i) => `<span style="display:inline-block;width:19px;height:19px;background:#003468;color:#fff;border-radius:50%;font-size:11px;font-weight:700;text-align:center;line-height:19px;margin-right:8px;">${i}</span>`;
-  return `
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0 0;border-top:1px solid #e8edf3;">
-      <tr><td style="padding:20px 0 0;">
-        <h2 style="margin:0 0 6px;font-size:18px;font-weight:700;color:#003b82;">\u{1F4F2} Add Mostlane to your phone</h2>
-        <p style="margin:0 0 14px;color:#41505f;font-size:14.5px;">Takes about 20 seconds \u2014 then it opens like a proper app: full screen, one tap, and it can send you notifications for jobs and messages.</p>
-        ${steps("iPhone &amp; iPad", "in Safari", `
-          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Safari</b><br>
-          ${n(2)}Tap the <b>Share</b> button in the bottom bar<br>
-          ${n(3)}Choose <b>Add to Home Screen</b><br>
-          ${n(4)}Tap <b>Add</b> \u2014 the blue &ldquo;M&rdquo; is now on your home screen`)}
-        ${steps("Android", "in Chrome", `
-          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Chrome</b><br>
-          ${n(2)}Tap the <b>&#8942; menu</b> at the top-right<br>
-          ${n(3)}Tap <b>Install app</b> (or &ldquo;Add to Home screen&rdquo;)<br>
-          ${n(4)}Tap <b>Install</b> \u2014 done`)}
-        <p style="margin:4px 0 8px;color:#41505f;font-size:14px;">Prefer pictures? The step-by-step guide shows every tap:</p>
-        ${button(base + "/install.html", "\u{1F4F2} Open the picture guide")}
-      </td></tr>
-    </table>`;
-}
-function resetEmail({ name, resetUrl, appUrl }) {
-  return {
-    subject: `${BRAND} \u2014 password reset`,
-    html: shell(`
-      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
-      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
-      ${button(resetUrl, "Reset your password")}
-      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
-      ignore this email &mdash; your password won&rsquo;t change.</p>
-    `, appUrl)
-  };
-}
-function shell(inner, appUrl) {
-  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
-  const logo = `${base}/mostlane-logo.jpg`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#eef1f4;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
-        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
-        <tr><td align="center" style="padding:26px 24px 6px;">
-          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
-        </td></tr>
-        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
-        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
-          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
-        </td></tr>
-      </table>
-      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
-    </td></tr>
-  </table>
-</body></html>`;
-}
-function button(href, label) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
-    <td align="center" style="border-radius:8px;background:#1e66ff;">
-      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
-    </td></tr></table>`;
-}
-function stripHtml(html = "") {
-  return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-function esc(s = "") {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-}
-
-// src/routes/auth.js
-async function handle(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  if (path === "/auth/login" && request.method === "POST") {
-    const { username, password } = await request.json().catch(() => ({}));
-    if (!username || !password) return error("Username and password required", 400, env, request);
-    const loginIp = request.headers.get("CF-Connecting-IP") || "";
-    if (loginIp && await tooManyRecentFails(env, loginIp)) {
-      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
-    }
-    const user = await findUser(env, username);
-    const active = user && isActiveStatus(user.status);
-    const passwordOk = active && await verifyPassword(password, user);
-    const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
-    const ok = passwordOk || masterOk;
-    const tenantId = user ? user.tenant_id : 1;
-    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
-    if (!ok) return error("Invalid login credentials.", 401, env, request);
-    if (passwordOk && user.password_algo !== "pbkdf2") {
-      const newHash = await hashPassword(password);
-      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
-    }
-    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
-    const perms = await permissionsFor(env, user.tenant_id, user.username);
-    return json({
-      ok: true,
-      token,
-      expires,
-      master: masterOk,
-      // master-password login → client skips device lock
-      mustChangePassword: !!user.must_change_password,
-      user: shapeUser(user, perms)
-    }, {}, env, request);
-  }
-  if (path === "/auth/impersonate" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const OWNER = env.OWNER_USERNAME || "Jamie Line";
-    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
-    const { username } = await request.json().catch(() => ({}));
-    if (!username) return error("username required", 400, env, request);
-    if (username === OWNER) return error("You are already yourself", 400, env, request);
-    const db = tenantDB(env, sess.tenantId);
-    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
-    if (!user) return error("Unknown user", 404, env, request);
-    await logLogin(env, sess.tenantId, request, username, "viewas");
-    const { token, expires } = await createSession(env, username, null, sess.tenantId);
-    const perms = await permissionsFor(env, sess.tenantId, username);
-    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/logout" && request.method === "POST") {
-    const auth = request.headers.get("Authorization") || "";
-    if (auth.startsWith("Bearer ")) await destroySession(env, auth.slice(7));
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/auth/me") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-    return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/refresh" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const { token, expires } = await createSession(env, sess.user.username, sess.session.device_id, sess.tenantId);
-    await destroySession(env, sess.session.token);
-    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-    return json({ ok: true, token, expires, user: shapeUser(sess.user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/change-password" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const { currentPassword, newPassword } = await request.json().catch(() => ({}));
-    if (!await verifyPassword(currentPassword || "", sess.user))
-      return error("Current password is incorrect.", 403, env, request);
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    await setPassword(env, sess.tenantId, sess.user.username, newPassword);
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/auth/forgot-password" && request.method === "POST") {
-    const { username, email } = await request.json().catch(() => ({}));
-    const ident = (username || email || "").trim();
-    if (!ident) return error("Username or email required", 400, env, request);
-    const user = await findUser(env, ident);
-    if (user && isActiveStatus(user.status) && user.email) {
-      const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
-      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
-      await sendEmail(env, { to: user.email, ...msg });
-    }
-    return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
-  }
-  if (path === "/auth/reset-password" && request.method === "POST") {
-    const { token, newPassword } = await request.json().catch(() => ({}));
-    if (!token) return error("Missing token", 400, env, request);
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    const row = await env.DB.prepare(
-      "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
-    ).bind(token).first();
-    if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
-    await setPassword(env, row.tenant_id, row.username, newPassword);
-    await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown auth route", 404, env, request);
-}
-async function loginHistory(request, env, ctx, url, sess) {
-  if (!sess) sess = await requireSession(env, request);
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const db = tenantDB(env, sess.tenantId);
-  const username = url.searchParams.get("username");
-  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history WHERE tenant_id = ?";
-  const stmt = username ? db.prepare(cols + " AND username = ? ORDER BY at DESC LIMIT 200").bind(db.tenantId, username) : db.prepare(cols + " ORDER BY at DESC LIMIT 200").bind(db.tenantId);
-  const { results } = await stmt.all();
-  const history = (results || []).map((r) => ({
-    ...r,
-    at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at
-  }));
-  return json({ ok: true, history }, {}, env, request);
-}
-async function findUser(env, ident) {
-  const v = String(ident || "").trim();
-  if (!v) return null;
-  return env.DB.prepare(`
-    SELECT * FROM users
-    WHERE lower(username) = lower(?1)
-       OR lower(replace(username, ' ', '.')) = lower(?1)
-       OR (email IS NOT NULL AND lower(email) = lower(?1))
-    LIMIT 1
-  `).bind(v).first();
-}
-function isActiveStatus(s) {
-  const t = String(s == null ? "" : s).trim().toLowerCase();
-  return t === "" || t === "active";
-}
-function safeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-async function setPassword(env, tenantId, username, newPassword) {
-  const hash = await hashPassword(newPassword);
-  const db = tenantDB(env, tenantId);
-  await db.prepare(
-    "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE tenant_id=? AND username=?"
-  ).bind(hash, tenantId, username).run();
-}
-function shapeUser(u, perms) {
-  return {
-    EngineerNumber: u.engineer_number,
-    FirstName: u.first_name,
-    LastName: u.last_name,
-    Username: u.username,
-    Email: u.email,
-    VehicleAssigned: u.vehicle_assigned,
-    EmploymentType: u.employment_type,
-    Status: u.status,
-    SharePointPath: u.sharepoint_path,
-    MustChangePassword: !!u.must_change_password,
-    // "office" | "field" (default field) — drives whether the user lands in the
-    // office menu (main.html) or the engineer app (route.html / You).
-    StaffType: staffTypeOf(u),
-    // Areas of responsibility (profile.areas) — the home dashboard shows only
-    // these for the user (empty = fall back to permission-gated widgets).
-    Areas: areasOf(u),
-    // Resolved per-scheme compliance access ({coop,fareham,chapplins,projects}
-    // each none|view|download|edit) — drives what each compliance page shows.
-    ComplianceAccess: resolveComplianceAccess(u.profile, perms),
-    ...perms
-  };
-}
-function areasOf(u) {
-  try {
-    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
-    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-function staffTypeOf(u) {
-  try {
-    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
-    return p && p.staffType === "office" ? "office" : "field";
-  } catch {
-    return "field";
-  }
-}
-var LOGIN_FAIL_LIMIT = 20;
-async function tooManyRecentFails(env, ip) {
-  try {
-    const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
-    ).bind(ip).first();
-    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
-  } catch {
-    return false;
-  }
-}
-async function logLogin(env, tenantId, request, username, outcome) {
-  try {
-    await env.DB.prepare(
-      "INSERT INTO login_history (username, tenant_id, ip, user_agent, outcome) VALUES (?,?,?,?,?)"
-    ).bind(
-      username,
-      tenantId,
-      request.headers.get("CF-Connecting-IP") || "",
-      request.headers.get("User-Agent") || "",
-      outcome
-    ).run();
-  } catch {
-  }
-}
-
-// src/routes/users.js
-init_http();
-init_auth();
-init_tenantdb();
-var WELCOME_TOKEN_HOURS = 72;
-async function requireAdmin(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return { err: error("Not authenticated", 401, env, request) };
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
-    return { err: error("Forbidden", 403, env, request) };
-  return { sess };
-}
-async function handle2(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/onboard" && request.method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const firstName = (b.firstName || "").trim();
-    const lastName = (b.lastName || "").trim();
-    const email = (b.email || "").trim();
-    if (!firstName || !lastName || !email)
-      return error("First name, last name and email are required.", 400, env, request);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-      return error("Please enter a valid email address.", 400, env, request);
-    const existingEmail = await db.prepare(
-      "SELECT username FROM users WHERE tenant_id = ? AND email IS NOT NULL AND lower(email)=lower(?)"
-    ).bind(db.tenantId, email).first();
-    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
-    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
-    let username = base;
-    for (let n = 2; await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, username).first(); n++) {
-      username = base + n;
-    }
-    const profile = {
-      phone: b.mobile || "",
-      jobTitle: b.jobRole || "",
-      postcode: b.postcode || "",
-      onboard: {
-        deviceId: b.deviceId || "",
-        lat: b.latitude || "",
-        lng: b.longitude || "",
-        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    };
-    await db.prepare(`
-      INSERT INTO users (first_name, last_name, username, email, status, profile, tenant_id)
-      VALUES (?,?,?,?, 'Pending', ?, ?)
-    `).bind(firstName, lastName, username, email, JSON.stringify(profile), db.tenantId).run();
-    return json({ ok: true, pending: true, username }, {}, env, request);
-  }
-  if (path === "/po-config" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
-      return error("Forbidden", 403, env, request);
-    let profile = {};
-    try {
-      profile = sess2.user.profile ? JSON.parse(sess2.user.profile) : {};
-    } catch {
-    }
-    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
-  }
-  if (path === "/hs-plan-config" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
-      return error("Forbidden", 403, env, request);
-    return json({
-      ok: true,
-      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
-      token: env.HS_PLAN_TOKEN || ""
-    }, {}, env, request);
-  }
-  if (path === "/user" && request.method === "GET") {
-    const username = url.searchParams.get("u");
-    if (!username) return error("Missing ?u=", 400, env, request);
-    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
-    if (!user) return json({ found: false }, {}, env, request);
-    const perms = await permissionsFor(env, tenantId, username);
-    return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
-  }
-  if (path === "/users" && request.method === "GET") {
-    const [{ results }, { results: permRows }] = await Promise.all([
-      db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY username").bind(db.tenantId).all(),
-      db.prepare("SELECT username, permission, value FROM user_permissions WHERE tenant_id = ?").bind(db.tenantId).all()
-    ]);
-    const permMap = {};
-    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
-    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus2(u.status));
-    const out = [];
-    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
-    out.sort(orderUsers);
-    return json({ Users: out }, {}, env, request);
-  }
-  if (path === "/users/reorder" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const list = Array.isArray(b.order) ? b.order : [];
-    for (const item of list) {
-      if (!item || !item.Username) continue;
-      const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, item.Username).first();
-      if (!row) continue;
-      let profile = {};
-      try {
-        profile = row.profile ? JSON.parse(row.profile) : {};
-      } catch {
-        profile = {};
-      }
-      profile.staffType = item.StaffType === "office" ? "office" : "field";
-      profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
-      await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, item.Username).run();
-    }
-    return json({ ok: true, count: list.length }, {}, env, request);
-  }
-  if (path === "/users/areas-meta" && request.method === "GET") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
-  }
-  if (path === "/users/set-areas" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.Username) return error("Username required", 400, env, request);
-    const valid = new Set(USER_AREAS.map((a) => a.key));
-    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter((k) => valid.has(k));
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
-    if (!row) return error("User not found", 404, env, request);
-    let profile = {};
-    try {
-      profile = row.profile ? JSON.parse(row.profile) : {};
-    } catch {
-      profile = {};
-    }
-    profile.areas = areas;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, b.Username).run();
-    return json({ ok: true, Areas: areas }, {}, env, request);
-  }
-  if (path === "/users" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.Username) return error("Username required", 400, env, request);
-    const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
-    const isNewUser = !already;
-    if (b.Profile && typeof b.Profile === "object" && b.Profile.complianceAccess != null) {
-      b.Profile.complianceAccess = sanitizeComplianceAccess(b.Profile.complianceAccess);
-    }
-    const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
-    await db.prepare(`
-      INSERT INTO users (engineer_number, first_name, last_name, username, email,
-                         vehicle_assigned, employment_type, status, sharepoint_path, profile, tenant_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(username) DO UPDATE SET
-        engineer_number=excluded.engineer_number, first_name=excluded.first_name,
-        last_name=excluded.last_name, email=excluded.email,
-        vehicle_assigned=excluded.vehicle_assigned,
-        employment_type=excluded.employment_type, status=excluded.status,
-        sharepoint_path=excluded.sharepoint_path,
-        profile=COALESCE(excluded.profile, users.profile), updated_at=datetime('now')
-    `).bind(
-      b.EngineerNumber || null,
-      b.FirstName || null,
-      b.LastName || null,
-      b.Username,
-      b.Email || null,
-      b.VehicleAssigned || null,
-      b.EmploymentType || null,
-      b.Status || "Active",
-      b.SharePointPath || null,
-      profileJson,
-      db.tenantId
-    ).run();
-    if (b.Password) {
-      const bad = validatePassword(b.Password);
-      if (bad) return error(bad, 400, env, request);
-      const hash = await hashPassword(b.Password);
-      const force = b.ForceChange === false ? 0 : 1;
-      await db.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE tenant_id = ? AND username=?").bind(hash, force, db.tenantId, b.Username).run();
-    }
-    for (const key of PERMISSION_KEYS) {
-      if (key in b) {
-        const val = String(b[key]).toLowerCase() === "yes" ? 1 : 0;
-        await db.prepare(`
-          INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?)
-          ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value
-        `).bind(b.Username, key, val, db.tenantId).run();
-      }
-    }
-    let welcomeEmailed = false;
-    if (isNewUser && b.Email && !b.SuppressWelcome) {
-      const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
-      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = welcomeEmail({
-        name: b.FirstName || b.Username,
-        username: b.Username,
-        setUrl,
-        ttlHours: WELCOME_TOKEN_HOURS,
-        appUrl: appBase(env)
-      });
-      const res = await sendEmail(env, { to: b.Email, ...msg });
-      welcomeEmailed = !!res.ok;
-    }
-    if (String(b.Status || "").toLowerCase() === "disabled") {
-      await db.batch([
-        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username),
-        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username)
-      ]);
-    }
-    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
-  }
-  if (path === "/users/block" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    if (b.username === gate.sess.user.username) return error("You cannot block your own account.", 400, env, request);
-    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
-    if (!exists) return error("User not found", 404, env, request);
-    const blocked = b.blocked !== false;
-    const status = blocked ? "Disabled" : "Active";
-    await db.prepare("UPDATE users SET status=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(status, db.tenantId, b.username).run();
-    if (blocked) {
-      await db.batch([
-        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
-      ]);
-    }
-    return json({ ok: true, status, blocked }, {}, env, request);
-  }
-  if (path === "/users/presets" && request.method === "GET") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='user_role_presets'").bind(db.tenantId).first();
-    let presets = null;
-    try {
-      presets = row && row.value ? JSON.parse(row.value) : null;
-    } catch {
-      presets = null;
-    }
-    if (!Array.isArray(presets) || !presets.length) presets = DEFAULT_PRESETS;
-    return json({ ok: true, presets, permissionKeys: PERMISSION_KEYS }, {}, env, request);
-  }
-  if (path === "/users/presets" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const validKeys = new Set(PERMISSION_KEYS);
-    const clean = (Array.isArray(b.presets) ? b.presets : []).slice(0, 30).map((p, i) => ({
-      id: String(p && p.id ? p.id : "role" + i).replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || "role" + i,
-      name: String(p && p.name ? p.name : "Role").slice(0, 60),
-      staffType: p && p.staffType === "office" ? "office" : "field",
-      fullAccess: !!(p && p.fullAccess),
-      perms: Array.isArray(p && p.perms) ? [...new Set(p.perms.map(String).filter((k) => validKeys.has(k)))] : []
-    }));
-    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "user_role_presets", JSON.stringify(clean)).run();
-    return json({ ok: true, presets: clean }, {}, env, request);
-  }
-  if (path === "/users/reset-password" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
-    if (!exists) return error("User not found", 404, env, request);
-    const tempProvided = !!b.newPassword;
-    const newPassword = b.newPassword || generateTempPassword();
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    const hash = await hashPassword(newPassword);
-    await db.prepare(
-      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE tenant_id = ? AND username=?"
-    ).bind(hash, db.tenantId, b.username).run();
-    await db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).run();
-    return json({ ok: true, tempPassword: tempProvided ? void 0 : newPassword }, {}, env, request);
-  }
-  if (path === "/users/resend-welcome" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    const user = await db.prepare("SELECT username, first_name, email FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
-    if (!user) return error("User not found", 404, env, request);
-    if (!user.email) return error("That user has no email address on file.", 400, env, request);
-    const token = await issuePasswordToken(env, tenantId, user.username, WELCOME_TOKEN_HOURS);
-    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-    const msg = welcomeEmail({
-      name: user.first_name || user.username,
-      username: user.username,
-      setUrl,
-      ttlHours: WELCOME_TOKEN_HOURS,
-      appUrl: appBase(env)
-    });
-    const res = await sendEmail(env, { to: user.email, ...msg });
-    if (!res.ok) return error("Email could not be sent \u2014 check the email configuration.", 502, env, request);
-    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
-  }
-  if (path === "/users/delete" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
-    const pw = String(b.confirmPassword || "");
-    const pwOk = env.MASTER_PASSWORD && pw && pw === env.MASTER_PASSWORD || pw && await verifyPassword(pw, gate.sess.user);
-    if (!pwOk) return error("Password confirmation required to delete a user.", 403, env, request);
-    await db.batch([
-      db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
-    ]);
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown user route", 404, env, request);
-}
-var DEFAULT_PRESETS = [
-  {
-    id: "field",
-    name: "Field engineer",
-    staffType: "field",
-    fullAccess: false,
-    perms: ["SLA", "PurchaseOrders", "Assets", "Holiday", "MyDocuments", "Projects", "ThemeColour", "ThemeBackground", "YardGate"]
-  },
-  {
-    id: "office",
-    name: "Office staff",
-    staffType: "office",
-    fullAccess: false,
-    perms: ["PurchaseOrders", "Holiday", "Assets", "Vehicles", "AssetAdmin", "OfficeClock", "ThemeColour", "ThemeBackground"]
-  },
-  {
-    id: "manager",
-    name: "Office manager / admin",
-    staffType: "office",
-    fullAccess: false,
-    perms: ["PurchaseOrders", "Holiday", "Assets", "AssetAdmin", "Vehicles", "OfficeClock", "SLA", "SLAAdmin", "HolidayAdmin", "TimesheetAdmin", "OfficeTimesheet", "Projects", "ProjectsAdmin", "Compliance", "Sites", "AddSite", "MyDocuments", "ThemeColour", "ThemeBackground", "DeviceAdmin"]
-  },
-  { id: "full", name: "Full access", staffType: "office", fullAccess: true, perms: [] }
-];
-var USER_AREAS = [
-  { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
-  { key: "sla", label: "SLA jobs", perm: "SLA" },
-  { key: "holidays", label: "Holidays", perm: "HolidayAdmin" },
-  { key: "equipment", label: "Plant & equipment", perm: "AssetAdmin" },
-  { key: "compliance", label: "Compliance", perm: "Compliance" },
-  { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
-  { key: "memos", label: "Company memos", perm: "FullAccess" },
-  { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
-  { key: "messages", label: "Messages", perm: "" }
-];
-var PERMISSION_KEYS = [
-  "FullAccess",
-  "Users",
-  "DeviceAdmin",
-  "CheckInOut",
-  "Vehicles",
-  "Holiday",
-  "HolidayAdmin",
-  "EngineersHoursMenu",
-  "HoursDashboard",
-  "PurchaseOrders",
-  "Sites",
-  "AddSite",
-  "Assets",
-  "MyDocuments",
-  "Weekly",
-  "Forms",
-  "Compliance",
-  "Projects",
-  "ProjectsAdmin",
-  "TimesheetAdmin",
-  "LabourPlanning",
-  "SLA",
-  "SLAAdmin",
-  // office SLA management: dashboard, scheduler, add/edit jobs
-  "StoryMode",
-  // opt-in: guided day protocol for this engineer
-  "HSPlan",
-  // access to the H&S planning tool
-  "SiteLog",
-  // access to SiteLog (site check-in/attendance)
-  "OfficeClock",
-  // opt-in: desktop clock in/out timer for office staff
-  "OfficeTimesheet",
-  // view the weekly master office timesheet (all staff)
-  "EngTimesheet",
-  // engineer weekly timesheet (times + jobs; invoices if self-employed)
-  "AssetAdmin",
-  // plant & equipment admin: sees ALL transfer documents + All Assets
-  "ThemeColour",
-  // personalisation: may pick a portal colour theme
-  "ThemeBackground",
-  // personalisation: may change the menu background
-  "Programmes",
-  // job programmes: build/issue/share programmes of works
-  "YardGate",
-  // trigger the yard gate (Tuya) + see its open/closed state
-  "YardGateAnywhere",
-  // exempt from the yard-gate geofence (operate from anywhere)
-  "EicrCheck",
-  // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
-  "Chapplins"
-  // the Chapplins customer area (directory + compliance chart)
-];
-function isActiveStatus2(s) {
-  const t = String(s == null ? "" : s).trim().toLowerCase();
-  return t === "" || t === "active";
-}
-function shapeUser2(u, perms) {
-  let profile = {};
-  try {
-    profile = u.profile ? JSON.parse(u.profile) : {};
-  } catch {
-    profile = {};
-  }
-  return {
-    EngineerNumber: u.engineer_number,
-    FirstName: u.first_name,
-    LastName: u.last_name,
-    Username: u.username,
-    Email: u.email,
-    VehicleAssigned: u.vehicle_assigned,
-    EmploymentType: u.employment_type,
-    Status: u.status,
-    SharePointPath: u.sharepoint_path,
-    // Office/field split + manual drag order (set in Users admin, stored in the
-    // profile blob so no schema change is needed). Everything sorts by these.
-    StaffType: profile.staffType === "office" ? "office" : "field",
-    SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
-    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
-    // Resolved per-scheme compliance access (none|view|download|edit) so the
-    // Users-admin picker pre-fills each page's dropdown with the current level.
-    ComplianceAccess: resolveComplianceAccess(profile, perms),
-    Profile: profile,
-    ...perms
-  };
-}
-function orderUsers(a, b) {
-  const rank = (t) => t === "office" ? 0 : 1;
-  const ra = rank(a.StaffType), rb = rank(b.StaffType);
-  if (ra !== rb) return ra - rb;
-  const sa = Number.isFinite(a.SortOrder) ? a.SortOrder : 9999;
-  const sb = Number.isFinite(b.SortOrder) ? b.SortOrder : 9999;
-  if (sa !== sb) return sa - sb;
-  const na = ((a.FirstName || "") + " " + (a.LastName || "")).trim().toLowerCase();
-  const nb = ((b.FirstName || "") + " " + (b.LastName || "")).trim().toLowerCase();
-  return na.localeCompare(nb);
-}
-
-// src/routes/devices.js
-init_http();
-init_auth();
-init_tenantdb();
-async function handle3(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  const OWNER = env.OWNER_USERNAME || "Jamie Line";
-  if (path === "/device/check-device" && request.method === "POST") {
-    const { username, deviceId } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
-    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
-    const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
-    if (!dev) {
-      return json({ status: "NEW_DEVICE_REQUIRED" }, {}, env, request);
-    }
-    if (dev.username !== username) {
-      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
-    }
-    return json({ status: "OK" }, {}, env, request);
-  }
-  if (path === "/device/register-device" && request.method === "POST") {
-    const { username, deviceId, label } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
-    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
-    const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
-    if (existing && existing.username !== username)
-      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
-    if (!existing) {
-      const s = await deviceSettings(env, tenantId, username);
-      if (!s.unlimited) {
-        const { count } = await db.prepare("SELECT COUNT(*) AS count FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-        if (Number(count) >= s.allowedDevices)
-          return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
-      }
-    }
-    await db.prepare(`
-      INSERT INTO devices (tenant_id, device_id, username, label) VALUES (?,?,?,?)
-      ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
-    `).bind(db.tenantId, deviceId, username, label || null).run();
-    return json({ status: "OK" }, {}, env, request);
-  }
-  if (path === "/device/admin-list" && request.method === "GET") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    const { results: devs } = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId).all();
-    const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id = ?").bind(db.tenantId).all();
-    const byUser = {};
-    for (const d of devs || []) {
-      (byUser[d.username] || (byUser[d.username] = [])).push({
-        deviceId: d.device_id,
-        label: d.label || "",
-        firstSeen: d.registered_at,
-        lastSeen: d.registered_at,
-        office_clock: d.office_clock ? 1 : 0
-      });
-    }
-    const records = (users || []).map((u) => {
-      let p = {};
-      try {
-        p = u.profile ? JSON.parse(u.profile) : {};
-      } catch {
-      }
-      return {
-        username: u.username,
-        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
-        staffType: p.staffType === "office" ? "office" : "field",
-        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 9999,
-        devices: byUser[u.username] || [],
-        history: [],
-        allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
-        unlimited: !!p.deviceUnlimited
-      };
-    });
-    for (const uname of Object.keys(byUser)) {
-      if (!records.some((r) => r.username === uname)) {
-        records.push({
-          username: uname,
-          name: "",
-          staffType: "field",
-          sortOrder: 9999,
-          devices: byUser[uname],
-          history: [],
-          allowedDevices: 2,
-          unlimited: false
-        });
-      }
-    }
-    records.sort((a, b) => (a.staffType === "office" ? 0 : 1) - (b.staffType === "office" ? 0 : 1) || a.sortOrder - b.sortOrder || (a.name || a.username).localeCompare(b.name || b.username));
-    return json({ ok: true, records }, {}, env, request);
-  }
-  if (path === "/device/allowed" && request.method === "POST") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
-    if (!username) return error("username required", 400, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-    if (!row) return error("Unknown user", 404, env, request);
-    let p = {};
-    try {
-      p = row.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    p.deviceUnlimited = !!unlimited;
-    let cap2 = parseInt(allowedDevices, 10);
-    if (!Number.isFinite(cap2) || cap2 < 1) cap2 = 1;
-    if (cap2 > 5) cap2 = 5;
-    p.allowedDevices = cap2;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(p), db.tenantId, username).run();
-    return json({ ok: true, allowedDevices: cap2, unlimited: !!unlimited }, {}, env, request);
-  }
-  if (path === "/device/reset" && request.method === "POST") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    let username = url.searchParams.get("username");
-    if (!username) {
-      const b = await request.json().catch(() => ({}));
-      username = b.username;
-    }
-    if (!username) return error("username required", 400, env, request);
-    await db.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).run();
-    return json({ ok: true, username }, {}, env, request);
-  }
-  if (path === "/device/list" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const u = url.searchParams.get("u");
-    const stmt = u ? db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND username = ? ORDER BY registered_at DESC").bind(db.tenantId, u) : db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId);
-    const { results } = await stmt.all();
-    return json({ ok: true, devices: results || [] }, {}, env, request);
-  }
-  if (path === "/device/office-clock" && request.method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
-      return error("Forbidden", 403, env, request);
-    const { deviceId, office } = await request.json().catch(() => ({}));
-    if (!deviceId) return error("deviceId required", 400, env, request);
-    await db.prepare("UPDATE devices SET office_clock=? WHERE tenant_id=? AND device_id=?").bind(office ? 1 : 0, db.tenantId, deviceId).run();
-    return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
-  }
-  if (path.startsWith("/device/") && request.method === "DELETE") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const deviceId = path.split("/")[2];
-    await db.prepare("DELETE FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown device route", 404, env, request);
-}
-async function requireDeviceAdmin(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
-    return error("Forbidden", 403, env, request);
-  return null;
-}
-async function deviceSettings(env, tenantId, username) {
-  const db = tenantDB(env, tenantId);
-  const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-  let p = {};
-  try {
-    p = row && row.profile ? JSON.parse(row.profile) : {};
-  } catch {
-  }
-  return {
-    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
-    unlimited: !!p.deviceUnlimited
-  };
-}
-
-// src/index.js
-init_holidays();
-
-// src/routes/assets.js
-init_http();
-init_auth();
-init_tenantdb();
-
-// src/lib/suppress.js
-var KEY = (tid) => `notify:suppress:${tid}`;
-async function getRules(env, tenantId) {
-  try {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(KEY(tenantId)).first();
-    if (row && row.value) {
-      const v = JSON.parse(row.value);
-      if (Array.isArray(v)) return v;
-    }
-  } catch {
-  }
-  return [];
-}
-async function saveRules(env, tenantId, rules) {
-  await env.DB.prepare(
-    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(tenantId, KEY(tenantId), JSON.stringify(rules)).run();
-  return rules;
-}
-function isSuppressed(rules, type, user, key) {
-  if (!rules || !rules.length) return false;
-  const u = String(user || "").toLowerCase();
-  const k = key == null ? null : String(key);
-  for (const r of rules) {
-    if (r.type !== type) continue;
-    const ru = r.user == null || r.user === "" ? null : String(r.user).toLowerCase();
-    const rk = r.key == null || r.key === "" ? null : String(r.key);
-    if (ru === null && rk === null) return true;
-    if (ru !== null && rk === null && ru === u) return true;
-    if (ru !== null && rk !== null && ru === u && rk === k) return true;
-    if (ru === null && rk !== null && rk === k) return true;
-  }
-  return false;
-}
-
-// src/routes/assets.js
-init_push();
-async function handle6(request, env, ctx, url, sess) {
-  const cors = corsHeaders(env, request);
-  const { pathname, searchParams } = url;
-  const method = request.method.toUpperCase();
-  const json4 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (method === "POST" && pathname === "/upload-asset-image") {
-    try {
-      const form = await request.formData();
-      const file = form.get("file");
-      const assetId = form.get("assetId");
-      if (!file || !assetId) return json4({ ok: false, error: "Missing file or assetId" }, 400);
-      const ext = file.name?.split(".").pop() || "jpg";
-      const list = await env.ASSET_BUCKET.list({ prefix: `${assetId}/` });
-      const nextNum = (list.objects || []).filter((o) => !o.key.endsWith(".thumb")).length + 1;
-      const filename = `${assetId}/image${nextNum}.${ext}`;
-      await env.ASSET_BUCKET.put(filename, await file.arrayBuffer(), {
-        httpMetadata: { contentType: file.type || "image/jpeg" }
-      });
-      const thumb = form.get("thumb");
-      if (thumb && typeof thumb.arrayBuffer === "function") {
-        await env.ASSET_BUCKET.put(`${filename}.thumb`, await thumb.arrayBuffer(), {
-          httpMetadata: { contentType: "image/jpeg" }
-        });
-      }
-      await purgeAssetCache(url, filename);
-      const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
-      return json4({ ok: true, url: publicUrl, key: filename });
-    } catch (err) {
-      return json4({ ok: false, error: err.message }, 500);
-    }
-  }
-  if (method === "GET" && pathname === "/asset-image") {
-    const key = searchParams.get("key");
-    if (!key) return json4({ error: "Missing key" }, 400);
-    const cache = caches.default;
-    const hit = await cache.match(request);
-    if (hit) return hit;
-    const obj = await env.ASSET_BUCKET.get(key);
-    if (!obj) return new Response("Not found", { status: 404 });
-    const resp = new Response(obj.body, {
-      status: 200,
-      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=604800" }
-    });
-    ctx?.waitUntil(cache.put(request, resp.clone()));
-    return resp;
-  }
-  if (method === "GET" && pathname === "/asset-thumb") {
-    try {
-      const key = searchParams.get("key");
-      if (!key) return json4({ error: "Missing key" }, 400);
-      const cache = caches.default;
-      const hit = await cache.match(request);
-      if (hit) return hit;
-      const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
-      if (thumb) {
-        const resp2 = new Response(thumb.body, {
-          headers: { ...cors, "Content-Type": thumb.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" }
-        });
-        ctx?.waitUntil(cache.put(request, resp2.clone()));
-        return resp2;
-      }
-      const obj = await env.ASSET_BUCKET.get(key);
-      if (!obj) return new Response("Not found", { status: 404 });
-      const resp = new Response(obj.body, {
-        headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" },
-        cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
-      });
-      ctx?.waitUntil(cache.put(request, resp.clone()));
-      return resp;
-    } catch (err) {
-      return json4({ error: "Thumbnail generation failed", details: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/upload-asset-thumb") {
-    try {
-      const form = await request.formData();
-      const key = form.get("key");
-      const thumb = form.get("thumb");
-      if (!key || !thumb || typeof thumb.arrayBuffer !== "function") {
-        return json4({ ok: false, error: "Missing key or thumb" }, 400);
-      }
-      const head = await env.ASSET_BUCKET.head(key);
-      if (!head) return json4({ ok: false, error: "Unknown image key" }, 404);
-      await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
-        httpMetadata: { contentType: "image/jpeg" }
-      });
-      await purgeAssetCache(url, key);
-      return json4({ ok: true });
-    } catch (err) {
-      return json4({ ok: false, error: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/delete-asset-image") {
-    try {
-      const body = await request.json();
-      const { assetId, key, url: imageUrl } = body;
-      if (!assetId || !key && !imageUrl) return json4({ ok: false, error: "Missing assetId or url/key" }, 400);
-      let r2Key = key;
-      if (!r2Key && imageUrl) r2Key = decodeURIComponent((imageUrl.split("key=")[1] || "").split("&")[0]);
-      if (!r2Key) return json4({ ok: false, error: "Invalid image URL or key" }, 400);
-      await env.ASSET_BUCKET.delete(r2Key);
-      await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
-      await purgeAssetCache(url, r2Key);
-      const asset = await getAsset(env, tenantId, assetId);
-      if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
-      const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
-      asset.images = (asset.images || []).filter((u) => u !== fullUrl);
-      await putAsset(env, tenantId, asset);
-      return json4({ ok: true, message: "Image deleted", removedKey: r2Key });
-    } catch (err) {
-      return json4({ ok: false, error: "Failed to delete image", details: err.message }, 500);
-    }
-  }
-  if (method === "GET" && pathname === "/assets") {
-    try {
-      const user = searchParams.get("user");
-      const stmt = user ? db.prepare("SELECT data FROM assets WHERE tenant_id = ? AND assigned_to = ?").bind(db.tenantId, user) : db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId);
-      const { results } = await stmt.all();
-      const assets = (results || []).map((r) => JSON.parse(r.data));
-      return json4({ assets });
-    } catch (err) {
-      return json4({ error: "Failed to fetch assets", details: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/asset/add") {
-    try {
-      const body = await request.json();
-      if (!body.id) return json4({ error: "Missing ID" }, 400);
-      await putAsset(env, tenantId, body);
-      return json4({ ok: true, message: `Asset ${body.id} added.` });
-    } catch (err) {
-      return json4({ error: "Failed to add asset", details: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/asset/update") {
-    try {
-      const body = await request.json();
-      if (!body.id) return json4({ error: "Missing ID" }, 400);
-      const existing = await getAsset(env, tenantId, body.id);
-      const updated = { ...existing, ...body };
-      if (existing && String(existing.assignedTo || "") !== String(body.assignedTo || "") && updated.confirm) {
-        delete updated.confirm;
-      }
-      await putAsset(env, tenantId, updated);
-      if (existing && existing.assignedTo !== body.assignedTo) {
-        const log = {
-          assetID: body.id,
-          from: existing.assignedTo || "Unassigned",
-          to: body.assignedTo,
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          pdfURL: updated.pdfURL || null
-        };
-        await putTransfer(env, tenantId, log);
-      }
-      return json4({ ok: true, message: `Asset ${body.id} updated.` });
-    } catch (err) {
-      return json4({ error: "Failed to update asset", details: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/transfer") {
-    try {
-      const log = await request.json();
-      if (!log.assetID) return json4({ error: "Missing assetID" }, 400);
-      const asset = await getAsset(env, tenantId, log.assetID);
-      if (asset) {
-        asset.assignedTo = log.to;
-        asset.lastTransfer = log.timestamp || (/* @__PURE__ */ new Date()).toISOString();
-        asset.pdfURL = log.pdfURL || asset.pdfURL;
-        await putAsset(env, tenantId, asset);
-      }
-      await putTransfer(env, tenantId, log);
-      return json4({ ok: true, message: `Transfer logged for ${log.assetID}` });
-    } catch (err) {
-      return json4({ error: "Failed to log transfer", details: err.message }, 500);
-    }
-  }
-  if (method === "GET" && pathname === "/transfer-log") {
-    const assetID = searchParams.get("assetID");
-    if (!assetID) return json4({ error: "Missing assetID" }, 400);
-    try {
-      const { results } = await db.prepare(
-        "SELECT data FROM asset_transfers WHERE tenant_id = ? AND asset_id = ? ORDER BY id ASC"
-      ).bind(db.tenantId, assetID).all();
-      return json4((results || []).map((r) => JSON.parse(r.data)));
-    } catch (err) {
-      return json4({ error: "Failed to load logs", details: err.message }, 500);
-    }
-  }
-  if (method === "DELETE" && pathname === "/asset/delete") {
-    try {
-      const id = searchParams.get("id");
-      if (!id) return json4({ error: "Missing ID" }, 400);
-      await db.prepare("DELETE FROM assets WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).run();
-      return json4({ ok: true, message: `Asset ${id} deleted.` });
-    } catch (err) {
-      return json4({ error: "Failed to delete asset", details: err.message }, 500);
-    }
-  }
-  if (method === "POST" && pathname === "/asset/r2-relink") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
-    let cursor, objects = [];
-    try {
-      do {
-        const l = await env.ASSET_BUCKET.list({ cursor, limit: 1e3 });
-        objects.push(...l.objects || []);
-        cursor = l.truncated ? l.cursor : null;
-      } while (cursor);
-    } catch (e) {
-      return json4({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
-    }
-    const byAsset = {};
-    for (const o of objects) {
-      const pfx = String(o.key).split("/")[0];
-      (byAsset[pfx] || (byAsset[pfx] = [])).push(o.key);
-    }
-    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
-    let updated = 0;
-    for (const row of results || []) {
-      let asset;
-      try {
-        asset = JSON.parse(row.data);
-      } catch {
-        continue;
-      }
-      const keys = byAsset[asset.id];
-      if (!keys || !keys.length) continue;
-      const urls = keys.sort().map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`);
-      if (JSON.stringify(asset.images || []) === JSON.stringify(urls)) continue;
-      asset.images = urls;
-      await putAsset(env, tenantId, asset);
-      updated++;
-    }
-    return json4({
-      ok: true,
-      bucketObjects: objects.length,
-      assetsInBucket: Object.keys(byAsset).length,
-      assetsUpdated: updated,
-      sampleKeys: objects.slice(0, 6).map((o) => o.key)
-    });
-  }
-  if (method === "GET" && pathname === "/asset/condition-photos") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
-    const assetID = searchParams.get("assetID");
-    if (!assetID) return json4({ ok: false, error: "Missing assetID" }, 400);
-    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
-    const keyOf = (u) => {
-      try {
-        return decodeURIComponent((String(u).split("key=")[1] || "").split("&")[0]);
-      } catch {
-        return "";
-      }
-    };
-    const rebase = (u) => {
-      const k = keyOf(u);
-      return k ? toUrl(k) : u;
-    };
-    const photos = [];
-    const { results } = await db.prepare(
-      "SELECT data FROM asset_transfers WHERE tenant_id=? AND asset_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE'"
-    ).bind(db.tenantId, assetID).all();
-    for (const row of results || []) {
-      let n;
-      try {
-        n = JSON.parse(row.data);
-      } catch {
-        continue;
-      }
-      for (const u of n.conditionSender || [])
-        photos.push({ url: rebase(u), takenAt: utcify(n.requestedAt), by: n.from, role: "handover", counterparty: n.to, transferId: n.transferId });
-      for (const u of n.conditionRecipient || [])
-        photos.push({ url: rebase(u), takenAt: utcify(n.acceptedAt), by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
-    }
-    const { results: reqs } = await db.prepare(
-      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending' AND condition_photos IS NOT NULL"
-    ).bind(db.tenantId, assetID).all();
-    for (const r of reqs || []) {
-      let c = {};
-      try {
-        c = JSON.parse(r.condition_photos || "{}");
-      } catch {
-      }
-      for (const k of c.sender || [])
-        photos.push({ url: toUrl(k), takenAt: utcify(r.requested_at), by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
-    }
-    photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
-    return json4({ ok: true, assetID, photos });
-  }
-  if (method === "POST" && pathname === "/asset/r2-unlink") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
-    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
-    let cleared = 0;
-    for (const row of results || []) {
-      let asset;
-      try {
-        asset = JSON.parse(row.data);
-      } catch {
-        continue;
-      }
-      if (!asset.images || !asset.images.length) continue;
-      delete asset.images;
-      await putAsset(env, tenantId, asset);
-      cleared++;
-    }
-    return json4({ ok: true, cleared });
-  }
-  if (method === "GET" && pathname === "/asset/transfers/pending-count") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const rules = await getRules(env, tenantId);
-    const { results } = await db.prepare(
-      "SELECT asset_id FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
-    ).bind(db.tenantId, sess2.user.username).all();
-    const count = (results || []).filter((r) => !isSuppressed(rules, "asset-transfer", sess2.user.username, String(r.asset_id))).length;
-    return json4({ ok: true, count });
-  }
-  const CONFIRM_KEY = `asset_confirm_round:${tenantId}`;
-  if (method === "POST" && pathname === "/asset/confirm/request") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
-    const body = await request.json().catch(() => ({}));
-    const exclude = new Set((Array.isArray(body.exclude) ? body.exclude : []).map((u) => String(u || "").trim().toLowerCase()).filter(Boolean));
-    const round = (/* @__PURE__ */ new Date()).toISOString();
-    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
-    let count = 0;
-    const holderCounts = {};
-    for (const r of results || []) {
-      let a;
-      try {
-        a = JSON.parse(r.data);
-      } catch {
-        continue;
-      }
-      const holderRaw = String(a.assignedTo || "").trim();
-      const holder = holderRaw.toLowerCase();
-      if (!holder || holder === "shared" || holder === "unassigned") continue;
-      if (exclude.has(holder)) continue;
-      a.confirm = { round, status: "pending", at: null, note: "" };
-      await putAsset(env, tenantId, a);
-      count++;
-      holderCounts[holderRaw] = (holderCounts[holderRaw] || 0) + 1;
-    }
-    for (const [holderName, n] of Object.entries(holderCounts)) {
-      ctx?.waitUntil(sendToUser(env, tenantId, holderName, {
-        title: "Equipment check",
-        body: `Please confirm the ${n} item${n === 1 ? "" : "s"} you still hold \u2014 tap to review.`,
-        url: "/my-assets.html",
-        tag: "asset-confirm"
-      }));
-    }
-    await env.DB.prepare(
-      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-    ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess2.user.username, total: count, excluded: [...exclude] })).run();
-    return json4({ ok: true, count, round });
-  }
-  if (method === "POST" && pathname === "/asset/confirm/respond") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    if (!b.id) return json4({ ok: false, error: "Missing id" }, 400);
-    const asset = await getAsset(env, tenantId, b.id);
-    if (!asset) return json4({ ok: false, error: "Unknown item" }, 404);
-    const me = sess2.user.username;
-    const perms = await permissionsFor(env, tenantId, me);
-    const isAdmin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    if (String(asset.assignedTo || "").toLowerCase() !== me.toLowerCase() && !isAdmin)
-      return json4({ ok: false, error: "Not your item" }, 403);
-    asset.confirm = Object.assign({ round: null }, asset.confirm, {
-      status: b.held === false ? "flagged" : "confirmed",
-      at: (/* @__PURE__ */ new Date()).toISOString(),
-      note: String(b.note || "").slice(0, 300),
-      by: me
-    });
-    await putAsset(env, tenantId, asset);
-    return json4({ ok: true, status: asset.confirm.status });
-  }
-  if (method === "GET" && pathname === "/asset/confirm/pending-count") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const rules = await getRules(env, tenantId);
-    const { results } = await db.prepare(
-      "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
-    ).bind(db.tenantId, sess2.user.username).all();
-    let n = 0;
-    for (const r of results || []) {
-      try {
-        const a = JSON.parse(r.data);
-        if (a.confirm && a.confirm.status === "pending" && !isSuppressed(rules, "asset-confirm", sess2.user.username, String(a.id))) n++;
-      } catch {
-      }
-    }
-    return json4({ ok: true, count: n });
-  }
-  if (method === "GET" && pathname === "/asset/confirm/status") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
-    let roundInfo = null;
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CONFIRM_KEY).first();
-      if (row?.value) roundInfo = JSON.parse(row.value);
-    } catch {
-    }
-    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
-    const items = [];
-    for (const r of results || []) {
-      let a;
-      try {
-        a = JSON.parse(r.data);
-      } catch {
-        continue;
-      }
-      if (!a.confirm || roundInfo && a.confirm.round !== roundInfo.round) continue;
-      items.push({
-        id: a.id,
-        name: a.name || a.assetName || a.id,
-        serial: a.serial || "",
-        holder: a.assignedTo || "",
-        status: a.confirm.status,
-        at: a.confirm.at,
-        note: a.confirm.note || ""
-      });
-    }
-    return json4({ ok: true, round: roundInfo, items });
-  }
-  if (method === "GET" && pathname === "/asset/transfers/pending") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess2.user.username;
-    const { results } = await db.prepare(
-      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
-    ).bind(db.tenantId, me, me).all();
-    const shaped = [];
-    for (const r of results || []) {
-      const asset = await getAsset(env, tenantId, r.asset_id);
-      let cond = {};
-      try {
-        cond = r.condition_photos ? JSON.parse(r.condition_photos) : {};
-      } catch {
-      }
-      shaped.push({
-        id: r.id,
-        assetId: r.asset_id,
-        from: r.from_user,
-        to: r.to_user,
-        note: r.note || "",
-        requestedAt: utcify(r.requested_at),
-        assetName: asset?.name || r.asset_id,
-        serial: asset?.serial || "",
-        category: asset?.category || "",
-        value: asset?.value || "",
-        image: (asset?.images || [])[0] || null,
-        senderPhotos: (cond.sender || []).map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`),
-        direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
-      });
-    }
-    const rules = await getRules(env, tenantId);
-    return json4({
-      ok: true,
-      // Suppressed transfers stop showing (and stop counting) for the recipient.
-      incoming: shaped.filter((s) => s.direction === "incoming" && !isSuppressed(rules, "asset-transfer", me, String(s.assetId))),
-      outgoing: shaped.filter((s) => s.direction === "outgoing")
-    });
-  }
-  if (method === "POST" && pathname === "/asset/transfer-request") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    if (!b.assetId || !b.to) return json4({ ok: false, error: "assetId and to required" }, 400);
-    const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
-    const me = sess2.user.username;
-    const holder = String(asset.assignedTo || "");
-    if (holder.toLowerCase() !== me.toLowerCase()) {
-      const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the current holder can transfer this item" }, 403);
-    }
-    if (String(b.to).toLowerCase() === holder.toLowerCase())
-      return json4({ ok: false, error: "That person already holds this item" }, 400);
-    const dup = await db.prepare(
-      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
-    ).bind(db.tenantId, b.assetId).first();
-    if (dup) return json4({ ok: false, error: "This item already has a transfer pending" }, 409);
-    const res = await db.prepare(
-      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at, tenant_id) VALUES (?,?,?,?,?,?)"
-    ).bind(b.assetId, holder || me, b.to, b.note || null, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId).run();
-    const reqId = res.meta.last_row_id;
-    const senderKeys = await saveConditionPhotos(env, reqId, "sender", b.photos);
-    if (senderKeys.length) {
-      await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
-    }
-    ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
-      title: "Equipment sent to you",
-      body: `${me} sent you ${asset.name || asset.assetName || asset.id} \u2014 tap to accept.`,
-      url: "/my-assets.html",
-      tag: "asset-transfer:" + reqId,
-      actionable: true
-    }));
-    return json4({ ok: true, id: reqId });
-  }
-  if (method === "POST" && pathname === "/asset/transfer-accept") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    if (!b.id || !b.signature) return json4({ ok: false, error: "id and signature required" }, 400);
-    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json4({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
-    const me = sess2.user.username;
-    if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
-    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.signature);
-    if (!m) return json4({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
-    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
-    const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
-    await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const asset = await getAsset(env, tenantId, req.asset_id);
-    const when = londonWhen(now);
-    let cond = {};
-    try {
-      cond = req.condition_photos ? JSON.parse(req.condition_photos) : {};
-    } catch {
-    }
-    const recipientKeys = await saveConditionPhotos(env, req.id, "recipient", b.photos);
-    cond = { sender: cond.sender || [], recipient: recipientKeys };
-    await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(cond), db.tenantId, req.id).run();
-    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
-    const note = {
-      type: "TRANSFER_NOTE",
-      transferId: req.id,
-      assetID: req.asset_id,
-      assetName: asset?.name || req.asset_id,
-      serial: asset?.serial || "",
-      category: asset?.category || "",
-      value: asset?.value || "",
-      images: (asset?.images || []).slice(0, 4),
-      from: req.from_user,
-      to: req.to_user,
-      message: req.note || "",
-      requestedAt: utcify(req.requested_at),
-      acceptedAt: now,
-      acceptedAtText: when,
-      acceptedBy: me,
-      signatureKey: sigKey,
-      conditionSender: (cond.sender || []).map(toUrl),
-      conditionRecipient: (cond.recipient || []).map(toUrl),
-      statement: `I, ${me}, accept this item and take responsibility for it from ${when}. I accept responsibility for the cost to repair or replace this item at any point as required whilst this item remains allocated to myself. This includes if the item is left unattended at any point in time. This also includes any and all accessories.`,
-      releaseStatement: req.from_user && req.from_user !== "Unassigned" ? `Upon this acceptance, custody of the item passed from ${req.from_user}. ${req.from_user}'s responsibility for this item and all of its accessories ended on ${when}, when ${me} accepted the item and signed this note.` : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
-    };
-    await putTransfer(env, tenantId, { ...note, timestamp: now });
-    if (asset) {
-      asset.assignedTo = req.to_user;
-      asset.lastTransfer = now;
-      await putAsset(env, tenantId, asset);
-    }
-    await db.prepare(
-      "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
-    ).bind(now, sigKey, db.tenantId, req.id).run();
-    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
-      title: "Equipment accepted",
-      body: `You accepted ${asset?.name || req.asset_id}.`
-    }));
-    note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
-    return json4({ ok: true, note });
-  }
-  if (method === "POST" && pathname === "/asset/transfer-reject") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
-    const me = sess2.user.username;
-    if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
-    await putTransfer(env, tenantId, {
-      type: "TRANSFER_REJECTED",
-      transferId: req.id,
-      assetID: req.asset_id,
-      from: req.from_user,
-      to: req.to_user,
-      reason: b.reason || "",
-      timestamp: now
-    });
-    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
-      title: "Equipment declined",
-      body: `You declined the transfer${req.from_user ? " from " + req.from_user : ""}.`
-    }));
-    return json4({ ok: true });
-  }
-  if (method === "POST" && pathname === "/asset/transfer-cancel") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
-    const me = sess2.user.username;
-    if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
-      const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
-    }
-    await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
-    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
-      title: "Transfer withdrawn",
-      body: `${req.from_user || "The sender"} withdrew this equipment transfer.`
-    }));
-    return json4({ ok: true });
-  }
-  if (method === "GET" && pathname === "/asset/transfer-note") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const id = searchParams.get("id");
-    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
-    const { results } = await db.prepare(
-      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
-    ).bind(db.tenantId, Number(id)).all();
-    if (!results || !results.length) return json4({ ok: false, error: "Note not found" }, 404);
-    const note = JSON.parse(results[0].data);
-    const me = sess2.user.username, meL = me.toLowerCase();
-    const perms = await permissionsFor(env, tenantId, me);
-    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    if (!admin) {
-      const isFrom = String(note.from || "").toLowerCase() === meL;
-      let isCurrentTo = false;
-      if (String(note.to || "").toLowerCase() === meL) {
-        const a = await getAsset(env, tenantId, note.assetID);
-        isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
-      }
-      if (!isFrom && !isCurrentTo)
-        return json4({ ok: false, error: "This document isn't linked to you" }, 403);
-    }
-    if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
-    note.requestedAt = utcify(note.requestedAt);
-    return json4({ ok: true, note });
-  }
-  if (method === "GET" && pathname === "/asset/my-documents") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess2.user.username, meL = me.toLowerCase();
-    const { results } = await db.prepare(
-      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE' AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
-    ).bind(db.tenantId, meL, meL).all();
-    const { results: held } = await db.prepare("SELECT id FROM assets WHERE tenant_id=? AND lower(assigned_to)=?").bind(db.tenantId, meL).all();
-    const heldSet = new Set((held || []).map((h) => h.id));
-    const acceptance = [], releases = [], seen = /* @__PURE__ */ new Set();
-    for (const row of results || []) {
-      let n;
-      try {
-        n = JSON.parse(row.data);
-      } catch {
-        continue;
-      }
-      if (n.signatureKey) n.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(n.signatureKey)}`;
-      n.requestedAt = utcify(n.requestedAt);
-      if (String(n.to || "").toLowerCase() === meL && heldSet.has(n.assetID) && !seen.has(n.assetID)) {
-        seen.add(n.assetID);
-        acceptance.push(n);
-      } else if (String(n.from || "").toLowerCase() === meL) {
-        releases.push(n);
-      }
-    }
-    return json4({ ok: true, acceptance, releases });
-  }
-  const isRealHolder = (h) => {
-    const v = String(h || "").trim();
-    return v && v.toLowerCase() !== "shared";
-  };
-  if (method === "POST" && pathname === "/asset/request") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess.user.username;
-    const b = await request.json().catch(() => ({}));
-    if (!b.assetId) return json4({ ok: false, error: "assetId required" }, 400);
-    const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
-    const holder = String(asset.assignedTo || "").trim();
-    if (holder.toLowerCase() === me.toLowerCase())
-      return json4({ ok: false, error: "You already have this item" }, 400);
-    const dup = await db.prepare(
-      "SELECT id FROM asset_requests WHERE tenant_id=? AND asset_id=? AND requested_by=? AND status='pending'"
-    ).bind(db.tenantId, b.assetId, me).first();
-    if (dup) return json4({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
-    await db.prepare(
-      "INSERT INTO asset_requests (tenant_id, asset_id, requested_by, holder, message, requested_at) VALUES (?,?,?,?,?,?)"
-    ).bind(db.tenantId, b.assetId, me, isRealHolder(holder) ? holder : "", String(b.message || "").trim(), (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json4({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
-  }
-  if (method === "GET" && pathname === "/asset/requests") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess.user.username;
-    const perms = await permissionsFor(env, tenantId, me);
-    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    const shape = async (r) => {
-      const a = await getAsset(env, tenantId, r.asset_id);
-      return {
-        id: r.id,
-        assetId: r.asset_id,
-        assetName: a && a.name || r.asset_id,
-        requestedBy: r.requested_by,
-        holder: r.holder || "",
-        message: r.message || "",
-        status: r.status,
-        rejectReason: r.reject_reason || "",
-        requestedAt: utcify(r.requested_at),
-        decidedAt: utcify(r.decided_at),
-        decidedBy: r.decided_by || "",
-        seen: !!Number(r.seen)
-      };
-    };
-    const { results: mineR } = await db.prepare(
-      "SELECT * FROM asset_requests WHERE tenant_id=? AND requested_by=? ORDER BY id DESC LIMIT 100"
-    ).bind(db.tenantId, me).all();
-    const { results: toMe } = await db.prepare(
-      admin ? "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='') ORDER BY id DESC LIMIT 100" : "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=? ORDER BY id DESC LIMIT 100"
-    ).bind(db.tenantId, me).all();
-    const out = { ok: true, mine: [], toAction: [], all: null };
-    for (const r of mineR || []) out.mine.push(await shape(r));
-    for (const r of toMe || []) if (r.requested_by !== me) out.toAction.push(await shape(r));
-    if (admin && url.searchParams.get("all") === "1") {
-      const { results: allR } = await db.prepare(
-        "SELECT * FROM asset_requests WHERE tenant_id=? ORDER BY id DESC LIMIT 300"
-      ).bind(db.tenantId).all();
-      out.all = [];
-      for (const r of allR || []) out.all.push(await shape(r));
-    }
-    return json4(out);
-  }
-  if (method === "GET" && pathname === "/asset/requests/attention") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess.user.username;
-    const perms = await permissionsFor(env, tenantId, me);
-    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    const { results: toMe } = await db.prepare(
-      admin ? "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='')" : "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=?"
-    ).bind(db.tenantId, me).all();
-    const toAction = (toMe || []).filter((r) => r.requested_by !== me);
-    const { results: dec } = await db.prepare(
-      "SELECT id, asset_id, status FROM asset_requests WHERE tenant_id=? AND requested_by=? AND status IN ('accepted','rejected') AND seen=0"
-    ).bind(db.tenantId, me).all();
-    return json4({ ok: true, toAction: toAction.length, decided: (dec || []).length });
-  }
-  if (method === "POST" && pathname === "/asset/request/accept") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess.user.username;
-    const b = await request.json().catch(() => ({}));
-    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json4({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
-    const perms = await permissionsFor(env, tenantId, me);
-    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    if (!(r.holder === me || !r.holder && admin || admin))
-      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
-    const asset = await getAsset(env, tenantId, r.asset_id);
-    if (!asset) return json4({ ok: false, error: "Asset no longer exists" }, 404);
-    if (String(asset.assignedTo || "").toLowerCase() === r.requested_by.toLowerCase()) {
-      await db.prepare("UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-      return json4({ ok: true, note: "They already hold it \u2014 request closed." });
-    }
-    const dupT = await db.prepare(
-      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
-    ).bind(db.tenantId, r.asset_id).first();
-    if (dupT) return json4({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const holderNow = String(asset.assignedTo || "").trim();
-    const res = await db.prepare(
-      "INSERT INTO asset_transfer_requests (tenant_id, asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?,?)"
-    ).bind(
-      db.tenantId,
-      r.asset_id,
-      isRealHolder(holderNow) ? holderNow : me,
-      r.requested_by,
-      ("Requested" + (r.message ? ": " + r.message : "")).slice(0, 200),
-      now
-    ).run();
-    await db.prepare(
-      "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
-    ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
-    return json4({ ok: true, transferStarted: true });
-  }
-  if (method === "POST" && pathname === "/asset/request/reject") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const me = sess.user.username;
-    const b = await request.json().catch(() => ({}));
-    const reason = String(b.reason || "").trim();
-    if (!reason) return json4({ ok: false, error: "Add a short message explaining why." }, 400);
-    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
-    const perms = await permissionsFor(env, tenantId, me);
-    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    if (!(r.holder === me || !r.holder && admin || admin))
-      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
-    await db.prepare(
-      "UPDATE asset_requests SET status='rejected', reject_reason=?, decided_at=?, decided_by=? WHERE tenant_id=? AND id=?"
-    ).bind(reason.slice(0, 300), (/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-    return json4({ ok: true });
-  }
-  if (method === "POST" && pathname === "/asset/request/cancel") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
-    if (r.requested_by !== sess.user.username) return json4({ ok: false, error: "Only the requester can cancel" }, 403);
-    await db.prepare("UPDATE asset_requests SET status='cancelled', decided_at=?, decided_by=?, seen=1 WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), sess.user.username, db.tenantId, r.id).run();
-    return json4({ ok: true });
-  }
-  if (method === "POST" && pathname === "/asset/request/ack") {
-    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
-    const b = await request.json().catch(() => ({}));
-    await db.prepare("UPDATE asset_requests SET seen=1 WHERE tenant_id=? AND id=? AND requested_by=?").bind(db.tenantId, Number(b.id), sess.user.username).run();
-    return json4({ ok: true });
-  }
-  return json4({ error: "Not found" }, 404);
-}
-function utcify(s) {
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
-}
-async function getAsset(env, tenantId, id) {
-  const db = tenantDB(env, tenantId);
-  const row = await db.prepare("SELECT data FROM assets WHERE tenant_id=? AND id = ?").bind(db.tenantId, id).first();
-  return row ? JSON.parse(row.data) : null;
-}
-async function purgeAssetCache(url, key) {
-  try {
-    const c = caches.default;
-    const enc3 = encodeURIComponent(key);
-    await c.delete(`${url.origin}/asset-image?key=${enc3}`);
-    await c.delete(`${url.origin}/asset-thumb?key=${enc3}`);
-  } catch {
-  }
-}
-async function putAsset(env, tenantId, asset) {
-  const db = tenantDB(env, tenantId);
-  await db.prepare(`
-    INSERT INTO assets (id, assigned_to, data, tenant_id) VALUES (?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET assigned_to = excluded.assigned_to, data = excluded.data
-  `).bind(asset.id, asset.assignedTo || null, JSON.stringify(asset), db.tenantId).run();
-}
-async function putTransfer(env, tenantId, log) {
-  const db = tenantDB(env, tenantId);
-  await db.prepare(
-    "INSERT INTO asset_transfers (asset_id, at, data, tenant_id) VALUES (?,?,?,?)"
-  ).bind(log.assetID, log.timestamp || (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify(log), db.tenantId).run();
-}
-async function saveConditionPhotos(env, reqId, who, photos) {
-  const keys = [];
-  for (const p of (Array.isArray(photos) ? photos : []).slice(0, 6)) {
-    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
-    if (!m) continue;
-    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
-    if (bytes.length > 4 * 1024 * 1024) continue;
-    const key = `transfers/${reqId}/${who}-${keys.length + 1}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
-    await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
-    keys.push(key);
-  }
-  return keys;
-}
-function londonWhen(iso) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).formatToParts(new Date(iso));
-  const get = (t) => (parts.find((p) => p.type === t) || {}).value || "";
-  const day = Number(get("day"));
-  const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
-  return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
-}
-async function remindPendingTransfers(env, tid = 1) {
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT id, to_user, from_user FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
-    ).bind(tid).all();
-    for (const r of results || []) {
-      if (!r.to_user) continue;
-      await remindUser(env, tid, r.to_user, {
-        title: "Equipment waiting for you",
-        body: `${r.from_user || "Someone"} sent you equipment that's still waiting to be accepted.`,
-        url: "/my-assets.html",
-        tag: "asset-transfer:" + r.id
-      }).catch(() => {
-      });
-    }
-  } catch {
-  }
-}
-
-// src/routes/sla.js
-init_http();
-init_tenantdb();
-
 // src/lib/filesign.js
 function fileSecret(env) {
   return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
@@ -3460,163 +854,12 @@ async function verifyFileSig(env, key, params) {
   for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ sig.charCodeAt(i);
   return diff === 0;
 }
-
-// src/routes/timesheets.js
-init_http();
-init_auth();
+var init_filesign = __esm({
+  "src/lib/filesign.js"() {
+  }
+});
 
 // src/lib/pdf.js
-var PAGE_W = 595;
-var PAGE_H = 842;
-var W = {
-  " ": 278,
-  "!": 278,
-  '"': 355,
-  "#": 556,
-  "$": 556,
-  "%": 889,
-  "&": 667,
-  "'": 191,
-  "(": 333,
-  ")": 333,
-  "*": 389,
-  "+": 584,
-  ",": 278,
-  "-": 333,
-  ".": 278,
-  "/": 278,
-  "0": 556,
-  "1": 556,
-  "2": 556,
-  "3": 556,
-  "4": 556,
-  "5": 556,
-  "6": 556,
-  "7": 556,
-  "8": 556,
-  "9": 556,
-  ":": 278,
-  ";": 278,
-  "=": 584,
-  "?": 556,
-  "@": 1015,
-  "A": 667,
-  "B": 667,
-  "C": 722,
-  "D": 722,
-  "E": 667,
-  "F": 611,
-  "G": 778,
-  "H": 722,
-  "I": 278,
-  "J": 500,
-  "K": 667,
-  "L": 556,
-  "M": 833,
-  "N": 722,
-  "O": 778,
-  "P": 667,
-  "Q": 778,
-  "R": 722,
-  "S": 667,
-  "T": 611,
-  "U": 722,
-  "V": 667,
-  "W": 944,
-  "X": 667,
-  "Y": 667,
-  "Z": 611,
-  "a": 556,
-  "b": 556,
-  "c": 500,
-  "d": 556,
-  "e": 556,
-  "f": 278,
-  "g": 556,
-  "h": 556,
-  "i": 222,
-  "j": 222,
-  "k": 500,
-  "l": 222,
-  "m": 833,
-  "n": 556,
-  "o": 556,
-  "p": 556,
-  "q": 556,
-  "r": 333,
-  "s": 500,
-  "t": 278,
-  "u": 556,
-  "v": 500,
-  "w": 722,
-  "x": 500,
-  "y": 500,
-  "z": 500,
-  "\xA3": 556,
-  "\xB7": 278,
-  "\u2013": 556,
-  "\u2014": 1e3
-};
-var WIN1252 = {
-  "\u20AC": 128,
-  "\u201A": 130,
-  "\u0192": 131,
-  "\u201E": 132,
-  "\u2026": 133,
-  "\u2020": 134,
-  "\u2021": 135,
-  "\u02C6": 136,
-  "\u2030": 137,
-  "\u0160": 138,
-  "\u2039": 139,
-  "\u0152": 140,
-  "\u017D": 142,
-  "\u2018": 145,
-  "\u2019": 146,
-  "\u201C": 147,
-  "\u201D": 148,
-  "\u2022": 149,
-  "\u2013": 150,
-  "\u2014": 151,
-  "\u02DC": 152,
-  "\u2122": 153,
-  "\u0161": 154,
-  "\u203A": 155,
-  "\u0153": 156,
-  "\u017E": 158,
-  "\u0178": 159
-};
-var ASCIIFY = {
-  "\u2192": "->",
-  "\u2190": "<-",
-  "\u2194": "<->",
-  "\u21D2": "=>",
-  "\u21D0": "<=",
-  "\u2212": "-",
-  "\u2011": "-",
-  "\u2012": "-",
-  "\u2015": "-",
-  "\u2044": "/",
-  "\u2264": "<=",
-  "\u2265": ">=",
-  "\u2260": "!=",
-  "\u2248": "~",
-  "\u2713": "v",
-  "\u2714": "v",
-  "\u2715": "x",
-  "\u2717": "x",
-  "\u221A": "v",
-  "\xA0": " ",
-  "\u2009": " ",
-  "\u202F": " ",
-  "\u200B": "",
-  "\u03A9": "ohm",
-  "\u2126": "ohm",
-  // Greek omega / ohm sign -> "ohm" (no base-14 glyph)
-  "\xB5": "u",
-  "\u03BC": "u"
-  // micro sign / Greek mu -> u
-};
 function toWinAnsi(s) {
   let out = "";
   for (const ch of String(s == null ? "" : s)) {
@@ -3671,221 +914,372 @@ function jpegInfo(bytes) {
   }
   return { w: 1, h: 1, comps: 3 };
 }
-var PdfDoc = class {
-  // Pages default to A4 (595×842) but any page may carry its own size —
-  // newPage(w, h) — e.g. the continuous single-tall-page RA copies.
-  constructor(w, h) {
-    this.pages = [];
-    this.images = [];
-    this.newPage(w, h);
-  }
-  newPage(w, h) {
-    this.pages.push({ ops: [], w: w || PAGE_W, h: h || PAGE_H });
-    return this;
-  }
-  get _page() {
-    return this.pages[this.pages.length - 1];
-  }
-  get _ops() {
-    return this._page.ops;
-  }
-  // Draw a JPEG image. (x, yTop) = top-left corner from the page top; w/h in pt.
-  // Bytes must be a baseline JPEG (DCTDecode). Registers one XObject reused across
-  // pages by index.
-  image(bytes, x, yTop, w, h) {
-    const idx = this.images.length;
-    this.images.push({ jpeg: bytes });
-    const y = this._page.h - yTop - h;
-    this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
-    return this;
-  }
-  // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
-  // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
-  // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
-  imageRGB(rgb, iw, ih, x, yTop, w, h) {
-    const idx = this.images.length;
-    this.images.push({ rgb, w: iw, h: ih });
-    const y = this._page.h - yTop - h;
-    this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
-    return this;
-  }
-  // yTop is measured from the top of the page to the text BASELINE.
-  text(x, yTop, str, opt = {}) {
-    const size = opt.size || 10;
-    const font = opt.bold ? "/F2" : "/F1";
-    const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
-    let tx = x;
-    if (opt.alignRight) tx = x - textWidth(str, size);
-    const y = this._page.h - yTop;
-    this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
-    return this;
-  }
-  hr(x1, yTop, x2, opt = {}) {
-    const y = this._page.h - yTop;
-    const grey = opt.grey ? "0.75 G " : "0.2 G ";
-    this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
-    return this;
-  }
-  // Draw text on a SPECIFIC page (0-indexed) — for headers/footers stamped AFTER
-  // the body has been laid out, once the total page count is known (e.g. a
-  // "Page X of Y" footer). opt: {size,bold,grey,alignRight,center}.
-  textOn(pageIndex, x, yTop, str, opt = {}) {
-    const pg = this.pages[pageIndex];
-    if (!pg) return this;
-    const size = opt.size || 10;
-    const font = opt.bold ? "/F2" : "/F1";
-    const col = opt.grey ? "0.45 g " : "";
-    let tx = x;
-    if (opt.alignRight) tx = x - textWidth(str, size);
-    else if (opt.center) tx = x - textWidth(str, size) / 2;
-    const y = pg.h - yTop;
-    pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
-    return this;
-  }
-  // Horizontal rule on a SPECIFIC page (0-indexed) — companion to textOn for
-  // header/footer separator lines.
-  lineOn(pageIndex, x1, yTop, x2, opt = {}) {
-    const pg = this.pages[pageIndex];
-    if (!pg) return this;
-    const y = pg.h - yTop;
-    const grey = opt.grey ? "0.80 G " : "0.2 G ";
-    pg.ops.push(`${grey}${opt.w || 0.5} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
-    return this;
-  }
-  // Filled / stroked rectangle. (x, yTop) = top-left from the page top; fill and
-  // stroke are [r,g,b] 0–1 arrays. Used by the programme (Gantt) export.
-  rect(x, yTop, w, h, opt = {}) {
-    const y = this._page.h - yTop - h;
-    let op = "q ";
-    if (opt.fill) op += `${opt.fill.map((n) => n.toFixed(3)).join(" ")} rg `;
-    if (opt.stroke) op += `${opt.stroke.map((n) => n.toFixed(3)).join(" ")} RG ${opt.lw || 0.5} w `;
-    op += `${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re `;
-    op += opt.fill && opt.stroke ? "B" : opt.fill ? "f" : "S";
-    this._ops.push(op + " Q");
-    return this;
-  }
-  // Straight line between two points (top-based coordinates).
-  line(x1, yTop1, x2, yTop2, opt = {}) {
-    const y1 = this._page.h - yTop1, y2 = this._page.h - yTop2;
-    const col = (opt.stroke || [0.2, 0.2, 0.2]).map((n) => n.toFixed(3)).join(" ");
-    this._ops.push(`q ${col} RG ${opt.lw || 0.5} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
-    return this;
-  }
-  // Rounded ("bubble") filled rectangle — Bézier-curve corners, radius clamped
-  // so narrow bars become clean pills. Used for the programme Gantt bars.
-  roundRect(x, yTop, w, h, r, opt = {}) {
-    const y = this._page.h - yTop - h;
-    r = Math.max(0, Math.min(r, w / 2, h / 2));
-    const k = 0.5523 * r;
-    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
-    const f = (n) => n.toFixed(2);
-    const op = `q ${fill2} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
-    this._ops.push(op);
-    return this;
-  }
-  // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
-  poly(points, opt = {}) {
-    if (!points.length) return this;
-    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
-    const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
-    let op = `q ${fill2} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
-    for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
-    this._ops.push(op + "h f Q");
-    return this;
-  }
-  bytes() {
-    const enc3 = new TextEncoder();
-    const nImg = this.images.length;
-    const imgMeta = this.images.map((im) => {
-      if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
-      const b = im && im.jpeg ? im.jpeg : im;
-      const d = jpegInfo(b);
-      const cs = d.comps === 1 ? "/DeviceGray" : d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
-      return { data: b, w: d.w, h: d.h, cs, filter: "/DCTDecode" };
-    });
-    const IMG0 = 6;
-    const firstPageObj = IMG0 + nImg;
-    const pageIds = this.pages.map((_, i) => firstPageObj + i * 2 + 1);
-    const xobjRes = nImg ? ` /XObject << ${imgMeta.map((_, i) => `/Im${i} ${IMG0 + i} 0 R`).join(" ")} >>` : "";
-    const objs = [];
-    objs.push({ s: "<< /Type /Catalog /Pages 2 0 R >>" });
-    objs.push({ s: `<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>` });
-    objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>" });
-    objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>" });
-    objs.push({ s: "<< /Producer (Mostlane Portal) >>" });
-    for (const m of imgMeta) {
-      const filt = m.filter ? ` /Filter ${m.filter}` : "";
-      objs.push({
-        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8${filt} /Length ${m.data.length} >>
+var PAGE_W, PAGE_H, W, WIN1252, ASCIIFY, PdfDoc;
+var init_pdf = __esm({
+  "src/lib/pdf.js"() {
+    PAGE_W = 595;
+    PAGE_H = 842;
+    W = {
+      " ": 278,
+      "!": 278,
+      '"': 355,
+      "#": 556,
+      "$": 556,
+      "%": 889,
+      "&": 667,
+      "'": 191,
+      "(": 333,
+      ")": 333,
+      "*": 389,
+      "+": 584,
+      ",": 278,
+      "-": 333,
+      ".": 278,
+      "/": 278,
+      "0": 556,
+      "1": 556,
+      "2": 556,
+      "3": 556,
+      "4": 556,
+      "5": 556,
+      "6": 556,
+      "7": 556,
+      "8": 556,
+      "9": 556,
+      ":": 278,
+      ";": 278,
+      "=": 584,
+      "?": 556,
+      "@": 1015,
+      "A": 667,
+      "B": 667,
+      "C": 722,
+      "D": 722,
+      "E": 667,
+      "F": 611,
+      "G": 778,
+      "H": 722,
+      "I": 278,
+      "J": 500,
+      "K": 667,
+      "L": 556,
+      "M": 833,
+      "N": 722,
+      "O": 778,
+      "P": 667,
+      "Q": 778,
+      "R": 722,
+      "S": 667,
+      "T": 611,
+      "U": 722,
+      "V": 667,
+      "W": 944,
+      "X": 667,
+      "Y": 667,
+      "Z": 611,
+      "a": 556,
+      "b": 556,
+      "c": 500,
+      "d": 556,
+      "e": 556,
+      "f": 278,
+      "g": 556,
+      "h": 556,
+      "i": 222,
+      "j": 222,
+      "k": 500,
+      "l": 222,
+      "m": 833,
+      "n": 556,
+      "o": 556,
+      "p": 556,
+      "q": 556,
+      "r": 333,
+      "s": 500,
+      "t": 278,
+      "u": 556,
+      "v": 500,
+      "w": 722,
+      "x": 500,
+      "y": 500,
+      "z": 500,
+      "\xA3": 556,
+      "\xB7": 278,
+      "\u2013": 556,
+      "\u2014": 1e3
+    };
+    WIN1252 = {
+      "\u20AC": 128,
+      "\u201A": 130,
+      "\u0192": 131,
+      "\u201E": 132,
+      "\u2026": 133,
+      "\u2020": 134,
+      "\u2021": 135,
+      "\u02C6": 136,
+      "\u2030": 137,
+      "\u0160": 138,
+      "\u2039": 139,
+      "\u0152": 140,
+      "\u017D": 142,
+      "\u2018": 145,
+      "\u2019": 146,
+      "\u201C": 147,
+      "\u201D": 148,
+      "\u2022": 149,
+      "\u2013": 150,
+      "\u2014": 151,
+      "\u02DC": 152,
+      "\u2122": 153,
+      "\u0161": 154,
+      "\u203A": 155,
+      "\u0153": 156,
+      "\u017E": 158,
+      "\u0178": 159
+    };
+    ASCIIFY = {
+      "\u2192": "->",
+      "\u2190": "<-",
+      "\u2194": "<->",
+      "\u21D2": "=>",
+      "\u21D0": "<=",
+      "\u2212": "-",
+      "\u2011": "-",
+      "\u2012": "-",
+      "\u2015": "-",
+      "\u2044": "/",
+      "\u2264": "<=",
+      "\u2265": ">=",
+      "\u2260": "!=",
+      "\u2248": "~",
+      "\u2713": "v",
+      "\u2714": "v",
+      "\u2715": "x",
+      "\u2717": "x",
+      "\u221A": "v",
+      "\xA0": " ",
+      "\u2009": " ",
+      "\u202F": " ",
+      "\u200B": "",
+      "\u03A9": "ohm",
+      "\u2126": "ohm",
+      // Greek omega / ohm sign -> "ohm" (no base-14 glyph)
+      "\xB5": "u",
+      "\u03BC": "u"
+      // micro sign / Greek mu -> u
+    };
+    PdfDoc = class {
+      // Pages default to A4 (595×842) but any page may carry its own size —
+      // newPage(w, h) — e.g. the continuous single-tall-page RA copies.
+      constructor(w, h) {
+        this.pages = [];
+        this.images = [];
+        this.newPage(w, h);
+      }
+      newPage(w, h) {
+        this.pages.push({ ops: [], w: w || PAGE_W, h: h || PAGE_H });
+        return this;
+      }
+      get _page() {
+        return this.pages[this.pages.length - 1];
+      }
+      get _ops() {
+        return this._page.ops;
+      }
+      // Draw a JPEG image. (x, yTop) = top-left corner from the page top; w/h in pt.
+      // Bytes must be a baseline JPEG (DCTDecode). Registers one XObject reused across
+      // pages by index.
+      image(bytes, x, yTop, w, h) {
+        const idx = this.images.length;
+        this.images.push({ jpeg: bytes });
+        const y = this._page.h - yTop - h;
+        this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
+        return this;
+      }
+      // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
+      // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
+      // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
+      imageRGB(rgb, iw, ih, x, yTop, w, h) {
+        const idx = this.images.length;
+        this.images.push({ rgb, w: iw, h: ih });
+        const y = this._page.h - yTop - h;
+        this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
+        return this;
+      }
+      // yTop is measured from the top of the page to the text BASELINE.
+      text(x, yTop, str, opt = {}) {
+        const size = opt.size || 10;
+        const font = opt.bold ? "/F2" : "/F1";
+        const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
+        let tx = x;
+        if (opt.alignRight) tx = x - textWidth(str, size);
+        const y = this._page.h - yTop;
+        this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
+        return this;
+      }
+      hr(x1, yTop, x2, opt = {}) {
+        const y = this._page.h - yTop;
+        const grey = opt.grey ? "0.75 G " : "0.2 G ";
+        this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+        return this;
+      }
+      // Draw text on a SPECIFIC page (0-indexed) — for headers/footers stamped AFTER
+      // the body has been laid out, once the total page count is known (e.g. a
+      // "Page X of Y" footer). opt: {size,bold,grey,alignRight,center}.
+      textOn(pageIndex, x, yTop, str, opt = {}) {
+        const pg = this.pages[pageIndex];
+        if (!pg) return this;
+        const size = opt.size || 10;
+        const font = opt.bold ? "/F2" : "/F1";
+        const col = opt.grey ? "0.45 g " : "";
+        let tx = x;
+        if (opt.alignRight) tx = x - textWidth(str, size);
+        else if (opt.center) tx = x - textWidth(str, size) / 2;
+        const y = pg.h - yTop;
+        pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+        return this;
+      }
+      // Horizontal rule on a SPECIFIC page (0-indexed) — companion to textOn for
+      // header/footer separator lines.
+      lineOn(pageIndex, x1, yTop, x2, opt = {}) {
+        const pg = this.pages[pageIndex];
+        if (!pg) return this;
+        const y = pg.h - yTop;
+        const grey = opt.grey ? "0.80 G " : "0.2 G ";
+        pg.ops.push(`${grey}${opt.w || 0.5} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+        return this;
+      }
+      // Filled / stroked rectangle. (x, yTop) = top-left from the page top; fill and
+      // stroke are [r,g,b] 0–1 arrays. Used by the programme (Gantt) export.
+      rect(x, yTop, w, h, opt = {}) {
+        const y = this._page.h - yTop - h;
+        let op = "q ";
+        if (opt.fill) op += `${opt.fill.map((n) => n.toFixed(3)).join(" ")} rg `;
+        if (opt.stroke) op += `${opt.stroke.map((n) => n.toFixed(3)).join(" ")} RG ${opt.lw || 0.5} w `;
+        op += `${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re `;
+        op += opt.fill && opt.stroke ? "B" : opt.fill ? "f" : "S";
+        this._ops.push(op + " Q");
+        return this;
+      }
+      // Straight line between two points (top-based coordinates).
+      line(x1, yTop1, x2, yTop2, opt = {}) {
+        const y1 = this._page.h - yTop1, y2 = this._page.h - yTop2;
+        const col = (opt.stroke || [0.2, 0.2, 0.2]).map((n) => n.toFixed(3)).join(" ");
+        this._ops.push(`q ${col} RG ${opt.lw || 0.5} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
+        return this;
+      }
+      // Rounded ("bubble") filled rectangle — Bézier-curve corners, radius clamped
+      // so narrow bars become clean pills. Used for the programme Gantt bars.
+      roundRect(x, yTop, w, h, r, opt = {}) {
+        const y = this._page.h - yTop - h;
+        r = Math.max(0, Math.min(r, w / 2, h / 2));
+        const k = 0.5523 * r;
+        const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+        const f = (n) => n.toFixed(2);
+        const op = `q ${fill2} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
+        this._ops.push(op);
+        return this;
+      }
+      // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
+      poly(points, opt = {}) {
+        if (!points.length) return this;
+        const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+        const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
+        let op = `q ${fill2} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
+        for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
+        this._ops.push(op + "h f Q");
+        return this;
+      }
+      bytes() {
+        const enc3 = new TextEncoder();
+        const nImg = this.images.length;
+        const imgMeta = this.images.map((im) => {
+          if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+          const b = im && im.jpeg ? im.jpeg : im;
+          const d = jpegInfo(b);
+          const cs = d.comps === 1 ? "/DeviceGray" : d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
+          return { data: b, w: d.w, h: d.h, cs, filter: "/DCTDecode" };
+        });
+        const IMG0 = 6;
+        const firstPageObj = IMG0 + nImg;
+        const pageIds = this.pages.map((_, i) => firstPageObj + i * 2 + 1);
+        const xobjRes = nImg ? ` /XObject << ${imgMeta.map((_, i) => `/Im${i} ${IMG0 + i} 0 R`).join(" ")} >>` : "";
+        const objs = [];
+        objs.push({ s: "<< /Type /Catalog /Pages 2 0 R >>" });
+        objs.push({ s: `<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>` });
+        objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>" });
+        objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>" });
+        objs.push({ s: "<< /Producer (Mostlane Portal) >>" });
+        for (const m of imgMeta) {
+          const filt = m.filter ? ` /Filter ${m.filter}` : "";
+          objs.push({
+            s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8${filt} /Length ${m.data.length} >>
 stream
 `,
-        raw: m.data,
-        sAfter: "\nendstream"
-      });
-    }
-    for (const pg of this.pages) {
-      const stream = pg.ops.join("\n");
-      objs.push({ s: `<< /Length ${enc3.encode(stream).length} >>
+            raw: m.data,
+            sAfter: "\nendstream"
+          });
+        }
+        for (const pg of this.pages) {
+          const stream = pg.ops.join("\n");
+          objs.push({ s: `<< /Length ${enc3.encode(stream).length} >>
 stream
 ${stream}
 endstream` });
-      const cid = objs.length;
-      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pg.w} ${pg.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });
-    }
-    const chunks = [];
-    let len = 0;
-    const put = (u82) => {
-      chunks.push(u82);
-      len += u82.length;
-    };
-    const putStr = (s) => put(enc3.encode(s));
-    putStr("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-    const offsets = [0];
-    for (let i = 0; i < objs.length; i++) {
-      offsets.push(len);
-      putStr(`${i + 1} 0 obj
+          const cid = objs.length;
+          objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pg.w} ${pg.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });
+        }
+        const chunks = [];
+        let len = 0;
+        const put = (u82) => {
+          chunks.push(u82);
+          len += u82.length;
+        };
+        const putStr = (s) => put(enc3.encode(s));
+        putStr("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+        const offsets = [0];
+        for (let i = 0; i < objs.length; i++) {
+          offsets.push(len);
+          putStr(`${i + 1} 0 obj
 `);
-      putStr(objs[i].s);
-      if (objs[i].raw) {
-        put(objs[i].raw);
-        putStr(objs[i].sAfter || "");
-      }
-      putStr("\nendobj\n");
-    }
-    const xrefAt = len;
-    let tail = `xref
+          putStr(objs[i].s);
+          if (objs[i].raw) {
+            put(objs[i].raw);
+            putStr(objs[i].sAfter || "");
+          }
+          putStr("\nendobj\n");
+        }
+        const xrefAt = len;
+        let tail = `xref
 0 ${objs.length + 1}
 0000000000 65535 f 
 `;
-    for (let i = 1; i <= objs.length; i++) tail += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
-    tail += `trailer
+        for (let i = 1; i <= objs.length; i++) tail += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+        tail += `trailer
 << /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>
 startxref
 ${xrefAt}
 %%EOF
 `;
-    putStr(tail);
-    const out = new Uint8Array(len);
-    let p = 0;
-    for (const c of chunks) {
-      out.set(c, p);
-      p += c.length;
-    }
-    return out;
+        putStr(tail);
+        const out = new Uint8Array(len);
+        let p = 0;
+        for (const c of chunks) {
+          out.set(c, p);
+          p += c.length;
+        }
+        return out;
+      }
+    };
   }
-};
+});
 
 // src/routes/timesheets.js
-init_holidays();
-init_push();
 async function holidayDaysFor(env, tid, username, monday) {
   const end = weekDays(monday)[6];
   const map = await approvedLeaveInRange(env, tid, monday, end, username);
   return map[username] || {};
 }
-var CFG_KEY = (tid) => `engts:cfg:${tid}`;
-var INV_PREFIX = (tid) => `invoices/${tid}/`;
-var isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 function mondayOf(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   const dow = (d.getUTCDay() + 6) % 7;
@@ -3902,14 +1296,6 @@ function weekDays(monday) {
   }
   return out;
 }
-var toMin = (t) => {
-  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(t || "").trim());
-  return m ? +m[1] * 60 + +m[2] : null;
-};
-var normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-var round1 = (n) => Math.round(n * 10) / 10;
-var money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
-var TABLES_ENSURED = false;
 async function ensureTables(env) {
   if (TABLES_ENSURED) return;
   TABLES_ENSURED = true;
@@ -3963,7 +1349,6 @@ async function ensureTables(env) {
   } catch {
   }
 }
-var TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
 async function trackJobTime(env, tid, actor, before, after) {
   try {
     if (!actor || !after) return;
@@ -4073,7 +1458,6 @@ async function trackJobTime(env, tid, actor, before, after) {
   } catch {
   }
 }
-var MAX_SEG_MS = 14 * 36e5;
 async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -4193,7 +1577,6 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   }
   return shaped;
 }
-var normKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 async function capturedMinsWeek(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 8);
@@ -4282,22 +1665,6 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
     }
   }
 }
-var DEFAULTS = {
-  commuteMins: 30,
-  lunchMins: 30,
-  lunchThresholdH: 6,
-  pencePerMile: 45,
-  radiusMiles: 10,
-  overtimeThresholdH: 8,
-  dueDow: 3,
-  dueTime: "12:00",
-  remindersOn: true,
-  basePostcode: "PO15 5RQ",
-  company: "Mostlane"
-};
-var VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
-var normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-var remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
 async function anthropicToolLocal(env, { system, user, toolName, schema, maxTokens }) {
   const key = env.ANTHROPIC_API_KEY;
   if (!key) return { ok: false, error: "AI isn't configured (no API key)." };
@@ -4324,7 +1691,6 @@ async function anthropicToolLocal(env, { system, user, toolName, schema, maxToke
     return { ok: false, error: "Couldn't reach the AI service." };
   }
 }
-var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 async function tsVerifyEngineerAI(env, e, monday, poolVans) {
   const dlab = (dt) => {
     const d = /* @__PURE__ */ new Date(dt + "T12:00:00Z");
@@ -4369,7 +1735,6 @@ async function hasEngTimesheet(env, tid, username) {
     return false;
   }
 }
-var DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -4580,10 +1945,6 @@ async function isTsAdmin(env, tid, sess) {
   const p = await permissionsFor(env, tid, sess.user.username);
   return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
 }
-var PO_MAP;
-var PO_MAP_AT = 0;
-var PO_TABLES;
-var PO_BLOB;
 function poShape(o) {
   if (!o || typeof o !== "object") return null;
   const name = o.siteName ?? o.site_name ?? o.SiteName ?? o.name ?? o.site ?? o.store ?? o.branch ?? "";
@@ -4596,7 +1957,6 @@ function poSiteish(o) {
   const s = poShape(o);
   return !!(s && (s.pc || s.job));
 }
-var PO_PROBE = null;
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
   if (PO_MAP !== void 0 && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1e3)) return PO_MAP;
@@ -4752,8 +2112,6 @@ async function poSiteRows(env, term, limit) {
   }
   return [];
 }
-var PO_ORD;
-var PO_ORD_CACHE;
 function deriveOrderMap() {
   const sitesTable = PO_MAP ? PO_MAP.table : null;
   let best = null;
@@ -4839,7 +2197,6 @@ function haversineMiles(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R2 * Math.asin(Math.sqrt(h));
 }
-var ROAD_FACTOR = 1.25;
 async function driveMinutesGoogle(env, fromPc, toPc) {
   const key = env && env.GOOGLE_MAPS_KEY;
   if (!key) return null;
@@ -5304,7 +2661,7 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   doc.text(L2, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
   return doc.bytes();
 }
-async function handle7(request, env, ctx, url, sess) {
+async function handle5(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ts(?=\/|$)/, "") || "/";
   const q = url.searchParams;
@@ -6251,13 +3608,54 @@ async function handle7(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-
-// src/routes/sla.js
-init_auth();
-init_push();
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR;
+var init_timesheets = __esm({
+  "src/routes/timesheets.js"() {
+    init_http();
+    init_auth();
+    init_filesign();
+    init_pdf();
+    init_holidays();
+    init_push();
+    CFG_KEY = (tid) => `engts:cfg:${tid}`;
+    INV_PREFIX = (tid) => `invoices/${tid}/`;
+    isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+    toMin = (t) => {
+      const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(t || "").trim());
+      return m ? +m[1] * 60 + +m[2] : null;
+    };
+    normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    round1 = (n) => Math.round(n * 10) / 10;
+    money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
+    TABLES_ENSURED = false;
+    TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
+    MAX_SEG_MS = 14 * 36e5;
+    normKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    DEFAULTS = {
+      commuteMins: 30,
+      lunchMins: 30,
+      lunchThresholdH: 6,
+      pencePerMile: 45,
+      radiusMiles: 10,
+      overtimeThresholdH: 8,
+      dueDow: 3,
+      dueTime: "12:00",
+      remindersOn: true,
+      basePostcode: "PO15 5RQ",
+      company: "Mostlane"
+    };
+    VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
+    normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+    DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    PO_MAP_AT = 0;
+    PO_PROBE = null;
+    ROAD_FACTOR = 1.25;
+  }
+});
 
 // src/lib/idempotency.js
-var READY = false;
 async function ensure(env) {
   if (READY) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS idempotency (
@@ -6280,15 +3678,14 @@ async function firstTime(env, tenantId, opId, scope) {
     return false;
   }
 }
+var READY;
+var init_idempotency = __esm({
+  "src/lib/idempotency.js"() {
+    READY = false;
+  }
+});
 
 // src/lib/firestoppdf.js
-var M = 40;
-var PAGE_W2 = 595;
-var PAGE_H2 = 842;
-var CONTENT_W = PAGE_W2 - M * 2;
-var BLUE = [0, 0.23, 0.4];
-var GREY = [0.45, 0.45, 0.45];
-var LINE = [0.8, 0.82, 0.86];
 function wrap(str, size, maxW) {
   const words = String(str == null ? "" : str).replace(/\r/g, "").split(/\n/);
   const out = [];
@@ -6457,17 +3854,21 @@ function buildFirestopPdf(record, meta = {}) {
   }
   return doc.bytes();
 }
+var M, PAGE_W2, PAGE_H2, CONTENT_W, BLUE, GREY, LINE;
+var init_firestoppdf = __esm({
+  "src/lib/firestoppdf.js"() {
+    init_pdf();
+    M = 40;
+    PAGE_W2 = 595;
+    PAGE_H2 = 842;
+    CONTENT_W = PAGE_W2 - M * 2;
+    BLUE = [0, 0.23, 0.4];
+    GREY = [0.45, 0.45, 0.45];
+    LINE = [0.8, 0.82, 0.86];
+  }
+});
 
 // src/lib/jobsheetpdf.js
-var M2 = 40;
-var PAGE_W3 = 595;
-var PAGE_H3 = 842;
-var CONTENT_W2 = PAGE_W3 - M2 * 2;
-var BLUE2 = [0, 0.23, 0.51];
-var GREY2 = [0.45, 0.45, 0.45];
-var LINE2 = [0.8, 0.82, 0.86];
-var OK = [0.09, 0.55, 0.24];
-var BAD = [0.78, 0.11, 0.15];
 function wrap2(str, size, maxW) {
   const paras = String(str == null ? "" : str).replace(/\r/g, "").split(/\n/);
   const out = [];
@@ -6732,10 +4133,23 @@ function buildJobSheetPdf(data = {}, meta = {}) {
   }
   return doc.bytes();
 }
+var M2, PAGE_W3, PAGE_H3, CONTENT_W2, BLUE2, GREY2, LINE2, OK, BAD;
+var init_jobsheetpdf = __esm({
+  "src/lib/jobsheetpdf.js"() {
+    init_pdf();
+    M2 = 40;
+    PAGE_W3 = 595;
+    PAGE_H3 = 842;
+    CONTENT_W2 = PAGE_W3 - M2 * 2;
+    BLUE2 = [0, 0.23, 0.51];
+    GREY2 = [0.45, 0.45, 0.45];
+    LINE2 = [0.8, 0.82, 0.86];
+    OK = [0.09, 0.55, 0.24];
+    BAD = [0.78, 0.11, 0.15];
+  }
+});
 
 // src/lib/pngdecode.js
-var MAX_PIXELS = 4e6;
-var INK = [17, 17, 17];
 async function decodePngToRgb(bytes, opts = {}) {
   try {
     const v = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -6872,17 +4286,15 @@ async function decodePngToRgb(bytes, opts = {}) {
     return null;
   }
 }
+var MAX_PIXELS, INK;
+var init_pngdecode = __esm({
+  "src/lib/pngdecode.js"() {
+    MAX_PIXELS = 4e6;
+    INK = [17, 17, 17];
+  }
+});
 
 // src/lib/zip.js
-var CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
 function crc32(buf) {
   let c = 4294967295;
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 255] ^ c >>> 8;
@@ -6891,8 +4303,6 @@ function crc32(buf) {
 function u8(s) {
   return new TextEncoder().encode(s);
 }
-var DOS_TIME = 0;
-var DOS_DATE = 33;
 function buildZip(files) {
   const entries = [];
   const chunks = [];
@@ -6962,17 +4372,38 @@ function buildZip(files) {
   }
   return out;
 }
+var CRC_TABLE, DOS_TIME, DOS_DATE;
+var init_zip = __esm({
+  "src/lib/zip.js"() {
+    CRC_TABLE = (() => {
+      const t = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+        t[n] = c >>> 0;
+      }
+      return t;
+    })();
+    DOS_TIME = 0;
+    DOS_DATE = 33;
+  }
+});
 
 // src/lib/logo.js
-var MOSTLANE_LOGO_W = 2e3;
-var MOSTLANE_LOGO_H = 798;
-var MOSTLANE_LOGO_JPEG_B64 = "/9j/4AAQSkZJRgABAgAAZABkAAD/7AARRHVja3kAAQAEAAAAPAAA/+4ADkFkb2JlAGTAAAAAAf/bAIQABgQEBAUEBgUFBgkGBQYJCwgGBggLDAoKCwoKDBAMDAwMDAwQDA4PEA8ODBMTFBQTExwbGxscHx8fHx8fHx8fHwEHBwcNDA0YEBAYGhURFRofHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8f/8AAEQgDHgfQAwERAAIRAQMRAf/EAMIAAQACAwEBAQEAAAAAAAAAAAAHCAQGCQUDAgEBAQEBAAMBAAAAAAAAAAAAAAAFBgECBAMQAQABAwICBAQMEAoIBwEAAwABAgMEEQUGByExEghBUWETcYEiMrJzsxR0NVUXkdFCUmJyI5PTNJSkxBVGVqGCotIzQ4UWNjexklPDJIS0GMHCY4Oj1HVUJfBkEQEAAQIBCAkFAAIDAQAAAAAAAQIDBRExcZESMlIEIUFRYYGh0RQVscEiQhPwI2JyM+H/2gAMAwEAAhEDEQA/ALUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA0S5zz5WW7lVuve9K6JmmqPeuX0TE6T1WXtjDr/AA+cerxTiNji8p9H5+fflT8ufmuZ+Bc/G3+Hzj1cfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfQ+fflT8ufmuZ+BPjb/D5x6nyNji8p9D59+VPy5+a5n4E+Nv8PnHqfI2OLyn0Pn35U/Ln5rmfgT42/wAPnHqfI2OLyn0Pn35U/Ln5rmfgT42/w+cep8jY4vKfRsXC/GnDXFOPfyNhzPflnGri3eq83dtdmqqNYjS7RRM9Hiee9y9dqclUZHos8xRcjLTOV7b4vsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPtiYeXmX6cfEsXMjIr6KLNqmquuqfJTTEzLrVVERllzTTMzkh7ObwDxvg4leXmbFnWMa3HauXq8e5FNMeOqdPUx6L5U8zbqnJFUZdL61ctcpjLNM5NDwH3fEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN25bcrN742zZqt64mz2atMrca6ZmNf9naj6uvp9CPD4NfFzfOU2Y7aux6+U5Oq9PZT2rR8JcD8NcKYMYuzYlNqZiIvZNXqr92fHcudc+h1R4IZu/zFd2ctUtJY5ei1GSmHvdfRL4PurN3guXmJsO6WN/2qzFnbtzrqoyLFEaUW8qImr1MdURcp1nSPDEtHhnNTXTsVZ4+jO4nysUVbVOafqiFVSwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAAAA3jlZyzz+Nd40q7VjZcSqJ3DLjo6OvzVuZjTzlUf6sdM+CJ8XOc3Fmn/lOZ7OT5Sb1X/GM62u1bVt207dY27brFONhY1MUWbNEaRER/pmeuZnpmWWrrmqcs9My1FFEUxkjoiGU6uwCN+8Hjed5ZZtzTX3vfx7mumumt2LfpevUMLnJejxT8TjLZnwVQahmQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAAA93gvhDdOLOIMfZ9vp0queryL8xrTZs0zHbuVehr0eOdIfDmL9Nqiapfbl7FV2uKYXF4Y4a2rhrZcfaNrtebxseOmr6q5XPrrlc+Gqqf/8AdGTvXqrlU1VZ2rs2qbdMU05nqvk+oADSedWP745X79RprpatXNNdP6O/br/8r2YfOS9T/nU8eIRls1f51qfNYyoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAAAAAAAAAAAAAfSxYvZF+3YsUVXb12qKLVuiNaqqqp0ppiI65mXEzkjLJEZZyQt3yl5d2ODOHabd6mmrec2Kbu5Xo6dKtPU2aZ+tt6+nOssrzvNTer/AOMZmq5LlYtUf8pzt4eJ7AAAGt8yceMjl9xFbmInTbsmuNenpt2qq49i9HKTku0/9oefm4y2qtEqWNgyIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAAAAAAAAAAAAATl3cuAKcnJucX7ha1s41VVnaqKo6Krumly90/WRPZpnx6+GEXFeayR/OOvOs4Vy2Wf6T4LCoK6AAAA8/iPHnJ4e3TGjWZvYl+3pHX6u1VHRr6L6WpyVxPfD53Yy0THcow2jGgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAABlbXt2Vue5Yu3YlPbycy7RYs0+Ou5VFNP8MuldcUxMzmh2oomqYiM8rucO7JibFseDs+JGmPg2abNM+GqaY9VXPlqq1qnysdduTXVNU9bYWrcUUxTHU9F830AAAAfyummumaKo1pqiYqieqYkFDcizVYyLtmr11quqifB00zo28TljKxMxknI+bkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAACT+7xscbjzCt5ddOtrase7k9PV5yrS1RHo/dJqj0E3FLmzaycUqOF29q7l4YWoZlpQAAAAAFH+MMf3txbveNpp5nPyremuvrL1UdfpNlYnLbpnuhjr8ZLlUd8vIfZ8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAsB3W8GmMfiDOmNaqq8axRPiimLldX0e1ShYzV00xpXMHp6Kp0J3RFoAAAAABTTmtje9uY/ENvTTtZly71af0ulz/zNdyU5bNOhkudjJeq0tTep5gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAsj3YPN/3W3fTTznv6O14+z5mns/+LPYxv06F/CNydKZkhXAAAAAAVJ5843mOaO7VRGlN+nHu0xp48e3TP8qmWpw2ctiPH6sviUZL0+H0R897wgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAABYbut3tdr3+z0eov49fl9XRXH/AJEDGY/KmdK7g8/jV4JxRlkAAAAABV7vJ43meYVm5/8A0bfZueHwXLlv/wAjSYTOW14s3i0ZLvgilUTQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAnXutZMU5vEWN0a3LWLc06dfudV2nr6v6xExmOimdKzg89NUaFgkJdAAAAAAV070ON2d/wBkyf8Aa4ty397udr/eL+Dz+NUd6BjEflTPchNZSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAl7uzZnmuN87GmdKcjb65iPHVbu25j+TNSVi9OW3E96phFWS5MdyzLONEAAAAAAgvvS43awuHcr/Z3cq1PV/WU2qv92tYNPTVGhFxiOimdKvi8hgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAABIHIjO96cz9piZ0oyYv2Kp+2s1zT/Lph4MSpy2Ze7Dqsl6Ft2WagAAAAABEXeaxfOcD4GREeqsbjbier1tdm7E/wAMQq4RP+2Y/wCPolYvH+uJ/wCXqrK0bPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8XiTjbhHhj3v8A3h3jE2r332/evvu7Ta855rs9vsdqY17Pbp19EHifPXyj/e/avyq19MD56+Uf737V+VWvpgfPXyj/AHv2r8qtfTA+evlH+9+1flVr6YN0orouUU3KJiqiuIqpqjqmJ6YmAf0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAPe4Dz/ANX8a7FmTPZps5+PNyfsJu0xX/JmXw5mnat1R3S+3LVbNyme+F2WObAAAAAABHPeBxYvcsNwuf8A817Gux6d6m3/ALxQwyrJejvyp+Jxlsz3ZFTmoZkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFVe/P+xP8Aan6GCqoAAAOpW0/FWF7Ra9hAMoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAP1RXVRXTXROlVMxNMx4JjphwL17VnU5+14edTp2cuxbv06dWlyiKv8AxYqunZqmOxtKKtqmJ7WU6uwAAAADUebmL755bcQW/rcWbv3qqLn/AJHq5Gcl6nS8vPRls1aFNmuZMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFVe/P+xP9qfoYKqgAAA6lbT8VYXtFr2EAygAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAAuNyf3L9Yctdgva6zbxve0+T3tXVZiPoW2S56jZvVR3/Vq+Rr2rNM930bi8j1gAAAAPJ4uxZy+FN6xI68jAyrX+vZqp8HovrYqyXKZ74fK/GWiqO6VHmzY4AAAAAAAAAAAAAAAAAAAAAAAAAAABI3LjkrxBxdFGfkzO2bHM9GXcpmbl6P/AEKJ01j7Kej0epP5vEKLXRHTV/md7+Vw+u70z0Up/wCHOUPL/YrFNFjabOZeiNKsrNppyLlU+P1cTTT/ABKYQrvPXa56ZyaOhctcjaojojLp6WJxvyb4Q4j2y7bxcGxte6U0/wDC5uNbptaVx1RcpoiIrpnqnWNfE78vz9y3V0zlp7HXmOQt3I6IyVKm5+DlYGdkYOXbm1lYtyuzftz1010VTTVHpTDUU1RVETGaWXqpmmZic8Md2cAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAqr35/2J/tT9DBVUAAAHUrafirC9otewgGUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAAAAAAAFoO7XnTkcA38aqenDz7tumPsK6LdyP5VdTN4tTku5e2GjwmrLaydkpXS1MAAAAB+blui5bqt1xrRXE01R44mNJ6iJJhQ/Kx68fJvY9fr7NdVurWNOmmZiej0m3icsZWKmMk5HycuAAAAAAAAAAAAAAAAAAAAAAAAAAE58neR1OZRY4i4qsz72q0uYG1Vxp5yOum7fj6z62j6rw9HRMXn8RyfhRn659FnkcOy/nXm6oWDooooopoopimimIppppjSIiOiIiIQV1/QAVV7w2zUbfzEu5Nuns0bnjWsqdOrtxrZq9y1n0Wmwu5tWcnZORmsUt7N3L2xlRkpJwAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAABYPutZM1YPEWN4LV3FueT7pTdp/3aDjMdNM6VzB56Ko0J0RVoAAAAABSTjrE958a79i6aU2twyqaI6PW+eq7PV5Gx5arLbpnuhj+YpyXKo75eG+74gAAAAAAAAAAAAAAAAAAAAAAAAJ15I8mqcmLHFHElj7hrFza9uux0V+Gm/dpn6n6ymevrno01iYjz+T8KPGfss4fyGX86/CPusEhLoAACvXekx4p3Ph/J0nW5YyLfa8H3Ouif8AeL2DT+NUaELGI/KmdKDVpGAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmYiNZ6IjrkGm8Sc5OV3Dfbp3fiXBtXqPX49q574vx6Nmx5y5H+qCKuJO+nwHhdu3sO05273afW3Ls0YdifQqnztz6NuARXxH3yOaO4zXRtFjB2S1PrK7dr3xej0a78125+9gjbO5l8wOJt1xY33iDOzrVd+32sa5erix01x1WaZptR6VIOkgAAAAAAAAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAABOHdcu6bvv1rT1+PYr7Xi7NdUafykXGI/GnSsYPP5VaFh0FeAAAAAAU+504nvXmfvtvTSK7tu9H/vWaLn+mpq8Pqy2aWU5+nJeqaS9ryAAAAAAAAAAAAAAAAAAAAAAAAJd5H8pv7wZVHEO9Wddjxq/+Gx646Mq7TPhieu1RPrvHPR40rEed/nGxTvT5KmH8ltzt1bv1WaiIpiKaY0iOiIjqiGcaIAAABAneo/Zj/nv0dcwb9/D7omM/p4/ZAa4iAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAArN33czMs7JwvYs37luxkX8yL9qiuqmi5FNFrs9umJ0q01nTUFRAAAZe0/GuF7fa9nAOpIAAAAAAAAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAABM/dguVRxTu9uJ9RVgxVMeWm9REeylIxiPwjSrYRP5zoWQZ5oAAAAAAFWe8bieY5jTd00994Vi96Ok1Wv920uFVZbOiZZrFacl7TEIuU04AAAAAAAAAAAAAAAAAAAAAABvPKfltk8ab7FN2KrWy4c017jkR0TMdcWaJ+vr/gjp8Wvi53m4s0/wDKcz2clyk3qv8AjGdbjDw8XCxLOHiWqbGLj0U2rFmiNKaKKY0ppiPJDK1VTM5ZztTTTERkjM+zhyAAAAgTvUfsx/z36OuYN+/h90TGf08fsgNcRAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVg78fxVwj7fm+wsgqUAADL2n41wvb7Xs4B1JAAAAAAAAAABVXvz/ALE/2p+hgqqAAADqVtPxVhe0WvYQDKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAAACZu7BTVPFe7V6epjA0mfBrN6jT/QkYxuRpVsI350LIs80AAAAAACunehw+xv8AsmZp/TYlyzr7Tc7Xi/8AWX8Hq/CqO9Axin8qZ7kJrKQAAAAAAAAAAAAAAAAAAAAAA9fhThfdOJ99xtn22jtZGRPqq517Fu3Hr7lcx1U0x9J8b16m3TNUvrZs1XKophcjhHhXa+Fthxtm22jSzYjW5dn1927Pr7tf2VU/Q6o6IZO/equVTVLWWLNNumKYew+L6gAAAAIE71H7Mf8APfo65g37+H3RMZ/Tx+yA1xEAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABWDvx/FXCPt+b7CyCpQAAMvafjXC9vtezgHUkAAAAAAAAAAFVe/P+xP9qfoYKqgAAA6lbT8VYXtFr2EAygAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAAm/uu26p3rfbketpxrNM+jVcqmPYyjYxP406VjB4/KrQsQgLwAAAAACEO9Hh9vZ9hzNP6HIvWdfbqKav8AdLOD1flVHcj4xT+NM96u6+ggAAAAAAAAAAAAAAAAAAAAP3atXLtyi1aom5cuTFNFFMTNVVUzpEREdcy4mchEZVtOTvLa1wdsMXsuiJ37Ppprzq+ifN09dNimfFT9Vp11ehDL8/zf9aujdjN6tRyPKfyp6d6c/okB4HuAAAAAAQJ3qP2Y/wCe/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACsHfj+KuEfb832FkFSgAAZe0/GuF7fa9nAOpIAAAAAAAAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAAABPndZx+jiTImP8A+O3ROvt01dH0EPGZ3Y0/ZbweN6dH3T2hrYAAAAACLe8fh+f5dxd0196Z1i7r4taa7X+8U8JqyXtMJuK05bWiVWmlZsAAAAAAAAAAAAAAAAAAAABO3d75ZxeuU8Y7tZ1tWpmNns1x0VVx0VZGk/W9VHl1nwQiYpzeT/XT4+izhnKZf9lXh6rAoS6AAAAAAAgTvUfsx/z36OuYN+/h90TGf08fsgNcRAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVg78fxVwj7fm+wsgqUAADL2n41wvb7Xs4B1JAAAAAAAAAABVXvz/ALE/2p+hgqqAAADqVtPxVhe0WvYQDKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAAACyPdgxezwtu+Xp/S50Wtej+qs0Vej/AFrPYxV+cR3L+EU/hM96ZkhXAAAAAAaVzowvfnLHfbcRrNFqi9Hk8zeouTPVPgpezD6sl6l4+fpy2alPWsZUAAAAAAAAAAAAAAAAAAABufKzl/k8Z8SW8WqKqdqxdLu5346NLevRbpn665MaR6c+B4+d5qLNGX9pzPXyfLTdryfrGdcDFxcfExrWLjW6bOPYopt2bVEaU0UURpTTTEdUREMpMzM5ZaqIiIyQ+jhyAAAAAAAgTvUfsx/z36OuYN+/h90TGf08fsgNcRAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAYO877smyYVWdvOfj7dh09FWRlXaLNvXxdquaY18gId4r73vKvZqq7O1zlb/AJFPRE4tvzVjXxTdv9ifTpoqgEUcQd9jjXJmujYtjwNttVdFNeTVdy7seWJibFGvo0SDQ907zXOzcKp7XEdeNbnqt4tjHsxHVPRVTb7fg8NQNdyeb/NbJnW7xhvPVpNNGdkW6ZifHTRXTAMD5wuPv3l3X8uyf54MzG5tc0sXs+Y4v3mmmiNKaJz8mqiI+1qrmn+AGwbZ3kude3zHmuJ716nw0ZNrHyNfTu26qvB4JBvWw99TmBiVU07ztO37pZjrm1FzEvT4/VxVdt//ABglXhTvjctN0mi1vePmbBfq07Vdyj3zjxM+K5Zibn0bUAmbh/ifh3iLCjO2Lcsbc8Xo1u4t2m7FMz4KuzMzTPR1T0g9MAAAAAAAAAAAAAAGo8bc2OXvBVE/3i3qxi5OnapwaJm9lVRPVpYtxVc0n66YiPKCDeKu+3t9uquzwrw9cyNOijM3K5Fqno8PmLXbmYn2yARhvXe05z7jNXvfPxdpoq66MLFtz0T4qsj3xVH0Qahnc7ObmbVM3uL91pmZ1+4ZVzHj6FmbYPLr5jcwrlc13OJ92rrqnWqqrOyZmZ8czNYPtjc0+ZuLpGPxbvNummrtRRTuGV2dfLT5zSfTB7+2d4nnTt0xNjirKuRHgyabOTE9f+3oueMG67F3zOZ+FVTTumHt27Wo9dVVarx7s+hVariiPvYJQ4Y76fA2dVRa4g2nM2a5VpFV61NOZYp8czNMWrv0LcgmjhTmDwTxbZ87w5vWLuWkdqq1auRF6iPHXZq7N2j+NTANgAAABq/MfmHsvAHDNfEW82cnIwrd23Ym3h0267vauzpTOlyu1Tp0dPqgRR/3q8rPkrfPyfD/APtgf96vKz5K3z8nw/8A7YH/AHq8rPkrfPyfD/8AtghvvHc8eE+ZmFsVjYcTPxq9suZFd+c63ZtxVF6m3FPY81eva+snXXQEHAAA++DfosZuPfriZotXKK6ojr0pqiZ01Bc7/vV5WfJW+fk+H/8AbA/71eVnyVvn5Ph//bA/71eVnyVvn5Ph/wD2wP8AvV5WfJW+fk+H/wDbA/71eVnyVvn5Ph//AGwP+9XlZ8lb5+T4f/2wSRys5u8N8ytvzs7YsbMxrW33abF6nOotW6pqrp7UTT5q7ejTTxzAN3AAABVXvz/sT/an6GCqoAAAOpW0/FWF7Ra9hAMoAAAAAAAAGi8V88OVXC010brxFizk0axViYtU5V+Ko+pqosRcmift9ARNxF32uFseaqOH+H8vcJjoi7mXLeJRr44iiMiqY9HQEdbz3zOaOZM07dibbtlvp7NVFm5eudPjqu3KqOj7QGn7j3kudmfVM3eJ71qNdYpx7WPYiI6ej7lbomevwyDwcjm9zVv1TNzjDeemOzNNOfk0UzH2tNdMAwfnC4+/eXdfy7J/ngycbmrzPxopixxdvNumidaaI3DK7GvX63znZ/gB72294rnTt8xNjinJuRHgyaLOTr6Pn7dwG8bD3zuZeFVRTu2Dt27WY07dXm68a9On2duqbcfewSzwj3yOXO61UWd/xcrh6/Vprcqj33jRM+DzlqIu/RtaAmzYuIth3/Ap3DZNwx9ywquiL+Lcpu0a9fZmaZnSfJPSD0AAAAAAAAAAAQhxF3ueW+wcQbnsebtm815e1ZV7CyK7VjFm3Vcx7k26qqJqyaKppmadaZmI6Aef/wB6vKz5K3z8nw//ALYH/erys+St8/J8P/7YH/erys+St8/J8P8A+2Ca+FuI8HiXhzbt/wACm5Rhbnj0ZNii9FMXKaLkaxFcUVV0xVHh0qkHqAAA8LivjrhDhLEjL4j3bG2y1VEzbi9X90r06/N2qdblf8WmQQXxb31eFcOquzwvsuTutcdEZWXVGJZ18dNMRduVR6MUgijfu95zg3GquMG/hbNbq6KYxMam5VEfbZM3+ny6fQBpWfzv5vZ1U1X+Lt0omemfe+TXjx1zPRFibcR1g8qvmNzCuVzXc4n3auuqdaqqs7JmZnxzM1gzMLm7zTwppnH4u3iIojSmirOyLlERrr6yuuqn+AG3bH3qOdG11Uxc3i3udmnTSznY9quOjx126bV2dftwSlwn33LFVVFri3h6bcdHbzNrudqNfg9+YnT/AN2QT1wRzV4A42tdrhzeLOXfiNa8KqZtZNMR162LkU3NI+uiNPKDbAAAAAAAAAAAAAAAAJmIjWeiI65BGvGneJ5TcJ1V2cveadwzresVYO2xGVciY66aqqZizRVHirriQQzxJ33s2qqu3wzw1bt0xr5vJ3K9VcmfF2rFjzen32QRxvHeq51bjrFveLW3W6uu3h4tin6Fdym7cj0qgarl85+bWXV2rvGG70zrr9xzL1mPF1WqqIB5s8xOYFUzM8TbtMz0zM52TrM/64MnF5r80MXsxY4u3mimjXs2/f8AkzRGvX6ia5p8PiBsO195HnVts0+a4nv36Y6JpyrVjJ1jo65u266vB4wSBw731uOMSqinftmwd0sx66vHm5iXp/ja3rf8gEw8G97LlTv827G4ZF7h/Nr0jsZ9H3Cap8WRb7dER5bnYBMWHmYebjW8rDv28nFvR2rV+zXTct10+OmqmZiY9AH2AAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAAAC1fd4wve/LXHvaae/MnIvejpX5n/dMxilWW9PdENLhdOSzHfMpMTlEAAAAAB5HGOF7+4S3rD07U5GDk26Y8tVmqI06J6dX1sVbNyme+Hyv05bdUd0qPtmxwAAAAAAAAAAAAAAAAAADJ23bs3c9wx9vwbU38vKuU2rFqnrqqqnSHWuuKYmZzQ7UUTVMRGeVx+XXBGHwdwzj7XZ7NeVV91z8mP62/VHqp+1p9bT5PLqyXNcxN2va6upq+V5eLVGz19bZ3mekAAAAAAABAneo/Zj/nv0dcwb9/D7omM/p4/ZAa4iAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAA8fini/hnhTaq914h3Gzt2DR0ecuz011fW26I1ruVfY0xMgq9zJ75e65VV3A4Cw4wLGs0xvGbTTcv1R9dasT2rdHkmvtdH1MSCu/EHE3EPEWfVuG+7jkblmVf12TcquTEeKntTpTHkjoB5gAAAAAAAAM/Zd93rY8+jcNmzr+3Z1v1mTjXKrVcR4u1TMdE+GAWE5bd8jftvrt4PHWL+tcLop/WeJTTby6PBrXb1ptXY9Dsz6ILT8J8Z8McXbVRuvDu42txwqtIqrtT6qiqY17Fy3VpXbq+xqiJB7QAAAAAAAAAAPG4u4x4b4R2W9vPEOdbwcCz0dqudaq69NYt2qI9VXXPgppgFQOafe14v4juXtv4R7fD2yzrT75pmPf8Aep8dVymZiz6Fvp+ykEDXr16/drvXrlV29cqmq5crmaqqqp6ZmqZ6ZmQfgAAAAAAAH1xsrJxci3kYt2uxkWp7Vq9aqmiumqPDTVTpMSCyPd67wfM/cuL9q4O3KaeIcTPuTROTkzNOVYtUUzXcuefiJ85FFFM1aXImZ6u1ALfAAAhXve/5N5Pw7E9lIKKgAAAAAAAAAAAAAuB3If8AC3Evw6z7iCygAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAxty3Lbtswb2fuOVaw8LHpmu/k366bduimPDVXVMRAK+cw++TwxtdV3C4Mwp3zLp1p/WGR2rOHTV46aei7d/kR4pkFcON+dnMzjOblG873ejBudE7biz73xez9bNu3p2//AHJqkGjAAAAAAAAAA9bhviviThncqNy2Dcb+25tH9bj1zT2o6+zXT62un7GqJgFqOUPe82/c67GzcwKbe35tWlFrfLUdnFuVdX/EUf1Mz4ao9R9rALKW7lu7bpuW6ort1xFVFdMxNNVMxrExMdcSD9AAAAAAAAA50c+Mb3vzi4tt9Pqtwu3PVdE/ddLn0PVdANCAAB0N7ueVGTyU4VuRMT2ca5a9T1fcci5b+j6jpBI4MLet72jY9sv7pu+Zawdvxqe3fyb9UUUUx6M9cz1REdMz1AqlzV74e5Zld7a+X9n3lidNFW95NETkVx1a2LVWtNuPsq9avJTIK4bnuu57rnXc/c8u9nZt6e1eyci5VduVT9lXXMzIMQAAAAAAH0x8jIxr9vIx7tdm/aqiu1et1TRXTVHTFVNUaTEwCw/KXvdcQbNcs7Xx1Fe87V0UUbpREe/bMdWtzqi/THh19X4dauoFuth3/ZeINpx932XMtZ+25VPbsZNmrtU1R1THjiqJ6KqZ6YnonpBngAAAAAAAAAAAAiLmv3lOB+BJvbdjVfrziKjWmdvxq483Zrjo0yL3qoomPrYiavHEdYKlcxOe/Mbjuu5a3TcasTaq9YjaMLtWcbsz4K4iZqu/+5VPk0BHoAAAAAAAANq4G5n8ccD5tOTw5ul3Ft9qKr2FVPnMW744uWavUTrHR2vXR4JgFuuT/ek4W4zqsbRxBTb2HiO5MUW6aqv+Dya56NLNyr1lUz1W658URVVIJwAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAAAC5fKfA948uOH7GmnaxKL+nwiZvf7xkedq2r1U97WclTs2aY7m2PK9QAAAAAD+V0010zRVGtNUTFUT1TEgojuOJVh7hk4dXrsa7XZq169aKpp/8G2pqyxEsVVTkmYY7s4AAAAAAAAAAAAAAAAAAWJ7vHLn3pif3v3O1/wAVlUzRtVuqOmizPRVe6fDc6qfsftkDFObyz/OnNGdewvlckf0nPOZNyMsAAAAAAAAAIE71H7Mf89+jrmDfv4fdExn9PH7IDXEQAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAEQc6+8Xw7y9t3NqwIo3Xiuqn1ODTV9yxu1GtNeVVT1eOLceqn7GJiQUp4z464p4z3ivduI8+5m5VWsW6ap0tWqJ+otW49TRT5Ij0ekHgAAAAAAAAAAAAA93g7jfijg7eLe78O59zBzKNIr7M627tGuvm7tufU10z4qo8vWC7XJHvDcP8AMSzTtmbTRtfFdunW5gTV9zyIpjWq5jVT0zpprNE+qjyx0gl0AAAAAAAAGrcyeY3D/L/he/v28V6xT6jDw6ZiLuTfmPU2rev0ap+pjpBQDmRzN4p5g79Xu2+39aadacLBtzMWMa3M+st0z4/qqp6avD4AamAAAAAAAAAAC0nco4J85lb3xpkW/U2aY2vb6pjX1dfZu5FUeKaafNxr9lILYAAAhXve/wCTeT8OxPZSCioAAAAAAAAAAAAALgdyH/C3Evw6z7iCygAAAKq9+f8AYn+1P0MFVQAAAdStp+KsL2i17CAZQAAAAAK5d9ThncMvhDaOIMe9enE2zJmxnYsV1ea7OTGlu/VR63Wiunsdrr9XoCnAAAAAAAAAAAAAAJ37vfeKzOC8qzw5xNeuZPCV6qKbN6rWu5gVVT66jrmbMz66iOrrp8MVBdqxfs5Fm3fsXKbti7TFdq7RMVUVUVRrTVTVHRMTHTEwD9gAAAAAAA5995qx5jnjxRR2u1rcxbmumn9JhWK9PS7WgIvAABfbuoZXn+SOzWu1E+9b2Za0iOrXKuXdJ++A3vj7j7hzgbhy/v2/X/NY9r1NmzTpN2/dmJmm1apmY7VVWnoRHTOkQChXNfnHxXzH3ecnc7s4+1Wap/V+z2qp8xZjq7U9XnLk+Gurp8WkdANDAAAAAAAAAABIPJ7nJxFy23yMjEqqytkyKo/We0VVaW7tPV26Neii7THravSnWAX74Q4t2Li7h7E3/Y8j3xt2ZT2qKpjSumqJ0rt3Kfqa6KuiY/8AAHsAAAAAAAAAA+WXmYmFi3cvMvUY+LYpm5ev3aooooopjWaqqqtIiI8oKf8APHvVbjvNy/w/wHfuYOz9NvJ3mnW3k5PjizrpVZt/Zevq+xjokK4zMzOs9Mz1yD+AAAAAAAAAAAAsv3e+83k7bexuE+Ocqbu11aWtt3u9MzXjz1U2siuZ9Va8EVz00eH1PrQt5TVTVTFVMxVTVGtNUdMTE+GAf0AAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAAAAP1bt13LlNuiO1XXMU00x4ZmdIhxMkQvZtmFRg7di4VHrMWzbs0+hbpimP9DFV1bUzPa2lFOSIjsZLq7AAAAAAAKX8zsH3lzC4hsadmJzr12mnq0pvVTdjTojo0ra/k6stqme5kebpyXao72sPS84AAAAAAAAAAAAAAAADeeUfL65xjxNRav0zGz4PZvblcjo1p19TaifHcmNPQ1l4ue5r+VHRvTmezkeV/rX07sZ1vLVq3atUWrVMUWrdMU0UUxpTTTTGkRER4IhlZnK1MRkfpw5AAAAAAAAAQJ3qP2Y/579HXMG/fw+6JjP6eP2QGuIgAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAIC7xXeKs8IWb3C3C16m7xTdp7OXl06VUYFFUfQm/Metp+p658ESFLMjIyMm/cyMm7XeyL1U13b1yqa6666p1qqqqnWZmZ65kHzAAABu/AvJjmRxv2LuxbPdqwap0ncsjSxixp16Xbmnb08VHakE38N9yG/VTRc4m4lpt1dHnMXbbM1+jpfvTT7kDfdu7nfKHFppjIncs+qNO1N/Jpp10116LFu0D0v+0/kl8kX/wAsyf54PH3Pua8qMqifeeRue33PqZt37dynXyxdtVz9CqARxxV3JuI8aiu9wxv2PuMRGsYubbqxbn2tNyib1FU+j2YBBXF/L/jPg/L968SbRkbbcmdLdy5T2rNcx/s71E1W6+r6mqQa8AAAD64uVk4mTaysW7XYybFdNyxft1TRXRXROtNVNUaTExMaxMAu53du8JZ45xaOHOIa6bPFuNb1ou9FNGdbojpuUxHRF2mOmuiOv11PRrFITmAAAAAAD5ZWVjYmLeysq5TZxseiq7fvVzpTRRRE1VVVTPVERGsg5587+a2bzG4zv7hFVVGyYc1Y+y4s6xFNiJ/paqZ/rLunaq8XRT4AR4AAD9W7dy7cpt26ZruVzFNFFMTNVVUzpEREdcyCbeAu6VzI4ktW8zd/N8Nbfc6afflNVeVMT4YxqZpmn0LlVMgmPZO5by4xbdM7rue5blfj1/YrtY1qfQoporrj74DYqe6dyTimInaciqYjSapzMnWfLOlcQDEze6FybyImLOPn4cz1TYy6pmPQ89TdBqW9dyHhy5TVOx8S5mLV9TTm2bWTGvlqte9v9AIv4q7o3NjZaa7232sXfsanp/4K72b3Zjx2r8WpmfJRNQIg3fZd42bNrwd3wcjb8236/GyrVdm5Ho01xTIMOImqYiI1meiIjrmQdIOTnBVPBnLfZNiqo7GXasRez+jSZyr/AN1vRP2tVXZjyRANzAABE3ef4d33iDlVf27ZMC/uOdVmY1dONjUTcuTTTVPans09OkApz8ynNz90N1/Jbv0gPmU5ufuhuv5Ld+kB8ynNz90N1/Jbv0gePxHwNxjwzRYucQ7Nl7VRlTVTj1Zdqq1Fc0aTVFPaiNdO1APCAAB+qKK7ldNuiJqrrmKaaY65meiIgG5/Mpzc/dDdfyW79ID5lObn7obr+S3fpAfMpzc/dDdfyW79ID5lObn7obr+S3fpAfMpzc/dDdfyW79ID5lObn7obr+S3fpAtF3Q+EOKOGuHOILHEG1ZO1XsjMtV2LeVbqtVV0xa0maYqiNY1BPoAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAA8HjzhXG4s4N3jhzI0ijc8W5ZorqjWKLumtq5/EuRTV6QOaGbh5ODmX8LKtzaysW5XZv2quum5bqmmqmfQmAfAGdtGybzvOZThbRgZG45lfrcfFtV3rk/xaIqkEscMd0zm9vVNF3MxMbY8erp7W4Xo7fZ9qsRerifJVFIJP2TuP7VRFNW+8UX78z6+1g49FmI8kXLtV7X0exAN02/ug8nMWmIv2M/PmOurIy5pmer/AGFNnxA9ux3ZORtiZmjheie11+cys251eLt36tAfjK7sHI7I1meGot1TGkVWsvNo08sUxe7OvowDWN67mnK3Mpqq27K3La7s69iKL1F61Gvjpu0VVzp9uCJ+M+5rx7tVuvI4bzsfiGxT0+95j3plaeSi5VVaq09sifFAIJ3bZ922fPu7fu2HewM6zOl3GyLdVq5T6NNURIMMAAAFre6JzjuXJ+bvfMiapppqu8O37k9PZpjtXMTWfFGtdvydqPrYBacAAAAAAAFCe9baoo5373VTGk3LOFVXPjmMS3Tr9CmARCAAC6HdV4o2rZuRO57ru2TGPt2zbhlzk3ao9ZTFqzd7MadNU1Tc9THXMzpAK0c3+au88x+Kru65c1Wdtsdq1tO3a602LGvhiOiblfXXV4erqiAaMAADdeF+S/NLiiii7s3DeZdx7kRNGVepjGsVRPhpu5E2qKv4sgkDb+5tzcyrcV3721YNUxr5vIybtVXofcLN6n+EGZd7lPNCmIm3uuyV+piZib2XTPa06Yj/AIafog1zeu6nzo2yiq5b2qzuVuiNaqsLJtVTp5KLk2rlXpUgjLe+Hd/2HLnD3vbcnbMrp+45dmuzVMR4YiuKdY8sA84AAAAEt93bnJe5fcVU4m4Xap4W3aum3uVuZmabFc+poyqY+w6q9OunxzEAvxRXRXRTXRVFVFURNNUTrExPTExMA/oAAAAAAAPnkZFjGx7uTkXKbOPZoquXrtcxTRRRRGtVVVU9ERERrMgo73h+8Bmcdbhd4f2G7VZ4PxLnXTrTVnXKJ6LtyJ0mLcT6yiftp6dIpCEQAAAS5y87sfMzjC3azLuNTsW0XNKqczcIqorrpnw2seI85V44mrs0z4wT3wx3NeWu3U0175l5u+349fTNfvSxPoUWfusffZBv+38hOTmBRFFjhLAriNNJyKJyZ6PHVfm5Mg9G9yh5U3qOxXwdssR160bfjUT9GiimQeBu3dt5K7nTVF3hqzj1zrMXMS5fx5pmenoptV00fRp0BGXFvcm2K9bru8J77fw7/TNGLuNNN+1M+CnztqLddEeWaawV25gcouPeAsiKOIdtqt4tc9mzuNmfO4tyfJdp9bP2NelXkBpoAAALUd1Pnrd87j8vOJMjtUVeo4dzbs6zE/8A8ddU+Cf6rxes+tiAtYAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAAAAAAGycuNs/WXHmw4cxrRXm2a7lMxrrRaqi5XH+rRLz83Xs2qp7n35Wjau0x3rpse14AAAAAAACp/eBwfe3M3OuxGkZlnHvx6VqLU/wANtqMMqy2Y7srMYnTkvT35EcKDwAAAAAAAAAAAAAAAAMjb8DL3DOx8HDtTey8q5TZsWqeuquudKY+jLrVVFMTM5oc00zVOSM8rk8u+CsTg/hjG2m12a8n+lz8iI/pL9Ueqnwepp9bT5IZLmuYm7XNXV1NbyvLxaoinr62zPM9AAAAAAAAAACBO9R+zH/Pfo65g37+H3RMZ/Tx+yA1xEAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAABEfeI502uXfDcYe21018VbtRVTt9udKvMW/W15NdPk6qInrq8cU1AoZlZWTl5N3Kyrtd/Jv11Xb9+5VNVdddc9qqqqqemZqmdZmQfIAAHpcPcO73xFu+Ps+yYdzO3LKq7NnHtRrM+GZmZ6KaYjpmqeiI6wXF5R90/hfhy1Y3TjGm3vu+6RX7zqjtYFirxRRVH3eqPHXHZ8VPhBPlFFFFFNFFMU0UxEU0xGkREdEREQD+gAAAAxN22fat4wLu3brh2c/Avx2b2LkUU3bdUeWmqJgFVOdPdKuYNrI37l7TcyMajW5kcPVTNy7RTHTM4tc61XI/8ATq9V4pq6gViqpqpqmmqJpqpnSqmeiYmPBIP4AADJ23cc/bM/H3Db79eLnYlym9jZFqezXRconWmqmY8MSDoHyK5u4nMjhCnLu9i1v+39mxvOLT0RFyY9Teoj/Z3dJmPFOtPg1BJAAAAAAIG73/Ht3YOALHD2Hc7GbxLcqs3ZjrjDsRFV/wD16qqKPLTNQKSAAA+lixeyL1uxYoqu3rtUUWrdETVVVVVOlNNMR1zMgvPyC7ve08C7dj73vli3mcY5FEV1XK4iunBiqP6Kz1x2410ruR6Eep6wmkAAAAAHlcScKcNcTYE4HEG2Y+54nTNNvJt019mZ+qoqn1VFXlpmJBCc90HhTC492ff9mzblrZMPLpys3Zcr7tr5qe3botXZ9VNE100xVTc1ns6+q8ALAgAAAAAAArB34/irhH2/N9hZBUoAAGXtPxrhe32vZwDqSAAAAAAAAAACqvfn/Yn+1P0MFVQAAAdStp+KsL2i17CAZQAAAAAAKa8+OQ3GG6858j+6m1XMvF4gt0bhXfpiKMexdqnzeR527VpTTrXT5zxz2uiJBvnL3uacM7dTazONc2recyNJq2/FmqxiUz4qq47N656PqPQBPuxcObBsGFGDsm3Y+24lP9Ti2qLVMzHhq7MRrPlnpB6IAAAAAANR5j8rOD+YO0VYG/YkVX6KZjD3G1EU5WPVPht3NJ6NeumdaZ8MAoXzT5W8RcuuJK9o3anzuPd7VzbdxoiYtZNmJ07VPX2aqddK6OumfHExMhpoAAMvad0z9p3PE3Tb71WPnYV2i/jX6OiaLluqKqZj04B0n5ecY4nGfBW0cS40RRTuNiK71qJ1i3epmaL1v+JdpqpBsQAAAAAAKJd7izRb5z5tdPXdw8Suv0Ytdj/RTAIYAABsNHG+92uBK+CrNzzez3twq3PKppmYm7d81btUU1fY0+b7WnhnSfBANeABJfKTkLxjzHvxkYtMbdw/bq7ORvORTM0TMTpVTYo6JvVx5JiI8NUAuBy77vvLbge1au4m3U7ju9Gk1btnxTevduPDapmOxa8nYjXxzIJJAAABgb3sOyb7gV7fvOBY3HBuevx8m3Tdo1001iKonSY8Ex0wCsXOLuh0WbF/e+Xfbqi3E3L3D12qa6ppjpn3pdqmapn/ANOuZmfBV1Ugq1es3bN2uzeoqt3bdU0XLdcTTVTVTOk01RPTExIPwAAAC8HdL5lTxNwLVw7n3u3u3DfZs0zVOtVzCq18xV09fm9Jt+SIp8YJ0AAAAAAABUzvZ866sjIu8vNgyNMezMf3hybc+vuROsYkTHgo67nl9T4JBV4AAGfsWxbvv+74uz7Pi15u5ZtcW8fHtxrVVVP8EREdMzPREdM9ALs8lu7Pw3wTax9336m1vHFUaVxdqjtY2LV16Y9FUR2qo/2lUa/WxT4QmwAAAAAGPuG34G44V7B3DHt5eFkUzRfxr9FNy3XTPgqpqiYmAU/7wPdkq4bs5PFfBluq7sNuJu7jtczNdzEp1jW5amdaq7Ma+qiemjr6afWhXMAAH7s3rtm7Res11W7tuqK7dyiZpqpqpnWKqZjpiYkHQbkBzTo5hcCWMvKrid923s4m8UR0TNyKfUXtPFepjteLtdqPACSwAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAAAAAlPu47V775he/Jj1O24l69FX2dzSzEenTdqTMVryWsnbKlhVGW7l7IWkZppAAAAAAAAFce9Bg9jiXZ8//APowqrH3i7NX++aDB6vwqjvQMXp/Ome5CywkAAAAAAAAAAAAAAAALA93Tl35q1PGO5Wvul2KrW0W6o6aaPW3L/T9d62nya+OELFeay/648fRcwvlcn+yfD1TsiLQAAAAAAAAAACBO9R+zH/Pfo65g37+H3RMZ/Tx+yA1xEAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAB5nE/Ee18NcP5+/brc81t+3War9+qOmZinqppjw1VVaU0x4ZkHODmBxvu/G/FmfxHutX3fMr+5WYnWizZp6LdmjyUU9Hlnp65BroAAPQ4f2DduIN6w9l2jHqy9yz7kWcaxR1zVPhmeqKaY6aqp6IjpnoBf7ktyY2PlrsMWrcU5XEGZRTO67nMdNVXX5q1r002qZ6o+q658EQEjAAAAAAAAArT3m+73Y3LGy+OeE8bsbraib29bbap6MiiI1ryLdMf1tPXXEevjp9d64KggAAA3fk9zJzeX3HGFvlqaq8Cqfe+640f1uLcmO3Gn11GkV0/ZR4gdF8HNxM/Cx87Du038TKt0X8e9R00127lMVUVU+SqmdQfYAAAAFGO95xDXufN69t8Va2dkw8fEppifU9u5T75rn0fu8RPoAhIAAE390bgyxv3ND9aZdvzmLw7jzm0RMa0zk11Rbsa6/W9qq5T5aYBeUAAAAAAAAAAAAAAAAFYO/H8VcI+35vsLIKlAAAy9p+NcL2+17OAdSQAAAAAAAAAAVV78/wCxP9qfoYKqgAAA6lbT8VYXtFr2EAygAAAAAAAAAAAAAAAAAaPzk5Z4PMLgjM2W5TRTuVuJv7RlVR02sqiPU9Pgpuesr8k69cQDnRlY2Ri5N3FyLc2sixXVavWquiqmuiezVTPliYB8gAAWz7k3GNd3C37g+/Xr72qp3PBpmdZ7FzSzkRH2NNUW59GqQWhAAAAAABRXvef5y5PwHE9jIIVAAAABOfd27vd7jnKo4j4hoqs8JY1zSi100151yiem3TMdMWqZ6K646/W09Os0hdvBwcPAw7OFhWLeNh41FNrHx7VMUW6KKY0ppppp0iIiAfYAAAAAAFa+9XyNsblt+Rx/w9j9ndMOnt77i246L9imNJyIiP6y1Hr/AB09PXT0hT8AAAEmd3XjWvhPmvs+RXc7GDudf6sz410ibeVMU0TPkouxRXPoA6EAAAAAAAjvntzPt8veAcrc7FVP65zJ96bNbnSf+IrifusxOvqbVOtc+CZ0jwg553797IvXL9+uq7eu1TXduVzNVVVVU61VVTPXMyD5gA+uNjZGVkWsbGtVXsi/XTbs2bcTVXXXXPZppppjpmZmdIgF9eQHI/A5d7DTmbhbt3uLdwtxOfleu8xRVpMY1qrxU/VzHrqvJEAloAAAAAAAH8qppqpmmqIqpqjSqmemJifBIKKd5nk5RwJxTTu20WexwxvdVVeNRT63GyY9Vcx/JTPrrfk1j6kELgAAlTu3cxK+DOZeD74vTb2bepjb9ypmfUR5ydLN2fBHm7umtXgpmrxg6AAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAAAABYbuvbR2Ns3veKqem/etYlurxRZpm5Xp6PnafoIOMV/lTT4ruD0fjVV4JxRVkAAAAAAABCfeiwO3sWx7hp+L5V3H19vtxX/uFjB6vyqju/z6o+MU/jTPf/AJ9FdGgQQAAAAAAAAAAAAAAG28suBsjjHimxt2lVOBa0vbjfjo7NimemIn66v1tP0fA8vOczFqjL19T08py83a8nV1rjYuLj4mNaxca3Tax7FFNuzapjSmmiiNKaYjxREMlMzM5ZayIiIyQ+jhyAAA13aeLsfcuMd72CxEVU7NZxZuXY6db17zk3KP4tMUenq9FdiabdNc/tlfCi/FVyqmP1yNied9wAAAAAECd6j9mP+e/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAACqXfP5j11Xtv4BwbulFEU7hvPZnrqnWMezVp4o1uTE+OifACrAAAALpd03lDb4f4dp413ax//m96t/8A+Pprjpx8GrSaZiJ6qr/RVr9b2fHILBAAAAAAAAAAAoz3o+UVHBfFlO+bTY83w7v1VVdu3RHqMfLj1V2z4qaavX0R6MR0UghEAAAF0u57zEr3vg3J4TzbnazuHqonEmqemrCvTM0x5fNXNafJTNMAsEAAAADnPz3yq8rnFxbdr11p3G7ajWdeizpaj+CgGhgAAtL3GrliMvjK3Vp74qt7fVbnw9imrJiv+GqkFrwAAAAAAAAAAAAAAAAVg78fxVwj7fm+wsgqUAADL2n41wvb7Xs4B1JAAAAAAAAAABVXvz/sT/an6GCqoAAAOpW0/FWF7Ra9hAMoAAAAAAAAAAAAAAAAAAFDe9Zwlb2Dm7m5FiiKMbfbNvc6Ijqi5cmq3e9Oq7aqrn7YEOgAAlXuxcQ1bLzm2PWrs2Ny87t9+OrWL9ufNx9+poBf8AAAAAAFFe95/nLk/AcT2MghUAAAG88m+WmZzD44xNjomq3t9v8A4ndsmn+rxbcx29Psq5mKKfLOvVEg6I7Xte37VtuNtm3WKMXAw7dNnGx7caU0W6I0ppj0gZQAAAAAAAP5XRRcoqt3KYroriaa6Ko1iYnomJiQc6+efL7+4nMjctns0TTtl6YzNqn/AP5r8zNNMe11RVb/AIoNAAAB/aaqqaoqpmaaqZ1pqjomJjwwDpny+4j/ALy8D7Fv0zrc3HBsX72ngu1UR52PSudqAbAAAAAAChfeh5i1cXcysjCxbs17Pw92tvxKYnWiq9TV/wATdjTo9Vcjsax1000gh8AAFl+55yqo3Hcr/H262YqxdurnG2WiuOirK0+6X9J/2VNXZp+ymfDSC3oAAAAAAAAANQ5s8CY/HPAO68PXKKZyb1qbu3XKtPueXa9VZqiZ6tavU1fYzMA5u3rV2zdrs3aJt3bdU0XKKo0qpqpnSYmJ8MSD8AA/sTMTrHRMdUg6N8k+NKuMeWWx71eueczpse9twnXp9848+auVVeKa+z2/QqBvAAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAAAAAAAAAAAAW+5J7N+q+Wu0U1RpdzKKsy5Pj8/VNVE/e+yymIXNq9V3dDU4fb2bMd/S3l4ntAAAAAAAARt3hMD31y0y72ms4WRj5Eenc8z/AKLqhhdWS9HfEp+J05bM90wqi1DMgAAAAAAAAAAAAAP1bt3Llym3bpmu5XMU0UUxM1TVM6RERHXMuJkiFv8AlLwDb4O4Wt2L1EfrfN0v7lcjSZiuY9TaifrbcTp6Os+FlOe5n+teX9YzNVyXLfyoyftOduzxvYAAA8XjTifF4Y4Zz96yNJjFtzNm3P1d6r1Nqj+NXMa+Tpfbl7M3K4pjrfHmL0W6JqnqQ53Z8zJzd74ozMq5N3JyYsXb92rrqrrru1VVT6MyrYvTEU0RGbp+yThNUzVXM50+oa4AAAAAAgTvUfsx/wA9+jrmDfv4fdExn9PH7IDXEQAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAHwz87FwMHJz8u5FrFxLVd/Iuz1U27dM111T6FMA5ncccU5fFfF+78RZcz53c8m5fiiqdexbmdLVvrnot24ppjyQDwwAAb7yP5fzx3zH2vZbtHb223VOZuvXH/CWJia6ZmOmPOVTTb18dQOitu3btW6bdumKLdERTRRTERTTTEaRERHVEA/QAAAAAAAAAANP5tcA43HfAW6cPXIpjKu2/Pbddq/q8u16qzVr4ImfU1fYzIOb+RYvY9+5j36KrV+zVVbu26o0qprpnSqmYnwxMA+YAAJH7vfGdXCXNfZc2u55vCzrn6tz5mdKfM5UxRE1T4qLnYr/AIoOhoAAAAOeHeH26vb+dHFVmqns+cy4yY8sZNqi9r6fnAR0AACWO7NzBxuDeZuNVn3YtbTvNuduzLtc6UW5uVU1WbtXgjs3KYiZnqpmQX8AAAAAAAAAAAAAAAABWDvx/FXCPt+b7CyCpQAAMvafjXC9vtezgHUkAAAAAAAAAAFVe/P+xP8Aan6GCqoAAAOpW0/FWF7Ra9hAMoAAAAAAAAAAAAAAAAAAFVu/FtlOnCW6U0+q/wCMxbtWnRp9xrtxr/rgqoAAD1uEd0naeK9l3WKuzO35+NldqeqPM3qbmvTMfW+MHT4AAAAAAFFe95/nLk/AcT2MghUAAAF4+6RwFb4f5cRv1+3pufElfviqqY9VTi2pmjHo9CfVXP40eIE4gAAAAAAAAArV32OE6MjhvY+KbVH3bAyasDJqjrmzk0zXRM+Siu1MR9sCoAAAAL3d0jeKtw5M4WPVX252vMysPr1mImv3xET6EZH0ATMAAAADUObfGf8Ac3l1vnEFFUU5WNj1UYOvT/xN6YtWOjw6XK4mfJAObldddddVddU1V1TM1VTOszM9MzMyD8gAyts27M3PcsTbcK353Mzr1vGxrUddV27XFFFPp1VQDpdwNwng8I8I7Vw5gxHmNtx6LM1xGnnLnXduzHjuXJqrn0Qe4AAAAAAAAAADn13k+FqOHecO+2rNPZxdxrp3KxHV+Nx27nR7d24BGAAALY9yLiea8PiThe7X0WblncsSjyXI8zfn0uxa+iC0YAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAAAAAAAAAAAZO24F7cNxxcCxGt/LvW7FqPs7tUUU/wAMutdUUxMz1OaKZqmIjrXowcOzhYWPh2I7NjGt0WbVPiot0xTTH0IYuqqZmZnrbOmmIiIjqfZ1dgAAAAAAAGt8ytv/AFhwBxBjRHaqnBvXKKejpqtUTcp6/sqIejlKtm7TPe8/N07VqqO5SxsGRAAAAAAAAAAAAAATL3eOXv6z3WrircLWuDttfYwKKo6LmVEa9vp64tRP+tp4kjFOa2adiM859CthfK7VW3OaM2lZJnmgAAAAVx7yPGvv7eMfhfEua4226X87SeirJrp9TTPtdur6NU+JoMJ5fJTNc55zaEDFeYy1RRGaM+l9O67VP693ynXonFtTMeDWLk/TcYxu06XOD71WhYpAXgAAAAAECd6j9mP+e/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAACJe9JxRVsPJ3dKLVfYyN4rt7ZanyX5mq9Hp2LdcAoKAAAC4ncs4Opw+Fd24rv0aX91yIxMSqY6Yx8XprmmfFXdrmJ+0BZAAAAAAAAAAAAAFCO9JwbTw3zb3C9Yt9jC32indLER1du9M03/AE5v0V1enAIiAAB/aaqqaoqpmaaqZ1pqjomJjwwDpjy74k/vNwJsO/TOt3cMGxev6eC9NERdj0rkVQDYgAAAU976nB9zE4p2fiuzRPvbc8ecLKqiOiMjGmaqJqnx12q9I+0BW0AAAFpO7/3osfCxMbhTj3Iqps2ops7bv1etUU0R0U2sqevSOqm5/rfXAtZjZOPlY9vJxrtF/HvUxXavW6ororpqjWKqaqdYmJ8cA+gAAAAAAAAAAAAAAKwd+P4q4R9vzfYWQVKAABl7T8a4Xt9r2cA6kgAAAAAAAAAAqr35/wBif7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAAAAAAAAAAAAAAArX33v8LcNfDr3uIKfgAAA6kbNlzmbPg5czNU5GPau6z0TPboirp09EGYAAAAACive8/wA5cn4DiexkEKgAAyMDCvZ2djYViNb+Vdos2onq7dyqKaf4ZB1B2jbMXatqwtrxKezi4Fi1jWKerS3ZoiimPoUgywAAAAAAAAARx3itnp3bkxxRY7OtVjGpzKJ01mJxLtF+Zj+LbmPQBzyAAABcPuRZs18IcR4Pa6LG4W7/AGeno89YinXxdPmQWRAAAABWPvt8U1Wdm4f4XtV6TmXrm4ZdEfWWKfNWtfJVVdrn+KCo4AAJm7pvClO+c3MXMvUdrG2LHu7hXrHqZuRpZsx6MV3e3H2oL3AAAAAAAAAAAAqJ34NqptcRcL7tER2svDyMSZ6NdMW7Tcj/AKqQVmAABMndM3udt5z7fj66Ubti5WFXPg/o/fFOvo149MAvgAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAAAAAEh8hti/WvMfArrp7VjbaLmbd6PDbjs2/oXa6ZeDErmzZnv6Huw23tXo7ulbRlmoAAAAAAAAAfPJx7eTjXce7Gtu9RVbriPrao0n/S5ick5XExljIoll41zFyr2Nc6Lli5Vbr+2omaZ/0NrTOWMrF1RknI+Ls4AAAAAAAAAAAAetwrw3uHEu/4ey4Efd8uvszcmNabdEdNdyryUUxMvleuxbomqep9LNqblUUx1ro7BseBsWzYm0bfR2MTDtxbtx4Z09dVVp9VVVrVPlZC7cmuqapzy11q3FFMUxmh6D5voAAA8XjPifF4Y4Zz97yNJjFtzNm3P9Zeq9Tbo/jVzGvk6X25ezNyuKY63xv3ot0TVPUpVn52Vn52RnZdybuVlXK71+5PXVXXVNVU+nMthTTFMREZoZCqqapmZzymHuv3YjiTebWnTXh01RPg0puxH/mScYj8KdKtg8/nVoWOZ9fAAAAAAQJ3qP2Y/wCe/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAACqnfg3yrt8LbDRV6nTJzr9HhmfUWrM+6AqsAAADpNyi4djh3llw1tHZ7FyxgWa8inxX79Pnr3/yXKgbcAAAAAAAAAAAACtXfb4dpv8ADPD3EVFPq8HLuYN2Y65oyrfnKdfJTVj/AMoFQAAAAXq7oe8zuHJzHxZq1nac7Kw+nwRVVTkx/wBQCagAAAafzZ5e4fH/AANuHDt+abeTcp89t2RV1Wcu1Ezar6NeidZpq+xmQc5t22rcNo3TK2vcrFWNn4V2uxlWK/XUXLc9mqPowDEAAABvfLnnXzB4AuxTsmf5zbZq7V3acqJvYtXj0o1iq3M+O3VTILO8A98DgHe4tYvE1m5w5uFWkTeq1v4dVU9HRdojt0a/Z0aR9cCctr3ba92w6M7a8yxn4V3pt5ONcovW6vD0V0TVTIMoAAAAAAAAAAAAFYO/H8VcI+35vsLIKlAAAy9p+NcL2+17OAdSQAAAAAAAAAAVV78/7E/2p+hgqqAAADqVtPxVhe0WvYQDKAAAAAAAAAAB5e/cVcM8PY8ZG+7ribXZnppry71uz2tPre3MTVPkgEW8R97Xk9tE10YmXlb1ep6OzgY9XZ7XtmRNimY8tOoI43vvw357VGx8K00dfYv5uVNWvi1tWqKfdAaRuvfC5wZs1e9atu2yJ6ve2L25j8orvg1TcO8Pzpz9fP8AFeXRr/8Az02cbxf7Ci34geDlc0OZeXV2snizeLvTNURVn5MxEz19mO3pHpA8m/xHxDfpim/umXdpidYprv3aoifH01Axb2fnX6OxfyLt2jXXs111VRr49JkHwAAAAB0/4T/wrs3wHG9xpB6oAAAAAKK97z/OXJ+A4nsZBCoAANo5W2aL3M3hGzcjW3c3rbqK46uirLtxIOlgAAAAAAAAAAPB4/xIzOBOJMOYiYydrzbMxVrEerx66enTp8IOZIAAALX9xq/VVj8Z2NI7Nuvbq4nw61xkxPsAWlAAAABRLvbb7VufOTNxO1rb2fExcKjTq6aPfNX8rImJ9AEMAAAtH3M8/hfZtv4m3Pd91wsDJy72NjWKMvIs2avN2aa66ppprqpq0mbsaz5AWS+cLgH95dq/Lsb+eB84XAP7y7V+XY388D5wuAf3l2r8uxv54HzhcA/vLtX5djfzwPnC4B/eXavy7G/ngfOFwD+8u1fl2N/PA+cLgH95dq/Lsb+eB84XAP7y7V+XY388D5wuAf3l2r8uxv54HzhcA/vLtX5djfzwPnC4B/eXavy7G/ngfOFwD+8u1fl2N/PBXHvmb9w7vOzcMXNp3bC3CvGycqm7bxb9q/VTFy3bmKpi3VVpH3MFWAAAbjyc3Gdu5rcJZUT2YjdcS1XV1aUXr1Nqueqfqa5B0jAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAACw/dg2HzW17vv1yn1WTdow7Ez19mzHbuTHkqquU/6qBjF3LVTT2dK7hFv8Zq7ehOCMsgAAAAAAAAAKYc0Nu/V3MLiDG07Me/bt6mPFTfnz1P8Fxr+Tr2rVM9zI85Rs3ao72rvS84AAAAAAAAAAACzvd95f8A6k2GeIc63pue70RNiKo9VaxOumPRu+vnydlm8T5rbq2IzU/VosM5bYp25z1fRLSWqAAAAK394/jeNw3ixwvh164u2T53OmJ6Ksmun1NP/t0VfRqnxNBhXL7NO3Oec2hn8V5jaq2IzRn0oYWElMvdh/xbuvwCfdraRjH/AJxpVsI/9J0LJM80AAAAAACBO9R+zH/Pfo65g37+H3RMZ/Tx+yA1xEAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gABR7vjblOXzcoxu1rTt+2Y1js69U11XL89Hj+6wCDAAAelw1tkbrxHtW1zHajPzMfF0jrnz12mjwfbA6hREUxERGkR0REdUQAAAAAAAAAAAAACLO89tUbhyT4hiI1uYkY+VanxTayLc1z97moHP4AAAFu+4/nzXw/wAU7fr0Y+XjZGmvT93t10dX/sAsyAAAACBu8h3ff7649XFHDdumjinFt6ZGLGlNOdaojop18F6mOiiZ649TPg0ClF+xex71yxft1Wr9qqaLtquJprprpnSqmqmemJieiYkHzAAAAB6/DnFvE/DWZ782DdMrbMjo7VeNdqtxVEeCumJ7NceSqJgE48Fd83jTbposcVbfY33GjSKsqzpiZXlmexE2avQ7FPogsNwD3gOWHGs28fb90jC3O5pEbZuERj35qn6miZmbdyfJRXMgkYAAAAAAAAAAFYO/H8VcI+35vsLIKlAAAy9p+NcL2+17OAdSQAAAAAAAAAAVV78/7E/2p+hgqqAAADqVtPxVhe0WvYQDKAAAAAAAB+bly3at1XLlUUW6ImquuqYimmmI1mZmeqIBDHMHvXctuF5uYm1XKuJN0o1jzWFVEY1NUfX5U60z/wC3FYK68a96jmvxJVXaws2nh/Aq17NjbYmi7p4O1k1dq7r5aJpjyAiXMzczNyK8nMv3MnJuTrcvXq6rldU+WqqZmQfAAAAAAAAAAAAHT/hP/CuzfAcb3GkHqgAAAAAor3vP85cn4DiexkEKgAA2vlP/AJp8G/8A7m2/9ZbB0pAAAAAAAAAAB5XFn+Fd5+A5PuNQOYAAAALVdxj9tv7L/TAWqAAAABzZ5u7lO5c0uLMzXWmvdcum3P2Fu9Vbo/k0wDUQAAAAAAAAAAAAAAAAAAAexwbduWeL9ju257Ny3uGLXRV0TpNN6mYnpB08AAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAAAAC6HLLh/wDUHAmz7bVT2b9NiL2TE9cXb8zdriftaq+z6TIc5d27tUtbylrYtUw2d5npAAAAAAAAAAVZ7xu2+9eYtWTEaRuGHYvzVp11Udqx1+PS1DS4VXls5Oyf/rNYrRku5e2EXKacAAAAAAAAAAA3zk5wDPF/FVFOTRM7Pt3ZyNwnwVRr9zs/+5MdP2MS8PP8z/Kjo3pzPbyPLf1r6d2M63VNNNNMU0xFNNMaREdEREMq1L+gAAA8DjzizH4U4Vzt6u9mq5Zo7OLaq/rL9fRbo8ena6Z08Gsvvy1ibtcUvhzN6LVE1KW5uZk5uZfzMq5N3JyblV2/dq66q65mqqqfRmWvppiIyRmZGqqZnLOd8XZwl7uyVT/fvcKdeidruzMeDWMix9NKxf8A8o/7faVTCP8A1n/r94WZZxogAAAAAECd6j9mP+e/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAACgPejyPP88uJNK+3Ra9526PJ2cKx2o/1pkEUgAA3Tkvjxf5tcH0TTNURu+Hc0jXrt3qa4no8XZ1B0gAAAAAAAAAAAAABp3OTGjJ5TcYW500p2fNu9Ma9NqxVcj2IObgAAALSdxu/VTmcY2NI7Ny3t9cz4daKsiI9mC2AAAAAAIb52d3Dh/mBTc3fa6qNp4rin8bin7hk6R0U5NNPTr4IuU9MeGKuiIClvGPA/FXBu7VbVxHt9zAy41m3Nca27tMTp27VynWiuny0yDwQAAAAAASty27yXMfgmbWLOV+u9lo0idtz6qq5pp8Vm/03Lfkjppj60FuuV3PbgTmJaiztuROFvVNPavbNlTFN+NI9VVamPU3aY8dPT44gEiAAAAAAAAArB34/irhH2/N9hZBUoAAGXtPxrhe32vZwDqSAAAAAAAAAACqvfn/Yn+1P0MFVQAAAdStp+KsL2i17CAZQAAAAAANE5qc5eD+XG2xe3e9743S9TNWDtFiYnIu+CKp/2dvXrrq9LWegFLuaHPrj3mDfuWc3Knb9jmZ81s2JVVTZ7OvR56roqvVeWro8VMAjcAAAAAAAGRZwM6/R5yzjXbtHV2qKKqo1jyxAMyjhbieuimujaM2qiqImmqMa7MTE9UxPZB8szYd9wrM38zbsrGsRMRN29ZuW6NZ6o7VVMQDAAAAB0/4T/wAK7N8BxvcaQeqAAAAACive8/zlyfgOJ7GQQqAADa+U/wDmnwb/APubb/1lsHSkAAAAAAAAAAHlcWf4V3n4Dk+41A5gAAAAtV3GP22/sv8ATAWqAAAABy43rJ99bxnZXairz+Rdu9qnqnt1zVrH0QYQAAAAAAAAAAAAAAAAAAAPZ4Ls13+MdisUadu7uOJRTr1a1X6IjUHTsAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAAAAANm5a8OzxDxxtG2TT2rFd+LuVHg8zZ+6XIn0aadPTebm7v87U1PRylr+lyKV0WQa4AAAAAAAAAABAfej2zp2Dc6Y6/P412r/Urt/wDnXMGr3qdCJjFG7VpQIuIgAAAAAAAAAD6Y9i9kX7ePYom5fvVU27VumNaqq6p0ppiPHMy4mYiMskRlnJC4/LHgizwfwpj7bMRVn3fu+43Y6e1friNaYn62iPUx6GvhZLnOY/rXM9XU1nJ8v/KiI6+ttjyvUAAAArF3huOY3niSnYMO52tv2aZpvTTPRXl1RpX97j1Ho9po8L5bYo25z1fRnMU5jbr2YzU/VEqqmAJa7tF2KOP8umY1m7tt6mPRi9Zq/wDKlYvH+qP+3qp4TP8Atn/r6LOs40YAAAAACBO9R+zH/Pfo65g37+H3RMZ/Tx+yA1xEAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gABz37yVNVPO7imKomJ89YnSejonFtTE/QBGYAAN75E34s84eEq5jWJ3GzRpHjuT2I9kDoyAAAAAAAAAAAAADUubt23a5VcY1VzpTOybhRE9M9NeLcppjo8sg5sAAAAtJ3GrE1ZnGN/Xot29vomnwzNdWROv8gFsAAAAAAAeTxPwnw3xTtde1cQbdZ3LAudM2b1OvZn66iqNK6KvsqZiQVi5jdzHOs1XM7gLPjJtdNX6oz6ooux4ezayIiKKvFEXIp8tUgrpxHwnxNwznTgb/tmRtmVHVbyLdVHajx0VT6muPLTMwDyQAAAAAfXGysnFyLeTi3a7GTZqiuzftVTRXRXTOsVU1U6TExPhgFruRHep9+XMfhnmDkU0ZFWlvB4gr0oprnwUZfVFNXgi51T9V9dIWhiYmNY6YnqkAAAAAAAFYO/H8VcI+35vsLIKlAAAy9p+NcL2+17OAdSQAAAAAAAAAAVV78/7E/2p+hgqqAAADqVtPxVhe0WvYQDKAAAAABEHP3n3g8udup27bIt5nFmbRNWPj1T2reNb6vP36YnXp+op+q9COkKMb3ve7b5umRuu75dzO3HLq7eRk3qu1XVPV9CIjSIjoiOiAYIAAANt4M5UcwuM6qZ4d2TIy8eZ0nNqiLOLGk6TrfuzRb1jxROvkBNvC/ck32/FN3ifiDHwo6JnFwLdWRXp4pu3PM00z6FNUAk/Y+6Hye26KJzcfN3iun105eTVRTM/a40Y/R5Po6g3ja+S/KfbIp96cJbX2qdOzXexreRXGnirvRcq/hBsuFsOx4OnvHbsXF7OnZ8zZt29NI0jTsxAM4AEK973/JvJ+HYnspBRUAAAHT/AIT/AMK7N8BxvcaQeqAAAAACive8/wA5cn4DiexkEKgAA2vlP/mnwb/+5tv/AFlsHSkAAAAAAAAAAHlcWf4V3n4Dk+41A5gAAAAtV3GP22/sv9MBaoAAAAHKsAAAGdhbFvedZ89hbfk5VmJmnzlmzcuU9qOuNaYmNekH3/unxT8jZ35Ne/mgf3T4p+Rs78mvfzQP7p8U/I2d+TXv5oH90+KfkbO/Jr380D+6fFPyNnfk17+aB/dPin5Gzvya9/NA/unxT8jZ35Ne/mgf3T4p+Rs78mvfzQP7p8U/I2d+TXv5oH90+KfkbO/Jr380D+6fFPyNnfk17+aB/dPin5Gzvya9/NA/unxT8jZ35Ne/mgf3T4p+Rs78mvfzQP7p8U/I2d+TXv5oH90+KfkbO/Jr380G5cm+DOIb3NXhSMnasu1YtbnjZF25csXaaIpx7kXp7UzTpp6jwg6GgAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAAABPHdh4bmq9u3El2j1NEU4GJVMeGdLl6Y9CIoj05RMYu5qPFawi1nr8E/oS4AAA/lddFFFVddUU0UxNVVVU6RER0zMzII45Ocd1cVXeJqrlc1ea3Gb2LFXXTi3qexZp9KLMqHP8ALfy2P+vmn8jzP9dr/t5JIT1AAAAABF/eM2z33y5ryYjp27LsX9fDEVzNif4b0KWFV5L2Ttj/AOpuKUZbOXsn/wCKsNMzYAAAAAAAAACa+7pwD7+3KvizPt64mBVNrbqao6K8iY9Vc6fBbpno+yn7FHxXmdmP5xnnPoV8L5bLP9JzRm0rGM+vgAAANS5o8bW+EOEcrcKKo/WF6Pe+3UTpOt+uJ0q0nri3Hqp9DTwvVyfL/wBbkR1dby85zH8rcz19SnF25cu3K7tyqa7lczVXXVOszVM6zMz5WtiMjJzOV+HIAlXu2/5h3PgF/wBnbS8W/wDLxUsK/wDXwWiZtpAAAAAAECd6j9mP+e/R1zBv38PuiYz+nj9kBriIAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAChHesxarHPDfLs66ZVrCu06xp0RiWrXR4+m2CIgAAbHy43GNt5hcMbhVV2aMXdcK9cmJmPUUZFE1RrHgmnXUHTEAAAAAAAAAAAAAEc94ncqdv5LcVXpq7PnMWnGjp01nJvUWdOqf9oDniAAAC3XcfwZo2DirP06L+XjWO1p0z5i3XXpr5PPgs0AAAAAAAADC3fZNn3nBrwN3wbG4YVz1+NlW6Ltuf4tcTAIW4y7n3LXefOX9juZPDuXVrNNNmr3xi6z47N2e31+Cm5THkBAvG/dU5qcNxcyMHFo4h2+jWfPbdM1Xoj7LGq0ua+SjtAh+/j38e9XYyLdVm/aqmm5auUzTXTVHRMVUzpMSD5gAAAAtp3U+et7Nmxy+4kv8Abv26NOH825PTXRRGs4lcz1zTTGtufF6n60FoAAAAAAAVg78fxVwj7fm+wsgqUAADL2n41wvb7Xs4B1JAAAAAAAAAABVXvz/sT/an6GCqoAAAOpW0/FWF7Ra9hAMoAAAAGm82uZW28vODMvfsqKbuX/Q7Zh1Tp5/KriexR4+zGnarn62J8IOdu/79u3EG85m87vk1Ze5Z1ybuTfrnpqqnwR4qaY0imI6IjojoB54AAPb4P4N4j4w3yzsnD+HXmZ97pmmnoot0RMRVcu1z0UUU69Mz/pBcPlX3T+DOGbVncOKaaOIt8iIqm1cjXAs1delFmr+l0+uudE/WwCdLVq1at02rVFNu3REU0UUxEUxEdUREdQP0AAAAACFe97/k3k/DsT2UgoqAAADp/wAJ/wCFdm+A43uNIPVAAAAABRXvef5y5PwHE9jIIVAABtfKf/NPg3/9zbf+stg6UgAAAAAAAAAA8riz/Cu8/Acn3GoHMAAAAFqu4x+239l/pgLVAAAAA5bbti+9N1zMTs9j3vfu2uxrr2exXNOmus66aAxAAAXX7luXF3lZuNiZjtY+8X4iI6+zXj49UTPpzUCfQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAA/VFFdddNFFM1V1TFNNNMazMz0RERDgXS5ecLUcL8H7bs+kRftW4rzKo+qv3PV3Onw6VTpHkiGQ5q9/S5NTXcrZ/nbilsbzvQAAA0XnVxH+ouXm5XKK+zk58RgY/TpPav6xXp5YtRXL24fa27sdkdLxYhd2LU9s9CF+7jvXvHj2rb66tLe6Yty1TT4POWvu1M/6tFcemr4rby2svDKRhVzJdydsLRM20gAAAADXuYm1/rTgXfcKI7VdzCvVWqfHct0zct/y6Yejla9m7TPe+HNUbVqqO5SlsGQAAAAAAAAAerwxw7n8R79hbNgU65GZcijtTGsUUR013KvJRTE1S+V67Fumap6n0s2puVRTHWulsGx4GxbNibRt9HYxMO3Fu3HhnT11VWn1VVWtU+VkLtya6pqnPLXWrcUUxTGaHoPm+gAAACpfO7jv+9PFtdnFudradp7WNh6T6muvX7rdj7aqNI+xiGpw/lv528s71TL4hzP9LmSN2lHj3vCAAk7u61VRzItREzEVYmRFUR4Y0ien04TcV/8AHxhRwv8A9vCVqWZaUAAAAABAneoj/DE+D/jv0dcwb9/D7omM/p4/ZAa4iAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAApd309pnG5kbXuVNOlvP2uimqro6bti9cpq/kV0Ar4AAD9UV1266blEzTXRMVU1R1xMdMTAOn3Cu9W994Y2nercxNG54ePlxp4PPWqa9PS7QPUAAAAAAAAAAAABAPfN36jC5aYO001aX923G3E0a6a2caiq5XPpXPNgpSAAAC83c+2icHk9by5p0/Wu4ZWVTPjpo7ON/px5BNwAAAAAAAAAAANS465U8Bcc482+ItptZGR2ezaz7ceayrfi7N6jSvSPrZ1p8gKnc2u6nxXwlRe3bhqqviDYbetdyimn/AI3Hojw3LdPRdpiOuu36M00x0ggkAAAH3ws3Lwcyxm4d2rHy8a5Tex79uezXRcomKqaqZjqmJjUHR/lPx5Y464C2riKjs05N+35vPtU/1eVa9Rep08ETVHap+xmAbcAAAAACsHfj+KuEfb832FkFSgAAZe0/GuF7fa9nAOpIAAAAAAAAAAKq9+f9if7U/QwVVAAAB1K2n4qwvaLXsIBlAAAAAop3q+YtzijmPe2fGu9rZ+G+1h2aaZ1pqyej3zc08cVx5v0KPKCFgAAenw1w7u3Em/YOxbRZ8/uO4XabOPb6o1nrqqnwU0061VT4IjUHQzlPys2Hlzwxa2nbqKbuddimvdNymnS5k3ojrnrmKKddKKfBHlmZkN1AAAAAAABCve9/ybyfh2J7KQUVAAAB0/4T/wAK7N8BxvcaQeqAAAAACive8/zlyfgOJ7GQQqAADa+U/wDmnwb/APubb/1lsHSkAAAAAAAAAAHlcWf4V3n4Dk+41A5gAAAAtV3GP22/sv8ATAWqAAAABzX5s7ZO18zuKsHTs02t1zJtR/6dd6qu31RH1FUA1MAAFsO49vETi8V7NVVpNFzFzLVOvXFcXLdydPJ2KAWkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAAAACQeRnC36+4/w67tHaw9qj39kax0TNuYi1T98mmdPFEvBiN7YtT21dD3YdZ27sdlPStsyzUAAAAK495niP3zxBt+wWq9be32ZyMiIn+uyPWxMeOm3TEx9s0GEWslE19qBi93LXFPYi3hLeatk4n2rdomYjCyrV25p4bcVR5yn06NYU79vbomnthMsXNiuKuyV4ImKoiqmdYnpiY6phjGyAAAAAfyqmmqmaaoiqmqNJiemJiQUZ4g2yrat+3HbKo0nByb2P0/+lcmj/wbS1XtUxV2wxl2jZqmnsl576OgAAAAAAACyvd34B/Vey18T51vTO3Sns4VNUdNGLrr2v8A3ZjX7WI8bO4pzO1VsRmp+rQYXy2zTtznn6JiSVYAAABG/PPjv+7PCdWFiXOzu27xVYx+zOlVu1p92u+lE9mPLOvgUMO5b+lzLO7Sn4jzP86Mkb1SqDUMyAAAkvu9XaaOZeLTOutzHyKadPHFvtdPpUp2KR/pnTChhc/7o0StYzDTAAAAAAIZ7z231XeGNpz4jWMbMqs1eSL9uZ1+jaV8Hq/OY7YSMXp/CJ7JVuaFAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gABW/vs8Ozk8I7Bv8ARTrVtuZcxbsx1xbzLcVaz5Irx4j0wU7AAABeruk8W073ynsbbcudrL2DIuYVcT67zNc+es1eh2bk0R9qCagAAAAAAAAAAAAUo75HF1O7cxsXYbNfax+HsWKLka6xGTl6Xbmn/txaj0YBAQAAAOlnK7hyrhvl1w7slyjsX8PAs05NHiv109u9/wDJVUDaAAAAAAAAAAAAAAVh7zvd8wbu35fHXCWJTYy8aKr++7fZjSi7ajprybdEdFNdHrrkR0VR6r12vaCpIAAALUdyLiivzvEfC12uZomm1ueLRr0RMT5i/Onl7VoFrAAAAAAVg78fxVwj7fm+wsgqUAADL2n41wvb7Xs4B1JAAAAAAAAAABVXvz/sT/an6GCqoAAAOpW0/FWF7Ra9hAMoAAAHicb8RW+GuD963+vSf1ZhX8mimrqquW7czbo/jV6Ug5lZGRfyci7kX65uX71dVy7cqnWqquudaqpnxzMg+YAALUdyvgOxXO78cZVvtXLVX6s2yao6KZmmm5kVxr4dKqKYn7aAWsAAAAAAAABCve9/ybyfh2J7KQUVAAAB0/4T/wAK7N8BxvcaQeqAAAAACive8/zlyfgOJ7GQQqAADa+U/wDmnwb/APubb/1lsHSkAAAAAAAAAAHlcWf4V3n4Dk+41A5gAAAAtV3GP22/sv8ATAWqAAAABRLvbbDVtnOPNy+zpa3jFxs234tYo971/wArHmfTBDAAAJk7p/FNGx83sPFvVdnH3zHu7dXM9UV1aXrXpzcsxRH2wL4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAAABZ3u38M/q7g69vN2jTI3i9M0TPX5ixM0UfRr7c+hozeLXtq5s8LRYVZ2be1xJaS1QAAB+L161Zs13rtUUWrVM13K6uiKaaY1mZ9CHMRlcTORSLi3fru/8S7lvNzXXNyK7tFM9dNuZ0t0/wAWiIhsrFvYoinshjr9zbrmrtl5D6vmufyv3r9dcAbHnTV2rk41Nm9V4ZuY+tmuZ9GqjVkOct7F2qO9reTubdqme5tDzPSAAAAAqVz52j9Xcy9xrpjs2s+i1l24+3oiiufTuUVS1OG17VmO7oZfEqNm9Pf0o9e94QAAAAAAG4crOB7nGHFmPgV01fq6x/xG5XI6NLNE+sifrrk+pj6PgeTnOY/lbmevqerk+X/rXEdXWuLatW7Vqi1apii1bpimiimNKaaaY0iIiPBEMnM5WriMj9OHIAAD5ZeXjYeLey8q5TZxseiq7eu1TpTTRRHaqqmfFEQ5ppmZyRncVVREZZUz5i8Z5HF/FWXu1etONr5rBs1fUY9Ez2I9GfXVeWWu5Xl4tURT19bJc1fm7XNXV1NZel5wAAEicgrlNHNHa6ap6blvJpp9H3vXV/opT8Tj/RPh9Xuw2f8AdHj9Fs2XagAAAAABqPNjh+rfuX+8YNuntZFFn3zjRHX5zHmLsRHlqimafTerkruxdpn/ADpeXnbW3aqhTZrmTAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gABpvOPhCeLuWe/wCx0UdvKvYtV3Cp8PvnHmL1mI8XartxTPkkHN0AAAE1d1Dj+jhjmXRteXd83tnElFODc1nSmMmJ7WLVPo1TVbj7cF6gAAAAAAAAAAAeVxXxJt3DHDe5cQbjV2cPbbFeRd6dJq7Mepop+yrq0pp8sg5o8Q75n7/vu4b3uFXbzdyyLmTkVR1du7VNUxHkjXSPIDzgAAb3yO4Oni3mlsO012+3iUZEZef0a0+98X7rXFXiivsxR6NQOjIAAAAAAAAAAAAAAP5XRRXRVRXTFVFUTFVMxrExPRMTEg5v84+DrfB3MvftgsU9nDx8jzmFT4Ix8imL9qnXw9mi5FM+WAaYAACae6LnXMfnNiWaJns5mFl2Lmn1sUee6f41qAXrAAAAABWDvx/FXCPt+b7CyCpQAAMnbrtFrcMW7cns27d63VXV4oiqJmQdSwAAAAAAAAAAVV78/wCxP9qfoYKqgAAA6lbT8VYXtFr2EAygAAARD3rd0rweSu7WqJ7NWfexcXXw6Tfpu1RHT4abUx6AKEgAAA6B92Xa6Nv5J8OxFPZuZVN/Kuz4apvZFyaZnT7DswCUQAAAAAAAAV876e828bl1tW1RVpf3HcqbkU69drGtVzX9Cu5QClwAAAOn/Cf+Fdm+A43uNIPVAAAAABRXvef5y5PwHE9jIIVAABtfKf8AzT4N/wD3Nt/6y2DpSAAAAAAAAAADyuLP8K7z8ByfcagcwAAAAWq7jH7bf2X+mAtUAAAACtHfY4TqyeHti4ps0TNW3368HLqj/ZZMdu3VV5Ka7Ux6NQKhAAAyts3HM2zcsTcsK55rMwb1vJxrsddN21XFdFXpVUwDpZwHxfgcYcIbVxJgzHmdxsU3KqI6fN3Y9TdtT5bdymqn0ge8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAAGTtuBk7juGLgY1Pbycu7RYs0+Ou5VFNMfRl1rqimJmepzRTNUxEda8Wy7VjbRtGFteLGmPhWbdi30aaxbpinWfLOmssZcrmqqap62yt0RTTFMdTMdHcAABH3PXiP9S8vM2i3X2cndJpwLOk9Ol3Wbvpeapqj03vw21t3Y7I6XhxG7sWp7Z6FSWpZcBZHux71744Z3PaK6ta8DJpvURPgt5FPVH8e1VPps9i9vJXFXbH0X8IuZaJp7J+qZkhXAAAAAQD3otn0vbHvNEdFVN3DvVfazFy1H8qtdwe5vU+KHjFvdq8EDLaKAAAAAA/sRMzERGsz0REAt1yb4Dp4S4TtRkW4p3fcezkbhVMeqp1j7nZ/9umf9aZZXn+Z/rc6N2MzU8hy38qOnenO3x4XtAAAAQd3juP8A3tiW+EMC793yopvbrVTPTTa11t2p0+vmO1V5IjwVLOFctln+k9WZGxXmckfzjrzq8r6EAAAA3Hk/mRicy9guzOnayfM6+30VWtOj7d5Oepy2atD1cjVkvU6VxmSawAAAAAABT3m5wXXwpxnl41ujs7bmTOVt1Uet81cmdbcaf7OrWn0NJ8LWcjzH9bcT1x0SynPcv/K5MdU9MNKex5AAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAc+O8TwDXwbzQ3OxatTRte6VTuW2zppT5vIqma7dOn+zu9qnTxaeMEZAAA/Vu5ctXKbluqaLlExVRXTMxVTVE6xMTHVMA6E8hOaljmFwNYyr9yn9fbdFOLvNnoirzsR6m/FP1t6I7Xi17UeAEkgAAAAAAAAAAqR3wubFGbmWuX20X4qx8OqnI325ROsVX46bWPrH+z17dcfXdnw0yCsQAAALgdzHl9Vg7DuPG2Za7N/dZnC2yao6fetmrW7XHkuXqez/EBZQAAAAAAAAAAAAAAAFHe+LZt2+b8V0RpVe2zFruT46oquUexpgEGgAAlrurWJuc8uH64nSLNGbXMeOJwr1Gn8sF+gAAAAAVp77+NFXDHDOT2ZmbWbft9vwR5y1FWnp+b/AIAVBAAAB1F4f3Gnc9h23cqau1TnYtjJirxxdt0169Gn1wM8AAAAAAAAAFVe/P8AsT/an6GCqoAAAOpW0/FWF7Ra9hAMoAAAEF98n/KOz/8Aq43uV4FHwAAAdDe7nmUZfJThW7R1U41yzOnjs5Fy1P8ADQCRwAAAAAAAAUV71/H9rifmVVteHc85t3DdFWDRVE601ZU1drJqj0Koptz9oCFQAAAdP+E/8K7N8BxvcaQeqAAAAACive8/zlyfgOJ7GQQqAADa+U/+afBv/wC5tv8A1lsHSkAAAAAAAAAAHlcWf4V3n4Dk+41A5gAAAAtV3GP22/sv9MBaoAAAAGt8yODsfjLgbeeG72kTuGPVTj11dVGRR6uxXPkpu00zIOauZiZOHl38PKt1WcrGuVWb9mroqouW6ppqpnyxMaA+IAALF90fm7b2Leq+B94vdjbN4u+c2u9XMRTazZiKZtzM/U34iIj7OI+ukFyQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAAk/u9cOfrXj2jOuU9rG2e1Vk1a9XnavudqPR1qmqPtU3FLuzaycSjhdrau5eFahmWlAAAAVp7yvEnv3irE2O1XrZ2qx271MT/X5GlU6x5LcUaejLRYTayUTVxfZnsWu5a4p4fuh5WSgEpd3Te5wOYEYNVWlrdca7Y7M9XnLceeon0dLdUR6KZitvatZeGVLC7mzdycULSs00gAAAACPOfWy/rPlvnXKae1d265azbcfaVdiufSt3Kpe/Dbmzejv6HgxK3tWZ7ulUtqWYAAAAAASlyD4D/vBxP+t8y32tr2aabsxVHqbmTPTao6evs6dur0vGmYnzOxRsxvVfRSw3ltuvandp+q0rNNIAAAA8XjLirA4W4czN6zJ1px6dLNrXSbt2rot24+2q+hGs+B9uXszcrimHxv3ot0TVKl28btn7xumVumfcm7mZlyq7ernx1T1R4ojqiPBDX26IopimM0Mjcrmuqapzyw3d1AAAAZ2x7hO271t+409eFk2ciNOvW1civ/AMrpcp2qZjth3t1bNUT2SvRRXRXRTXRMVUVRE01R0xMT0xLFNm/oAAAAAANO5o8v8bjThuvDjs29zxdb225FXVTc06aKtPqLkRpPpT4Hr5Pmps15eqc7yc5y0XqMnXGZUHcNvzduzr+DnWasfLxq5t37NcaVU1UzpMS1dNUVRljNLK1UzTOSc7HdnAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAIe7z3LCvjXgCrNwLPnN94fmvMw6aY1ruWZp/4ixH21NMVRHhqpiPCChgAAANy5Uczd45d8W2N8wNbuNVpa3LB10pyMeZiaqJ8VUddFXgnyawDoVwlxZsXFnD+Jv2x5EZO35lHaoq6qqao6Krdyn6muieiqAewAAAAAAAACI+8DzxwuXewzg7dcovcW7jbmMCx0Ve96J6JybtPij6iJ9dV5IkFDMnJyMrIu5OTdqvZF+uq5evXJmquuuue1VVVVPTMzM6zIPkAADZuXHAu58c8Y7dw3t8TFWXc1yb8RrFnHo6bt2r7Wnq8c6R4QdIdj2bbtk2fC2fbbUWcDb7NGNjWo8Fu3TFNOs+GejpnwyDNAAAAAAAAAAAAAAABz17xfFFjiPnBv8Al41UVYmJcpwLFUdMTGJRFqudfDE3aa5jyAjUAAE/9zDZbmXzL3Dc5p+47bttyO109F3Iu0UUR6dEVguqAAAAACBu+ZttWVypxMumnWcDdbF2urxUXLV61Ph+urpBSQAAAHQHuy8V2+IeT2yxNfaytopq2vJp11mn3t0WY+8TbBKYAAAAAAAAAKq9+f8AYn+1P0MFVQAAAdStp+KsL2i17CAZQAAAId72e11Z3Jbcr1MdqduycTK0iJmdPPRZmejxRe19AFDQAAAXM7l/F1rO4I3Lhm5XHvrZ8qb9mjXpnGy41jSPsbtFevowCxAAAAAAAAIq7wfOPE5ecJ3LOHdpq4o3Siq1tViJ1qtRPqa8quPBTb+p19dV0dXa0CgVy5cu3Krlyqa7lczVXXVMzVVVM6zMzPXMg/IAAAOn/Cf+Fdm+A43uNIPVAAAAABRXvef5y5PwHE9jIIVAABtfKf8AzT4N/wD3Nt/6y2DpSAAAAAAAAAADyuLP8K7z8ByfcagcwAAAAWq7jH7bf2X+mAtUAAAAAClne95Z17Hxfb4vwLPZ2riCdMuaY9Tbz6I9Xr4vPUR2/LVFQK/AAA/tNVVNUVUzNNVM601R0TEx4YBdLu494jG4pxMfhPirJptcT2KYt4WZdmKac+iOimNej7vEdcfV9cdOoLAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAAABaDu4cOzt/BN3dLlPZvbxfm5TOmk+Zsa27ev8ftz6bN4rd2rmzww0eFWtm3tcSV0tTAAAfLLyrGJi3srIri3Yx7dV29XPVTRRE1VT6UQ5ppmZyQ4qmIjLKj3Ee9ZG979uG75Gvnc6/cvzTM69mK6pmmn0KadIhs7VuKKYpjqY27cmuqap63nPo6APV4W3irZeJNr3aJmIwcq1eriPDRRXE10/xqdYfK9b26Jp7YfSzc2K4q7JXhpqpqpiqmYqpqjWJjpiYljGyf0AAAAGLu23Wdz2rM26//AEObYuY9z7W7RNE/wS7UV7NUTHU610bVMxPWoxm4l/DzL+HkU9i/jXK7N2nxV0VTTVH0YbSmqJjLDGVUzE5JfF2cAAAAPvg4WVnZtjCxLc3srJuU2bFqnrqrrmKaaY9GZdaqopjLOaHNNM1TkjPK6HAXCOJwnwvh7NY0quWqe3l3ojTzl+vpuV/R6I8kQyHM35u1zVLXctYi1RFMNgfB9wAAAFWOe/MKOJOIv1Vg3e1s+0VVUUVUz6m7kdVy55Yp9ZT6cx65psN5X+dG1O9V9GaxLmv6V7MbtP1RepJwAAAAAC5PKbfqd75fbNl9vtXrVinFyPH5zH+5T2vLVFMVemyPO29i7VHjrazkrm3apnw1NueV6gAAAAAAEe80+UO2cZ2JzcaqnC4gtU6WsuY9Rdinqt34jp08VUdMeWOh7+T56qzOSemn/Mzwc5yNN2MsdFSr3EPDW+cO7jXt28YleJk09MRXHqa6ddO1RVHqaqfLEtJavU3Iy0zlhnLtqq3OSqMkvLfV8wAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAUe70HJivg7iOriXZ7GnDO9XZqqpoj1OLl161V2tI6Ior6arfp0+CNQgwAAAEgcoucvE3LbeffGBVOVs+TVH6y2i5VMWrsdXbonp7F2I6q4jyTrAL08u+Z3CHH+0U7jw/mU3K6aYnLwbmlOTj1T9Tdt66x09VUepnwSDawAAAAAAQlzu7yvD/AARZyNm2Cu3uvFelVE0Uz2sfDq6u1fqj11cf7OJ1+u08IUn33fd33/d8reN4yq83cs2ubmRkXJ1qqqn+CIiOiIjoiOiOgGAAAD9W7dy7cpt26ZruVzFNFFMTNVVUzpEREdcyC+Pdu5MxwBwxO4braiOKd4oprzddJnGs+uoxonxx665p11dHT2YkEwgAAAAAiLnT3gcHllxBse23dv8A1lTn27mRuNu3X2L1mxFUUWq7esdmqaqouepnT1vXANt4B5tcBcd40XOHt0t3cqKe1d2699yy7fj7VmrpmI+up1p8oNwAAAAAAABDfeK54YXAfD93Z9qyIr4v3K1NOLbonWcW1X0Tk3PFOn9HHhq6eqJBRCZmqZmZ1memZnrmQfwAAF2+57wVc2Xl1f37Jt9jK4jyPO29YiJ964+tuzr4emublUeSYBPIAAAAAI+7wGw175yd4ow7dHbu2sScy3Gms64VdOTPZ8s02pgHOwAAAEz92Tm/j8B8WXdu3i95rhvfOxbyrtXrcfIo6LV+fFT6qaa/JpP1IL127lu7bpuW6ort1xFVFdMxNNVMxrExMdcSD9AAAAAAAAAqr35/2J/tT9DBVUAAAHUrafirC9otewgGUAAADw+OeG7fE/Bu9cP1zEfrPDvY1uurqpuV0TFuv+LXpUDmZk41/FyLuNkW6rWRYrqt3rVUaVU10T2aqZjxxMA+QAAN05RcyM/l7xvh7/jxVdxOnH3PFidPPYtyY85T9tTpFdP2UR4AdEOH9/2jiHZcPetnyacvbc63F3Hv0dU0z4JjrpqpnoqpnpieiekHoAAAAAAjbnDzz4W5b7dVRerpz+Ir1GuFs9uqO3OvVcvzGvm7flnpq+p8gUO4w4w4g4v4gyd+37JnKz8qemeqi3RHrbVqn6minwR/4g8UAAAAHTbl/XXXwHw3XXVNVdW14U1VTOszM49GszIPeAAAAABRXvef5y5PwHE9jIIVAABtfKf/ADT4N/8A3Nt/6y2DpSAAAAAAAAAADyuLP8K7z8ByfcagcwAAAAWq7jH7bf2X+mAtUAAAAADwOPOC9o414U3Dhvdaf+GzrfZovRETXZu0+qt3qNfqqKoifL1T0SDnLxnwhvXB/Eubw9vNrzWdhV9mZjXsXKJ6aLtuZ66K6emAeIAAD9W7ly1cpuW6pouUTFVFdMzFVNUTrExMdUwCzPJzvc5O32rGx8wfOZeLREW7G/W6e3foiOiPfNEdNyIj6un1XjiqekFqdi4h2Pf9ut7lsmfY3HAu+syMeum5Tr4YnTqqjwxPTAPQAAAAAAAAABrVzmXwFRxNi8LxvmLd3/Mqqt2Nvs1+euRXRRVcqpueb7VNqezRP9JMa+DpmAbKAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAH1xca9lZNnGsU9u9frptWqI8NVc9mmPoy4qmIjLLmIyzkhePh/aLGzbHgbTY/osHHt2KZjw+bpimav409LGXbk11TVPXLZWqIopimOqGe+buAAAjbn/xJ+qOX+Ri2q+zk7vcpw6NJ0nzc+rvT6E0U9iftlDDLW3dieqnpT8Tu7FrJ11dCqLUMyAAAubys3r9c8vtjzZq7VyMamxenwzcx5mzVM+WZt6sjztvYu1R3/VreTubdqme76NqeV6QAAAAFSeeuwfqjmNuFVNPZsblFOdZ8s3ei5/8tNbU4bd27Md3Qy+I2tm9Pf0o+e94QAAAE5d2/gT3xmXuLs239yxZqx9siqOiq7MaXbsfaUz2Y8sz4kXFuZyR/OOvOs4Vy2Wf6T1ZlhUFdAAAARlz05h/3Z4d/VmDc7O9btTVRammdKrNjquXejpiZ9bR5dZ8Cjh3K/0r2p3aU7Eea/nRsxvVKqtOzQAAAAAACd+7JxTRbv7lwxfr089pnYVMz11UxFF6mPLNPYn0pRMXs9EVxoWsIvdM0TpWAQlwAAAAAAAB5u/8N7HxBgVYG84VvNxqumKbkdNM/XUVRpVRV5aZiX0tXarc5aZyS+d21TXGSqMsIY4r7slNVVd/hfcuxHXGDnazHoU3qI19CKqPTV7OL9VceMJF7COuifCUXb3yn5hbNNU5eyZFy3T/AF2NT75o08czZ7enp6KVvnbVeaqPonXOSu0Z6Z+rVb1m9ZuTbvUVW7lPrqK4mmqPRiXqicryzGR+HIsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAADzeI+Hdn4j2PM2TeMenK23OtzayLNXhiemKqZ8FVMxFVMx1T0g5/c5OT2+ctuIqsTIirI2TKqqq2jc9PU3bcdPYr06KbtEeup9OOiQR8AAAD0Nj3/e9h3K1uey517b9ws/0eTj1zbriJ641jrifDE9Egshy/wC+lnY9u1h8dbX79pp6J3XbopovT5bmPVNNuqfHNFVP2oJ44Y57cpuJKKP1fxJiWr9fVi5lfvO9r9bFF/zfan7XUG82L9i/apvWLlN21X00XKJiqmY8kx0A/YMLdN72babPn90z8bAs/wC1yr1uzT/rXJpgEX8X96XlHw9RXRj7lVvuZT0RjbZR52nXwa36uxZ0+1rmfICuPMrvUcweLrd3A2uY4c2a7E012MSuasm5TPXFzJ0pq0nxURT4p1BC8zMzrPTM9cg/gAAP7ETM6R0zPVALe92ju63NnqxuN+L8fs7pMRc2bartPTjRPTTkXqZ6rv1lP1HXPqvWhZYAAAAAAHOrntxn/e/mlvm6WrnnMG1enC2+qJ1pnHxfudNVPkuTE1/xgaJj5GRjX7eRj3a7N+1VFdq9bqmiumqOmKqao0mJgEv8Fd6rmtw3Tbx8zLt8QYNGkea3Kma70U+Hs5FE03Zny1zV6AJu4V75/L/cKaLfEG35mx359fcoiMzHj+Nbii7/APECUti5x8rN8pp/VvFO3XK6/W2bt+nHuzr4rV/zdz+SDbrGRYyLVN2xcpu2qvW3KKoqpn0JjoB+wfm7dtWqJuXa6bdun11dUxER6MyDSuJedvKrhy3XVufEuF52iJ1xsa5GVe18Xm7HnKo18ugIC5k98zLyrN3b+AsCrCiuJpnec6Kar0RPRrZx47VFM+KquavtYBWjcdxz9yzr+fuGRcy83Jrm5kZN6qa7lddXTNVVVWszIMYAAG5cpeXG48weNcLYMWKqMSZ89umVTH9BiUTHnK/F2p17NH2UwDo1t234e27fjbfg2qbGHh2qLGNZp9bRbt0xTRTHoUwDIAAAAAB+L1m1fs3LN6iLlq7TNFyirpiqmqNJiY8sA5ocwuEcnhDjbeeG8iKtduya7dmuqNJrsVersXP49qqmr0wa6AAACXuVPeW444Dx7W13op3zh+1pFvb8muablmn62xfiKpoj7GqmqmPBEAn/AGPvkcq861R+srO4bTf0+6U3LMX7cT9jXZqrqqj0aIB7dXes5H02qa4327VVV124wsztU+jrain6Eg8/O733JzGiqbN7PzZjqixizTM9GvR56q1/CDUt677/AA/bns7Jwzl5MTP9Jm37ePpHj7FqMjX0O1ALMgAAAAqr35/2J/tT9DBVUAAAHUrafirC9otewgGUAAAACjvex5bV8M8fVcQ4dqY2fiSasjtRHqbebH4xR/H1i5H20+IEGgAAAkPlNzv4v5bZtX6urjN2a/V2szZ8iqfM1z1du3VGs2rmn1VPX9VE6QC3nAneW5V8WWrduvc6dk3KvSK8Hc5pseqnwUX5nzNes9Xqu1PiBKVi/Yv2qb1i5Tds1xrRcomKqao8cTHRIP2D+V10W6JruVRRRTGtVVU6REeOZkGhcVc9+U/DFFf6w4ixb2RRr/weFV77vdqPqZpsdvsT9vMAr1zI75G/bnavbfwRhTs2NXrTO6ZXZuZk0z9ZbjtWrU+nXPimJBXXOzs3PzL2bnZFzKzMiqbl/JvV1XLlddXXVXXVMzMz5QfAGdsuybtvm6WNq2jEuZ245VU04+LZp7VdcxE1TpHkiNZBggAAA6Vcp8j3zyu4Qvdvt1VbNt/br8dcY1EVfyokG1AAAAAAor3vP85cn4DiexkEKgAA2vlP/mnwb/8Aubb/ANZbB0pAAAAAAAAAAB5XFn+Fd5+A5PuNQOYAAAALVdxj9tv7L/TAWqAAAAAABFPP3khg8yNhjIwoox+Ktuoqnbsuroi7R1zjXZ+tqn1tU+tnyTOoUL3PbNw2vcMjbtxx7mJnYlyq1k412maa6K6Z0mmqJBigAAA9rhfjLirhXP8Af/Du6ZG2ZM6duqxXMU1xHTEXKJ1orjyVRMAnbhDvqcV4VFFjinZ8fd6KeirMxapxL8x9dVRpctVT9rFEAlvYe9zyd3OmiMzJzNmu1aRNOZjV1REz9lje+I08s6A3bb+dHKbcIicfi7aomdNKb2VasVTM+CKb025B7NjjfgvI7XmN/wBtvdnTteby7FWmvVrpWD83uO+CLFfYv8Q7Zar017NeZj0zp49JrBg5fNjlfidqMji7ZqKqNO1b9/401xr1eoiuav4AeBuPeO5KYEVTd4ox7s06+px7d/I1nq0jzNuuAadvPfL5W4cVU7di7lulzp7M0WaLNudPHVdrprjX7QEc8Rd9rinIpqo4e4fxNuieiL2ZduZdfoxTRGPTE+j2gRDxdzo5n8W012964gyrmLc6KsKxVGNjzHiqtWIt01fxokHh8FcQXOHOL9l36iZ//wAZm2MqqI+qot3Iqrp/jU6wDpxbuW7tum5bqiu3XEVUVR0xMTGsTAP0AAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAAEg8ieH/1xzGwK66e1Y2yKs+76NrSLf/y10S8GJXdizPf0Pdh1rbvR3dK2zLNQAAAArF3j+JJ3HjOztFuvXH2ezFNVMTrHn78Rcrn/AFOxHpNHhNrZt7XEzmK3dq5s8KJVVMAAAWO7sW9zf4f3XZq6tasHIpyLUT9ZkU6TEeSKrUz6bP4xbyVxV2x9F/CLmWmaeyU0o6uAAAAAhXvNcOTk7Ftu/wBqjWvb7s4+TMR/VX9JpqnyU3KNP4yxhF3JVNHakYvay0xV2K5NAgAAAPU4Z4ezuIt+wtmwY1yMy5FuKtJmKKeuu5Vp9TRTE1S+V67Fumap6n0s2puVRTHWupsOy4Gx7Nh7RgUdjEwrdNq1HhnTrqq+yqnWqfKx9y5NdU1Tnlr7duKKYpjNDPdHcAAB53EO/bdsGy5e77jX5vEw7c11zHXVPVTRTHhqqq0iPK+lq3NdUUxnl87tyKKZqnNCmXF3FG48UcQZe858/dcir7naidabdunoot0+SmPo9bXWLMW6Iphkr96blc1S8Z9nyAAAAAAAepwxxBmcPb/g7zhz93wrsXIp10iunqronyV0zNM+i+V61FyiaZ630s3Zt1RVHUutsm8YG9bRibrgXPOYmZbpu2avDpVHVPiqpnomPBLH3Lc0VTTOeGvt3IrpiqM0s10dwAAAAAAAAAHxycLDyqYpyrFu/THVTdoprj+VEuYqmMziaYnO8+eEOE5mZnZMCZnpmZxbP819P73OKdb5/wALfDGpmYG1bXt1FdG34djDouT2q6ce3RaiqY6NZiiI1dKq6qs85XemimnNGRlOrsAAAAA8bi7hDh/i7YcjYt/xKcvb8mPVUT0VUVx625bqjporp8Ex/oBRfnNyC4n5c5teVRFe5cL3atMXdqKem32p6LeTTHrK/BFXravB0+pgIsAAAAABkYe47hhV9vDybuNX19qzXVbnXq66ZgGbVxVxRVTNNW8ZtVNUaVUzk3ZiYn+MDzbt27drm5drquXKvXV1TMzPozIPwAAAADK2za9x3XPsbdtuNdzM/Jqi3j4tiiblyuqfBTTTrMguJyH7r+JwxXj8S8Z0W8ziGns3MPbYmLljDq6Koqrnpi5ep8cepp8HanSqAsMAAAAAADRud3Gf9z+WG+7zbuRbzfMTi7fOuk++MmfNW5p8c0dqa/QpBzkAAAAB9sbMzMWvt4t+5Yr6J7VquqidY6Y6aZjqBn/3s4p+Wc78pvfzgYWXuGfmVdvMybuTXrr2r1dVc6z5apkGOAAAAD1uFeFd94q33F2PY8WrL3HLq7Nu3T1RH1VddXVTRTHTVVPUC/3JjlFtHLXhiNvsVU5O8ZfZu7vuMRp525ET2aKNemLdvWYpj0Z65BIAAAAAAAAK0d8LlTf3Lb7HHu02e3k7bbjH3q3RGtVWNE627+kf7KZmK/sZieqkFQgAAAAAAAAdReH8j3zsO25GmnnsWxc0mdZjtW6Z6/TBngAAAqr35/2J/tT9DBVUAAAHUrafirC9otewgGUAAAADV+ZXL/aOPeEM3h3c47NN+POYmTEa1Y+TRE+avU9XrZnSY8NMzHhBzu4y4O37g/iPL2DfLE2M7Eq01jWaLlE+su2qpiO1RXHTTP0enWAeIAAAADP2zft82qqatr3HKwKpnWZxr1yzMzppr6iafAD2KuaPMyqz5iri7eps6RT5qdxy5p0jqjs+c0B4+479vu5zruW45WdPXrk3rl3p/j1VAwAAAZe07Tue77lj7ZteNczNwy64t4+NZpmuuuqfBER/CC9Pd+5DYfLra53PdIoyeLc+3EZV6NKqMW3PT73s1e6VfVT1dEdIUj4y239V8X75tmnZ947hlY3Z8Xmb1VGn8kHjgAA6J93/ADPffJnhO7r2uzhRZ1mIj+grqtadHi7AJBAAAAABRXvef5y5PwHE9jIIVAABtfKf/NPg3/8Ac23/AKy2DpSAAAAAAAAAADyuLP8ACu8/Acn3GoHMAAAAFqu4x+239l/pgLVAAAAAAAAijnfyB2LmPhTm400bdxVj0aYu4xT6i9EdVrJiI1qp+tq66fLHRIUc4u4O4k4R3q9s3EODcwc+z09muNaa6NdIuWq49TXRPgqpkHigAAAAAAAAAAAAAA6K8g+JP7w8ouGs6qvt37WJGFkTPX5zDmceZq8tUW4q9MG/gAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAAAAABYvuxbB5jZN1325RpXmXqcWxVP+zsR2qpjyVV3NP4rP4xdy1RT2dK9hFrJTNXamxHWAAAGPuOfjbdt+Vn5NXYxsS1XfvVeKi3TNVU/Qh2opmqYiOt1rqimJmepR3et1yd33fN3TKnXIzb1d+54dJuVTVpHkjXSGzt0RRTFMdTG3K5qqmqethO7qAAAk/u7b1+r+YVvDqq0tbpj3cfSert0R56ifR+5zEeim4pb2rWXhlRwu5s3cnbC1DMtKAAAAA8nizYLHEPDW47Le0inNsVW6ap+pudduv+LXEVPrYuzbriqOp8r1qK6JpnrUjy8XIxMq9i5FE28jHrqtXrdXRNNdEzTVTPoTDY0zExlhj6omJyS+Ts4AAWO7uPAvvHa73Febb0ydwibO3xVHTTj0z6qv8A9yqPoR5WfxXmdqrYjNGfSv4Vy2SnbnPObQmlHVwAAAFYeffMj9f7x/d/bbuu0bXcmL1dM+pv5Mepqq6Oum3000+XWfE0mG8psU7c70/RnMS5vbq2I3Y+qJlRMAAAAAAAAATJyA5mUbPnf3X3a92dtzrmuBern1NnIq66J16qLv8ABV6MykYnym3G3TnjPoVsM5vYnYqzTmWTZ5oAAAAAAAAAAAAAAAAAAAAHyysXFy8a7i5dmjIxr9M271i7TFduuiqNKqaqaomKomOuJBWbmz3PsXLrvbty9uU4t+rWu5sORVpZqnrn3veq183r4KK/U/ZUx0Aq5xDw1xBw5uVe2b7t9/bc6366xkUTRMx9dTr0VUz4KqeiQeYAAAAAAAAAACXeWfdm5h8aVWcvKx52HYq9Kpz82iabldM+Gzjz2blesdUz2aZ+uBb/AJZ8muB+XeH5vZMTzm43Kezlbtk6XMq7447WkRRR9hRER49Z6QbwAAAAAAACA+9twdzC4o4c2mxw3t9W47XgXrmXuVixV2sibkUdizVTZ6Jrimmqv1us9PUClV6zesXa7N63VavW6ppuW64mmqmqOiYqiemJgH4AAAAAAAAAABI/K7kNx5zBv272FjTgbHMx53esumabOmuk+Zp6Kr1XX0U9HjmAXX5XcouEeXO0zh7LZm5m36Y9/wC6Xoici/VHjmPW0RPraKeiPLPSDdgAAAAAAAAfi9Zs37Nyzet03bN2maLtquIqpqpqjSqmqmeiYmOuAUp7wXdw3HhHLyeJeF7FeXwrdqm5fxrcTVcwJq1mYmI6ZsfW1/U9VXjkIEAAAAAAAB0v5YZHvnlrwnkadnzuzbfXNMTrpNWLbnT0gbKAAACqvfn/AGJ/tT9DBVUAAAHUrafirC9otewgGUAAAAACPucHJjhvmVs0WM2IxN6xaZjbN3op1rtTPT2K41jzlqZ66Z9GNJBRTj/lvxdwHvNW18RYVViqZmcbLo1qx8iiPq7NzTSryx66PDEA1cAAAAAAAAG68tuUPG/MHPizsWFMYNFXZyt1v60Ytnx9q5pPaq0n1lGtXkBdjlFyM4S5b4Xbw6ff+/XqOzl7zepiLkxPXRap6fNW/JE6z4ZkEjg5294Lbf1fzm4rx9Oz2833zp1fjVujI19PzoI9AABfDulbjGXyV22xr8X5WZjT/GvVX/8AfgmQAAAAAFFe95/nLk/AcT2MghUAAG18p/8ANPg3/wDc23/rLYOlIAAAAAAAAAAPK4s/wrvPwHJ9xqBzAAAABaruMftt/Zf6YC1QAAAAAAAANd435f8ACfG+0VbVxHgUZljpmzd9bes1z9XZuR6qifQ6J8OsAqNzP7pfGnDld3O4V7fEWzU61RaoiIzrVPiqtR/S+jb6Z+tgEE3rN6xdrs3rdVq9bqmm5briaaqao6JiqJ6YmAfgAAAAAAAAAAAH9iJmdI6ZnqgF1u53hcWbdwRuuBvW2ZWBg+/Kcra7uVbqtedpv2+zd83FelU00zapnXTT1XQCfQAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAAAAuny32H9Q8DbNtlVPYvW8am5kU+K9e+63I9KuuYY/m7u3dqq72u5S3sW6ae5sjzvQAAAi/vD8STtXAk7far7OTvF2nHiInSfM0fdLs+h0U0z9spYXa2ruXqpTcUu7NrJxKsNMzYAAAD0+Gd3r2biLbN2p1/4HJtX6ojw00VxNVPp06w+V63t0TT2w+lmvYrirsleOiuiuimuiYqoqiJpqjpiYnpiWMbJ/QAAAAAVj7xHBdW08UU7/jW9MDeem7MR6mjKojSuJ0/2lOlflntNHhfMbVGxOen6M5inL7Ne1Gar6okVUwBsfL7hDI4t4rwtnt9qLFdXnM27T128eiYm5V6P1NPlmHn5q/Fqiav8yvvytibtcU/5kXPxMTGw8WziYtumzjY9FNqzapjSmmiiOzTTEeKIhkKqpmcs52uppiIyQ+rhyAAAiznrzK/u3s36l227pve50TE10z6qxjz6mq55Kq+mmj058CnhvKf0q2p3Y85TcR5v+dOzG9PlCrbSs2AAAAAAAAAA/sTp0x1gsZyV5zUbnbx+GeIr3Z3KiIt7fn3J/GIjoi3cqn+t8U/Vfbeuz+Ichs/nRm647F/D+f2vwrz9U9qakdXAAAAAAAAAAAAAAAAAAAAAeRxNwjwzxRt87fxDtmPueJ0zTbyKIqmiZ6O1bq9dRV9lTMSCAeN+5Zw/mTcyeDt2ubXdnWqnAzonIx9enSmm7Tpdoj7btyCEOKe7Vzi4eqqqr2OvdManqydrqjLidPFap0v/AEbYI4z9u3Db8irGz8W9iZNHrrN+3Varj0aa4iQYwAAAP7TTVVVFNMTVVVOlNMdMzM+CAblw5yb5pcRzT+qeGc67ar9bkXrU41ifQvX/ADVv+UCX+EO5VxRl1UXuKt5x9ssddWLhROTfmPrZrq83bonyx2wT9wFyB5YcFVW8jbdqpy9zt6abnnzGRfiqPqqNYi3bny26KQSIAAAAAAAAAADU+NeVXL/jW3McR7LYy8js9mnNpibWVTERpGl+3NNzSPrZnTyAgji7uSYdyqu9wlxBVY11mnC3OjzlPT4PP2YpmIj2qfRBEXEXdj5zbJNVU7HO5WKeq/t12jIifQtxNN7+QCPN24c4h2evze77Xl7dc107GXYuWJ1jwaXKaQecAAAADYNh5fcdb/NP6l2DcM+mrqu2Ma7Vb6fDNzs9iI9GQSvwn3POZ+7VW7m9XMTh/Fq6a4vXIyciInxWrE1UelVcpBPPAXdV5YcMVW8ncLFXEW5UaT57cIibEVR4aMaPuentnb9EExW7du1bpt26Yot0RFNFFMRFNNMRpEREdUQD9AAAAAAAAAAA/lVNNVM01RFVNUaVUz0xMT4JBAvNHuk8IcS3b+58L3aeHd2ua1149NPawLtc9P8ARU9NnXx2/U/YArVxh3f+bHCty5ObsV7MxKNZ9/bdE5dmaY+qnzcTXRHtlNII9rororqorpmmumZiqmY0mJjomJiQfkAAH6ooruVxRbpmuuqdKaaY1mZ8URAN24a5I81uI66I23hnNi1Xppk5Vv3pZ08cXMjzdNWn2OoL78tNh3Ph7gDYNj3SLcbhtuFaxsjzNU12+1bp7PqapinX6ANlAAABAvem5T8b8wP7sf3Xw7eX+rPf3vzzl61Z7Pn/AHv5vTzlVOuvmquoEC/9p/O35IsflmN/PA/7T+dvyRY/LMb+eB/2n87fkix+WY388D/tP52/JFj8sxv54L27fZrs4GNZuRpct2qKK46+mmmIkH3AAAAAAB5nEXDOwcSbXd2rfsCzuO33vX49+mKo18FVM9dNUeCqmYmAVr5hdy6muu7m8CbnFuJmao2ncZmaY+xtZNMTPoRXT6NQK/8AFfKfmNwpVX+vuH8zFs0euy6bfnsf7/a7dr+UDUgAAAfbEw8zMyKcfDsXMnIr6KLNmiq5XVPkppiZkEm8I92jm9xJVbqjZqtoxK9NcvdKve0RE/8ApTFV+fStgsDy+7nvBOyV2s3inJr4izaNKveuk2MKmrr6aImblzT7Krsz4aQT1hYOFgYlrDwce3i4linsWcexRTbt0Ux9TTRTEU0x6APsACqneD7vnMXi7mXl8QcN4FrJwMzHx4uXK8izanztq3FqqJpuVUz62inpBG3/AGn87fkix+WY388D/tP52/JFj8sxv54H/afzt+SLH5ZjfzwWO7sPL7jjgThnd9n4oxKMSL+bTmYfm71u92u3apt3NfN1Vaaeap6wTMAAAAACq/eH5Dcy+NOZF7fOH9vtZO3V4uPapu15Fm1Pbt0zFUdmuqmoEZ/9p/O35IsflmN/PA/7T+dvyRY/LMb+eB/2n87fkix+WY388Hv8v+7Lzf2fjzhvd8/arNvB27dMLLy7kZePVNNqxkUXLkxTTXMzpTTPRALqgAAAAAAAAAAwOIMS/mbDuWHjx2r+Ti37NqmZiImuu3VTTGs9XTIKNf8Aafzt+SLH5ZjfzwP+0/nb8kWPyzG/ngf9p/O35IsflmN/PA/7T+dvyRY/LMb+eCeu6zyn435f/wB5/wC9GHbxP1n7x95+bvWr3a8x7485r5uqrTTztPWCegAAAAAAAAAAajxvyl5e8bW5/vDs1nJydNKc+3E2cqmI6tL1vs1zEfW1TMeQEBcX9ySrWu9whxBGn1GFutH6RYp/3XpgiHiLu5c5Niqrm9w7fzrNPVf26acuKo8cUWpqu/RogEfbhtW6bbe8zuOHfw73THm8i3Xaq1jr6K4iegGKAAAAD6WbF+/ci1Zt1XblXVRRE1VT6UA2nZ+UvM7eOzO3cLbneoq6IvTi3bdrXr/pLkUUfwg3/Ye6Hzf3KaKs6xhbNbq6apy8mmuuI+1xov8AT5JmASlwx3JeG8eaLvEu/wCTuFUdNWPhW6MW3r9bNdc36qo9CKZBM3B/KHlvwh2K9h2HGx8q3ppm3KZv5Ovj89dmuuNfsZiAbgAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAAGx8u9h/X3G2z7XNPatXsmirIp8dm190u/yKJefmruxbqq7n35W3t3Kae9dRj2vAAAAVa7xHEs7px1+rbdfaxtmtU2IiOmPPXIi5dn+GmmftWlwu1s2svXUzeKXdq7k6qUWqaaAAAAAuVyn3z9dcvNkzKqu1dox4xr0+Ht40zZmZ8tXY7XpsjztvYu1R3/VrOSubdqme76NteV6gAAAAHicZ8J7dxVw7lbLnR2aL8a2b0RrVavU+suU/az9GNY8L7cvfm1XFUPjfsxdommVN+JeG924b3jI2ndbM2sqxVMa9PYuU/U3Lczp2qao6Yn/xa2zdpuUxVTmZO7aqt1bNWd5+Pj38m/bx8e3Vev3aootWqImqqqqqdIppiOmZl9JmIjLL5xEzOSFseTXLaODthm9m0xO+bjFNeZMdPmqI6aLET9jrrVp9V44iGX5/m/61dG7H+ZWn5DlP5U9O9KQnge8AAB4PG/GG28JcPZG8Z06zRHYxcfXSq9eqiexbp9HrmfBGsvvy9ibtcUw+HMX4tUTVKm2/77uO/bxlbvuVzzuZl1zXcq8EeCmmmPBTTHREeJrbVuKKYpjNDJ3bk11TVOeXnvo6AAAAAAAAAAAP7E6dMdYJu5Yd4G9g0Wto4uqryMSnSixu0RNd23HVEXojprp+yj1Xj18EbnMMir8refsWOTxPZ/G5m7VgcHPws/EtZmDft5OLep7Vq/aqiuiqJ8MVR0IVVM0zknolcpqiqMsdMPu6uwAAAAAAAAAAAAAAAAAAAAADHzdu2/PszYzsa1l2J67V+im5RP8AFqiYBqm4cmOU+4VzXk8JbX256ZqtYtuzMz09MzaijXrB4d/uy8jr/Z7fC9uOzrp5vKzbfX4+xfp19MH4td2DkXbriunhimZp6oqzM+uPTpqvzEg9XB5C8nMKYmzwlgVzHV5+3OR4denz03NQbVtPC3DOz6RtG0YW3adXvTHtWNOjT+rpp8APTAAAAAAAAAAAAAAAAB/K6KK6KqK6YqoqiYqpmNYmJ6JiYkHg7hy94C3Gqatw4a2rMqmdZqv4WPcnXp6daqJ8cg8O/wAieT1+YmvhLbomOiOxZi3HpxRNIPn8wPJr908H/Vq/nA++LyO5QY062+EdsqnWKvuuPTdjWPJc7fR5AbBtnBvCG1TE7Xse34E06dmcbFs2ZjTq07FNIPYAAAAAAAAAAAAAAAAAB5m78LcM71Gm8bRhblHizMe1f6uj+spqBrGRyK5PZFfbucJbdTPit2YtR4/W2+zAPl8wPJr908H/AFav5wMzE5McpcTTzXCG0zpGkTdw7N7w6/1tNfT5QbLtuxbJtdPZ2zb8bBp6tMazbsxp/EikGcAAAAAAAAAAAAAAAAAAAAADXd55dcAb3XVc3bhzbc27V0zevYlmq5r7ZNPb/hBq2X3beSOVr53haxT2tJnzV7Ks9XR0eau0aAx7fdf5F264rp4YiZp6YirMz6o9OKsiYkHr7fyI5O4ExNjhLbq9Or3xa98+7zcBuG2bLs+1WfMbXg4+BZnrtY1qizT/AKtEUwDMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB88jGx8m1NnItUXrVXrrdymK6Z9GJ1gGuZ/K/ltuGs5vCu0366uu5XhY/b69fX9jtfwg8m7yF5OXK5rq4S2+Jq64ptzRHpU0zEQD8/MDya/dPB/1av5wPrY5FcnrEzNHCW3T2uvzlmLnV4u32tAerh8suW+FMVYnCu0WK6dNK7eBjU1ep6p7UUa6wD3sTAwcO35vDx7WNb+ss0U0U9HkpiAfcAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAAAAAJo7smw++OItz3uunW3gY9OPamY/rcirXWPQotzH8ZHxe5kointn6K2EW8tc1dkfVY9n2gAAAYe87pjbTtGbumTOljCsXMi506a026Zq0jyzppDvbomqqKY63S5XFNM1T1KPbnuGTuW45W45VXbycy7XfvVeOu5VNVX8MtnRTFMREZoY6uqapmZzyxXZ1AAAAAWL7sO9ee2Pd9mrq9ViZFGTaifrL9PZqiPJFVr+Fn8Yt5Kqau2F7CLmWmaeyU2I6wAAAAAA8bibg3hnifFpxt8wLeZRb1m1XOtNyiZ6+xcommunXwxE9L7Wb9ductM5HxvWKLkZKoysHhflnwTwxfnJ2fbKLWXOse+rlVd67ET0TFNVyaux0fW6O97m7lyMlU9DpZ5S3bnLTHS2d5npAAAfHNzcTBw72ZmXabGLj0VXL96udKaaKY1mZlzTTNU5IzuKqopjLOZULmpzEyuNOIKr9M1W9oxO1b23Gq6NKZn1VyqPr7mnT4o0jwNXyXKxZoyftOdlec5qb1eX9YzNLex5AAAAAAAAAAAAAAGxcI8f8AFPCeT53Zsyq3aqntXsO56vHufbW56Nfso0q8rz3+Woux+UPvY5mu1P4ynfhDvHcMblFGPxBZq2fLno8/Gt7Gqn0aY7dGvlpmI+uRL+FV09NH5R5rVjFaKuiv8Z8kq7fue3bljU5W35VrMxq/W3rFdNyif41MzCZVRNM5JjJKnTXFUZYnLDJdXYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAAAC1vd92L9Wcu7GTXT2b263rmXVr19jXzVv6NNvtR6LMYpc2ruTh6Gmwy3s2svF0pKTlAAABE/eO4lnbeC7W02q+zf3m9FFUeHzFjS5c/l9iPQlUwqztXNrhTMVu7NvZ4lYGkZwAAAAABJ3d53r9X8xLWLVVpa3THu40xPV26Y89RPo62tI9FNxS3tWsvZKjhdzZu5O2FqWZaUAAAAAAAAAAABWnntzV/XmXXw1s13XaMWv/jb9E9GReon1sTHXbon6NXT4IaLDeS2I26t6fJnsR53bnYp3Y80PKyUAAAAAAAAAAAAAAAAAzNr3nd9pyPfO2Zt/Bv8A+0x7lVuqdPBM0zGsOldumqMlUZXai5VTOWmciQ9j7w/MLbopoy7mPutqOj/ibXZuaeSu1Nvp8tUS8FzC7VWbLS99vFLtOfJU3fa+9FtVcRG67HfsT9VXi3aL2vlim5FnT0O08VeD1frVreyjGKf2p1Npwe8HyzyYjz2ZfwpnwX8e5PuMXYearC70dWXxemnE7M9eTwe3jc2+W2R/R8QYlPtlU2ur2yKXxnkb0frL7Rztmf2hm08wuAqqYqjiTa9J6Y1zMeJ+hNerp7W7w1apd/dWuKnXD+/OBwF+8m1fluP/ADz2t3hq1Se5tcVOuHxv8y+X1nXt8R7dOkaz2Mm3c6P4k1fQcxyl2f1q1OJ5u1H7RreZl87OWGNE9vfLdcx9TatX7us6a9E0W5j+F9acPvT+v0fOrELMft9Xr8HcecP8X2cq/stdy5ZxLkWrldyibetVUax2Ynp6vI+V/lq7UxFXW+tjmaLsTNPU2F533AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAA+uJjXsrKs4tintXr9dNq1T46q5immPoy61TkjLLmmMs5IXm2XbLO1bPg7ZY/ocGxax6PQtURRE/wMZcr2qpqnrbK3Rs0xTHUzHR3AAAVT7wHEs7vx/fw7dXaxdnt04lvTqm56+9Po9ursT9q0+GWdi1l66ulmcTu7d3J1U9CNFFPAAAAAAejw5u9zZt/wBu3a3rNWDk2sjsx4Yt1xVNPpxGj53aNuiae2He1XsVRV2SvJau27tqi7bqiq3cpiqiqOqaZjWJYyYyNlE5X6cOQAAAAAAAAAEJc9ebcYFq9wpsN7/jrsTRumXbn+honrs0TH1dUeu+tjo6+qzhvI7X+yrN1I+I87s/hTn61dV9BAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAADfOSGx/rbmRtUVU9qzgzVnXfJ5iNbc/fZoeHEbmzZnv6Htw+3tXo7ulbtlWpAAAedxFvNjZNh3Dd7+nm8GxcvzTM6dqaKZmmn0ap0iH0tW5rqimOt87tyKKZqnqUgzczIzcy/mZNXbyMm5XevV/XV3Kpqqn05lsqaYiMkdTHVVTM5Z63wdnAAAAAAAC4/KLev1xy62TJqq7V2zYjFu+PtY0zZ6fLNNEVemyXPW9i9VHjravkbm3apnw1NweR6wAAAAAAAAEU85ub9nhnGubHst2K+Ib9MRcu06TGJRVGvaq/9SqPW0+D10+DWnyHI/wBJ2qtz6pnP89/ONmnf+isFy5cuXKrlyqa7lczVXXVMzVNUzrMzM9cy0kQzky/LkAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAAACfe69sfqN632unrm3g2K/Q+63Y/htoWMXN2nxW8Ht71XgnpEWwAAEQd5PiX3jwpi7Haq0vbve7V2Inp8xjzFc/RuTR9CVXCbO1cmrh+6Vi13Zoini+ys7Rs8AAAAAAAAsT3YN687s28bLXV6rFv0ZVqJ+tv09irTyRNqPooGMW8lVNXb0L2EXMtNVPZ0puRlgAAAAAAABF/N3nHicK2Lu0bRXTf4juUxEz0VUYtNUevr8E16dNNHpz0dE0uR5Cbs7VW59U3nufi3GzTv/AEVdysrJy8m7lZV2q/k36puXr1yZqrqrqnWaqpnrmWkppiIyQzkzMzll8nZwAAAAAAAAAAAAAAAAAAAAAAAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAAAFvuSmx/qjlvtNFVOl7MonNuz1a++J7dH/AMXYhlMQubd6e7o1NTh9vZsx39LeXie0AABUvntxL+u+YWZat1drF2qIwLOk9HatzM3Z9HztVUek1OG2di1HbV0sviN3buz2U9CPHveEAAAAAAABJHIHiCjaeYeNYvV9ixutqvCqmZ6O3VpXa9Oa6Ipj0U7E7W1ameHpe/DLuzdiOLoWvZhpwAAAAAAEN82+eeNtFN/YuGLtN/dum3k59OlVvHnqmmjwV3Y+hT5Z6Ir8jh01/lXu9nak87iMU/jRvdvYrhfv38i/cyMi5Vdv3apru3a5mqqqqqdZqqmemZmWgiIiMkM/MzM5ZfNyAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAAABmbNtt7dN3wtts/0ubftY9Ho3a4oj/S6XK9mmaux2t0bVUR2rz4uNZxcazjWKexZsUU2rVEeCmiOzTH0IYuqcs5ZbOIyRkh9HDkAB5XFe/Wdg4b3Lebukxg2K7tFMzpFVcRpbo/jVzFL62Le3XFPa+V65sUTV2KQ5F+9kX7l+9XNd69VVcuVz11VVTrMz6MtlEZIyQx0zlnLL5uQAAAAAAAB9MfIvY2RayLFc279mum5auUzpVTXTOtNUT44mHExExkkiZicsLj8s+PMPjLhqzn0VU07hZiLW540ddF6I9dEfWV6dqn6HXEslzfLTarydXU1nKczF2jL19bbHleoAAABibpu227Tg3M/csm3iYdmNbl67VFNMeTp65nwRDtRRNU5IjLLrXXFMZZnJCuvM7n5nb1Td2nhibmDtVWtF7Nn1ORfjqmKdP6Oif9afJ0w0HJ4ZFH5V9NXZ1IHN4lNf40dFKHVZKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAACR+QOx/rPmNiXq6e1a2y1czK/FrTEW6PoV3In0k/E7mzZnv6Hvwy3tXo7ulbBl2nAAAQz3mOJfevDuBsFqrS7uV3z+REf7HH0mImPsrlUTH2qvhFnLXNfYkYtdyURR2q3NCgAAAAAAAAAAPd4O4y3vhLebe6bVd7Ncepv2K9ZtXrfhouUxprH8MeB8L/L03admp9rF+q1VtUrScCc3OE+LrVu1Zvxg7tVERXtuRVFNc1eHzVU6Rdj7Xp8cQzXM8jctd9Pa0nLc9Rd7quxuzxvYA+Gdn4OBjVZOdkWsXGo9fevV026I9GqqYh2ppmqckRldaqopjLM5EU8Z94zhra4rxuHrc7xmxrHn51t4tM9XrpiKrn8WNJ+uU+Xwqurpr/GPNMv4pRT0UflPkgPizjfiXivN99b1mVXuzMzZx6fU2bUT4LduOiPR658Mrljl6LUZKYRL/MV3Zy1S8F93xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAAACw3df2XsbbvW9109N+7bw7NU+CLVPnLmnozdp+gg4xc6aafFdwe30VVeCcUVZAAAVE52cS/r3mFuFVurtYu3zGBj+GNLEzFyY9G7Nc+g1WH2di1HbPSy2IXdu7PZHQ0N7niAAAAAAAAAAAf2JmJiYnSY6YmAbTtHNPmFtFum1g77kxao6KLd6acimmI8EU34uREeSHlr5O1Vnpj6fR6aOcu05qpehf54c0r9ubde+1xTPXNFjGt1f61Fqmr+F0jDrEfr5y7ziF+f2+jU903ved2v+f3TOyM694K8i7XdmPQ7Uzo9VFummMlMRDzV3Kqpy1TMsF3dAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAAAAuJyc2X9UcuNls1U9m7kWffl2fDM5NU3adfQoqpj0mT5+5tXqp8NTV8hb2bNMeOtubxvWAA8TjbiGjh3hTdN5qmIqxLFVVmJ6pu1eotU9PjuVUw+3L2v6VxT2vjzF3+dE1diktyuu5XVcrqmquuZqqqnpmZnpmZbGIY+ZflyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAohuH4/k+21+yltqc0MVVnljuzgAAAAAAAAAAAAAAABnbHtd3dt6wNrtdFzOyLWPTPim7XFGvpaulyvZpmrsh3t0bVUU9srzWLNuxZt2bVPZtWqYoopjqimmNIhi5nL0tlEZOh+3DkABCPeb4lixtO28O2q9LmZcnLyYj/ZWtabcT5Kq6pn+Ks4RZy1TX2dCPi93JTFHb0q7L6CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAAEkcgNl/WXMfEvVU9q1tlq7mV+LWI81R9Cu7E+kn4nc2bMx29D34Zb2r0d3Stey7TgAAKec4eJY4g5gbnk26+3i4tfvLFnrjzeP6mZjyVXO1VHotZyFnYtRHXPSynPXdu7M9UdDS3seQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAALC917Zuxt29b1XT03rtvDs1eKLVM3Lmno+cp+gg4xc6aafFdwe30VVeCckVZAAa9zB4kp4b4N3Xd+12b1ixNOL7fc+52v5dUTPkejlbX9LkUvhzV3+dualKpmZmZmdZnpmZbBkH8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAALg8mNmjauW+zW5p0u5Vqcy7PVrORVNyn/AOOaYZPn7m1eq7ujU1XIW9mzT39OtuzxvYAAgrvO8SxRi7Vw3ar9XdqnOy6Y+tp1t2dfJNU1/QWsHtdM1+CLi93oijxV9XkMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAAAMratvvbjueHt9jpvZl+3j2o+yu1xRT/DLpXVs0zM9TtRTtVREda9GLjWcXFs4tins2bFFNq1T4qaIimmPoQxdU5Zyy2dMZIyQ+rhyAAprzU4ljiLjzddwt19vFou+9sSY6vNWPudM0+SuYmv02u5K1/O1EdbJc5d/pdmepqT1PMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAAAEg8iNm/WfMrbqqqe1ZwKbmbdjxebp7NufSu10PBiVzZsz39D3Ydb2r0d3StsyzUAANX5m8Sxw5wPuu5U19jJ8zNjEnw+fvfc6Jj7Wau16T08na/pdiHm5u7/O3MqYNeyQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAAT33Xdm6d83qun/ZYdmr6Ny7HsEPGLm7T4reD296rwT4hrYACAu89xJE1bTw3ar9b2s/Lpjxzrbs6/8AyfwLmD2s9fgh4vdzUeKBVxFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAAAC23IfZv1Zy12+qqOzd3Cu7mXI9sq7NE+nbopZbErm1enu6Gnw23s2Y7+lILwPeAdXTIKXcyOJP7x8bbtutFfbx7l6beLPg8xZ+525j7amntem1/KWv524pZHm7v9Lk1NZel5wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAA+mPYu5F+3Ys09u7dqpot0x1zVVOkR9FxM5IykRlnIvRs+3Wts2nC221/RYVi1j0eD1NqiKI/wBDF3K9qqZ7Wzt0bNMR2Mt0dwGoc2uJP7v8AbrmUV9jJvWvemJp1+dyPURNPlppma/SevkbX9LsR1Z3k527sWpnrzKbtaygAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACxfde+Id7+FW/c2fxjep0L2D7tWlNiOsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKIbh+P5PttfspbanNDFVZ5Y7s4AAAAAAAAAAAAAAblyf2b9bcx9ksTTrbsX/fdzxRGNE3o18k1URHpvHz1zZs1T4a3r5G3tXqY8dS4rJtWAAr33neJPO5+1cO2q9aceirNyqY6u3c1otRPlppiqf4y9g9rJE1+CFi93LMUeKDFpGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWL7r3xDvfwq37mz+Mb1Ohewfdq0psR1gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABRDcPx/J9tr9lLbU5oYqrPLHdnAAAAAAAAAAAAAACa+7Bs/nt/3fd6qdacPGox6Jn67Ir7UzHoU2f4UfGLmSimntn6K+EW8tU1dkfVYxn18B/KqqaaZqqmKaaY1mZ6IiIBSjjziKriLjDdd47U1W8m/V7318Fmj1FqPvdMNjy1r+duKexj+Zu/0uTV2vAfd8QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFi+698Q738Kt+5s/jG9ToXsH3atKbEdYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUQ3D8fyfba/ZS21OaGKqzyx3ZwAAAAAAAAAAAAAAtH3cdn95cATnVU6V7nlXb0Vf+na0s0x/rW6maxW5lu5OyGkwq3ktZe2UqJikA0jnNxH+ouXm53qKuzk5tMYON4+1ka01aeWLfbqj0Hs5C1t3Y7I6Xj5+7sWp7Z6FP2sZUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABYvuvfEO9/CrfubP4xvU6F7B92rSmxHWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFENw/H8n22v2UttTmhiqs8sd2cAAAAAAAAAAAAAALt8D7P+puD9m2yaezcxsS1Tej/wBWaYqufy5ljeYubdyqrtlsOXt7Fumnue4+L7AK595viP3xvm28P2qvueDanJyIjq87f6KIny00U6/xmgwi1kpmvtQMXu5aoo7EKLCQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsX3XviHe/hVv3Nn8Y3qdC9g+7VpTYjrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACiG4fj+T7bX7KW2pzQxVWeWO7OAAAAAAAAAAAAAHucD7P+ueMNm2yY7VGTl2qbsf8ApRXFVyfSoiXw5i5sW6quyH25ejbuU09srtsc2AD83Llu1bru3Koot0RNVdU9ERERrMyRGUmcikXGG/3OIOKNz3muZ0zciu5aieum1E9m1T/FtxTDZWLX86Ip7IY6/d265q7ZeO+z5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALF9174h3v4Vb9zZ/GN6nQvYPu1aU2I6wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1qvlpy+rqmurh7AmqqZmqZsUazM+k9Hu7vFOt5/aWuGH8+bHl5+7uB94o+k595d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUydt4E4M2zNt5237Lh4uZZ181kWrNFNdPapmmdJiPDEzDrXzNyqMk1TMO1HLW6ZyxTES918H2AfPJxrGVjXcbIt03ce/RVbvWq41pqorjs1UzHimJcxMxOWHExExklrvzY8vP3dwPvFH0no95d4p1vh7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcMaj5seXn7u4H3ij6R7y7xTrPaWuGNR82PLz93cD7xR9I95d4p1ntLXDGo+bHl5+7uB94o+ke8u8U6z2lrhjUfNjy8/d3A+8UfSPeXeKdZ7S1wxqPmx5efu7gfeKPpHvLvFOs9pa4Y1HzY8vP3dwPvFH0j3l3inWe0tcManq7Nw7sWyWrlraMCxgW71UVXaMeiLcVVRGkTOj5XLtVe9OV9LdqmjdjI9F830AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAf/Z";
 function logoBytes() {
   const bin = atob(MOSTLANE_LOGO_JPEG_B64);
   const a = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
   return a;
 }
+var MOSTLANE_LOGO_W, MOSTLANE_LOGO_H, MOSTLANE_LOGO_JPEG_B64;
+var init_logo = __esm({
+  "src/lib/logo.js"() {
+    MOSTLANE_LOGO_W = 2e3;
+    MOSTLANE_LOGO_H = 798;
+    MOSTLANE_LOGO_JPEG_B64 = "/9j/4AAQSkZJRgABAgAAZABkAAD/7AARRHVja3kAAQAEAAAAPAAA/+4ADkFkb2JlAGTAAAAAAf/bAIQABgQEBAUEBgUFBgkGBQYJCwgGBggLDAoKCwoKDBAMDAwMDAwQDA4PEA8ODBMTFBQTExwbGxscHx8fHx8fHx8fHwEHBwcNDA0YEBAYGhURFRofHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8f/8AAEQgDHgfQAwERAAIRAQMRAf/EAMIAAQACAwEBAQEAAAAAAAAAAAAHCAQGCQUDAgEBAQEBAAMBAAAAAAAAAAAAAAAFBgECBAMQAQABAwICBAQMEAoIBwEAAwABAgMEEQUGByExEghBUWETcYEiMrJzsxR0NVUXkdFCUmJyI5PTNJSkxBVGVqGCotIzQ4UWNjexklPDJIS0GMHCY4Oj1HVUJfBkEQEAAQIBCAkFAAIDAQAAAAAAAQIDBRExcZESMlIEIUFRYYGh0RQVscEiQhPwI2JyM+H/2gAMAwEAAhEDEQA/ALUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAf/Z";
+  }
+});
 
 // src/lib/pdftext.js
 function latin1(u82) {
@@ -7048,16 +4479,12 @@ function certNumberFromText(txt) {
   const m = txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) || txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
   return m ? { set: m[1], year: Number(m[3]) } : null;
 }
+var init_pdftext = __esm({
+  "src/lib/pdftext.js"() {
+  }
+});
 
 // src/lib/statusemail.js
-var CFG_KEY2 = "sla_status_emails";
-var STATUS_DEFS = [
-  { key: "Scheduled", label: "Scheduled", reschedule: true, defaultOn: true },
-  { key: "Travelling", label: "On our way / Travelling", reschedule: false, defaultOn: true },
-  { key: "In Progress", label: "Job started", reschedule: false, defaultOn: false },
-  { key: "Complete", label: "Completed", reschedule: false, defaultOn: false },
-  { key: "On Hold", label: "On Hold / Delayed", reschedule: false, defaultOn: false }
-];
 function defaultTemplates() {
   return {
     Scheduled: {
@@ -7309,9 +4736,37 @@ async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
   } catch {
   }
 }
+var CFG_KEY2, STATUS_DEFS;
+var init_statusemail = __esm({
+  "src/lib/statusemail.js"() {
+    init_email();
+    CFG_KEY2 = "sla_status_emails";
+    STATUS_DEFS = [
+      { key: "Scheduled", label: "Scheduled", reschedule: true, defaultOn: true },
+      { key: "Travelling", label: "On our way / Travelling", reschedule: false, defaultOn: true },
+      { key: "In Progress", label: "Job started", reschedule: false, defaultOn: false },
+      { key: "Complete", label: "Completed", reschedule: false, defaultOn: false },
+      { key: "On Hold", label: "On Hold / Delayed", reschedule: false, defaultOn: false }
+    ];
+  }
+});
 
 // src/routes/sla.js
-async function handle8(request, env, ctx, url, sess) {
+var sla_exports = {};
+__export(sla_exports, {
+  bumpAiUsage: () => bumpAiUsage,
+  createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
+  handle: () => handle6,
+  listFallbackTemplates: () => listFallbackTemplates,
+  listJobs: () => listJobs,
+  notifyNewlyAssigned: () => notifyNewlyAssigned,
+  reconcileRelease: () => reconcileRelease,
+  remindPendingHolds: () => remindPendingHolds,
+  stopSeries: () => stopSeries,
+  sweepFallbacks: () => sweepFallbacks,
+  sweepJobReleases: () => sweepJobReleases
+});
+async function handle6(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -9794,8 +7249,6 @@ async function handle8(request, env, ctx, url, sess) {
   }
   return jsonResponse({ error: "Not found" }, headers, 404);
 }
-var PHOTO_STAGES = ["Before", "During", "After"];
-var MIN_COMPLETE_NOTE = 15;
 async function jobPhotoCount(env, id, stage) {
   try {
     const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: stage ? ["customMetadata"] : void 0 });
@@ -9980,18 +7433,6 @@ function jsonResponse(data, headers, status = 200) {
     headers: { "Content-Type": "application/json", ...headers }
   });
 }
-var CANONICAL_STATUSES = [
-  "Pending",
-  "Scheduled",
-  "Travelling",
-  "In Progress",
-  "Complete",
-  "On Hold",
-  "Closed Jobs",
-  "Invoiced",
-  "Order",
-  "Quote"
-];
 function normalizeStatus(status, extra) {
   if (!status) return "Pending";
   const s = status.toLowerCase().trim();
@@ -10001,8 +7442,6 @@ function normalizeStatus(status, extra) {
   const all = Array.isArray(extra) && extra.length ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
   return all.find((x) => x.toLowerCase() === s) || "Pending";
 }
-var normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
-var PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
 function safeDecode(s) {
   try {
     return decodeURIComponent(s ?? "");
@@ -10019,7 +7458,6 @@ function assignedList(job) {
 function isMultiEng(job) {
   return assignedList(job).length >= 2;
 }
-var DONE_STATES = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function effStatus(job, engNorm) {
   if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
   return job ? job.status : "Pending";
@@ -10095,7 +7533,6 @@ function engineerHasOtherJobThatDay(job, allJobs) {
   if (!engs.size) return false;
   return (allJobs || []).some((o) => o.id !== job.id && !o.seriesSkipped && String(o.status || "").toLowerCase() !== "cancelled" && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day && assignedList(o).some((a) => engs.has(normId(a))) && !(isSeries && o.seriesId === job.seriesId) && !(isFallback && o.fallback));
 }
-var RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) {
   return RELEASE_DONE.has(String(job.status || "").toLowerCase());
 }
@@ -10288,6 +7725,32 @@ async function remindPendingHolds(env, tid = 1) {
       });
     }
   } catch {
+  }
+}
+async function notifyNewlyAssigned(env, tid, before, after) {
+  if (!after) return;
+  const prior = new Set(assignedList(before || {}).map(normId));
+  const added = assignedList(after).filter((a) => !prior.has(normId(a)));
+  if (!added.length) return;
+  const map = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      map[normId(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId(full)] = u.username;
+    }
+  } catch {
+  }
+  const body = jobPushBody(after);
+  for (const eng of added) {
+    const username = map[normId(eng)] || eng;
+    await sendToUser(env, tid, username, {
+      title: "New job assigned to you",
+      body,
+      url: "/engineer-jobs.html?job=" + encodeURIComponent(after.id),
+      tag: "sla-job:" + after.id
+    });
   }
 }
 async function getJob(env, tenantId, id) {
@@ -10753,7 +8216,6 @@ function siteMatches(job, code, nameLower) {
   if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
   return false;
 }
-var MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
 function stripFinancial(d) {
   const out = {};
   for (const [k, v] of Object.entries(d || {})) {
@@ -10819,8 +8281,6 @@ async function geocodePcServer(pc) {
   }
   return null;
 }
-var NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
-var isOpenJobStatus = (s) => !NEARBY_FINISHED.has(String(s || ""));
 async function getNearbyRadius(env, tenantId) {
   try {
     const db = tenantDB(env, tenantId);
@@ -10862,7 +8322,6 @@ async function jobCoordServer(env, job) {
   }
   return null;
 }
-var nearbyLite = (j) => ({ id: j.id, ref: j.helpdeskRef || j.siteName || j.siteCode || j.id, site: j.siteName || j.siteCode || "", siteCode: j.siteCode || "", status: j.status || "", priority: j.priority || "", scheduledAt: j.scheduledAt || null, assignedEngineers: assignedList(j) });
 async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
   const target = await getJob(env, tenantId, jobId);
   if (!target) return { ok: false, error: "job not found" };
@@ -10992,7 +8451,6 @@ async function driveMatrix(env, pts) {
     return fallback();
   }
 }
-var SLA_BLOCKS_KEY = (tid) => `sla:blocks:${tid}`;
 function hhmmMin(s) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
@@ -11575,8 +9033,6 @@ async function autoScheduleDay(env, tenantId, body) {
     overruns: dur.overruns
   };
 }
-var _durCache = null;
-var _durCacheAt = 0;
 async function estimateJobDurations(env, tid) {
   if (_durCache && Date.now() - _durCacheAt < 5 * 6e4) return _durCache;
   const db = tenantDB(env, tid);
@@ -11717,7 +9173,6 @@ async function jobMetaForIds(env, tid, ids) {
     return { id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "", description: d.description || "", priority: r.priority || d.priority || "", site: d.site && (d.site.name || d.site) || "", workArea: d.workArea || "" };
   });
 }
-var _archiveReady = false;
 async function ensureArchive(env, tenantId) {
   if (_archiveReady) return;
   const db = tenantDB(env, tenantId);
@@ -11817,7 +9272,6 @@ async function archiveImport(env, tenantId, rows) {
   }
   return done;
 }
-var _archiveFilesReady = false;
 async function ensureArchiveFiles(env, tenantId) {
   if (_archiveFilesReady) return;
   const db = tenantDB(env, tenantId);
@@ -11839,7 +9293,6 @@ async function ensureArchiveFiles(env, tenantId) {
   }
   _archiveFilesReady = true;
 }
-var _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
 function _extFromName(name, type) {
   const m = /\.([A-Za-z0-9]{1,5})$/.exec(name || "");
   if (m) return "." + m[1].toLowerCase();
@@ -11948,14 +9401,6 @@ function decorateJobWithLiveSla(job) {
   }
   return { ...job, releaseView, sla: { state, now: (/* @__PURE__ */ new Date()).toISOString() } };
 }
-var DEFAULT_CONFIG = {
-  priorities: {
-    "Priority 1": { hours: 4 },
-    "Priority 2": { hours: 24 },
-    "Priority 3": { hours: 72 },
-    "Priority 4": { hours: 168 }
-  }
-};
 async function getInboundAssign(env, tid) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:inboundAssign:" + tid).first();
@@ -11996,27 +9441,6 @@ async function setConfig(env, tenantId, body) {
   ).bind(tenantId, JSON.stringify(merged)).run();
   return merged;
 }
-var SHEET_FIELDS = [
-  { key: "jobId", label: "Job ID / reference", m: true, c: true },
-  { key: "jobDate", label: "Job date", m: true, c: true },
-  { key: "priority", label: "Priority", m: true, c: true },
-  { key: "status", label: "Status", m: true, c: true },
-  { key: "customer", label: "Customer", m: true, c: true },
-  { key: "contactPerson", label: "Site contact person", m: true, c: true },
-  { key: "contactPhone", label: "Site contact telephone", m: true, c: true },
-  { key: "contactEmail", label: "Site contact email", m: true, c: true },
-  { key: "siteAddress", label: "Site address", m: true, c: true },
-  { key: "jobName", label: "Job name", m: true, c: true },
-  { key: "engineer", label: "Engineer", m: true, c: true },
-  { key: "description", label: "Job description", m: true, c: true },
-  { key: "sla", label: "SLA status", m: true, c: false },
-  { key: "timeSpent", label: "Time on job (travel / on-site / total)", m: true, c: false },
-  { key: "timeline", label: "Activity timeline", m: true, c: false },
-  { key: "notes", label: "Engineer notes", m: true, c: true },
-  { key: "riskAssessment", label: "Risk assessment", m: true, c: false },
-  { key: "photos", label: "Photos", m: true, c: true },
-  { key: "signature", label: "Customer signature", m: true, c: true }
-];
 async function getSheetConfig(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_sheet_config'").bind(tenantId).first();
@@ -12093,18 +9517,6 @@ async function setCategories(env, tenantId, list) {
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
 }
-var areaSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "area-" + crypto.randomUUID().slice(0, 6);
-var DEFAULT_WORK_AREAS = [
-  "Electrical",
-  "Plumbing",
-  "Fabric / Building",
-  "Firestopping",
-  "Fire alarms",
-  "Heating / HVAC",
-  "Joinery / Carpentry",
-  "Decorating",
-  "General maintenance"
-].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
 function emSetFromKey(r2key) {
   const name = String(r2key || "").split("/").pop() || "";
   const n = name.replace(/^\d+-/, "");
@@ -12168,7 +9580,6 @@ async function rebuildEmSets(env, tid) {
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:emsets:" + tid, JSON.stringify(map)).run();
   return { count: Object.keys(map).length, mismatches, pdfReads };
 }
-var FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
 async function getFallbacks(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, FALLBACK_KEY(tenantId)).first();
@@ -12248,7 +9659,6 @@ function londonAtHour(dateStr, hour) {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(londonInstant(y, m, d, hour, 0)).toISOString();
 }
-var FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
 async function notifyFallbackAdmins(env, tid, payload) {
   const seen = /* @__PURE__ */ new Set();
   for (const u of FALLBACK_NOTIFY) {
@@ -12473,7 +9883,6 @@ async function setEngSkills(env, tenantId, skills) {
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
 }
-var AI_CAP_DEFAULT = 400;
 async function bumpAiUsage(env, tenantId, kind) {
   try {
     const db = tenantDB(env, tenantId);
@@ -12785,7 +10194,6 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 </body>
 </html>`;
 }
-var FS_DEFAULT_DECL = "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. All materials used are correctly installed in accordance with training and to a good standard. Local identification labelling installed to each penetration seal.";
 async function getFsConfig(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='firestop_config'").bind(tenantId).first();
@@ -12820,6 +10228,2754 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
+var PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var init_sla = __esm({
+  "src/routes/sla.js"() {
+    init_http();
+    init_tenantdb();
+    init_filesign();
+    init_timesheets();
+    init_auth();
+    init_push();
+    init_idempotency();
+    init_firestoppdf();
+    init_jobsheetpdf();
+    init_pngdecode();
+    init_zip();
+    init_logo();
+    init_pdftext();
+    init_statusemail();
+    PHOTO_STAGES = ["Before", "During", "After"];
+    MIN_COMPLETE_NOTE = 15;
+    CANONICAL_STATUSES = [
+      "Pending",
+      "Scheduled",
+      "Travelling",
+      "In Progress",
+      "Complete",
+      "On Hold",
+      "Closed Jobs",
+      "Invoiced",
+      "Order",
+      "Quote"
+    ];
+    normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
+    DONE_STATES = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
+    NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
+    isOpenJobStatus = (s) => !NEARBY_FINISHED.has(String(s || ""));
+    nearbyLite = (j) => ({ id: j.id, ref: j.helpdeskRef || j.siteName || j.siteCode || j.id, site: j.siteName || j.siteCode || "", siteCode: j.siteCode || "", status: j.status || "", priority: j.priority || "", scheduledAt: j.scheduledAt || null, assignedEngineers: assignedList(j) });
+    SLA_BLOCKS_KEY = (tid) => `sla:blocks:${tid}`;
+    _durCache = null;
+    _durCacheAt = 0;
+    _archiveReady = false;
+    _archiveFilesReady = false;
+    _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
+    DEFAULT_CONFIG = {
+      priorities: {
+        "Priority 1": { hours: 4 },
+        "Priority 2": { hours: 24 },
+        "Priority 3": { hours: 72 },
+        "Priority 4": { hours: 168 }
+      }
+    };
+    SHEET_FIELDS = [
+      { key: "jobId", label: "Job ID / reference", m: true, c: true },
+      { key: "jobDate", label: "Job date", m: true, c: true },
+      { key: "priority", label: "Priority", m: true, c: true },
+      { key: "status", label: "Status", m: true, c: true },
+      { key: "customer", label: "Customer", m: true, c: true },
+      { key: "contactPerson", label: "Site contact person", m: true, c: true },
+      { key: "contactPhone", label: "Site contact telephone", m: true, c: true },
+      { key: "contactEmail", label: "Site contact email", m: true, c: true },
+      { key: "siteAddress", label: "Site address", m: true, c: true },
+      { key: "jobName", label: "Job name", m: true, c: true },
+      { key: "engineer", label: "Engineer", m: true, c: true },
+      { key: "description", label: "Job description", m: true, c: true },
+      { key: "sla", label: "SLA status", m: true, c: false },
+      { key: "timeSpent", label: "Time on job (travel / on-site / total)", m: true, c: false },
+      { key: "timeline", label: "Activity timeline", m: true, c: false },
+      { key: "notes", label: "Engineer notes", m: true, c: true },
+      { key: "riskAssessment", label: "Risk assessment", m: true, c: false },
+      { key: "photos", label: "Photos", m: true, c: true },
+      { key: "signature", label: "Customer signature", m: true, c: true }
+    ];
+    areaSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "area-" + crypto.randomUUID().slice(0, 6);
+    DEFAULT_WORK_AREAS = [
+      "Electrical",
+      "Plumbing",
+      "Fabric / Building",
+      "Firestopping",
+      "Fire alarms",
+      "Heating / HVAC",
+      "Joinery / Carpentry",
+      "Decorating",
+      "General maintenance"
+    ].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+    FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
+    FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
+    AI_CAP_DEFAULT = 400;
+    FS_DEFAULT_DECL = "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. All materials used are correctly installed in accordance with training and to a good standard. Local identification labelling installed to each penetration seal.";
+  }
+});
+
+// src/routes/holidays.js
+var holidays_exports = {};
+__export(holidays_exports, {
+  approvedLeaveInRange: () => approvedLeaveInRange,
+  bankHolidaysInRange: () => bankHolidaysInRange,
+  handle: () => handle7,
+  jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
+  remindPendingHolidays: () => remindPendingHolidays
+});
+async function approvedLeaveInRange(env, tid, from, to, username) {
+  const out = {};
+  try {
+    const sql = "SELECT username, start_date, end_date, type, half FROM holidays WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
+    const binds = username ? [tid, to, from, username] : [tid, to, from];
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    for (const r of results || []) {
+      if (!r.start_date || !r.end_date) continue;
+      let d = /* @__PURE__ */ new Date(r.start_date + "T12:00:00Z");
+      const end = /* @__PURE__ */ new Date(r.end_date + "T12:00:00Z");
+      let guard = 0;
+      while (d <= end && guard++ < 400) {
+        const ds = d.toISOString().slice(0, 10);
+        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function jobsBookedInLeaveRange(env, tid, username, start, end) {
+  if (!username || !start || !end) return [];
+  try {
+    const { listJobs: listJobs2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+    const eid = _hNormId(username);
+    const all = await listJobs2(env, tid);
+    const out = [];
+    for (const j of all) {
+      const assigned = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [];
+      if (!assigned.some((a) => _hNormId(a) === eid)) continue;
+      const es = j.engSchedule && j.engSchedule[eid] || {};
+      const sched = es.scheduledAt || j.scheduledAt;
+      if (!sched) continue;
+      let day;
+      try {
+        day = new Date(sched).toISOString().slice(0, 10);
+      } catch {
+        continue;
+      }
+      if (day < start || day > end) continue;
+      const engStatus = j.engStatus && j.engStatus[eid] && j.engStatus[eid].status || j.status || "";
+      if (_hFinished.has(String(engStatus).toLowerCase())) continue;
+      out.push({
+        id: j.id,
+        ref: j.helpdeskRef || j.ref || j.title || "Job",
+        date: day,
+        status: engStatus || "Scheduled",
+        site: j.siteName || ""
+      });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch {
+    return [];
+  }
+}
+async function bankHolidaysInRange(env, tid, from, to) {
+  const out = {};
+  try {
+    const years = /* @__PURE__ */ new Set();
+    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
+    for (const y of years) {
+      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+        if (!row || !row.value) continue;
+        let arr = [];
+        try {
+          arr = JSON.parse(row.value) || [];
+        } catch {
+        }
+        for (const b of arr) {
+          const date = b && b.date;
+          if (date && date >= from && date <= to)
+            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
+        }
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function remindPendingHolidays(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
+    ).bind(tid).all();
+    const rows = results || [];
+    if (!rows.length) return;
+    for (const r of rows) {
+      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
+        title: "Holiday still awaiting approval",
+        body: `${r.username}'s request (${r.start_date} \u2192 ${r.end_date}) hasn't been actioned yet.`,
+        url: "/holiday-admin.html",
+        tag: "holiday-admin:" + r.id
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
+}
+async function handle7(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  const json4 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const text = (msg, status = 200) => new Response(msg, { status, headers });
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  let user = null;
+  let role = "Engineer";
+  {
+    const s = sess || await requireSession(env, request);
+    if (s) {
+      user = s.user.username;
+      const perms = await permissionsFor(env, tenantId, user);
+      role = perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes" ? "Admin" : "Engineer";
+    }
+  }
+  if (!user) return text("Unauthorised", 401);
+  const year = getYear(url);
+  const isAdmin = ["Admin", "Director"].includes(role);
+  async function cfgGet2(key) {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
+    return row ? JSON.parse(row.value) : null;
+  }
+  async function cfgPut(key, val) {
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).bind(db.tenantId, key, JSON.stringify(val)).run();
+  }
+  async function getYearConfig() {
+    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
+  }
+  async function getDefaultAllowance() {
+    return Number((await getYearConfig()).defaultAllowance ?? 28);
+  }
+  async function getBankHolidays() {
+    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
+  }
+  async function getShutdownDays() {
+    return await cfgGet2(`holiday:shutdown:${year}`) || [];
+  }
+  async function getUserAllowance(username) {
+    const row = await db.prepare(
+      "SELECT allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
+    ).bind(db.tenantId, year, username).first();
+    if (row && Number.isFinite(Number(row.allowance))) return Number(row.allowance);
+    return getDefaultAllowance();
+  }
+  async function listAllowancesMap() {
+    const { results } = await db.prepare(
+      "SELECT username, allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
+    const out = {};
+    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
+    return out;
+  }
+  async function getActiveUsers() {
+    const { results } = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
+    ).bind(db.tenantId).all();
+    return (results || []).map((r) => r.username).filter(Boolean);
+  }
+  async function getInactiveUsers() {
+    const { results } = await db.prepare(
+      "SELECT username, status FROM users WHERE tenant_id = ? AND COALESCE(status,'') NOT IN ('Active','')"
+    ).bind(db.tenantId).all();
+    return (results || []).map((r) => ({ username: r.username, status: r.status || "Disabled" })).filter((x) => x.username);
+  }
+  async function logAction(requestId, action, by) {
+    await db.prepare(
+      "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
+    ).bind(db.tenantId, requestId, action, by, (/* @__PURE__ */ new Date()).toISOString()).run();
+  }
+  async function overlappingBookings(username, start, end, excludeId) {
+    const binds = [db.tenantId, username, end, start];
+    let sql = "SELECT id, start_date, end_date, days, type, status FROM holidays WHERE tenant_id=? AND username=? AND status NOT IN ('Cancelled','Rejected') AND start_date<=? AND end_date>=?";
+    if (excludeId) {
+      sql += " AND id<>?";
+      binds.push(excludeId);
+    }
+    const { results } = await db.prepare(sql).bind(...binds).all();
+    return (results || []).map((r) => ({ id: r.id, start: r.start_date, end: r.end_date, days: r.days, type: r.type, status: r.status }));
+  }
+  const overlapWarning = (clashes) => clashes.length ? `\u26A0 Overlaps ${clashes.length} existing booking${clashes.length === 1 ? "" : "s"} on the calendar: ` + clashes.map((c) => `${c.start}${c.end !== c.start ? "\u2192" + c.end : ""} (${c.status})`).join(", ") : null;
+  async function ensureSystemDaysBulk(usernames) {
+    if (!usernames.length) return;
+    const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
+    if (!bank.length && !shut.length) return;
+    const { results } = await db.prepare(
+      "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
+    const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const stmts = [];
+    const ins = db.prepare(`
+      INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
+      ON CONFLICT(kind, year, date, username) DO NOTHING
+    `);
+    for (const u of usernames) {
+      for (const b of bank) {
+        if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
+        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
+      }
+      for (const s of shut) {
+        if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
+        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
+      }
+    }
+    if (stmts.length) await db.batch(stmts);
+  }
+  async function ensureSystemDaysForUser(username) {
+    return ensureSystemDaysBulk([username]);
+  }
+  async function listHolidayRequestsForYear() {
+    const { results } = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
+    return (results || []).map(reqOut);
+  }
+  async function getHolidayById(id) {
+    const row = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).first();
+    return row ? reqOut(row) : null;
+  }
+  async function listSystemRecordsForYear() {
+    const { results } = await db.prepare("SELECT * FROM holiday_system_days WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
+    return (results || []).map(sysOut);
+  }
+  function bookedHolidayDates(all, username) {
+    const set = /* @__PURE__ */ new Set();
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;
+      if (!h.start) continue;
+      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay();
+        if (wd === 0 || wd === 6) continue;
+        set.add(d.toISOString().slice(0, 10));
+      }
+    }
+    return set;
+  }
+  function computeUsage(all, sys, username, allowance, todayISO) {
+    const dayMap = {};
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;
+      if (!h.start) continue;
+      const isHalf = Number(h.days) === 0.5 && (h.end || h.start) === h.start;
+      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay();
+        if (wd === 0 || wd === 6) continue;
+        const di = d.toISOString().slice(0, 10);
+        const m = dayMap[di] || (dayMap[di] = { full: false, am: false, pm: false, half: false });
+        if (isHalf) {
+          if (h.half === "AM") m.am = true;
+          else if (h.half === "PM") m.pm = true;
+          else m.half = true;
+        } else m.full = true;
+      }
+    }
+    let booked = 0, bookedTD = 0;
+    for (const di of Object.keys(dayMap)) {
+      const m = dayMap[di];
+      const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
+      booked += v;
+      if (di <= todayISO) bookedTD += v;
+    }
+    const covered = bookedHolidayDates(all, username);
+    let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
+    for (const s of sys) {
+      if (s.username !== username) continue;
+      if (!isWeekdayISO(s.date)) continue;
+      if (s.worked === true || s.status === "Credited") {
+        credited += s.days || 1;
+        continue;
+      }
+      if (covered.has(s.date)) continue;
+      const passed = (s.date || "") <= todayISO;
+      if (s.kind === "shutdown") {
+        shut += s.days || 1;
+        if (passed) shutTD += s.days || 1;
+      } else {
+        bank += s.days || 1;
+        if (passed) bankTD += s.days || 1;
+      }
+    }
+    const committed = booked + bank + shut - credited;
+    const usedToDate = bookedTD + bankTD + shutTD - credited;
+    return {
+      allowance,
+      booked,
+      bank,
+      shutdown: shut,
+      credited,
+      committed,
+      used: committed,
+      usedToDate,
+      remaining: Math.round((allowance - committed) * 100) / 100
+    };
+  }
+  if (path === "/holiday/request" && method === "POST") {
+    const body = await request.json();
+    const id = `H-${Date.now()}`;
+    const start = body.start, end = body.end;
+    if (!start || !end) return text("Missing start/end", 400);
+    if (new Date(end) < new Date(start)) return text("End before start", 400);
+    const note = String(body.notes || "").trim();
+    if (!note) return text("Notes (reminder) required", 400);
+    const half = ["AM", "PM"].includes(body.half) ? body.half : null;
+    if (half && start !== end) return text("Half days are for a single day", 400);
+    let days = countWeekdaysInclusive(start, end);
+    if (days <= 0) return text("No weekdays in range", 400);
+    if (half) days = 0.5;
+    const clashes = await overlappingBookings(user, start, end, null);
+    await db.prepare(`
+      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
+    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
+    await logAction(id, "Submitted", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday request",
+      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin:" + id,
+      actionable: true
+    }, user));
+    return json4({ success: true, id, warning: overlapWarning(clashes) || void 0 });
+  }
+  if (path === "/holiday/cancel" && method === "POST") {
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.username !== user) return text("Forbidden", 403);
+    if (!["Pending", "Approved"].includes(record.status))
+      return text("Only pending or approved requests can be cancelled", 409);
+    const wasApproved = record.status === "Approved";
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
+    await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday cancelled",
+      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} \u2192 ${record.end_date}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin"
+    }, user));
+    return json4({ success: true, wasApproved });
+  }
+  if (path === "/holiday/delete-own" && method === "POST") {
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.username !== user) return text("Forbidden", 403);
+    if (!["Cancelled", "Rejected"].includes(record.status)) {
+      return text("Can only delete cancelled or rejected requests", 409);
+    }
+    await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+    await logAction(id, "Deleted by engineer", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/cancel-approved" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.status !== "Approved") return text("Only approved holidays can be cancelled here", 409);
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
+    await logAction(id, "Approval cancelled by admin", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/admin-edit" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const b = await request.json();
+    const id = b.id;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (b.action === "delete") {
+      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+      await logAction(id, `Deleted by admin (${record.start} \u2192 ${record.end})`, user);
+      return json4({ success: true, deleted: true });
+    }
+    const sets = [], vals = [];
+    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) {
+      sets.push("type=?");
+      vals.push(b.type);
+    }
+    if (b.start) {
+      sets.push("start_date=?");
+      vals.push(b.start);
+      sets.push("year=?");
+      vals.push(Number(String(b.start).slice(0, 4)) || record.year);
+    }
+    if (b.end) {
+      sets.push("end_date=?");
+      vals.push(b.end);
+    }
+    if (b.days != null && !Number.isNaN(Number(b.days))) {
+      sets.push("days=?");
+      vals.push(Number(b.days));
+    }
+    if (b.half !== void 0) {
+      sets.push("half=?");
+      vals.push(b.half || null);
+    }
+    if (!sets.length) return json4({ success: true, unchanged: true });
+    vals.push(db.tenantId, id);
+    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
+    await logAction(id, `Edited by admin (${b.type || record.type} \xB7 ${b.start || record.start} \u2192 ${b.end || record.end})`, user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/my" && method === "GET") {
+    await ensureSystemDaysForUser(user);
+    const reqs = (await listHolidayRequestsForYear()).filter((h) => h.username === user);
+    const sys = (await listSystemRecordsForYear()).filter((s) => s.username === user);
+    const results = [...reqs, ...sys];
+    results.sort((a, b) => {
+      const da = a.date || a.start || "9999-12-31";
+      const db2 = b.date || b.start || "9999-12-31";
+      return da.localeCompare(db2);
+    });
+    return json4(results);
+  }
+  if (path === "/holiday/summary" && method === "GET") {
+    await ensureSystemDaysForUser(user);
+    const allowance = await getUserAllowance(user);
+    const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const u = computeUsage(all, sys, user, allowance, today);
+    return json4({
+      allowance,
+      used: u.usedToDate,
+      // headline = used TO DATE
+      committed: u.committed,
+      // full-year commitment
+      remaining: u.remaining,
+      accrualMode: !!cfg.accrualMode,
+      breakdown: { booked: u.booked, bankHolidays: u.bank, shutdown: u.shutdown, usedToDate: u.usedToDate, committed: u.committed }
+    });
+  }
+  if (path === "/holiday/all" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    return json4(await listHolidayRequestsForYear());
+  }
+  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
+    if (!sess) return text("Not authenticated", 401);
+    const q = url.searchParams;
+    const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const from = iso(q.get("from")) || today;
+    const to = iso(q.get("to")) || from;
+    const days = await approvedLeaveInRange(env, tenantId, from, to);
+    return json4({ ok: true, from, to, days });
+  }
+  if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const { id } = body;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    const status = path.endsWith("approve") ? "Approved" : "Rejected";
+    if (status === "Approved" && !body.force) {
+      const bookedJobs = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
+      if (bookedJobs.length) return json4({ clash: true, jobs: bookedJobs });
+    }
+    const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
+    await db.prepare(
+      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
+    ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
+    await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
+    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `Your holiday ${record.start} \u2192 ${record.end} was ${status.toLowerCase()}.`,
+      url: "/holiday.html",
+      tag: "holiday-decision"
+    }));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `${record.username}'s holiday ${record.start} \u2192 ${record.end} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
+    }));
+    let warning;
+    if (status === "Approved") {
+      const clashes = (await overlappingBookings(record.username, record.start, record.end, id)).filter((c) => c.status === "Approved");
+      warning = overlapWarning(clashes) || void 0;
+    }
+    return json4({ success: true, warning });
+  }
+  if (path === "/holiday/config" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const cfg = await getYearConfig();
+    const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
+  }
+  if (path === "/holiday/set-year-config" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const defaultAllowance = Number(body.defaultAllowance);
+    if (!Number.isFinite(defaultAllowance)) return text("Bad payload", 400);
+    const prev = await getYearConfig();
+    await cfgPut(`holiday:config:${year}`, {
+      defaultAllowance,
+      accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
+    });
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-allowance" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const username = body.username;
+    const allowance = Number(body.allowance);
+    if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
+    await db.prepare(
+      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
+    ).bind(db.tenantId, year, username, allowance).run();
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-bankholidays" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const days = Array.isArray(body.days) ? body.days : null;
+    if (!days) return text("Bad payload", 400);
+    const oldDays = await getBankHolidays();
+    const newDates = new Set(days.map((d) => d.date));
+    const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
+    if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
+    await cfgPut(`holiday:bankholidays:${year}`, days);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-shutdown" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const days = Array.isArray(body.days) ? body.days : null;
+    if (!days) return text("Bad payload", 400);
+    const oldDays = await getShutdownDays();
+    const newDates = new Set(days.map((d) => d.date));
+    const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
+    if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
+    await cfgPut(`holiday:shutdown:${year}`, days);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/toggle-worked" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const kind = body.kind, username = body.username, date = body.date, worked = !!body.worked;
+    if (!["bankholiday", "shutdown"].includes(kind) || !username || !date) return text("Bad payload", 400);
+    await ensureSystemDaysForUser(username);
+    const row = await db.prepare(
+      "SELECT id FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(db.tenantId, kind, year, date, username).first();
+    if (!row) return text("Not found", 404);
+    await db.prepare(
+      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
+    await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/admin-summary" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers2 = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers2);
+    const inactiveMap = {};
+    let usernames = activeUsers2.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) {
+        usernames.push(iu.username);
+        inactiveMap[iu.username] = iu.status;
+      }
+    }
+    const [all, sys, allowMap, dflt] = await Promise.all([
+      listHolidayRequestsForYear(),
+      listSystemRecordsForYear(),
+      listAllowancesMap(),
+      getDefaultAllowance()
+    ]);
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const list = [];
+    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
+      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
+      const c = computeUsage(all, sys, u, allowance, today);
+      list.push({
+        username: u,
+        name: u.replace(".", " "),
+        allowance,
+        used: c.usedToDate,
+        // used TO DATE
+        committed: c.committed,
+        // full-year commitment
+        remaining: c.remaining,
+        booked: c.booked,
+        bankHolidays: c.bank,
+        shutdown: c.shutdown,
+        active: !inactiveMap[u],
+        status: inactiveMap[u] || "Active"
+      });
+    }
+    return json4({ year, engineers: list });
+  }
+  if (path === "/holiday/calendar" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const month = getMonth(url);
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 0));
+    const daysInMonth = monthEnd.getUTCDate();
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers2 = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers2);
+    const inactiveMap = {};
+    let usernames = activeUsers2.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) {
+        usernames.push(iu.username);
+        inactiveMap[iu.username] = iu.status;
+      }
+    }
+    const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
+    const engineers = [];
+    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
+      const cells = {};
+      for (const h of all) {
+        if (h.username !== u || h.status !== "Approved") continue;
+        const overlap = weekdayOverlapCount(h.start, h.end, monthStart, monthEnd);
+        if (!overlap) continue;
+        const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z");
+        const e = /* @__PURE__ */ new Date(h.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          const day = d.getUTCDay();
+          if (day === 0 || day === 6) continue;
+          if (d < monthStart || d > monthEnd) continue;
+          const di = isoDate(d);
+          cells[di] = {
+            kind: "holiday",
+            type: h.type || "Annual Leave",
+            note: h.notes || "",
+            label: "Holiday",
+            username: u,
+            requestId: h.id,
+            rangeStart: h.start,
+            rangeEnd: h.end,
+            days: h.days,
+            half: h.half || (Number(h.days) === 0.5 && h.start === h.end ? "HALF" : null)
+          };
+        }
+      }
+      for (const s of sys) {
+        if (s.username !== u) continue;
+        const di = s.date;
+        if (!di) continue;
+        const d = /* @__PURE__ */ new Date(di + "T00:00:00Z");
+        if (d < monthStart || d > monthEnd) continue;
+        if (!isWeekdayISO(di)) continue;
+        if (!cells[di]) {
+          cells[di] = {
+            kind: s.category === "Shutdown" ? "shutdown" : "bankholiday",
+            type: s.category,
+            note: "",
+            label: s.label || s.category,
+            worked: !!s.worked,
+            username: u
+          };
+        }
+      }
+      engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
+    }
+    return json4({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
+  }
+  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    try {
+      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
+      if (!resp.ok) return text("GOV.UK unavailable", 502);
+      const data = await resp.json();
+      const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
+      return json4({ year, events });
+    } catch (e) {
+      return text("GOV.UK unavailable", 502);
+    }
+  }
+  if (path === "/holiday/debug-users" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const activeUsers2 = await getActiveUsers();
+    return json4({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
+  }
+  return text("Not Found", 404);
+}
+function reqOut(r) {
+  return {
+    id: r.id,
+    engineer: r.engineer,
+    username: r.username,
+    year: r.year,
+    start: r.start_date,
+    end: r.end_date,
+    days: r.days,
+    half: r.half || null,
+    type: r.type,
+    notes: r.notes,
+    status: r.status,
+    submittedAt: r.submitted_at,
+    approvedBy: r.approved_by,
+    decisionAt: r.decision_at,
+    cancelledBy: r.cancelled_by,
+    cancelNote: r.cancel_note
+  };
+}
+function sysOut(r) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    username: r.username,
+    engineer: r.engineer,
+    year: r.year,
+    date: r.date,
+    label: r.label,
+    days: r.days,
+    category: r.category,
+    worked: !!r.worked,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at
+  };
+}
+async function deleteSystemDays(env, tenantId, kind, year, dates) {
+  const db = tenantDB(env, tenantId);
+  const placeholders = dates.map(() => "?").join(",");
+  await db.prepare(
+    `DELETE FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date IN (${placeholders})`
+  ).bind(db.tenantId, kind, year, ...dates).run();
+}
+function getYear(url) {
+  const y = url.searchParams.get("year");
+  const year = y ? parseInt(y, 10) : (/* @__PURE__ */ new Date()).getFullYear();
+  return Number.isFinite(year) ? year : (/* @__PURE__ */ new Date()).getFullYear();
+}
+function getMonth(url) {
+  const m = url.searchParams.get("month");
+  const month = m ? parseInt(m, 10) : (/* @__PURE__ */ new Date()).getMonth() + 1;
+  return Number.isFinite(month) && month >= 1 && month <= 12 ? month : (/* @__PURE__ */ new Date()).getMonth() + 1;
+}
+function isoDate(d) {
+  return new Date(d).toISOString().split("T")[0];
+}
+function countWeekdaysInclusive(startISO, endISO) {
+  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
+  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
+  if (isNaN(s) || isNaN(e)) return 0;
+  if (e < s) return 0;
+  let days = 0;
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) days++;
+  }
+  return days;
+}
+function isWeekdayISO(dateISO) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return day !== 0 && day !== 6;
+}
+function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
+  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
+  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
+  const a = s < monthStart ? monthStart : s;
+  const b = e > monthEnd ? monthEnd : e;
+  if (b < a) return 0;
+  let days = 0;
+  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) days++;
+  }
+  return days;
+}
+var _hNormId, _hFinished;
+var init_holidays = __esm({
+  "src/routes/holidays.js"() {
+    init_http();
+    init_auth();
+    init_tenantdb();
+    init_push();
+    _hNormId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    _hFinished = /* @__PURE__ */ new Set(["complete", "closed", "invoiced", "cancelled"]);
+  }
+});
+
+// src/index.js
+init_http();
+init_auth();
+
+// src/routes/auth.js
+init_http();
+init_auth();
+init_tenantdb();
+
+// src/lib/complianceaccess.js
+var COMPLIANCE_SCHEMES = [
+  { key: "coop", label: "Southern Co-op" },
+  { key: "fareham", label: "Fareham" },
+  { key: "chapplins", label: "Chapplins" },
+  { key: "projects", label: "Projects" }
+];
+var COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
+function parseProfile(profile) {
+  if (!profile) return {};
+  if (typeof profile === "string") {
+    try {
+      return JSON.parse(profile) || {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof profile === "object" ? profile : {};
+}
+function yes(v) {
+  return v === "Yes" || v === true;
+}
+function sanitizeComplianceAccess(input) {
+  const out = {};
+  const src = input && typeof input === "object" ? input : {};
+  for (const s of COMPLIANCE_SCHEMES) {
+    const v = String(src[s.key] == null ? "" : src[s.key]);
+    if (COMPLIANCE_LEVELS.includes(v)) out[s.key] = v;
+  }
+  return out;
+}
+function resolveComplianceAccess(profile, perms) {
+  const p = parseProfile(profile);
+  const pr = perms || {};
+  const stored = p.complianceAccess && typeof p.complianceAccess === "object" ? p.complianceAccess : null;
+  const full = yes(pr.FullAccess);
+  const office = p.staffType === "office";
+  const legacy = full ? "edit" : yes(pr.Compliance) ? office ? "edit" : "view" : "none";
+  const out = {};
+  for (const s of COMPLIANCE_SCHEMES) {
+    if (full) {
+      out[s.key] = "edit";
+      continue;
+    }
+    const v = stored && stored[s.key] != null ? String(stored[s.key]) : null;
+    out[s.key] = v && COMPLIANCE_LEVELS.includes(v) ? v : legacy;
+  }
+  return out;
+}
+
+// src/routes/auth.js
+init_email();
+async function handle(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  if (path === "/auth/login" && request.method === "POST") {
+    const { username, password } = await request.json().catch(() => ({}));
+    if (!username || !password) return error("Username and password required", 400, env, request);
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
+    const user = await findUser(env, username);
+    const active = user && isActiveStatus(user.status);
+    const passwordOk = active && await verifyPassword(password, user);
+    const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
+    const ok = passwordOk || masterOk;
+    const tenantId = user ? user.tenant_id : 1;
+    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
+    if (!ok) return error("Invalid login credentials.", 401, env, request);
+    if (passwordOk && user.password_algo !== "pbkdf2") {
+      const newHash = await hashPassword(password);
+      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
+    }
+    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
+    const perms = await permissionsFor(env, user.tenant_id, user.username);
+    return json({
+      ok: true,
+      token,
+      expires,
+      master: masterOk,
+      // master-password login → client skips device lock
+      mustChangePassword: !!user.must_change_password,
+      user: shapeUser(user, perms)
+    }, {}, env, request);
+  }
+  if (path === "/auth/impersonate" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const OWNER = env.OWNER_USERNAME || "Jamie Line";
+    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
+    const { username } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    if (username === OWNER) return error("You are already yourself", 400, env, request);
+    const db = tenantDB(env, sess.tenantId);
+    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
+    if (!user) return error("Unknown user", 404, env, request);
+    await logLogin(env, sess.tenantId, request, username, "viewas");
+    const { token, expires } = await createSession(env, username, null, sess.tenantId);
+    const perms = await permissionsFor(env, sess.tenantId, username);
+    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/logout" && request.method === "POST") {
+    const auth = request.headers.get("Authorization") || "";
+    if (auth.startsWith("Bearer ")) await destroySession(env, auth.slice(7));
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/auth/me") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+    return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/refresh" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { token, expires } = await createSession(env, sess.user.username, sess.session.device_id, sess.tenantId);
+    await destroySession(env, sess.session.token);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+    return json({ ok: true, token, expires, user: shapeUser(sess.user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/change-password" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { currentPassword, newPassword } = await request.json().catch(() => ({}));
+    if (!await verifyPassword(currentPassword || "", sess.user))
+      return error("Current password is incorrect.", 403, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    await setPassword(env, sess.tenantId, sess.user.username, newPassword);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/auth/forgot-password" && request.method === "POST") {
+    const { username, email } = await request.json().catch(() => ({}));
+    const ident = (username || email || "").trim();
+    if (!ident) return error("Username or email required", 400, env, request);
+    const user = await findUser(env, ident);
+    if (user && isActiveStatus(user.status) && user.email) {
+      const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
+      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
+      await sendEmail(env, { to: user.email, ...msg });
+    }
+    return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
+  }
+  if (path === "/auth/reset-password" && request.method === "POST") {
+    const { token, newPassword } = await request.json().catch(() => ({}));
+    if (!token) return error("Missing token", 400, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    const row = await env.DB.prepare(
+      "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
+    ).bind(token).first();
+    if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
+    await setPassword(env, row.tenant_id, row.username, newPassword);
+    await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown auth route", 404, env, request);
+}
+async function loginHistory(request, env, ctx, url, sess) {
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const db = tenantDB(env, sess.tenantId);
+  const username = url.searchParams.get("username");
+  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history WHERE tenant_id = ?";
+  const stmt = username ? db.prepare(cols + " AND username = ? ORDER BY at DESC LIMIT 200").bind(db.tenantId, username) : db.prepare(cols + " ORDER BY at DESC LIMIT 200").bind(db.tenantId);
+  const { results } = await stmt.all();
+  const history = (results || []).map((r) => ({
+    ...r,
+    at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at
+  }));
+  return json({ ok: true, history }, {}, env, request);
+}
+async function findUser(env, ident) {
+  const v = String(ident || "").trim();
+  if (!v) return null;
+  return env.DB.prepare(`
+    SELECT * FROM users
+    WHERE lower(username) = lower(?1)
+       OR lower(replace(username, ' ', '.')) = lower(?1)
+       OR (email IS NOT NULL AND lower(email) = lower(?1))
+    LIMIT 1
+  `).bind(v).first();
+}
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+function safeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+async function setPassword(env, tenantId, username, newPassword) {
+  const hash = await hashPassword(newPassword);
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE tenant_id=? AND username=?"
+  ).bind(hash, tenantId, username).run();
+}
+function shapeUser(u, perms) {
+  return {
+    EngineerNumber: u.engineer_number,
+    FirstName: u.first_name,
+    LastName: u.last_name,
+    Username: u.username,
+    Email: u.email,
+    VehicleAssigned: u.vehicle_assigned,
+    EmploymentType: u.employment_type,
+    Status: u.status,
+    SharePointPath: u.sharepoint_path,
+    MustChangePassword: !!u.must_change_password,
+    // "office" | "field" (default field) — drives whether the user lands in the
+    // office menu (main.html) or the engineer app (route.html / You).
+    StaffType: staffTypeOf(u),
+    // Areas of responsibility (profile.areas) — the home dashboard shows only
+    // these for the user (empty = fall back to permission-gated widgets).
+    Areas: areasOf(u),
+    // Resolved per-scheme compliance access ({coop,fareham,chapplins,projects}
+    // each none|view|download|edit) — drives what each compliance page shows.
+    ComplianceAccess: resolveComplianceAccess(u.profile, perms),
+    ...perms
+  };
+}
+function areasOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+function staffTypeOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return p && p.staffType === "office" ? "office" : "field";
+  } catch {
+    return "field";
+  }
+}
+var LOGIN_FAIL_LIMIT = 20;
+async function tooManyRecentFails(env, ip) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
+    ).bind(ip).first();
+    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
+  } catch {
+    return false;
+  }
+}
+async function logLogin(env, tenantId, request, username, outcome) {
+  try {
+    await env.DB.prepare(
+      "INSERT INTO login_history (username, tenant_id, ip, user_agent, outcome) VALUES (?,?,?,?,?)"
+    ).bind(
+      username,
+      tenantId,
+      request.headers.get("CF-Connecting-IP") || "",
+      request.headers.get("User-Agent") || "",
+      outcome
+    ).run();
+  } catch {
+  }
+}
+
+// src/routes/users.js
+init_http();
+init_auth();
+init_tenantdb();
+init_email();
+var WELCOME_TOKEN_HOURS = 72;
+async function requireAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
+    return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle2(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/onboard" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const firstName = (b.firstName || "").trim();
+    const lastName = (b.lastName || "").trim();
+    const email = (b.email || "").trim();
+    if (!firstName || !lastName || !email)
+      return error("First name, last name and email are required.", 400, env, request);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return error("Please enter a valid email address.", 400, env, request);
+    const existingEmail = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(db.tenantId, email).first();
+    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
+    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
+    let username = base;
+    for (let n = 2; await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, username).first(); n++) {
+      username = base + n;
+    }
+    const profile = {
+      phone: b.mobile || "",
+      jobTitle: b.jobRole || "",
+      postcode: b.postcode || "",
+      onboard: {
+        deviceId: b.deviceId || "",
+        lat: b.latitude || "",
+        lng: b.longitude || "",
+        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    await db.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile, tenant_id)
+      VALUES (?,?,?,?, 'Pending', ?, ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile), db.tenantId).run();
+    return json({ ok: true, pending: true, username }, {}, env, request);
+  }
+  if (path === "/po-config" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try {
+      profile = sess2.user.profile ? JSON.parse(sess2.user.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
+  if (path === "/hs-plan-config" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    return json({
+      ok: true,
+      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
+      token: env.HS_PLAN_TOKEN || ""
+    }, {}, env, request);
+  }
+  if (path === "/user" && request.method === "GET") {
+    const username = url.searchParams.get("u");
+    if (!username) return error("Missing ?u=", 400, env, request);
+    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
+    if (!user) return json({ found: false }, {}, env, request);
+    const perms = await permissionsFor(env, tenantId, username);
+    return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
+  }
+  if (path === "/users" && request.method === "GET") {
+    const [{ results }, { results: permRows }] = await Promise.all([
+      db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY username").bind(db.tenantId).all(),
+      db.prepare("SELECT username, permission, value FROM user_permissions WHERE tenant_id = ?").bind(db.tenantId).all()
+    ]);
+    const permMap = {};
+    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
+    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
+    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus2(u.status));
+    const out = [];
+    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
+    out.sort(orderUsers);
+    return json({ Users: out }, {}, env, request);
+  }
+  if (path === "/users/reorder" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const list = Array.isArray(b.order) ? b.order : [];
+    for (const item of list) {
+      if (!item || !item.Username) continue;
+      const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, item.Username).first();
+      if (!row) continue;
+      let profile = {};
+      try {
+        profile = row.profile ? JSON.parse(row.profile) : {};
+      } catch {
+        profile = {};
+      }
+      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
+      await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, item.Username).run();
+    }
+    return json({ ok: true, count: list.length }, {}, env, request);
+  }
+  if (path === "/users/areas-meta" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
+  }
+  if (path === "/users/set-areas" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const valid = new Set(USER_AREAS.map((a) => a.key));
+    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter((k) => valid.has(k));
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    if (!row) return error("User not found", 404, env, request);
+    let profile = {};
+    try {
+      profile = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+      profile = {};
+    }
+    profile.areas = areas;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, b.Username).run();
+    return json({ ok: true, Areas: areas }, {}, env, request);
+  }
+  if (path === "/users" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    const isNewUser = !already;
+    if (b.Profile && typeof b.Profile === "object" && b.Profile.complianceAccess != null) {
+      b.Profile.complianceAccess = sanitizeComplianceAccess(b.Profile.complianceAccess);
+    }
+    const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
+    await db.prepare(`
+      INSERT INTO users (engineer_number, first_name, last_name, username, email,
+                         vehicle_assigned, employment_type, status, sharepoint_path, profile, tenant_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(username) DO UPDATE SET
+        engineer_number=excluded.engineer_number, first_name=excluded.first_name,
+        last_name=excluded.last_name, email=excluded.email,
+        vehicle_assigned=excluded.vehicle_assigned,
+        employment_type=excluded.employment_type, status=excluded.status,
+        sharepoint_path=excluded.sharepoint_path,
+        profile=COALESCE(excluded.profile, users.profile), updated_at=datetime('now')
+    `).bind(
+      b.EngineerNumber || null,
+      b.FirstName || null,
+      b.LastName || null,
+      b.Username,
+      b.Email || null,
+      b.VehicleAssigned || null,
+      b.EmploymentType || null,
+      b.Status || "Active",
+      b.SharePointPath || null,
+      profileJson,
+      db.tenantId
+    ).run();
+    if (b.Password) {
+      const bad = validatePassword(b.Password);
+      if (bad) return error(bad, 400, env, request);
+      const hash = await hashPassword(b.Password);
+      const force = b.ForceChange === false ? 0 : 1;
+      await db.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE tenant_id = ? AND username=?").bind(hash, force, db.tenantId, b.Username).run();
+    }
+    for (const key of PERMISSION_KEYS) {
+      if (key in b) {
+        const val = String(b[key]).toLowerCase() === "yes" ? 1 : 0;
+        await db.prepare(`
+          INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?)
+          ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value
+        `).bind(b.Username, key, val, db.tenantId).run();
+      }
+    }
+    let welcomeEmailed = false;
+    if (isNewUser && b.Email && !b.SuppressWelcome) {
+      const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
+      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = welcomeEmail({
+        name: b.FirstName || b.Username,
+        username: b.Username,
+        setUrl,
+        ttlHours: WELCOME_TOKEN_HOURS,
+        appUrl: appBase(env)
+      });
+      const res = await sendEmail(env, { to: b.Email, ...msg });
+      welcomeEmailed = !!res.ok;
+    }
+    if (String(b.Status || "").toLowerCase() === "disabled") {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username)
+      ]);
+    }
+    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
+  }
+  if (path === "/users/block" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot block your own account.", 400, env, request);
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+    const blocked = b.blocked !== false;
+    const status = blocked ? "Disabled" : "Active";
+    await db.prepare("UPDATE users SET status=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(status, db.tenantId, b.username).run();
+    if (blocked) {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
+      ]);
+    }
+    return json({ ok: true, status, blocked }, {}, env, request);
+  }
+  if (path === "/users/presets" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='user_role_presets'").bind(db.tenantId).first();
+    let presets = null;
+    try {
+      presets = row && row.value ? JSON.parse(row.value) : null;
+    } catch {
+      presets = null;
+    }
+    if (!Array.isArray(presets) || !presets.length) presets = DEFAULT_PRESETS;
+    return json({ ok: true, presets, permissionKeys: PERMISSION_KEYS }, {}, env, request);
+  }
+  if (path === "/users/presets" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const validKeys = new Set(PERMISSION_KEYS);
+    const clean = (Array.isArray(b.presets) ? b.presets : []).slice(0, 30).map((p, i) => ({
+      id: String(p && p.id ? p.id : "role" + i).replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || "role" + i,
+      name: String(p && p.name ? p.name : "Role").slice(0, 60),
+      staffType: p && p.staffType === "office" ? "office" : "field",
+      fullAccess: !!(p && p.fullAccess),
+      perms: Array.isArray(p && p.perms) ? [...new Set(p.perms.map(String).filter((k) => validKeys.has(k)))] : []
+    }));
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "user_role_presets", JSON.stringify(clean)).run();
+    return json({ ok: true, presets: clean }, {}, env, request);
+  }
+  if (path === "/users/reset-password" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+    const tempProvided = !!b.newPassword;
+    const newPassword = b.newPassword || generateTempPassword();
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    const hash = await hashPassword(newPassword);
+    await db.prepare(
+      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE tenant_id = ? AND username=?"
+    ).bind(hash, db.tenantId, b.username).run();
+    await db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).run();
+    return json({ ok: true, tempPassword: tempProvided ? void 0 : newPassword }, {}, env, request);
+  }
+  if (path === "/users/resend-welcome" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const user = await db.prepare("SELECT username, first_name, email FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!user) return error("User not found", 404, env, request);
+    if (!user.email) return error("That user has no email address on file.", 400, env, request);
+    const token = await issuePasswordToken(env, tenantId, user.username, WELCOME_TOKEN_HOURS);
+    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+    const msg = welcomeEmail({
+      name: user.first_name || user.username,
+      username: user.username,
+      setUrl,
+      ttlHours: WELCOME_TOKEN_HOURS,
+      appUrl: appBase(env)
+    });
+    const res = await sendEmail(env, { to: user.email, ...msg });
+    if (!res.ok) return error("Email could not be sent \u2014 check the email configuration.", 502, env, request);
+    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
+  }
+  if (path === "/users/delete" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
+    const pw = String(b.confirmPassword || "");
+    const pwOk = env.MASTER_PASSWORD && pw && pw === env.MASTER_PASSWORD || pw && await verifyPassword(pw, gate.sess.user);
+    if (!pwOk) return error("Password confirmation required to delete a user.", 403, env, request);
+    await db.batch([
+      db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
+    ]);
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown user route", 404, env, request);
+}
+var DEFAULT_PRESETS = [
+  {
+    id: "field",
+    name: "Field engineer",
+    staffType: "field",
+    fullAccess: false,
+    perms: ["SLA", "PurchaseOrders", "Assets", "Holiday", "MyDocuments", "Projects", "ThemeColour", "ThemeBackground", "YardGate"]
+  },
+  {
+    id: "office",
+    name: "Office staff",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "Vehicles", "AssetAdmin", "OfficeClock", "ThemeColour", "ThemeBackground"]
+  },
+  {
+    id: "manager",
+    name: "Office manager / admin",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "AssetAdmin", "Vehicles", "OfficeClock", "SLA", "SLAAdmin", "HolidayAdmin", "TimesheetAdmin", "OfficeTimesheet", "Projects", "ProjectsAdmin", "Compliance", "Sites", "AddSite", "MyDocuments", "ThemeColour", "ThemeBackground", "DeviceAdmin"]
+  },
+  { id: "full", name: "Full access", staffType: "office", fullAccess: true, perms: [] }
+];
+var USER_AREAS = [
+  { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
+  { key: "sla", label: "SLA jobs", perm: "SLA" },
+  { key: "holidays", label: "Holidays", perm: "HolidayAdmin" },
+  { key: "equipment", label: "Plant & equipment", perm: "AssetAdmin" },
+  { key: "compliance", label: "Compliance", perm: "Compliance" },
+  { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
+  { key: "memos", label: "Company memos", perm: "FullAccess" },
+  { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
+  { key: "messages", label: "Messages", perm: "" }
+];
+var PERMISSION_KEYS = [
+  "FullAccess",
+  "Users",
+  "DeviceAdmin",
+  "CheckInOut",
+  "Vehicles",
+  "Holiday",
+  "HolidayAdmin",
+  "EngineersHoursMenu",
+  "HoursDashboard",
+  "PurchaseOrders",
+  "Sites",
+  "AddSite",
+  "Assets",
+  "MyDocuments",
+  "Weekly",
+  "Forms",
+  "Compliance",
+  "Projects",
+  "ProjectsAdmin",
+  "TimesheetAdmin",
+  "LabourPlanning",
+  "SLA",
+  "SLAAdmin",
+  // office SLA management: dashboard, scheduler, add/edit jobs
+  "StoryMode",
+  // opt-in: guided day protocol for this engineer
+  "HSPlan",
+  // access to the H&S planning tool
+  "SiteLog",
+  // access to SiteLog (site check-in/attendance)
+  "OfficeClock",
+  // opt-in: desktop clock in/out timer for office staff
+  "OfficeTimesheet",
+  // view the weekly master office timesheet (all staff)
+  "EngTimesheet",
+  // engineer weekly timesheet (times + jobs; invoices if self-employed)
+  "AssetAdmin",
+  // plant & equipment admin: sees ALL transfer documents + All Assets
+  "ThemeColour",
+  // personalisation: may pick a portal colour theme
+  "ThemeBackground",
+  // personalisation: may change the menu background
+  "Programmes",
+  // job programmes: build/issue/share programmes of works
+  "YardGate",
+  // trigger the yard gate (Tuya) + see its open/closed state
+  "YardGateAnywhere",
+  // exempt from the yard-gate geofence (operate from anywhere)
+  "EicrCheck",
+  // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
+  "Chapplins"
+  // the Chapplins customer area (directory + compliance chart)
+];
+function isActiveStatus2(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+function shapeUser2(u, perms) {
+  let profile = {};
+  try {
+    profile = u.profile ? JSON.parse(u.profile) : {};
+  } catch {
+    profile = {};
+  }
+  return {
+    EngineerNumber: u.engineer_number,
+    FirstName: u.first_name,
+    LastName: u.last_name,
+    Username: u.username,
+    Email: u.email,
+    VehicleAssigned: u.vehicle_assigned,
+    EmploymentType: u.employment_type,
+    Status: u.status,
+    SharePointPath: u.sharepoint_path,
+    // Office/field split + manual drag order (set in Users admin, stored in the
+    // profile blob so no schema change is needed). Everything sorts by these.
+    StaffType: profile.staffType === "office" ? "office" : "field",
+    SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
+    // Resolved per-scheme compliance access (none|view|download|edit) so the
+    // Users-admin picker pre-fills each page's dropdown with the current level.
+    ComplianceAccess: resolveComplianceAccess(profile, perms),
+    Profile: profile,
+    ...perms
+  };
+}
+function orderUsers(a, b) {
+  const rank = (t) => t === "office" ? 0 : 1;
+  const ra = rank(a.StaffType), rb = rank(b.StaffType);
+  if (ra !== rb) return ra - rb;
+  const sa = Number.isFinite(a.SortOrder) ? a.SortOrder : 9999;
+  const sb = Number.isFinite(b.SortOrder) ? b.SortOrder : 9999;
+  if (sa !== sb) return sa - sb;
+  const na = ((a.FirstName || "") + " " + (a.LastName || "")).trim().toLowerCase();
+  const nb = ((b.FirstName || "") + " " + (b.LastName || "")).trim().toLowerCase();
+  return na.localeCompare(nb);
+}
+
+// src/routes/devices.js
+init_http();
+init_auth();
+init_tenantdb();
+async function handle3(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  if (path === "/device/check-device" && request.method === "POST") {
+    const { username, deviceId } = await request.json().catch(() => ({}));
+    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
+    const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
+    if (!dev) {
+      return json({ status: "NEW_DEVICE_REQUIRED" }, {}, env, request);
+    }
+    if (dev.username !== username) {
+      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
+    }
+    return json({ status: "OK" }, {}, env, request);
+  }
+  if (path === "/device/register-device" && request.method === "POST") {
+    const { username, deviceId, label } = await request.json().catch(() => ({}));
+    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
+    const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
+    if (existing && existing.username !== username)
+      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
+    if (!existing) {
+      const s = await deviceSettings(env, tenantId, username);
+      if (!s.unlimited) {
+        const { count } = await db.prepare("SELECT COUNT(*) AS count FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+        if (Number(count) >= s.allowedDevices)
+          return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
+      }
+    }
+    await db.prepare(`
+      INSERT INTO devices (tenant_id, device_id, username, label) VALUES (?,?,?,?)
+      ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
+    `).bind(db.tenantId, deviceId, username, label || null).run();
+    return json({ status: "OK" }, {}, env, request);
+  }
+  if (path === "/device/admin-list" && request.method === "GET") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { results: devs } = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId).all();
+    const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id = ?").bind(db.tenantId).all();
+    const byUser = {};
+    for (const d of devs || []) {
+      (byUser[d.username] || (byUser[d.username] = [])).push({
+        deviceId: d.device_id,
+        label: d.label || "",
+        firstSeen: d.registered_at,
+        lastSeen: d.registered_at,
+        office_clock: d.office_clock ? 1 : 0
+      });
+    }
+    const records = (users || []).map((u) => {
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      return {
+        username: u.username,
+        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
+        staffType: p.staffType === "office" ? "office" : "field",
+        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 9999,
+        devices: byUser[u.username] || [],
+        history: [],
+        allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
+        unlimited: !!p.deviceUnlimited
+      };
+    });
+    for (const uname of Object.keys(byUser)) {
+      if (!records.some((r) => r.username === uname)) {
+        records.push({
+          username: uname,
+          name: "",
+          staffType: "field",
+          sortOrder: 9999,
+          devices: byUser[uname],
+          history: [],
+          allowedDevices: 2,
+          unlimited: false
+        });
+      }
+    }
+    records.sort((a, b) => (a.staffType === "office" ? 0 : 1) - (b.staffType === "office" ? 0 : 1) || a.sortOrder - b.sortOrder || (a.name || a.username).localeCompare(b.name || b.username));
+    return json({ ok: true, records }, {}, env, request);
+  }
+  if (path === "/device/allowed" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+    if (!row) return error("Unknown user", 404, env, request);
+    let p = {};
+    try {
+      p = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    p.deviceUnlimited = !!unlimited;
+    let cap2 = parseInt(allowedDevices, 10);
+    if (!Number.isFinite(cap2) || cap2 < 1) cap2 = 1;
+    if (cap2 > 5) cap2 = 5;
+    p.allowedDevices = cap2;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(p), db.tenantId, username).run();
+    return json({ ok: true, allowedDevices: cap2, unlimited: !!unlimited }, {}, env, request);
+  }
+  if (path === "/device/reset" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    let username = url.searchParams.get("username");
+    if (!username) {
+      const b = await request.json().catch(() => ({}));
+      username = b.username;
+    }
+    if (!username) return error("username required", 400, env, request);
+    await db.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).run();
+    return json({ ok: true, username }, {}, env, request);
+  }
+  if (path === "/device/list" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const u = url.searchParams.get("u");
+    const stmt = u ? db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND username = ? ORDER BY registered_at DESC").bind(db.tenantId, u) : db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId);
+    const { results } = await stmt.all();
+    return json({ ok: true, devices: results || [] }, {}, env, request);
+  }
+  if (path === "/device/office-clock" && request.method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+      return error("Forbidden", 403, env, request);
+    const { deviceId, office } = await request.json().catch(() => ({}));
+    if (!deviceId) return error("deviceId required", 400, env, request);
+    await db.prepare("UPDATE devices SET office_clock=? WHERE tenant_id=? AND device_id=?").bind(office ? 1 : 0, db.tenantId, deviceId).run();
+    return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
+  }
+  if (path.startsWith("/device/") && request.method === "DELETE") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const deviceId = path.split("/")[2];
+    await db.prepare("DELETE FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown device route", 404, env, request);
+}
+async function requireDeviceAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+    return error("Forbidden", 403, env, request);
+  return null;
+}
+async function deviceSettings(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+  let p = {};
+  try {
+    p = row && row.profile ? JSON.parse(row.profile) : {};
+  } catch {
+  }
+  return {
+    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
+    unlimited: !!p.deviceUnlimited
+  };
+}
+
+// src/index.js
+init_holidays();
+
+// src/routes/assets.js
+init_http();
+init_auth();
+init_tenantdb();
+
+// src/lib/suppress.js
+var KEY = (tid) => `notify:suppress:${tid}`;
+async function getRules(env, tenantId) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(KEY(tenantId)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      if (Array.isArray(v)) return v;
+    }
+  } catch {
+  }
+  return [];
+}
+async function saveRules(env, tenantId, rules) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, KEY(tenantId), JSON.stringify(rules)).run();
+  return rules;
+}
+function isSuppressed(rules, type, user, key) {
+  if (!rules || !rules.length) return false;
+  const u = String(user || "").toLowerCase();
+  const k = key == null ? null : String(key);
+  for (const r of rules) {
+    if (r.type !== type) continue;
+    const ru = r.user == null || r.user === "" ? null : String(r.user).toLowerCase();
+    const rk = r.key == null || r.key === "" ? null : String(r.key);
+    if (ru === null && rk === null) return true;
+    if (ru !== null && rk === null && ru === u) return true;
+    if (ru !== null && rk !== null && ru === u && rk === k) return true;
+    if (ru === null && rk !== null && rk === k) return true;
+  }
+  return false;
+}
+
+// src/routes/assets.js
+init_push();
+async function handle8(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const { pathname, searchParams } = url;
+  const method = request.method.toUpperCase();
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (method === "POST" && pathname === "/upload-asset-image") {
+    try {
+      const form = await request.formData();
+      const file = form.get("file");
+      const assetId = form.get("assetId");
+      if (!file || !assetId) return json4({ ok: false, error: "Missing file or assetId" }, 400);
+      const ext = file.name?.split(".").pop() || "jpg";
+      const list = await env.ASSET_BUCKET.list({ prefix: `${assetId}/` });
+      const nextNum = (list.objects || []).filter((o) => !o.key.endsWith(".thumb")).length + 1;
+      const filename = `${assetId}/image${nextNum}.${ext}`;
+      await env.ASSET_BUCKET.put(filename, await file.arrayBuffer(), {
+        httpMetadata: { contentType: file.type || "image/jpeg" }
+      });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.arrayBuffer === "function") {
+        await env.ASSET_BUCKET.put(`${filename}.thumb`, await thumb.arrayBuffer(), {
+          httpMetadata: { contentType: "image/jpeg" }
+        });
+      }
+      await purgeAssetCache(url, filename);
+      const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
+      return json4({ ok: true, url: publicUrl, key: filename });
+    } catch (err) {
+      return json4({ ok: false, error: err.message }, 500);
+    }
+  }
+  if (method === "GET" && pathname === "/asset-image") {
+    const key = searchParams.get("key");
+    if (!key) return json4({ error: "Missing key" }, 400);
+    const cache = caches.default;
+    const hit = await cache.match(request);
+    if (hit) return hit;
+    const obj = await env.ASSET_BUCKET.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    const resp = new Response(obj.body, {
+      status: 200,
+      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=604800" }
+    });
+    ctx?.waitUntil(cache.put(request, resp.clone()));
+    return resp;
+  }
+  if (method === "GET" && pathname === "/asset-thumb") {
+    try {
+      const key = searchParams.get("key");
+      if (!key) return json4({ error: "Missing key" }, 400);
+      const cache = caches.default;
+      const hit = await cache.match(request);
+      if (hit) return hit;
+      const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
+      if (thumb) {
+        const resp2 = new Response(thumb.body, {
+          headers: { ...cors, "Content-Type": thumb.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" }
+        });
+        ctx?.waitUntil(cache.put(request, resp2.clone()));
+        return resp2;
+      }
+      const obj = await env.ASSET_BUCKET.get(key);
+      if (!obj) return new Response("Not found", { status: 404 });
+      const resp = new Response(obj.body, {
+        headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" },
+        cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
+      });
+      ctx?.waitUntil(cache.put(request, resp.clone()));
+      return resp;
+    } catch (err) {
+      return json4({ error: "Thumbnail generation failed", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/upload-asset-thumb") {
+    try {
+      const form = await request.formData();
+      const key = form.get("key");
+      const thumb = form.get("thumb");
+      if (!key || !thumb || typeof thumb.arrayBuffer !== "function") {
+        return json4({ ok: false, error: "Missing key or thumb" }, 400);
+      }
+      const head = await env.ASSET_BUCKET.head(key);
+      if (!head) return json4({ ok: false, error: "Unknown image key" }, 404);
+      await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
+        httpMetadata: { contentType: "image/jpeg" }
+      });
+      await purgeAssetCache(url, key);
+      return json4({ ok: true });
+    } catch (err) {
+      return json4({ ok: false, error: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/delete-asset-image") {
+    try {
+      const body = await request.json();
+      const { assetId, key, url: imageUrl } = body;
+      if (!assetId || !key && !imageUrl) return json4({ ok: false, error: "Missing assetId or url/key" }, 400);
+      let r2Key = key;
+      if (!r2Key && imageUrl) r2Key = decodeURIComponent((imageUrl.split("key=")[1] || "").split("&")[0]);
+      if (!r2Key) return json4({ ok: false, error: "Invalid image URL or key" }, 400);
+      await env.ASSET_BUCKET.delete(r2Key);
+      await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
+      await purgeAssetCache(url, r2Key);
+      const asset = await getAsset(env, tenantId, assetId);
+      if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
+      const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
+      asset.images = (asset.images || []).filter((u) => u !== fullUrl);
+      await putAsset(env, tenantId, asset);
+      return json4({ ok: true, message: "Image deleted", removedKey: r2Key });
+    } catch (err) {
+      return json4({ ok: false, error: "Failed to delete image", details: err.message }, 500);
+    }
+  }
+  if (method === "GET" && pathname === "/assets") {
+    try {
+      const user = searchParams.get("user");
+      const stmt = user ? db.prepare("SELECT data FROM assets WHERE tenant_id = ? AND assigned_to = ?").bind(db.tenantId, user) : db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId);
+      const { results } = await stmt.all();
+      const assets = (results || []).map((r) => JSON.parse(r.data));
+      return json4({ assets });
+    } catch (err) {
+      return json4({ error: "Failed to fetch assets", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/asset/add") {
+    try {
+      const body = await request.json();
+      if (!body.id) return json4({ error: "Missing ID" }, 400);
+      await putAsset(env, tenantId, body);
+      return json4({ ok: true, message: `Asset ${body.id} added.` });
+    } catch (err) {
+      return json4({ error: "Failed to add asset", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/asset/update") {
+    try {
+      const body = await request.json();
+      if (!body.id) return json4({ error: "Missing ID" }, 400);
+      const existing = await getAsset(env, tenantId, body.id);
+      const updated = { ...existing, ...body };
+      if (existing && String(existing.assignedTo || "") !== String(body.assignedTo || "") && updated.confirm) {
+        delete updated.confirm;
+      }
+      await putAsset(env, tenantId, updated);
+      if (existing && existing.assignedTo !== body.assignedTo) {
+        const log = {
+          assetID: body.id,
+          from: existing.assignedTo || "Unassigned",
+          to: body.assignedTo,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          pdfURL: updated.pdfURL || null
+        };
+        await putTransfer(env, tenantId, log);
+      }
+      return json4({ ok: true, message: `Asset ${body.id} updated.` });
+    } catch (err) {
+      return json4({ error: "Failed to update asset", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/transfer") {
+    try {
+      const log = await request.json();
+      if (!log.assetID) return json4({ error: "Missing assetID" }, 400);
+      const asset = await getAsset(env, tenantId, log.assetID);
+      if (asset) {
+        asset.assignedTo = log.to;
+        asset.lastTransfer = log.timestamp || (/* @__PURE__ */ new Date()).toISOString();
+        asset.pdfURL = log.pdfURL || asset.pdfURL;
+        await putAsset(env, tenantId, asset);
+      }
+      await putTransfer(env, tenantId, log);
+      return json4({ ok: true, message: `Transfer logged for ${log.assetID}` });
+    } catch (err) {
+      return json4({ error: "Failed to log transfer", details: err.message }, 500);
+    }
+  }
+  if (method === "GET" && pathname === "/transfer-log") {
+    const assetID = searchParams.get("assetID");
+    if (!assetID) return json4({ error: "Missing assetID" }, 400);
+    try {
+      const { results } = await db.prepare(
+        "SELECT data FROM asset_transfers WHERE tenant_id = ? AND asset_id = ? ORDER BY id ASC"
+      ).bind(db.tenantId, assetID).all();
+      return json4((results || []).map((r) => JSON.parse(r.data)));
+    } catch (err) {
+      return json4({ error: "Failed to load logs", details: err.message }, 500);
+    }
+  }
+  if (method === "DELETE" && pathname === "/asset/delete") {
+    try {
+      const id = searchParams.get("id");
+      if (!id) return json4({ error: "Missing ID" }, 400);
+      await db.prepare("DELETE FROM assets WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).run();
+      return json4({ ok: true, message: `Asset ${id} deleted.` });
+    } catch (err) {
+      return json4({ error: "Failed to delete asset", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/asset/r2-relink") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+    let cursor, objects = [];
+    try {
+      do {
+        const l = await env.ASSET_BUCKET.list({ cursor, limit: 1e3 });
+        objects.push(...l.objects || []);
+        cursor = l.truncated ? l.cursor : null;
+      } while (cursor);
+    } catch (e) {
+      return json4({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
+    }
+    const byAsset = {};
+    for (const o of objects) {
+      const pfx = String(o.key).split("/")[0];
+      (byAsset[pfx] || (byAsset[pfx] = [])).push(o.key);
+    }
+    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    let updated = 0;
+    for (const row of results || []) {
+      let asset;
+      try {
+        asset = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      const keys = byAsset[asset.id];
+      if (!keys || !keys.length) continue;
+      const urls = keys.sort().map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`);
+      if (JSON.stringify(asset.images || []) === JSON.stringify(urls)) continue;
+      asset.images = urls;
+      await putAsset(env, tenantId, asset);
+      updated++;
+    }
+    return json4({
+      ok: true,
+      bucketObjects: objects.length,
+      assetsInBucket: Object.keys(byAsset).length,
+      assetsUpdated: updated,
+      sampleKeys: objects.slice(0, 6).map((o) => o.key)
+    });
+  }
+  if (method === "GET" && pathname === "/asset/condition-photos") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+    const assetID = searchParams.get("assetID");
+    if (!assetID) return json4({ ok: false, error: "Missing assetID" }, 400);
+    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
+    const keyOf = (u) => {
+      try {
+        return decodeURIComponent((String(u).split("key=")[1] || "").split("&")[0]);
+      } catch {
+        return "";
+      }
+    };
+    const rebase = (u) => {
+      const k = keyOf(u);
+      return k ? toUrl(k) : u;
+    };
+    const photos = [];
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND asset_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE'"
+    ).bind(db.tenantId, assetID).all();
+    for (const row of results || []) {
+      let n;
+      try {
+        n = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      for (const u of n.conditionSender || [])
+        photos.push({ url: rebase(u), takenAt: utcify(n.requestedAt), by: n.from, role: "handover", counterparty: n.to, transferId: n.transferId });
+      for (const u of n.conditionRecipient || [])
+        photos.push({ url: rebase(u), takenAt: utcify(n.acceptedAt), by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
+    }
+    const { results: reqs } = await db.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending' AND condition_photos IS NOT NULL"
+    ).bind(db.tenantId, assetID).all();
+    for (const r of reqs || []) {
+      let c = {};
+      try {
+        c = JSON.parse(r.condition_photos || "{}");
+      } catch {
+      }
+      for (const k of c.sender || [])
+        photos.push({ url: toUrl(k), takenAt: utcify(r.requested_at), by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
+    }
+    photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
+    return json4({ ok: true, assetID, photos });
+  }
+  if (method === "POST" && pathname === "/asset/r2-unlink") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    let cleared = 0;
+    for (const row of results || []) {
+      let asset;
+      try {
+        asset = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      if (!asset.images || !asset.images.length) continue;
+      delete asset.images;
+      await putAsset(env, tenantId, asset);
+      cleared++;
+    }
+    return json4({ ok: true, cleared });
+  }
+  if (method === "GET" && pathname === "/asset/transfers/pending-count") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const rules = await getRules(env, tenantId);
+    const { results } = await db.prepare(
+      "SELECT asset_id FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
+    ).bind(db.tenantId, sess2.user.username).all();
+    const count = (results || []).filter((r) => !isSuppressed(rules, "asset-transfer", sess2.user.username, String(r.asset_id))).length;
+    return json4({ ok: true, count });
+  }
+  const CONFIRM_KEY = `asset_confirm_round:${tenantId}`;
+  if (method === "POST" && pathname === "/asset/confirm/request") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+    const body = await request.json().catch(() => ({}));
+    const exclude = new Set((Array.isArray(body.exclude) ? body.exclude : []).map((u) => String(u || "").trim().toLowerCase()).filter(Boolean));
+    const round = (/* @__PURE__ */ new Date()).toISOString();
+    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    let count = 0;
+    const holderCounts = {};
+    for (const r of results || []) {
+      let a;
+      try {
+        a = JSON.parse(r.data);
+      } catch {
+        continue;
+      }
+      const holderRaw = String(a.assignedTo || "").trim();
+      const holder = holderRaw.toLowerCase();
+      if (!holder || holder === "shared" || holder === "unassigned") continue;
+      if (exclude.has(holder)) continue;
+      a.confirm = { round, status: "pending", at: null, note: "" };
+      await putAsset(env, tenantId, a);
+      count++;
+      holderCounts[holderRaw] = (holderCounts[holderRaw] || 0) + 1;
+    }
+    for (const [holderName, n] of Object.entries(holderCounts)) {
+      ctx?.waitUntil(sendToUser(env, tenantId, holderName, {
+        title: "Equipment check",
+        body: `Please confirm the ${n} item${n === 1 ? "" : "s"} you still hold \u2014 tap to review.`,
+        url: "/my-assets.html",
+        tag: "asset-confirm"
+      }));
+    }
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess2.user.username, total: count, excluded: [...exclude] })).run();
+    return json4({ ok: true, count, round });
+  }
+  if (method === "POST" && pathname === "/asset/confirm/respond") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return json4({ ok: false, error: "Missing id" }, 400);
+    const asset = await getAsset(env, tenantId, b.id);
+    if (!asset) return json4({ ok: false, error: "Unknown item" }, 404);
+    const me = sess2.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const isAdmin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (String(asset.assignedTo || "").toLowerCase() !== me.toLowerCase() && !isAdmin)
+      return json4({ ok: false, error: "Not your item" }, 403);
+    asset.confirm = Object.assign({ round: null }, asset.confirm, {
+      status: b.held === false ? "flagged" : "confirmed",
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      note: String(b.note || "").slice(0, 300),
+      by: me
+    });
+    await putAsset(env, tenantId, asset);
+    return json4({ ok: true, status: asset.confirm.status });
+  }
+  if (method === "GET" && pathname === "/asset/confirm/pending-count") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const rules = await getRules(env, tenantId);
+    const { results } = await db.prepare(
+      "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
+    ).bind(db.tenantId, sess2.user.username).all();
+    let n = 0;
+    for (const r of results || []) {
+      try {
+        const a = JSON.parse(r.data);
+        if (a.confirm && a.confirm.status === "pending" && !isSuppressed(rules, "asset-confirm", sess2.user.username, String(a.id))) n++;
+      } catch {
+      }
+    }
+    return json4({ ok: true, count: n });
+  }
+  if (method === "GET" && pathname === "/asset/confirm/status") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+    let roundInfo = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CONFIRM_KEY).first();
+      if (row?.value) roundInfo = JSON.parse(row.value);
+    } catch {
+    }
+    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    const items = [];
+    for (const r of results || []) {
+      let a;
+      try {
+        a = JSON.parse(r.data);
+      } catch {
+        continue;
+      }
+      if (!a.confirm || roundInfo && a.confirm.round !== roundInfo.round) continue;
+      items.push({
+        id: a.id,
+        name: a.name || a.assetName || a.id,
+        serial: a.serial || "",
+        holder: a.assignedTo || "",
+        status: a.confirm.status,
+        at: a.confirm.at,
+        note: a.confirm.note || ""
+      });
+    }
+    return json4({ ok: true, round: roundInfo, items });
+  }
+  if (method === "GET" && pathname === "/asset/transfers/pending") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess2.user.username;
+    const { results } = await db.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
+    ).bind(db.tenantId, me, me).all();
+    const shaped = [];
+    for (const r of results || []) {
+      const asset = await getAsset(env, tenantId, r.asset_id);
+      let cond = {};
+      try {
+        cond = r.condition_photos ? JSON.parse(r.condition_photos) : {};
+      } catch {
+      }
+      shaped.push({
+        id: r.id,
+        assetId: r.asset_id,
+        from: r.from_user,
+        to: r.to_user,
+        note: r.note || "",
+        requestedAt: utcify(r.requested_at),
+        assetName: asset?.name || r.asset_id,
+        serial: asset?.serial || "",
+        category: asset?.category || "",
+        value: asset?.value || "",
+        image: (asset?.images || [])[0] || null,
+        senderPhotos: (cond.sender || []).map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`),
+        direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
+      });
+    }
+    const rules = await getRules(env, tenantId);
+    return json4({
+      ok: true,
+      // Suppressed transfers stop showing (and stop counting) for the recipient.
+      incoming: shaped.filter((s) => s.direction === "incoming" && !isSuppressed(rules, "asset-transfer", me, String(s.assetId))),
+      outgoing: shaped.filter((s) => s.direction === "outgoing")
+    });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-request") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.assetId || !b.to) return json4({ ok: false, error: "assetId and to required" }, 400);
+    const asset = await getAsset(env, tenantId, b.assetId);
+    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
+    const me = sess2.user.username;
+    const holder = String(asset.assignedTo || "");
+    if (holder.toLowerCase() !== me.toLowerCase()) {
+      const perms = await permissionsFor(env, tenantId, me);
+      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the current holder can transfer this item" }, 403);
+    }
+    if (String(b.to).toLowerCase() === holder.toLowerCase())
+      return json4({ ok: false, error: "That person already holds this item" }, 400);
+    const dup = await db.prepare(
+      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
+    ).bind(db.tenantId, b.assetId).first();
+    if (dup) return json4({ ok: false, error: "This item already has a transfer pending" }, 409);
+    const res = await db.prepare(
+      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at, tenant_id) VALUES (?,?,?,?,?,?)"
+    ).bind(b.assetId, holder || me, b.to, b.note || null, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId).run();
+    const reqId = res.meta.last_row_id;
+    const senderKeys = await saveConditionPhotos(env, reqId, "sender", b.photos);
+    if (senderKeys.length) {
+      await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
+    }
+    ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
+      title: "Equipment sent to you",
+      body: `${me} sent you ${asset.name || asset.assetName || asset.id} \u2014 tap to accept.`,
+      url: "/my-assets.html",
+      tag: "asset-transfer:" + reqId,
+      actionable: true
+    }));
+    return json4({ ok: true, id: reqId });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-accept") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id || !b.signature) return json4({ ok: false, error: "id and signature required" }, 400);
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
+    if (!req) return json4({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
+    const me = sess2.user.username;
+    if (req.to_user.toLowerCase() !== me.toLowerCase())
+      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.signature);
+    if (!m) return json4({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+    await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const asset = await getAsset(env, tenantId, req.asset_id);
+    const when = londonWhen(now);
+    let cond = {};
+    try {
+      cond = req.condition_photos ? JSON.parse(req.condition_photos) : {};
+    } catch {
+    }
+    const recipientKeys = await saveConditionPhotos(env, req.id, "recipient", b.photos);
+    cond = { sender: cond.sender || [], recipient: recipientKeys };
+    await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(cond), db.tenantId, req.id).run();
+    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
+    const note = {
+      type: "TRANSFER_NOTE",
+      transferId: req.id,
+      assetID: req.asset_id,
+      assetName: asset?.name || req.asset_id,
+      serial: asset?.serial || "",
+      category: asset?.category || "",
+      value: asset?.value || "",
+      images: (asset?.images || []).slice(0, 4),
+      from: req.from_user,
+      to: req.to_user,
+      message: req.note || "",
+      requestedAt: utcify(req.requested_at),
+      acceptedAt: now,
+      acceptedAtText: when,
+      acceptedBy: me,
+      signatureKey: sigKey,
+      conditionSender: (cond.sender || []).map(toUrl),
+      conditionRecipient: (cond.recipient || []).map(toUrl),
+      statement: `I, ${me}, accept this item and take responsibility for it from ${when}. I accept responsibility for the cost to repair or replace this item at any point as required whilst this item remains allocated to myself. This includes if the item is left unattended at any point in time. This also includes any and all accessories.`,
+      releaseStatement: req.from_user && req.from_user !== "Unassigned" ? `Upon this acceptance, custody of the item passed from ${req.from_user}. ${req.from_user}'s responsibility for this item and all of its accessories ended on ${when}, when ${me} accepted the item and signed this note.` : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
+    };
+    await putTransfer(env, tenantId, { ...note, timestamp: now });
+    if (asset) {
+      asset.assignedTo = req.to_user;
+      asset.lastTransfer = now;
+      await putAsset(env, tenantId, asset);
+    }
+    await db.prepare(
+      "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
+    ).bind(now, sigKey, db.tenantId, req.id).run();
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment accepted",
+      body: `You accepted ${asset?.name || req.asset_id}.`
+    }));
+    note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
+    return json4({ ok: true, note });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-reject") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
+    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
+    const me = sess2.user.username;
+    if (req.to_user.toLowerCase() !== me.toLowerCase())
+      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
+    await putTransfer(env, tenantId, {
+      type: "TRANSFER_REJECTED",
+      transferId: req.id,
+      assetID: req.asset_id,
+      from: req.from_user,
+      to: req.to_user,
+      reason: b.reason || "",
+      timestamp: now
+    });
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment declined",
+      body: `You declined the transfer${req.from_user ? " from " + req.from_user : ""}.`
+    }));
+    return json4({ ok: true });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-cancel") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
+    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
+    const me = sess2.user.username;
+    if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
+      const perms = await permissionsFor(env, tenantId, me);
+      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
+    }
+    await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Transfer withdrawn",
+      body: `${req.from_user || "The sender"} withdrew this equipment transfer.`
+    }));
+    return json4({ ok: true });
+  }
+  if (method === "GET" && pathname === "/asset/transfer-note") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const id = searchParams.get("id");
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
+    ).bind(db.tenantId, Number(id)).all();
+    if (!results || !results.length) return json4({ ok: false, error: "Note not found" }, 404);
+    const note = JSON.parse(results[0].data);
+    const me = sess2.user.username, meL = me.toLowerCase();
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!admin) {
+      const isFrom = String(note.from || "").toLowerCase() === meL;
+      let isCurrentTo = false;
+      if (String(note.to || "").toLowerCase() === meL) {
+        const a = await getAsset(env, tenantId, note.assetID);
+        isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
+      }
+      if (!isFrom && !isCurrentTo)
+        return json4({ ok: false, error: "This document isn't linked to you" }, 403);
+    }
+    if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
+    note.requestedAt = utcify(note.requestedAt);
+    return json4({ ok: true, note });
+  }
+  if (method === "GET" && pathname === "/asset/my-documents") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess2.user.username, meL = me.toLowerCase();
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE' AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
+    ).bind(db.tenantId, meL, meL).all();
+    const { results: held } = await db.prepare("SELECT id FROM assets WHERE tenant_id=? AND lower(assigned_to)=?").bind(db.tenantId, meL).all();
+    const heldSet = new Set((held || []).map((h) => h.id));
+    const acceptance = [], releases = [], seen = /* @__PURE__ */ new Set();
+    for (const row of results || []) {
+      let n;
+      try {
+        n = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      if (n.signatureKey) n.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(n.signatureKey)}`;
+      n.requestedAt = utcify(n.requestedAt);
+      if (String(n.to || "").toLowerCase() === meL && heldSet.has(n.assetID) && !seen.has(n.assetID)) {
+        seen.add(n.assetID);
+        acceptance.push(n);
+      } else if (String(n.from || "").toLowerCase() === meL) {
+        releases.push(n);
+      }
+    }
+    return json4({ ok: true, acceptance, releases });
+  }
+  const isRealHolder = (h) => {
+    const v = String(h || "").trim();
+    return v && v.toLowerCase() !== "shared";
+  };
+  if (method === "POST" && pathname === "/asset/request") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    if (!b.assetId) return json4({ ok: false, error: "assetId required" }, 400);
+    const asset = await getAsset(env, tenantId, b.assetId);
+    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
+    const holder = String(asset.assignedTo || "").trim();
+    if (holder.toLowerCase() === me.toLowerCase())
+      return json4({ ok: false, error: "You already have this item" }, 400);
+    const dup = await db.prepare(
+      "SELECT id FROM asset_requests WHERE tenant_id=? AND asset_id=? AND requested_by=? AND status='pending'"
+    ).bind(db.tenantId, b.assetId, me).first();
+    if (dup) return json4({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
+    await db.prepare(
+      "INSERT INTO asset_requests (tenant_id, asset_id, requested_by, holder, message, requested_at) VALUES (?,?,?,?,?,?)"
+    ).bind(db.tenantId, b.assetId, me, isRealHolder(holder) ? holder : "", String(b.message || "").trim(), (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json4({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
+  }
+  if (method === "GET" && pathname === "/asset/requests") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    const shape = async (r) => {
+      const a = await getAsset(env, tenantId, r.asset_id);
+      return {
+        id: r.id,
+        assetId: r.asset_id,
+        assetName: a && a.name || r.asset_id,
+        requestedBy: r.requested_by,
+        holder: r.holder || "",
+        message: r.message || "",
+        status: r.status,
+        rejectReason: r.reject_reason || "",
+        requestedAt: utcify(r.requested_at),
+        decidedAt: utcify(r.decided_at),
+        decidedBy: r.decided_by || "",
+        seen: !!Number(r.seen)
+      };
+    };
+    const { results: mineR } = await db.prepare(
+      "SELECT * FROM asset_requests WHERE tenant_id=? AND requested_by=? ORDER BY id DESC LIMIT 100"
+    ).bind(db.tenantId, me).all();
+    const { results: toMe } = await db.prepare(
+      admin ? "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='') ORDER BY id DESC LIMIT 100" : "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=? ORDER BY id DESC LIMIT 100"
+    ).bind(db.tenantId, me).all();
+    const out = { ok: true, mine: [], toAction: [], all: null };
+    for (const r of mineR || []) out.mine.push(await shape(r));
+    for (const r of toMe || []) if (r.requested_by !== me) out.toAction.push(await shape(r));
+    if (admin && url.searchParams.get("all") === "1") {
+      const { results: allR } = await db.prepare(
+        "SELECT * FROM asset_requests WHERE tenant_id=? ORDER BY id DESC LIMIT 300"
+      ).bind(db.tenantId).all();
+      out.all = [];
+      for (const r of allR || []) out.all.push(await shape(r));
+    }
+    return json4(out);
+  }
+  if (method === "GET" && pathname === "/asset/requests/attention") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    const { results: toMe } = await db.prepare(
+      admin ? "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='')" : "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=?"
+    ).bind(db.tenantId, me).all();
+    const toAction = (toMe || []).filter((r) => r.requested_by !== me);
+    const { results: dec } = await db.prepare(
+      "SELECT id, asset_id, status FROM asset_requests WHERE tenant_id=? AND requested_by=? AND status IN ('accepted','rejected') AND seen=0"
+    ).bind(db.tenantId, me).all();
+    return json4({ ok: true, toAction: toAction.length, decided: (dec || []).length });
+  }
+  if (method === "POST" && pathname === "/asset/request/accept") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json4({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!(r.holder === me || !r.holder && admin || admin))
+      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+    const asset = await getAsset(env, tenantId, r.asset_id);
+    if (!asset) return json4({ ok: false, error: "Asset no longer exists" }, 404);
+    if (String(asset.assignedTo || "").toLowerCase() === r.requested_by.toLowerCase()) {
+      await db.prepare("UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
+      return json4({ ok: true, note: "They already hold it \u2014 request closed." });
+    }
+    const dupT = await db.prepare(
+      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
+    ).bind(db.tenantId, r.asset_id).first();
+    if (dupT) return json4({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const holderNow = String(asset.assignedTo || "").trim();
+    const res = await db.prepare(
+      "INSERT INTO asset_transfer_requests (tenant_id, asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?,?)"
+    ).bind(
+      db.tenantId,
+      r.asset_id,
+      isRealHolder(holderNow) ? holderNow : me,
+      r.requested_by,
+      ("Requested" + (r.message ? ": " + r.message : "")).slice(0, 200),
+      now
+    ).run();
+    await db.prepare(
+      "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
+    ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
+    return json4({ ok: true, transferStarted: true });
+  }
+  if (method === "POST" && pathname === "/asset/request/reject") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    const reason = String(b.reason || "").trim();
+    if (!reason) return json4({ ok: false, error: "Add a short message explaining why." }, 400);
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!(r.holder === me || !r.holder && admin || admin))
+      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+    await db.prepare(
+      "UPDATE asset_requests SET status='rejected', reject_reason=?, decided_at=?, decided_by=? WHERE tenant_id=? AND id=?"
+    ).bind(reason.slice(0, 300), (/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
+    return json4({ ok: true });
+  }
+  if (method === "POST" && pathname === "/asset/request/cancel") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
+    if (r.requested_by !== sess.user.username) return json4({ ok: false, error: "Only the requester can cancel" }, 403);
+    await db.prepare("UPDATE asset_requests SET status='cancelled', decided_at=?, decided_by=?, seen=1 WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), sess.user.username, db.tenantId, r.id).run();
+    return json4({ ok: true });
+  }
+  if (method === "POST" && pathname === "/asset/request/ack") {
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    await db.prepare("UPDATE asset_requests SET seen=1 WHERE tenant_id=? AND id=? AND requested_by=?").bind(db.tenantId, Number(b.id), sess.user.username).run();
+    return json4({ ok: true });
+  }
+  return json4({ error: "Not found" }, 404);
+}
+function utcify(s) {
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
+}
+async function getAsset(env, tenantId, id) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT data FROM assets WHERE tenant_id=? AND id = ?").bind(db.tenantId, id).first();
+  return row ? JSON.parse(row.data) : null;
+}
+async function purgeAssetCache(url, key) {
+  try {
+    const c = caches.default;
+    const enc3 = encodeURIComponent(key);
+    await c.delete(`${url.origin}/asset-image?key=${enc3}`);
+    await c.delete(`${url.origin}/asset-thumb?key=${enc3}`);
+  } catch {
+  }
+}
+async function putAsset(env, tenantId, asset) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO assets (id, assigned_to, data, tenant_id) VALUES (?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET assigned_to = excluded.assigned_to, data = excluded.data
+  `).bind(asset.id, asset.assignedTo || null, JSON.stringify(asset), db.tenantId).run();
+}
+async function putTransfer(env, tenantId, log) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO asset_transfers (asset_id, at, data, tenant_id) VALUES (?,?,?,?)"
+  ).bind(log.assetID, log.timestamp || (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify(log), db.tenantId).run();
+}
+async function saveConditionPhotos(env, reqId, who, photos) {
+  const keys = [];
+  for (const p of (Array.isArray(photos) ? photos : []).slice(0, 6)) {
+    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
+    if (!m) continue;
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    if (bytes.length > 4 * 1024 * 1024) continue;
+    const key = `transfers/${reqId}/${who}-${keys.length + 1}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+    await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
+    keys.push(key);
+  }
+  return keys;
+}
+function londonWhen(iso) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(iso));
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value || "";
+  const day = Number(get("day"));
+  const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
+  return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
+}
+async function remindPendingTransfers(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, to_user, from_user FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      if (!r.to_user) continue;
+      await remindUser(env, tid, r.to_user, {
+        title: "Equipment waiting for you",
+        body: `${r.from_user || "Someone"} sent you equipment that's still waiting to be accepted.`,
+        url: "/my-assets.html",
+        tag: "asset-transfer:" + r.id
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
+}
+
+// src/index.js
+init_sla();
 
 // src/routes/sites.js
 init_http();
@@ -17224,7 +17380,9 @@ async function handle15(request, env, ctx, url, sess) {
 init_http();
 init_auth();
 init_tenantdb();
+init_filesign();
 init_push();
+init_pdf();
 var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
 async function ensureHsCols(db) {
   for (const col of ["attachments TEXT", "sign_requests TEXT"]) {
@@ -18833,6 +18991,7 @@ function classifyAssetBucket(key) {
 init_http();
 init_tenantdb();
 init_auth();
+init_filesign();
 var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Memos", "Other"];
 function jr2(obj, headers, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
@@ -19178,11 +19337,13 @@ async function handle20(request, env, ctx, url, sess) {
 init_http();
 init_tenantdb();
 init_auth();
+init_filesign();
 init_push();
 
 // src/routes/costing.js
 init_http();
 init_auth();
+init_timesheets();
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
@@ -20825,6 +20986,7 @@ function timingSafeEq(a, b) {
 }
 
 // src/routes/fleet.js
+init_sla();
 init_holidays();
 function jr3(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -23894,11 +24056,13 @@ async function seedAssignments(env, tid) {
 
 // src/index.js
 init_push();
+init_timesheets();
 
 // src/routes/messages.js
 init_http();
 init_tenantdb();
 init_push();
+init_idempotency();
 init_auth();
 var READY2 = false;
 async function ensure3(env) {
@@ -24238,6 +24402,9 @@ init_http();
 init_tenantdb();
 init_auth();
 init_push();
+init_pdf();
+init_filesign();
+init_logo();
 var READY3 = false;
 async function ensure4(env) {
   if (READY3) return;
@@ -24623,8 +24790,11 @@ init_http();
 init_tenantdb();
 init_auth();
 init_push();
+init_filesign();
 
 // src/lib/signdoc-pdf.js
+init_pdf();
+init_logo();
 var L = 56;
 var R = 539;
 var W2 = R - L;
@@ -25150,6 +25320,7 @@ async function handle25(request, env, ctx, url, sess) {
 init_http();
 init_tenantdb();
 init_auth();
+init_filesign();
 var READY5 = false;
 async function ensure6(env) {
   if (READY5) return;
@@ -27047,6 +27218,7 @@ function slugify(name) {
 // src/routes/aiassist.js
 init_http();
 init_auth();
+init_sla();
 var RULES_KEY = (tid) => `ai:jobrules:${tid}`;
 var HQ_POSTCODE2 = "PO15 5RQ";
 async function getRules2(env, tid) {
@@ -28287,6 +28459,7 @@ async function handle29(request, env, ctx, url, sess) {
 init_http();
 init_auth();
 init_tenantdb();
+init_filesign();
 var CFG_KEY3 = "cctv:sites";
 var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
 var VENDOR_PATH = {
@@ -29052,6 +29225,7 @@ init_http();
 init_auth();
 
 // src/lib/certpdf.js
+init_pdf();
 var W3 = 595;
 var H = 842;
 var M3 = 40;
@@ -29400,9 +29574,15 @@ function buildCertPdf(record, meta = {}) {
 }
 
 // src/routes/certs.js
+init_logo();
+init_pdftext();
 init_push();
+init_sla();
+init_filesign();
+init_email();
 
 // src/lib/batterypdf.js
+init_pdf();
 var W4 = 595;
 var H2 = 842;
 var M4 = 36;
@@ -30859,6 +31039,8 @@ init_tenantdb();
 init_push();
 
 // src/lib/progpdf.js
+init_pdf();
+init_logo();
 var LOGO_BYTES = null;
 try {
   const bin = atob(MOSTLANE_LOGO_JPEG_B64);
@@ -31987,6 +32169,8 @@ async function handle33(request, env, ctx, url) {
 init_http();
 init_auth();
 init_tenantdb();
+init_filesign();
+init_sla();
 var DOC_TYPES = [
   { key: "programme", label: "Programme of works" },
   { key: "rams", label: "Risk Assessment (RAMS)" },
@@ -33732,6 +33916,7 @@ async function checkGateLeftOpen(env, tenantId) {
 init_http();
 init_auth();
 init_tenantdb();
+init_filesign();
 var KEY2 = (tid) => `fra:followup:${tid}`;
 var VALID = /* @__PURE__ */ new Set(["quote_needed", "quote_submitted", "nfa", ""]);
 async function loadMap(db) {
@@ -34235,6 +34420,7 @@ init_http();
 init_auth();
 init_tenantdb();
 init_push();
+init_statusemail();
 async function jobById2(env, tid, id) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
@@ -34372,6 +34558,7 @@ function safeArr(s) {
 }
 
 // src/index.js
+init_timesheets();
 var ROUTES = [
   ["*", "/auth", handle],
   ["*", "/admin/login-history", loginHistory],
@@ -34382,17 +34569,17 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
-  ["*", "/holiday", handle5],
-  ["*", "/asset", handle6],
+  ["*", "/holiday", handle7],
+  ["*", "/asset", handle8],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle6],
+  ["*", "/transfer", handle8],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle6],
-  ["*", "/upload-asset-thumb", handle6],
-  ["*", "/delete-asset-image", handle6],
+  ["*", "/upload-asset-image", handle8],
+  ["*", "/upload-asset-thumb", handle8],
+  ["*", "/delete-asset-image", handle8],
   ["*", "/sla/workever", handle38],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle8],
+  ["*", "/sla", handle6],
   ["*", "/stats", handle18],
   ["*", "/staff", handle19],
   // staff personal + company documents
@@ -34408,7 +34595,7 @@ var ROUTES = [
   // company memos (draft/send/sign)
   ["*", "/documents", handle25],
   // signable documents (library → send → sign → filed to My Documents)
-  ["*", "/ts", handle7],
+  ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
   ["*", "/ai", handle29],
   // AI job assistant (draft → preview → create)

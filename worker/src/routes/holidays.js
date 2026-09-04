@@ -48,6 +48,49 @@ export async function approvedLeaveInRange(env, tid, from, to, username) {
   return out;
 }
 
+// ── Jobs booked for a person within a leave range ────────────────────────────
+// Used to WARN the admin before approving a holiday: if the person already has
+// SLA jobs scheduled on any of those days, list them so the office can move /
+// reassign them (or decide to approve anyway). Reads the live sla_jobs table via
+// sla.js (dynamic import avoids any top-level import cycle). Includes hidden
+// project drip-series days (a booked-but-unreleased job is exactly what the
+// office needs warning about) — it does NOT go through the release filter.
+// Returns [{ id, ref, date, status, site }], soonest first.
+const _hNormId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+const _hFinished = new Set(["complete", "closed", "invoiced", "cancelled"]);
+export async function jobsBookedInLeaveRange(env, tid, username, start, end) {
+  if (!username || !start || !end) return [];
+  try {
+    const { listJobs } = await import("./sla.js");
+    const eid = _hNormId(username);
+    const all = await listJobs(env, tid);
+    const out = [];
+    for (const j of all) {
+      const assigned = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [];
+      if (!assigned.some(a => _hNormId(a) === eid)) continue;
+      // this engineer's own scheduled slot, else the shared top-level slot
+      const es = (j.engSchedule && j.engSchedule[eid]) || {};
+      const sched = es.scheduledAt || j.scheduledAt;
+      if (!sched) continue;
+      let day;
+      try { day = new Date(sched).toISOString().slice(0, 10); } catch { continue; }
+      if (day < start || day > end) continue;
+      // this engineer's own status on a multi-engineer job, else the shared one
+      const engStatus = (j.engStatus && j.engStatus[eid] && j.engStatus[eid].status) || j.status || "";
+      if (_hFinished.has(String(engStatus).toLowerCase())) continue;
+      out.push({
+        id: j.id,
+        ref: j.helpdeskRef || j.ref || j.title || "Job",
+        date: day,
+        status: engStatus || "Scheduled",
+        site: j.siteName || ""
+      });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch { return []; }
+}
+
 // Bank-holiday + company-shutdown dates within [from,to] as
 // { "YYYY-MM-DD": { label, kind:"bank"|"shutdown" } }. Reads the per-year
 // app_config the holiday admin maintains. Company-wide (not per user) — used to
@@ -488,6 +531,13 @@ export async function handle(request, env, ctx, url, sess) {
     const record = await getHolidayById(id);
     if (!record) return text("Not found", 404);
     const status = path.endsWith("approve") ? "Approved" : "Rejected";
+    // Before APPROVING: warn if this person already has jobs booked on any of
+    // those days (incl. hidden project drip-series days). Don't block — return
+    // the clashes so the admin can confirm; a re-post with force:true proceeds.
+    if (status === "Approved" && !body.force) {
+      const bookedJobs = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
+      if (bookedJobs.length) return json({ clash: true, jobs: bookedJobs });
+    }
     const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
     await db.prepare(
       "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
@@ -495,13 +545,13 @@ export async function handle(request, env, ctx, url, sess) {
     await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
     ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
       title: `Holiday ${status.toLowerCase()}`,
-      body: `Your holiday ${record.start_date} → ${record.end_date} was ${status.toLowerCase()}.`,
+      body: `Your holiday ${record.start} → ${record.end} was ${status.toLowerCase()}.`,
       url: "/holiday.html", tag: "holiday-decision"
     }));
     // Dealt with — flip the "holiday request" alert to the outcome for every admin.
     ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
       title: `Holiday ${status.toLowerCase()}`,
-      body: `${record.username}'s holiday ${record.start_date} → ${record.end_date} — ${status === "Approved" ? "✅ approved" : "❌ rejected"} by ${user}.`
+      body: `${record.username}'s holiday ${record.start} → ${record.end} — ${status === "Approved" ? "✅ approved" : "❌ rejected"} by ${user}.`
     }));
     // On approval, warn (don't block) if this now overlaps another APPROVED
     // booking for the same person — the duplicate-day early-warning.

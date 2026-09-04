@@ -134,6 +134,9 @@
     .hol-badge{display:inline-block;background:#16a34a;color:#fff;border-radius:6px;padding:2px 6px;font-size:10.5px;font-weight:700;margin:2px;}
     .day-row.on-holiday .day-track{background:repeating-linear-gradient(45deg,#f0fdf4,#f0fdf4 10px,#dcfce7 10px,#dcfce7 20px);}
     .hol-badge-inline{display:inline-block;background:#16a34a;color:#fff;border-radius:999px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle;}
+    /* A job sitting on a day the engineer is on approved leave — flag it clearly. */
+    .day-job.leave-clash{outline:2px dashed #d97706;outline-offset:-2px;box-shadow:0 0 0 2px #fef3c7 inset;}
+    .week-job-chip.leave-clash{border-style:dashed !important;border-width:2px !important;border-color:#d97706 !important;background:#fffbeb;}
     .week-job-chip{
       background:#e0f2fe;border:1px solid #60a5fa;border-radius:999px;padding:2px 6px;
       font-size:10px;margin:2px;display:inline-block;cursor:pointer;max-width:100%;
@@ -1096,7 +1099,7 @@ function renderDayView(container){
       }
 
       const el = document.createElement("div");
-      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "");
+      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "") + (holD ? " leave-clash" : "");
       el.dataset.jobId = job.id;
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
@@ -1111,14 +1114,15 @@ function renderDayView(container){
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+      el.querySelector(".day-job-ref").textContent = (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
                  (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
                  (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
-                 (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "");
+                 (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "") +
+                 (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "");
 
       // Completed jobs are locked (not draggable) — they still open on click.
       if(!done) attachPointerDrag(el, job, false);
@@ -1200,10 +1204,11 @@ function renderWeekView(container){
         .forEach(job => {
           const done = isDoneStatus(job.status);
           const chip = document.createElement("div");
-          chip.className = "week-job-chip" + (done ? " done" : "");
+          chip.className = "week-job-chip" + (done ? " done" : "") + (hol ? " leave-clash" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+          chip.textContent = (hol ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+          if(hol) chip.title = "⚠ " + engineer.name + " is on " + (hol.half ? hol.half + " leave" : "holiday") + " this day";
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
