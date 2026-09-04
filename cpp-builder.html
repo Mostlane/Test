@@ -319,7 +319,7 @@
 <div class="ml-portalbar no-print">
   <img class="ml-pb-logo" src="/mostlane-logo.jpg" alt="Mostlane">
   <span class="ml-pb-title">H&amp;S Planner</span>
-  <button class="ml-pb-back" onclick="(window.top||window).location.href='/main.html'">&larr; Menu</button>
+  <button class="ml-pb-back" onclick="cppBack()">&larr; H&amp;S</button>
 </div>
 
 <!-- ============ LIBRARY / HOME SCREEN ============ -->
@@ -2064,6 +2064,16 @@ function authFetch(path, opts={}){
 }
 const uid=()=> (window.crypto&&crypto.randomUUID)?crypto.randomUUID():"j"+Date.now()+Math.random().toString(16).slice(2);
 let PROJECT_ID="", PROJECT=null, ME=null, _userTouched=false, _ready=false;
+
+// Top-bar back → the H&S section. Saves any open plan first, then uses the
+// portal breadcrumb (returns to wherever you came from — H&S hub or the
+// project) with the H&S hub as the fallback for a cold start.
+function cppBack(){
+  try{ if(state && state._id && _userTouched) saveCurrent(false); }catch(e){}
+  const dest = PROJECT_ID ? ("/project-hub.html?id=" + encodeURIComponent(PROJECT_ID)) : "/hs-docs.html";
+  if(window.mlBack) return mlBack(dest);
+  (window.top||window).location.href = dest;
+}
 
 const libEl=()=>document.getElementById("library");
 function showLibrary(){ libEl().classList.add("show"); renderLibrary(); }
