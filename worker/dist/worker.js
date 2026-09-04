@@ -19703,6 +19703,31 @@ async function handle21(request, env, ctx, url, sess) {
       e.mins += mins;
       e.days.add(String(s.started_at).slice(0, 10));
     }
+    const normIdL = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const todayISO = londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    const plannedEng = /* @__PURE__ */ new Set();
+    if (!/^cancelled$/i.test(String(jd.status || ""))) {
+      const engs = Array.isArray(jd.assignedEngineers) && jd.assignedEngineers.length ? jd.assignedEngineers : jd.assignedTo ? [jd.assignedTo] : [];
+      for (const rawEng of engs) {
+        if (!rawEng) continue;
+        if (Object.keys(byEng).some((u) => normName(u) === normName(rawEng))) continue;
+        const es = jd.engSchedule && jd.engSchedule[normIdL(rawEng)] || {};
+        const startISO = es.scheduledAt || jd.scheduledAt;
+        if (!startISO) continue;
+        const day = String(startISO).slice(0, 10);
+        if (day > todayISO) continue;
+        let mins = 0;
+        const endISO = es.scheduledEnd || jd.scheduledEnd;
+        if (endISO) {
+          const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 6e4;
+          if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin);
+        }
+        if (!mins && Number(jd.durationMinutes) > 0) mins = Math.round(Number(jd.durationMinutes));
+        if (!mins) continue;
+        byEng[rawEng] = { mins, days: /* @__PURE__ */ new Set([day]) };
+        plannedEng.add(rawEng);
+      }
+    }
     let rtMiles = 0, milesSource = "unknown";
     const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
     if (key) {
@@ -19745,7 +19770,7 @@ async function handle21(request, env, ctx, url, sess) {
       onSiteCost += oCost;
       travelCost += tCost;
       fuelCost += fCost;
-      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null });
+      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null, planned: plannedEng.has(u) });
     }
     const poRows2 = await jobPoRows(env, jobId);
     let materials = 0, unpriced = 0;
@@ -19768,7 +19793,8 @@ async function handle21(request, env, ctx, url, sess) {
       materials: { cost: r2(materials), unpriced, count: poRows2.length },
       total: r2(total),
       unpricedPOs: unpriced,
-      hasSegments: (segs || []).length > 0
+      hasSegments: (segs || []).length > 0,
+      plannedLabour: plannedEng.size > 0
     }, {}, env, request);
   }
   if (path === "/costing/eng-aliases" && method === "GET") {
@@ -19968,6 +19994,66 @@ async function handle21(request, env, ctx, url, sess) {
           s.costPartial = true;
         }
       }
+    }
+    try {
+      const { listJobs: listJobs2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+      const allJobs = await listJobs2(env, tid);
+      const segPairs = /* @__PURE__ */ new Set();
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT DISTINCT job_id, username FROM job_time_segments WHERE tenant_id=? AND job_id IS NOT NULL"
+        ).bind(tid).all();
+        for (const r of results || []) segPairs.add(String(r.job_id) + "::" + normName(canonEng(r.username)));
+      } catch {
+      }
+      const normIdL = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+      for (const j of allJobs) {
+        if (!j || j.fallbackTemplate) continue;
+        if (/^cancelled$/i.test(String(j.status || ""))) continue;
+        const engList = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+        if (!engList.length) continue;
+        const siteLabel = j.siteName || j.siteCode || "(no site)";
+        const resolved = resolveSite(reg, j.siteName || j.siteCode || "");
+        const sKey = siteKeyOf2(resolved, j.siteName || j.siteCode);
+        let s = null;
+        for (const rawEng of engList) {
+          if (!rawEng) continue;
+          const es = j.engSchedule && j.engSchedule[normIdL(rawEng)] || {};
+          const startISO = es.scheduledAt || j.scheduledAt;
+          if (!startISO) continue;
+          const day = String(startISO).slice(0, 10);
+          if (day < from || day > to) continue;
+          let mins = 0;
+          const endISO = es.scheduledEnd || j.scheduledEnd;
+          if (endISO) {
+            const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 6e4;
+            if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin);
+          }
+          if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+          if (!mins) continue;
+          const who = canonEng(rawEng);
+          const whoNorm = normName(who);
+          if (slCovered.has(sKey + "::" + whoNorm)) continue;
+          if (segPairs.has(String(j.id) + "::" + whoNorm)) continue;
+          if (!s) s = siteFor(siteLabel, resolved);
+          s.onsiteMins += mins;
+          if (j.helpdeskRef) s.jobs[j.helpdeskRef] = (s.jobs[j.helpdeskRef] || 0) + mins;
+          const eng = engFor(s, who);
+          eng.mins += mins;
+          eng.days.add(day);
+          addSrc(eng, "sla");
+          eng.planned = true;
+          const r = rates[who];
+          if (r && r.rateType === "hour" && r.rate) {
+            eng.cost = Math.round(((eng.cost || 0) + mins / 60 * r.rate) * 100) / 100;
+            s.cost = Math.round((s.cost + mins / 60 * r.rate) * 100) / 100;
+            addDay(s.labD, day, mins / 60 * r.rate);
+          } else {
+            s.costPartial = true;
+          }
+        }
+      }
+    } catch {
     }
     for (const p of await poRows(env, from, to)) {
       const resolved = resolveSite(reg, p.site);

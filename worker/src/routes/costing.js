@@ -345,6 +345,34 @@ export async function handle(request, env, ctx, url, sess) {
       e.mins += mins; e.days.add(String(s.started_at).slice(0, 10));
     }
 
+    // 2b) Scheduled-hours fallback: an ASSIGNED engineer who worked this job but
+    //    never changed status has no segment → cost the PLANNED hours instead
+    //    (their own scheduled slot span, else the job's duration). Actual
+    //    status-tap time ALWAYS wins — only engineers with no captured segment
+    //    are filled. Skips a day still in the future (not worked yet).
+    const normIdL = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const todayISO = londonDate(new Date().toISOString());
+    const plannedEng = new Set();
+    if (!/^cancelled$/i.test(String(jd.status || ""))) {
+      const engs = Array.isArray(jd.assignedEngineers) && jd.assignedEngineers.length ? jd.assignedEngineers : (jd.assignedTo ? [jd.assignedTo] : []);
+      for (const rawEng of engs) {
+        if (!rawEng) continue;
+        if (Object.keys(byEng).some(u => normName(u) === normName(rawEng))) continue;   // real segment exists → actual wins
+        const es = (jd.engSchedule && jd.engSchedule[normIdL(rawEng)]) || {};
+        const startISO = es.scheduledAt || jd.scheduledAt;
+        if (!startISO) continue;
+        const day = String(startISO).slice(0, 10);
+        if (day > todayISO) continue;   // not worked yet
+        let mins = 0;
+        const endISO = es.scheduledEnd || jd.scheduledEnd;
+        if (endISO) { const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin); }
+        if (!mins && Number(jd.durationMinutes) > 0) mins = Math.round(Number(jd.durationMinutes));
+        if (!mins) continue;
+        byEng[rawEng] = { mins, days: new Set([day]) };
+        plannedEng.add(rawEng);
+      }
+    }
+
     // 3) round-trip miles for the site: the admin's site_miles register first
     //    (already a round-trip figure), else a HQ→site geocode × road factor × 2.
     let rtMiles = 0, milesSource = "unknown";
@@ -368,7 +396,7 @@ export async function handle(request, env, ctx, url, sess) {
       const fCost = engMiles * FUEL_PER_MILE;
       onSiteMins += e.mins; travelMins += tMins; totalMiles += engMiles;
       onSiteCost += oCost; travelCost += tCost; fuelCost += fCost;
-      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null });
+      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null, planned: plannedEng.has(u) });
     }
 
     // 5) materials from POs (priced total + unpriced flag)
@@ -383,7 +411,8 @@ export async function handle(request, env, ctx, url, sess) {
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows.length },
-      total: r2(total), unpricedPOs: unpriced, hasSegments: (segs || []).length > 0
+      total: r2(total), unpricedPOs: unpriced, hasSegments: (segs || []).length > 0,
+      plannedLabour: plannedEng.size > 0
     }, {}, env, request);
   }
 
@@ -607,6 +636,69 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
     }
+
+    // ── Scheduled-hours fallback (planned labour) ────────────────────────────
+    // A scheduled job an engineer WORKED but never status-tapped captures no
+    // job_time_segments, so it would cost £0. Fall back to the HOURS PLANNED on
+    // the job (the engineer's own scheduled slot span, else the job's duration)
+    // so those visits are still costed. Actual status-tap time ALWAYS takes
+    // priority — skip any (job, engineer) that has a captured segment — and skip
+    // anyone SiteLog already covers, and any day still in the future.
+    try {
+      const { listJobs } = await import("./sla.js");
+      const allJobs = await listJobs(env, tid);
+      const segPairs = new Set();   // "<job_id>::<normName(canonEng(user))>" with real captured time
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT DISTINCT job_id, username FROM job_time_segments WHERE tenant_id=? AND job_id IS NOT NULL"
+        ).bind(tid).all();
+        for (const r of results || []) segPairs.add(String(r.job_id) + "::" + normName(canonEng(r.username)));
+      } catch {}
+      const normIdL = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+      for (const j of allJobs) {
+        if (!j || j.fallbackTemplate) continue;
+        if (/^cancelled$/i.test(String(j.status || ""))) continue;
+        const engList = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+        if (!engList.length) continue;
+        const siteLabel = j.siteName || j.siteCode || "(no site)";
+        const resolved = resolveSite(reg, j.siteName || j.siteCode || "");
+        const sKey = siteKeyOf(resolved, j.siteName || j.siteCode);
+        let s = null;   // created lazily, only if an engineer actually contributes
+        for (const rawEng of engList) {
+          if (!rawEng) continue;
+          const es = (j.engSchedule && j.engSchedule[normIdL(rawEng)]) || {};
+          const startISO = es.scheduledAt || j.scheduledAt;
+          if (!startISO) continue;
+          const day = String(startISO).slice(0, 10);
+          if (day < from || day > to) continue;   // outside the window (incl. future)
+          let mins = 0;
+          const endISO = es.scheduledEnd || j.scheduledEnd;
+          if (endISO) { const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin); }
+          if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+          if (!mins) continue;
+          const who = canonEng(rawEng);
+          const whoNorm = normName(who);
+          if (slCovered.has(sKey + "::" + whoNorm)) continue;         // SiteLog authoritative
+          if (segPairs.has(String(j.id) + "::" + whoNorm)) continue;  // actual segment wins
+          if (!s) s = siteFor(siteLabel, resolved);
+          s.onsiteMins += mins;
+          if (j.helpdeskRef) s.jobs[j.helpdeskRef] = (s.jobs[j.helpdeskRef] || 0) + mins;
+          const eng = engFor(s, who);
+          eng.mins += mins;
+          eng.days.add(day);
+          addSrc(eng, "sla");
+          eng.planned = true;
+          const r = rates[who];
+          if (r && r.rateType === "hour" && r.rate) {
+            eng.cost = Math.round(((eng.cost || 0) + (mins / 60) * r.rate) * 100) / 100;
+            s.cost = Math.round((s.cost + (mins / 60) * r.rate) * 100) / 100;
+            addDay(s.labD, day, (mins / 60) * r.rate);
+          } else {
+            s.costPartial = true;   // day-rate or no rate on file — hours shown, £ can't be split fairly
+          }
+        }
+      }
+    } catch {}
 
     // PO spend (ex VAT) from the PO system's D1 — folded in per site + per
     // engineer. Fails soft when PO_DB isn't bound. Unpriced POs (no cost yet)
