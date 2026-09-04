@@ -10,6 +10,7 @@
   <script src="hs-rams-render.js?v=2"></script>
   <script src="html2canvas.min.js?v=1"></script>
   <script src="hs-pdf-capture.js?v=4"></script>
+  <script src="xlsx-lite.js?v=2"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -223,10 +224,10 @@
 
       <div class="card ra-step" data-rastep="0">
         <h3 style="margin-top:0;">🤖 Quick-start with AI <span class="muted" style="font-weight:400;font-size:12px;">— optional</span></h3>
-        <p class="muted" style="font-size:12.5px;margin-top:0;">Drop the job's documents (spec, scope, survey — PDF or text) and/or type a description. The assistant reads them and pre-fills as much of this risk assessment as it can — you then step through and check/adjust everything. Nothing is saved until you finish, and the finished document looks exactly as always.</p>
+        <p class="muted" style="font-size:12.5px;margin-top:0;">Drop the job's documents (spec, scope, survey — PDF, Word or text) and/or type a description. The assistant reads them and pre-fills as much of this risk assessment as it can — you then step through and check/adjust everything. Nothing is saved until you finish, and the finished document looks exactly as always.</p>
         <div id="raDrop" class="ra-drop">
           <div>📄 <b>Drag documents here</b>, or <button type="button" class="btn ghost small" id="raPick">choose files</button></div>
-          <input type="file" id="raFiles" multiple accept=".pdf,.txt,.csv,.md" style="display:none;">
+          <input type="file" id="raFiles" multiple accept=".pdf,.docx,.txt,.csv,.md" style="display:none;">
           <div id="raFileList" class="muted" style="font-size:12px;margin-top:8px;"></div>
         </div>
         <label style="margin-top:10px;">Describe the job <span class="muted" style="font-weight:400;">(optional)</span></label>
@@ -1061,6 +1062,25 @@
     });
   }
   const readText = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result||"")); fr.onerror = () => r(""); fr.readAsText(f); });
+  // Word .docx = a ZIP of XML; pull word/document.xml and strip to plain text
+  // (paragraph breaks on </w:p>, tabs on <w:tab/>). Uses the shared xlsx-lite
+  // ZIP reader — no external library.
+  async function docxText(f){
+    try{
+      if (!window.XLSXLite || !XLSXLite.readZipEntryText) return "";
+      const buf = await f.arrayBuffer();
+      const xml = await XLSXLite.readZipEntryText(buf, "word/document.xml");
+      if (!xml) return "";
+      let out = "";
+      xml.replace(/<w:t[^>]*>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>/g, (m, txt) => {
+        if (txt != null) out += txt.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n));
+        else if (m === "</w:p>") out += "\n";
+        else out += " ";
+        return "";
+      });
+      return out.trim();
+    }catch(e){ return ""; }
+  }
   const readB64 = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result||"").split(",")[1]||""); fr.onerror = () => r(""); fr.readAsDataURL(f); });
   async function pdfText(f){
     try {
@@ -1110,6 +1130,8 @@
           const t = await pdfText(f);
           if (t && t.trim().length >= 40) text += "\n\n[" + f.name + "]\n" + t;
           else if (!pdfBase64 && f.size < 8000000) { pdfBase64 = await readB64(f); }   // scanned → OCR by the AI
+        } else if (nm.endsWith(".docx")){
+          text += "\n\n[" + f.name + "]\n" + await docxText(f);
         } else { text += "\n\n[" + f.name + "]\n" + await readText(f); }
       }
     } catch(e){}
