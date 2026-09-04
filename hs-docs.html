@@ -514,21 +514,16 @@
       </button>`).join("")
       + `<button class="tile" onclick="openPlan()">
            <div class="emoji">🏗️</div><h3>Construction Phase Plan</h3>
-           <p class="muted">Full project H&amp;S plan (existing tool)</p>
+           <p class="muted">Full project H&amp;S plan · wizard with 🤖 AI</p>
          </button>`;
   }
   const VIEWS = ["hub","list","formInduction","formHotworks","formHwClose","formRams","formIncident","docView"];
   function showHub(){ VIEWS.forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
   function show(id){ VIEWS.forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
 
-  // Open the existing Construction Phase Plan app (unchanged) via its launch config.
-  async function openPlan() {
-    try {
-      const c = await authFetch("/hs-plan-config").then(r => r.json());
-      if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token);
-      else alert("Construction Phase Plan isn't configured for your account.");
-    } catch (e) { alert("Couldn't open the Construction Phase Plan tool."); }
-  }
+  // Open the portal-native Construction Phase Plan builder (wizard + AI, saved
+  // to the portal DB). Replaces the old standalone hs-plan launch.
+  function openPlan() { location.href = "cpp-builder.html"; }
 
   // ── List view ──────────────────────────────────────────────────────────────
   let curType = null;
