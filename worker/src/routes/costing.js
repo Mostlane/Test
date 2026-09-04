@@ -497,6 +497,10 @@ export async function handle(request, env, ctx, url, sess) {
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
+    // Hourly-equivalent rate: an hourly rate as-is; a DAY rate ÷ 8 so it's
+    // pro-rata by hours (8h scheduled = a full day, 4h = half a day). null when
+    // there's no usable rate on file (labour shown as hours, flagged partial).
+    const hrRate = r => (r && r.rate) ? (r.rateType === "day" ? r.rate / 8 : (r.rateType === "hour" ? r.rate : null)) : null;
     const days = await reconcileRange(env, tid, from, to, reg);
     // Engineer aliases: collapse different names for one person (e.g. the PO
     // system's "JT" → the portal's "John Thorn") so their labour + POs group.
@@ -624,15 +628,13 @@ export async function handle(request, env, ctx, url, sess) {
         eng.mins += e.mins;
         eng.days.add(d.date);   // distinct on-site days = visits for tap-only people
         addSrc(eng, "sla");
-        const r = rates[cu];
-        if (r && r.rateType === "hour" && r.rate) {
-          eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
-          s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
-          addDay(s.labD, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
-        } else if (r && r.rateType === "day") {
-          s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
+        const hr = hrRate(rates[cu]);
+        if (hr != null) {
+          eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * hr) * 100) / 100;
+          s.cost = Math.round((s.cost + (e.mins / 60) * hr) * 100) / 100;
+          addDay(s.labD, d.date, (e.mins / 60) * hr);   // dated labour for this site's trend
         } else {
-          s.costPartial = true;   // no rate on file
+          s.costPartial = true;   // no rate on file — hours shown, £ can't be computed
         }
       }
     }
@@ -688,13 +690,13 @@ export async function handle(request, env, ctx, url, sess) {
           eng.days.add(day);
           addSrc(eng, "sla");
           eng.planned = true;
-          const r = rates[who];
-          if (r && r.rateType === "hour" && r.rate) {
-            eng.cost = Math.round(((eng.cost || 0) + (mins / 60) * r.rate) * 100) / 100;
-            s.cost = Math.round((s.cost + (mins / 60) * r.rate) * 100) / 100;
-            addDay(s.labD, day, (mins / 60) * r.rate);
+          const hr = hrRate(rates[who]);
+          if (hr != null) {
+            eng.cost = Math.round(((eng.cost || 0) + (mins / 60) * hr) * 100) / 100;
+            s.cost = Math.round((s.cost + (mins / 60) * hr) * 100) / 100;
+            addDay(s.labD, day, (mins / 60) * hr);
           } else {
-            s.costPartial = true;   // day-rate or no rate on file — hours shown, £ can't be split fairly
+            s.costPartial = true;   // no rate on file — hours shown, £ can't be computed
           }
         }
       }

@@ -19873,6 +19873,7 @@ async function handle21(request, env, ctx, url, sess) {
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
+    const hrRate = (r) => r && r.rate ? r.rateType === "day" ? r.rate / 8 : r.rateType === "hour" ? r.rate : null : null;
     const days = await reconcileRange(env, tid, from, to, reg);
     const eAlias = await cfgGet(env, tid, "eng_aliases", {});
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
@@ -19983,13 +19984,11 @@ async function handle21(request, env, ctx, url, sess) {
         eng.mins += e.mins;
         eng.days.add(d.date);
         addSrc(eng, "sla");
-        const r = rates[cu];
-        if (r && r.rateType === "hour" && r.rate) {
-          eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
-          s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
-          addDay(s.labD, d.date, e.mins / 60 * r.rate);
-        } else if (r && r.rateType === "day") {
-          s.costPartial = true;
+        const hr = hrRate(rates[cu]);
+        if (hr != null) {
+          eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * hr) * 100) / 100;
+          s.cost = Math.round((s.cost + e.mins / 60 * hr) * 100) / 100;
+          addDay(s.labD, d.date, e.mins / 60 * hr);
         } else {
           s.costPartial = true;
         }
@@ -20043,11 +20042,11 @@ async function handle21(request, env, ctx, url, sess) {
           eng.days.add(day);
           addSrc(eng, "sla");
           eng.planned = true;
-          const r = rates[who];
-          if (r && r.rateType === "hour" && r.rate) {
-            eng.cost = Math.round(((eng.cost || 0) + mins / 60 * r.rate) * 100) / 100;
-            s.cost = Math.round((s.cost + mins / 60 * r.rate) * 100) / 100;
-            addDay(s.labD, day, mins / 60 * r.rate);
+          const hr = hrRate(rates[who]);
+          if (hr != null) {
+            eng.cost = Math.round(((eng.cost || 0) + mins / 60 * hr) * 100) / 100;
+            s.cost = Math.round((s.cost + mins / 60 * hr) * 100) / 100;
+            addDay(s.labD, day, mins / 60 * hr);
           } else {
             s.costPartial = true;
           }
