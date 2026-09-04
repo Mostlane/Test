@@ -484,12 +484,25 @@ async function toolPlanEmpat(env, tid, caps, args) {
 }
 
 // ── Read tools: the assistant can look up any portal area, gated per user ─────
+// Compliance due dates are stored in MIXED formats on the chart — some rows are
+// ISO (YYYY-MM-DD, written by bumpDue), older imports are UK DD/MM/YYYY (or
+// DD-MM-YYYY). Normalise BOTH to ISO, or the reader silently drops a whole
+// due date (this is what made 0247's PAT read as "not on file").
+function toIsoDate(v) {
+  const s = String(v || "").trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);            // ISO
+  if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);    // DD/MM/YYYY (UK)
+  if (m) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+  return null;
+}
 function dueSummary(dueJson) {
   let due = {}; try { due = JSON.parse(dueJson || "{}"); } catch {}
   const t0 = Date.parse(londonToday() + "T12:00:00Z");
   const out = [];
-  for (const [type, date] of Object.entries(due || {})) {
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) continue;
+  for (const [type, raw] of Object.entries(due || {})) {
+    const date = toIsoDate(raw);
+    if (!date) continue;
     const days = Math.round((Date.parse(date + "T12:00:00Z") - t0) / 86400000);
     out.push({ type, date, daysUntil: days, state: days < 0 ? "OVERDUE" : days <= 30 ? "due soon" : "ok" });
   }
@@ -775,14 +788,25 @@ export async function handle(request, env, ctx, url, sess) {
       ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter(c => c.type === "tool_use");
-      // A terminal tool ends the loop immediately.
-      const term = uses.find(u => !READ.has(u.name));
+      // draft_jobs/assign_jobs sent with an EMPTY list is a mistake (the model
+      // described a plan then forgot to re-list the jobs) — don't dead-end on it;
+      // nudge it to re-list everything in full and keep looping.
+      const isEmptyAction = u => (u.name === "draft_jobs" && !(Array.isArray(u.input && u.input.jobs) && u.input.jobs.length))
+        || (u.name === "assign_jobs" && !(Array.isArray(u.input && u.input.assignments) && u.input.assignments.length));
+      // A terminal tool with real content ends the loop immediately.
+      const term = uses.find(u => !READ.has(u.name) && !isEmptyAction(u));
       if (term) { t = term; break; }
+      const hasEmptyTerm = uses.some(u => !READ.has(u.name) && isEmptyAction(u));
       const reads = last ? [] : uses.filter(c => READ.has(c.name));
-      if (reads.length) {
+      if (reads.length || (hasEmptyTerm && !last)) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
         for (const u of uses) {
+          if (!READ.has(u.name)) {
+            // an empty terminal tool sitting alongside (or instead of) reads
+            out.push({ type: "tool_result", tool_use_id: u.id, content: "You called " + u.name + " with an EMPTY list, so nothing can be created. Re-call " + u.name + " NOW re-listing EVERY job you proposed, each in full — for a NEW job: site (store number), engineer, date, start time, description (for an EM/PAT day include the interleaved briefing in the description); for an ASSIGN: the jobId (or jobRef), engineer and date. Never send an empty list, and never describe the jobs only in text." });
+            continue;
+          }
           let data;
           try {
             if (u.name === "find_jobs") { const f = markEngActivity(await searchJobs(env, tid, u.input.query || "")); data = { count: f.length, jobs: f }; }
@@ -798,7 +822,7 @@ export async function handle(request, env, ctx, url, sess) {
           out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12000) });
         }
         messages.push({ role: "user", content: out });
-        continue;   // let the model use the results
+        continue;   // let the model use the results / re-list the jobs
       }
       // No terminal tool and no reads — the model answered in PROSE. Use it.
       if (ai.text) return json({ ok: true, kind: "reply", text: ai.text }, {}, env, request);
