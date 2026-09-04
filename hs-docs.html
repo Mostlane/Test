@@ -66,6 +66,17 @@
        printed / saved PDF — browsers drop background colours unless told to. */
     .doc, .doc * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } .doc, .doc *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; } }
+    /* ── RA wizard (an on-screen AID; the saved document is unchanged) ── */
+    .ra-wiz .ra-step { display:none; }
+    .ra-wiz .ra-step.on { display:block; }
+    .ra-prog { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
+    .ra-prog .rp { flex:1; min-width:70px; text-align:center; font-size:11px; font-weight:700; color:#8090a0; padding:6px 4px; border-radius:8px; background:#eef2f7; border:1px solid #e2e8f0; }
+    .ra-prog .rp.done { color:#0a7d33; background:#e6f6ec; border-color:#bfe6cd; }
+    .ra-prog .rp.cur { color:#fff; background:#003366; border-color:#003366; }
+    .ra-prog .rp .n { display:inline-block; min-width:16px; }
+    .ra-drop { border:2px dashed #9fb0c3; border-radius:12px; background:#fbfdff; padding:18px; text-align:center; color:#557; transition:background .15s,border-color .15s; }
+    .ra-drop.drag { background:#eef6ff; border-color:#2b6cb0; }
+    .ra-file { display:inline-block; background:#eef3fb; border-radius:8px; padding:2px 8px; margin:3px 3px 0 0; font-size:12px; }
   </style>
   <style id="printOrient">@page { size: A4 portrait; margin: 12mm; }</style>
 </head>
@@ -208,7 +219,26 @@
     <!-- FORM: RAMS (Risk Assessment Builder) -->
     <div id="formRams" class="hide">
       <h2 id="ramsFormTitle">New Risk Assessment</h2>
-      <div class="card">
+      <div id="raProg" class="ra-prog"></div>
+
+      <div class="card ra-step" data-rastep="0">
+        <h3 style="margin-top:0;">🤖 Quick-start with AI <span class="muted" style="font-weight:400;font-size:12px;">— optional</span></h3>
+        <p class="muted" style="font-size:12.5px;margin-top:0;">Drop the job's documents (spec, scope, survey — PDF or text) and/or type a description. The assistant reads them and pre-fills as much of this risk assessment as it can — you then step through and check/adjust everything. Nothing is saved until you finish, and the finished document looks exactly as always.</p>
+        <div id="raDrop" class="ra-drop">
+          <div>📄 <b>Drag documents here</b>, or <button type="button" class="btn ghost small" id="raPick">choose files</button></div>
+          <input type="file" id="raFiles" multiple accept=".pdf,.txt,.csv,.md" style="display:none;">
+          <div id="raFileList" class="muted" style="font-size:12px;margin-top:8px;"></div>
+        </div>
+        <label style="margin-top:10px;">Describe the job <span class="muted" style="font-weight:400;">(optional)</span></label>
+        <textarea id="raAiNotes" placeholder="e.g. Replace consumer unit and rewire the ground floor at the surgery. Asbestos survey attached; live services present; occupied building."></textarea>
+        <div class="row" style="margin-top:10px;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn" id="raScanBtn">🤖 Scan &amp; autofill</button>
+          <button type="button" class="btn grey" id="raSkipBtn">Skip — fill it myself</button>
+          <span class="msg" id="raAiMsg" style="margin:0;"></span>
+        </div>
+      </div>
+
+      <div class="card ra-step" data-rastep="1">
         <h3 style="margin-top:0;">Activity details</h3>
         <label>Document number <span class="muted" style="font-weight:400;font-size:11px;">— leave blank to auto-number (RA…)</span></label>
         <input type="text" id="r_ref" placeholder="Auto (RA…)" style="max-width:220px;">
@@ -231,12 +261,12 @@
           <div><label>Review before</label><input type="date" id="r_review"></div>
         </div>
       </div>
-      <div class="card">
+      <div class="card ra-step" data-rastep="2">
         <h3 style="margin-top:0;">Select the types of work</h3>
         <p class="muted" style="font-size:12.5px; margin-top:0;">Tick the work you're doing — the matching hazards and control measures are pulled in below, pre-rated. You can then adjust ratings, edit or add controls, and add your own hazards.</p>
         <div id="r_tree"></div>
       </div>
-      <div class="card">
+      <div class="card ra-step" data-rastep="3">
         <h3 style="margin-top:0;">Hazards &amp; risk rating</h3>
         <div id="r_assembled"><p class="muted">Select some work above to pull in hazards, or add one manually.</p></div>
         <div class="row" style="align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;">
@@ -247,7 +277,7 @@
         </div>
         <p class="muted" style="font-size:12px;margin:6px 0 0;">Drag the ⠿ handle (or use ↑/↓) to set the order — the document follows it.</p>
       </div>
-      <div class="card">
+      <div class="card ra-step" data-rastep="4">
         <h3 style="margin-top:0;">Required PPE</h3>
         <p class="muted" style="font-size:12.5px;margin-top:0;">Auto-suggested from the hazards above — add or remove to suit. This is the list that prints on the document.</p>
         <div id="r_ppe" class="chips"><span class="muted" style="font-size:13px;">No PPE yet.</span></div>
@@ -258,20 +288,24 @@
           <datalist id="ppeSuggest"></datalist>
         </div>
       </div>
-      <div class="card">
+      <div class="card ra-step" data-rastep="5">
         <h3 style="margin-top:0;">Assessor sign-off</h3>
         <label>Signature</label><div class="sigwrap"><canvas class="sig" id="r_bysig"></canvas></div>
         <button class="btn grey small noprint" type="button" onclick="clearSig('r_bysig')">Clear signature</button>
       </div>
-      <div class="card">
+      <div class="card ra-step" data-rastep="5">
         <h3 style="margin-top:0;">Operative sign-off <span class="muted" style="font-weight:400;">— "I have read and understood this risk assessment"</span></h3>
         <div id="r_acks"></div>
         <button class="btn ghost small" type="button" onclick="addAck()">+ Add operative</button>
       </div>
       <p class="msg" id="ramsMsg"></p>
-      <div class="row">
-        <button class="btn" id="ramsSave">Save</button>
-        <button class="btn ghost" id="ramsSaveView">Save &amp; open document</button>
+      <div class="row" id="raNav" style="align-items:center;gap:8px;flex-wrap:wrap;">
+        <button class="btn grey" type="button" id="raBack">‹ Back</button>
+        <button class="btn" type="button" id="raNext">Next ›</button>
+        <span id="raSaveRow" style="display:none;gap:8px;">
+          <button class="btn" id="ramsSave">Save</button>
+          <button class="btn ghost" id="ramsSaveView">Save &amp; open document</button>
+        </span>
         <button class="btn grey" onclick="showList('rams')">Cancel</button>
       </div>
     </div>
@@ -448,6 +482,7 @@
     } catch (e) {}
     buildHub();
     showHub();
+    wireRaAiStep();
     // Deep-links from a Project: ?open=<docId> opens a RAMS; ?newRams=1&site=&project=
     // starts a new RAMS pre-filled with the site and remembers the project to link back.
     try {
@@ -944,8 +979,11 @@
     const today = new Date(); g("r_date").value = today.toISOString().slice(0,10);
     g("r_review").value = new Date(today.getTime() + 365*86400000).toISOString().slice(0,10);
     buildPpeDatalist(); buildHazDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
+    raResetAiStep();
     show("formRams");
-    setTimeout(() => initSig("r_bysig",""), 30);
+    // Show the form fully first so the signature canvas can size, then engage the
+    // step wizard starting at the AI step.
+    setTimeout(() => { initSig("r_bysig",""); engageRaWizard(0); }, 30);
   }
   function fillRams(doc) {
     const x = doc.data || {};
@@ -964,9 +1002,148 @@
       controls:(h.controls||[]).map(c => typeof c === "string" ? { level:"admin", text:c } : { level:c.level||"admin", text:c.text||"" }),
       sevWith:h.sevWith||3, likWith:h.likWith||1, custom:!h.id }));
     buildPpeDatalist(); buildHazDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = "";
+    raResetAiStep();
     show("formRams");
-    setTimeout(() => { initSig("r_bysig", x.assessorSignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
+    // Init the signatures + acks while everything is visible, then engage the
+    // wizard starting on Activity details (editing skips the AI step).
+    setTimeout(() => { initSig("r_bysig", x.assessorSignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); engageRaWizard(1); }, 30);
   }
+  /* ── RA WIZARD — a step-through AID over the existing form. The saved document
+     and its data are completely unchanged; this only controls which card shows
+     and adds an optional AI autofill step at the front. ── */
+  const RA_STEPS = ["AI", "Details", "Work", "Hazards", "PPE", "Sign-off"];
+  let raStep = 0, raAiFiles = [];
+  function raProgHtml(){
+    return RA_STEPS.map((s,i)=>`<div class="rp ${i===raStep?'cur':(i<raStep?'done':'')}"><span class="n">${i<raStep?'✓':(i+1)}</span> ${s}</div>`).join("");
+  }
+  function showRaStep(i){
+    raStep = Math.max(0, Math.min(RA_STEPS.length-1, i));
+    document.querySelectorAll("#formRams .ra-step").forEach(el => el.classList.toggle("on", Number(el.dataset.rastep) === raStep));
+    const last = raStep === RA_STEPS.length - 1;
+    if (g("raBack")) g("raBack").style.display = raStep > 0 ? "" : "none";
+    if (g("raNext")) g("raNext").style.display = last ? "none" : "";
+    if (g("raSaveRow")) g("raSaveRow").style.display = last ? "inline-flex" : "none";
+    const p = g("raProg"); if (p) p.innerHTML = raProgHtml();
+    try { g("formRams").scrollIntoView({ block:"start" }); } catch(e) {}
+  }
+  function engageRaWizard(start){
+    g("formRams").classList.add("ra-wiz");
+    if (g("raBack")) g("raBack").onclick = () => showRaStep(raStep - 1);
+    if (g("raNext")) g("raNext").onclick = () => showRaStep(raStep + 1);
+    showRaStep(start || 0);
+  }
+  function raResetAiStep(){
+    raAiFiles = [];
+    const fl = g("raFileList"); if (fl) fl.innerHTML = "";
+    const n = g("raAiNotes"); if (n) n.value = "";
+    const m = g("raAiMsg"); if (m) { m.textContent = ""; m.className = "msg"; }
+    const f = g("raFiles"); if (f) f.value = "";
+  }
+  // Flatten the work-type tree the SAME way renderTree draws the checkboxes, so
+  // an index returned by the AI maps to the Nth checkbox in #r_tree.
+  function raFlatTypes(){
+    const out = []; let i = 0;
+    (HS.workTypes||[]).forEach(wt => (wt.subs||[]).forEach(sub => (sub.types||[]).forEach(t => {
+      out.push({ i, group: (wt.label||"") + " › " + (sub.label||""), label: t.label||"" }); i++;
+    })));
+    return out;
+  }
+  let _pdfjs = null;
+  function loadPdfJs(){
+    if (_pdfjs) return Promise.resolve(_pdfjs);
+    if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs = window.pdfjsLib; return Promise.resolve(_pdfjs); }
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      s.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs = window.pdfjsLib; res(_pdfjs); } catch(e){ rej(e); } };
+      s.onerror = () => rej(new Error("pdf load"));
+      document.head.appendChild(s);
+    });
+  }
+  const readText = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result||"")); fr.onerror = () => r(""); fr.readAsText(f); });
+  const readB64 = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result||"").split(",")[1]||""); fr.onerror = () => r(""); fr.readAsDataURL(f); });
+  async function pdfText(f){
+    try {
+      const lib = await loadPdfJs();
+      const buf = await f.arrayBuffer();
+      const pdf = await lib.getDocument({ data: buf }).promise;
+      let out = "";
+      for (let p = 1; p <= Math.min(pdf.numPages, 40); p++){
+        const page = await pdf.getPage(p);
+        const c = await page.getTextContent();
+        out += c.items.map(it => it.str).join(" ") + "\n";
+      }
+      return out;
+    } catch(e){ return ""; }
+  }
+  function raRenderFiles(){
+    const fl = g("raFileList"); if (!fl) return;
+    fl.innerHTML = raAiFiles.length
+      ? raAiFiles.map((f,i)=>`<span class="ra-file">📄 ${esc(f.name)} <a href="#" onclick="raRmFile(${i});return false;" style="color:#b00020;text-decoration:none;">✕</a></span>`).join("")
+      : "";
+  }
+  function raRmFile(i){ raAiFiles.splice(i,1); raRenderFiles(); }
+  function wireRaAiStep(){
+    const drop = g("raDrop"), pick = g("raPick"), files = g("raFiles");
+    if (pick && files){ pick.onclick = () => files.click(); files.onchange = e => { raAddFiles(e.target.files); files.value = ""; }; }
+    if (drop){
+      ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("drag"); }));
+      ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+      drop.addEventListener("drop", e => { if (e.dataTransfer && e.dataTransfer.files) raAddFiles(e.dataTransfer.files); });
+    }
+    if (g("raScanBtn")) g("raScanBtn").onclick = raScan;
+    if (g("raSkipBtn")) g("raSkipBtn").onclick = () => showRaStep(1);
+  }
+  function raAddFiles(list){
+    [...list].forEach(f => { if (f && !raAiFiles.some(x => x.name===f.name && x.size===f.size)) raAiFiles.push(f); });
+    raRenderFiles();
+  }
+  async function raScan(){
+    const msg = g("raAiMsg"); const notes = (g("raAiNotes").value||"").trim();
+    if (!raAiFiles.length && !notes){ msg.textContent = "Drop a document or type a description first."; msg.className = "msg err"; return; }
+    g("raScanBtn").disabled = true; msg.className = "msg"; msg.textContent = "Reading documents…";
+    let text = "", pdfBase64 = "";
+    try {
+      for (const f of raAiFiles){
+        const nm = (f.name||"").toLowerCase();
+        if (nm.endsWith(".pdf")){
+          const t = await pdfText(f);
+          if (t && t.trim().length >= 40) text += "\n\n[" + f.name + "]\n" + t;
+          else if (!pdfBase64 && f.size < 8000000) { pdfBase64 = await readB64(f); }   // scanned → OCR by the AI
+        } else { text += "\n\n[" + f.name + "]\n" + await readText(f); }
+      }
+    } catch(e){}
+    msg.textContent = "Scanning with AI…";
+    try {
+      const r = await authFetch("/hs/ai-rams", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ notes, text: text.slice(0,120000), pdfBase64, types: raFlatTypes() }) }).then(x=>x.json());
+      if (!r || !r.ok){ msg.textContent = (r && r.error) || "Couldn't scan — you can still fill it in yourself."; msg.className = "msg err"; g("raScanBtn").disabled = false; return; }
+      applyAiRams(r.result || {});
+      msg.textContent = "✓ Pre-filled — step through and check everything.";
+      msg.className = "msg ok";
+      g("raScanBtn").disabled = false;
+      showRaStep(1);
+    } catch(e){ msg.textContent = "Couldn't scan — you can still fill it in yourself."; msg.className = "msg err"; g("raScanBtn").disabled = false; }
+  }
+  function applyAiRams(res){
+    const setIf = (id,v) => { if (v != null && String(v).trim() && g(id) && !g(id).value.trim()) g(id).value = String(v).trim(); };
+    setIf("r_task", res.title); setIf("r_site", res.site); setIf("r_location", res.location);
+    setIf("r_desc", res.description); setIf("r_persons", res.persons);
+    // Tick the chosen work-types (adds their pre-rated hazards, exactly like a manual tick).
+    if (Array.isArray(res.workTypes)){
+      const boxes = document.querySelectorAll("#r_tree input[type=checkbox]");
+      res.workTypes.forEach(idx => { const cb = boxes[Number(idx)]; if (cb && !cb.checked){ cb.checked = true; treeAdd(cb); } });
+    }
+    // Job-specific extra hazards the work-types wouldn't cover.
+    (Array.isArray(res.extraHazards) ? res.extraHazards : []).forEach(h => {
+      if (!h || !String(h.name||"").trim()) return;
+      ramsHazards.push({ id:"", name:String(h.name).trim(), persons:"", injuries:[], ppe:[], sevWithout:3, likWithout:3,
+        controls:[{ level:"admin", text:String(h.control||"").trim() }], sevWith:3, likWith:1, custom:true });
+    });
+    renderAssembled();
+    if (Array.isArray(res.ppe) && res.ppe.length){ res.ppe.forEach(p => { if (p && !ramsPPE.includes(p)) ramsPPE.push(String(p)); }); ppeTouched = true; renderPPE(); }
+  }
+
   function collectRams() {
     const acks = [...g("r_acks").children].map(div => ({ name: (div.querySelector('[data-a="name"]')||{}).value?.trim()||"", signature: sigVal(div.dataset.sig) })).filter(a => a.name);
     return {
