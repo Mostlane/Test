@@ -329,7 +329,7 @@
           <div style="margin-top:10px;"><button class="btn" id="jvCreate">➕ Create job</button> <span class="msg" id="jvMsg" style="display:inline;"></span></div>
           <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
         </div>` : ""}
-        <h3 style="margin:2px 0 6px;font-size:14.5px;">Project jobs</h3>
+        <h3 style="margin:2px 0 6px;font-size:14.5px;">${CAN ? "Project jobs" : "My jobs"}</h3>
         <div id="jvJobs"><p class="muted">Loading…</p></div>
         <div id="jvSeries"></div>
         <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
