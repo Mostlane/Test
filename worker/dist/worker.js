@@ -5258,6 +5258,8 @@ async function handle6(request, env, ctx, url, sess) {
     const cleanRef = String(b.reference || "").replace(/[\u0000-\u001F\u007F\u00A0\u200B-\u200D\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
     const payload = {
       reference: cleanRef || void 0,
+      dedupeByRef: true,
+      // machine intake: a re-sent email UPDATES the same job (dedupe by reference)
       description: String(b.description || "").trim() || void 0,
       priority,
       raisedAt,
@@ -7872,7 +7874,7 @@ async function saveJob(env, tenantId, job) {
 }
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
-  const id = body.id || body.reference || crypto.randomUUID();
+  const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
