@@ -3460,6 +3460,48 @@ scratchpad pattern gen-help-shots*.cjs). Search + tap-to-enlarge lightbox.
 Known gap: PO guide is text-only (external code — Jamie may supply a phone
 screenshot to embed). **UPDATE THE RELEVANT GUIDE WHENEVER FEATURES CHANGE.**
 
+## Cable Calculator (cable-calc.html + routes/cablecalc.js + lib/cablecalcpdf.js + cable-calc-engine.js — Sep 2026)
+A **BS 7671 single-circuit cable-sizing / verification** tool with a branded PDF
+report — the ProCert-style calculation flow, v1. Permission **`CableCalc`**
+(new PERMISSION_KEYS entry; FullAccess implies) gates the 🔌 Cable Calculator tile
+(main.html MAP `CableCalc:["CableCalc"]`) + sidebar NAV + all `/cablecalc/*` routes.
+- **Engine `cable-calc-engine.js`** (`window.MLCable.calculate(inputs, data)`) is
+  DOM-free + pure, modelled on eicr-engine.js. **Split: COMPUTED vs LOOKED-UP.**
+  Computed here (engineering formulae, no copyright): design current
+  (Ib = P/(V·pf), ×√3 for 3-phase), the required tabulated capacity
+  It = In/(Ca·Cg·Ci·Cc), voltage drop (mV/A/m·Ib·L/1000), R1+R2 (from resistivity
+  RHO20 or a supplied mΩ/m, × op-temp factor), Zs = Ze + R1+R2, max Zs
+  (MCB/RCBO = Uoc·0.95/(k·In), k=5/10/20 for B/C/D — same Cmin method
+  eicr-engine uses; fuses from a supplied deviceZs table), prospective fault
+  current, adiabatic min CPC S = √(I²t)/k (k from the standard K_LINE/K_CPC
+  constants, caller-overridable). **Looked up from the caller-supplied `data`**
+  (the user's OWN manufacturer-datasheet values — NOT reproduced from BS 7671
+  Appendix 4 here): tabulated Iz, mV/A/m, and the Ca/Cg/Ci factor tables. A
+  missing value is reported as a check with `pass:null` ("no data"), NEVER a
+  silent pass. Each check carries its reg (433.1.1 / 523 / 525 / 411.4.5 / 543.1.3).
+  Validated against a known worked example (32 A radial: VD 4.67 V, Zs 0.584 Ω,
+  max Zs 1.37 Ω, min CPC 2.17 mm²) — see the build session; re-run before touching
+  the formulae.
+- **Reference data** lives in app_config `cablecalc:data:<tid>` (cables →
+  method → csa → {iz, vd}, plus ambient/grouping/insulation/deviceZs). SEED in
+  cablecalc.js is **SAMPLE data, flagged `sample:true`** (representative commodity
+  cable ratings so the tool works out of the box) — NOT the BS 7671 tables; a red
+  banner tells the user to verify/replace it. The **Datasheet data** tab is a
+  structured editor (per-cable Iz + mV/A/m grid, factor tables, add cable/size,
+  reset-to-sample). Config (company/defaults) in `cablecalc:config:<tid>`.
+- **Saved reports** in table **cable_calcs** (self-migrating; inputs+results JSON).
+  The **PDF** (`lib/cablecalcpdf.js buildCableCalcPdf(record, meta{logo})`, vector
+  A4 on lib/pdf.js — navy header + logo, circuit/installation cards, correction-
+  factor strip, striped verification table with pass/fail dots, key-figures block,
+  declaration + "checking aid" disclaimer) is an **authed blob** (POST
+  /cablecalc/pdf carries the Bearer token → the page opens the blob; NO public
+  route). The client computes with MLCable and posts the record it produced — the
+  PDF just formats it (one source of numbers, no drift).
+- **Endpoints** (`/cablecalc/*`, gate FullAccess|CableCalc): GET/POST /data (+
+  /data/reset), GET/POST /config, GET /list, GET /one?id=, POST /save, POST
+  /delete, POST /pdf. **TODO/next:** multi-circuit / board schedule; fuse deviceZs
+  tables; RCD as a hard check; fold into the compliance chart / job costing.
+
 ## EICR / BS 7671 check (eicr-check.html)
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
 Compliance|FullAccess; sidebar NAV entry too). NO backend — the PDF is read

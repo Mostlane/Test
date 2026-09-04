@@ -51,6 +51,7 @@ import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: p
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
+import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
@@ -123,6 +124,7 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
+  ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs

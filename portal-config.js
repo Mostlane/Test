@@ -990,6 +990,7 @@
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
+          { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },

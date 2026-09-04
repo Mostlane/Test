@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=27"></script>
+  <title>Mostlane • Cable Calculator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="cable-calc-engine.js?v=1"></script>
+  <style>
+    body{font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#0f2438;background:transparent;margin:0}
+    .wrap{max-width:620px;margin:0 auto;padding:12px 12px 90px}
+    @media(min-width:1000px){ .wrap{max-width:1080px} .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start} }
+    h1{font-size:19px;margin:0}
+    header.page h1{display:flex;align-items:center;gap:8px}
+    .tabs{display:flex;gap:6px;margin:10px 0 14px;flex-wrap:wrap}
+    .tab{padding:8px 14px;border:1px solid #cfd8e3;background:#fff;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;color:#003468}
+    .tab.on{background:#003468;color:#fff;border-color:#003468}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px 15px;margin-bottom:14px;box-shadow:0 1px 3px rgba(16,36,56,.05)}
+    .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#5a6b7b;margin:0 0 10px}
+    .fld{margin-bottom:10px}
+    label.l{display:block;font-size:11.5px;font-weight:600;color:#3a4b5b;margin-bottom:3px}
+    input,select{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #cfd8e3;border-radius:9px;font-size:14px;background:#fff;color:#0f2438}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .hint{font-size:11px;color:#71808f;margin-top:3px}
+    .btn{padding:10px 16px;border:none;border-radius:10px;background:#003468;color:#fff;font-weight:700;font-size:14px;cursor:pointer}
+    .btn.ghost{background:#fff;color:#003468;border:1px solid #003468}
+    .btn.sm{padding:7px 11px;font-size:12.5px}
+    .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .checks{list-style:none;margin:0;padding:0}
+    .chk{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid #eef2f6}
+    .chk:last-child{border-bottom:none}
+    .dot{width:16px;height:16px;border-radius:50%;flex:0 0 auto;margin-top:2px}
+    .dot.ok{background:#22803c}.dot.bad{background:#c72929}.dot.na{background:#b3720a}
+    .chk .cl{font-weight:700;font-size:13.5px}
+    .chk .cr{font-size:11px;color:#8493a2}
+    .chk .cd{font-size:12.5px;color:#33404d;margin-top:2px}
+    .figs{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
+    .fig{display:flex;justify-content:space-between;font-size:13px;border-bottom:1px dotted #e2e8f0;padding:3px 0}
+    .fig b{color:#003468}
+    .outcome{display:inline-block;padding:5px 13px;border-radius:999px;font-weight:800;font-size:13px;color:#fff}
+    .outcome.ok{background:#22803c}.outcome.bad{background:#c72929}.outcome.na{background:#b3720a}
+    .warn{background:#fff8ec;border:1px solid #f2dcae;border-radius:9px;padding:9px 11px;font-size:12px;color:#7a5a0a;margin-top:8px}
+    .sample-banner{background:#fdecec;border:1px solid #f3b7b7;color:#8a1f1f;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:12px;font-weight:600}
+    .hide{display:none!important}
+    table.d{width:100%;border-collapse:collapse;font-size:12.5px}
+    table.d th,table.d td{border:1px solid #e2e8f0;padding:4px 6px;text-align:center}
+    table.d th{background:#f3f6f9;font-weight:700;color:#3a4b5b}
+    table.d input{padding:5px;font-size:12.5px;text-align:center;border-radius:6px}
+    .listrow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eef2f6}
+    .listrow .m{font-size:11px;color:#8493a2}
+    .disc{font-size:11px;color:#8493a2;margin-top:10px;line-height:1.4}
+    .panel.hide{display:none}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <h1>🔌 Cable Calculator</h1>
+  </header>
+
+  <div id="gate" class="wrap hide">
+    <div class="card"><h2>No access</h2><p>You don't have permission to use the Cable Calculator. Ask an administrator to grant the <b>Cable Calculator</b> permission.</p></div>
+  </div>
+
+  <div id="app" class="wrap hide">
+    <div class="tabs">
+      <div class="tab on" data-tab="calc">Calculator</div>
+      <div class="tab" data-tab="saved">Saved reports</div>
+      <div class="tab" data-tab="data">Datasheet data</div>
+    </div>
+
+    <!-- ───────── CALCULATOR ───────── -->
+    <div class="panel" id="p-calc">
+      <div id="sampleBanner" class="sample-banner hide">⚠ Using SAMPLE cable data — verify/replace it against your manufacturer datasheet on the <b>Datasheet data</b> tab before issuing any report.</div>
+      <div class="cols">
+        <div>
+          <div class="card">
+            <h2>Report details</h2>
+            <div class="row2">
+              <div class="fld"><label class="l">Client</label><input id="client"></div>
+              <div class="fld"><label class="l">Site</label><input id="site"></div>
+            </div>
+            <div class="fld"><label class="l">Circuit reference / title</label><input id="circuitRef" placeholder="e.g. Ring final — ground floor sockets"></div>
+          </div>
+
+          <div class="card">
+            <h2>Load & supply</h2>
+            <div class="fld"><label class="l">Enter design current as…</label>
+              <select id="loadMode"><option value="power">Power (kW) + power factor</option><option value="ib">Design current Ib (A) directly</option></select>
+            </div>
+            <div class="row3" id="powerRow">
+              <div class="fld"><label class="l">Load (kW)</label><input id="powerKw" type="number" step="0.01" inputmode="decimal"></div>
+              <div class="fld"><label class="l">Power factor</label><input id="pf" type="number" step="0.01" value="1"></div>
+              <div class="fld"><label class="l">Phases</label><select id="phases"><option value="1">Single</option><option value="3">Three</option></select></div>
+            </div>
+            <div class="row2 hide" id="ibRow">
+              <div class="fld"><label class="l">Design current Ib (A)</label><input id="ib" type="number" step="0.1" inputmode="decimal"></div>
+              <div class="fld"><label class="l">Phases</label><select id="phases2"><option value="1">Single</option><option value="3">Three</option></select></div>
+            </div>
+            <div class="row2">
+              <div class="fld"><label class="l">Nominal voltage (V)</label><input id="voltage" type="number" value="230"></div>
+              <div class="fld"><label class="l">Circuit use</label><select id="circuitUse"><option value="sockets">Socket outlets</option><option value="lighting">Lighting</option><option value="other">Other / fixed</option></select></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Protective device</h2>
+            <div class="row2">
+              <div class="fld"><label class="l">Device standard</label><select id="deviceStd">
+                <option value="60898">BS EN 60898 MCB</option>
+                <option value="61009">BS EN 61009 RCBO</option>
+                <option value="88">BS 88 fuse</option>
+                <option value="1361">BS 1361 fuse</option>
+                <option value="3036">BS 3036 fuse</option>
+              </select></div>
+              <div class="fld" id="curveWrap"><label class="l">Curve</label><select id="deviceCurve"><option>B</option><option>C</option><option>D</option></select></div>
+            </div>
+            <div class="row2">
+              <div class="fld"><label class="l">Rating In (A)</label><input id="In" type="number" step="1" inputmode="numeric"></div>
+              <div class="fld"><label class="l">Disconnection time</label><select id="disconnect"><option value="0.4">0.4 s (final ≤ 32 A)</option><option value="5">5 s (distribution)</option></select></div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h2>Cable</h2>
+            <div class="fld"><label class="l">Cable type</label><select id="cableId"></select></div>
+            <div class="row3">
+              <div class="fld"><label class="l">Reference method</label><select id="method"></select></div>
+              <div class="fld"><label class="l">Live CSA (mm²)</label><select id="csa"></select></div>
+              <div class="fld"><label class="l">CPC CSA (mm²)</label><input id="cpcCsa" type="number" step="0.5" inputmode="decimal"></div>
+            </div>
+            <div class="row2">
+              <div class="fld"><label class="l">CPC arrangement</label><select id="cpcArrangement">
+                <option value="core">CPC = core within the cable</option>
+                <option value="sep">Separate insulated CPC</option>
+                <option value="bare">Bare CPC (conduit/tray)</option>
+                <option value="steel">Steel armour / conduit</option>
+              </select></div>
+              <div class="fld"><label class="l">Length (m)</label><input id="length" type="number" step="0.5" inputmode="decimal"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Installation environment</h2>
+            <div class="row3">
+              <div class="fld"><label class="l">Ambient (°C)</label><input id="ambient" type="number" value="30"></div>
+              <div class="fld"><label class="l">Grouped circuits</label><input id="circuits" type="number" value="1" min="1"></div>
+              <div class="fld"><label class="l">Thermal insulation</label><select id="insulationFactor">
+                <option value="none">None</option><option value="50mm">Touching 50 mm</option><option value="100mm">100 mm</option>
+                <option value="200mm">200 mm</option><option value="400mm">400 mm</option><option value="surround">Fully surrounded</option>
+              </select></div>
+            </div>
+            <div class="fld"><label class="l"><input type="checkbox" id="buried" style="width:auto;margin-right:6px">Buried direct in ground (Cc 0.9)</label></div>
+          </div>
+
+          <div class="card">
+            <h2>Earth fault loop</h2>
+            <div class="row2">
+              <div class="fld"><label class="l">Supply / Ze preset</label><select id="zePreset">
+                <option value="">Enter Ze manually</option>
+                <option value="0.35">TN-C-S (PME) — 0.35 Ω</option>
+                <option value="0.8">TN-S — 0.8 Ω</option>
+                <option value="21">TT — 21 Ω (RCD required)</option>
+              </select></div>
+              <div class="fld"><label class="l">Ze (Ω)</label><input id="ze" type="number" step="0.01" value="0.35"></div>
+            </div>
+            <div class="row2">
+              <div class="fld"><label class="l">Permitted volt drop (%)</label><input id="vdPercent" type="number" step="0.1"></div>
+              <div class="fld"><label class="l">Uoc (V, open-circuit)</label><input id="uoc" type="number" value="230"></div>
+            </div>
+            <div class="hint">Uoc is the source open-circuit voltage used for max-Zs & fault-current (BS 7671 Cmin method uses 230 × 0.95).</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RESULTS -->
+      <div class="card" id="results">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h2 style="margin:0">Result</h2><span id="overall" class="outcome na">—</span>
+        </div>
+        <ul class="checks" id="checks"></ul>
+        <div id="warnings"></div>
+        <h2 style="margin:16px 0 8px">Key figures</h2>
+        <div class="figs" id="figs"></div>
+        <div class="btnrow" style="margin-top:14px">
+          <button class="btn" id="pdfBtn">⬇ Report PDF</button>
+          <button class="btn ghost" id="saveBtn">💾 Save</button>
+        </div>
+        <div class="disc">Checking aid only. Every figure must be verified by a competent person against BS 7671 and the manufacturer's data before use. Correction-factor and current-carrying-capacity values come from the datasheet data you maintain — they are not reproduced from BS 7671.</div>
+      </div>
+    </div>
+
+    <!-- ───────── SAVED ───────── -->
+    <div class="panel hide" id="p-saved">
+      <div class="card"><h2>Saved reports</h2><div id="savedList">Loading…</div></div>
+    </div>
+
+    <!-- ───────── DATA ───────── -->
+    <div class="panel hide" id="p-data">
+      <div class="card">
+        <h2>Datasheet reference data</h2>
+        <p style="font-size:12.5px;color:#4a5a6a;margin:0 0 10px">These are the current-carrying capacities (<b>Iz</b>, A) and voltage-drop (<b>mV/A/m</b>) values the calculator looks up, plus the correction-factor tables. <b>Enter your own manufacturer datasheet values here.</b> The calculator never invents these — a missing value is reported as "no data", never a silent pass.</p>
+        <div class="fld"><label class="l">Cable type</label><select id="dCable"></select></div>
+        <div class="btnrow"><button class="btn ghost sm" id="dAddCable">+ Add cable type</button><button class="btn ghost sm" id="dAddRow">+ Add size</button></div>
+        <div id="dTable" style="overflow-x:auto;margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h2>Correction factors</h2>
+        <div id="dFactors"></div>
+      </div>
+      <div class="btnrow">
+        <button class="btn" id="dSave">💾 Save datasheet data</button>
+        <button class="btn ghost" id="dReset">↺ Reset to sample</button>
+      </div>
+      <div class="disc" style="margin-top:10px">Saved data replaces the sample set for everyone. Values apply exactly as entered — verify them against the current manufacturer datasheet and BS 7671 Appendix 4 reference methods.</div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  var perms={}; try{ perms=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){}
+  var ok = perms.FullAccess==="Yes" || perms.CableCalc==="Yes";
+  document.getElementById(ok?"app":"gate").classList.remove("hide");
+  if(!ok) return;
+
+  var API = window.MOSTLANE_API, TOKEN = localStorage.getItem("mostlaneToken")||"";
+  function af(path,opt){ opt=opt||{}; opt.headers=Object.assign({Authorization:"Bearer "+TOKEN}, opt.headers||{}); return fetch(API+path,opt); }
+  function $(id){ return document.getElementById(id); }
+  var DATA={cables:[]}, CFG={}, USER=(function(){try{return sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";}})();
+
+  // ── tabs ──
+  document.querySelectorAll(".tab").forEach(function(t){ t.onclick=function(){
+    document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("on");}); t.classList.add("on");
+    ["calc","saved","data"].forEach(function(n){ $("p-"+n).classList.add("hide"); });
+    $("p-"+t.dataset.tab).classList.remove("hide");
+    if(t.dataset.tab==="saved") loadSaved();
+    if(t.dataset.tab==="data") renderData();
+  };});
+
+  // ── load config + data ──
+  Promise.all([
+    af("/cablecalc/config").then(function(r){return r.json();}).catch(function(){return {};}),
+    af("/cablecalc/data").then(function(r){return r.json();}).catch(function(){return {};})
+  ]).then(function(res){
+    CFG=(res[0]&&res[0].config)||{};
+    DATA=(res[1]&&res[1].data)||{cables:[]};
+    if(DATA.sample) $("sampleBanner").classList.remove("hide");
+    if(CFG.engineer) DATA._eng=CFG.engineer;
+    fillCables(); recalc();
+  });
+
+  function fillCables(){
+    var s=$("cableId"); s.innerHTML="";
+    (DATA.cables||[]).forEach(function(c){ var o=document.createElement("option"); o.value=c.id; o.textContent=c.name; s.appendChild(o); });
+    fillMethods();
+  }
+  function currentCable(){ return (DATA.cables||[]).filter(function(c){return c.id===$("cableId").value;})[0]; }
+  function fillMethods(){
+    var c=currentCable(), s=$("method"); s.innerHTML="";
+    if(!c) return; Object.keys(c.methods||{}).forEach(function(m){ var o=document.createElement("option"); o.value=m; o.textContent="Method "+m; s.appendChild(o); });
+    fillCsa();
+  }
+  function fillCsa(){
+    var c=currentCable(), m=c&&c.methods[$("method").value], s=$("csa"); s.innerHTML="";
+    if(!m) return; Object.keys(m).sort(function(a,b){return parseFloat(a)-parseFloat(b);}).forEach(function(k){ var o=document.createElement("option"); o.value=k; o.textContent=k+" mm²"; s.appendChild(o); });
+    recalc();
+  }
+  $("cableId").onchange=function(){ fillMethods(); };
+  $("method").onchange=function(){ fillCsa(); };
+
+  // load mode toggle
+  $("loadMode").onchange=function(){ var ib=this.value==="ib"; $("ibRow").classList.toggle("hide",!ib); $("powerRow").classList.toggle("hide",ib); recalc(); };
+  $("deviceStd").onchange=function(){ $("curveWrap").classList.toggle("hide", this.value!=="60898"&&this.value!=="61009"); recalc(); };
+  $("zePreset").onchange=function(){ if(this.value){ $("ze").value=this.value; } recalc(); };
+  $("circuitUse").onchange=function(){ recalc(); };
+
+  // recalc on any input
+  document.querySelectorAll("#p-calc input, #p-calc select").forEach(function(el){ el.addEventListener("input",recalc); el.addEventListener("change",recalc); });
+
+  function gatherInputs(){
+    var ib = $("loadMode").value==="ib";
+    var phases = parseInt(ib?$("phases2").value:$("phases").value,10);
+    return {
+      circuitRef:$("circuitRef").value,
+      phases:phases, voltage:num($("voltage").value), uoc:num($("uoc").value),
+      ib: ib?num($("ib").value):null,
+      powerW: ib?null:(num($("powerKw").value)!=null?num($("powerKw").value)*1000:null),
+      pf:num($("pf").value)||1,
+      circuitUse:$("circuitUse").value,
+      In:num($("In").value), deviceStd:$("deviceStd").value, deviceCurve:$("deviceCurve").value,
+      disconnect:parseFloat($("disconnect").value),
+      cableId:$("cableId").value, method:$("method").value, csa:num($("csa").value),
+      cpcCsa:num($("cpcCsa").value), cpcArrangement:$("cpcArrangement").value,
+      conductor:(currentCable()||{}).conductor||"cu", insulation:(currentCable()||{}).insulation||"pvc",
+      length:num($("length").value), ambient:num($("ambient").value),
+      circuits:num($("circuits").value)||1, insulationFactor:$("insulationFactor").value,
+      buried:$("buried").checked, ze:num($("ze").value),
+      vdPercent:num($("vdPercent").value)
+    };
+  }
+  function num(x){ var n=parseFloat(x); return isFinite(n)?n:null; }
+
+  var LAST=null;
+  function recalc(){
+    if(!window.MLCable) return;
+    var inp=gatherInputs();
+    var r=window.MLCable.calculate(inp,DATA);
+    LAST=r; render(r);
+  }
+
+  function render(r){
+    var v=r.values;
+    var ov=$("overall");
+    if(r.incomplete){ ov.className="outcome na"; ov.textContent="INCOMPLETE"; }
+    else if(r.pass){ ov.className="outcome ok"; ov.textContent="COMPLIANT"; }
+    else { ov.className="outcome bad"; ov.textContent="NOT COMPLIANT"; }
+    var ul=$("checks"); ul.innerHTML="";
+    r.checks.forEach(function(c){
+      var li=document.createElement("li"); li.className="chk";
+      var cls=c.pass===true?"ok":c.pass===false?"bad":"na";
+      li.innerHTML='<span class="dot '+cls+'"></span><div><div class="cl">'+esc(c.label)+' <span class="cr">'+esc(c.reg)+'</span></div><div class="cd">'+esc(c.detail||"")+'</div></div>';
+      ul.appendChild(li);
+    });
+    var w=$("warnings"); w.innerHTML="";
+    (r.warnings||[]).forEach(function(t){ var d=document.createElement("div"); d.className="warn"; d.textContent="⚠ "+t; w.appendChild(d); });
+    var figs=[
+      ["Design current Ib", v.Ib, "A"],["Device rating In", v.In, "A"],
+      ["Correction product", v.factorProduct, ""],["Required capacity It", v.itRequired, "A"],
+      ["Corrected Iz", v.izCorrected, "A"],["Volt drop", v.vdVolts, "V"+(v.vdPercent!=null?" ("+v.vdPercent+"%)":"")],
+      ["R1+R2", v.r1r2, "Ω"],["Zs", v.Zs, "Ω"],["Max Zs", v.maxZs&&v.maxZs.value, "Ω"],
+      ["Fault current", v.faultCurrent, "A"],["Min CPC (adiabatic)", v.minCpcCsa, "mm²"],["k (CPC)", v.kCpc, ""]
+    ];
+    var g=$("figs"); g.innerHTML="";
+    figs.forEach(function(f){ var d=document.createElement("div"); d.className="fig"; d.innerHTML='<span>'+esc(f[0])+'</span><b>'+(f[1]==null?"—":esc(f[1]+(f[2]?" "+f[2]:"")))+'</b>'; g.appendChild(d); });
+  }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
+
+  function meta(){
+    return { company:CFG.company||"Mostlane", client:$("client").value, site:$("site").value,
+      title:$("circuitRef").value, engineer:CFG.engineer||USER, qualification:CFG.qualification||"",
+      date:new Date().toISOString().slice(0,10) };
+  }
+
+  // ── PDF ──
+  $("pdfBtn").onclick=function(){
+    if(!LAST) return;
+    var rec=Object.assign({},LAST); rec.meta=meta(); rec.ref=rec.ref||($("circuitRef").value||"Cable calc");
+    var btn=this; btn.disabled=true; btn.textContent="Building…";
+    af("/cablecalc/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record:rec})})
+      .then(function(r){ if(!r.ok) throw new Error("PDF failed"); return r.blob(); })
+      .then(function(b){ var u=URL.createObjectURL(b); window.open(u,"_blank"); setTimeout(function(){URL.revokeObjectURL(u);},60000); })
+      .catch(function(e){ (window.MLUI?MLUI.toast:alert)("Couldn't build the report: "+e.message); })
+      .finally(function(){ btn.disabled=false; btn.textContent="⬇ Report PDF"; });
+  };
+
+  // ── save ──
+  $("saveBtn").onclick=function(){
+    if(!LAST) return;
+    var rec=Object.assign({},LAST); rec.meta=meta(); rec.ref=$("circuitRef").value||("Circuit "+(new Date().toLocaleDateString()));
+    var btn=this; btn.disabled=true;
+    af("/cablecalc/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({record:rec,ref:rec.ref})})
+      .then(function(r){return r.json();})
+      .then(function(j){ (window.MLUI?MLUI.toast:alert)(j.ok?"Saved":"Save failed"); })
+      .catch(function(){ alert("Save failed"); })
+      .finally(function(){ btn.disabled=false; });
+  };
+
+  // ── saved list ──
+  function loadSaved(){
+    af("/cablecalc/list").then(function(r){return r.json();}).then(function(j){
+      var el=$("savedList"); var rows=(j&&j.calcs)||[];
+      if(!rows.length){ el.textContent="No saved reports yet."; return; }
+      el.innerHTML="";
+      rows.forEach(function(c){
+        var d=document.createElement("div"); d.className="listrow";
+        var oc=c.outcome==="compliant"?"#22803c":c.outcome==="not-compliant"?"#c72929":"#b3720a";
+        d.innerHTML='<div><div style="font-weight:700">'+esc(c.ref||c.circuit_ref||"—")+'</div><div class="m">'+esc([c.client,c.site].filter(Boolean).join(" · "))+' · '+esc((c.updated_at||"").slice(0,10))+'</div></div>'+
+          '<div style="display:flex;gap:6px;align-items:center"><span style="color:'+oc+';font-weight:700;font-size:11px">'+esc((c.outcome||"").toUpperCase())+'</span></div>';
+        var btns=document.createElement("div"); btns.style.cssText="display:flex;gap:6px;margin-left:8px";
+        var pdf=document.createElement("button"); pdf.className="btn ghost sm"; pdf.textContent="PDF";
+        pdf.onclick=function(){ af("/cablecalc/pdf",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:c.id})}).then(function(r){return r.blob();}).then(function(b){var u=URL.createObjectURL(b);window.open(u,"_blank");}); };
+        var del=document.createElement("button"); del.className="btn ghost sm"; del.textContent="🗑"; del.style.color="#c72929";
+        del.onclick=function(){ if(!confirm("Delete this saved report?"))return; af("/cablecalc/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:c.id})}).then(function(){loadSaved();}); };
+        d.querySelector("div:last-child").appendChild(btns); btns.appendChild(pdf); btns.appendChild(del);
+        el.appendChild(d);
+      });
+    });
+  }
+
+  // ── data editor ──
+  function renderData(){
+    var s=$("dCable"); s.innerHTML="";
+    (DATA.cables||[]).forEach(function(c){ var o=document.createElement("option"); o.value=c.id; o.textContent=c.name; s.appendChild(o); });
+    s.onchange=renderDTable; renderDTable(); renderFactors();
+  }
+  function dCurrent(){ return (DATA.cables||[]).filter(function(c){return c.id===$("dCable").value;})[0]; }
+  function renderDTable(){
+    var c=dCurrent(); var host=$("dTable"); if(!c){ host.innerHTML=""; return; }
+    var methods=Object.keys(c.methods||{});
+    var sizes={}; methods.forEach(function(m){ Object.keys(c.methods[m]).forEach(function(k){ sizes[k]=1; }); });
+    var sizeList=Object.keys(sizes).sort(function(a,b){return parseFloat(a)-parseFloat(b);});
+    var h='<div style="margin-bottom:8px"><label class="l">Name</label><input id="dName" value="'+esc(c.name)+'" style="max-width:420px">'+
+      ' <label class="l" style="display:inline">Conductor</label> <select id="dCond" style="width:auto"><option value="cu"'+(c.conductor==="cu"?" selected":"")+'>Copper</option><option value="al"'+(c.conductor==="al"?" selected":"")+'>Aluminium</option></select>'+
+      ' <select id="dIns" style="width:auto"><option value="pvc"'+(c.insulation==="pvc"?" selected":"")+'>70°C PVC</option><option value="xlpe"'+(c.insulation==="xlpe"?" selected":"")+'>90°C XLPE</option></select></div>';
+    h+='<table class="d"><tr><th>Size mm²</th>';
+    methods.forEach(function(m){ h+='<th>'+esc(m)+' Iz</th><th>'+esc(m)+' mV/A/m</th>'; });
+    h+='</tr>';
+    sizeList.forEach(function(sz){
+      h+='<tr><td><b>'+esc(sz)+'</b></td>';
+      methods.forEach(function(m){ var row=c.methods[m][sz]||{}; h+='<td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="iz" type="number" step="0.1" value="'+(row.iz==null?"":row.iz)+'"></td><td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="vd" type="number" step="0.1" value="'+(row.vd==null?"":row.vd)+'"></td>'; });
+      h+='</tr>';
+    });
+    h+='</table><div class="hint" style="margin-top:6px">Method letters follow BS 7671 (A enclosed in insulated wall, B in conduit/trunking, C clipped direct, D buried, E free air/tray, 100 above a ceiling…). Leave a cell blank if the datasheet has no value.</div>';
+    host.innerHTML=h;
+    $("dName").oninput=function(){ c.name=this.value; };
+    $("dCond").onchange=function(){ c.conductor=this.value; };
+    $("dIns").onchange=function(){ c.insulation=this.value; };
+    host.querySelectorAll("input[data-m]").forEach(function(inp){ inp.oninput=function(){
+      var m=inp.dataset.m,sz=inp.dataset.sz,k=inp.dataset.k;
+      c.methods[m][sz]=c.methods[m][sz]||{}; var vv=parseFloat(inp.value); c.methods[m][sz][k]=isFinite(vv)?vv:null;
+    };});
+  }
+  function renderFactors(){
+    var host=$("dFactors");
+    function kvTable(title,obj,onset){
+      var h='<div style="margin:8px 0 4px;font-weight:700;font-size:12.5px">'+esc(title)+'</div><table class="d"><tr>';
+      var keys=Object.keys(obj||{}); keys.forEach(function(k){ h+='<th>'+esc(k)+'</th>'; }); h+='</tr><tr>';
+      keys.forEach(function(k){ h+='<td><input data-k="'+esc(k)+'" type="number" step="0.01" value="'+esc(obj[k])+'"></td>'; });
+      h+='</tr></table>'; return h;
+    }
+    var h="";
+    h+=kvTable("Ca — ambient (70°C PVC), key = °C", DATA.ambient&&DATA.ambient.pvc||{});
+    h+='<div id="fac-pvc"></div>';
+    h+=kvTable("Ca — ambient (90°C XLPE), key = °C", DATA.ambient&&DATA.ambient.xlpe||{});
+    h+='<div id="fac-xlpe"></div>';
+    h+=kvTable("Cg — grouping, key = circuits", DATA.grouping&&DATA.grouping.default||{});
+    h+='<div id="fac-cg"></div>';
+    h+=kvTable("Ci — thermal insulation", DATA.insulation||{});
+    host.innerHTML=h;
+    // wire edits: rebuild tables inline
+    wireKv(host.querySelectorAll("table")[0], DATA.ambient.pvc);
+    wireKv(host.querySelectorAll("table")[1], DATA.ambient.xlpe);
+    wireKv(host.querySelectorAll("table")[2], DATA.grouping.default);
+    wireKv(host.querySelectorAll("table")[3], DATA.insulation);
+  }
+  function wireKv(table,obj){ if(!table)return; table.querySelectorAll("input[data-k]").forEach(function(inp){ inp.oninput=function(){ var vv=parseFloat(inp.value); obj[inp.dataset.k]=isFinite(vv)?vv:null; }; }); }
+
+  $("dAddCable").onclick=function(){
+    var name=prompt("New cable type name:"); if(!name)return;
+    var id="cab"+Date.now().toString(36);
+    DATA.cables.push({id:id,name:name,conductor:"cu",insulation:"pvc",methods:{C:{"2.5":{iz:null,vd:null}}}});
+    renderData(); $("dCable").value=id; renderDTable();
+  };
+  $("dAddRow").onclick=function(){
+    var c=dCurrent(); if(!c)return; var sz=prompt("New conductor size (mm²), e.g. 25:"); if(!sz)return;
+    Object.keys(c.methods).forEach(function(m){ c.methods[m][sz]=c.methods[m][sz]||{iz:null,vd:null}; });
+    renderDTable();
+  };
+  $("dSave").onclick=function(){
+    var btn=this; btn.disabled=true;
+    af("/cablecalc/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:DATA})})
+      .then(function(r){return r.json();}).then(function(j){
+        if(j&&j.ok){ DATA=j.data; DATA.sample=false; $("sampleBanner").classList.add("hide"); (window.MLUI?MLUI.toast:alert)("Datasheet data saved"); fillCables(); recalc(); }
+        else alert("Save failed");
+      }).catch(function(){alert("Save failed");}).finally(function(){btn.disabled=false;});
+  };
+  $("dReset").onclick=function(){
+    if(!confirm("Reset to the built-in sample data? This discards your saved datasheet values."))return;
+    af("/cablecalc/data/reset",{method:"POST"}).then(function(r){return r.json();}).then(function(j){ DATA=j.data; renderData(); fillCables(); recalc(); $("sampleBanner").classList.remove("hide"); });
+  };
+})();
+</script>
+</body>
+</html>
