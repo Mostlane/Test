@@ -2332,6 +2332,25 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
 
+## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
+A live at-a-glance office view of where every field engineer is right now.
+**GET /sla/live** (office: FullAccess|SLAAdmin|SLA) computes, per field engineer
+(staffType≠office, active), using each engineer's OWN per-engineer slice
+(`effStatus`/`effSchedule`, NOT the release-gated for-engineer view — the office sees
+the true plan): the job they're **on now** (effStatus Travelling / In Progress, incl.
+one left running from a previous day), and the job they **should be** on next (earliest
+unfinished, non-active job scheduled today — a normal job, a project day, or a 🛟 standby
+fallback). Category = `on_job` (has a current) → `should_be` (has a next) → `off` (on
+approved leave, via `approvedLeaveInRange`) → `idle`. Returns each engineer's WHOLE
+`planned` day (today's jobs sorted by time, each with status/priority/since) so the
+modal needs no extra fetch. Front-end **engineers-live.html** (📍 Where's everyone):
+two sections **🔧 On Job** then **📋 Should Be** (+ a muted 🕔 No job / off), colour-coded
+status pills, **auto-refreshes every 45s**; each engineer **name is clickable → a
+planned-day modal** (time · site · status chips; a row opens job-view.html). Entry
+points: a **📍 Where's everyone** button on sla-scheduler.html + in sla-main.html's 🛠
+Tools menu, and a sidebar nav item (SLA|SLAAdmin). Reuses listJobs + effStatus/
+effSchedule; no new table.
+
 ## EM light test + PAT job types (add-job.html + sla.js — Aug 2026)
 Add Job has **💡 EM light test** + **🔌 PAT** ticks. Ticking them auto-fills the
 **description** and **duration**: PAT → `Import certificate number <storeCode>-<YY>`,

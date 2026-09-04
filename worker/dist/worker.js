@@ -5706,6 +5706,74 @@ async function handle6(request, env, ctx, url, sess) {
       return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
   }
+  if (subpath === "/live" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const permSet = await userPerms(env, tenantId, sess);
+    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("SLA")))
+      return jsonResponse({ error: "Office access required" }, headers, 403);
+    const today = londonNow().date;
+    const londonDay = (iso) => {
+      try {
+        const d = new Date(iso);
+        return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d);
+      } catch {
+        return "";
+      }
+    };
+    const allJobs = (await listJobs(env, tenantId)).filter((j) => j && String(j.status || "").toLowerCase() !== "cancelled");
+    const { results: users } = await env.DB.prepare(
+      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')"
+    ).bind(tenantId).all();
+    const fieldUsers = (users || []).filter((u) => {
+      let st = "field";
+      try {
+        st = JSON.parse(u.profile || "{}").staffType || "field";
+      } catch {
+      }
+      return st !== "office";
+    });
+    let leave = {};
+    try {
+      const { approvedLeaveInRange: approvedLeaveInRange2 } = await Promise.resolve().then(() => (init_holidays(), holidays_exports));
+      leave = await approvedLeaveInRange2(env, tenantId, today, today);
+    } catch {
+    }
+    const isDone = (s) => DONE_STATES.has(String(s || "").toLowerCase());
+    const isActive = (s) => s === "In Progress" || s === "Travelling";
+    const shape = (a) => a ? {
+      jobId: a.job.id,
+      ref: a.job.helpdeskRef || a.job.reference || "",
+      site: a.job.siteName || a.job.helpdeskRef || a.job.reference || "",
+      siteCode: a.job.siteCode || "",
+      status: a.status,
+      priority: a.job.priority || "",
+      scheduledAt: a.scheduledAt || "",
+      scheduledEnd: a.scheduledEnd || "",
+      since: a.since || "",
+      projectId: a.job.projectId || null,
+      isProject: !!a.job.projectId,
+      isFallback: !!a.job.fallback
+    } : null;
+    const engineers = fieldUsers.map((u) => {
+      const norm = normId(u.username);
+      const name = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+      const onLeave = !!(leave[u.username] || leave[norm] || {})[today];
+      const mine = allJobs.filter((j) => assignedList(j).some((a) => normId(a) === norm)).map((j) => {
+        const st = effStatus(j, norm), sc = effSchedule(j, norm);
+        const es = j.engStatus && j.engStatus[norm] || null;
+        return { job: j, status: st, scheduledAt: sc.scheduledAt, scheduledEnd: sc.scheduledEnd, day: sc.scheduledAt ? londonDay(sc.scheduledAt) : "", since: es ? es.at : isActive(st) ? j.updatedAt : "" };
+      });
+      const todays = mine.filter((a) => a.day === today || isActive(a.status));
+      const active = todays.filter((a) => isActive(a.status)).sort((x, y) => String(y.since || "").localeCompare(String(x.since || "")));
+      const current = active[0] || null;
+      const upcoming = todays.filter((a) => !isDone(a.status) && !isActive(a.status)).sort((x, y) => String(x.scheduledAt || "9").localeCompare(String(y.scheduledAt || "9")));
+      const next = upcoming[0] || null;
+      const planned = todays.slice().sort((x, y) => String(x.scheduledAt || "~").localeCompare(String(y.scheduledAt || "~")));
+      const category = current ? "on_job" : next ? "should_be" : onLeave ? "off" : "idle";
+      return { username: u.username, name, onLeave, category, current: shape(current), next: shape(next), planned: planned.map(shape), count: todays.length };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return jsonResponse({ ok: true, date: today, engineers }, headers);
+  }
   if (subpath === "/route-optimize" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess))
