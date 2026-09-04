@@ -2479,6 +2479,19 @@ it straight onto the compliance chart (rolling the next-due date).
   Portsmouth, PO6 3FE** (office-editable). Used to SEED a new cert's client ONLY when
   the previous cert didn't supply one — the previous cert always wins, and it never
   overwrites a typed value. (Non-Co-op EM/PAT would need the office to change it.)
+- **The JOB is completed SERVER-SIDE when its certs are in (Sep 2026 fix):** the
+  job→Complete used to depend ENTIRELY on the engineer's browser calling `patchJob`
+  the moment the last cert submitted. If that was interrupted — the office finalised
+  the certs, or a combined EM+PAT job's two certs were submitted across separate page
+  loads (each reload resets the client's `done` flags, so the "both done → complete"
+  patch never fired) — the job sat **stuck In Progress** with no way to complete it,
+  which then **blocked the engineer's clock-off**. Now `certs.js maybeCompleteCertJob`
+  runs on BOTH `/certs/submit` AND `/certs/finalise`: once every required cert (em
+  and/or pat, from the job's flags) is submitted-or-final, it writes the job to
+  Complete — top-level status AND every assigned engineer's `engStatus` slice (so
+  single- and multi-engineer shared-cert jobs both read Complete). The certificates
+  are the source of truth, not the engineer's device. (Ryan hit this: two combined
+  EM+PAT jobs finalised by the office stayed In Progress and he couldn't end his day.)
 - **Combined EM+PAT job (engineer-job.html):** two tabs, each certificate completed
   INDEPENDENTLY (finish one before the other, any order) — each has its own "Complete
   & submit". The JOB only patches to Complete once BOTH certs are submitted

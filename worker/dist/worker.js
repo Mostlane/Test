@@ -30368,6 +30368,47 @@ function padCode(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 }
+var normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+async function maybeCompleteCertJob(env, tid, cert) {
+  try {
+    if (!cert || !cert.job_id) return false;
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, cert.job_id).first();
+    if (!row) return false;
+    let job;
+    try {
+      job = JSON.parse(row.data);
+    } catch {
+      return false;
+    }
+    const need = [];
+    if (job.emTest) need.push("em");
+    if (job.pat) need.push("pat");
+    if (!need.length) return false;
+    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
+    const { results } = await env.DB.prepare(
+      "SELECT DISTINCT type FROM certificates WHERE tenant_id=? AND job_id=? AND status IN ('review','final')"
+    ).bind(tid, cert.job_id).all();
+    const have = new Set((results || []).map((r) => r.type));
+    if (!need.every((t) => have.has(t))) return false;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    job.status = "Complete";
+    job.updatedAt = now;
+    job.closedAt = job.closedAt || now;
+    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
+    if (engs.length >= 2) {
+      job.engStatus = job.engStatus || {};
+      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "cert" };
+    } else if (job.engStatus) {
+      for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now, by: "cert" };
+    }
+    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+    job.statusHistory.push({ status: "Complete", at: now, by: "cert" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, cert.job_id).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
 function isRealRemedial(rem) {
   if (!rem || typeof rem !== "object") return false;
   if (rem.failed) return true;
@@ -31031,6 +31072,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
+    const jobDone = await maybeCompleteCertJob(env, tid, cert);
     const payload = {
       title: (cert.type === "pat" ? "PAT" : "EM") + " certificate ready to review",
       body: `${me} submitted a certificate for review.`,
@@ -31046,7 +31088,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {
       }));
     }
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, jobComplete: jobDone }, {}, env, request);
   }
   if (sub === "/pdf" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
@@ -31216,6 +31258,10 @@ PAT: Import certificate number ${num2}-${yr}`;
       if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:patseq:" + tid, String(n)).run();
     }
     await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, me, now, tid, cert.id).run();
+    try {
+      await maybeCompleteCertJob(env, tid, cert);
+    } catch {
+    }
     if (cert.engineer && cert.engineer !== me) ctx?.waitUntil?.(sendToUser(env, tid, cert.engineer, { title: "Certificate issued", body: `Your ${cert.type === "pat" ? "PAT" : "EM"} certificate ${number} has been reviewed and filed.`, url: "/eicr-portal.html", tag: "cert-final:" + cert.id }).catch(() => {
     }));
     let remedial = null;
