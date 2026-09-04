@@ -2535,6 +2535,16 @@ it straight onto the compliance chart (rolling the next-due date).
   Done / All with per-fitting £ + totals + links to each remedial job; the office
   also sees ⚠ tags per row when reviewing. `createOrUpdateJobFromPayload` imported
   from sla.js. portal-config `?v=20`, SW `mostlane-v84`.
+- **Photos on EVERY failed fitting — light OR battery (Sep 2026, `cert-form.js?v=19`):**
+  the per-fitting **📷 Add photo** control used to render ONLY when the fault kind was
+  Batteries, so a **replace-light** remedial had NOWHERE to photograph the failed
+  fitting (Ryan hit this). The photos block now shows for BOTH kinds (spec + qty stay
+  battery-only), and **validation requires ≥1 photo per failed fitting** ("N failed
+  fitting(s) — add a photo"). Server: `processEmRemedials` now captures `photos` for
+  every kind into `em_remedials.photos` (was battery-only), and
+  `createRemedialJobForCert` **copies each fitting's photos into the raised remedial
+  job's R2 folder** (`jobs/<jobId>/emrem-*`, idempotent) so the works job shows exactly
+  which fittings to replace. Photos are vital for the office record + the ordered works.
 - **EM remedial BATTERIES (not a new light) — supplier enquiry (Aug 2026):** a failed
   fitting's remedial can be **batteries** instead of a replacement light. On the cert
   form (cert-form.js `?v=10`, EM only) a failed fitting picks **Fault: Replace light /
