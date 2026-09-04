@@ -31649,7 +31649,10 @@ var SEED = {
         // C = clipped direct; A = enclosed in conduit in insulated wall; 100 = above a plasterboard ceiling
         C: { "1": { iz: 16, vd: 44 }, "1.5": { iz: 20, vd: 29 }, "2.5": { iz: 27, vd: 18 }, "4": { iz: 37, vd: 11 }, "6": { iz: 47, vd: 7.3 }, "10": { iz: 64, vd: 4.4 }, "16": { iz: 85, vd: 2.8 } },
         A: { "1": { iz: 11, vd: 44 }, "1.5": { iz: 14, vd: 29 }, "2.5": { iz: 18.5, vd: 18 }, "4": { iz: 25, vd: 11 }, "6": { iz: 32, vd: 7.3 }, "10": { iz: 43, vd: 4.4 }, "16": { iz: 57, vd: 2.8 } },
-        "100": { "1": { iz: 13, vd: 44 }, "1.5": { iz: 16, vd: 29 }, "2.5": { iz: 21, vd: 18 }, "4": { iz: 27, vd: 11 }, "6": { iz: 34, vd: 7.3 }, "10": { iz: 45, vd: 4.4 }, "16": { iz: 57, vd: 2.8 } }
+        "100": { "1": { iz: 13, vd: 44 }, "1.5": { iz: 16, vd: 29 }, "2.5": { iz: 21, vd: 18 }, "4": { iz: 27, vd: 11 }, "6": { iz: 34, vd: 7.3 }, "10": { iz: 45, vd: 4.4 }, "16": { iz: 57, vd: 2.8 } },
+        // "in an insulated wall" columns — empty; fill from your datasheet (or use Method C + Ci)
+        "102": {},
+        "103": {}
       }
     },
     {
@@ -31659,7 +31662,10 @@ var SEED = {
       insulation: "xlpe",
       methods: {
         C: { "1": { iz: 18, vd: 44 }, "1.5": { iz: 23, vd: 29 }, "2.5": { iz: 32, vd: 18 }, "4": { iz: 42, vd: 11 }, "6": { iz: 54, vd: 7.3 }, "10": { iz: 75, vd: 4.4 }, "16": { iz: 100, vd: 2.8 } },
-        A: { "1": { iz: 14, vd: 44 }, "1.5": { iz: 18, vd: 29 }, "2.5": { iz: 25, vd: 18 }, "4": { iz: 33, vd: 11 }, "6": { iz: 42, vd: 7.3 }, "10": { iz: 57, vd: 4.4 }, "16": { iz: 76, vd: 2.8 } }
+        A: { "1": { iz: 14, vd: 44 }, "1.5": { iz: 18, vd: 29 }, "2.5": { iz: 25, vd: 18 }, "4": { iz: 33, vd: 11 }, "6": { iz: 42, vd: 7.3 }, "10": { iz: 57, vd: 4.4 }, "16": { iz: 76, vd: 2.8 } },
+        "100": {},
+        "102": {},
+        "103": {}
       }
     },
     {
@@ -31672,7 +31678,13 @@ var SEED = {
         E: { "1.5": { iz: 27, vd: 29 }, "2.5": { iz: 36, vd: 18 }, "4": { iz: 49, vd: 11 }, "6": { iz: 62, vd: 7.3 }, "10": { iz: 85, vd: 4.4 }, "16": { iz: 110, vd: 2.8 }, "25": { iz: 146, vd: 1.75 } },
         D: { "1.5": { iz: 25, vd: 29 }, "2.5": { iz: 33, vd: 18 }, "4": { iz: 43, vd: 11 }, "6": { iz: 53, vd: 7.3 }, "10": { iz: 71, vd: 4.4 }, "16": { iz: 91, vd: 2.8 }, "25": { iz: 116, vd: 1.75 } }
       }
-    }
+    },
+    // Empty scaffolds for the rest of the common range — method columns present so
+    // the datasheet importer has a target; fill Iz + mV/A/m from your datasheet.
+    { id: "singles-pvc", name: "6491X singles (70\xB0C PVC), Cu", conductor: "cu", insulation: "pvc", methods: { A: {}, B: {}, C: {}, "102": {}, "103": {} } },
+    { id: "singles-lszh", name: "6491B singles (90\xB0C LSZH), Cu", conductor: "cu", insulation: "xlpe", methods: { A: {}, B: {}, C: {}, "102": {}, "103": {} } },
+    { id: "swa-xlpe-3c", name: "XLPE/SWA 3-core (6944X), Cu", conductor: "cu", insulation: "xlpe", methods: { C: {}, D: {}, E: {} } },
+    { id: "swa-xlpe-4c", name: "XLPE/SWA 4-core (6945X), Cu", conductor: "cu", insulation: "xlpe", methods: { C: {}, D: {}, E: {} } }
   ],
   // Ca — ambient temperature correction (by insulation). Keys = °C.
   ambient: {

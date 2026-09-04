@@ -153,7 +153,7 @@
               <div class="fld"><label class="l">Ambient (°C)</label><input id="ambient" type="number" value="30"></div>
               <div class="fld"><label class="l">Grouped circuits</label><input id="circuits" type="number" value="1" min="1"></div>
               <div class="fld"><label class="l">Thermal insulation</label><select id="insulationFactor">
-                <option value="none">None</option><option value="50mm">Touching 50 mm</option><option value="100mm">100 mm</option>
+                <option value="none">None</option><option value="50mm">In a wall, ≤50 mm (0.89)</option><option value="100mm">100 mm</option>
                 <option value="200mm">200 mm</option><option value="400mm">400 mm</option><option value="surround">Fully surrounded</option>
               </select></div>
             </div>
@@ -246,10 +246,13 @@
           <button class="btn sm" id="impParse">Parse →</button>
         </div>
         <div id="impMapWrap" class="hide" style="margin-top:12px">
-          <div class="row3">
+          <div class="row2">
             <div class="fld"><label class="l">Size column (mm²)</label><select id="impColSize"></select></div>
-            <div class="fld"><label class="l">Iz column (A)</label><select id="impColIz"></select></div>
             <div class="fld"><label class="l">mV/A/m column</label><select id="impColVd"></select></div>
+          </div>
+          <div class="fld"><label class="l">Which columns are current ratings, and for which reference method?</label>
+            <div id="impMethodMap"></div>
+            <div class="hint">A datasheet current-rating table usually has one Iz column per reference method — tag each one. Leave a column as "— ignore —" if it isn't an Iz column.</div>
           </div>
           <div id="impPreview" style="overflow-x:auto"></div>
           <div class="btnrow"><button class="btn" id="impApply">Add to grid</button></div>
@@ -298,9 +301,11 @@
     fillMethods();
   }
   function currentCable(){ return (DATA.cables||[]).filter(function(c){return c.id===$("cableId").value;})[0]; }
+  var METHOD_LABELS={A:"A — enclosed in an insulated wall",B:"B — in conduit/trunking on a wall",C:"C — clipped direct / in a wall","100":"100 — above an insulated ceiling ≤100 mm","101":"101 — above an insulated ceiling >100 mm","102":"102 — in an insulated wall, touching surface","103":"103 — in an insulated wall, not touching",D:"D — buried direct in ground",E:"E — free air / on a tray",F:"F — free air (spaced)"};
+  function methodLabel(m){ return METHOD_LABELS[m]||("Method "+m); }
   function fillMethods(){
     var c=currentCable(), s=$("method"); s.innerHTML="";
-    if(!c) return; Object.keys(c.methods||{}).forEach(function(m){ var o=document.createElement("option"); o.value=m; o.textContent="Method "+m; s.appendChild(o); });
+    if(!c) return; Object.keys(c.methods||{}).forEach(function(m){ var o=document.createElement("option"); o.value=m; o.textContent=methodLabel(m); s.appendChild(o); });
     fillCsa();
   }
   function fillCsa(){
@@ -543,41 +548,62 @@
   };
   $("impParse").onclick=function(){ IMPMAT=parseTabular($("impPaste").value); buildMap(); };
 
+  var METHOD_OPTS=["A","B","C","100","101","102","103","D","E","F"];
   function guessCol(headers,words){ for(var i=0;i<headers.length;i++){ var h=(headers[i]||"").toLowerCase(); if(words.some(function(w){return h.indexOf(w)>=0;})) return i; } return -1; }
+  function guessMethod(header){ var h=(header||"").toUpperCase(); for(var i=0;i<METHOD_OPTS.length;i++){ var m=METHOD_OPTS[i]; var re=new RegExp("(^|[^A-Z0-9])"+m+"([^A-Z0-9]|$)"); if(re.test(h)) return m; } return ""; }
   function buildMap(){
     if(!IMPMAT.length){ (window.MLUI?MLUI.toast:alert)("Nothing to parse — paste rows or upload a file."); return; }
     var hdr=$("impHdr").checked;
     var ncols=Math.max.apply(null,IMPMAT.map(function(r){return r.length;}));
     var headers=hdr?IMPMAT[0]:[];
-    ["impColSize","impColIz","impColVd"].forEach(function(id){ var s=$(id); s.innerHTML=""; for(var i=0;i<ncols;i++){ var o=document.createElement("option"); o.value=i; o.textContent=(hdr&&headers[i]?headers[i]:"Column "+(i+1)); s.appendChild(o); } });
-    // auto-guess
-    if(hdr){ var gs=guessCol(headers,["size","csa","mm","c.s.a","conductor"]); var gi=guessCol(headers,["iz","current","rating","capacity","amp"]); var gv=guessCol(headers,["mv","v/a","volt","drop","vd"]);
-      if(gs>=0)$("impColSize").value=gs; if(gi>=0)$("impColIz").value=gi; if(gv>=0)$("impColVd").value=gv; }
-    else { $("impColSize").value=0; $("impColIz").value=Math.min(1,ncols-1); $("impColVd").value=Math.min(2,ncols-1); }
-    $("impMapWrap").classList.remove("hide");
-    renderImpPreview();
-    ["impColSize","impColIz","impColVd"].forEach(function(id){ $(id).onchange=renderImpPreview; });
+    function colName(i){ return hdr&&headers[i]?headers[i]:"Column "+(i+1); }
+    // size + vd selects
+    var ss=$("impColSize"); ss.innerHTML=""; for(var i=0;i<ncols;i++){ var o=document.createElement("option"); o.value=i; o.textContent=colName(i); ss.appendChild(o); }
+    var vs=$("impColVd"); vs.innerHTML='<option value="-1">— none —</option>'; for(i=0;i<ncols;i++){ o=document.createElement("option"); o.value=i; o.textContent=colName(i); vs.appendChild(o); }
+    var gs=hdr?guessCol(headers,["size","csa","mm","c.s.a","conductor"]):0; var gv=hdr?guessCol(headers,["mv","v/a","volt","drop","vd"]):-1;
+    $("impColSize").value=gs>=0?gs:0; $("impColVd").value=gv>=0?gv:-1;
+    renderMethodMap(ncols,headers,hdr);
+    $("impColSize").onchange=function(){ renderMethodMap(ncols,headers,hdr); };
+    $("impColVd").onchange=function(){ renderMethodMap(ncols,headers,hdr); };
     $("impHdr").onchange=buildMap;
+    $("impMapWrap").classList.remove("hide");
   }
+  function renderMethodMap(ncols,headers,hdr){
+    var sizeCol=+$("impColSize").value, vdCol=+$("impColVd").value, host=$("impMethodMap"); host.innerHTML="";
+    for(var i=0;i<ncols;i++){
+      if(i===sizeCol||i===vdCol) continue;
+      var name=hdr&&headers[i]?headers[i]:"Column "+(i+1);
+      var wrap=document.createElement("div"); wrap.style.cssText="display:flex;align-items:center;gap:8px;margin:3px 0";
+      var lab=document.createElement("span"); lab.style.cssText="flex:1;font-size:12.5px;color:#33404d"; lab.textContent=name;
+      var sel=document.createElement("select"); sel.style.cssText="width:auto"; sel.dataset.col=i;
+      sel.innerHTML='<option value="">— ignore —</option>'+METHOD_OPTS.map(function(m){return '<option value="'+m+'">Method '+m+'</option>';}).join("");
+      var g=guessMethod(name); if(g) sel.value=g; else if(host.querySelectorAll("select").length===0) sel.value=($("impMethod").value||"C").trim();
+      sel.onchange=renderImpPreview;
+      wrap.appendChild(lab); wrap.appendChild(sel); host.appendChild(wrap);
+    }
+    renderImpPreview();
+  }
+  function methodCols(){ var out=[]; $("impMethodMap").querySelectorAll("select").forEach(function(s){ if(s.value) out.push({col:+s.dataset.col, method:s.value}); }); return out; }
   function impRows(){
-    var hdr=$("impHdr").checked, cs=+$("impColSize").value, ci=+$("impColIz").value, cv=+$("impColVd").value;
-    var out=[];
+    var hdr=$("impHdr").checked, cs=+$("impColSize").value, cv=+$("impColVd").value, mc=methodCols(), out=[];
     IMPMAT.slice(hdr?1:0).forEach(function(r){
-      var size=(r[cs]||"").replace(/[^\d.]/g,""), iz=parseFloat((r[ci]||"").replace(/[^\d.]/g,"")), vd=parseFloat((r[cv]||"").replace(/[^\d.]/g,""));
-      if(size && (isFinite(iz)||isFinite(vd))) out.push({size:size, iz:isFinite(iz)?iz:null, vd:isFinite(vd)?vd:null});
+      var size=(r[cs]||"").replace(/[^\d.]/g,""); if(!size) return;
+      var vd=cv>=0?parseFloat((r[cv]||"").replace(/[^\d.]/g,"")):NaN;
+      var byM={}; mc.forEach(function(m){ var iz=parseFloat((r[m.col]||"").replace(/[^\d.]/g,"")); if(isFinite(iz)) byM[m.method]=iz; });
+      if(Object.keys(byM).length||isFinite(vd)) out.push({size:size, vd:isFinite(vd)?vd:null, byM:byM});
     });
     return out;
   }
   function renderImpPreview(){
-    var rows=impRows();
-    var h='<table class="d"><tr><th>Size mm²</th><th>Iz (A)</th><th>mV/A/m</th></tr>';
-    rows.forEach(function(r){ h+='<tr><td>'+esc(r.size)+'</td><td>'+(r.iz==null?"—":esc(r.iz))+'</td><td>'+(r.vd==null?"—":esc(r.vd))+'</td></tr>'; });
-    h+='</table><div class="hint" style="margin-top:5px">'+rows.length+' size(s) detected.</div>';
+    var mc=methodCols(), rows=impRows();
+    var h='<table class="d"><tr><th>Size mm²</th>'+mc.map(function(m){return '<th>Iz '+esc(m.method)+'</th>';}).join("")+'<th>mV/A/m</th></tr>';
+    rows.forEach(function(r){ h+='<tr><td>'+esc(r.size)+'</td>'+mc.map(function(m){return '<td>'+(r.byM[m.method]==null?"—":esc(r.byM[m.method]))+'</td>';}).join("")+'<td>'+(r.vd==null?"—":esc(r.vd))+'</td></tr>'; });
+    h+='</table><div class="hint" style="margin-top:5px">'+rows.length+' size(s), '+mc.length+' method(s) detected.</div>';
     $("impPreview").innerHTML=h;
   }
   $("impApply").onclick=function(){
     var rows=impRows(); if(!rows.length){ (window.MLUI?MLUI.toast:alert)("No usable rows."); return; }
-    var method=($("impMethod").value||"C").trim();
+    var mc=methodCols(); if(!mc.length){ (window.MLUI?MLUI.toast:alert)("Tag at least one column as a reference method's Iz."); return; }
     var cabId=$("impCable").value, cab;
     if(cabId==="__new"){
       var name=($("impNewName").value||"").trim(); if(!name){ alert("Enter a name for the new cable."); return; }
@@ -585,11 +611,11 @@
       DATA.cables.push(cab);
     } else { cab=(DATA.cables||[]).filter(function(c){return c.id===cabId;})[0]; }
     if(!cab){ alert("Pick a cable."); return; }
-    cab.methods[method]=cab.methods[method]||{};
-    rows.forEach(function(r){ cab.methods[method][r.size]={iz:r.iz,vd:r.vd}; });
+    var nSet=0;
+    rows.forEach(function(r){ Object.keys(r.byM).forEach(function(m){ cab.methods[m]=cab.methods[m]||{}; cab.methods[m][r.size]={iz:r.byM[m], vd:r.vd}; nSet++; }); });
     $("impOverlay").classList.add("hide");
     renderData(); if($("dCable")) $("dCable").value=cab.id; renderDTable();
-    (window.MLUI?MLUI.toast:alert)("Added "+rows.length+" size(s) to “"+cab.name+"” (method "+method+"). Review, then Save datasheet data.");
+    (window.MLUI?MLUI.toast:alert)("Added "+nSet+" value(s) across "+mc.length+" method(s) to “"+cab.name+"”. Review, then Save datasheet data.");
   };
 })();
 </script>
