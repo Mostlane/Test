@@ -7,7 +7,7 @@
 const CONFIG = {
   siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
-  address:   "Sarisbury Sports & Football Club, Coal Park Lane, Swanwick, SO31 7GW",
+  address:   "Coal Park Lane, Swanwick, SO31 7GW",
   email:     "bookings@example.com",   // where enquiries are sent — set this before go-live
   phone:     "01234 567 890",
   phoneLink: "+440000000000",          // tel: format, no spaces
