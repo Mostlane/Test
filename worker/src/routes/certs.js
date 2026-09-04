@@ -169,7 +169,9 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       kind,
       batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
       batteryQty: kind === "battery" ? (Number(rem.batteryQty) || 0) : 0,
-      photos: (kind === "battery" && Array.isArray(rem.photos)) ? rem.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [],
+      // Every failed fitting's photos (light OR battery) — needed for the office
+      // record and to build the remedial job when the client orders the works.
+      photos: Array.isArray(rem.photos) ? rem.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [],
     };
   }).filter(x => x.failed);
   if (!fails.length) {
@@ -270,6 +272,30 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
           await env.DB.batch(ids.slice(i, i + 20).map(rid => env.DB.prepare("UPDATE em_remedials SET job_id=? WHERE tenant_id=? AND id=?").bind(job.id, tid, rid)));
         }
       } catch {}
+      // Carry each failed fitting's PHOTOS onto the remedial job, so whoever opens
+      // it can see exactly which fittings to replace. Copied into the job's own R2
+      // folder (they then show like any job photo). Idempotent — skipped if the job
+      // already has them (re-running the pipeline never duplicates).
+      if (env.JOB_FILES) {
+        try {
+          const already = await env.JOB_FILES.list({ prefix: "jobs/" + job.id + "/emrem-" }).catch(() => null);
+          if (!already || !already.objects || !already.objects.length) {
+            let n = 0;
+            for (const r of pend) {
+              let keys = []; try { keys = JSON.parse(r.photos || "[]"); } catch {}
+              for (const key of (Array.isArray(keys) ? keys : [])) {
+                if (!key || typeof key !== "string" || n >= 40) continue;
+                const obj = await env.JOB_FILES.get(key);
+                if (!obj) continue;
+                await env.JOB_FILES.put("jobs/" + job.id + "/emrem-" + n + "-" + Date.now() + ".jpg", obj.body,
+                  { httpMetadata: { contentType: (obj.httpMetadata && obj.httpMetadata.contentType) || "image/jpeg" } });
+                n++;
+              }
+              if (n >= 40) break;
+            }
+          }
+        } catch {}
+      }
     }
     return job && job.id;
   } catch { return null; }
