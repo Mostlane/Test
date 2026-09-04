@@ -33052,6 +33052,32 @@ async function handle34(request, env, ctx, url, sess) {
     const meNorm = normId2(me);
     const engsOf = (j) => Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
     const jobIsMine = (j) => engsOf(j).some((e) => String(e).toLowerCase() === meLower || normId2(e) === meNorm);
+    const segPairs = /* @__PURE__ */ new Set();
+    for (const s of segs) segPairs.add(String(s.job_id) + "::" + normId2(s.username));
+    const todayISO = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    for (const j of projectJobs) {
+      if (/^cancelled$/i.test(String(j.status || ""))) continue;
+      for (const rawEng of engsOf(j)) {
+        if (!rawEng) continue;
+        if (segPairs.has(String(j.id) + "::" + normId2(rawEng))) continue;
+        const es = j.engSchedule && j.engSchedule[normId2(rawEng)] || {};
+        const startISO = es.scheduledAt || j.scheduledAt;
+        if (!startISO) continue;
+        const date = String(startISO).slice(0, 10);
+        if (date > todayISO) continue;
+        let mins = 0;
+        const endISO = es.scheduledEnd || j.scheduledEnd;
+        if (endISO) {
+          const d = (Date.parse(endISO) - Date.parse(startISO)) / 6e4;
+          if (d >= 15 && d <= 24 * 60) mins = Math.round(d);
+        }
+        if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+        if (!mins) continue;
+        const key = "p|" + rawEng + "|" + date + "|" + j.id;
+        if (visitMap.has(key)) continue;
+        visitMap.set(key, { date, user: rawEng, jobId: String(j.id), jobRef: j.helpdeskRef || String(j.id), onsiteMins: mins, travelMins: 0, live: false, manual: false, planned: true, cost: 0, note: "" });
+      }
+    }
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage2) {
       visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {

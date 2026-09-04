@@ -384,7 +384,11 @@
       const byDay = {};
       for (const v of visits) { (byDay[v.date] = byDay[v.date] || []).push(v); }
       const days = Object.keys(byDay).sort().reverse();
-      el.innerHTML = days.map(day => {
+      const anyPlanned = visits.some(v => v.planned);
+      const caption = anyPlanned
+        ? `<p class="muted" style="font-size:12px;margin:0 0 8px;">🛠 <b>on-site</b> = time from the engineer's status changes. <span class="badge" style="background:#e0e7ff;color:#3730a3;">PLANNED</span> = no status was logged, so it's costed on the <b>hours scheduled</b> for that job. Actual status times always take priority.</p>`
+        : "";
+      el.innerHTML = caption + days.map(day => {
         const rows = byDay[day];
         return `<div style="margin:6px 0 10px;"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;">${esc(day)}</div>
           ${rows.map(v => {
@@ -392,13 +396,15 @@
               ? " · <a href='/job-view.html?jobId=" + encodeURIComponent(v.jobId) + "' style='text-decoration:none;color:var(--brand);'>" + esc(v.jobRef) + "</a>"
               : (v.manual ? ' · <span class="badge" style="background:#fef3c7;color:#92400e;">MANUAL</span>' : "");
             const live = v.live ? ' <span class="badge" style="background:#dcfce7;color:#166534;">LIVE</span>' : "";
+            const planned = v.planned ? ' <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="No status change was logged — costed on the hours scheduled for this job">PLANNED</span>' : "";
             const note = v.note ? ' <span class="muted" style="font-size:12px;">— ' + esc(v.note) + '</span>' : "";
             // Engineers must NEVER see £ — only admins get the cost line, even
             // if the server had somehow sent it. (Server also strips it.)
             const cost = (CAN && v.manual && v.cost) ? " · £" + v.cost.toFixed(2) : "";
+            const hoursLabel = v.planned ? "scheduled" : "on-site";
             return `<div class="frow">
-              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${note}</span>
-              <span>🛠 ${esc(fmtMins(v.onsiteMins))} on-site${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
+              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${planned}${note}</span>
+              <span>🛠 ${esc(fmtMins(v.onsiteMins))} ${hoursLabel}${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
             </div>`;
           }).join("")}
         </div>`;
