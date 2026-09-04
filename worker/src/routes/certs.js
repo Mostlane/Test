@@ -164,7 +164,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       ref: (String(r.comments || "").trim()) || ("Light " + (i + 1)),
       replaced: rem.replacedOnSite === true,
       note: rem.note || "",
-      failed: !!rem.failed,
+      failed: isRealRemedial(rem),
       kind,
       batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
       batteryQty: kind === "battery" ? (Number(rem.batteryQty) || 0) : 0,
@@ -277,6 +277,30 @@ async function getJob(env, tid, id) {
 }
 // A store code from the job's site (numeric, 4-padded like the compliance chart).
 function padCode(v) { const d = String(v ?? "").replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; }
+
+// A remedial counts as REAL (a flagged fault) whenever it carries substantive
+// detail — not only when the `failed` flag is set. The engineer app's "Mark
+// fitting failed" button is a toggle whose active label reads like a confirm, so
+// a fitting could end up with battery spec/qty/notes/photos but failed:false and
+// then be invisible to the office. Anything with detail is a fault.
+function isRealRemedial(rem) {
+  if (!rem || typeof rem !== "object") return false;
+  if (rem.failed) return true;
+  if (rem.replacedOnSite != null) return true;
+  if (String(rem.batterySpec || "").trim()) return true;
+  if (Number(rem.batteryQty) > 0) return true;
+  if (Array.isArray(rem.photos) && rem.photos.length) return true;
+  if (String(rem.note || "").trim()) return true;
+  return false;
+}
+// Force failed=true on every substantive remedial so all downstream (office
+// render, £ processing, supplier enquiry, tracker) sees it. Mutates in place.
+function normalizeRemedials(rec) {
+  if (rec && Array.isArray(rec.rows)) {
+    for (const r of rec.rows) { if (r && r.remedial && isRealRemedial(r.remedial)) r.remedial.failed = true; }
+  }
+  return rec;
+}
 
 // ── Prefill the luminaire/appliance list from the site's most recent cert ─────
 // Both parsers are TOKEN-BASED and LANDMARK-ANCHORED so they cope with format
@@ -494,12 +518,16 @@ async function suggestNumber(env, tid, code, type, opts = {}) {
 
 function shapeRow(cert) {
   let d = {}; try { d = JSON.parse(cert.data) || {}; } catch {}
-  return {
+  const rec = {
     id: cert.id, type: cert.type, status: cert.status, jobId: cert.job_id, siteCode: cert.site_code,
     certNumber: cert.cert_number, engineer: cert.engineer, createdAt: cert.created_at, updatedAt: cert.updated_at,
     submittedAt: cert.submitted_at, finalisedAt: cert.finalised_at, finalisedBy: cert.finalised_by,
     ...d,
   };
+  // Heal any remedial that has detail but lost its failed flag, so the office
+  // always sees flagged faults (this is what made a submitted cert's remedials
+  // invisible on review).
+  return normalizeRemedials(rec);
 }
 
 export async function handle(request, env, ctx, url, sess) {
@@ -856,6 +884,7 @@ export async function handle(request, env, ctx, url, sess) {
       emKind: (b.emKind === "monthly" || b.emKind === "yearly") ? b.emKind : (prevData.emKind || ""),
       signature: typeof b.signature === "string" ? b.signature.slice(0, 400000) : (existing ? undefined : ""),
     };
+    normalizeRemedials(data);   // a remedial with detail is always a flagged fault
     if (data.signature === undefined) { // keep the stored signature if not re-sent
       try { const d = existing ? JSON.parse(existing.data) : {}; data.signature = d.signature || ""; } catch { data.signature = ""; }
     }
@@ -1157,7 +1186,7 @@ export async function handle(request, env, ctx, url, sess) {
       const rec = shapeRow(cert);
       siteName = (rec.installation && rec.installation.name) || cert.site_code || "";
       certNumber = rec.certNumber || cert.cert_number || "";
-      const batt = (rec.rows || []).filter(r => r.remedial && r.remedial.failed && r.remedial.kind === "battery");
+      const batt = (rec.rows || []).filter(r => r.remedial && isRealRemedial(r.remedial) && r.remedial.kind === "battery");
       for (const r of batt) {
         const rem = r.remedial;
         items.push({ site: siteName, ref: (String(r.comments || "").trim()) || "Fitting", spec: rem.batterySpec || "", qty: rem.batteryQty || 0, note: rem.note || "", photos: await loadImgs(rem.photos) });

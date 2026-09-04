@@ -29957,7 +29957,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       ref: String(r.comments || "").trim() || "Light " + (i + 1),
       replaced: rem.replacedOnSite === true,
       note: rem.note || "",
-      failed: !!rem.failed,
+      failed: isRealRemedial(rem),
       kind,
       batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
       batteryQty: kind === "battery" ? Number(rem.batteryQty) || 0 : 0,
@@ -30117,6 +30117,24 @@ async function getJob2(env, tid, id) {
 function padCode(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
+}
+function isRealRemedial(rem) {
+  if (!rem || typeof rem !== "object") return false;
+  if (rem.failed) return true;
+  if (rem.replacedOnSite != null) return true;
+  if (String(rem.batterySpec || "").trim()) return true;
+  if (Number(rem.batteryQty) > 0) return true;
+  if (Array.isArray(rem.photos) && rem.photos.length) return true;
+  if (String(rem.note || "").trim()) return true;
+  return false;
+}
+function normalizeRemedials(rec) {
+  if (rec && Array.isArray(rec.rows)) {
+    for (const r of rec.rows) {
+      if (r && r.remedial && isRealRemedial(r.remedial)) r.remedial.failed = true;
+    }
+  }
+  return rec;
 }
 var cap = (s) => {
   s = String(s || "").trim();
@@ -30341,7 +30359,7 @@ function shapeRow(cert) {
     d = JSON.parse(cert.data) || {};
   } catch {
   }
-  return {
+  const rec = {
     id: cert.id,
     type: cert.type,
     status: cert.status,
@@ -30356,6 +30374,7 @@ function shapeRow(cert) {
     finalisedBy: cert.finalised_by,
     ...d
   };
+  return normalizeRemedials(rec);
 }
 async function handle32(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
@@ -30734,6 +30753,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       emKind: b.emKind === "monthly" || b.emKind === "yearly" ? b.emKind : prevData.emKind || "",
       signature: typeof b.signature === "string" ? b.signature.slice(0, 4e5) : existing ? void 0 : ""
     };
+    normalizeRemedials(data);
     if (data.signature === void 0) {
       try {
         const d = existing ? JSON.parse(existing.data) : {};
@@ -31071,7 +31091,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       const rec = shapeRow(cert);
       siteName = rec.installation && rec.installation.name || cert.site_code || "";
       certNumber = rec.certNumber || cert.cert_number || "";
-      const batt = (rec.rows || []).filter((r2) => r2.remedial && r2.remedial.failed && r2.remedial.kind === "battery");
+      const batt = (rec.rows || []).filter((r2) => r2.remedial && isRealRemedial(r2.remedial) && r2.remedial.kind === "battery");
       for (const r2 of batt) {
         const rem = r2.remedial;
         items.push({ site: siteName, ref: String(r2.comments || "").trim() || "Fitting", spec: rem.batterySpec || "", qty: rem.batteryQty || 0, note: rem.note || "", photos: await loadImgs(rem.photos) });
