@@ -289,9 +289,21 @@
     // separate £50 remedial log. Replaced-on-site rows print "Fitting failed,
     // replaced on site" on the cert; not-replaced rows raise a remedial job for
     // the office to schedule + charge.
+    // A remedial is a REAL fault whenever it has detail — not only when the
+    // failed flag is set (the flag can be lost by the toggle button).
+    function isRealRem(rem) {
+      if (!rem || typeof rem !== "object") return false;
+      if (rem.failed) return true;
+      if (rem.replacedOnSite != null) return true;
+      if (String(rem.batterySpec || "").trim()) return true;
+      if (Number(rem.batteryQty) > 0) return true;
+      if (Array.isArray(rem.photos) && rem.photos.length) return true;
+      if (String(rem.note || "").trim()) return true;
+      return false;
+    }
     function remedialHtml(r, i) {
       const rem = r.remedial || {};
-      const on = !!rem.failed;
+      const on = isRealRem(rem);
       const onsite = rem.replacedOnSite === true ? "yes" : rem.replacedOnSite === false ? "no" : "";
       const kind = rem.kind === "battery" ? "battery" : "light";
       const photos = Array.isArray(rem.photos) ? rem.photos : [];
@@ -315,7 +327,7 @@
           : 'Choose whether it was replaced on site.');
       const thumbs = photos.map((p, pi) => '<span class="mlrem-thw"><img class="mlrem-th" src="' + esc((p && p.url) || "") + '"><button type="button" class="mlrem-thx" data-rem="delphoto" data-i="' + i + '" data-p="' + pi + '">✕</button></span>').join("");
       return '<div class="mlrem' + (on ? " open" : "") + '">'
-        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed" : "Mark fitting failed") + '</button>'
+        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed — tap to remove" : "Mark fitting failed") + '</button>'
         + '<div class="mlrem-body" style="' + (on ? "" : "display:none") + '">'
           + '<span class="mlrem-q">Fault</span>'
           + '<div class="tg mlrem-kind" data-rem="kind" data-i="' + i + '">'
@@ -416,31 +428,39 @@
       }));
       container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); queueSave(); }));
       // EM remedial controls
-      container.querySelectorAll('[data-rem="flag"]').forEach(b => b.addEventListener("click", () => {
+      container.querySelectorAll('[data-rem="flag"]').forEach(b => b.addEventListener("click", async () => {
         const i = +b.dataset.i; rec.rows[i] = rec.rows[i] || {};
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.failed = !rem.failed; if (!rem.failed) rem.replacedOnSite = null;
+        if (isRealRem(rem)) {
+          // Turning a fault OFF wipes it — confirm so a filled-in fault (spec,
+          // qty, photos) is never lost by an accidental second tap.
+          const ok = window.MLUI ? await MLUI.confirm("Remove this fault and its details (battery spec, photos, notes)?", { title: "Remove fault", okLabel: "Remove", danger: true }) : confirm("Remove this fault and its details?");
+          if (!ok) return;
+          rec.rows[i].remedial = {};
+        } else {
+          rem.failed = true;   // mark this fitting failed
+        }
         renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="onsite"] button').forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.replacedOnSite = btn.dataset.v === "yes";
+        rem.replacedOnSite = btn.dataset.v === "yes"; rem.failed = true;
         renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="kind"] button').forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.kind = btn.dataset.v; renderRows(); queueSave();
+        rem.kind = btn.dataset.v; rem.failed = true; renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="note"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).note = el.value; queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.note = el.value; rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="bspec"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batterySpec = el.value; queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.batterySpec = el.value; rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="bqty"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batteryQty = el.value === "" ? "" : (Number(el.value) || 0); queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.batteryQty = el.value === "" ? "" : (Number(el.value) || 0); rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="addphoto"]').forEach(b => b.addEventListener("click", () => pickRemedialPhoto(+b.dataset.i)));
       container.querySelectorAll('[data-rem="delphoto"]').forEach(b => b.addEventListener("click", () => {
@@ -479,7 +499,7 @@
           const d = await fetch(api + "/certs/photo", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd }).then(r => r.json());
           if (d && d.ok && d.key) {
             const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-            rem.photos = rem.photos || []; rem.photos.push({ key: d.key, url: d.url });
+            rem.photos = rem.photos || []; rem.photos.push({ key: d.key, url: d.url }); rem.failed = true;
             renderRows(); queueSave();
           } else alert((d && d.error) || "Photo upload failed.");
         } catch (e) { alert("Photo upload failed."); }
@@ -600,7 +620,7 @@
         if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
         else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
         // A failed fitting MUST say whether it was done on site (drives the charge + remedial job).
-        if (type === "em" && r.remedial && r.remedial.failed) {
+        if (type === "em" && isRealRem(r.remedial)) {
           const rem = r.remedial;
           if (rem.replacedOnSite == null) { bad = true; remOpen++; }
           // Batteries: spec + qty + at least one photo, so the supplier can quote.
