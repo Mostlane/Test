@@ -1248,16 +1248,17 @@ async function loadJobCost(){
       ? '<div style="margin-top:6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:13px;">⚠️ ' + d.unpricedPOs + ' purchase order' + (d.unpricedPOs===1?'':'s') + ' raised but not yet priced — the total will rise once ' + (d.unpricedPOs===1?'it is':'they are') + ' costed.</div>'
       : '';
     const noRateNote = lab.missingRate ? '<div class="sub" style="margin-top:4px;color:#9a3412;">Some engineers have no labour rate set — their time isn’t costed.</div>' : '';
-    const noTimeNote = !d.hasSegments ? '<div class="sub" style="margin-top:4px;">No on-site time captured yet (engineer hasn’t started the job), so labour &amp; travel are £0 so far.</div>' : '';
+    const plannedNote = d.plannedLabour ? '<div class="sub" style="margin-top:4px;color:#3730a3;">🗓 Labour is costed from the <b>hours scheduled</b> on this job — no status change was logged. If the engineer changes status, their <b>actual</b> time is used instead.</div>' : '';
+    const noTimeNote = (!d.hasSegments && !d.plannedLabour) ? '<div class="sub" style="margin-top:4px;">No on-site time captured yet (engineer hasn’t started the job), and no hours were scheduled — so labour &amp; travel are £0 so far.</div>' : '';
     const milesNote = d.milesSource === 'geocoded' ? ' (est. from postcode)' : (d.milesSource === 'register' ? '' : (d.roundTripMiles ? '' : ' — no site mileage'));
     $("jobCostBody").innerHTML =
       '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
       '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>' +
-      row('Labour — on site', money(lab.onSiteCost), lab.onSiteMinutes ? hm(lab.onSiteMinutes) : '') +
+      row('Labour — on site', money(lab.onSiteCost), lab.onSiteMinutes ? (hm(lab.onSiteMinutes) + (d.plannedLabour && !d.hasSegments ? ' · scheduled' : '')) : '') +
       row('Labour — travel', money(lab.travelCost), lab.travelMinutes ? hm(lab.travelMinutes) + ' round trips' : '') +
       row('Fuel', money(fuel.cost), (fuel.miles ? fuel.miles + ' mi @ £' + (fuel.perMile||0.5).toFixed(2) + '/mi' + milesNote : milesNote.replace(/^ /,''))) +
       row('Materials (POs)', money(mat.cost), mat.count ? (mat.count + ' PO' + (mat.count===1?'':'s') + (d.unpricedPOs? ' · ' + d.unpricedPOs + ' unpriced':'')) : 'none') +
-      warn + noRateNote + noTimeNote;
+      warn + noRateNote + plannedNote + noTimeNote;
     card.style.display = "";
   }catch(e){ card.style.display = "none"; }
 }

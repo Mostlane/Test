@@ -817,6 +817,37 @@ export async function handle(request, env, ctx, url, sess) {
     const engsOf = j => (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
       ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
     const jobIsMine = j => engsOf(j).some(e => String(e).toLowerCase() === meLower || normId(e) === meNorm);
+
+    // Planned visits — a scheduled job an engineer WORKED but never status-tapped
+    // has no segment, so it would be missing here even though the P&L costs its
+    // planned hours. Add it as a visit marked `planned` so the list matches the
+    // costing and it's clear where the hours came from. Actual taps always win
+    // (skip any job+engineer that already has a captured segment); future-dated
+    // days and cancelled jobs are skipped.
+    const segPairs = new Set();
+    for (const s of segs) segPairs.add(String(s.job_id) + "::" + normId(s.username));
+    const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    for (const j of projectJobs) {
+      if (/^cancelled$/i.test(String(j.status || ""))) continue;
+      for (const rawEng of engsOf(j)) {
+        if (!rawEng) continue;
+        if (segPairs.has(String(j.id) + "::" + normId(rawEng))) continue;   // real time captured → actual wins
+        const es = (j.engSchedule && j.engSchedule[normId(rawEng)]) || {};
+        const startISO = es.scheduledAt || j.scheduledAt;
+        if (!startISO) continue;
+        const date = String(startISO).slice(0, 10);
+        if (date > todayISO) continue;   // not worked yet
+        let mins = 0;
+        const endISO = es.scheduledEnd || j.scheduledEnd;
+        if (endISO) { const d = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (d >= 15 && d <= 24 * 60) mins = Math.round(d); }
+        if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+        if (!mins) continue;
+        const key = "p|" + rawEng + "|" + date + "|" + j.id;
+        if (visitMap.has(key)) continue;
+        visitMap.set(key, { date, user: rawEng, jobId: String(j.id), jobRef: j.helpdeskRef || String(j.id), onsiteMins: mins, travelMins: 0, live: false, manual: false, planned: true, cost: 0, note: "" });
+      }
+    }
+
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage) {
       // Field/engineer view: only their own visits (match on either username or
