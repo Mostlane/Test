@@ -134,8 +134,14 @@
     .hol-badge{display:inline-block;background:#16a34a;color:#fff;border-radius:6px;padding:2px 6px;font-size:10.5px;font-weight:700;margin:2px;}
     .day-row.on-holiday .day-track{background:repeating-linear-gradient(45deg,#f0fdf4,#f0fdf4 10px,#dcfce7 10px,#dcfce7 20px);}
     .hol-badge-inline{display:inline-block;background:#16a34a;color:#fff;border-radius:999px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle;}
-    /* A job sitting on a day the engineer is on approved leave — flag it clearly. */
-    .day-job.leave-clash{outline:2px dashed #d97706;outline-offset:-2px;box-shadow:0 0 0 2px #fef3c7 inset;}
+    /* Holiday takes precedence: a bold banner spanning the whole day track so an
+       off day reads as HOLIDAY first, with any clashing job dimmed + flagged. */
+    .day-holiday-banner{position:absolute;left:0;top:0;height:100%;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:repeating-linear-gradient(45deg,rgba(220,252,231,.72),rgba(220,252,231,.72) 12px,rgba(187,247,208,.72) 12px,rgba(187,247,208,.72) 24px);color:#166534;font-weight:800;font-size:13px;letter-spacing:.02em;pointer-events:none;z-index:6;}
+    /* A job sitting on a day the engineer is on approved leave — dimmed + flagged. */
+    .day-job.leave-clash{outline:2px dashed #d97706;outline-offset:-2px;box-shadow:0 0 0 2px #fef3c7 inset;opacity:.5;z-index:7;}
+    .day-job.leave-clash:hover{opacity:1;}
+    .week-engineer-cell.on-holiday .week-job-chip{opacity:.55;}
+    .week-engineer-cell.on-holiday .week-job-chip:hover{opacity:1;}
     .week-job-chip.leave-clash{border-style:dashed !important;border-width:2px !important;border-color:#d97706 !important;background:#fffbeb;}
     .week-job-chip{
       background:#e0f2fe;border:1px solid #60a5fa;border-radius:999px;padding:2px 6px;
@@ -1129,6 +1135,16 @@ function renderDayView(container){
       el.addEventListener("click", () => { if(!dragState.active && !dragState.moved) openJobModal(job.id); });
       track.appendChild(el);
     });
+
+    // Holiday takes precedence — a bold banner across the whole day so it reads as
+    // HOLIDAY first; any clashing job is dimmed underneath (still tappable to move).
+    if(holD){
+      const ban = document.createElement("div");
+      ban.className = "day-holiday-banner";
+      const lbl = holD.half ? holD.half + " leave" : (holD.type==="Unpaid" ? "Unpaid leave" : holD.type==="Other" ? "Leave" : "On holiday");
+      ban.textContent = "🌴 " + engineer.name + " — " + lbl + (placements.length ? "  ·  ⚠ " + placements.length + " job" + (placements.length===1?"":"s") + " still booked" : "");
+      track.appendChild(ban);
+    }
 
     bodyH += rowH + 1;   // +1 for the row's bottom border
     row.appendChild(track);
