@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="portal.css?v=1">
   <script src="auth.js"></script>
   <script src="cable-calc-engine.js?v=1"></script>
+  <script src="xlsx-lite.js"></script>
   <style>
     body{font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#0f2438;background:transparent;margin:0}
     .wrap{max-width:620px;margin:0 auto;padding:12px 12px 90px}
@@ -207,7 +208,7 @@
         <h2>Datasheet reference data</h2>
         <p style="font-size:12.5px;color:#4a5a6a;margin:0 0 10px">These are the current-carrying capacities (<b>Iz</b>, A) and voltage-drop (<b>mV/A/m</b>) values the calculator looks up, plus the correction-factor tables. <b>Enter your own manufacturer datasheet values here.</b> The calculator never invents these — a missing value is reported as "no data", never a silent pass.</p>
         <div class="fld"><label class="l">Cable type</label><select id="dCable"></select></div>
-        <div class="btnrow"><button class="btn ghost sm" id="dAddCable">+ Add cable type</button><button class="btn ghost sm" id="dAddRow">+ Add size</button></div>
+        <div class="btnrow"><button class="btn ghost sm" id="dAddCable">+ Add cable type</button><button class="btn ghost sm" id="dAddRow">+ Add size</button><button class="btn sm" id="dImport">📥 Import from datasheet</button></div>
         <div id="dTable" style="overflow-x:auto;margin-top:10px"></div>
       </div>
       <div class="card">
@@ -219,6 +220,42 @@
         <button class="btn ghost" id="dReset">↺ Reset to sample</button>
       </div>
       <div class="disc" style="margin-top:10px">Saved data replaces the sample set for everyone. Values apply exactly as entered — verify them against the current manufacturer datasheet and BS 7671 Appendix 4 reference methods.</div>
+    </div>
+
+    <!-- ───────── IMPORT MODAL ───────── -->
+    <div id="impOverlay" class="hide" style="position:fixed;inset:0;background:rgba(8,20,34,.55);z-index:5000;display:flex;align-items:flex-end;justify-content:center">
+      <div style="background:#fff;width:100%;max-width:680px;max-height:94vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h2 style="margin:0;font-size:15px">📥 Import cable ratings from a datasheet</h2>
+          <button class="btn ghost sm" id="impClose">✕</button>
+        </div>
+        <p style="font-size:12px;color:#5a6b7b;margin:0 0 12px">Paste rows copied from a datasheet/spreadsheet, or upload a <b>.csv</b>/<b>.xlsx</b>. Nothing is saved until you review the grid and press <b>Save datasheet data</b>. Everything stays on your device until then.</p>
+        <div class="row2">
+          <div class="fld"><label class="l">Add into cable</label><select id="impCable"></select></div>
+          <div class="fld"><label class="l">Reference method (letter)</label><input id="impMethod" value="C" placeholder="C, A, B, D, E, 100…"></div>
+        </div>
+        <div id="impNewWrap" class="row3 hide">
+          <div class="fld"><label class="l">New cable name</label><input id="impNewName" placeholder="e.g. Doncaster 6242Y T&E"></div>
+          <div class="fld"><label class="l">Conductor</label><select id="impCond"><option value="cu">Copper</option><option value="al">Aluminium</option></select></div>
+          <div class="fld"><label class="l">Insulation</label><select id="impIns"><option value="pvc">70°C PVC</option><option value="xlpe">90°C XLPE</option></select></div>
+        </div>
+        <div class="fld"><label class="l">Paste rows here</label><textarea id="impPaste" rows="6" style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #cfd8e3;border-radius:9px;font-family:monospace;font-size:12px" placeholder="Size	Iz	mV/A/m&#10;1.5	20	29&#10;2.5	27	18&#10;4	37	11"></textarea></div>
+        <div class="btnrow">
+          <label class="btn ghost sm" style="cursor:pointer">📄 Upload CSV/XLSX<input type="file" id="impFile" accept=".csv,.xlsx" style="display:none"></label>
+          <label class="l" style="display:flex;align-items:center;gap:5px;font-weight:600"><input type="checkbox" id="impHdr" checked style="width:auto">First row is headers</label>
+          <button class="btn sm" id="impParse">Parse →</button>
+        </div>
+        <div id="impMapWrap" class="hide" style="margin-top:12px">
+          <div class="row3">
+            <div class="fld"><label class="l">Size column (mm²)</label><select id="impColSize"></select></div>
+            <div class="fld"><label class="l">Iz column (A)</label><select id="impColIz"></select></div>
+            <div class="fld"><label class="l">mV/A/m column</label><select id="impColVd"></select></div>
+          </div>
+          <div id="impPreview" style="overflow-x:auto"></div>
+          <div class="btnrow"><button class="btn" id="impApply">Add to grid</button></div>
+          <div class="hint">This merges into the grid on the Datasheet-data tab. Review it there, then <b>Save datasheet data</b> to store it against your portal (not the public code).</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -473,6 +510,86 @@
   $("dReset").onclick=function(){
     if(!confirm("Reset to the built-in sample data? This discards your saved datasheet values."))return;
     af("/cablecalc/data/reset",{method:"POST"}).then(function(r){return r.json();}).then(function(j){ DATA=j.data; renderData(); fillCables(); recalc(); $("sampleBanner").classList.remove("hide"); });
+  };
+
+  // ── datasheet importer ──
+  var IMPMAT=[];   // parsed matrix (array of string arrays)
+  function colLetterToIdx(l){ var n=0; for(var i=0;i<l.length;i++) n=n*26+(l.charCodeAt(i)-64); return n-1; }
+  $("dImport").onclick=function(){
+    var s=$("impCable"); s.innerHTML="";
+    (DATA.cables||[]).forEach(function(c){ var o=document.createElement("option"); o.value=c.id; o.textContent=c.name; s.appendChild(o); });
+    var nw=document.createElement("option"); nw.value="__new"; nw.textContent="➕ New cable type…"; s.appendChild(nw);
+    s.onchange=function(){ $("impNewWrap").classList.toggle("hide", s.value!=="__new"); };
+    s.onchange();
+    IMPMAT=[]; $("impPaste").value=""; $("impMapWrap").classList.add("hide");
+    $("impOverlay").classList.remove("hide");
+  };
+  $("impClose").onclick=function(){ $("impOverlay").classList.add("hide"); };
+  $("impOverlay").onclick=function(e){ if(e.target===this) this.classList.add("hide"); };
+
+  function parseTabular(text){
+    var lines=text.replace(/\r/g,"").split("\n").filter(function(l){return l.trim();});
+    var delim = text.indexOf("\t")>=0 ? "\t" : (/,/.test(text) ? "," : null);
+    return lines.map(function(l){ return (delim? l.split(delim) : l.trim().split(/\s{2,}|\s+/)).map(function(c){return c.trim();}); });
+  }
+  $("impFile").onchange=function(){
+    var f=this.files&&this.files[0]; if(!f) return;
+    if(/\.xlsx$/i.test(f.name)){
+      f.arrayBuffer().then(function(buf){ return XLSXLite.parse(buf); }).then(function(wb){
+        var rows=[]; (async function(){ for await (var row of wb.rows()){ var cells=row.cells; var max=0; Object.keys(cells).forEach(function(k){ var i=colLetterToIdx(k.replace(/\d+$/,"")); if(i>max)max=i; }); var arr=[]; for(var i=0;i<=max;i++) arr.push(""); Object.keys(cells).forEach(function(k){ arr[colLetterToIdx(k.replace(/\d+$/,""))]=String(cells[k]); }); rows.push(arr); } IMPMAT=rows; buildMap(); })(); });
+    } else {
+      f.text().then(function(t){ IMPMAT=parseTabular(t); buildMap(); });
+    }
+  };
+  $("impParse").onclick=function(){ IMPMAT=parseTabular($("impPaste").value); buildMap(); };
+
+  function guessCol(headers,words){ for(var i=0;i<headers.length;i++){ var h=(headers[i]||"").toLowerCase(); if(words.some(function(w){return h.indexOf(w)>=0;})) return i; } return -1; }
+  function buildMap(){
+    if(!IMPMAT.length){ (window.MLUI?MLUI.toast:alert)("Nothing to parse — paste rows or upload a file."); return; }
+    var hdr=$("impHdr").checked;
+    var ncols=Math.max.apply(null,IMPMAT.map(function(r){return r.length;}));
+    var headers=hdr?IMPMAT[0]:[];
+    ["impColSize","impColIz","impColVd"].forEach(function(id){ var s=$(id); s.innerHTML=""; for(var i=0;i<ncols;i++){ var o=document.createElement("option"); o.value=i; o.textContent=(hdr&&headers[i]?headers[i]:"Column "+(i+1)); s.appendChild(o); } });
+    // auto-guess
+    if(hdr){ var gs=guessCol(headers,["size","csa","mm","c.s.a","conductor"]); var gi=guessCol(headers,["iz","current","rating","capacity","amp"]); var gv=guessCol(headers,["mv","v/a","volt","drop","vd"]);
+      if(gs>=0)$("impColSize").value=gs; if(gi>=0)$("impColIz").value=gi; if(gv>=0)$("impColVd").value=gv; }
+    else { $("impColSize").value=0; $("impColIz").value=Math.min(1,ncols-1); $("impColVd").value=Math.min(2,ncols-1); }
+    $("impMapWrap").classList.remove("hide");
+    renderImpPreview();
+    ["impColSize","impColIz","impColVd"].forEach(function(id){ $(id).onchange=renderImpPreview; });
+    $("impHdr").onchange=buildMap;
+  }
+  function impRows(){
+    var hdr=$("impHdr").checked, cs=+$("impColSize").value, ci=+$("impColIz").value, cv=+$("impColVd").value;
+    var out=[];
+    IMPMAT.slice(hdr?1:0).forEach(function(r){
+      var size=(r[cs]||"").replace(/[^\d.]/g,""), iz=parseFloat((r[ci]||"").replace(/[^\d.]/g,"")), vd=parseFloat((r[cv]||"").replace(/[^\d.]/g,""));
+      if(size && (isFinite(iz)||isFinite(vd))) out.push({size:size, iz:isFinite(iz)?iz:null, vd:isFinite(vd)?vd:null});
+    });
+    return out;
+  }
+  function renderImpPreview(){
+    var rows=impRows();
+    var h='<table class="d"><tr><th>Size mm²</th><th>Iz (A)</th><th>mV/A/m</th></tr>';
+    rows.forEach(function(r){ h+='<tr><td>'+esc(r.size)+'</td><td>'+(r.iz==null?"—":esc(r.iz))+'</td><td>'+(r.vd==null?"—":esc(r.vd))+'</td></tr>'; });
+    h+='</table><div class="hint" style="margin-top:5px">'+rows.length+' size(s) detected.</div>';
+    $("impPreview").innerHTML=h;
+  }
+  $("impApply").onclick=function(){
+    var rows=impRows(); if(!rows.length){ (window.MLUI?MLUI.toast:alert)("No usable rows."); return; }
+    var method=($("impMethod").value||"C").trim();
+    var cabId=$("impCable").value, cab;
+    if(cabId==="__new"){
+      var name=($("impNewName").value||"").trim(); if(!name){ alert("Enter a name for the new cable."); return; }
+      cab={id:"cab"+Date.now().toString(36),name:name,conductor:$("impCond").value,insulation:$("impIns").value,methods:{}};
+      DATA.cables.push(cab);
+    } else { cab=(DATA.cables||[]).filter(function(c){return c.id===cabId;})[0]; }
+    if(!cab){ alert("Pick a cable."); return; }
+    cab.methods[method]=cab.methods[method]||{};
+    rows.forEach(function(r){ cab.methods[method][r.size]={iz:r.iz,vd:r.vd}; });
+    $("impOverlay").classList.add("hide");
+    renderData(); if($("dCable")) $("dCable").value=cab.id; renderDTable();
+    (window.MLUI?MLUI.toast:alert)("Added "+rows.length+" size(s) to “"+cab.name+"” (method "+method+"). Review, then Save datasheet data.");
   };
 })();
 </script>
