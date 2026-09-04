@@ -172,6 +172,21 @@
         };
       }
 
+      // Fetch the finalised cert PDF and hand it to the browser as a download.
+      async function downloadCertPdf(cid, num, ctype){
+        try {
+          const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid));
+          if (!r.ok) throw new Error("http");
+          const blob = await r.blob();
+          const u = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = u;
+          a.download = ((ctype==="pat"?"PAT":"EM")+" certificate "+(num||cid)+".pdf").replace(/[\/\\:*?"<>|]+/g,"-");
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+        } catch(e) { setMsg("Issued ✓ — but the copy didn't download. Open it from the compliance chart's 📄 link.", true); }
+      }
+
       if (g("finBtn")) g("finBtn").onclick = async function(){
         const num = g("finNum").value.trim(); if (!num) { setMsg("Enter a certificate number.", true); return; }
         this.disabled = true; setMsg("Finalising…");
@@ -179,9 +194,12 @@
           const d = await authFetch("/certs/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, certNumber:num, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
           if (d && d.ok) {
             setMsg("Issued as "+d.number+" and filed to compliance ✓" + (d.remedial && d.remedial.count ? " — "+d.remedial.count+" fitting(s) failed, £"+d.remedial.charge+" to charge" : ""));
+            // Offer a copy of the issued certificate to download.
+            const wantDl = window.MLUI ? await MLUI.confirm("Download a copy of certificate "+d.number+"?", { title:"Certificate issued ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Download a copy of certificate "+d.number+"?");
+            if (wantDl) await downloadCertPdf(id, d.number, cert.type);
             // Pop the charge/quote confirmation immediately for a cert with remedials.
             if (d.remedial && d.remedial.count && window.mlRemedialCheck) setTimeout(window.mlRemedialCheck, 400);
-            setTimeout(loadList, 1300);
+            setTimeout(loadList, wantDl ? 1600 : 1300);
           }
           else { setMsg((d && d.error) || "Couldn't finalise.", true); this.disabled = false; }
         } catch { setMsg("Couldn't finalise.", true); this.disabled = false; }
