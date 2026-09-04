@@ -32963,9 +32963,11 @@ async function handle34(request, env, ctx, url, sess) {
     }
     const meLower = String(me).toLowerCase();
     const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const meNorm = normId2(me);
+    const engsOf = (j) => Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+    const jobIsMine = (j) => engsOf(j).some((e) => String(e).toLowerCase() === meLower || normId2(e) === meNorm);
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage2) {
-      const meNorm = normId2(me);
       visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {
         const { cost, rate, amount, ...rest } = v;
         return rest;
@@ -32988,7 +32990,8 @@ async function handle34(request, env, ctx, url, sess) {
       for (const r of byU.values()) perUser.push({ user: r.user, visits: r.visits, days: r.days.size, onsiteMins: r.onsiteMins, travelMins: r.travelMins });
       perUser.sort((a, b) => b.onsiteMins + b.travelMins - (a.onsiteMins + a.travelMins));
     }
-    const jobs = projectJobs.map((j) => ({
+    const jobsSource = canManage2 ? projectJobs : projectJobs.filter(jobIsMine);
+    const jobs = jobsSource.map((j) => ({
       id: j.id,
       ref: j.helpdeskRef || j.id,
       description: j.description || "",

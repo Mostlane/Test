@@ -813,12 +813,15 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const meLower = String(me).toLowerCase();
     const normId = u => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const meNorm = normId(me);
+    const engsOf = j => (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
+      ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+    const jobIsMine = j => engsOf(j).some(e => String(e).toLowerCase() === meLower || normId(e) === meNorm);
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage) {
       // Field/engineer view: only their own visits (match on either username or
       // the dotted form some legacy records carry). Strip every £-carrying
       // field — engineers must NEVER see cost/rate/amount in their visit list.
-      const meNorm = normId(me);
       visits = visits.filter(v => v.user.toLowerCase() === meLower || normId(v.user) === meNorm)
         .map(v => { const { cost, rate, amount, ...rest } = v; return rest; });
     }
@@ -834,7 +837,10 @@ export async function handle(request, env, ctx, url, sess) {
       perUser.sort((a, b) => (b.onsiteMins + b.travelMins) - (a.onsiteMins + a.travelMins));
     }
     // Compact job list for the page (title/status/schedule + who's on it).
-    const jobs = projectJobs.map(j => ({
+    // A non-manager (field engineer) sees ONLY the jobs they're on — never the
+    // whole project's jobs — matching the "your visits only" rule for visits.
+    const jobsSource = canManage ? projectJobs : projectJobs.filter(jobIsMine);
+    const jobs = jobsSource.map(j => ({
       id: j.id, ref: j.helpdeskRef || j.id, description: j.description || "",
       status: j.status || "Pending", scheduledAt: j.scheduledAt || null,
       engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length
