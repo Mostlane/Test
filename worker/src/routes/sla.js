@@ -1971,6 +1971,23 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, groupId, visits }, headers);
     }
 
+    // GET /sla/jobs/{id}/series — the other days in this job's recurring series
+    // (same seriesId). Powers the "delete just this day / the whole series?"
+    // prompt so the office can see how many days it would affect. Empty when the
+    // job isn't part of a series.
+    if (parts[2] === "series" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
+      const all = await listJobs(env, tenantId, { includeDormant: true });
+      const jobs = all.filter(j => j && j.seriesId === src.seriesId)
+        .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "",
+          status: j.status || "", scheduledAt: j.scheduledAt || null, current: j.id === src.id }))
+        .sort((a, b) => new Date(a.scheduledAt || 0) - new Date(b.scheduledAt || 0));
+      return jsonResponse({ ok: true, seriesId: src.seriesId, jobs }, headers);
+    }
+
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
     // (Before/During/After). Stored as a job.photoStages override; no R2 rewrite.
     if (parts[2] === "photo-stage" && method === "POST") {
@@ -2167,16 +2184,32 @@ export async function handle(request, env, ctx, url, sess) {
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).run();
-      // Purge the job's uploads (photos, signatures, files) from R2.
-      try {
-        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
-        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
-      } catch {}
-      // Remove any unverified (draft/submitted) EM/PAT certificates this job made;
-      // finalised ones stay filed on the compliance chart.
-      await purgeUnverifiedCertsForJob(env, tenantId, id);
-      return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
+      // scope=series → delete EVERY day in this job's recurring series (same
+      // seriesId), not just this one. Default (no scope) deletes only this job,
+      // so cancelling Thursday never knocks off Mon/Tue/Wed of the same series.
+      const delScope = searchParams.get("scope");
+      let targets = [job];
+      if (delScope === "series" && job.seriesId) {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const sibs = all.filter(j => j && j.seriesId === job.seriesId);
+        if (sibs.length) targets = sibs;
+      }
+      let deletedCount = 0;
+      for (const t of targets) {
+        const res = await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, t.id).run();
+        if (res.meta?.changes) deletedCount++;
+        // Purge the job's uploads (photos, signatures, files) from R2.
+        try {
+          const listed = await env.JOB_FILES.list({ prefix: `jobs/${t.id}/` });
+          for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+        } catch {}
+        // Remove any unverified (draft/submitted) EM/PAT certificates this job made;
+        // finalised ones stay filed on the compliance chart.
+        await purgeUnverifiedCertsForJob(env, tenantId, t.id);
+      }
+      return jsonResponse({ ok: true, deleted: id, count: deletedCount,
+        series: (delScope === "series" && job.seriesId) ? job.seriesId : null,
+        reference: job.helpdeskRef || id }, headers);
     }
 
     // PATCH /sla/jobs/{id}  — status changes, packs, scheduler assign/drag-drop.

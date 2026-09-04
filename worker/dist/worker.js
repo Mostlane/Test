@@ -6647,6 +6647,22 @@ async function handle6(request, env, ctx, url, sess) {
       })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
       return jsonResponse({ ok: true, groupId, visits }, headers);
     }
+    if (parts[2] === "series" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
+      const all = await listJobs(env, tenantId, { includeDormant: true });
+      const jobs = all.filter((j) => j && j.seriesId === src.seriesId).map((j) => ({
+        id: j.id,
+        ref: j.helpdeskRef || j.id,
+        siteName: j.siteName || "",
+        status: j.status || "",
+        scheduledAt: j.scheduledAt || null,
+        current: j.id === src.id
+      })).sort((a, b) => new Date(a.scheduledAt || 0) - new Date(b.scheduledAt || 0));
+      return jsonResponse({ ok: true, seriesId: src.seriesId, jobs }, headers);
+    }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -6820,14 +6836,31 @@ async function handle6(request, env, ctx, url, sess) {
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).run();
-      try {
-        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
-        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
-      } catch {
+      const delScope = searchParams.get("scope");
+      let targets = [job];
+      if (delScope === "series" && job.seriesId) {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const sibs = all.filter((j) => j && j.seriesId === job.seriesId);
+        if (sibs.length) targets = sibs;
       }
-      await purgeUnverifiedCertsForJob(env, tenantId, id);
-      return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
+      let deletedCount = 0;
+      for (const t of targets) {
+        const res = await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, t.id).run();
+        if (res.meta?.changes) deletedCount++;
+        try {
+          const listed = await env.JOB_FILES.list({ prefix: `jobs/${t.id}/` });
+          for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+        } catch {
+        }
+        await purgeUnverifiedCertsForJob(env, tenantId, t.id);
+      }
+      return jsonResponse({
+        ok: true,
+        deleted: id,
+        count: deletedCount,
+        series: delScope === "series" && job.seriesId ? job.seriesId : null,
+        reference: job.helpdeskRef || id
+      }, headers);
     }
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
