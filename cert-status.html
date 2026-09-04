@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Certificate Tracker</title>
+  <script src="/portal-config.js?v=27"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:860px;margin:14px auto 90px;padding:0 12px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    /* Filter chips */
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+    .chip{background:#fff;border:1px solid #ccd5dd;color:#334;border-radius:999px;padding:8px 15px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    /* Summary tiles */
+    .sumrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;}
+    .tile{flex:1;min-width:120px;background:#f7f9fb;border:1px solid #eef2f6;border-radius:12px;padding:10px 12px;text-align:center;}
+    .tile .n{font-size:26px;font-weight:800;line-height:1;color:var(--brand);}
+    .tile .l{font-size:12px;color:#6b7a90;margin-top:4px;}
+    .tile.warn .n{color:#b7791f;} .tile.warn{background:#fffaf0;border-color:#f6e0b5;}
+    .tile.bad .n{color:#b00020;} .tile.bad{background:#fdf2f2;border-color:#f5c6c6;}
+    .tile.ok .n{color:var(--ok);} .tile.ok{background:#f0faf3;border-color:#c9ebd4;}
+    /* Certificate rows */
+    .item{display:flex;align-items:center;gap:11px;padding:12px 4px;border-top:1px solid #eef2f6;cursor:pointer;}
+    .item:first-child{border-top:none;}
+    .item .em{font-size:22px;width:28px;text-align:center;flex:none;}
+    .item .m{flex:1;min-width:0;}
+    .item .m .t{font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .item .m .s{font-size:12.5px;color:#6b7a90;margin-top:2px;}
+    .badge{display:inline-block;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;flex:none;}
+    .badge.notstarted{background:#eef1f4;color:#5a6b80;}
+    .badge.draft{background:#fff3cd;color:#7a5b00;}
+    .badge.review{background:#dbe9ff;color:#1c4e9c;}
+    .badge.final{background:#d8f0e0;color:#0e7a3b;}
+    .greet{font-size:13px;color:#6b7a90;margin:0 0 10px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/main.html" style="text-decoration:none;">‹ Back</a>
+    <h1>📄 EM &amp; PAT certificates</h1>
+    <a class="chip" href="cert-review.html" style="text-decoration:none;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">Review queue →</a>
+  </header>
+
+  <div class="wrap">
+    <div class="filters" id="filters">
+      <button class="chip on" data-range="today">Today</button>
+      <button class="chip" data-range="7d">Last 7 days</button>
+      <button class="chip" data-range="30d">Last 30 days</button>
+      <button class="chip" data-range="all">All time</button>
+    </div>
+
+    <div class="card">
+      <p class="greet" id="greet">Every EM &amp; PAT certificate and where it's up to.</p>
+      <div class="sumrow" id="summary"></div>
+    </div>
+
+    <div class="card" id="list"><p class="muted" style="padding:8px 4px;">Loading…</p></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const fmtDay = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}); } catch { return ""; } };
+    const fmtDT = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return ""; } };
+    let RANGE = "today";
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r=>r.json());
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      // Optional deep-link ?range=
+      const r = new URLSearchParams(location.search).get("range");
+      if (r && ["today","7d","30d","all"].includes(r)) RANGE = r;
+      [].forEach.call(g("filters").querySelectorAll(".chip"), b => {
+        if (b.dataset.range === RANGE) { b.classList.add("on"); } else { b.classList.remove("on"); }
+        b.onclick = () => {
+          RANGE = b.dataset.range;
+          [].forEach.call(g("filters").querySelectorAll(".chip"), x => x.classList.toggle("on", x.dataset.range === RANGE));
+          load();
+        };
+      });
+      load();
+    })();
+
+    // How the status reads, per role (what the office needs to know at a glance).
+    function statusLabel(it) {
+      const who = it.engineer ? (" — " + esc(it.engineer)) : "";
+      if (it.status === "final")   return { badge: "Uploaded ✓" + (it.certNumber ? " " + esc(it.certNumber) : ""), cls: "final" };
+      if (it.status === "review")  return { badge: "Awaiting review", cls: "review" };
+      if (it.status === "draft")   return { badge: "With engineer" + who, cls: "draft" };
+      return { badge: "Not started" + who, cls: "notstarted" };   // notstarted
+    }
+
+    async function load() {
+      g("list").innerHTML = '<p class="muted" style="padding:8px 4px;">Loading…</p>';
+      let d = null;
+      try { d = await authFetch("/certs/status?range=" + encodeURIComponent(RANGE)).then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("list").innerHTML = '<p class="muted" style="padding:8px 4px;color:#b00020">Couldn\'t load the certificate tracker.</p>'; g("summary").innerHTML=""; return; }
+      const c = d.counts || {}, items = d.items || [];
+      const outstanding = (c.toReview || 0) + (c.withEngineers || 0);
+
+      // Summary tiles
+      g("summary").innerHTML =
+        tile(c.expected || 0, "certificate" + ((c.expected===1)?"":"s"), "") +
+        tile(c.uploaded || 0, "uploaded", (c.uploaded ? "ok" : "")) +
+        tile(c.toReview || 0, "to review", (c.toReview ? "review-t" : "")) +
+        tile(c.withEngineers || 0, "with engineers", (c.withEngineers ? "warn" : ""));
+      g("greet").textContent = outstanding
+        ? ("You're waiting on " + outstanding + " certificate" + (outstanding===1?"":"s") + " — " + (c.withEngineers||0) + " still with engineers, " + (c.toReview||0) + " to review.")
+        : (c.expected ? "All certificates received and filed — nothing outstanding. 🎉" : "No EM/PAT certificates in this period.");
+
+      // List
+      if (!items.length) { g("list").innerHTML = '<p class="muted" style="padding:8px 4px;">No EM/PAT certificates in this period.</p>'; return; }
+      let h = '<div class="muted" style="margin-bottom:4px;padding:0 4px;">' + items.length + ' certificate' + (items.length===1?"":"s") + ' — tap to open.</div>';
+      items.forEach(it => {
+        const em = it.type === "pat" ? "🔌" : "💡";
+        const site = it.site || it.siteCode || "—";
+        const st = statusLabel(it);
+        const when = it.finalisedAt || it.submittedAt || it.activityAt || it.scheduledAt;
+        h += '<div class="item" data-cert="'+esc(it.certId)+'" data-job="'+esc(it.jobId)+'" data-status="'+esc(it.status)+'">'
+          + '<div class="em">'+em+'</div>'
+          + '<div class="m"><div class="t">'+esc(site)+' <span class="muted">· '+(it.type==="pat"?"PAT":"EM")+'</span></div>'
+          + '<div class="s">'+(it.siteCode?esc(it.siteCode)+' · ':'')+(when?fmtDT(when):'')+'</div></div>'
+          + '<span class="badge '+st.cls+'">'+st.badge+'</span></div>';
+      });
+      g("list").innerHTML = h;
+      [].forEach.call(g("list").querySelectorAll(".item"), el => el.onclick = () => {
+        const cert = el.dataset.cert, job = el.dataset.job, status = el.dataset.status;
+        if (cert && status !== "notstarted") location.href = "cert-review.html?open=" + encodeURIComponent(cert);
+        else if (job) location.href = "job-view.html?jobId=" + encodeURIComponent(job);
+      });
+    }
+
+    function tile(n, label, tone) {
+      // Map the certs tones onto the tile classes.
+      const cls = tone === "review-t" ? "warn" : tone;   // "to review" reads amber
+      return '<div class="tile '+(cls||"")+'"><div class="n">'+n+'</div><div class="l">'+esc(label)+'</div></div>';
+    }
+  </script>
+</body>
+</html>

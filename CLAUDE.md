@@ -2543,8 +2543,25 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Certificate TRACKER + home-page card (Sep 2026):** **GET /certs/status?range=today|7d|30d|all**
+  (office; `count=1` = tallies only) is a **JOB-based** view — one row per EM/PAT
+  **job × the type(s) it needs** (em/pat), joined to its certificate, so a cert that
+  hasn't been started yet still shows. Per-row status: **notstarted** (no cert row —
+  with the engineer), **draft** (being filled), **review** (submitted — office to
+  finalise), **final** (uploaded/filed to the compliance chart). Filtered by the
+  cert's activity day (finalised→submitted→last-edited, else the job's scheduled day);
+  **future-dated work is never shown** (so "Today" = work done/due today, All time =
+  everything up to today). `counts = {expected, uploaded, toReview, withEngineers}`.
+  Front-end **cert-status.html** (📄 tile-less page, reached from the home card) =
+  Today (default) / Last 7 days / Last 30 days / All time chips + summary tiles + a
+  tap-to-open list (a cert → **cert-review.html?open=<certId>** which now deep-opens
+  that cert incl. issued ones; a not-started row → job-view.html). **Home hub card
+  `certs`** (area compliance, FullAccess|SLAAdmin|Compliance) shows outstanding =
+  toReview+withEngineers with an "Awaiting from engineers / In your review queue"
+  breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
+  (same `/certs/status?range=30d&count=1` fetch, jget-cached).
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
-  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
+  navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
 ## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
@@ -2979,6 +2996,9 @@ Current detail widgets (each permission-gated):
     toAction + decided. Open requests + My equipment.
   - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
     / due within 30 days (per-type `due` dates). Open compliance.
+  - **EM & PAT certificates** (FullAccess|SLAAdmin|Compliance): GET
+    /certs/status?range=30d&count=1 → outstanding (toReview + withEngineers), with
+    an "awaiting from engineers / in your review queue" split. Open cert-status.html.
   - **Purchase orders** (FullAccess|PurchaseOrders): GET /po/api/dashboard →
     uncosted (to price) + needs_review/flagged/credit_due/unmatched_site. Open
     PO system (po-office.html).
