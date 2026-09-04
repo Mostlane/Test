@@ -2545,6 +2545,23 @@ it straight onto the compliance chart (rolling the next-due date).
   `createRemedialJobForCert` **copies each fitting's photos into the raised remedial
   job's R2 folder** (`jobs/<jobId>/emrem-*`, idempotent) so the works job shows exactly
   which fittings to replace. Photos are vital for the office record + the ordered works.
+- **Auto-reissue a CLEAN certificate after the works (Sep 2026 — the final step):** once
+  the replacement lights/batteries are fitted, the SAME EM certificate is regenerated
+  with every previously-failed fitting now **Pass** and its comment suffixed
+  **"(Replaced)"** (traceable, not silently hidden). Trigger: sla.js `maybeReissueAfterRemedial`
+  fires when a remedial SLA job (`emrem:<certId>:L|:B`) is COMPLETED and calls
+  `certs.js reissueCleanCertForRemedialJob` (via dynamic import — no static circular dep),
+  which reissues ONCE every remedial job raised for that cert is finished (a split
+  lights+batteries order waits for both). `reissueCleanCert` clones the original cert,
+  flips the failed rows to Pass + "(Replaced)", clears their `remedial`, and inserts a NEW
+  cert (stable id `CERT-reissue-<origId>`, idempotent) at status **`review`** — so it lands
+  in the office review queue (a one-tap Finalise files the clean copy to the compliance
+  chart, keeping the original number) as the human checkpoint before it replaces the failed
+  cert. Pushes the office (deep-links `cert-review.html?open=<newId>`). `em_remedial_acks`
+  gains `reissue_cert_id`/`reissue_at` (self-migrating). **Manual control:** POST
+  **/certs/remedials/reissue** `{certId}` (office) does it on demand; the EM remedials
+  tracker shows a **♻ Issue updated cert** button per case (once a works job exists, hidden
+  after reissue → **♻ Updated cert →** link). `reissueCertId` returned on the board rows.
 - **EM remedial BATTERIES (not a new light) — supplier enquiry (Aug 2026):** a failed
   fitting's remedial can be **batteries** instead of a replacement light. On the cert
   form (cert-form.js `?v=10`, EM only) a failed fitting picks **Fault: Replace light /

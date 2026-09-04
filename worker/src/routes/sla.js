@@ -1502,6 +1502,7 @@ export async function handle(request, env, ctx, url, sess) {
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+    if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -2376,6 +2377,7 @@ export async function handle(request, env, ctx, url, sess) {
         })());
       }
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
       if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       // Tell every office/admin when a job has just been parked pending approval.
       if (updated && updated.hold?.approval?.state === "pending"
@@ -3377,6 +3379,24 @@ async function getShift(env, tenantId, username, date) {
   if (!username) return null;
   const db = tenantDB(env, tenantId);
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
+}
+
+// When an EM remedial SLA job (id "emrem:<certId>:L|:B") is COMPLETED, the final
+// step of the remedial process is to reissue a clean certificate (failures → Pass,
+// "(Replaced)"). certs.js owns that; we call it via a dynamic import so there's no
+// static circular dependency (certs.js already imports from this module). Fires only
+// on the transition INTO a finished state so it can't re-run on every later save.
+async function maybeReissueAfterRemedial(env, tid, before, updated) {
+  try {
+    if (!updated) return;
+    const id = String(updated.id || "");
+    if (!(id.startsWith("emrem:") || updated.originator === "em-remedial")) return;
+    const fin = s => /complete|closed|invoiced/i.test(String(s || ""));
+    if (!fin(updated.status)) return;
+    if (before && fin(before.status)) return;   // was already finished — nothing new
+    const certs = await import("./certs.js");
+    if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
+  } catch {}
 }
 
 export async function listJobs(env, tenantId, opts) {

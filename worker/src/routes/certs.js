@@ -131,7 +131,8 @@ async function ensureTables(env) {
   // Pipeline: to_quote → quoted → approved (job raised if any not-replaced) → invoiced.
   for (const col of ["stage TEXT", "job_id TEXT", "quoted_at TEXT", "quoted_by TEXT",
     "approved_at TEXT", "approved_by TEXT", "invoiced_at TEXT", "invoiced_by TEXT",
-    "lights_pending INTEGER", "lights_job_id TEXT"]) {
+    "lights_pending INTEGER", "lights_job_id TEXT",
+    "reissue_cert_id TEXT", "reissue_at TEXT"]) {   // the auto-generated clean cert after the works
     try { await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
@@ -298,6 +299,73 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
       }
     }
     return job && job.id;
+  } catch { return null; }
+}
+
+// ── Auto-reissue a CLEAN certificate after the remedial works are done ──────────
+// The final step of the EM remedial process: once the replacement lights/batteries
+// have been fitted, produce the SAME certificate as before but with every
+// previously-failed fitting now showing Pass and its comment suffixed "(Replaced)"
+// (so it's traceable, not as-if-it-never-happened-but-hidden). Generated as a cert
+// in the office REVIEW queue (a one-tap Finalise files the clean copy to the
+// compliance chart) — the human checkpoint before it replaces the failed cert.
+// Idempotent: stable reissue id + an ack marker, so it's produced exactly once.
+async function reissueCleanCert(env, tid, certId, ctx) {
+  const orig = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, certId).first();
+  if (!orig || orig.type !== "em") return null;
+  const newId = "CERT-reissue-" + certId;   // stable → idempotent even without the marker
+  const dupe = await env.DB.prepare("SELECT id FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId).first().catch(() => null);
+  if (dupe) return newId;
+  let data = {}; try { data = JSON.parse(orig.data) || {}; } catch {}
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  let changed = 0;
+  const cleanRows = rows.map(r => {
+    const rem = r && r.remedial;
+    if (rem && isRealRemedial(rem)) {
+      changed++;
+      const nr = { ...r };
+      delete nr.remedial;                       // no longer a fault — it's been replaced
+      nr.normal = "Pass"; nr.led = "Pass"; nr.emergency = "Pass";
+      const c = String(nr.comments || "").trim();
+      if (!/\(replaced\)/i.test(c)) nr.comments = (c ? c + " " : "") + "(Replaced)";
+      return nr;
+    }
+    return r;
+  });
+  if (!changed) return null;                    // nothing failed → nothing to reissue
+  const now = new Date().toISOString();
+  const newData = { ...data, rows: cleanRows, reissueOf: certId };
+  await env.DB.prepare(
+    "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+  ).bind(newId, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now, now, now).run();
+  try { await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=? WHERE tenant_id=? AND cert_id=?").bind(newId, now, tid, certId).run(); } catch {}
+  try {
+    const site = (newData.installation && newData.installation.name) || orig.site_code || "";
+    const p = sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: "Updated EM certificate ready",
+      body: `Remedial works complete at ${site} — a clean EM certificate has been auto-generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass, marked "(Replaced)"). Review and issue it.`,
+      url: "/cert-review.html?open=" + newId, tag: "cert-reissue:" + newId,
+    });
+    ctx?.waitUntil ? ctx.waitUntil(p.catch(() => {})) : await p.catch(() => {});
+  } catch {}
+  return newId;
+}
+
+// Called from sla.js when a remedial SLA job (id "emrem:<certId>:L|:B") is completed:
+// reissue the clean cert ONCE every remedial job raised for that cert is finished
+// (so a split lights+batteries order waits for both).
+export async function reissueCleanCertForRemedialJob(env, tid, job) {
+  try {
+    await ensureTables(env);
+    const jid = String((job && job.id) || "");
+    if (!jid.startsWith("emrem:")) return null;
+    const certId = jid.slice(6).replace(/:(L|B)$/i, "");
+    if (!certId) return null;
+    const { results: sib } = await env.DB.prepare("SELECT id, status FROM sla_jobs WHERE tenant_id=? AND id LIKE ?")
+      .bind(tid, "emrem:" + certId + "%").all().catch(() => ({ results: [] }));
+    const fin = s => /complete|closed|invoiced/i.test(String(s || ""));
+    if ((sib || []).some(j => !fin(j.status))) return null;   // works still outstanding
+    return await reissueCleanCert(env, tid, certId);
   } catch { return null; }
 }
 
@@ -1283,6 +1351,7 @@ export async function handle(request, env, ctx, url, sess) {
     lightsPending: r.lights_pending || 0, lightsJobId: r.lights_job_id || null,
     stage: r.stage || "to_quote", jobId: r.job_id || null, createdAt: r.created_at,
     quotedAt: r.quoted_at, approvedAt: r.approved_at, invoicedAt: r.invoiced_at,
+    reissueCertId: r.reissue_cert_id || null,
   });
 
   // GET /certs/remedials/outstanding — cases still at the BLOCKING `to_quote` stage
@@ -1380,6 +1449,19 @@ export async function handle(request, env, ctx, url, sess) {
     if (!jobId) return error("No light-fitting remedials to raise on this certificate.", 400, env, request);
     try { await env.DB.prepare("UPDATE em_remedial_acks SET lights_job_id=?, job_id=COALESCE(job_id,?) WHERE tenant_id=? AND cert_id=?").bind(jobId, jobId, tid, certId).run(); } catch {}
     return json({ ok: true, jobId }, {}, env, request);
+  }
+
+  // POST /certs/remedials/reissue {certId} — office: generate the CLEAN certificate
+  // now (failures → Pass + "(Replaced)"), instead of waiting for the remedial job to
+  // be marked complete. Lands in the review queue to finalise. Office only.
+  if (sub === "/remedials/reissue" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const newId = await reissueCleanCert(env, tid, certId, ctx);
+    if (!newId) return error("Nothing to reissue — this certificate has no failed fittings.", 400, env, request);
+    return json({ ok: true, id: newId }, {}, env, request);
   }
 
   // GET /certs/remedials/flags — site codes with an OPEN case (not yet invoiced),
