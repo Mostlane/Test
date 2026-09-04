@@ -332,7 +332,8 @@
       </div>
       <div class="lib-actions">
         <button id="libMain" class="secondary">&#9776; Main Menu</button>
-        <button id="libNew">+ New job</button>
+        <button id="libNew">+ New</button>
+        <button id="libImport" class="secondary">⤵ Import old plans</button>
         <button id="libRefresh" class="secondary">Refresh</button>
         <button id="libCloud" class="secondary">Cloud settings</button>
       </div>
@@ -2034,6 +2035,7 @@ document.getElementById("btnExample").addEventListener("click",async ()=>{
   if(ok){ state=exampleState(); state._id=""; state._ref=""; _userTouched=false; persist(); buildForm(); renderDoc(); engageWizard(1); }
 });
 if(document.getElementById("libNew")) document.getElementById("libNew").onclick=newJob;
+if(document.getElementById("libImport")) document.getElementById("libImport").onclick=importOld;
 if(document.getElementById("libRefresh")) document.getElementById("libRefresh").onclick=renderLibrary;
 document.getElementById("btnSave").addEventListener("click",()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
@@ -2090,6 +2092,43 @@ async function renderLibrary(){
       list.appendChild(d);
     });
   }catch(e){ status.innerHTML='<span style="color:#c0392b">Could not load: '+esc(e.message)+'</span>'; list.innerHTML=""; }
+}
+
+// One-tap migration: pull the plans from the OLD standalone planner
+// (mostlane-hs-jobs worker) into the portal store. Browser-side (the old worker
+// already allows the portal origin, same as the old app did). Idempotent —
+// skips a plan whose name is already in the portal library.
+async function importOld(){
+  const status=document.getElementById("libStatus");
+  const btn=document.getElementById("libImport"); if(btn) btn.disabled=true;
+  status.textContent="Connecting to the old planner…";
+  try{
+    const c=await authFetch("/hs-plan-config").then(r=>r.json()).catch(()=>null);
+    if(!c||!c.ok||!c.worker||!c.token){ status.innerHTML='<span style="color:#c0392b">The old planner isn’t available for your account, so there’s nothing to import.</span>'; if(btn) btn.disabled=false; return; }
+    const base=String(c.worker).replace(/\/+$/,""), tok=c.token;
+    const oldReq=(p)=>fetch(base+p,{headers:{Authorization:"Bearer "+tok}}).then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
+    const list=await oldReq("/jobs");
+    const jobs=Array.isArray(list)?list:[];
+    if(!jobs.length){ status.textContent="The old planner has no saved plans."; if(btn) btn.disabled=false; return; }
+    // Existing portal plans (dedupe by site/name).
+    const have=new Set();
+    try{ ((await authFetch("/hs/docs?type=cpp").then(r=>r.json())).docs||[]).forEach(d=>have.add(String(d.site||"").trim().toLowerCase())); }catch(e){}
+    let done=0, skipped=0;
+    for(const j of jobs){
+      const nm=String(j.name||"").trim();
+      if(nm && have.has(nm.toLowerCase())){ skipped++; continue; }
+      status.textContent="Importing "+(nm||"a plan")+"…";
+      let data; try{ data=await oldReq("/jobs/"+encodeURIComponent(j.id)); }catch(e){ continue; }
+      if(!data||typeof data!=="object") continue;
+      delete data._id; delete data._ref;                    // portal assigns its own id/ref
+      const site=(data.projectName||nm||"CPP").slice(0,120);
+      const r=await authFetch("/hs/doc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({doc_type:"cpp",site,data})}).then(x=>x.json());
+      if(r&&r.ok){ done++; have.add(site.toLowerCase()); }
+    }
+    status.innerHTML='<b>Imported '+done+' plan'+(done===1?"":"s")+'</b>'+(skipped?(" · "+skipped+" already here"):"")+".";
+    renderLibrary();
+  }catch(e){ status.innerHTML='<span style="color:#c0392b">Import failed: '+esc(e.message)+'</span>'; }
+  finally{ if(btn) btn.disabled=false; }
 }
 
 function newJob(){ state=blankState(); state._id=""; state._ref=""; _userTouched=false; persist(); buildForm(); renderDoc(); hideLibrary(); engageWizard(0); }
