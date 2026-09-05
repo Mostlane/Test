@@ -692,7 +692,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   day, how many days, daily start/finish, **reveal time** (the evening before),
   include-weekends. The client builds each day's absolute `scheduledAt` (London)
   and POSTs **/project/create-day-series** (projects-api.js), which creates one
-  SLA job per day linked by **`job.seriesId`**, each with
+  SLA job per day. **Weekend guard (Sep 2026):** the "Include weekends" checkbox is
+  now RESET after each series is created (it used to stick, so a one-off weekend
+  series silently carried "include weekends" into the NEXT project — that's how a
+  Saturday day slipped into Chris/Steve's P0006 drip), the client POSTs
+  **`includeWeekends`**, and **create-day-series DROPS any Sat/Sun day server-side
+  unless `includeWeekends===true`** (Europe/London weekday) — so a project drip can
+  never land on a weekend by accident, even from a stale client.
+  Each day is linked by **`job.seriesId`**, each with
   `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
   now **configurable** — `londonHourDayBefore`). The office sees every day in the
   scheduler; the engineer only sees a day from the reveal time the evening before.

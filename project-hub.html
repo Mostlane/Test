@@ -577,10 +577,14 @@
       msg.textContent = "Creating " + days.length + " days…"; msg.className = "msg";
       try {
         const r = await authFetch("/project/create-day-series", { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh }) }).then(r => r.json());
+          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh,
+            includeWeekends: document.getElementById("jvWeekends").checked }) }).then(r => r.json());
         if (!r.ok) throw new Error(r.error || "Couldn't create");
         msg.textContent = "Created ✓ " + r.count + " days drip-fed"; msg.className = "msg ok";
         document.getElementById("jvDesc").value = "";
+        // Reset the weekend toggle so a one-off "include weekends" never silently
+        // carries into the NEXT project's series (that's how a Saturday slipped in).
+        document.getElementById("jvWeekends").checked = false; renderDayPreview();
         document.getElementById("jvMulti").checked = false; document.getElementById("jvMultiPanel").classList.add("hide"); document.getElementById("jvDur").disabled = false;
         JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
         loadJobsVisits();
