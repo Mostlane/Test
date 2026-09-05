@@ -131,7 +131,8 @@ async function ensureTables(env) {
   // Pipeline: to_quote → quoted → approved (job raised if any not-replaced) → invoiced.
   for (const col of ["stage TEXT", "job_id TEXT", "quoted_at TEXT", "quoted_by TEXT",
     "approved_at TEXT", "approved_by TEXT", "invoiced_at TEXT", "invoiced_by TEXT",
-    "lights_pending INTEGER", "lights_job_id TEXT"]) {
+    "lights_pending INTEGER", "lights_job_id TEXT",
+    "reissue_cert_id TEXT", "reissue_at TEXT"]) {   // the auto-generated clean cert after the works
     try { await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
@@ -169,7 +170,9 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       kind,
       batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
       batteryQty: kind === "battery" ? (Number(rem.batteryQty) || 0) : 0,
-      photos: (kind === "battery" && Array.isArray(rem.photos)) ? rem.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [],
+      // Every failed fitting's photos (light OR battery) — needed for the office
+      // record and to build the remedial job when the client orders the works.
+      photos: Array.isArray(rem.photos) ? rem.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [],
     };
   }).filter(x => x.failed);
   if (!fails.length) {
@@ -270,8 +273,99 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
           await env.DB.batch(ids.slice(i, i + 20).map(rid => env.DB.prepare("UPDATE em_remedials SET job_id=? WHERE tenant_id=? AND id=?").bind(job.id, tid, rid)));
         }
       } catch {}
+      // Carry each failed fitting's PHOTOS onto the remedial job, so whoever opens
+      // it can see exactly which fittings to replace. Copied into the job's own R2
+      // folder (they then show like any job photo). Idempotent — skipped if the job
+      // already has them (re-running the pipeline never duplicates).
+      if (env.JOB_FILES) {
+        try {
+          const already = await env.JOB_FILES.list({ prefix: "jobs/" + job.id + "/emrem-" }).catch(() => null);
+          if (!already || !already.objects || !already.objects.length) {
+            let n = 0;
+            for (const r of pend) {
+              let keys = []; try { keys = JSON.parse(r.photos || "[]"); } catch {}
+              for (const key of (Array.isArray(keys) ? keys : [])) {
+                if (!key || typeof key !== "string" || n >= 40) continue;
+                const obj = await env.JOB_FILES.get(key);
+                if (!obj) continue;
+                await env.JOB_FILES.put("jobs/" + job.id + "/emrem-" + n + "-" + Date.now() + ".jpg", obj.body,
+                  { httpMetadata: { contentType: (obj.httpMetadata && obj.httpMetadata.contentType) || "image/jpeg" } });
+                n++;
+              }
+              if (n >= 40) break;
+            }
+          }
+        } catch {}
+      }
     }
     return job && job.id;
+  } catch { return null; }
+}
+
+// ── Auto-reissue a CLEAN certificate after the remedial works are done ──────────
+// The final step of the EM remedial process: once the replacement lights/batteries
+// have been fitted, produce the SAME certificate as before but with every
+// previously-failed fitting now showing Pass and its comment suffixed "(Replaced)"
+// (so it's traceable, not as-if-it-never-happened-but-hidden). Generated as a cert
+// in the office REVIEW queue (a one-tap Finalise files the clean copy to the
+// compliance chart) — the human checkpoint before it replaces the failed cert.
+// Idempotent: stable reissue id + an ack marker, so it's produced exactly once.
+async function reissueCleanCert(env, tid, certId, ctx) {
+  const orig = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, certId).first();
+  if (!orig || orig.type !== "em") return null;
+  const newId = "CERT-reissue-" + certId;   // stable → idempotent even without the marker
+  const dupe = await env.DB.prepare("SELECT id FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId).first().catch(() => null);
+  if (dupe) return newId;
+  let data = {}; try { data = JSON.parse(orig.data) || {}; } catch {}
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  let changed = 0;
+  const cleanRows = rows.map(r => {
+    const rem = r && r.remedial;
+    if (rem && isRealRemedial(rem)) {
+      changed++;
+      const nr = { ...r };
+      delete nr.remedial;                       // no longer a fault — it's been replaced
+      nr.normal = "Pass"; nr.led = "Pass"; nr.emergency = "Pass";
+      const c = String(nr.comments || "").trim();
+      if (!/\(replaced\)/i.test(c)) nr.comments = (c ? c + " " : "") + "(Replaced)";
+      return nr;
+    }
+    return r;
+  });
+  if (!changed) return null;                    // nothing failed → nothing to reissue
+  const now = new Date().toISOString();
+  const newData = { ...data, rows: cleanRows, reissueOf: certId };
+  await env.DB.prepare(
+    "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+  ).bind(newId, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now, now, now).run();
+  try { await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=? WHERE tenant_id=? AND cert_id=?").bind(newId, now, tid, certId).run(); } catch {}
+  try {
+    const site = (newData.installation && newData.installation.name) || orig.site_code || "";
+    const p = sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: "Updated EM certificate ready",
+      body: `Remedial works complete at ${site} — a clean EM certificate has been auto-generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass, marked "(Replaced)"). Review and issue it.`,
+      url: "/cert-review.html?open=" + newId, tag: "cert-reissue:" + newId,
+    });
+    ctx?.waitUntil ? ctx.waitUntil(p.catch(() => {})) : await p.catch(() => {});
+  } catch {}
+  return newId;
+}
+
+// Called from sla.js when a remedial SLA job (id "emrem:<certId>:L|:B") is completed:
+// reissue the clean cert ONCE every remedial job raised for that cert is finished
+// (so a split lights+batteries order waits for both).
+export async function reissueCleanCertForRemedialJob(env, tid, job) {
+  try {
+    await ensureTables(env);
+    const jid = String((job && job.id) || "");
+    if (!jid.startsWith("emrem:")) return null;
+    const certId = jid.slice(6).replace(/:(L|B)$/i, "");
+    if (!certId) return null;
+    const { results: sib } = await env.DB.prepare("SELECT id, status FROM sla_jobs WHERE tenant_id=? AND id LIKE ?")
+      .bind(tid, "emrem:" + certId + "%").all().catch(() => ({ results: [] }));
+    const fin = s => /complete|closed|invoiced/i.test(String(s || ""));
+    if ((sib || []).some(j => !fin(j.status))) return null;   // works still outstanding
+    return await reissueCleanCert(env, tid, certId);
   } catch { return null; }
 }
 
@@ -315,6 +409,52 @@ async function getJob(env, tid, id) {
 }
 // A store code from the job's site (numeric, 4-padded like the compliance chart).
 function padCode(v) { const d = String(v ?? "").replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; }
+
+// Normalise an engineer name to the engStatus key (matches sla.js normId).
+const normEng = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+
+// Complete an EM/PAT JOB once ALL the certificates it needs are in (submitted or
+// finalised). The engineer's app normally flips the job to Complete when they
+// submit the last cert — but if that's interrupted (the office finalises the
+// certs, or the two certs are submitted across separate page loads), the job was
+// left stuck In Progress with no way to complete it, which then blocked the
+// engineer's clock-off. So the SERVER now completes the job whenever its certs are
+// all in — the source of truth is the certificates, not the engineer's device.
+// Writes the top-level status AND every assigned engineer's per-engineer slice so
+// single-engineer and multi-engineer (shared cert) jobs both read Complete.
+async function maybeCompleteCertJob(env, tid, cert) {
+  try {
+    if (!cert || !cert.job_id) return false;
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, cert.job_id).first();
+    if (!row) return false;
+    let job; try { job = JSON.parse(row.data); } catch { return false; }
+    const need = [];
+    if (job.emTest) need.push("em");
+    if (job.pat) need.push("pat");
+    if (!need.length) return false;                                    // not an EM/PAT job
+    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;   // already finished
+    const { results } = await env.DB.prepare(
+      "SELECT DISTINCT type FROM certificates WHERE tenant_id=? AND job_id=? AND status IN ('review','final')"
+    ).bind(tid, cert.job_id).all();
+    const have = new Set((results || []).map(r => r.type));
+    if (!need.every(t => have.has(t))) return false;                   // still waiting on a cert
+    const now = new Date().toISOString();
+    job.status = "Complete"; job.updatedAt = now; job.closedAt = job.closedAt || now;
+    const engs = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length)
+      ? job.assignedEngineers.filter(Boolean) : (job.assignedTo ? [job.assignedTo] : []);
+    if (engs.length >= 2) {   // shared cert → everyone on the job is done
+      job.engStatus = job.engStatus || {};
+      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "cert" };
+    } else if (job.engStatus) {   // single-eng with a stale slice — keep it consistent
+      for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now, by: "cert" };
+    }
+    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+    job.statusHistory.push({ status: "Complete", at: now, by: "cert" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?")
+      .bind(job.closedAt, now, JSON.stringify(job), tid, cert.job_id).run();
+    return true;
+  } catch { return false; }
+}
 
 // A remedial counts as REAL (a flagged fault) whenever it carries substantive
 // detail — not only when the `failed` flag is set. The engineer app's "Mark
@@ -948,6 +1088,10 @@ export async function handle(request, env, ctx, url, sess) {
     if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
+    // Complete the JOB if all its required certs (em/pat) are now in — server-side,
+    // so the job is never left stuck In Progress if the engineer's device didn't
+    // patch it (which then blocks their clock-off).
+    const jobDone = await maybeCompleteCertJob(env, tid, cert);
     // Notify the office review queue. If specific reviewers are configured
     // (cert:config.reviewers), notify ONLY them; otherwise fall back to everyone
     // with FullAccess / SLAAdmin / Compliance (the default behaviour).
@@ -962,7 +1106,7 @@ export async function handle(request, env, ctx, url, sess) {
     } else {
       ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {}));
     }
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, jobComplete: jobDone }, {}, env, request);
   }
 
   // ── Render the certificate PDF ───────────────────────────────────────────────
@@ -998,6 +1142,87 @@ export async function handle(request, env, ctx, url, sess) {
       "SELECT * FROM certificates WHERE tenant_id=? AND status IN " + statuses + " ORDER BY COALESCE(submitted_at,finalised_at,updated_at) DESC LIMIT 300"
     ).bind(tid).all()).results || [];
     return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+  }
+
+  // ── EM/PAT certificate TRACKER (office) — every expected certificate and where
+  // it's up to, so the office can see what's still outstanding. One row per
+  // (EM/PAT job × type it needs), joined to its certificate: notstarted (no cert
+  // row yet — with the engineer), draft (being filled), review (submitted — office
+  // to finalise), final (uploaded/filed to the compliance chart). Filter by the
+  // certificate's activity day: today (default) / 7d / 30d / all. `count=1` returns
+  // just the tallies (for the home-page hub card). ─────────────────────────────
+  if (sub === "/status" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const range = String(q.get("range") || "today").toLowerCase();
+    const countOnly = q.get("count") === "1";
+    // London calendar-day strings (YYYY-MM-DD) so the window matches the working day.
+    const londonDay = (d) => { try { const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return ""; } };
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); };
+    let from = null;
+    if (range === "7d") from = daysAgo(6);
+    else if (range === "30d") from = daysAgo(29);
+    else if (range !== "all") from = today;   // default = today
+
+    // Every live EM/PAT job (dormant fallback templates + archive already excluded).
+    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat));
+    // Certificate rows for those jobs, keyed job_id::type.
+    const certByKey = {};
+    const jobIds = jobs.map(j => String(j.id));
+    for (let i = 0; i < jobIds.length; i += 100) {
+      const chunk = jobIds.slice(i, i + 100);
+      if (!chunk.length) break;
+      const ph = chunk.map(() => "?").join(",");
+      const rows = (await env.DB.prepare(
+        `SELECT id,type,status,job_id,cert_number,engineer,created_at,updated_at,submitted_at,finalised_at FROM certificates WHERE tenant_id=? AND job_id IN (${ph})`
+      ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of rows) certByKey[String(r.job_id) + "::" + r.type] = r;
+    }
+
+    const isCancelled = s => /cancel/i.test(String(s || ""));
+    const items = [];
+    for (const j of jobs) {
+      if (isCancelled(j.status)) continue;
+      const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean)
+        : (j.assignedTo ? [j.assignedTo] : []);
+      const types = [];
+      if (j.emTest) types.push("em");
+      if (j.pat) types.push("pat");
+      for (const type of types) {
+        const cert = certByKey[String(j.id) + "::" + type] || null;
+        const status = cert ? cert.status : "notstarted";
+        // The certificate's "activity" day: the timestamp of its current state
+        // (finalised → submitted → last-edited), else the job's scheduled day.
+        const activity = cert
+          ? (cert.finalised_at || cert.submitted_at || cert.updated_at || cert.created_at)
+          : (j.scheduledAt || j.createdAt || "");
+        const day = londonDay(activity);
+        if (day && day > today) continue;              // never show future/not-yet-due work
+        if (from && (!day || day < from)) continue;    // outside the chosen window
+        items.push({
+          jobId: j.id, type,
+          site: j.siteName || j.helpdeskRef || j.reference || "",
+          siteCode: j.siteCode || "",
+          engineers: engs,
+          engineer: (cert && cert.engineer) || engs[0] || "",
+          status,
+          certId: cert ? cert.id : "",
+          certNumber: (cert && cert.cert_number) || "",
+          scheduledAt: j.scheduledAt || "",
+          submittedAt: cert ? (cert.submitted_at || "") : "",
+          finalisedAt: cert ? (cert.finalised_at || "") : "",
+          activityAt: activity || "",
+        });
+      }
+    }
+    items.sort((a, b) => String(b.activityAt || "").localeCompare(String(a.activityAt || "")));
+    const counts = {
+      expected: items.length,
+      uploaded: items.filter(i => i.status === "final").length,
+      toReview: items.filter(i => i.status === "review").length,
+      withEngineers: items.filter(i => i.status === "draft" || i.status === "notstarted").length,
+    };
+    return json({ ok: true, range, counts, items: countOnly ? [] : items }, {}, env, request);
   }
 
   // ── A site's issued history ──────────────────────────────────────────────────
@@ -1050,6 +1275,10 @@ export async function handle(request, env, ctx, url, sess) {
     if (cert.type === "pat") { const n = Number(String(number).replace(/\D/g, "").slice(0, 5)); if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:patseq:" + tid, String(n)).run(); }
     await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(number, filed.key, now, me, now, tid, cert.id).run();
+    // Finalising a cert also completes the JOB once all its certs are in — so an
+    // office-finalised EM/PAT job never sits stuck In Progress on the engineer's
+    // board (which used to block their clock-off).
+    try { await maybeCompleteCertJob(env, tid, cert); } catch {}
     if (cert.engineer && cert.engineer !== me) ctx?.waitUntil?.(sendToUser(env, tid, cert.engineer, { title: "Certificate issued", body: `Your ${cert.type === "pat" ? "PAT" : "EM"} certificate ${number} has been reviewed and filed.`, url: "/eicr-portal.html", tag: "cert-final:" + cert.id }).catch(() => {}));
     // EM remedials: log the £50/fitting failures + raise a remedial job for the
     // not-replaced ones, and tell the office so they can charge for the works.
@@ -1122,6 +1351,7 @@ export async function handle(request, env, ctx, url, sess) {
     lightsPending: r.lights_pending || 0, lightsJobId: r.lights_job_id || null,
     stage: r.stage || "to_quote", jobId: r.job_id || null, createdAt: r.created_at,
     quotedAt: r.quoted_at, approvedAt: r.approved_at, invoicedAt: r.invoiced_at,
+    reissueCertId: r.reissue_cert_id || null,
   });
 
   // GET /certs/remedials/outstanding — cases still at the BLOCKING `to_quote` stage
@@ -1219,6 +1449,19 @@ export async function handle(request, env, ctx, url, sess) {
     if (!jobId) return error("No light-fitting remedials to raise on this certificate.", 400, env, request);
     try { await env.DB.prepare("UPDATE em_remedial_acks SET lights_job_id=?, job_id=COALESCE(job_id,?) WHERE tenant_id=? AND cert_id=?").bind(jobId, jobId, tid, certId).run(); } catch {}
     return json({ ok: true, jobId }, {}, env, request);
+  }
+
+  // POST /certs/remedials/reissue {certId} — office: generate the CLEAN certificate
+  // now (failures → Pass + "(Replaced)"), instead of waiting for the remedial job to
+  // be marked complete. Lands in the review queue to finalise. Office only.
+  if (sub === "/remedials/reissue" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const newId = await reissueCleanCert(env, tid, certId, ctx);
+    if (!newId) return error("Nothing to reissue — this certificate has no failed fittings.", 400, env, request);
+    return json({ ok: true, id: newId }, {}, env, request);
   }
 
   // GET /certs/remedials/flags — site codes with an OPEN case (not yet invoiced),

@@ -2332,6 +2332,25 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
 
+## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
+A live at-a-glance office view of where every field engineer is right now.
+**GET /sla/live** (office: FullAccess|SLAAdmin|SLA) computes, per field engineer
+(staffType≠office, active), using each engineer's OWN per-engineer slice
+(`effStatus`/`effSchedule`, NOT the release-gated for-engineer view — the office sees
+the true plan): the job they're **on now** (effStatus Travelling / In Progress, incl.
+one left running from a previous day), and the job they **should be** on next (earliest
+unfinished, non-active job scheduled today — a normal job, a project day, or a 🛟 standby
+fallback). Category = `on_job` (has a current) → `should_be` (has a next) → `off` (on
+approved leave, via `approvedLeaveInRange`) → `idle`. Returns each engineer's WHOLE
+`planned` day (today's jobs sorted by time, each with status/priority/since) so the
+modal needs no extra fetch. Front-end **engineers-live.html** (📍 Where's everyone):
+two sections **🔧 On Job** then **📋 Should Be** (+ a muted 🕔 No job / off), colour-coded
+status pills, **auto-refreshes every 45s**; each engineer **name is clickable → a
+planned-day modal** (time · site · status chips; a row opens job-view.html). Entry
+points: a **📍 Where's everyone** button on sla-scheduler.html + in sla-main.html's 🛠
+Tools menu, and a sidebar nav item (SLA|SLAAdmin). Reuses listJobs + effStatus/
+effSchedule; no new table.
+
 ## EM light test + PAT job types (add-job.html + sla.js — Aug 2026)
 Add Job has **💡 EM light test** + **🔌 PAT** ticks. Ticking them auto-fills the
 **description** and **duration**: PAT → `Import certificate number <storeCode>-<YY>`,
@@ -2460,6 +2479,19 @@ it straight onto the compliance chart (rolling the next-due date).
   Portsmouth, PO6 3FE** (office-editable). Used to SEED a new cert's client ONLY when
   the previous cert didn't supply one — the previous cert always wins, and it never
   overwrites a typed value. (Non-Co-op EM/PAT would need the office to change it.)
+- **The JOB is completed SERVER-SIDE when its certs are in (Sep 2026 fix):** the
+  job→Complete used to depend ENTIRELY on the engineer's browser calling `patchJob`
+  the moment the last cert submitted. If that was interrupted — the office finalised
+  the certs, or a combined EM+PAT job's two certs were submitted across separate page
+  loads (each reload resets the client's `done` flags, so the "both done → complete"
+  patch never fired) — the job sat **stuck In Progress** with no way to complete it,
+  which then **blocked the engineer's clock-off**. Now `certs.js maybeCompleteCertJob`
+  runs on BOTH `/certs/submit` AND `/certs/finalise`: once every required cert (em
+  and/or pat, from the job's flags) is submitted-or-final, it writes the job to
+  Complete — top-level status AND every assigned engineer's `engStatus` slice (so
+  single- and multi-engineer shared-cert jobs both read Complete). The certificates
+  are the source of truth, not the engineer's device. (Ryan hit this: two combined
+  EM+PAT jobs finalised by the office stayed In Progress and he couldn't end his day.)
 - **Combined EM+PAT job (engineer-job.html):** two tabs, each certificate completed
   INDEPENDENTLY (finish one before the other, any order) — each has its own "Complete
   & submit". The JOB only patches to Complete once BOTH certs are submitted
@@ -2503,6 +2535,33 @@ it straight onto the compliance chart (rolling the next-due date).
   Done / All with per-fitting £ + totals + links to each remedial job; the office
   also sees ⚠ tags per row when reviewing. `createOrUpdateJobFromPayload` imported
   from sla.js. portal-config `?v=20`, SW `mostlane-v84`.
+- **Photos on EVERY failed fitting — light OR battery (Sep 2026, `cert-form.js?v=19`):**
+  the per-fitting **📷 Add photo** control used to render ONLY when the fault kind was
+  Batteries, so a **replace-light** remedial had NOWHERE to photograph the failed
+  fitting (Ryan hit this). The photos block now shows for BOTH kinds (spec + qty stay
+  battery-only), and **validation requires ≥1 photo per failed fitting** ("N failed
+  fitting(s) — add a photo"). Server: `processEmRemedials` now captures `photos` for
+  every kind into `em_remedials.photos` (was battery-only), and
+  `createRemedialJobForCert` **copies each fitting's photos into the raised remedial
+  job's R2 folder** (`jobs/<jobId>/emrem-*`, idempotent) so the works job shows exactly
+  which fittings to replace. Photos are vital for the office record + the ordered works.
+- **Auto-reissue a CLEAN certificate after the works (Sep 2026 — the final step):** once
+  the replacement lights/batteries are fitted, the SAME EM certificate is regenerated
+  with every previously-failed fitting now **Pass** and its comment suffixed
+  **"(Replaced)"** (traceable, not silently hidden). Trigger: sla.js `maybeReissueAfterRemedial`
+  fires when a remedial SLA job (`emrem:<certId>:L|:B`) is COMPLETED and calls
+  `certs.js reissueCleanCertForRemedialJob` (via dynamic import — no static circular dep),
+  which reissues ONCE every remedial job raised for that cert is finished (a split
+  lights+batteries order waits for both). `reissueCleanCert` clones the original cert,
+  flips the failed rows to Pass + "(Replaced)", clears their `remedial`, and inserts a NEW
+  cert (stable id `CERT-reissue-<origId>`, idempotent) at status **`review`** — so it lands
+  in the office review queue (a one-tap Finalise files the clean copy to the compliance
+  chart, keeping the original number) as the human checkpoint before it replaces the failed
+  cert. Pushes the office (deep-links `cert-review.html?open=<newId>`). `em_remedial_acks`
+  gains `reissue_cert_id`/`reissue_at` (self-migrating). **Manual control:** POST
+  **/certs/remedials/reissue** `{certId}` (office) does it on demand; the EM remedials
+  tracker shows a **♻ Issue updated cert** button per case (once a works job exists, hidden
+  after reissue → **♻ Updated cert →** link). `reissueCertId` returned on the board rows.
 - **EM remedial BATTERIES (not a new light) — supplier enquiry (Aug 2026):** a failed
   fitting's remedial can be **batteries** instead of a replacement light. On the cert
   form (cert-form.js `?v=10`, EM only) a failed fitting picks **Fault: Replace light /
@@ -2543,8 +2602,25 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Certificate TRACKER + home-page card (Sep 2026):** **GET /certs/status?range=today|7d|30d|all**
+  (office; `count=1` = tallies only) is a **JOB-based** view — one row per EM/PAT
+  **job × the type(s) it needs** (em/pat), joined to its certificate, so a cert that
+  hasn't been started yet still shows. Per-row status: **notstarted** (no cert row —
+  with the engineer), **draft** (being filled), **review** (submitted — office to
+  finalise), **final** (uploaded/filed to the compliance chart). Filtered by the
+  cert's activity day (finalised→submitted→last-edited, else the job's scheduled day);
+  **future-dated work is never shown** (so "Today" = work done/due today, All time =
+  everything up to today). `counts = {expected, uploaded, toReview, withEngineers}`.
+  Front-end **cert-status.html** (📄 tile-less page, reached from the home card) =
+  Today (default) / Last 7 days / Last 30 days / All time chips + summary tiles + a
+  tap-to-open list (a cert → **cert-review.html?open=<certId>** which now deep-opens
+  that cert incl. issued ones; a not-started row → job-view.html). **Home hub card
+  `certs`** (area compliance, FullAccess|SLAAdmin|Compliance) shows outstanding =
+  toReview+withEngineers with an "Awaiting from engineers / In your review queue"
+  breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
+  (same `/certs/status?range=30d&count=1` fetch, jget-cached).
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
-  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
+  navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
 ## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
@@ -2979,6 +3055,9 @@ Current detail widgets (each permission-gated):
     toAction + decided. Open requests + My equipment.
   - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
     / due within 30 days (per-type `due` dates). Open compliance.
+  - **EM & PAT certificates** (FullAccess|SLAAdmin|Compliance): GET
+    /certs/status?range=30d&count=1 → outstanding (toReview + withEngineers), with
+    an "awaiting from engineers / in your review queue" split. Open cert-status.html.
   - **Purchase orders** (FullAccess|PurchaseOrders): GET /po/api/dashboard →
     uncosted (to price) + needs_review/flagged/credit_due/unmatched_site. Open
     PO system (po-office.html).
@@ -4035,9 +4114,32 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
    returns raw visits (portal dates SiteLog labour + P4 reconcile from these).
    Worker last pasted ≈ the /update-engineer-portal_username build (3,184 lines,
    tail `};`); before that the /job-costing build. Confirm with Jamie what's live.
-3. **H&S planner** — static app IN THIS REPO at /hs-plan/; worker
-   `mostlane-hs-jobs` (own D1 + APP_TOKEN secret). Menu 🦺 builds
-   `hs-plan/#worker=...&token=` via /hs-plan-config.
+3. **H&S planner** — Menu 🦺 → **hs-docs.html** (the H&S hub: inductions,
+   hot-works permits, RAMS, incidents + the Construction Phase Plan tile).
+   - **Construction Phase Plan is now PORTAL-NATIVE (Sep 2026)** —
+     **cpp-builder.html** (a faithful port of the old /hs-plan app so the OUTPUT
+     document is byte-for-byte the same 18-page CDN 2015 plan) rebuilt as a
+     **stepped wizard** saved to the portal DB. Storage = the generic
+     `hs_documents` store, **`doc_type="cpp"`** (ref `CPP-0001…`, hs.js PREFIX+SEQ);
+     the whole form `state` object rides in `data`. Endpoints reuse hs.js:
+     GET /hs/docs?type=cpp (library), GET/POST /hs/doc, POST /hs/doc/delete.
+     **Wizard** = 🤖 AI step + the 9 form groups (Branding·Project·Team·
+     Arrangements·Directory·RAMS·Compound·Hospital·Method) + Review; tap-to-jump
+     progress chips; debounced autosave to the DB; resumable (open a part-filled
+     plan from the library). **🤖 AI step** (**POST /hs/ai-cpp**, mirrors
+     /hs/ai-rams — drop PDF/Word/text or a scanned PDF for OCR + a description →
+     Claude pre-fills the plan's fields, gap-fill only, nothing saved; fails soft
+     without ANTHROPIC_API_KEY). **Project link:** the builder links itself to a
+     project via /project/link kind `cpp` (→ `links.cppRef` = the `HSD-…` doc id);
+     project-hub.html "Build in the portal" opens **cpp-builder.html?project=<PID>**
+     (opens the existing linked CPP if `cppRef` is an HSD id, else a fresh plan
+     seeded with the project name/number), and "link an existing" lists
+     /hs/docs?type=cpp. Compound map (Google Maps draw/route) + A&E route planner
+     carried over unchanged (the DrawingManager draw/save fix is in). Mobile: the
+     doc pane is hidden until the Review step. _headers + SW `mostlane-v114`.
+   - **Old standalone app** (static /hs-plan/, worker `mostlane-hs-jobs` own D1 +
+     APP_TOKEN, /hs-plan-config launch token) is now UNLINKED but kept as a
+     fallback — do not delete /hs-plan/.
 
 ## FUTURE PLANS / NEXT UP (agreed with Jamie)
 0. **Job costing & SiteLog↔Portal — DONE (Aug 2026)**, see the dedicated

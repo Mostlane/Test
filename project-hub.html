@@ -662,13 +662,8 @@
       }
       if (kind === "rams") { location.href = "/hs-docs.html?newRams=1&site=" + encodeURIComponent(P.name) + "&project=" + encodeURIComponent(PID); return; }
       if (kind === "cpp") {
-        // Mark the CPP as started (links it), then open the builder pre-filled.
-        await authFetch("/project/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, kind: "cpp", value: P.number }) });
-        try {
-          const c = await authFetch("/hs-plan-config").then(r => r.json());
-          if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token) + "&projectName=" + encodeURIComponent(P.name) + "&projectNo=" + encodeURIComponent(P.number);
-          else alert("The Construction Phase Plan tool isn't configured for your account.");
-        } catch { alert("Couldn't open the Construction Phase Plan tool."); }
+        // Portal-native CPP builder — it links itself to the project on first save.
+        location.href = "/cpp-builder.html?project=" + encodeURIComponent(PID);
         return;
       }
       if (kind === "valuations") {
@@ -725,8 +720,14 @@
         },
       },
       cpp: {
-        title: "📄 Construction Phase Plan", build: () => build("cpp"), buildLabel: "Build in the planner",
-        portal: null, // CPPs aren't stored in the portal — attach the file instead
+        title: "📄 Construction Phase Plan", build: () => build("cpp"), buildLabel: "Build in the portal",
+        portal: {
+          label: "…or link an existing Construction Phase Plan:", single: true, linkKind: "cpp",
+          list: async () => (await authFetch("/hs/docs?type=cpp").then(r => r.json()).catch(() => ({}))).docs || [],
+          linked: () => (P.links && P.links.cppRef && /^HSD-/.test(String(P.links.cppRef))) ? [P.links.cppRef] : [],
+          name: x => x.ref || x.site || "CPP", sub: x => [x.site, x.created_at ? fmtDay(x.created_at) : ""].filter(Boolean).join(" · "),
+          match: (x, q) => (String(x.ref || "") + " " + String(x.site || "")).toLowerCase().includes(q),
+        },
       },
     };
 
@@ -738,14 +739,16 @@
       let docs = [];
       try { docs = (await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json())).files || []; } catch {}
       const docById = {}; docs.forEach(f => docById[f.id] = f);
-      let ramsBy = {}, progBy = {};
+      let ramsBy = {}, progBy = {}, cppBy = {};
       if ((L.ramsIds || []).length) { try { ((await authFetch("/hs/docs?type=rams").then(r => r.json())).docs || []).forEach(x => ramsBy[x.id] = x); } catch {} }
       if (L.programmeId) { try { ((await authFetch("/prog/list").then(r => r.json())).programmes || []).forEach(x => progBy[x.id] = x); } catch {} }
+      if (L.cppRef && /^HSD-/.test(String(L.cppRef))) { try { ((await authFetch("/hs/docs?type=cpp").then(r => r.json())).docs || []).forEach(x => cppBy[x.id] = x); } catch {} }
       const filePill = id => { const f = docById[id]; return f ? `<a class="pill" href="#" data-docopen="${esc(f.url)}" data-docname="${esc(f.title || "File")}" style="text-decoration:none;">📎 ${esc(f.title || "File")}</a>` : ""; };
       for (const key of keys) {
         const line = g(key + "RefLine"); const pills = [];
         if (key === "programme" && L.programmeId) pills.push(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`);
         if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`));
+        if (key === "cpp" && L.cppRef && /^HSD-/.test(String(L.cppRef))) pills.push(`<a class="pill" href="/cpp-builder.html?doc=${encodeURIComponent(L.cppRef)}" style="text-decoration:none;">📄 ${esc((cppBy[L.cppRef] && (cppBy[L.cppRef].ref || cppBy[L.cppRef].site)) || "CPP")}</a>`);
         (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(p); });
         line.innerHTML = pills.length ? " " + pills.join(" ") : "";
       }

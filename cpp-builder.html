@@ -2,14 +2,15 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<script src="/portal-config.js?v=5"></script>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/portal-config.js?v=27"></script>
+<script src="/auth.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mostlane &mdash; Construction Phase H&amp;S Plan Builder</title>
-<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1b5a9b">
-<link rel="apple-touch-icon" href="assets/icon-192.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Mostlane H&amp;S">
+<link rel="stylesheet" href="/portal.css?v=1">
+<script src="html2canvas.min.js?v=1"></script>
+<script src="hs-pdf-capture.js?v=4"></script>
+<script src="xlsx-lite.js?v=2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -283,11 +284,42 @@
     html.pnav-collapsed body.pnav-on .library{ left:64px !important; }
   }
   #libMain, #btnMainMenu{ display:none !important; }   /* replaced by the portal bar's back button */
+
+  /* ---- Wizard chrome ---- */
+  .cpp-prog{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 14px; }
+  .cpp-prog .rp{ display:flex; align-items:center; gap:6px; padding:6px 11px; border:1px solid var(--line);
+    border-radius:999px; background:#fff; font:600 13px/1 var(--body); color:var(--muted); cursor:pointer; white-space:nowrap; }
+  .cpp-prog .rp .n{ display:inline-flex; align-items:center; justify-content:center; width:19px; height:19px;
+    border-radius:50%; background:#e6edf4; color:var(--brand-dark); font-size:11px; }
+  .cpp-prog .rp.cur{ border-color:var(--brand); background:var(--brand); color:#fff; }
+  .cpp-prog .rp.cur .n{ background:rgba(255,255,255,.25); color:#fff; }
+  .cpp-prog .rp.done{ border-color:#bcd3c4; color:#2b7a4b; }
+  .cpp-prog .rp.done .n{ background:#d8efe0; color:#2b7a4b; }
+  /* In wizard mode, show only the current group; the doc pane stays live. */
+  .cpp-wiz #formRoot > .group{ display:none; }
+  .cpp-wiz #formRoot > .group.cpp-on{ display:block; }
+  .cpp-wiz #formRoot > .group.cpp-on > summary{ pointer-events:none; }   /* it's the step header, not collapsible */
+  .cpp-step{ display:none; }
+  .cpp-step.cpp-on{ display:block; }
+  .cpp-drop{ border:2px dashed var(--line); border-radius:12px; padding:18px; text-align:center; color:var(--muted); background:#fafcfe; }
+  .cpp-drop.drag{ border-color:var(--brand); background:var(--brand-light); }
+  .cpp-files{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; justify-content:center; }
+  .cpp-files .cpp-file{ background:#eef4fa; border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:13px; }
+  .cpp-nav{ display:flex; gap:10px; align-items:center; margin:16px 0 40px; flex-wrap:wrap; }
+  .cpp-nav .btn, .cpp-step .btn{ background:var(--brand); color:#fff; border:none; border-radius:9px; padding:10px 18px; font:600 15px/1 var(--body); cursor:pointer; }
+  .cpp-nav .btn:hover, .cpp-step .btn:hover{ background:var(--brand-dark); }
+  .msg{ font-size:14px; }
+  .msg.ok{ color:#2b7a4b; } .msg.err{ color:#c0392b; }
+  @media screen and (max-width:900px){
+    /* On phones the wizard runs full-width — hide the always-on doc pane until Review. */
+    .cpp-wiz .doc-pane{ display:none; }
+    .cpp-wiz.cpp-review .doc-pane{ display:block; }
+  }
 </style>
 <div class="ml-portalbar no-print">
   <img class="ml-pb-logo" src="/mostlane-logo.jpg" alt="Mostlane">
   <span class="ml-pb-title">H&amp;S Planner</span>
-  <button class="ml-pb-back" onclick="(window.top||window).location.href='/main.html'">&larr; Menu</button>
+  <button class="ml-pb-back" onclick="cppBack()">&larr; H&amp;S</button>
 </div>
 
 <!-- ============ LIBRARY / HOME SCREEN ============ -->
@@ -300,7 +332,8 @@
       </div>
       <div class="lib-actions">
         <button id="libMain" class="secondary">&#9776; Main Menu</button>
-        <button id="libNew">+ New job</button>
+        <button id="libNew">+ New</button>
+        <button id="libImport" class="secondary">⤵ Import old plans</button>
         <button id="libRefresh" class="secondary">Refresh</button>
         <button id="libCloud" class="secondary">Cloud settings</button>
       </div>
@@ -320,7 +353,7 @@
     <div class="toolbar">
       <button id="btnMainMenu" class="secondary">&#9776; Main Menu</button>
       <button id="btnLibrary" class="secondary">&larr; Library</button>
-      <button id="btnCloudSave">Save to cloud</button>
+      <button id="btnCloudSave">💾 Save</button>
       <button id="btnPrint">Save / Print PDF</button>
       <button id="btnPreview" class="secondary">Preview PDF</button>
       <button id="btnNew" class="secondary small">Blank form</button>
@@ -329,13 +362,41 @@
       <button id="btnLoad" class="secondary small">Restore file</button>
     </div>
 
-    <p class="hint">
-      Fill in the fields below &mdash; the document on the right updates as you type.
-      When it looks right, click <b>Save / Print PDF</b> and choose
-      &ldquo;Save as PDF&rdquo;. Your answers are kept in this browser automatically.
-    </p>
+    <p id="cppSaveState" class="hint" style="min-height:18px"></p>
+
+    <!-- Wizard progress strip (tap a chip to jump to that step) -->
+    <div id="cppProg" class="cpp-prog no-print"></div>
+
+    <!-- AI step (step 0) — drop documents + a description, Claude pre-fills -->
+    <div id="cppAiStep" class="cpp-step card no-print" data-cppstep="0">
+      <h2 style="margin:.2em 0">🤖 Start with AI <span style="font-weight:400;font-size:14px;color:var(--muted)">(optional)</span></h2>
+      <p class="hint" style="margin-top:0">Drop the tender/scope documents and/or type a short description of the works. Claude reads them and pre-fills as much of the plan as it can — you then step through and check/adjust everything. Nothing is saved until you save.</p>
+      <div id="cppDrop" class="cpp-drop">
+        <div>📄 Drop PDF / Word / text files here, or</div>
+        <button type="button" id="cppPick" class="secondary small" style="margin-top:6px">Choose files</button>
+        <input type="file" id="cppFiles" accept=".pdf,.docx,.txt,.csv,.md" multiple style="display:none">
+        <div id="cppFileList" class="cpp-files"></div>
+      </div>
+      <label class="field"><span class="lbl">Notes / description for the AI (optional)</span>
+        <textarea id="cppAiNotes" rows="3" placeholder="e.g. Demolition, extension &amp; refurbishment of Lake Road Surgery. 16 weeks. Asbestos survey shows ACMs in the ceiling voids. Working hours 08:00–16:30."></textarea></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+        <button type="button" id="cppScanBtn" class="btn">🤖 Scan &amp; pre-fill</button>
+        <button type="button" id="cppSkipBtn" class="secondary">Skip — fill in myself →</button>
+      </div>
+      <p id="cppAiMsg" class="msg" style="margin-top:8px"></p>
+    </div>
 
     <div id="formRoot"></div>
+
+    <!-- Wizard Back / Next / Save nav -->
+    <div id="cppNav" class="cpp-nav no-print">
+      <button type="button" id="cppBack" class="secondary">&larr; Back</button>
+      <button type="button" id="cppNext" class="btn">Next &rarr;</button>
+      <span id="cppSaveRow" style="display:none;gap:8px">
+        <button type="button" id="cppNextSave" class="btn">💾 Save plan</button>
+        <button type="button" id="cppNextPrint" class="secondary">🖨 Print / PDF</button>
+      </span>
+    </div>
     <input type="file" id="fileInput" accept="application/json" class="no-print" style="display:none">
   </div>
 
@@ -1965,16 +2026,17 @@ document.getElementById("btnPreview").addEventListener("click",()=>{
   win.document.close();
 });
 
-document.getElementById("btnNew").addEventListener("click",()=>{
-  if(confirm("Start a new job? This clears all answers in this browser.")){
-    state=blankState(); persist(); buildForm(); renderDoc();
-  }
+document.getElementById("btnNew").addEventListener("click",async ()=>{
+  const ok = window.MLUI ? await MLUI.confirm("Start a new blank plan? (Your saved plans are kept in the Library.)",{okLabel:"New plan"}) : confirm("Start a new blank plan?");
+  if(ok) newJob();
 });
-document.getElementById("btnExample").addEventListener("click",()=>{
-  if(confirm("Load the Lake Road Surgery example over your current answers?")){
-    state=exampleState(); persist(); buildForm(); renderDoc();
-  }
+document.getElementById("btnExample").addEventListener("click",async ()=>{
+  const ok = window.MLUI ? await MLUI.confirm("Load the Lake Road Surgery example over the current answers?") : confirm("Load the Lake Road Surgery example over your current answers?");
+  if(ok){ state=exampleState(); state._id=""; state._ref=""; _userTouched=false; persist(); buildForm(); renderDoc(); engageWizard(1); }
 });
+if(document.getElementById("libNew")) document.getElementById("libNew").onclick=newJob;
+if(document.getElementById("libImport")) document.getElementById("libImport").onclick=importOld;
+if(document.getElementById("libRefresh")) document.getElementById("libRefresh").onclick=renderLibrary;
 document.getElementById("btnSave").addEventListener("click",()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
   const a=document.createElement("a");
@@ -1987,29 +2049,30 @@ document.getElementById("btnLoad").addEventListener("click",()=>fileInput.click(
 fileInput.addEventListener("change",e=>{
   const file=e.target.files[0]; if(!file) return;
   const r=new FileReader();
-  r.onload=()=>{ try{ state=JSON.parse(r.result); mergeDefaults(); ensureAux(); persist(); buildForm(); renderDoc(); }
+  r.onload=()=>{ try{ state=JSON.parse(r.result); delete state._id; delete state._ref; mergeDefaults(); ensureAux(); _userTouched=true; persist(); buildForm(); renderDoc(); engageWizard(1); }
                  catch(err){ alert("Could not read that file."); } };
   r.readAsText(file); fileInput.value="";
 });
 
 /* ============================================================
-   7. CLOUD LIBRARY (Cloudflare Worker + D1)
+   7. PORTAL STORAGE + LIBRARY  (hs_documents, doc_type = cpp)
    ============================================================ */
-const CLOUD_KEY="mostlane_cloud";
+const API = (window.MOSTLANE_API || "").replace(/\/+$/,"");
+function authFetch(path, opts={}){
+  opts.headers = Object.assign({ "Authorization":"Bearer "+(localStorage.getItem("mostlaneToken")||"") }, opts.headers||{});
+  return fetch(API + path, opts);
+}
 const uid=()=> (window.crypto&&crypto.randomUUID)?crypto.randomUUID():"j"+Date.now()+Math.random().toString(16).slice(2);
-function getCloud(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
-function setCloud(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify(c)); }
-function cloudOn(){ const c=getCloud(); return !!(c.url&&c.token); }
+let PROJECT_ID="", PROJECT=null, ME=null, _userTouched=false, _ready=false;
 
-async function cloudReq(method,path,body){
-  const c=getCloud();
-  const r=await fetch(c.url.replace(/\/+$/,"")+path,{
-    method,
-    headers:{ "Authorization":"Bearer "+c.token, ...(body?{"Content-Type":"application/json"}:{}) },
-    body: body?JSON.stringify(body):undefined,
-  });
-  if(!r.ok) throw new Error("HTTP "+r.status+(r.status===401?" — check your access token":""));
-  return r.json().catch(()=>null);
+// Top-bar back → the H&S section. Saves any open plan first, then uses the
+// portal breadcrumb (returns to wherever you came from — H&S hub or the
+// project) with the H&S hub as the fallback for a cold start.
+function cppBack(){
+  try{ if(state && state._id && _userTouched) saveCurrent(false); }catch(e){}
+  const dest = PROJECT_ID ? ("/project-hub.html?id=" + encodeURIComponent(PROJECT_ID)) : "/hs-docs.html";
+  if(window.mlBack) return mlBack(dest);
+  (window.top||window).location.href = dest;
 }
 
 const libEl=()=>document.getElementById("library");
@@ -2018,19 +2081,16 @@ function hideLibrary(){ libEl().classList.remove("show"); }
 
 async function renderLibrary(){
   const list=document.getElementById("libList"), status=document.getElementById("libStatus");
-  if(!cloudOn()){
-    status.innerHTML='Not connected yet — click <b>Cloud settings</b> and paste your Cloudflare Worker URL and access token.';
-    list.innerHTML='<div class="lib-empty">Once connected, your saved jobs appear here on every device.</div>'; return;
-  }
-  status.textContent="Loading jobs…"; list.innerHTML="";
+  status.textContent="Loading plans…"; list.innerHTML="";
   try{
-    const jobs=await cloudReq("GET","/jobs");
-    status.textContent = jobs.length ? (jobs.length+" saved job"+(jobs.length>1?"s":"")) : "";
-    if(!jobs.length){ list.innerHTML='<div class="lib-empty">No saved jobs yet. Click <b>+ New job</b> to create one.</div>'; return; }
+    const r=await authFetch("/hs/docs?type=cpp").then(x=>x.json());
+    const jobs=(r&&r.docs)||[];
+    status.textContent = jobs.length ? (jobs.length+" saved plan"+(jobs.length>1?"s":"")) : "";
+    if(!jobs.length){ list.innerHTML='<div class="lib-empty">No plans yet. Click <b>+ New</b> to start one.</div>'; return; }
     jobs.forEach(j=>{
       const d=document.createElement("div"); d.className="job-card";
       let when=""; try{ when=new Date(j.updated_at).toLocaleString("en-GB"); }catch(e){}
-      d.innerHTML=`<h3>${esc(j.name||"Untitled job")}</h3><div class="meta">Edited ${esc(when)}</div>
+      d.innerHTML=`<h3>${esc(j.site||j.ref||"Untitled")}</h3><div class="meta">${esc(j.ref||"")}${j.ref?" · ":""}Edited ${esc(when)}</div>
         <div class="row">
           <button class="small" data-open>Open</button>
           <button class="small secondary" data-dup>Duplicate</button>
@@ -2038,96 +2098,273 @@ async function renderLibrary(){
         </div>`;
       d.querySelector("[data-open]").onclick=()=>openJob(j.id);
       d.querySelector("[data-dup]").onclick=()=>duplicateJob(j.id);
-      d.querySelector("[data-del]").onclick=()=>deleteJob(j.id,j.name);
+      d.querySelector("[data-del]").onclick=()=>deleteJob(j.id,j.site||j.ref);
       list.appendChild(d);
     });
-  }catch(e){ status.innerHTML='<span style="color:#c0392b">Could not load jobs: '+esc(e.message)+'</span>'; list.innerHTML=""; }
+  }catch(e){ status.innerHTML='<span style="color:#c0392b">Could not load: '+esc(e.message)+'</span>'; list.innerHTML=""; }
 }
 
-function newJob(){
-  state=exampleState();          // start from the standard template, ready to edit
-  state._id=uid(); persist(); buildForm(); renderDoc(); hideLibrary();
+// One-tap migration: pull the plans from the OLD standalone planner
+// (mostlane-hs-jobs worker) into the portal store. Browser-side (the old worker
+// already allows the portal origin, same as the old app did). Idempotent —
+// skips a plan whose name is already in the portal library.
+async function importOld(){
+  const status=document.getElementById("libStatus");
+  const btn=document.getElementById("libImport"); if(btn) btn.disabled=true;
+  status.textContent="Connecting to the old planner…";
+  try{
+    const c=await authFetch("/hs-plan-config").then(r=>r.json()).catch(()=>null);
+    if(!c||!c.ok||!c.worker||!c.token){ status.innerHTML='<span style="color:#c0392b">The old planner isn’t available for your account, so there’s nothing to import.</span>'; if(btn) btn.disabled=false; return; }
+    const base=String(c.worker).replace(/\/+$/,""), tok=c.token;
+    const oldReq=(p)=>fetch(base+p,{headers:{Authorization:"Bearer "+tok}}).then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
+    const list=await oldReq("/jobs");
+    const jobs=Array.isArray(list)?list:[];
+    if(!jobs.length){ status.textContent="The old planner has no saved plans."; if(btn) btn.disabled=false; return; }
+    // Existing portal plans (dedupe by site/name).
+    const have=new Set();
+    try{ ((await authFetch("/hs/docs?type=cpp").then(r=>r.json())).docs||[]).forEach(d=>have.add(String(d.site||"").trim().toLowerCase())); }catch(e){}
+    let done=0, skipped=0;
+    for(const j of jobs){
+      const nm=String(j.name||"").trim();
+      if(nm && have.has(nm.toLowerCase())){ skipped++; continue; }
+      status.textContent="Importing "+(nm||"a plan")+"…";
+      let data; try{ data=await oldReq("/jobs/"+encodeURIComponent(j.id)); }catch(e){ continue; }
+      if(!data||typeof data!=="object") continue;
+      delete data._id; delete data._ref;                    // portal assigns its own id/ref
+      const site=(data.projectName||nm||"CPP").slice(0,120);
+      const r=await authFetch("/hs/doc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({doc_type:"cpp",site,data})}).then(x=>x.json());
+      if(r&&r.ok){ done++; have.add(site.toLowerCase()); }
+    }
+    status.innerHTML='<b>Imported '+done+' plan'+(done===1?"":"s")+'</b>'+(skipped?(" · "+skipped+" already here"):"")+".";
+    renderLibrary();
+  }catch(e){ status.innerHTML='<span style="color:#c0392b">Import failed: '+esc(e.message)+'</span>'; }
+  finally{ if(btn) btn.disabled=false; }
 }
+
+function newJob(){ state=blankState(); state._id=""; state._ref=""; _userTouched=false; persist(); buildForm(); renderDoc(); hideLibrary(); engageWizard(0); }
 async function openJob(id){
   try{
-    const data=await cloudReq("GET","/jobs/"+id);
-    state=data; state._id=id; ensureAux(); persist(); buildForm(); renderDoc(); hideLibrary();
-  }catch(e){ alert("Could not open job: "+e.message); }
+    const r=await authFetch("/hs/doc?id="+encodeURIComponent(id)).then(x=>x.json());
+    if(!r.ok) throw new Error(r.error||"not found");
+    state=r.doc.data||{}; state._id=id; state._ref=r.doc.ref||""; ensureAux(); mergeDefaults();
+    _userTouched=false; persist(); buildForm(); renderDoc(); hideLibrary(); engageWizard(1);
+  }catch(e){ alert("Could not open: "+e.message); }
 }
 async function duplicateJob(id){
   try{
-    const data=await cloudReq("GET","/jobs/"+id);
-    data._id=uid(); data.projectName=(data.projectName||"Job")+" (copy)";
-    await cloudReq("PUT","/jobs/"+data._id,data); renderLibrary();
+    const r=await authFetch("/hs/doc?id="+encodeURIComponent(id)).then(x=>x.json());
+    if(!r.ok) throw new Error(r.error||"not found");
+    const data=r.doc.data||{}; delete data._id; delete data._ref; data.projectName=(data.projectName||"Plan")+" (copy)";
+    const s=await authFetch("/hs/doc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({doc_type:"cpp",site:(data.projectName||"CPP"),data})}).then(x=>x.json());
+    if(!s.ok) throw new Error(s.error||"copy failed"); renderLibrary();
   }catch(e){ alert("Could not duplicate: "+e.message); }
 }
 async function deleteJob(id,name){
-  if(!confirm('Delete "'+(name||"this job")+'"? This cannot be undone.')) return;
-  try{ await cloudReq("DELETE","/jobs/"+id); renderLibrary(); }
+  const ok = window.MLUI ? await MLUI.confirm('Delete "'+(name||"this plan")+'"? This cannot be undone.',{danger:true,okLabel:"Delete"}) : confirm('Delete "'+(name||"this plan")+'"?');
+  if(!ok) return;
+  try{ await authFetch("/hs/doc/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(x=>x.json()); renderLibrary(); }
   catch(e){ alert("Could not delete: "+e.message); }
 }
-function flashCloud(msg){ const b=document.getElementById("btnCloudSave"); const t=b.dataset.t||b.textContent; b.dataset.t=t; b.textContent=msg; setTimeout(()=>b.textContent=t,1500); }
+
+function saveState(msg,cls){ const el=document.getElementById("cppSaveState"); if(el){ el.textContent=msg||""; el.className="hint"+(cls?" msg "+cls:""); } }
+let _saveBusy=false, _saveQueued=false, _saveT=null;
 async function saveCurrent(toast){
-  if(!cloudOn()){ alert("Not connected to the cloud yet. Open the Library and click Cloud settings."); return false; }
-  if(!state._id) state._id=uid();
-  try{ await cloudReq("PUT","/jobs/"+state._id, state); persist(); if(toast) flashCloud("Saved ✓"); return true; }
-  catch(e){ alert("Could not save to cloud: "+e.message); return false; }
+  if(_saveBusy){ _saveQueued=true; return true; }
+  _saveBusy=true;
+  try{
+    const body={ doc_type:"cpp", site:(v("projectName")||"CPP").slice(0,120), data:state,
+      ...(state._id?{id:state._id}:{}), ...(state._ref?{ref:state._ref}:{}) };
+    const r=await authFetch("/hs/doc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(x=>x.json());
+    if(!r.ok) throw new Error(r.error||"save failed");
+    state._id=r.id||state._id; state._ref=r.ref||state._ref; persist();
+    if(PROJECT_ID && state._id){ try{ await authFetch("/project/link",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:PROJECT_ID,kind:"cpp",value:state._id})}); }catch(e){} }
+    if(toast) saveState("Saved ✓ "+(state._ref||""),"ok");
+    return true;
+  }catch(e){ saveState("Couldn't save — "+e.message,"err"); return false; }
+  finally{ _saveBusy=false; if(_saveQueued){ _saveQueued=false; queueSave(); } }
 }
-function cloudSettings(){
-  const c=getCloud();
-  const url=prompt("Cloudflare Worker URL\n(e.g. https://mostlane-hs-jobs.<your-subdomain>.workers.dev)", c.url||"");
-  if(url===null) return;
-  const token=prompt("Access token (the APP_TOKEN you set on the Worker)", c.token||"");
-  if(token===null) return;
-  setCloud({ url:(url||"").trim(), token:(token||"").trim() }); renderLibrary();
+function queueSave(){
+  if(!_ready || !_userTouched) return;
+  if(!(state._id || PROJECT_ID || (v("projectName")||"").trim())) return;   // don't create an empty row
+  saveState("Saving…"); clearTimeout(_saveT);
+  _saveT=setTimeout(()=>saveCurrent(false).then(ok=>{ if(ok) saveState("Saved ✓ "+(state._ref||""),"ok"); }), 1400);
 }
 
-/* Return to the portal. Navigates the top-level window, so it works whether
-   the tool is opened directly or embedded in the portal via an iframe. */
-const MAIN_MENU_URL="https://mostlane-portal.com/main.html";
-function goMainMenu(){ try{ (window.top||window).location.href=MAIN_MENU_URL; }catch(e){ window.location.href=MAIN_MENU_URL; } }
-document.getElementById("btnMainMenu").onclick=goMainMenu;
-document.getElementById("libMain").onclick=goMainMenu;
+document.getElementById("btnLibrary").onclick=async()=>{ if(state._id) await saveCurrent(false); showLibrary(); };
+document.getElementById("btnCloudSave").onclick=()=>{ _userTouched=true; saveCurrent(true); };
 
-document.getElementById("libNew").onclick=newJob;
-document.getElementById("libRefresh").onclick=renderLibrary;
-document.getElementById("libCloud").onclick=cloudSettings;
-document.getElementById("btnLibrary").onclick=async()=>{ if(cloudOn()&&state._id) await saveCurrent(false); showLibrary(); };
-document.getElementById("btnCloudSave").onclick=()=>saveCurrent(true);
+/* ============================================================
+   7b. WIZARD
+   ============================================================ */
+const CPP_STEP_LABELS=["🤖 AI","Branding","Project","Team","Arrangements","Directory","RAMS","Compound","Hospital","Method","Review"];
+let cppStep=0;
+const cppGroups=()=>[...document.querySelectorAll("#formRoot > .group")];
+function cppLastStep(){ return CPP_STEP_LABELS.length-1; }
+function cppProgHtml(){
+  return CPP_STEP_LABELS.map((s,i)=>`<div class="rp ${i===cppStep?'cur':(i<cppStep?'done':'')}" onclick="showCppStep(${i})" title="Go to ${esc(s)}"><span class="n">${i<cppStep?'✓':(i+1)}</span> ${esc(s)}</div>`).join("");
+}
+function showCppStep(i){
+  cppStep=Math.max(0,Math.min(cppLastStep(),i));
+  const last=cppStep===cppLastStep();
+  // AI card (step 0)
+  document.getElementById("cppAiStep").classList.toggle("cpp-on", cppStep===0);
+  // Group cards (steps 1..N)
+  cppGroups().forEach((g,gi)=>{ g.open=true; g.classList.toggle("cpp-on", gi === cppStep-1); });
+  // Review (last) shows the live document (mobile) + save row
+  document.body.classList.toggle("cpp-review", last);
+  document.getElementById("cppBack").style.display = cppStep>0 ? "" : "none";
+  document.getElementById("cppNext").style.display = last ? "none" : "";
+  document.getElementById("cppSaveRow").style.display = last ? "inline-flex" : "none";
+  const p=document.getElementById("cppProg"); if(p) p.innerHTML=cppProgHtml();
+  if(last) renderDoc();
+  try{ document.querySelector(".form-pane").scrollIntoView({block:"start"}); }catch(e){}
+  try{ window.scrollTo(0,0); }catch(e){}
+}
+function engageWizard(start){
+  document.body.classList.add("cpp-wiz");
+  cppGroups().forEach(g=>{ g.open=true; });
+  document.getElementById("cppBack").onclick=()=>showCppStep(cppStep-1);
+  document.getElementById("cppNext").onclick=()=>{ if(_userTouched) queueSave(); showCppStep(cppStep+1); };
+  document.getElementById("cppNextSave").onclick=()=>{ _userTouched=true; saveCurrent(true); };
+  document.getElementById("cppNextPrint").onclick=()=>window.print();
+  showCppStep(start||0);
+}
+
+/* ============================================================
+   7c. AI PRE-FILL  (drop docs + notes -> /hs/ai-cpp)
+   ============================================================ */
+let cppAiFiles=[];
+function cppRenderFiles(){
+  const fl=document.getElementById("cppFileList"); if(!fl) return;
+  fl.innerHTML=cppAiFiles.length ? cppAiFiles.map((f,i)=>`<span class="cpp-file">📄 ${esc(f.name)} <a href="#" onclick="cppRmFile(${i});return false;" style="color:#b00020;text-decoration:none">✕</a></span>`).join("") : "";
+}
+function cppRmFile(i){ cppAiFiles.splice(i,1); cppRenderFiles(); }
+function cppAddFiles(list){ [...list].forEach(f=>{ if(f && !cppAiFiles.some(x=>x.name===f.name&&x.size===f.size)) cppAiFiles.push(f); }); cppRenderFiles(); }
+let _pdfjs=null;
+function loadPdfJs(){
+  if(_pdfjs) return Promise.resolve(_pdfjs);
+  if(window.pdfjsLib){ window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs=window.pdfjsLib; return Promise.resolve(_pdfjs); }
+  return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs=window.pdfjsLib; res(_pdfjs); }catch(e){ rej(e); } };
+    s.onerror=()=>rej(new Error("pdf load")); document.head.appendChild(s); });
+}
+const readText=f=>new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(String(fr.result||"")); fr.onerror=()=>r(""); fr.readAsText(f); });
+const readB64=f=>new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(String(fr.result||"").split(",")[1]||""); fr.onerror=()=>r(""); fr.readAsDataURL(f); });
+async function pdfText(f){ try{ const lib=await loadPdfJs(); const buf=await f.arrayBuffer(); const pdf=await lib.getDocument({data:buf}).promise; let out="";
+  for(let p=1;p<=Math.min(pdf.numPages,40);p++){ const pg=await pdf.getPage(p); const c=await pg.getTextContent(); out+=c.items.map(it=>it.str).join(" ")+"\n"; } return out; }catch(e){ return ""; } }
+async function docxText(f){ try{ if(!window.XLSXLite||!XLSXLite.readZipEntryText) return ""; const buf=await f.arrayBuffer(); const xml=await XLSXLite.readZipEntryText(buf,"word/document.xml"); if(!xml) return ""; let out="";
+  xml.replace(/<w:t[^>]*>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>/g,(m,txt)=>{ if(txt!=null) out+=txt.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)); else if(m==="</w:p>") out+="\n"; else out+=" "; return ""; }); return out.trim(); }catch(e){ return ""; } }
+
+async function cppScan(){
+  const msg=document.getElementById("cppAiMsg"); const notes=(document.getElementById("cppAiNotes").value||"").trim();
+  if(!cppAiFiles.length && !notes){ msg.textContent="Drop a document or type a description first."; msg.className="msg err"; return; }
+  document.getElementById("cppScanBtn").disabled=true; msg.className="msg"; msg.textContent="Reading documents…";
+  let text="", pdfBase64="";
+  try{
+    for(const f of cppAiFiles){
+      const nm=(f.name||"").toLowerCase();
+      if(nm.endsWith(".pdf")){ const t=await pdfText(f); if(t&&t.trim().length>=40) text+="\n\n["+f.name+"]\n"+t; else if(!pdfBase64&&f.size<8000000){ pdfBase64=await readB64(f); } }
+      else if(nm.endsWith(".docx")){ text+="\n\n["+f.name+"]\n"+await docxText(f); }
+      else{ text+="\n\n["+f.name+"]\n"+await readText(f); }
+    }
+  }catch(e){}
+  msg.textContent="Scanning with AI…";
+  try{
+    const r=await authFetch("/hs/ai-cpp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({notes,text:text.slice(0,160000),pdfBase64})}).then(x=>x.json());
+    if(!r||!r.ok){ msg.textContent=(r&&r.error)||"Couldn't scan — you can still fill it in yourself."; msg.className="msg err"; document.getElementById("cppScanBtn").disabled=false; return; }
+    applyAiCpp(r.result||{});
+    msg.textContent="✓ Pre-filled — step through and check everything.";
+    msg.className="msg ok";
+    document.getElementById("cppScanBtn").disabled=false;
+    _userTouched=true; queueSave();
+    showCppStep(1);
+  }catch(e){ msg.textContent="Couldn't scan — you can still fill it in yourself."; msg.className="msg err"; document.getElementById("cppScanBtn").disabled=false; }
+}
+function applyAiCpp(res){
+  const TEXT=["projectName","siteAddress","projectNo","projectRef","scheme","duration","workingHours",
+    "projectDirector","contractsManager","siteManager","welfare","accessEgress","stability","fallPrevention",
+    "lifting","traffic","storage","ramsTitle","ramsLocation","ramsDesc","ramsEquipment","ramsPersons",
+    "msSummary","msStartDate","msFinishDate","msTraining","msEquipment","msWaste","msOrderOps",
+    "hospitalName","hospitalAddress","compoundText"];
+  TEXT.forEach(k=>{ const val=res[k]; if(val!=null && String(val).trim() && !String(state[k]||"").trim()) state[k]=String(val).trim(); });
+  // Selects — the AI's informed read wins (they always carry a value).
+  if(res.asbestos && ["Yes","No"].includes(res.asbestos)) state.asbestos=res.asbestos;
+  if(res.ramsDanger && ["Low Risk Activity","Medium Risk Activity","High Risk Activity"].includes(res.ramsDanger)) state.ramsDanger=res.ramsDanger;
+  // Directory — only if the current one is still blank (don't clobber typed contacts).
+  if(Array.isArray(res.directory) && res.directory.length){
+    const cur=state.directory||[];
+    const blank=cur.every(c=>!(c.service||c.name||c.company));
+    if(blank){
+      state.directory=res.directory.map(c=>({ service:c.service||"",name:c.name||"",company:c.company||"",address:c.address||"",phone:c.phone||"",mobile:c.mobile||"",email:c.email||"" }));
+    }
+  }
+  // Site address changed -> invalidate cached A&E route/map (same rule as manual edit).
+  state.siteLatLng=null; state.hospitalPolyline=""; state.hospitalStraight=null; state.hospitalRouteText=""; state.hospitalImg="";
+  persist(); buildForm(); renderDoc();
+}
+function wireAiStep(){
+  const drop=document.getElementById("cppDrop"), pick=document.getElementById("cppPick"), files=document.getElementById("cppFiles");
+  if(pick&&files){ pick.onclick=()=>files.click(); files.onchange=e=>{ cppAddFiles(e.target.files); files.value=""; }; }
+  if(drop){
+    ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add("drag"); }));
+    ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove("drag"); }));
+    drop.addEventListener("drop",e=>{ if(e.dataTransfer&&e.dataTransfer.files) cppAddFiles(e.dataTransfer.files); });
+  }
+  document.getElementById("cppScanBtn").onclick=cppScan;
+  document.getElementById("cppSkipBtn").onclick=()=>showCppStep(1);
+}
 
 /* ============================================================
    8. INIT
    ============================================================ */
-/* Portal launch (option B): if opened with #worker=<url>&token=<token>
-   (from a portal button), auto-connect cloud settings and strip the token
-   from the address bar so it isn't left visible / bookmarked. */
-function applyLaunchParams(){
+function readParams(){
+  const p=new URLSearchParams(location.search||"");
+  const h=new URLSearchParams((location.hash||"").replace(/^#/,""));
+  return { project:p.get("project")||h.get("project")||"", doc:p.get("doc")||h.get("doc")||"",
+           projectName:p.get("projectName")||h.get("projectName")||"", projectNo:p.get("projectNo")||h.get("projectNo")||"", projectRef:p.get("projectRef")||h.get("projectRef")||"" };
+}
+async function initFromProject(pr){
   try{
-    const h=(location.hash||"").replace(/^#/,"");
-    if(!h) return;
-    const p=new URLSearchParams(h);
-    const url=p.get("worker"), token=p.get("token");
-    if(url&&token){
-      setCloud({ url:url.trim(), token:token.trim() });
+    const r=await authFetch("/project/get?id="+encodeURIComponent(pr.project)).then(x=>x.json());
+    if(r&&r.ok&&r.project){ PROJECT=r.project; PROJECT_ID=r.project.id;
+      const linked=(r.project.links&&r.project.links.cppRef)||"";
+      if(linked && /^HSD-/.test(String(linked))){ await openJob(linked); return; }   // existing portal CPP → open it
+      // Fresh plan seeded with the project's identity.
+      state=blankState(); state._id=""; state._ref="";
+      state.projectName=r.project.name||pr.projectName||"";
+      state.projectNo=r.project.number||pr.projectNo||"";
+      if(pr.projectRef) state.projectRef=pr.projectRef;
+      _userTouched=false; persist(); buildForm(); renderDoc(); engageWizard(0); return;
     }
-    // Pre-fill from a portal Project: start a fresh plan seeded with its name/number.
-    const pn=p.get("projectName");
-    if(pn){
-      state=exampleState(); state._id=uid();
-      state.projectName=pn;
-      if(p.get("projectNo")) state.projectNo=p.get("projectNo");
-      if(p.get("projectRef")) state.projectRef=p.get("projectRef");
-      persist(); window.__cppPrefilled=true;
-    }
-    if(url&&token || pn) history.replaceState(null,"",location.pathname+location.search);
   }catch(e){}
+  // Fallback: seed from the URL params.
+  state=blankState(); state.projectName=pr.projectName||""; state.projectNo=pr.projectNo||""; state.projectRef=pr.projectRef||"";
+  persist(); buildForm(); renderDoc(); engageWizard(0);
 }
 
-load();
-applyLaunchParams();
-buildForm();
-renderDoc();
-if(cloudOn() && !window.__cppPrefilled) showLibrary();   // start on the library when connected (unless pre-filled from a Project)
+(async ()=>{
+  // Auth gate — H&S access only.
+  try{
+    const me=await authFetch("/auth/me").then(r=>r.json());
+    if(!me.ok || !(me.user.FullAccess==="Yes" || me.user.HSPlan==="Yes")){ alert("This page needs H&S access."); location.href="main.html"; return; }
+    ME=me.user;
+  }catch(e){ location.href="main.html"; return; }
+
+  // Hide the old cloud-settings control (portal auth replaces it).
+  const lc=document.getElementById("libCloud"); if(lc) lc.style.display="none";
+  wireAiStep();
+
+  const pr=readParams();
+  if(pr.project){ await initFromProject(pr); history.replaceState(null,"",location.pathname); }
+  else if(pr.doc){ await openJob(pr.doc); history.replaceState(null,"",location.pathname); }
+  else if(pr.projectName){ state=blankState(); state.projectName=pr.projectName; state.projectNo=pr.projectNo; state.projectRef=pr.projectRef; persist(); buildForm(); renderDoc(); engageWizard(0); history.replaceState(null,"",location.pathname); }
+  else { load(); if(!state || !Object.keys(state).length){ state=blankState(); } buildForm(); renderDoc(); showLibrary(); }
+
+  // Debounced autosave to the portal DB on any user edit.
+  document.addEventListener("input", ()=>{ _userTouched=true; queueSave(); });
+  window.addEventListener("pagehide", ()=>{ if(_userTouched && (state._id||PROJECT_ID)) { try{ navigator.sendBeacon; }catch(e){} saveCurrent(false); } });
+  _ready=true;
+})();
 </script>
 </body>
 </html>
