@@ -61,7 +61,7 @@ async function ensureTables(env) {
   // groups tasks by type (Emails / Compliance / …) for filtering; `ref_date` is the
   // task's "as of" date (e.g. an email's received date) so age + the >7-day warning
   // are accurate and self-updating rather than frozen in the title.
-  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT"]) {
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
     try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
@@ -148,7 +148,7 @@ function shapeTask(t) {
     areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
     areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || "",
-    category: t.category || "", refDate: t.ref_date || "", createdAt: t.created_at || "",
+    category: t.category || "", refDate: t.ref_date || "", createdAt: t.created_at || "", link: t.link || "",
   };
 }
 
@@ -218,8 +218,12 @@ export async function handle(request, env, ctx, url, sess) {
         try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
         assignees.push(u || w);
       }
-      let detail = String(b.detail || "").slice(0, 1800);
-      if (b.link) detail = (detail ? detail + "\n" : "") + String(b.link).slice(0, 500);
+      // Keep the detail clean — the email link is stored SEPARATELY (rendered as a
+      // tidy "Open email" button), never glued into the summary text. Strip any URL
+      // a bot pastes into the detail, and capture it as the link if none was given.
+      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+      const link = String(b.link || urlInDetail || "").slice(0, 800);
       const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
       const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
       const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -238,13 +242,13 @@ export async function handle(request, env, ctx, url, sess) {
       }
       if (!id) id = "email-" + crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
           due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date)`)
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`)
         .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
-          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate).run();
+          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null).run();
       if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
         sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
       return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);

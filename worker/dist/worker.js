@@ -31452,7 +31452,7 @@ async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
-  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT"]) {
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
     try {
       await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run();
     } catch {
@@ -31586,7 +31586,8 @@ function shapeTask(t) {
     createdBy: t.created_by || "",
     category: t.category || "",
     refDate: t.ref_date || "",
-    createdAt: t.created_at || ""
+    createdAt: t.created_at || "",
+    link: t.link || ""
   };
 }
 async function handle32(request, env, ctx, url, sess) {
@@ -31651,8 +31652,9 @@ async function handle32(request, env, ctx, url, sess) {
         }
         assignees.push(u || w);
       }
-      let detail = String(b.detail || "").slice(0, 1800);
-      if (b.link) detail = (detail ? detail + "\n" : "") + String(b.link).slice(0, 500);
+      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+      const link = String(b.link || urlInDetail || "").slice(0, 800);
       const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(/* @__PURE__ */ new Date());
       const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
       const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -31673,11 +31675,11 @@ async function handle32(request, env, ctx, url, sess) {
       }
       if (!id) id = "email-" + crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
           due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date)`).bind(
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`).bind(
         id,
         tid2,
         title,
@@ -31698,7 +31700,8 @@ async function handle32(request, env, ctx, url, sess) {
         String(b.source || "outlook").slice(0, 40),
         extKey || null,
         category,
-        refDate
+        refDate,
+        link || null
       ).run();
       if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid2, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
       }))));

@@ -42,6 +42,8 @@
     .tickbtn.on{background:#16a34a;border-color:#16a34a;color:#fff;}
     .sec-h{font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin:16px 2px 8px;}
     .auto-note{font-size:12px;color:#0369a1;background:#e0f2fe;border-radius:8px;padding:5px 9px;margin-top:6px;display:inline-block;}
+    .mailink{font:600 13px 'Segoe UI';color:#1e40af;text-decoration:none;background:#eef2f6;border:1px solid #dbe4ee;border-radius:9px;padding:7px 12px;display:inline-block;}
+    .mailink:active{background:#e2e8f0;}
     .empty{text-align:center;color:var(--muted);padding:40px 10px;}
   </style>
 </head>
@@ -173,12 +175,18 @@
         : "";
       // Email tasks show when it arrived; scheduled tasks show their recurrence.
       const meta=t.refDate ? ("Received "+fmtDMY(t.refDate)) : schedule(t);
+      // Keep the detail clean — pull the email link OUT of the text and show it as
+      // a tidy "Open email" link (covers older tasks that had the URL glued in).
+      const rawDetail=String(t.detail||"");
+      const emailUrl=t.link || (rawDetail.match(/https?:\/\/\S+/)||[])[0] || "";
+      const cleanDet=rawDetail.replace(/https?:\/\/\S+/g,"").replace(/\n{2,}/g,"\n").trim();
+      const emailLink=emailUrl ? '<a class="mailink" href="'+esc(emailUrl)+'" target="_blank" rel="noopener">📧 Open email ↗</a>' : "";
       return '<div class="card'+(over7?" warn7":"")+'"><div class="task">'+tick+
         '<div class="body">'+title+
         '<div class="meta">'+esc(meta)+'</div>'+catPill+pill+
-        (t.detail?'<div class="detail">'+esc(t.detail)+'</div>':"")+
+        (cleanDet?'<div class="detail">'+esc(cleanDet)+'</div>':"")+
         (t.autoMatch&&!s.done?'<div class="auto-note">⤿ Auto-ticks when you do this in the portal</div>':"")+
-        (goBtn?'<div>'+goBtn+'</div>':"")+
+        ((goBtn||emailLink)?'<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">'+goBtn+emailLink+'</div>':"")+
         '</div></div></div>';
     }
     async function toggle(id, isDone){

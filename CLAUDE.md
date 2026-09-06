@@ -3115,7 +3115,12 @@ shows for scheduled ones), a **category pill** per card, and it strips a leading
 The **flag/warn threshold is a per-user SETTING on the page** ("⚑ Flag & warn when
 older than N days", default 7, shown only when there are age-based tasks) — saved to
 localStorage (instant) + mirrored to **/prefs `taskFlagAge`** so it follows the user
-across devices. `shapeTask`
+across devices. **Clean detail + email link (Sep 2026):** the email URL is kept OUT
+of the summary text — admin_tasks gained a **`link`** column; inbound stores the link
+there (and STRIPS any URL a bot pasted into `detail`, capturing it as the link),
+`shapeTask` returns `link`, and my-tasks.html renders it as a tidy **"📧 Open email
+↗"** button while stripping any `https?://…` from the shown detail (so the older
+tasks that had the URL glued in also read clean). `shapeTask`
 returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
 **Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
 token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
