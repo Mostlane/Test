@@ -127,8 +127,6 @@
     }
     function render(){
       if(!ALL.length){ g("filters").innerHTML=""; g("flagrow").style.display="none"; g("list").innerHTML='<div class="empty">🎉 No tasks assigned to you right now.</div>'; return; }
-      // The flag-age control only matters when there are age-based (email) tasks.
-      g("flagrow").style.display = ALL.some(t=>t.refDate) ? "flex" : "none";
       // Filter chips: All + each category present (with a live count).
       const cats={}; ALL.forEach(t=>{ const c=catOf(t); cats[c]=(cats[c]||0)+1; });
       const names=Object.keys(cats).sort();
@@ -139,6 +137,9 @@
       [].forEach.call(g("filters").querySelectorAll(".chip"), b=>b.onclick=()=>{ FILTER=b.dataset.f; render(); });
 
       const shown = FILTER==="all" ? ALL : ALL.filter(t=>catOf(t)===FILTER);
+      // The flag-age control shows ONLY when a specific age-based category is
+      // filtered to (i.e. Emails) — not on "All".
+      g("flagrow").style.display = (FILTER!=="all" && shown.some(t=>t.refDate)) ? "flex" : "none";
       // OLDEST FIRST: by the age base date ascending (no date → last).
       const byOldest=(a,b)=>{ const ka=ageBase(a)||"9999-12-31", kb=ageBase(b)||"9999-12-31"; return ka.localeCompare(kb); };
       const open=shown.filter(t=>!t.status.done).sort(byOldest);
