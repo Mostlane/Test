@@ -3113,7 +3113,10 @@ case-insensitive → "first last"). **Dedupe by `externalId`** (an email message
 re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
 + `ext_key` cols on admin_tasks). GET /tasks/inbound = a no-secret connection check
 (configured? + token fingerprint). Task is `recurrence:"once"`, no auto-match — the
-assignee ticks it on my-tasks.html when they've replied.
+assignee ticks it on my-tasks.html when they've replied. **Close the loop:** the
+same POST with **`{externalId, action:"done"}`** marks it complete (drops off the
+attention count, shows ticked) and **`{externalId, action:"delete"}`** removes it —
+so the bot clears a task once it sees a sent reply. No-match = success (idempotent).
 
 ## Notifications system
 - **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
