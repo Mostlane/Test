@@ -31,6 +31,7 @@ import { createOrUpdateJobFromPayload, listJobs } from "./sla.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
+import { resolveTenantId } from "../lib/tenantdb.js";
 
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
@@ -135,6 +136,17 @@ async function ensureTables(env) {
     "reissue_cert_id TEXT", "reissue_at TEXT"]) {   // the auto-generated clean cert after the works
     try { await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run(); } catch {}
   }
+  // Incoming CLIENT ORDERS (e.g. Concerto REM/R-order emails fed in by a bot) that
+  // approve outstanding remedial works. Matched to a remedial awaiting approval; the
+  // office confirms with one tap to raise the works job.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_orders (
+    id TEXT PRIMARY KEY, tenant_id TEXT, external_id TEXT, order_number TEXT,
+    client TEXT, priority INTEGER, order_value REAL, currency TEXT,
+    title TEXT, detail TEXT, description TEXT, job_category TEXT, observation_codes TEXT,
+    already_done INTEGER, store_code TEXT, site_name TEXT, sr_ref TEXT, site_raw TEXT,
+    notified_at TEXT, link TEXT, source TEXT, status TEXT,
+    matched_kind TEXT, matched_cert_id TEXT, matched_job_id TEXT, match_note TEXT,
+    created_at TEXT, updated_at TEXT, actioned_at TEXT, actioned_by TEXT)`).run();
 }
 const STAGES = ["to_quote", "quoted", "approved", "invoiced"];
 const REMEDIAL_CHARGE = 50;   // £ per failed EM LIGHT (batteries are priced by the supplier, no £50)
@@ -367,6 +379,91 @@ export async function reissueCleanCertForRemedialJob(env, tid, job) {
     if ((sib || []).some(j => !fin(j.status))) return null;   // works still outstanding
     return await reissueCleanCert(env, tid, certId);
   } catch { return null; }
+}
+
+// ── Client-order intake (Concerto REM/R-orders) → match to a remedial ──────────
+// A client order APPROVES outstanding remedial works. We match it (by store code)
+// to a remedial that's awaiting approval — an EM remedial case (em_remedial_acks,
+// stage to_quote/quoted) or an electrical-test job carrying remedials not yet
+// turned into a works job — and store it for the office to confirm with one tap.
+const numOf = v => { const d = String(v ?? "").replace(/\D/g, ""); return d ? String(Number(d)) : ""; };
+async function matchOrderToRemedial(env, tid, o) {
+  const code = padCode(o.storeCode), num = numOf(o.storeCode);
+  if (!code && !num) return null;
+  // 1) EM remedial case awaiting approval at this store.
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT cert_id, site_code, site_name, cert_number, stage FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted') ORDER BY created_at DESC LIMIT 200"
+    ).bind(tid).all();
+    const cands = (results || []).filter(r => numOf(r.site_code) && numOf(r.site_code) === num);
+    if (cands.length) {
+      const r = cands[0];
+      return { kind: "em", certId: r.cert_id, note: `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})` + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
+    }
+  } catch {}
+  // 2) Electrical-test job with remedials not yet raised as a works job.
+  try {
+    const jobs = (await listJobs(env, tid)).filter(j => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
+    const cand = jobs.find(j => numOf(j.siteCode) && numOf(j.siteCode) === num);
+    if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
+  } catch {}
+  return null;
+}
+function shapeOrder(r) {
+  let codes = []; try { codes = JSON.parse(r.observation_codes || "[]"); } catch {}
+  return {
+    id: r.id, externalId: r.external_id || "", orderNumber: r.order_number || "", client: r.client || "",
+    priority: r.priority, orderValue: r.order_value, currency: r.currency || "GBP",
+    title: r.title || "", detail: r.detail || "", jobCategory: r.job_category || "", observationCodes: codes,
+    alreadyDone: r.already_done === 1, storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "",
+    notifiedAt: r.notified_at || "", link: r.link || "", source: r.source || "", status: r.status || "new",
+    matchedKind: r.matched_kind || "", matchedCertId: r.matched_cert_id || "", matchedJobId: r.matched_job_id || "",
+    matchNote: r.match_note || "", createdAt: r.created_at || "",
+  };
+}
+async function handleOrderInbound(env, tid, b, ctx, request) {
+  const now = new Date().toISOString();
+  const extId = String(b.externalId || b.messageId || "").slice(0, 200);
+  const orderNumber = String(b.orderNumber || "").slice(0, 60);
+  const storeCode = padCode(b.storeCode || (b.siteRaw ? (String(b.siteRaw).match(/\d{2,5}/) || [])[0] : ""));
+  const siteName = String(b.siteName || "").slice(0, 160);
+  const srRef = String(b.srRef || "").slice(0, 40);
+  const detail = String(b.detail || b.description || "").replace(/https?:\/\/\S+/g, "").replace(/\n{2,}/g, "\n").trim().slice(0, 1000);
+  const title = String(b.title || `Order ${orderNumber} — ${siteName || storeCode}`).slice(0, 200);
+  // Dedupe by external id, then order number.
+  let id = null, created = true;
+  if (extId) { const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND external_id=? LIMIT 1").bind(tid, extId).first().catch(() => null); if (ex) { id = ex.id; created = false; } }
+  if (!id && orderNumber) { const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND order_number=? LIMIT 1").bind(tid, orderNumber).first().catch(() => null); if (ex) { id = ex.id; created = false; } }
+  if (!id) id = "ord-" + crypto.randomUUID();
+  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber });
+  const status = m ? "matched" : "new";
+  await env.DB.prepare(`INSERT INTO client_orders
+    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET order_number=excluded.order_number, client=excluded.client, priority=excluded.priority,
+      order_value=excluded.order_value, currency=excluded.currency, title=excluded.title, detail=excluded.detail,
+      description=excluded.description, job_category=excluded.job_category, observation_codes=excluded.observation_codes,
+      already_done=excluded.already_done, store_code=excluded.store_code, site_name=excluded.site_name, sr_ref=excluded.sr_ref,
+      site_raw=excluded.site_raw, notified_at=excluded.notified_at, link=excluded.link,
+      status=CASE WHEN client_orders.status IN ('actioned','dismissed') THEN client_orders.status ELSE excluded.status END,
+      matched_kind=excluded.matched_kind, matched_cert_id=excluded.matched_cert_id, matched_job_id=excluded.matched_job_id,
+      match_note=excluded.match_note, updated_at=excluded.updated_at`)
+    .bind(id, tid, extId || null, orderNumber || null, String(b.client || "").slice(0, 80), Number(b.priority) || null,
+      (b.orderValue != null ? Number(b.orderValue) : null), String(b.currency || "GBP").slice(0, 8), title, detail,
+      String(b.description || "").slice(0, 4000), String(b.jobCategory || "").slice(0, 20),
+      JSON.stringify(Array.isArray(b.observationCodes) ? b.observationCodes.slice(0, 40) : []), b.alreadyDoneOnSite ? 1 : 0,
+      storeCode || null, siteName || null, srRef || null, String(b.siteRaw || "").slice(0, 200),
+      String(b.notifiedAt || now).slice(0, 40), String(b.link || "").slice(0, 800) || null, String(b.source || "concerto").slice(0, 40),
+      status, m ? m.kind : null, m ? (m.certId || null) : null, m ? (m.jobId || null) : null, m ? m.note : null, now, now).run();
+  if (ctx && ctx.waitUntil) {
+    const site = siteName || storeCode || "a site";
+    const body = m
+      ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
+      : `Client order ${orderNumber || ""} for ${site} — no matching remedial found yet. Review it in the remedials tracker.`;
+    ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
+      { title: m ? "Client order — approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true }, "").catch(() => {}));
+  }
+  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
 }
 
 async function getConfig(env, tid) {
@@ -719,6 +816,32 @@ export async function handle(request, env, ctx, url, sess) {
     if (!obj) return new Response("Not found", { status: 404 });
     return new Response(obj.body, { headers: { "Content-Type": (obj.httpMetadata && obj.httpMetadata.contentType) || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
   }
+
+  // ── Machine-to-machine CLIENT-ORDER intake (PUBLIC_ROUTES; token verified here) ─
+  // A bot (e.g. Grok watching Concerto REM/R-order emails) POSTs a client order; we
+  // store it, match it to a remedial awaiting approval, and push the office to
+  // confirm. GET = a no-secret connection check.
+  if (url.pathname === "/certs/remedials/order-inbound") {
+    const secret = (env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    const m0 = request.method.toUpperCase();
+    if (m0 === "GET") {
+      let fp = null;
+      if (secret) { const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)); fp = [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8); }
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, use: "POST the Concerto order JSON with header Authorization: Bearer <token>" }, {}, env, request);
+    }
+    if (m0 === "POST") {
+      if (!secret) return json({ ok: false, error: "Order intake isn't configured (set ORDERS_INBOUND_TOKEN or TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
+      const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      let diff = tok.length === secret.length ? 0 : 1;
+      for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+      if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
+      const oTid = await resolveTenantId(env, request);
+      await ensureTables(env);
+      const ob = await request.json().catch(() => ({}));
+      return await handleOrderInbound(env, oTid, ob, ctx, request);
+    }
+  }
+
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -1374,6 +1497,61 @@ export async function handle(request, env, ctx, url, sess) {
       `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
     ).bind(tid).all();
     return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
+  }
+
+  // ── Client orders (office) — incoming approvals fed in by the email bot ────────
+  // GET /certs/remedials/orders?all=1 — the review list (default hides
+  // actioned/dismissed). Each carries its match to a remedial awaiting approval.
+  if (sub === "/remedials/orders" && method === "GET") {
+    if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
+    const all = q.get("all") === "1";
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
+    ).bind(tid).all();
+    return json({ ok: true, orders: (results || []).map(shapeOrder) }, {}, env, request);
+  }
+
+  // POST /certs/remedials/order-action {id, action:"approve"|"dismiss"|"reopen"} —
+  // office confirms an order: `approve` raises the works job for the matched EM
+  // remedial (advances the case to `approved`) — or, for an electrical-test match,
+  // links the job for the office to raise the works there. `dismiss` files it away.
+  if (sub === "/remedials/order-action" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const oid = String(b.id || "").trim();
+    const action = String(b.action || "").toLowerCase();
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, oid).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    const now = new Date().toISOString();
+    if (action === "dismiss") {
+      await env.DB.prepare("UPDATE client_orders SET status='dismissed', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, oid).run();
+      return json({ ok: true, status: "dismissed" }, {}, env, request);
+    }
+    if (action === "reopen") {
+      const st = ord.matched_cert_id || ord.matched_job_id ? "matched" : "new";
+      await env.DB.prepare("UPDATE client_orders SET status=?, actioned_at=NULL, actioned_by=NULL WHERE tenant_id=? AND id=?").bind(st, tid, oid).run();
+      return json({ ok: true, status: st }, {}, env, request);
+    }
+    if (action === "approve") {
+      let jobId = null, note = "";
+      if (ord.matched_kind === "em" && ord.matched_cert_id) {
+        // Client order landed → raise the works job(s) and advance the case to approved.
+        const lj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "light").catch(() => null);
+        const bj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "battery").catch(() => null);
+        jobId = bj || lj;
+        await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id), lights_job_id=COALESCE(?,lights_job_id) WHERE tenant_id=? AND cert_id=?")
+          .bind(now, me, bj, lj, tid, ord.matched_cert_id).run();
+        note = jobId ? "Works job raised — case approved." : "Case approved (no pending fittings to raise).";
+      } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
+        jobId = ord.matched_job_id;
+        note = "Open the electrical-test job to raise the remedial works job.";
+      } else {
+        return json({ ok: false, error: "This order isn't matched to a remedial — open the tracker and link it manually." }, { status: 400 }, env, request);
+      }
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=COALESCE(?,matched_job_id), actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(jobId, now, me, tid, oid).run();
+      return json({ ok: true, status: "actioned", jobId, note }, {}, env, request);
+    }
+    return error("Unknown action", 400, env, request);
   }
 
   // POST /certs/remedials/ack {certId, action:"done"|"later"} — the blocking modal:
