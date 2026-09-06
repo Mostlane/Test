@@ -34,6 +34,10 @@
     .chip{background:#fff;border:1px solid #cbd5e1;color:#334155;border-radius:999px;padding:7px 14px;font:600 13px 'Segoe UI';cursor:pointer;}
     .chip.on{background:var(--navy);color:#fff;border-color:var(--navy);}
     .chip .n{opacity:.7;font-weight:600;margin-left:4px;}
+    .flagrow{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);margin:-2px 2px 12px;}
+    .flagrow input{width:56px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;font:700 13.5px 'Segoe UI';text-align:center;color:#1f2a37;}
+    .flagrow .saved{color:var(--ok);font-weight:600;font-size:12px;opacity:0;transition:opacity .2s;}
+    .flagrow .saved.on{opacity:1;}
     .tickbtn{border:2px solid #cbd5e1;background:#fff;border-radius:10px;width:30px;height:30px;font-size:16px;cursor:pointer;flex:none;color:#16a34a;}
     .tickbtn.on{background:#16a34a;border-color:#16a34a;color:#fff;}
     .sec-h{font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin:16px 2px 8px;}
@@ -49,6 +53,9 @@
   </header>
   <div class="wrap">
     <div id="filters" class="filters"></div>
+    <div id="flagrow" class="flagrow" style="display:none;">⚑ Flag &amp; warn when older than
+      <input id="flagAge" type="number" min="1" max="90" inputmode="numeric"> days
+      <span class="saved" id="flagSaved">Saved ✓</span></div>
     <div id="list"><div class="empty">Loading…</div></div>
   </div>
 
@@ -89,7 +96,26 @@
     // title — the portal shows the age itself now, so it isn't doubled up.
     function cleanTitle(t){ const s=String(t.title||""); const c=s.replace(/^\s*\d+\s*d\s*[·\-–—]\s*/i,"").trim(); return c||s; }
 
-    let ALL=[], FILTER="all";
+    let ALL=[], FILTER="all", FLAG_AGE=7;
+    // Flag/warn threshold (days) — per-user, saved to localStorage (instant) and
+    // mirrored to /prefs so it follows the user across devices.
+    function clampAge(n){ n=Math.round(Number(n)||7); return Math.max(1, Math.min(90, n)); }
+    function initFlagAge(){
+      try{ const l=localStorage.getItem("mlTaskFlagAge"); if(l!=null) FLAG_AGE=clampAge(l); }catch(e){}
+      g("flagAge").value=FLAG_AGE;
+      // Server value (if any) wins, then re-render.
+      aFetch("/prefs").then(r=>r.json()).then(p=>{ const v=p&&p.ok&&p.prefs&&p.prefs.taskFlagAge; if(v!=null){ FLAG_AGE=clampAge(v); g("flagAge").value=FLAG_AGE; try{localStorage.setItem("mlTaskFlagAge",String(FLAG_AGE));}catch(e){} if(ALL.length) render(); } }).catch(()=>{});
+      let t=null;
+      g("flagAge").addEventListener("input", ()=>{
+        FLAG_AGE=clampAge(g("flagAge").value);
+        try{ localStorage.setItem("mlTaskFlagAge", String(FLAG_AGE)); }catch(e){}
+        render();
+        clearTimeout(t); t=setTimeout(()=>{
+          aFetch("/prefs",{method:"POST",body:JSON.stringify({taskFlagAge:FLAG_AGE})}).then(()=>{ const s=g("flagSaved"); s.classList.add("on"); setTimeout(()=>s.classList.remove("on"),1200); }).catch(()=>{});
+        }, 500);
+      });
+      g("flagAge").addEventListener("blur", ()=>{ g("flagAge").value=FLAG_AGE; });
+    }
     async function load(){
       let d;
       try{ d=await aFetch("/tasks/mine").then(r=>r.json()); }catch(e){ g("list").innerHTML='<div class="empty">⚠️ Couldn\'t load your tasks.</div>'; g("filters").innerHTML=""; return; }
@@ -98,7 +124,9 @@
       render();
     }
     function render(){
-      if(!ALL.length){ g("filters").innerHTML=""; g("list").innerHTML='<div class="empty">🎉 No tasks assigned to you right now.</div>'; return; }
+      if(!ALL.length){ g("filters").innerHTML=""; g("flagrow").style.display="none"; g("list").innerHTML='<div class="empty">🎉 No tasks assigned to you right now.</div>'; return; }
+      // The flag-age control only matters when there are age-based (email) tasks.
+      g("flagrow").style.display = ALL.some(t=>t.refDate) ? "flex" : "none";
       // Filter chips: All + each category present (with a live count).
       const cats={}; ALL.forEach(t=>{ const c=catOf(t); cats[c]=(cats[c]||0)+1; });
       const names=Object.keys(cats).sort();
@@ -121,7 +149,7 @@
     }
     function row(t){
       const s=t.status;
-      const age=ageDays(t), over7=(age!=null && age>7 && !s.done);
+      const age=ageDays(t), over7=(age!=null && age>FLAG_AGE && !s.done);
       let pill;
       if(s.done) pill='<span class="pill done">✓ '+(s.auto?"Done automatically":"Done")+'</span>';
       else if(t.refDate){   // email-style task → show AGE (with a warning past 7 days)
@@ -160,6 +188,7 @@
     window.toggle=toggle;
     (async function(){
       try{ const me=await aFetch("/auth/me").then(r=>r.json()); if(!me.ok){ location.href="/login.html"; return; } }catch(e){}
+      initFlagAge();
       load();
     })();
   </script>
