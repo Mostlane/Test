@@ -3109,9 +3109,13 @@ portal shows the **real age** + a **⚠ warning past 7 days**, self-updating rat
 than frozen in the title. **my-tasks.html** now: category **filter chips** (All +
 each type, live counts; hidden when there's only one plain group), **oldest-first**
 ordering (by `ref_date` else created), an **age pill** ("N days ago", red ⚠ + a red
-card border once >7 days) for email-style tasks (a due/overdue pill still shows for
-scheduled ones), a **category pill** per card, and it strips a leading "13d · " age
-prefix a bot may bake into the title (the portal owns the age now). `shapeTask`
+card border once past the flag age) for email-style tasks (a due/overdue pill still
+shows for scheduled ones), a **category pill** per card, and it strips a leading
+"13d · " age prefix a bot may bake into the title (the portal owns the age now).
+The **flag/warn threshold is a per-user SETTING on the page** ("⚑ Flag & warn when
+older than N days", default 7, shown only when there are age-based tasks) — saved to
+localStorage (instant) + mirrored to **/prefs `taskFlagAge`** so it follows the user
+across devices. `shapeTask`
 returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
 **Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
 token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
