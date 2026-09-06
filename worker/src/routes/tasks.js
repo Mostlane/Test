@@ -21,6 +21,7 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
+import { resolveTenantId } from "../lib/tenantdb.js";
 
 // Areas a task can be linked to = a permission the assignee needs, plus the
 // audit path fragment that means "they did the job" (for auto-completion).
@@ -55,6 +56,11 @@ async function ensureTables(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
+  // Machine-to-machine intake bookkeeping: which external system created a task and
+  // its stable external id (dedupe key, e.g. an Outlook message-id).
+  for (const col of ["source TEXT", "ext_key TEXT"]) {
+    try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
+  }
 }
 
 // ── London-time helpers (deadlines are UK wall-clock) ────────────────────────
@@ -143,6 +149,70 @@ function shapeTask(t) {
 }
 
 export async function handle(request, env, ctx, url, sess) {
+  const methodTop = request.method.toUpperCase();
+  const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
+
+  // ── Machine-to-machine INBOUND (PUBLIC_ROUTES; token verified in-handler) ────
+  // An external scanner (e.g. an Outlook "emails I need to reply to" bot) POSTs a
+  // one-off task into someone's portal task list. Token = TASKS_INBOUND_TOKEN if
+  // set, else the shared JOBS_INBOUND_TOKEN. GET = a no-secret connection check.
+  if (subTop === "/inbound") {
+    const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    if (methodTop === "GET") {
+      let fp = null;
+      if (secret) { const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)); fp = [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8); }
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, tokenVar: env.TASKS_INBOUND_TOKEN ? "TASKS_INBOUND_TOKEN" : (env.JOBS_INBOUND_TOKEN ? "JOBS_INBOUND_TOKEN" : null), use: "POST JSON with header Authorization: Bearer <token>" }, {}, env, request);
+    }
+    if (methodTop === "POST") {
+      if (!secret) return json({ ok: false, error: "Task intake isn't configured (set TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
+      const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      let diff = tok.length === secret.length ? 0 : 1;
+      for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+      if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
+
+      const tid = await resolveTenantId(env, request);
+      await ensureTables(env);
+      const b = await request.json().catch(() => ({}));
+      const title = String(b.title || "").trim().slice(0, 300);
+      if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
+      const owner = String(env.OWNER_USERNAME || "Jamie Line");
+      // Resolve each assignee to a real portal username (exact → case-insensitive →
+      // first name), so "jamie", "Jamie Line" etc. all land on the right person.
+      let want = Array.isArray(b.assignees) ? b.assignees : (b.assignee ? [b.assignee] : []);
+      want = want.map(s => String(s || "").trim()).filter(Boolean);
+      if (!want.length) want = [owner];
+      const assignees = [];
+      for (const w of want) {
+        let u = null;
+        try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
+        assignees.push(u || w);
+      }
+      let detail = String(b.detail || "").slice(0, 1800);
+      if (b.link) detail = (detail ? detail + "\n" : "") + String(b.link).slice(0, 500);
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
+      const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+      const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      const now = new Date().toISOString();
+      // Dedupe by external id — re-scanning the same email UPDATES the task, never
+      // creates a duplicate.
+      let id = null, created = true;
+      if (extKey) {
+        try { const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first(); if (ex) { id = ex.id; created = false; } } catch {}
+      }
+      if (!id) id = "email-" + crypto.randomUUID();
+      await env.DB.prepare(`INSERT INTO admin_tasks
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at`)
+        .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
+          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null).run();
+      if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
+        sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
+      return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
+    }
+  }
+
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;

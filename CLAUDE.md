@@ -3102,6 +3102,18 @@ POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
 ~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
 user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
+**Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
+token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
+**JOBS_INBOUND_TOKEN**) lets an external tool (e.g. an Outlook "emails I need to
+reply to" bot / Grok) create a **one-off** task in someone's list. Body
+`{title (req), detail?, link?, assignee?/assignees[]?, dueDate? (YYYY-MM-DD,
+default today), dueTime? (HH:MM, default 17:00), externalId?, source?}`. Assignee
+defaults to **OWNER_USERNAME**; each is resolved to a real portal username (exact →
+case-insensitive → "first last"). **Dedupe by `externalId`** (an email message-id):
+re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
++ `ext_key` cols on admin_tasks). GET /tasks/inbound = a no-secret connection check
+(configured? + token fingerprint). Task is `recurrence:"once"`, no auto-match — the
+assignee ticks it on my-tasks.html when they've replied.
 
 ## Notifications system
 - **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
@@ -3733,6 +3745,8 @@ is kept as documentation of the hot pages.)
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
+optional **TASKS_INBOUND_TOKEN** (dedicated m2m token for POST /tasks/inbound —
+an external "emails to reply to" bot; falls back to JOBS_INBOUND_TOKEN if unset),
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
