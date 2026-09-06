@@ -31597,7 +31597,7 @@ async function handle32(request, env, ctx, url, sess) {
         const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
         fp = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
       }
-      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, tokenVar: env.TASKS_INBOUND_TOKEN ? "TASKS_INBOUND_TOKEN" : env.JOBS_INBOUND_TOKEN ? "JOBS_INBOUND_TOKEN" : null, use: "POST JSON with header Authorization: Bearer <token>" }, {}, env, request);
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, tokenVar: env.TASKS_INBOUND_TOKEN ? "TASKS_INBOUND_TOKEN" : env.JOBS_INBOUND_TOKEN ? "JOBS_INBOUND_TOKEN" : null, use: "POST JSON (Authorization: Bearer <token>). Create: {title, externalId, ...}. Close: {externalId, action:'done'} or {externalId, action:'delete'}." }, {}, env, request);
     }
     if (methodTop === "POST") {
       if (!secret) return json({ ok: false, error: "Task intake isn't configured (set TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
@@ -31608,6 +31608,30 @@ async function handle32(request, env, ctx, url, sess) {
       const tid2 = await resolveTenantId(env, request);
       await ensureTables4(env);
       const b = await request.json().catch(() => ({}));
+      const action = String(b.action || "").toLowerCase();
+      const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      const isDone = action === "done" || action === "complete" || b.done === true || b.resolve === true;
+      const isDelete = action === "delete" || action === "remove" || b.delete === true;
+      if (isDone || isDelete) {
+        if (!extKey0) return json({ ok: false, error: "externalId is required to mark done / delete a task" }, { status: 400 }, env, request);
+        const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid2, extKey0).first().catch(() => null);
+        if (!row) return json({ ok: true, found: false, note: "No task with that externalId (already removed, or never created)." }, {}, env, request);
+        if (isDelete) {
+          await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid2, row.id).run();
+          await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid2, row.id).run();
+          return json({ ok: true, found: true, removed: true, id: row.id }, {}, env, request);
+        }
+        let who = [];
+        try {
+          who = JSON.parse(row.assignees || "[]");
+        } catch {
+        }
+        const nowD = (/* @__PURE__ */ new Date()).toISOString();
+        for (const u of who) {
+          await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at").bind(tid2, row.id, u, "once", nowD, "inbound").run();
+        }
+        return json({ ok: true, found: true, done: true, id: row.id }, {}, env, request);
+      }
       const title = String(b.title || "").trim().slice(0, 300);
       if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
       const owner = String(env.OWNER_USERNAME || "Jamie Line");
