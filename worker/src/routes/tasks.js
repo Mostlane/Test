@@ -57,8 +57,11 @@ async function ensureTables(env) {
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
   // Machine-to-machine intake bookkeeping: which external system created a task and
-  // its stable external id (dedupe key, e.g. an Outlook message-id).
-  for (const col of ["source TEXT", "ext_key TEXT"]) {
+  // its stable external id (dedupe key, e.g. an Outlook message-id). `category`
+  // groups tasks by type (Emails / Compliance / …) for filtering; `ref_date` is the
+  // task's "as of" date (e.g. an email's received date) so age + the >7-day warning
+  // are accurate and self-updating rather than frozen in the title.
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT"]) {
     try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
@@ -145,6 +148,7 @@ function shapeTask(t) {
     areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
     areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || "",
+    category: t.category || "", refDate: t.ref_date || "", createdAt: t.created_at || "",
   };
 }
 
@@ -219,6 +223,12 @@ export async function handle(request, env, ctx, url, sess) {
       const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
       const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
       const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      // Type for filtering (Emails / Compliance / …) — defaults to Emails for the
+      // email intake. `date` = the email's RECEIVED date, so the portal shows the
+      // real age + the >7-day warning (self-updating, not frozen in the title).
+      const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
+      const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
+      const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
       const now = new Date().toISOString();
       // Dedupe by external id — re-scanning the same email UPDATES the task, never
       // creates a duplicate.
@@ -228,12 +238,13 @@ export async function handle(request, env, ctx, url, sess) {
       }
       if (!id) id = "email-" + crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
-          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at`)
+          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date)`)
         .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
-          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null).run();
+          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate).run();
       if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
         sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
       return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
@@ -339,18 +350,19 @@ export async function handle(request, env, ctx, url, sess) {
     const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
     const id = String(b.id || "") || crypto.randomUUID();
     const existing = b.id ? await env.DB.prepare("SELECT created_at, created_by FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
+    const category = b.category != null ? String(b.category).trim().slice(0, 40) : "";
     await env.DB.prepare(`INSERT INTO admin_tasks
-      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, category)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
         recurrence=excluded.recurrence, due_time=excluded.due_time, due_dow=excluded.due_dow, due_dom=excluded.due_dom,
         due_month=excluded.due_month, due_date=excluded.due_date, area=excluded.area, auto_match=excluded.auto_match,
-        active=excluded.active, updated_at=excluded.updated_at`)
+        active=excluded.active, updated_at=excluded.updated_at, category=excluded.category`)
       .bind(id, tid, title, String(b.detail || "").slice(0, 2000), JSON.stringify(assignees), recurrence, dueTime,
         b.dueDow != null ? Number(b.dueDow) : null, b.dueDom != null ? Number(b.dueDom) : null,
         b.dueMonth != null ? Number(b.dueMonth) : null, b.dueDate ? String(b.dueDate).slice(0, 10) : null,
         area, autoMatch, b.active === false ? 0 : 1,
-        (existing && existing.created_by) || me, (existing && existing.created_at) || now, now).run();
+        (existing && existing.created_by) || me, (existing && existing.created_at) || now, now, category).run();
     // Notify newly-assigned people (best effort).
     if (ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
       sendToUser(env, tid, u, { title: "New task assigned", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
