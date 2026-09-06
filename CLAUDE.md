@@ -3102,12 +3102,24 @@ POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
 ~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
 user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
+**Task types / filtering (Sep 2026):** admin_tasks gained **`category`** (self-
+migrating) — a type label ("Emails" / "Compliance" / …) so My Tasks can filter by
+type; and **`ref_date`** = a task's "as of" date (an email's RECEIVED date) so the
+portal shows the **real age** + a **⚠ warning past 7 days**, self-updating rather
+than frozen in the title. **my-tasks.html** now: category **filter chips** (All +
+each type, live counts; hidden when there's only one plain group), **oldest-first**
+ordering (by `ref_date` else created), an **age pill** ("N days ago", red ⚠ + a red
+card border once >7 days) for email-style tasks (a due/overdue pill still shows for
+scheduled ones), a **category pill** per card, and it strips a leading "13d · " age
+prefix a bot may bake into the title (the portal owns the age now). `shapeTask`
+returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
 **Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
 token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
 **JOBS_INBOUND_TOKEN**) lets an external tool (e.g. an Outlook "emails I need to
 reply to" bot / Grok) create a **one-off** task in someone's list. Body
 `{title (req), detail?, link?, assignee?/assignees[]?, dueDate? (YYYY-MM-DD,
-default today), dueTime? (HH:MM, default 17:00), externalId?, source?}`. Assignee
+default today), dueTime? (HH:MM, default 17:00), externalId?, source?, category?
+(default "Emails"), date? (the email's received date → age + >7-day warning)}`. Assignee
 defaults to **OWNER_USERNAME**; each is resolved to a real portal username (exact →
 case-insensitive → "first last"). **Dedupe by `externalId`** (an email message-id):
 re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
