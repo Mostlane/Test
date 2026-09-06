@@ -447,6 +447,10 @@ const PUBLIC_ROUTES = [
   // TASKS_INBOUND_TOKEN (or JOBS_INBOUND_TOKEN) verified in-handler.
   ["POST", "/tasks/inbound"],
   ["GET", "/tasks/inbound"],   // connection self-check (fingerprint only, no secret)
+  // Machine-to-machine CLIENT-ORDER intake (e.g. a Concerto REM/R-order email bot) —
+  // ORDERS_INBOUND_TOKEN (or TASKS_/JOBS_INBOUND_TOKEN) verified in-handler.
+  ["POST", "/certs/remedials/order-inbound"],
+  ["GET", "/certs/remedials/order-inbound"],   // connection self-check (fingerprint only, no secret)
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
   ["GET", "/sla/archive-file"],
   // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.

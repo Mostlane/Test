@@ -2626,6 +2626,25 @@ it straight onto the compliance chart (rolling the next-due date).
   toReview+withEngineers with an "Awaiting from engineers / In your review queue"
   breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
   (same `/certs/status?range=30d&count=1` fetch, jget-cached).
+- **Client-order intake → approve a remedial (Sep 2026):** a bot (e.g. Grok watching
+  the client's Concerto REM/R-order emails) POSTs each order to **POST
+  /certs/remedials/order-inbound** (PUBLIC_ROUTES; token verified in-handler —
+  **ORDERS_INBOUND_TOKEN** if set, else TASKS_/JOBS_INBOUND_TOKEN). Body carries the
+  Concerto fields (`orderNumber, client, priority, orderValue, storeCode, siteName,
+  srRef, siteRaw, description/detail, jobCategory, observationCodes, notifiedAt,
+  externalId, link, source`). Stored in table **`client_orders`** (dedupe by
+  `externalId` then `orderNumber`), and **matched by store code** to a remedial
+  AWAITING APPROVAL — an EM remedial case (`em_remedial_acks` stage to_quote/quoted)
+  or an electrical-test job carrying `remedials` with no works job yet. Pushes the
+  office (`actionable`, deep-links `cert-review.html?orders=1`). **NOT auto-actioned**
+  — the office confirms with one tap. Endpoints (office): **GET /certs/remedials/orders**
+  (`?all=1`), **POST /certs/remedials/order-action** `{id, action:"approve"|"dismiss"
+  |"reopen"}` — `approve` on an EM match raises the works job(s) (`createRemedialJobForCert`
+  light+battery) + advances the ack to `approved`; on an elec match it links the job to
+  raise the works there. Front-end: **📥 Client orders** button + modal on
+  cert-review.html (To-action / All, per-order match note + ✅ Approve & raise works /
+  Dismiss + Open-email/Open-job). GET /certs/remedials/order-inbound = a no-secret
+  connection check.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
@@ -3771,6 +3790,9 @@ RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 optional **TASKS_INBOUND_TOKEN** (dedicated m2m token for POST /tasks/inbound —
 an external "emails to reply to" bot; falls back to JOBS_INBOUND_TOKEN if unset),
+optional **ORDERS_INBOUND_TOKEN** (dedicated m2m token for POST
+/certs/remedials/order-inbound — the client-order/Concerto email bot; falls back to
+TASKS_INBOUND_TOKEN then JOBS_INBOUND_TOKEN),
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
