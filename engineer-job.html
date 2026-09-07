@@ -618,6 +618,7 @@
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
     var elec = !!(job && job.elecTest) && !fs && !cert && !au;
+    var pump = !!(job && job.pumpMaintenance) && !fs && !cert && !au && !elec;
     // Back goes through the portal's shared breadcrumb (window.mlBack) so it
     // returns to the genuine previous page and can never trap the user in a
     // revolving cycle. backTo is only the cold-start fallback.
@@ -627,7 +628,7 @@
     // so wire its change handler unconditionally — otherwise the RA photo does
     // nothing on an audit/remedial/cert job.
     var _fi=$("fileInput"); if(_fi) _fi.addEventListener("change",uploadPhotos);
-    if(!fs && !au && !cert && !elec){
+    if(!fs && !au && !cert && !elec && !pump){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
       wireHqToggle();
       restoreNoteDraft();   // bring back a note typed before an app kill / bounce
@@ -639,7 +640,7 @@
       $("auditFile").addEventListener("change", onAuditPhoto);
       renderAuditList();
     }
-    if(!fs && !cert){   // the completion slider exists for standard AND audit jobs (not firestop / EM-PAT cert)
+    if(!fs && !cert && !pump){   // the completion slider exists for standard/audit/elec jobs (not firestop / EM-PAT cert / pump — they complete via their own form)
       var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
       knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
       knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
