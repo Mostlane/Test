@@ -32,6 +32,7 @@ import { buildPumpPdf } from "../lib/pumppdf.js";
 import { logoBytes } from "../lib/logo.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser, sendToPermission } from "./push.js";
+import { fileCertificatePdf } from "./compliance.js";
 
 const GENERAL = [
   "Chamber free of debris or obstructions", "Water level within expected range when idle",
@@ -73,12 +74,12 @@ const DEFAULT_CONFIG = {
     { id: "notified", label: "Store staff have been notified that the works are being carried out" },
   ],
   stores: [
-    { id: "binfield", name: "Binfield", siteCode: "", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
-    { id: "wickham", name: "Wickham", siteCode: "", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
-    { id: "eastbourne", name: "Eastbourne", siteCode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
-    { id: "shanklin", name: "Shanklin", siteCode: "", instructions: INSTR.shanklin, checks: GENERAL.slice() },
-    { id: "wimbledon", name: "Wimbledon", siteCode: "", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
-    { id: "newportels", name: "Newport ELS", siteCode: "", instructions: INSTR.newportels, checks: GENERAL.slice() },
+    { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
+    { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
+    { id: "eastbourne", name: "Eastbourne", siteCode: "", client: "retail", address: "", postcode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+    { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
+    { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
+    { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() },
   ],
 };
 
@@ -198,6 +199,8 @@ export async function handle(request, env, ctx, url, sess) {
       if (Array.isArray(b.stores)) next.stores = b.stores.map(s => ({
         id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || ("store" + Math.random().toString(36).slice(2, 7)),
         name: String(s.name || "").slice(0, 120), siteCode: String(s.siteCode || "").slice(0, 20),
+        client: String(s.client || "").slice(0, 40),
+        address: String(s.address || "").slice(0, 300), postcode: String(s.postcode || "").slice(0, 20),
         instructions: String(s.instructions || "").slice(0, 4000),
         checks: (Array.isArray(s.checks) ? s.checks : []).map(c => String(c || "").slice(0, 200)).filter(Boolean),
       })).filter(s => s.name);
@@ -209,7 +212,7 @@ export async function handle(request, env, ctx, url, sess) {
   // ── stores list for the Add-Job picker ──
   if (sub === "/stores" && method === "GET") {
     const cfg = await getConfig(env, tid);
-    return json({ ok: true, stores: (cfg.stores || []).map(s => ({ id: s.id, name: s.name, siteCode: s.siteCode || "" })) }, {}, env, request);
+    return json({ ok: true, stores: (cfg.stores || []).map(s => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
   }
 
   // ── load / seed a job's record ──
@@ -372,13 +375,22 @@ export async function handle(request, env, ctx, url, sess) {
     const now = new Date().toISOString();
     const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
     if (env.JOB_FILES) { try { await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } }); } catch {} }
-    // File to the store's site Documents (a "Pump Maintenance" area) if a code is set.
+    // File the PDF into the compliance chart's PUMP section for the store's site,
+    // as the CURRENT pump document (rolls the due date). Co-op stores are the
+    // `coop` scheme; the compliance code = the site number. Also surfaces in the
+    // site's Documents via the /sla/site/docs compliance injection. Skipped when
+    // the store isn't linked to a site yet (Eastbourne) — the PDF still lives on
+    // the record + review page.
     let filedToSite = false;
     const code = rec.site_code || d.siteCode || "";
-    if (code && env.JOB_FILES) {
+    if (code) {
       try {
-        const key = `sitedocs/${siteKeyOf(code)}/Pump Maintenance/${Date.now()}-Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${(d.date || now.slice(0, 10))}.pdf`;
-        await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+        await fileCertificatePdf(env, tid, {
+          scheme: "coop", code: code, type: "pump", bytes: bytes,
+          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${(d.date || now.slice(0, 10))}.pdf`,
+          docDate: d.date || now.slice(0, 10), bump: false, source: "pump:" + rec.id,
+          label: "Pump maintenance — " + (d.date || now.slice(0, 10)),
+        });
         filedToSite = true;
       } catch {}
     }

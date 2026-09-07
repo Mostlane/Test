@@ -95,7 +95,13 @@
     async function finalise(id){
       g("finBtn").disabled=true; g("finBtn").textContent="Finalising…";
       try{ const d = await af("/pump/finalise",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
-        if(d&&d.ok){ if(window.MLUI) MLUI.toast? MLUI.toast("Filed"+(d.filedToSite?" to the site":"")) : null; showQueue(); }
+        if(d&&d.ok){
+          if(window.MLUI && MLUI.toast) MLUI.toast(d.filedToSite ? "Filed to the site's pump compliance" : "Finalised");
+          // Offer the PDF straight away.
+          const dl = window.MLUI ? await MLUI.confirm("Filed"+(d.filedToSite?" to the site's pump compliance section":"")+". Do you want to download the PDF?",{title:"Pump record finalised",okLabel:"Download PDF"}) : confirm("Download the PDF?");
+          if(dl){ try{ const b = await af("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()); window.open(URL.createObjectURL(b),"_blank"); }catch(e){} }
+          showQueue();
+        }
         else { alert((d&&d.error)||"Finalise failed"); g("finBtn").disabled=false; g("finBtn").textContent="🏁 Finalise & file to site"; }
       }catch{ alert("Finalise failed"); g("finBtn").disabled=false; g("finBtn").textContent="🏁 Finalise & file to site"; }
     }

@@ -23636,7 +23636,7 @@ async function handle23(request, env, ctx, url, sess) {
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
     const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
-    const siteKeyOf3 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
       return bySite[key] || (bySite[key] = {
@@ -23682,7 +23682,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!name) continue;
         const resolved = resolveSite(reg, name);
         const s = siteFor(name, resolved);
-        const sKey = siteKeyOf3(resolved, name);
+        const sKey = siteKeyOf2(resolved, name);
         seededProjects[sKey] = { id: p.id, number: p.number };
       }
     } catch {
@@ -23693,7 +23693,7 @@ async function handle23(request, env, ctx, url, sess) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
         const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
-        const sKey = siteKeyOf3(resolved, slSite.siteCode);
+        const sKey = siteKeyOf2(resolved, slSite.siteCode);
         for (const p of slSite.people || []) {
           if (!p.costedVisits) continue;
           const portalUser = (p.portalUsername || "").trim();
@@ -23731,7 +23731,7 @@ async function handle23(request, env, ctx, url, sess) {
     for (const d of days) {
       for (const e of d.entries) {
         const s = siteFor(e.site, e.resolved);
-        const sKey = siteKeyOf3(e.resolved, e.site);
+        const sKey = siteKeyOf2(e.resolved, e.site);
         const cu = canonEng(e.user);
         if (slCovered.has(sKey + "::" + normName(cu))) continue;
         const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
@@ -23770,7 +23770,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!engList.length) continue;
         const siteLabel = j.siteName || j.siteCode || "(no site)";
         const resolved = resolveSite(reg, j.siteName || j.siteCode || "");
-        const sKey = siteKeyOf3(resolved, j.siteName || j.siteCode);
+        const sKey = siteKeyOf2(resolved, j.siteName || j.siteCode);
         let s = null;
         for (const rawEng of engList) {
           if (!rawEng) continue;
@@ -23841,7 +23841,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!v.check_in_at || !v.check_out_at) continue;
         const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
         const resolved = resolveSiteCode(reg, v.site_code);
-        const sKey = siteKeyOf3(resolved, v.site_code);
+        const sKey = siteKeyOf2(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
         if (!rt) continue;
         const site = bySite[sKey];
@@ -32553,6 +32553,7 @@ function buildPumpPdf(record, meta = {}) {
 init_logo();
 init_filesign();
 init_push();
+init_compliance();
 var GENERAL = [
   "Chamber free of debris or obstructions",
   "Water level within expected range when idle",
@@ -32606,19 +32607,15 @@ var DEFAULT_CONFIG3 = {
     { id: "notified", label: "Store staff have been notified that the works are being carried out" }
   ],
   stores: [
-    { id: "binfield", name: "Binfield", siteCode: "", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
-    { id: "wickham", name: "Wickham", siteCode: "", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
-    { id: "eastbourne", name: "Eastbourne", siteCode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
-    { id: "shanklin", name: "Shanklin", siteCode: "", instructions: INSTR.shanklin, checks: GENERAL.slice() },
-    { id: "wimbledon", name: "Wimbledon", siteCode: "", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
-    { id: "newportels", name: "Newport ELS", siteCode: "", instructions: INSTR.newportels, checks: GENERAL.slice() }
+    { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
+    { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
+    { id: "eastbourne", name: "Eastbourne", siteCode: "", client: "retail", address: "", postcode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+    { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
+    { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
+    { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
   ]
 };
 var normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
-var siteKeyOf2 = (s) => {
-  const t = String(s || "").trim();
-  return t ? /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
-};
 async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
     tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
@@ -32779,6 +32776,9 @@ async function handle33(request, env, ctx, url, sess) {
         id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
         name: String(s.name || "").slice(0, 120),
         siteCode: String(s.siteCode || "").slice(0, 20),
+        client: String(s.client || "").slice(0, 40),
+        address: String(s.address || "").slice(0, 300),
+        postcode: String(s.postcode || "").slice(0, 20),
         instructions: String(s.instructions || "").slice(0, 4e3),
         checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
       })).filter((s) => s.name);
@@ -32788,7 +32788,7 @@ async function handle33(request, env, ctx, url, sess) {
   }
   if (sub === "/stores" && method === "GET") {
     const cfg = await getConfig4(env, tid);
-    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "" })) }, {}, env, request);
+    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
   }
   if (sub === "/for-job" && method === "GET") {
     const jobId = q.get("jobId") || "";
@@ -32985,10 +32985,19 @@ async function handle33(request, env, ctx, url, sess) {
     }
     let filedToSite = false;
     const code = rec.site_code || d.siteCode || "";
-    if (code && env.JOB_FILES) {
+    if (code) {
       try {
-        const key = `sitedocs/${siteKeyOf2(code)}/Pump Maintenance/${Date.now()}-Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`;
-        await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+        await fileCertificatePdf(env, tid, {
+          scheme: "coop",
+          code,
+          type: "pump",
+          bytes,
+          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
+          docDate: d.date || now.slice(0, 10),
+          bump: false,
+          source: "pump:" + rec.id,
+          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
+        });
         filedToSite = true;
       } catch {
       }
