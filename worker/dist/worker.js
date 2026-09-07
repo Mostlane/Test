@@ -12114,7 +12114,7 @@ async function handle10(request, env, ctx, url, sess) {
       const terms = q.split(/\s+/).map((t) => t.replace(/[%_\\]/g, "")).filter(Boolean).slice(0, 8);
       if (terms.length) {
         const where = terms.map(() => "search LIKE ?").join(" AND ");
-        const likes = terms.map((t) => "%" + t + "%");
+        const likes = terms.map((t) => "%" + likeKey(t, 40) + "%");
         total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
         ({ results: rows } = await db.prepare(`SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
@@ -12165,7 +12165,7 @@ async function handle10(request, env, ctx, url, sess) {
       }
       if (!siteCodeR && digits) siteCodeR = digits.padStart(4, "0");
       if (!body.force) {
-        const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
+        const dkey = likeKey(desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, ""), 40);
         if (dkey) {
           const { results } = await db.prepare(
             "SELECT id, helpdesk_ref, status, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id<>? AND lower(data) LIKE ? LIMIT 30"
@@ -14244,6 +14244,17 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
 async function readJson2(r) {
   const t = await r.text();
   return t ? JSON.parse(t) : {};
+}
+function likeKey(str, maxBytes = 40) {
+  let out = "";
+  let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch;
+    bytes += b;
+  }
+  return out;
 }
 function jsonResponse(data, headers, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -30042,6 +30053,17 @@ function slugify(name) {
 init_http();
 init_auth();
 init_sla();
+function likeKey2(str, maxBytes = 40) {
+  let out = "";
+  let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch;
+    bytes += b;
+  }
+  return out;
+}
 var RULES_KEY = (tid) => `ai:jobrules:${tid}`;
 var HQ_POSTCODE2 = "PO15 5RQ";
 async function getRules2(env, tid) {
@@ -30115,7 +30137,7 @@ async function resolveSite2(env, tid, query) {
   } catch {
   }
   try {
-    const like = "%" + q.replace(/[%_]/g, "") + "%";
+    const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
     const { results } = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND active=1 AND site_name LIKE ? ORDER BY length(site_name) LIMIT 6").bind(tid, like).all();
     if (results && results.length === 1) return siteOut(results[0]);
     if (results && results.length > 1) return { ok: false, ambiguous: results.map((r) => `${r.site_number} ${r.site_name}`) };
@@ -30219,9 +30241,9 @@ var FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return [];
-  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
   const numRun = (q.match(/\d{3,}/) || [])[0];
-  const likeNum = numRun ? "%" + numRun + "%" : like;
+  const likeNum = numRun ? "%" + likeKey2(numRun) + "%" : like;
   try {
     const { results } = await env.DB.prepare(
       "SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, updated_at, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR lower(status) LIKE lower(?) OR lower(data) LIKE lower(?)) ORDER BY (CASE WHEN lower(status) LIKE lower(?) THEN 0 ELSE 1 END), (CASE WHEN status IN ('Complete','Closed','Closed Jobs','Invoiced','Cancelled') THEN 1 ELSE 0 END), updated_at DESC LIMIT 60"
@@ -30724,7 +30746,7 @@ function dueSummary(dueJson) {
 async function toolFindSite(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { count: 0, sites: [] };
-  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
   const num2 = q.replace(/\D/g, "");
   const binds = [tid, like, like];
   let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
@@ -30756,7 +30778,7 @@ async function toolFindCompliance(env, tid, caps2, query, scheme) {
   }
   const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
   if (bare) {
-    const like = "%" + bare.replace(/[%_]/g, "") + "%";
+    const like = "%" + likeKey2(bare.replace(/[%_]/g, "")) + "%";
     const num2 = bare.replace(/\D/g, "");
     sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
     binds.push(like, like);
@@ -30913,7 +30935,7 @@ async function toolCertNumbers(env, tid, store) {
 }
 async function toolFindVehicle(env, tid, caps2, query) {
   if (!caps2.vehicles) return { denied: true, message: "You don't have Vehicles access." };
-  const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(String(query || "").replace(/[%_]/g, "")) + "%";
   try {
     const { results } = await env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND (reg LIKE ? OR make LIKE ? OR model LIKE ?) LIMIT 12").bind(tid, like, like, like).all().catch(() => env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND reg LIKE ? LIMIT 12").bind(tid, like).all());
     const vehicles = (results || []).map((r) => ({ reg: r.reg, make: r.make, model: r.model, motDue: r.mot_due, taxDue: r.tax_due, nextService: r.next_service }));
