@@ -9,6 +9,7 @@
   <script src="sla-jobedit.js?v=29"></script>
   <script src="firestop-form.js?v=1"></script>
   <script src="cert-form.js?v=19"></script>
+  <script src="pump-form.js?v=1"></script>
   <script src="remedials-form.js?v=2"></script>
   <style>
     :root{
@@ -569,6 +570,12 @@
     <div id="certViewHost"></div>
   </div>
 
+  <!-- PUMP MAINTENANCE — read-only record view + PDF -->
+  <div class="card" id="pumpCard" style="display:none;">
+    <h2 class="section-title">🚰 Pump maintenance record</h2>
+    <div id="pumpViewHost"></div>
+  </div>
+
   <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
   <div class="card" id="jobCostCard" style="display:none;">
     <h2 class="section-title">💷 Total cost to us</h2>
@@ -1005,6 +1012,7 @@ function renderJob(){
   mountFirestopView();
   renderAuditView();
   mountCertView();
+  mountPumpView();
   mountRemedialsView();
   setupRevisit();
   loadVisits();
@@ -1096,6 +1104,20 @@ function mountFirestopView(){
       api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken")
     });
   }
+}
+
+// Pump maintenance jobs: read-only view of the record + Open PDF.
+let pumpViewMounted = false;
+function mountPumpView(){
+  const card = $("pumpCard"); if(!card || !job) return;
+  const isPump = !!job.pumpMaintenance && !job.firestopping && !(job.emTest||job.pat);
+  card.style.display = isPump ? "" : "none";
+  if(!isPump || !window.MLPump || pumpViewMounted) return;
+  pumpViewMounted = true;
+  window.MLPump.mount($("pumpViewHost"), {
+    jobId: job.id, store: job.pumpStore||"", mode: "view",
+    api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken")
+  });
 }
 
 // EM / PAT jobs: a LIVE read-only view of the engineer's certificate(s) — every

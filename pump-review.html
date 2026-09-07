@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Pump Maintenance Review</title>
+  <script src="/portal-config.js?v=27"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="pump-form.js?v=1"></script>
+  <style>
+    :root{--brand:#003468;--ok:#0a7d33;--bad:#b00020;--warn:#b45309;--line:#e2e8f0;}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:860px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;} .btn.danger{background:#fff;color:var(--bad);border:1px solid #e6b3ba;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:12px;}
+    .rrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #f1f5f9;cursor:pointer;}
+    .rrow:last-child{border-bottom:0;}
+    .rrow .nm{flex:1;font-weight:700;font-size:14.5px;}
+    .rrow .meta{font-size:12px;color:#6b7a90;}
+    .chip{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;}
+    .chip.review{background:#e0f2fe;color:#075985;} .chip.draft{background:#f1f5f9;color:#475569;} .chip.final{background:#dcfce7;color:#166534;}
+    #detail{display:none;}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
+    <h1>🚰 Pump maintenance review</h1>
+    <button class="btn ghost sm" id="listBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);display:none;">‹ Queue</button>
+  </header>
+  <div class="wrap">
+    <div id="queue"><div class="card"><div class="muted">Loading…</div></div></div>
+    <div id="detail">
+      <div class="card" id="detHead"></div>
+      <div class="bar">
+        <button class="btn" id="finBtn">🏁 Finalise &amp; file to site</button>
+        <label class="btn ghost" style="cursor:pointer">⬆ Upload replacement PDF<input type="file" id="upFile" accept="application/pdf" style="display:none"></label>
+        <button class="btn ghost" id="pdfBtn">⬇ Preview PDF</button>
+        <button class="btn danger" id="delBtn">🗑 Delete</button>
+      </div>
+      <div id="pumpHost"></div>
+    </div>
+  </div>
+  <script>
+    const API = window.MOSTLANE_API, g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const af = (p,o={}) => { o.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},o.headers||{}); return fetch((p.startsWith("http")?p:API+p),o); };
+    let CUR = null;
+
+    (async () => {
+      try { const me = await af("/auth/me").then(r=>r.json());
+        if(!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")){ alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      g("listBtn").onclick = showQueue;
+      const open = new URLSearchParams(location.search).get("open");
+      await loadQueue();
+      if(open) openRec(open);
+    })();
+
+    async function loadQueue(){
+      let d=null; try{ d = await af("/pump/review").then(r=>r.json()); }catch{}
+      if(!d||!d.ok){ g("queue").innerHTML='<div class="card muted">Couldn\'t load the queue.</div>'; return; }
+      const rows=d.records||[];
+      g("queue").innerHTML = '<div class="card">'+(rows.length?('<div style="font-size:12px;color:#6b7a90;margin-bottom:4px">'+rows.length+' awaiting review</div>'+rows.map(rowHtml).join("")):'<div class="muted">Nothing to review — all pump records are filed. 🎉</div>')+'</div>';
+      [].forEach.call(g("queue").querySelectorAll(".rrow"), el => el.onclick = () => openRec(el.dataset.id));
+    }
+    function rowHtml(r){
+      const when = r.updatedAt ? new Date(r.updatedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short"}) : "";
+      return '<div class="rrow" data-id="'+esc(r.id)+'"><div class="nm">'+esc(r.storeName||r.store||"Pump")+'<div class="meta">'+esc(r.engineer||"")+(r.date?" · "+esc(r.date):"")+'</div></div><span class="chip '+esc(r.status)+'">'+esc(r.status==="review"?"To review":r.status)+'</span><span class="meta">'+when+'</span></div>';
+    }
+    function showQueue(){ g("detail").style.display="none"; g("queue").style.display=""; g("listBtn").style.display="none"; CUR=null; loadQueue(); }
+
+    async function openRec(id){
+      let d=null; try{ d = await af("/pump/one?id="+encodeURIComponent(id)).then(r=>r.json()); }catch{}
+      if(!d||!d.ok){ alert("Couldn't open that record."); return; }
+      CUR = d.record;
+      g("queue").style.display="none"; g("detail").style.display=""; g("listBtn").style.display="";
+      g("detHead").innerHTML = '<h2 style="margin:0 0 4px;font-size:17px;color:#003468">'+esc(CUR.storeName||CUR.store||"Pump")+'</h2><div class="muted">'+esc(CUR.engineer||"")+(CUR.date?" · "+esc(CUR.date):"")+' · <span class="chip '+esc(CUR.status)+'">'+esc(CUR.status)+'</span></div>';
+      g("finBtn").textContent = "🏁 Finalise & file to site";
+      g("pumpHost").innerHTML="";
+      // Finalised records open read-only; drafts/review open editable (office).
+      window.MLPump.mount(g("pumpHost"), { jobId: CUR.jobId||"", store: CUR.store||"", mode: CUR.status==="final"?"view":"office", api: API, token: localStorage.getItem("mostlaneToken") });
+      g("finBtn").onclick = () => finalise(id);
+      g("pdfBtn").onclick = () => af("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()).then(b=>window.open(URL.createObjectURL(b),"_blank"));
+      g("delBtn").onclick = async () => { const ok = window.MLUI? await MLUI.confirm("Delete this pump record permanently?",{danger:true}):confirm("Delete this pump record?"); if(!ok) return; await af("/pump/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); showQueue(); };
+      g("upFile").onchange = async () => { if(!g("upFile").files[0]) return; const fd=new FormData(); fd.append("id",id); fd.append("file",g("upFile").files[0]); g("finBtn").textContent="Uploading…"; await af("/pump/upload",{method:"POST",body:fd}); showQueue(); };
+    }
+    async function finalise(id){
+      g("finBtn").disabled=true; g("finBtn").textContent="Finalising…";
+      try{ const d = await af("/pump/finalise",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
+        if(d&&d.ok){ if(window.MLUI) MLUI.toast? MLUI.toast("Filed"+(d.filedToSite?" to the site":"")) : null; showQueue(); }
+        else { alert((d&&d.error)||"Finalise failed"); g("finBtn").disabled=false; g("finBtn").textContent="🏁 Finalise & file to site"; }
+      }catch{ alert("Finalise failed"); g("finBtn").disabled=false; g("finBtn").textContent="🏁 Finalise & file to site"; }
+    }
+  </script>
+</body>
+</html>

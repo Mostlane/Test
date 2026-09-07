@@ -185,3 +185,7 @@
   Cache-Control: no-cache
 /cert-form.js
   Cache-Control: no-cache
+/pump-review.html
+  Cache-Control: no-cache
+/pump-form.js
+  Cache-Control: no-cache

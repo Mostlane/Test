@@ -2685,6 +2685,62 @@ it straight onto the compliance chart (rolling the next-due date).
   navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
+## Sump Pump Monthly Maintenance (routes/pump.js + lib/pumppdf.js + pump-form.js + pump-review.html — Sep 2026)
+A per-store maintenance form ported from Jamie's Jotform ("Sump Pump Monthly
+Maintenance", form 252242531697055 — read via the **Jotform connector**, which the
+network otherwise blocks). Modelled EXACTLY on the EM/PAT cert flow: engineer fills
+it on the job → submits → office review → **Mostlane-branded PDF filed to the site**.
+- **Job type:** add-job.html **🚰 Pump Maintenance** tick + a **store picker**
+  (loads `/pump/stores`) → `job.pumpMaintenance` + `job.pumpStore` (threaded through
+  createOrUpdateJobFromPayload + patchJob + the revisit clone in sla.js). Ticking it
+  sends requiresRA/Sig/Photo/Note=false (the record is the completion); the RA lock
+  is off. `completionMissing` returns [] for pump jobs (like EM/PAT) — the job
+  **auto-completes server-side** via `pump.js maybeCompletePumpJob` when the record is
+  submitted or finalised (top-level status + every engineer's engStatus slice).
+- **Six stores, seeded from the Jotform** in app_config `pump:config:<tid>` (self-
+  seeds on first `/pump/config` read; editable via POST /pump/config, office-gated):
+  **Binfield, Wickham, Eastbourne, Shanklin, Wimbledon, Newport ELS**. Each store
+  carries its own **location & method instructions** (verbatim) + its own **checklist**.
+  Three checklists: **general** (13 items — Eastbourne/Shanklin/Wimbledon/Newport ELS),
+  **Binfield** (14, adds "Control panel or alarm system functioning"), **Wickham** (18,
+  adds the ditch + CCTV items). Each check is **Yes / No / N/A** with a shared
+  "details of any check answered No" box.
+- **Required safety pre-check (Jamie's rule):** every store's form opens with TWO
+  mandatory confirmations that must BOTH be Yes before submit — (1) area made safe and
+  **barriered off** to prevent injury (someone falling into the open hatch/sump), and
+  (2) **staff have been notified** the works are being carried out. Stored in
+  `config.safety`; validated client + implied by the checklist gate.
+- **Photos AND video** upload straight to the record (**POST /pump/media** multipart,
+  kind photo|video → R2 JOB_FILES `pump/<tid>/<recordId>/…`; **GET /pump/media** signed
+  inline stream, PUBLIC_ROUTES; photo cap 12 MB, **video cap 95 MB** — under the
+  Workers ~100 MB body limit, keep clips short). **POST /pump/media-delete**.
+- **Two drawn signatures** (engineer + store DM, both required — matches the Jotform)
+  + names + date + the declaration tick. Stored as data-URL JPEGs in the record.
+- **Table `pump_records`** (self-migrating; status draft|review|final, data JSON).
+  Endpoints (`/pump/*`, office = FullAccess|SLAAdmin|Compliance; engineer owns their
+  job's record): GET /config, POST /config, GET /stores, GET /for-job?jobId=&store=
+  (load or seed), POST /save, POST /submit, POST /media(+/media-delete), GET /one,
+  GET /review (queue), GET /list?store=, GET /pdf?id=, POST /finalise (draw PDF →
+  R2 `pump/<tid>/<id>/record.pdf` + file to the store's site Documents under a
+  "Pump Maintenance" area when the store has a `siteCode`), POST /upload (replacement),
+  POST /reopen, POST /delete.
+- **lib/pumppdf.js** `buildPumpPdf(record, meta{logo,engSig,dmSig})` — the same soft-UI
+  house style as certpdf: navy header + logo + store name + status pill, instructions
+  card, safety card, paginated Yes/No/N-A checklist (green/red/grey dots), details-of-No,
+  declaration + the two signatures. Vector-drawn on lib/pdf.js.
+- **Front-end:** shared **pump-form.js** (`window.MLPump.mount(el,{jobId,store,mode:
+  engineer|office|view,api,token,patchComplete,onComplete})`) — instructions + safety +
+  checklist + photo/video + signature pads + autosave + engineer "Complete & submit"
+  (validates everything). Mounted in **engineer-job.html** (pump branch, slim status
+  set Travelling/In Progress), **job-view.html** (read-only "🚰 Pump maintenance record"
+  card + PDF), and **pump-review.html** (office queue → edit in office mode → 🏁 Finalise
+  & file / ⬆ upload replacement / 🗑 delete; deep-links `?open=<id>`). Entry point:
+  **🚰 Pump review** button on sla-main.html (office roles). Submit pushes the office
+  review queue (`sendToPermission`); finalise pushes the engineer. _headers no-cache on
+  pump-review.html + pump-form.js. **Store site codes are blank at seed** — set each
+  store's `siteCode` (POST /pump/config) so its finalised PDF files to that site's
+  Documents. **TODO/next:** Help guide; optional store→portal-site auto-match by name.
+
 ## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
 Re-attending a finished job is a NEW linked job, never a re-open of the old one
 (re-opening a completed job in place breaks the engineer completion gate). Office

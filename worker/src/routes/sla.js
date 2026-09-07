@@ -1956,6 +1956,7 @@ export async function handle(request, env, ctx, url, sess) {
         requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
         requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
         firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
+        pumpMaintenance: src.pumpMaintenance, pumpStore: src.pumpStore,
         workArea: src.workArea || undefined, projectId: src.projectId || undefined,
         assignedEngineers: engineers,
         scheduledAt, durationMinutes,
@@ -2850,6 +2851,10 @@ function completionMissing(job, patch, afterPhotoCount) {
   // Electrical-test jobs: the remedials list is the deliverable (a clean test has
   // none), so completion is relaxed — the engineer taps Complete when finished.
   if (isElecTest(job)) return [];
+  // Pump maintenance jobs are completed by the portal pump record (checklist +
+  // photos/video + signatures, submitted for office review) — like EM/PAT, the
+  // job auto-completes server-side when the record is submitted (maybeCompletePumpJob).
+  if (job && job.pumpMaintenance) return [];
   // Site-audit jobs complete when every checklist item has its completion photo.
   if (isAuditJob(job)) return auditMissing(job);
   // Investigate-only jobs have relaxed gates — Connor sets Quote/Complete freely.
@@ -3627,6 +3632,12 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // works job (photos carried, duration/cost stripped). Preserved across re-saves.
     elecTest: body.elecTest !== undefined ? !!body.elecTest : (existing?.elecTest || false),
     remedials: normRemedials(body.remedials, existing),
+    // Pump (sump-pump) monthly maintenance job: produces a per-store checklist
+    // record (pump_records table) + photos/video + engineer & store-DM signatures,
+    // completed on the job then submitted for office review → branded PDF filed to
+    // the site. `pumpStore` = the chosen store's id in the pump config. Preserved.
+    pumpMaintenance: body.pumpMaintenance !== undefined ? !!body.pumpMaintenance : (existing?.pumpMaintenance || false),
+    pumpStore: body.pumpStore !== undefined ? String(body.pumpStore || "") : (existing?.pumpStore || ""),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
@@ -3823,6 +3834,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emTimer !== undefined) job.emTimer = patch.emTimer || null;   // 3h drain-down countdown
   if (patch.elecTest !== undefined) job.elecTest = !!patch.elecTest;
   if (patch.remedials !== undefined) job.remedials = normRemedials(patch.remedials, job);
+  if (patch.pumpMaintenance !== undefined) job.pumpMaintenance = !!patch.pumpMaintenance;
+  if (patch.pumpStore !== undefined) job.pumpStore = String(patch.pumpStore || "");
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== undefined) job.revisitOf = String(patch.revisitOf || "") || null;
