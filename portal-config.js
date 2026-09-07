@@ -461,6 +461,74 @@
   // below it, portal-wide. Height is exactly the device's inset (0 on a phone
   // with no notch, and in a normal browser tab), so it's only ever as slim as it
   // needs to be. Content scrolling under it looks right because it's opaque.
+  // ── iOS: keep fixed bars on the VISIBLE screen ─────────────────────────────
+  // On an installed iPhone PWA, WebKit positions `position:fixed` against the
+  // LAYOUT viewport, and after the on-screen keyboard has been up on a form
+  // page (or the page was zoomed) that layout viewport can stay shifted from
+  // the visible one — every fixed element then sits a keyboard-height too high
+  // and slides about as you scroll (Jamie: the purple View-As bar + the field
+  // tab bar floating mid-screen on engineer-jobs / engineer-job, and the navy
+  // status strip pushed off the top). Chromium never does this, so it can't be
+  // reproduced headless. Fix: whenever the visual viewport disagrees with the
+  // layout one, pin the bars to the visual viewport's own edges (visualViewport
+  // offsetTop/height); when they agree again, hand back to the CSS. Skipped
+  // while an input has focus (keyboard genuinely up — don't cover the field).
+  (function pinFixedBars() {
+    var vv = window.visualViewport; if (!vv) return;
+    try { if (window.self !== window.top) return; } catch (e) { return; }
+    var SEL = "#mlStatusCap,#mlVaBar,.tabbar";
+    var raf = 0;
+    function typing() {
+      var a = document.activeElement; if (!a) return false;
+      var t = (a.tagName || "").toLowerCase();
+      return t === "input" || t === "textarea" || t === "select" || a.isContentEditable;
+    }
+    function apply() {
+      raf = 0;
+      var els = document.querySelectorAll(SEL); if (!els.length) return;
+      var off = vv.offsetTop || 0;
+      var drift = Math.abs(off) > 1 || Math.abs(window.innerHeight - vv.height) > 1;
+      var pin = drift && !typing();
+      var stack = 0;   // bottom bars stack upward: View-As bar first, tab bar above it
+      // Process bottom bars in stacking order (mlVaBar before .tabbar).
+      var list = Array.prototype.slice.call(els).sort(function (a, b) { return (a.id === "mlVaBar" ? 0 : 1) - (b.id === "mlVaBar" ? 0 : 1); });
+      list.forEach(function (el) {
+        if (getComputedStyle(el).display === "none") return;
+        var isCap = el.id === "mlStatusCap";
+        if (!pin) {
+          if (el.dataset.mlPinned) {
+            el.style.top = el.dataset.mlTop0 || ""; el.style.bottom = el.dataset.mlBottom0 || "";
+            delete el.dataset.mlPinned; delete el.dataset.mlTop0; delete el.dataset.mlBottom0;
+          }
+          return;
+        }
+        if (!el.dataset.mlPinned) { el.dataset.mlPinned = "1"; el.dataset.mlTop0 = el.style.top || ""; el.dataset.mlBottom0 = el.style.bottom || ""; }
+        if (isCap) { el.style.top = off + "px"; return; }
+        var h = el.offsetHeight || 0;
+        el.style.bottom = "auto";
+        el.style.top = Math.round(off + vv.height - h - stack) + "px";
+        stack += h;
+      });
+    }
+    function queue() { if (!raf) raf = requestAnimationFrame(apply); }
+    vv.addEventListener("resize", queue); vv.addEventListener("scroll", queue);
+    window.addEventListener("scroll", queue, { passive: true });
+    window.addEventListener("orientationchange", function () { setTimeout(queue, 250); });
+    window.addEventListener("pageshow", function () { setTimeout(queue, 50); });
+    // Keyboard dismissed: WebKit may leave the layout viewport where the keyboard
+    // pushed it. A zero-distance scrollTo is the cheapest nudge that makes it
+    // re-place fixed elements; re-check shortly after in case it settles late.
+    document.addEventListener("focusout", function () {
+      setTimeout(function () { try { window.scrollTo(window.scrollX, window.scrollY); } catch (e) {} queue(); }, 60);
+      setTimeout(queue, 400);
+    }, true);
+    // Bars are added after load (View-As bar, tab bars in page markup) — re-run once the DOM settles.
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(queue, 0); });
+    else setTimeout(queue, 0);
+    window.addEventListener("load", function () { setTimeout(queue, 100); });
+    window.mlPinFixedBars = queue;
+  })();
+
   (function statusCap() {
     // Only the top document paints it — po.html embeds portal pages in an
     // iframe, and a second cap inside the frame would double the gap.
@@ -868,6 +936,7 @@
           };
           bar.appendChild(lbl); bar.appendChild(btn);
           document.body.appendChild(bar);
+          if (window.mlPinFixedBars) setTimeout(window.mlPinFixedBars, 0);
           // The field app (route/jobs/inbox/you) has its own fixed bottom tab bar
           // at bottom:0 — the purple bar would sit ON TOP and hide it. Lift the
           // tab bar to just above the purple bar so both stay usable while viewing.
