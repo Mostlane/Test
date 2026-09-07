@@ -2753,14 +2753,14 @@ it on the job → submits → office review → **Mostlane-branded PDF filed to 
   Standby/fallback · Compliance test type) are wrapped in a collapsed
   **🧰 Specialist job type** `<details>` to keep the form clean.
 - **Finalise files to the compliance chart's PUMP section (Sep 2026):** finalise calls
-  **`fileCertificatePdf(scheme:"coop", type:"pump", code:<siteCode>, bump:false)`** so the
+  **`fileCertificatePdf(scheme:"coop", type:"pump", code:<siteCode>, bump:true)`** so the
   PDF lands as the site's **current pump document** (and surfaces in Site Documents via
-  the /sla/site/docs compliance injection). **bump:false on purpose** — pump maintenance
-  is MONTHLY but the compliance `pump` line is an annual due date, so filing a monthly
-  record must NOT roll it. Unlinked stores (Eastbourne) skip compliance filing — the PDF
-  still lives on the record + review page. The review page **prompts "Do you want to
-  download the PDF?"** right after finalise. **TODO/next:** confirm which Eastbourne
-  store (link it); Help guide.
+  the /sla/site/docs compliance injection). The **coop `pump` compliance type is MONTHLY**
+  (`SCHEME_DEFAULTS.coop.pump = {months:1, amberDays:14, redDays:7}`) so it flags
+  correctly and each finalise rolls the due date **+1 month** (bumpDue keys off `months`).
+  Unlinked stores (Eastbourne) skip compliance filing — the PDF still lives on the record
+  + review page. The review page **prompts "Do you want to download the PDF?"** right
+  after finalise. **TODO/next:** confirm which Eastbourne store (link it); Help guide.
 
 ## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
 Re-attending a finished job is a NEW linked job, never a re-open of the old one

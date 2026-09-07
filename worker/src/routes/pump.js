@@ -388,7 +388,7 @@ export async function handle(request, env, ctx, url, sess) {
         await fileCertificatePdf(env, tid, {
           scheme: "coop", code: code, type: "pump", bytes: bytes,
           filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${(d.date || now.slice(0, 10))}.pdf`,
-          docDate: d.date || now.slice(0, 10), bump: false, source: "pump:" + rec.id,
+          docDate: d.date || now.slice(0, 10), bump: true, source: "pump:" + rec.id,
           label: "Pump maintenance — " + (d.date || now.slice(0, 10)),
         });
         filedToSite = true;

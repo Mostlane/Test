@@ -9312,7 +9312,8 @@ var init_compliance = __esm({
         pv: { years: 1, amberDays: 90, redDays: 30 },
         ev: { years: 1, amberDays: 90, redDays: 30 },
         forecourt: { years: 1, amberDays: 90, redDays: 30 },
-        pump: { years: 1, amberDays: 90, redDays: 30 }
+        pump: { months: 1, amberDays: 14, redDays: 7 }
+        // sump-pump MONTHLY maintenance
       },
       fareham: {
         fiveYear: { years: 5, amberDays: 90, redDays: 30 },
@@ -32994,7 +32995,7 @@ async function handle33(request, env, ctx, url, sess) {
           bytes,
           filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
           docDate: d.date || now.slice(0, 10),
-          bump: false,
+          bump: true,
           source: "pump:" + rec.id,
           label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
         });
