@@ -23487,6 +23487,7 @@ async function handle23(request, env, ctx, url, sess) {
       }
     }
     let rtMiles = 0, milesSource = "unknown";
+    let rtDriveMins = 0, travelSource = "estimate";
     const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
     if (key) {
       try {
@@ -23498,6 +23499,23 @@ async function handle23(request, env, ctx, url, sess) {
       } catch {
       }
     }
+    if (sitePc && (env.GOOGLE_MAPS_KEY || "")) {
+      try {
+        const gu = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC) + "&destinations=" + encodeURIComponent(sitePc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
+        const gr = await fetch(gu);
+        const gd = await gr.json();
+        const el = gd && gd.status === "OK" && gd.rows && gd.rows[0] && gd.rows[0].elements && gd.rows[0].elements[0];
+        if (el && el.status === "OK") {
+          rtDriveMins = r1(el.duration.value / 60 * 2);
+          travelSource = "google";
+          if (!rtMiles) {
+            rtMiles = r1(el.distance.value / 1609.344 * 2);
+            milesSource = "google";
+          }
+        }
+      } catch {
+      }
+    }
     if (!rtMiles && sitePc) {
       const base = await geoPc(HQ_PC), dest = await geoPc(sitePc);
       if (base && dest) {
@@ -23505,6 +23523,7 @@ async function handle23(request, env, ctx, url, sess) {
         milesSource = "geocoded";
       }
     }
+    if (!rtDriveMins) rtDriveMins = rtMiles > 0 ? r1(rtMiles / SPEED_MPH * 60) : 0;
     const rates = await ratesMap(env, tid);
     const hourlyOf = (u) => {
       const r = rates[u] || rates[String(u).toLowerCase()] || {};
@@ -23518,7 +23537,7 @@ async function handle23(request, env, ctx, url, sess) {
       if (rate == null) anyNoRate = true;
       const days = e.days.size || 0;
       const engMiles = rtMiles * days;
-      const tMins = rtMiles > 0 ? rtMiles / SPEED_MPH * 60 * days : 0;
+      const tMins = rtDriveMins * days;
       const oCost = rate != null ? e.mins / 60 * rate : 0;
       const tCost = rate != null ? tMins / 60 * rate : 0;
       const fCost = engMiles * FUEL_PER_MILE;
@@ -23545,7 +23564,9 @@ async function handle23(request, env, ctx, url, sess) {
       poBound: !!env.PO_DB,
       site: siteName,
       milesSource,
+      travelSource,
       roundTripMiles: r1(rtMiles),
+      roundTripDriveMins: r1(rtDriveMins),
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows2.length },
