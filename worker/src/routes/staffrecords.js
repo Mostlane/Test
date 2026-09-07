@@ -66,6 +66,23 @@ async function poListSubcontractors(env) {
   catch { return []; }
 }
 
+// Managed matrix columns per kind (app_config `staff:matrixcols:<tid>` = {kind:[names]}).
+// Lets a competency column exist before any engineer holds it.
+async function getMatrixCols(db, kind) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:matrixcols:" + db.tenantId).first();
+    const all = row && row.value ? JSON.parse(row.value) : {};
+    return Array.isArray(all[kind]) ? all[kind] : [];
+  } catch { return []; }
+}
+async function setMatrixCols(db, kind, cols) {
+  let all = {};
+  try { const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:matrixcols:" + db.tenantId).first(); all = row && row.value ? JSON.parse(row.value) : {}; } catch {}
+  all[kind] = cols;
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, "staff:matrixcols:" + db.tenantId, JSON.stringify(all)).run();
+}
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -306,6 +323,8 @@ export async function handle(request, env, ctx, url, sess) {
       // keep the record that expires latest (blank expiry ranks lowest)
       if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf(r.expires) };
     }
+    // Managed columns (added via "+ Add column") appear even with no records yet.
+    for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
     const competencies = [...titles].sort((a, b) => a.localeCompare(b));
     const rows = people.map(u => ({
       username: u.username,
@@ -313,6 +332,26 @@ export async function handle(request, env, ctx, url, sess) {
       cells: best[u.username] || {},
     })).sort((a, b) => a.name.localeCompare(b.name));
     return json({ ok: true, kind, competencies, rows }, {}, env, request);
+  }
+  // Add / remove a managed matrix column (competency) for a kind.
+  if (path === "/hr/matrix/column" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    const name = String(b.name || "").trim().slice(0, 120);
+    if (!name) return error("A column name is required.", 400, env, request);
+    const cols = await getMatrixCols(db, kind);
+    if (!cols.some(c => c.toLowerCase() === name.toLowerCase())) { cols.push(name); await setMatrixCols(db, kind, cols); }
+    return json({ ok: true, columns: cols }, {}, env, request);
+  }
+  if (path === "/hr/matrix/column/delete" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    const name = String(b.name || "").trim();
+    const cols = (await getMatrixCols(db, kind)).filter(c => c.toLowerCase() !== name.toLowerCase());
+    await setMatrixCols(db, kind, cols);
+    return json({ ok: true, columns: cols }, {}, env, request);
   }
 
   // ── Create / update (multipart; file optional) ───────────────────────────────

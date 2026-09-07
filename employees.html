@@ -96,6 +96,7 @@
             <label class="lbl" style="display:inline-flex;align-items:center;gap:6px;font-weight:400;font-size:13px;cursor:pointer"><input type="checkbox" id="mxField" style="width:auto"> Field engineers only</label>
           </div>
           <div class="row" style="gap:6px">
+            <button class="btn small" id="mxAddCol">＋ Add column</button>
             <button class="btn ghost small" id="mxCsv">⬇ CSV</button>
             <button class="btn ghost small" id="mxPrint">🖨 Print</button>
           </div>
@@ -103,6 +104,7 @@
         <div class="mx-legend" style="margin:8px 0;font-size:12.5px">
           <span class="chip green">Valid</span> <span class="chip amber">Expiring ≤30d</span>
           <span class="chip red">Expired</span> <span class="chip grey">Not held</span>
+          <span class="muted" style="margin-left:8px">Tip: drag a certificate onto a cell to file it, or tap a cell to add/edit.</span>
         </div>
         <div id="mxWrap" style="overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:10px">
           <div id="mxTable"><p class="muted" style="padding:12px">Loading…</p></div>
@@ -235,7 +237,7 @@
   function showTab(t){
     RETURN_TAB = t;
     document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===t));
-    ["staff","subs","drivers"].forEach(x=>g("tab-"+x).classList.toggle("hide", x!==t));
+    ["staff","matrix","subs","drivers"].forEach(x=>g("tab-"+x).classList.toggle("hide", x!==t));
     if(t==="subs" && !SUBS_LOADED) loadSubs();
     if(t==="drivers" && !DRIVERS_LOADED) loadDrivers();
     if(t==="matrix" && !MATRIX_LOADED) loadMatrix();
@@ -413,16 +415,53 @@
     h+=m.rows.map(row=>{
       const cells=m.competencies.map(c=>{
         const cell=row.cells[c];
-        if(!cell) return `<td class="cell st-none" data-u="${esc(row.username)}" data-n="${esc(row.name)}">—</td>`;
-        const label = cell.status==="none" ? "✓" : (cell.expires?fmtDate(cell.expires):"✓");
-        return `<td class="cell st-${cell.status}" data-u="${esc(row.username)}" data-n="${esc(row.name)}" title="${esc(c)} — ${cell.status}">${label}</td>`;
+        const st = cell ? cell.status : "none";
+        const label = !cell ? "＋" : (cell.status==="none" ? "✓" : (cell.expires?fmtDate(cell.expires):"✓"));
+        return `<td class="cell st-${st}" data-u="${esc(row.username)}" data-n="${esc(row.name)}" data-c="${esc(c)}" title="${esc(c)} — ${cell?cell.status:"not held"} (drop a file or tap)">${label}</td>`;
       }).join("");
-      return `<tr><td class="nm">${esc(row.name)}</td>${cells}</tr>`;
+      return `<tr><td class="nm" data-u="${esc(row.username)}" data-n="${esc(row.name)}" title="Open ${esc(row.name)}">${esc(row.name)}</td>${cells}</tr>`;
     }).join("");
     h+='</tbody></table>';
     g("mxTable").innerHTML=h;
-    document.querySelectorAll("#mxTable td.cell").forEach(td=>td.onclick=()=>openPerson(td.dataset.u, td.dataset.n, false));
+    // Name → open the person; cell tap → add/edit that competency.
+    document.querySelectorAll("#mxTable td.nm").forEach(td=>td.onclick=()=>openPerson(td.dataset.u, td.dataset.n, false));
+    document.querySelectorAll("#mxTable td.cell").forEach(td=>{
+      td.onclick=()=>openCell(td.dataset.u, td.dataset.n, td.dataset.c, null);
+      td.addEventListener("dragover", e=>{ e.preventDefault(); td.style.outline="2px dashed var(--brand)"; });
+      td.addEventListener("dragleave", ()=>{ td.style.outline=""; });
+      td.addEventListener("drop", e=>{ e.preventDefault(); td.style.outline=""; const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; openCell(td.dataset.u, td.dataset.n, td.dataset.c, f||null); });
+    });
   }
+  // Open the add/edit modal for one engineer × competency cell (optionally with a
+  // dropped file). Finds an existing record of that title to edit, else creates.
+  async function openCell(username, name, comp, droppedFile){
+    const kind=g("mxKind").value;
+    CUR_USER=username; CUR_NAME=name; CUR_IS_SUB=false; RETURN_TAB="matrix";
+    let existing=null;
+    try{
+      const r=await authFetch("/hr/records?user="+encodeURIComponent(username)).then(x=>x.json());
+      const recs=(r&&r.records)||[];
+      existing=recs.filter(x=>x.kind===kind && String(x.title||"").trim().toLowerCase()===comp.toLowerCase())
+                   .sort((a,b)=>String(b.expires||"").localeCompare(String(a.expires||"")))[0]||null;
+    }catch(e){}
+    openRec(kind, existing);
+    // Lock the title to the chosen competency column.
+    if(g("f_title")){ g("f_title").value = comp; }
+    if(droppedFile && g("recFile")){
+      try{ const dt=new DataTransfer(); dt.items.add(droppedFile); g("recFile").files=dt.files;
+        g("recDocNow").innerHTML = "Attaching: <b>"+esc(droppedFile.name)+"</b>"; }catch(e){}
+    }
+  }
+  g("mxAddCol").onclick=async ()=>{
+    const kind=g("mxKind").value;
+    const name = window.prompt("Add a "+(kind==="qualification"?"competency / ticket":"column")+" name (e.g. Asbestos Awareness):","");
+    if(!name || !name.trim()) return;
+    try{
+      const r=await authFetch("/hr/matrix/column",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind,name:name.trim()})}).then(x=>x.json());
+      if(!r.ok) throw new Error(r.error||"failed");
+      MATRIX_LOADED=false; loadMatrix();
+    }catch(e){ alert("Couldn’t add the column."); }
+  };
   g("mxKind").addEventListener("change", ()=>{ MATRIX_LOADED=false; loadMatrix(); });
   g("mxField").addEventListener("change", ()=>{ MATRIX_LOADED=false; loadMatrix(); });
   g("mxCsv").onclick=()=>{
@@ -518,6 +557,7 @@
       // If this was a quick "Log check" from the drivers tab (person view not
       // open), go back to the drivers list; otherwise reopen the person.
       if(RETURN_TAB==="drivers" && g("personView").classList.contains("hide")){ DRIVERS_LOADED=false; showTab("drivers"); loadDrivers(); }
+      else if(RETURN_TAB==="matrix" && g("personView").classList.contains("hide")){ MATRIX_LOADED=false; showTab("matrix"); loadMatrix(); }
       else openPerson(CUR_USER, CUR_NAME, false, CUR_IS_SUB, CUR_SUB_LOCAL);
     }catch(e){ g("recMsg").textContent="Couldn’t save — "+e.message; g("recMsg").className="msg err"; }
     finally{ g("recSave").disabled=false; }
