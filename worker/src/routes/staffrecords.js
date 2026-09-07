@@ -277,6 +277,44 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, rows, due: rows.filter(r => r.status === "due").length }, {}, env, request);
   }
 
+  // ── Training matrix — competencies (columns) × staff (rows) ──────────────────
+  // Pivots the records of one kind (default `qualification`) into a grid so the
+  // office can see at a glance who holds what and when each expires. Columns are
+  // the distinct record TITLES; each cell is that person's latest record of that
+  // title (the one with the furthest-out expiry) + its status.
+  if (path === "/hr/matrix" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const kind = KINDS.includes(q.get("kind")) ? q.get("kind") : "qualification";
+    const fieldOnly = q.get("field") === "1";
+    const { results: users } = await db.prepare(
+      "SELECT username, first_name, last_name, status, profile FROM users WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const active = (users || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); return s === "" || s === "active"; });
+    const staffTypeOf = u => { try { return String((JSON.parse(u.profile || "{}").staffType) || "").toLowerCase(); } catch { return ""; } };
+    const people = fieldOnly ? active.filter(u => staffTypeOf(u) !== "office") : active;
+    const { results: recs } = await db.prepare(
+      "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
+    ).bind(db.tenantId, kind).all();
+    const titles = new Set();
+    const best = {};                                    // username -> title -> {expires, id, status}
+    for (const r of (recs || [])) {
+      const t = String(r.title || "").trim();
+      if (!t) continue;
+      titles.add(t);
+      const pm = (best[r.username] = best[r.username] || {});
+      const cur = pm[t];
+      // keep the record that expires latest (blank expiry ranks lowest)
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf(r.expires) };
+    }
+    const competencies = [...titles].sort((a, b) => a.localeCompare(b));
+    const rows = people.map(u => ({
+      username: u.username,
+      name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username,
+      cells: best[u.username] || {},
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    return json({ ok: true, kind, competencies, rows }, {}, env, request);
+  }
+
   // ── Create / update (multipart; file optional) ───────────────────────────────
   if (path === "/hr/record" && method === "POST") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);

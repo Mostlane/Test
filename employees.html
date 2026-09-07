@@ -49,6 +49,14 @@
   .search{ margin-bottom:10px; }
   .tab.active{ background:var(--brand); color:#fff; border-color:var(--brand); }
   .tabpane.hide{ display:none; }
+  table.mx{ border-collapse:separate; border-spacing:0; font-size:12.5px; }
+  table.mx th, table.mx td{ border-bottom:1px solid #eef1f5; border-right:1px solid #eef1f5; padding:7px 9px; white-space:nowrap; text-align:center; }
+  table.mx thead th{ position:sticky; top:0; background:#f4f7fb; z-index:2; font-weight:600; color:#334155; }
+  table.mx td.nm, table.mx th.nm{ position:sticky; left:0; background:#fff; text-align:left; font-weight:600; z-index:1; min-width:150px; }
+  table.mx thead th.nm{ z-index:3; background:#f4f7fb; }
+  table.mx td.cell{ cursor:pointer; }
+  td.st-valid{ background:#e8f5ec; color:#2b7a4b; } td.st-expiring{ background:#fef7e6; color:#8a6100; }
+  td.st-expired{ background:#fdecea; color:#c0392b; font-weight:600; } td.st-none{ background:#fff; color:#c7ced6; }
 </style>
 </head>
 <body>
@@ -63,6 +71,7 @@
   <div id="listView" class="hide">
     <div class="row" id="tabBar" style="gap:6px;margin-bottom:12px">
       <button class="btn ghost small tab" data-tab="staff">👷 Staff</button>
+      <button class="btn ghost small tab" data-tab="matrix">📊 Training matrix</button>
       <button class="btn ghost small tab" data-tab="subs">🧰 Subcontractors</button>
       <button class="btn ghost small tab" data-tab="drivers">🚗 Licence checks</button>
     </div>
@@ -71,6 +80,33 @@
       <div class="card">
         <input id="empSearch" class="search" type="search" placeholder="Search staff by name…">
         <div id="empList"><p class="muted">Loading staff…</p></div>
+      </div>
+    </div>
+
+    <div id="tab-matrix" class="tabpane hide">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="row" style="gap:8px">
+            <select id="mxKind" style="width:auto">
+              <option value="qualification">Qualifications & tickets</option>
+              <option value="licence">Driving licences</option>
+              <option value="insurance">Insurances</option>
+              <option value="licence_check">Licence checks</option>
+            </select>
+            <label class="lbl" style="display:inline-flex;align-items:center;gap:6px;font-weight:400;font-size:13px;cursor:pointer"><input type="checkbox" id="mxField" style="width:auto"> Field engineers only</label>
+          </div>
+          <div class="row" style="gap:6px">
+            <button class="btn ghost small" id="mxCsv">⬇ CSV</button>
+            <button class="btn ghost small" id="mxPrint">🖨 Print</button>
+          </div>
+        </div>
+        <div class="mx-legend" style="margin:8px 0;font-size:12.5px">
+          <span class="chip green">Valid</span> <span class="chip amber">Expiring ≤30d</span>
+          <span class="chip red">Expired</span> <span class="chip grey">Not held</span>
+        </div>
+        <div id="mxWrap" style="overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:10px">
+          <div id="mxTable"><p class="muted" style="padding:12px">Loading…</p></div>
+        </div>
       </div>
     </div>
 
@@ -202,6 +238,7 @@
     ["staff","subs","drivers"].forEach(x=>g("tab-"+x).classList.toggle("hide", x!==t));
     if(t==="subs" && !SUBS_LOADED) loadSubs();
     if(t==="drivers" && !DRIVERS_LOADED) loadDrivers();
+    if(t==="matrix" && !MATRIX_LOADED) loadMatrix();
   }
 
   // ── Staff list ───────────────────────────────────────────────────────────
@@ -357,6 +394,53 @@
     document.querySelectorAll("#driverList [data-log]").forEach(b=>b.onclick=()=>{ CUR_USER=b.dataset.log; CUR_NAME=b.dataset.n; CUR_IS_SUB=false; RETURN_TAB="drivers"; openRec("licence_check", null); });
     document.querySelectorAll("#driverList [data-open]").forEach(b=>b.onclick=()=>openPerson(b.dataset.open, b.dataset.n, false));
   }
+
+  // ── Training matrix ──────────────────────────────────────────────────────────
+  let MATRIX=null, MATRIX_LOADED=false;
+  async function loadMatrix(){
+    const kind=g("mxKind").value, field=g("mxField").checked?"1":"0";
+    g("mxTable").innerHTML='<p class="muted" style="padding:12px">Loading…</p>';
+    try{
+      const r=await authFetch("/hr/matrix?kind="+encodeURIComponent(kind)+"&field="+field).then(x=>x.json());
+      if(!r.ok) throw new Error(r.error||"failed");
+      MATRIX=r; MATRIX_LOADED=true; renderMatrix();
+    }catch(e){ g("mxTable").innerHTML='<p class="msg err" style="padding:12px">Couldn’t load the matrix.</p>'; }
+  }
+  function renderMatrix(){
+    const m=MATRIX; if(!m) return;
+    if(!m.competencies.length){ g("mxTable").innerHTML='<p class="muted" style="padding:12px">No records of this type yet — add some against staff and they’ll appear here as columns.</p>'; return; }
+    let h='<table class="mx"><thead><tr><th class="nm">Engineer</th>'+m.competencies.map(c=>`<th>${esc(c)}</th>`).join("")+'</tr></thead><tbody>';
+    h+=m.rows.map(row=>{
+      const cells=m.competencies.map(c=>{
+        const cell=row.cells[c];
+        if(!cell) return `<td class="cell st-none" data-u="${esc(row.username)}" data-n="${esc(row.name)}">—</td>`;
+        const label = cell.status==="none" ? "✓" : (cell.expires?fmtDate(cell.expires):"✓");
+        return `<td class="cell st-${cell.status}" data-u="${esc(row.username)}" data-n="${esc(row.name)}" title="${esc(c)} — ${cell.status}">${label}</td>`;
+      }).join("");
+      return `<tr><td class="nm">${esc(row.name)}</td>${cells}</tr>`;
+    }).join("");
+    h+='</tbody></table>';
+    g("mxTable").innerHTML=h;
+    document.querySelectorAll("#mxTable td.cell").forEach(td=>td.onclick=()=>openPerson(td.dataset.u, td.dataset.n, false));
+  }
+  g("mxKind").addEventListener("change", ()=>{ MATRIX_LOADED=false; loadMatrix(); });
+  g("mxField").addEventListener("change", ()=>{ MATRIX_LOADED=false; loadMatrix(); });
+  g("mxCsv").onclick=()=>{
+    const m=MATRIX; if(!m) return;
+    const q=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+    const head=["Engineer",...m.competencies].map(q).join(",");
+    const lines=m.rows.map(row=>[q(row.name),...m.competencies.map(c=>{ const cell=row.cells[c]; return q(!cell?"":(cell.status==="expired"?"EXPIRED ":cell.status==="expiring"?"EXPIRING ":"")+(cell.expires||"held")); })].join(","));
+    const csv=[head,...lines].join("\r\n");
+    const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+    a.download="training-matrix-"+g("mxKind").value+".csv"; a.click();
+  };
+  g("mxPrint").onclick=()=>{
+    const m=MATRIX; if(!m) return;
+    const w=window.open("","_blank"); if(!w) return;
+    const legend='<div style="margin:8px 0;font-size:12px">■ <span style="color:#2b7a4b">Valid</span> &nbsp; ■ <span style="color:#8a6100">Expiring</span> &nbsp; ■ <span style="color:#c0392b">Expired</span> &nbsp; — Not held</div>';
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Training matrix</title><style>body{font:12px Arial;padding:16px}h1{font-size:16px}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;text-align:center}td:first-child,th:first-child{text-align:left}.e{background:#fdecea}.w{background:#fef7e6}.v{background:#e8f5ec}</style></head><body><h1>Training matrix — '+esc(g("mxKind").options[g("mxKind").selectedIndex].text)+'</h1><div>'+new Date().toLocaleDateString("en-GB")+'</div>'+legend+'<table><thead><tr><th>Engineer</th>'+m.competencies.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+m.rows.map(row=>'<tr><td>'+esc(row.name)+'</td>'+m.competencies.map(c=>{const cell=row.cells[c];const cl=cell?(cell.status==="expired"?"e":cell.status==="expiring"?"w":"v"):"";return '<td class="'+cl+'">'+(cell?(cell.expires?fmtDate(cell.expires):"✓"):"—")+'</td>';}).join("")+'</tr>').join("")+'</tbody></table></body></html>');
+    w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
+  };
 
   // ── Add / edit modal ───────────────────────────────────────────────────────
   function openRec(kind, rec){
