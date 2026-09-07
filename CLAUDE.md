@@ -1173,8 +1173,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     person's latest record of that title (furthest-out expiry) + status
     (valid/expiring/expired/none). employees.html **📊 Training matrix** tab:
     sticky name column, colour-coded cells, kind selector, "field engineers only"
-    toggle, **CSV + Print** export, cell → opens the person. Read-only pivot of
-    the same data (no new table).
+    toggle, **CSV + Print** export. **Interactive (like the compliance chart):**
+    **drag a certificate onto a cell** (or tap it) → the add/edit modal opens with
+    the engineer + competency locked, set the expiry + attach the file → POST
+    /hr/record → the cell colours by status; tapping the **name** opens the person.
+    **Managed columns:** "＋ Add column" adds a competency via **POST
+    /hr/matrix/column** (app_config `staff:matrixcols:<tid>` = {kind:[names]}), so a
+    column can exist before anyone holds it; GET /hr/matrix merges managed columns
+    with the distinct record titles. (+/delete column endpoints admin-gated.)
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
