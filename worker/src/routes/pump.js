@@ -140,19 +140,23 @@ async function deflate(bytes) {
     return new Uint8Array(await new Response(cs.readable).arrayBuffer());
   } catch { return null; }
 }
+// Returns { img } or { why } so the PDF can say why a photo isn't shown.
 async function photoImage(env, m) {
   try {
-    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key); if (!o) return null;
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key); if (!o) return { why: "file missing" };
     const b = new Uint8Array(await o.arrayBuffer());
-    if (isJpeg(b)) return { jpeg: b, name: m.name || "" };
+    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
     if (isPng(b)) {
-      const d = await decodePngToRgb(b); if (!d) return null;
+      // Camera PNGs can be 12 MP+ — decode with the sampler straight to ≤1000px.
+      const d = await decodePngToRgb(b, { maxPixels: 60e6, maxEdge: 1000 });
+      if (!d) return { why: "PNG couldn't be decoded" };
       const s = shrinkRgb(d.rgb, d.width, d.height, 1000);
       const z = await deflate(s.rgb);
-      return z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" };
+      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
     }
-    return null;
-  } catch { return null; }
+    const ct = (o.httpMetadata && o.httpMetadata.contentType) || "";
+    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported — upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
+  } catch (e) { return { why: "decode error: " + String(e && e.message || e).slice(0, 60) }; }
 }
 const MAX_PDF_PHOTOS = 12;
 // Everything the PDF builder needs from a record row: decoded signatures +
@@ -163,9 +167,9 @@ async function pdfMeta(env, d) {
   for (const m of media) {
     if (!m || !m.key) continue;
     if (m.kind === "video") { videos.push(m.name || "video"); continue; }
-    if (photos.length >= MAX_PDF_PHOTOS) { skipped.push(m.name || "photo"); continue; }
-    const img = await photoImage(env, m);
-    if (img) photos.push(img); else skipped.push(m.name || "photo");
+    if (photos.length >= MAX_PDF_PHOTOS) { skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)"); continue; }
+    const r = await photoImage(env, m);
+    if (r.img) photos.push(r.img); else skipped.push((m.name || "photo") + " — " + (r.why || "not embedded"));
   }
   return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
 }

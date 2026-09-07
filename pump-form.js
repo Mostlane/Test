@@ -124,10 +124,36 @@
     }
 
     // ── media upload ──
+    // Photos are re-encoded on the phone to a ≤1600px JPEG before upload: smaller
+    // uploads, and the PDF builder can embed JPEG directly (a 12-MP PNG or a HEIC
+    // can't be embedded server-side). Always resolves — a stall/failure (iOS can
+    // silently choke on a HEIC decode) falls back to the original file after 8s.
+    function toJpeg(file) {
+      return new Promise(function (resolve) {
+        var done = false, finish = function (v) { if (!done) { done = true; resolve(v); } };
+        try {
+          if (!/^image\//.test(file.type || "") || /gif|svg/i.test(file.type || "")) return finish(file);
+          var url = URL.createObjectURL(file), img = new Image();
+          setTimeout(function () { finish(file); }, 8000);
+          img.onload = function () {
+            try {
+              var MAX = 1600, s = Math.min(1, MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+              var w = Math.max(1, Math.round((img.naturalWidth || 1) * s)), h = Math.max(1, Math.round((img.naturalHeight || 1) * s));
+              var c = document.createElement("canvas"); c.width = w; c.height = h;
+              var cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, w, h); cx.drawImage(img, 0, 0, w, h);
+              c.toBlob(function (b) { URL.revokeObjectURL(url); if (!b) return finish(file); finish(new File([b], (file.name || "photo").replace(/\.[a-z0-9]+$/i, "") + ".jpg", { type: "image/jpeg" })); }, "image/jpeg", 0.85);
+            } catch (e) { finish(file); }
+          };
+          img.onerror = function () { URL.revokeObjectURL(url); finish(file); };
+          img.src = url;
+        } catch (e) { finish(file); }
+      });
+    }
     function uploadMedia(file, kind) {
       if (!REC.id) { // must have a saved record first
         return doSave().then(function () { return REC.id ? uploadMedia(file, kind) : null; });
       }
+      if (kind === "photo" && !file.__jpeg) { return toJpeg(file).then(function (f) { try { f.__jpeg = true; } catch (e) {} return uploadMedia(f, kind); }); }
       var fd = new FormData(); fd.append("id", REC.id); fd.append("kind", kind); fd.append("file", file);
       var note = host.querySelector("#mlpUpNote"); if (note) note.textContent = "Uploading " + kind + "…";
       return af("/pump/media", { method: "POST", body: fd }).then(function (r) { return r.json(); })

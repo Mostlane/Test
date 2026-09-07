@@ -4231,7 +4231,9 @@ async function decodePngToRgb(bytes, opts = {}) {
       p = d + len + 4;
     }
     if (!width || !height || bitDepth !== 8 || interlace !== 0) return null;
-    if (width * height > MAX_PIXELS) return null;
+    if (width * height > (opts.maxPixels || MAX_PIXELS)) return null;
+    const step = opts.maxEdge ? Math.max(1, Math.ceil(Math.max(width, height) / opts.maxEdge)) : 1;
+    const ow = Math.ceil(width / step), oh = Math.ceil(height / step);
     const ch = colorType === 0 ? 1 : colorType === 2 ? 3 : colorType === 3 ? 1 : colorType === 4 ? 2 : colorType === 6 ? 4 : 0;
     if (!ch) return null;
     if (colorType === 3 && !palette) return null;
@@ -4248,16 +4250,16 @@ async function decodePngToRgb(bytes, opts = {}) {
     const raw = new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(ds)).arrayBuffer());
     const bpp = ch, stride = width * ch;
     if (raw.length < height * (stride + 1)) return null;
-    const out = new Uint8Array(height * stride);
+    const out = new Uint8Array(ow * oh * ch);
+    let prev = new Uint8Array(stride), cur = new Uint8Array(stride);
     let ip = 0;
     for (let y = 0; y < height; y++) {
       const filter = raw[ip++];
-      const rowOff = y * stride, prevOff = (y - 1) * stride;
       for (let x = 0; x < stride; x++) {
         const rv = raw[ip++];
-        const a = x >= bpp ? out[rowOff + x - bpp] : 0;
-        const b = y > 0 ? out[prevOff + x] : 0;
-        const c = y > 0 && x >= bpp ? out[prevOff + x - bpp] : 0;
+        const a = x >= bpp ? cur[x - bpp] : 0;
+        const b = y > 0 ? prev[x] : 0;
+        const c = y > 0 && x >= bpp ? prev[x - bpp] : 0;
         let val2;
         switch (filter) {
           case 0:
@@ -4280,10 +4282,20 @@ async function decodePngToRgb(bytes, opts = {}) {
           default:
             return null;
         }
-        out[rowOff + x] = val2 & 255;
+        cur[x] = val2 & 255;
       }
+      if (y % step === 0) {
+        const oy = y / step, rowOff = oy * ow * ch;
+        for (let ox = 0; ox < ow; ox++) {
+          const sx = ox * step * ch;
+          for (let k = 0; k < ch; k++) out[rowOff + ox * ch + k] = cur[sx + k];
+        }
+      }
+      const t = prev;
+      prev = cur;
+      cur = t;
     }
-    const npx = width * height;
+    const npx = ow * oh;
     const px = (pix) => {
       let r, g, bl, al = 255;
       if (colorType === 0) {
@@ -4333,7 +4345,7 @@ async function decodePngToRgb(bytes, opts = {}) {
         rgb[o++] = (bl * al + 255 * inv) / 255 | 0;
       }
     }
-    return { width, height, rgb };
+    return { width: ow, height: oh, rgb };
   } catch {
     return null;
   }
@@ -32791,19 +32803,20 @@ async function deflate(bytes) {
 async function photoImage(env, m) {
   try {
     const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
-    if (!o) return null;
+    if (!o) return { why: "file missing" };
     const b = new Uint8Array(await o.arrayBuffer());
-    if (isJpeg(b)) return { jpeg: b, name: m.name || "" };
+    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
     if (isPng(b)) {
-      const d = await decodePngToRgb(b);
-      if (!d) return null;
+      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
+      if (!d) return { why: "PNG couldn't be decoded" };
       const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
       const z = await deflate(s.rgb);
-      return z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" };
+      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
     }
-    return null;
-  } catch {
-    return null;
+    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
+  } catch (e) {
+    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
   }
 }
 var MAX_PDF_PHOTOS = 12;
@@ -32817,12 +32830,12 @@ async function pdfMeta(env, d) {
       continue;
     }
     if (photos.length >= MAX_PDF_PHOTOS) {
-      skipped.push(m.name || "photo");
+      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
       continue;
     }
-    const img = await photoImage(env, m);
-    if (img) photos.push(img);
-    else skipped.push(m.name || "photo");
+    const r = await photoImage(env, m);
+    if (r.img) photos.push(r.img);
+    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
   }
   return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
 }
