@@ -9579,6 +9579,10 @@ async function ensureTables2(env) {
     notified_at TEXT, link TEXT, source TEXT, status TEXT,
     matched_kind TEXT, matched_cert_id TEXT, matched_job_id TEXT, match_note TEXT,
     created_at TEXT, updated_at TEXT, actioned_at TEXT, actioned_by TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cert_register (
+    tenant_id TEXT, number INTEGER, job TEXT, cert_type TEXT DEFAULT 'fiveYear',
+    created_at TEXT, updated_at TEXT, updated_by TEXT,
+    PRIMARY KEY (tenant_id, number))`).run();
 }
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -11314,6 +11318,77 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/register" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT number, job FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
+    const rows = (results || []).map((r) => ({ number: r.number, job: r.job || "" }));
+    const nums = rows.map((r) => r.number);
+    const max = nums.length ? Math.max(...nums) : 0;
+    const min = nums.length ? Math.min(...nums) : 0;
+    const have = new Set(nums);
+    const gaps = [];
+    for (let n = min; n <= max; n++) if (!have.has(n)) gaps.push(n);
+    const blanks = rows.filter((r) => !String(r.job || "").trim()).map((r) => r.number);
+    return json({ ok: true, entries: rows, count: rows.length, min, max, next: max + 1, gaps, blanks }, {}, env, request);
+  }
+  if (sub === "/register" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number) || number < 1 || number > 999999) return error("A valid number is required.", 400, env, request);
+    const job = String(b.job || "").slice(0, 300);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=excluded.job, updated_at=excluded.updated_at, updated_by=excluded.updated_by").bind(tid, number, job, "fiveYear", now, now, me).run();
+    return json({ ok: true, number, job }, {}, env, request);
+  }
+  if (sub === "/register/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number)) return error("Missing number", 400, env, request);
+    await env.DB.prepare("DELETE FROM cert_register WHERE tenant_id=? AND number=?").bind(tid, number).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/register/import" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let entries = [];
+    if (Array.isArray(b.entries)) {
+      entries = b.entries.map((e) => ({ number: parseInt(e.number, 10), job: String(e.job || "").slice(0, 300) })).filter((e) => Number.isFinite(e.number));
+    } else if (typeof b.text === "string") {
+      for (const line of b.text.split(/\r?\n/)) {
+        const m = line.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
+        if (!m) continue;
+        entries.push({ number: parseInt(m[1], 10), job: String(m[2] || "").trim().slice(0, 300) });
+      }
+    }
+    if (!entries.length) return error("Nothing to import \u2014 paste lines like '349<tab>Corsham Remedials'.", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let imported = 0;
+    for (let i = 0; i < entries.length; i += 40) {
+      const chunk = entries.slice(i, i + 40);
+      await env.DB.batch(chunk.map((e) => env.DB.prepare(
+        // Keep an existing non-empty job if the incoming job is blank.
+        "INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=CASE WHEN excluded.job<>'' THEN excluded.job ELSE cert_register.job END, updated_at=excluded.updated_at, updated_by=excluded.updated_by"
+      ).bind(tid, e.number, e.job, "fiveYear", now, now, me)));
+      imported += chunk.length;
+    }
+    if (b.fillGaps) {
+      const nums = entries.map((e) => e.number);
+      const min = Math.min(...nums), max = Math.max(...nums);
+      const { results } = await env.DB.prepare("SELECT number FROM cert_register WHERE tenant_id=?").bind(tid).all();
+      const have = new Set((results || []).map((r) => r.number));
+      const missing = [];
+      for (let n = min; n <= max; n++) if (!have.has(n)) missing.push(n);
+      for (let i = 0; i < missing.length; i += 40) {
+        await env.DB.batch(missing.slice(i, i + 40).map((n) => env.DB.prepare(
+          "INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?)"
+        ).bind(tid, n, "", "fiveYear", now, now, me)));
+      }
+    }
+    const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
+    return json({ ok: true, imported, count: row ? row.n : imported, next: (row && row.mx ? row.mx : 0) + 1 }, {}, env, request);
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
