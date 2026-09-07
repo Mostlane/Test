@@ -1145,7 +1145,28 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   four sections, add/edit/delete records, expiry badges, doc view (docviewer).
   A field/office employee sees their OWN records read-only on **my-documents.html**
   ("📋 My qualifications, licences & insurances" card). Home-hub widget + overview
-  KPI (`staffrecords` area). _headers + SW `mostlane-v115`.
+  KPI (`staffrecords` area).
+  - **Subcontractors (non-portal people) — bidirectionally linked to the PO
+    system (Sep 2026):** table **staff_subcontractors** (main D1; keyed by
+    `name_key` = normalised name, matching the PO `subcontractors` table which is
+    name-unique). Records attach to a subcontractor via `staff_records.username =
+    "sub:"+name_key`. **GET /hr/subcontractors** MERGES local subs with the PO
+    system's (`env.PO_DB.subcontractors`) — so a sub added in the PO system
+    auto-appears here (`inPO`/`local` flags), and **POST /hr/subcontractor**
+    (name/trade/contact/phone/email) upserts locally AND pushes to PO
+    (`INSERT … ON CONFLICT set active=1`); **POST /hr/subcontractor/delete**
+    deactivates in both. All PO calls fail soft when PO_DB is unbound. A PO-only
+    sub is materialised locally (POST /hr/subcontractor) the first time a record
+    is attached. employees.html has **Staff / Subcontractors / Licence checks**
+    tabs.
+  - **Monthly driver licence checks (proof register):** **GET /hr/driver-checks**
+    = every active user with `vehicle_assigned` set, their latest `licence_check`,
+    and a **done|due** status (done = a check logged in the current calendar
+    month). The licence-check add form defaults **Checked on = today, Next due =
+    +1 month**. Drivers due this month are folded into **/hr/attention** (`driverChecksDue`),
+    the home-hub card, and the daily cron summary. The employees.html "Licence
+    checks" tab lists each driver with a one-tap **Log check** (attach the DVLA
+    result as proof). _headers + SW `mostlane-v115`+.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.

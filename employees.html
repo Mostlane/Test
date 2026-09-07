@@ -47,6 +47,8 @@
   .msg{ font-size:14px; min-height:18px; }
   .msg.ok{ color:#2b7a4b; } .msg.err{ color:#c0392b; }
   .search{ margin-bottom:10px; }
+  .tab.active{ background:var(--brand); color:#fff; border-color:var(--brand); }
+  .tabpane.hide{ display:none; }
 </style>
 </head>
 <body>
@@ -59,9 +61,36 @@
 
   <!-- LIST (admin) -->
   <div id="listView" class="hide">
-    <div class="card">
-      <input id="empSearch" class="search" type="search" placeholder="Search staff by name…">
-      <div id="empList"><p class="muted">Loading staff…</p></div>
+    <div class="row" id="tabBar" style="gap:6px;margin-bottom:12px">
+      <button class="btn ghost small tab" data-tab="staff">👷 Staff</button>
+      <button class="btn ghost small tab" data-tab="subs">🧰 Subcontractors</button>
+      <button class="btn ghost small tab" data-tab="drivers">🚗 Licence checks</button>
+    </div>
+
+    <div id="tab-staff" class="tabpane">
+      <div class="card">
+        <input id="empSearch" class="search" type="search" placeholder="Search staff by name…">
+        <div id="empList"><p class="muted">Loading staff…</p></div>
+      </div>
+    </div>
+
+    <div id="tab-subs" class="tabpane hide">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <input id="subSearch" class="search" type="search" placeholder="Search subcontractors…" style="flex:1">
+          <button class="btn small" id="addSubBtn">+ Add subcontractor</button>
+        </div>
+        <p class="muted" style="font-size:13px;margin:2px 0 8px">Subcontractors sync with the PO system — adding one here adds it there too, and vice versa.</p>
+        <div id="subList"><p class="muted">Loading…</p></div>
+      </div>
+    </div>
+
+    <div id="tab-drivers" class="tabpane hide">
+      <div class="card">
+        <h2 style="margin:0 0 2px;font-size:16px">🚗 Monthly driver licence checks</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 10px">Every driver with a company vehicle should have a licence check logged each month. Tap <b>Log check</b> to record one (with proof).</p>
+        <div id="driverList"><p class="muted">Loading…</p></div>
+      </div>
     </div>
   </div>
 
@@ -92,6 +121,26 @@
     <div class="row" style="justify-content:flex-end;margin-top:8px">
       <button class="btn ghost" id="recCancel">Cancel</button>
       <button class="btn" id="recSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add subcontractor -->
+<div class="modal" id="subModal">
+  <div class="sheet">
+    <h2 style="margin:.1em 0 .4em">Add subcontractor</h2>
+    <p class="muted" style="font-size:13px;margin:0 0 8px">They'll be added to the PO system's subcontractors too.</p>
+    <label class="field"><span class="lbl">Name / company *</span><input id="s_name" type="text" placeholder="e.g. ABC Electrical Ltd"></label>
+    <div class="two">
+      <label class="field"><span class="lbl">Trade</span><input id="s_trade" type="text" placeholder="Electrical"></label>
+      <label class="field"><span class="lbl">Contact name</span><input id="s_contact" type="text"></label>
+      <label class="field"><span class="lbl">Phone</span><input id="s_phone" type="text"></label>
+      <label class="field"><span class="lbl">Email</span><input id="s_email" type="text"></label>
+    </div>
+    <p id="subMsg" class="msg"></p>
+    <div class="row" style="justify-content:flex-end;margin-top:8px">
+      <button class="btn ghost" id="subCancel">Cancel</button>
+      <button class="btn" id="subSave">Add</button>
     </div>
   </div>
 </div>
@@ -128,6 +177,7 @@
   const kindDef = k => KINDS.find(x=>x.kind===k);
 
   let ME=null, CAN=false, CUR_USER="", CUR_NAME="", editing=null, editKind="";
+  let CUR_IS_SUB=false, CUR_SUB_LOCAL=true, RETURN_TAB="staff";
 
   (async ()=>{
     try{
@@ -136,13 +186,23 @@
       ME = me.user;
       CAN = me.user.FullAccess==="Yes" || me.user.StaffRecords==="Yes";
     }catch(e){ location.href="main.html"; return; }
-    if(CAN){ g("listView").classList.remove("hide"); loadList(); }
+    if(CAN){ g("listView").classList.remove("hide"); wireTabs(); showTab("staff"); loadList(); }
     else { // self-view: own records only, read-only
       g("pageTitle").textContent = "My records";
       openPerson(ME.username, ((ME.FirstName||"")+" "+(ME.LastName||"")).trim()||ME.username, true);
     }
     wireModal();
   })();
+
+  // ── Tabs ───────────────────────────────────────────────────────────────────
+  function wireTabs(){ document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>showTab(b.dataset.tab)); }
+  function showTab(t){
+    RETURN_TAB = t;
+    document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===t));
+    ["staff","subs","drivers"].forEach(x=>g("tab-"+x).classList.toggle("hide", x!==t));
+    if(t==="subs" && !SUBS_LOADED) loadSubs();
+    if(t==="drivers" && !DRIVERS_LOADED) loadDrivers();
+  }
 
   // ── Staff list ───────────────────────────────────────────────────────────
   let ROWS=[];
@@ -175,8 +235,8 @@
   g("empSearch").addEventListener("input", renderList);
 
   // ── Person view ──────────────────────────────────────────────────────────
-  async function openPerson(username, name, selfOnly){
-    CUR_USER=username; CUR_NAME=name;
+  async function openPerson(username, name, selfOnly, isSub, subLocal){
+    CUR_USER=username; CUR_NAME=name; CUR_IS_SUB=!!isSub; CUR_SUB_LOCAL=(subLocal!==false);
     g("listView").classList.add("hide"); g("personView").classList.remove("hide");
     g("personName").textContent = name;
     g("backToList").classList.toggle("hide", !CAN);
@@ -230,7 +290,73 @@
       </div>
     </div>`;
   }
-  g("backToList").onclick=()=>{ g("personView").classList.add("hide"); g("listView").classList.remove("hide"); loadList(); };
+  g("backToList").onclick=()=>{ g("personView").classList.add("hide"); g("listView").classList.remove("hide");
+    if(RETURN_TAB==="subs") loadSubs(); else if(RETURN_TAB==="drivers") loadDrivers(); else loadList(); };
+
+  // ── Subcontractors ───────────────────────────────────────────────────────────
+  let SUBS=[], SUBS_LOADED=false;
+  async function loadSubs(){
+    try{
+      const r = await authFetch("/hr/subcontractors").then(x=>x.json());
+      SUBS = (r&&r.rows)||[]; SUBS_LOADED=true; renderSubs();
+    }catch(e){ g("subList").innerHTML='<p class="msg err">Couldn’t load subcontractors.</p>'; }
+  }
+  function renderSubs(){
+    const q=(g("subSearch").value||"").toLowerCase().trim();
+    const rows=SUBS.filter(s=>s.active!==false && (!q || s.name.toLowerCase().includes(q)));
+    if(!rows.length){ g("subList").innerHTML='<p class="muted">No subcontractors yet. Click <b>+ Add subcontractor</b>.</p>'; return; }
+    g("subList").innerHTML = rows.map(s=>`
+      <div class="emp" data-k="${esc(s.nameKey)}">
+        <span class="nm">${esc(s.name)}${s.trade?` <span class="muted" style="font-weight:400">· ${esc(s.trade)}</span>`:""}</span>
+        <span class="row" style="gap:5px">${statusChips(s.counts)}${s.inPO?'<span class="chip grey">PO ✓</span>':""}</span>
+      </div>`).join("");
+    document.querySelectorAll("#subList .emp").forEach(el=>el.onclick=()=>{ const s=SUBS.find(x=>x.nameKey===el.dataset.k);
+      openPerson("sub:"+s.nameKey, s.name, false, true, s.local!==false); });
+  }
+  g("subSearch").addEventListener("input", renderSubs);
+  g("addSubBtn").onclick=openSubForm;
+  function openSubForm(){
+    ["s_name","s_trade","s_contact","s_phone","s_email"].forEach(id=>g(id).value="");
+    g("subMsg").textContent=""; g("subMsg").className="msg";
+    g("subModal").classList.add("show");
+  }
+  g("subCancel").onclick=()=>g("subModal").classList.remove("show");
+  g("subModal").onclick=e=>{ if(e.target===g("subModal")) g("subModal").classList.remove("show"); };
+  g("subSave").onclick=async ()=>{
+    const name=g("s_name").value.trim();
+    if(!name){ g("subMsg").textContent="A name is required."; g("subMsg").className="msg err"; return; }
+    g("subSave").disabled=true; g("subMsg").textContent="Saving…"; g("subMsg").className="msg";
+    try{
+      const body={ name, trade:g("s_trade").value.trim(), contact:g("s_contact").value.trim(), phone:g("s_phone").value.trim(), email:g("s_email").value.trim() };
+      const r=await authFetch("/hr/subcontractor",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(x=>x.json());
+      if(!r.ok) throw new Error(r.error||"save failed");
+      g("subModal").classList.remove("show"); SUBS_LOADED=false; loadSubs();
+    }catch(e){ g("subMsg").textContent="Couldn’t save — "+e.message; g("subMsg").className="msg err"; }
+    finally{ g("subSave").disabled=false; }
+  };
+
+  // ── Driver licence checks ────────────────────────────────────────────────────
+  let DRIVERS=[], DRIVERS_LOADED=false;
+  async function loadDrivers(){
+    try{
+      const r = await authFetch("/hr/driver-checks").then(x=>x.json());
+      DRIVERS = (r&&r.rows)||[]; DRIVERS_LOADED=true; renderDrivers();
+    }catch(e){ g("driverList").innerHTML='<p class="msg err">Couldn’t load drivers.</p>'; }
+  }
+  function renderDrivers(){
+    if(!DRIVERS.length){ g("driverList").innerHTML='<p class="muted">No drivers with a company vehicle assigned.</p>'; return; }
+    g("driverList").innerHTML = DRIVERS.map(d=>`
+      <div class="emp">
+        <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
+        <span class="row" style="gap:6px">
+          ${d.status==="due" ? `<span class="chip amber">Due this month</span>` : `<span class="chip green">✓ Checked ${fmtDate(d.lastChecked)}</span>`}
+          <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
+          <button class="btn ghost small" data-open="${esc(d.username)}" data-n="${esc(d.name)}">History</button>
+        </span>
+      </div>`).join("");
+    document.querySelectorAll("#driverList [data-log]").forEach(b=>b.onclick=()=>{ CUR_USER=b.dataset.log; CUR_NAME=b.dataset.n; CUR_IS_SUB=false; RETURN_TAB="drivers"; openRec("licence_check", null); });
+    document.querySelectorAll("#driverList [data-open]").forEach(b=>b.onclick=()=>openPerson(b.dataset.open, b.dataset.n, false));
+  }
 
   // ── Add / edit modal ───────────────────────────────────────────────────────
   function openRec(kind, rec){
@@ -257,6 +383,12 @@
       if(f.col.startsWith("data.")) el.value = d[f.col.slice(5)]||"";
       else el.value = cur[f.col]||"";
     });
+    // A NEW monthly licence check defaults to today, with the next check due in a month.
+    if(kind==="licence_check" && !rec){
+      const iso = n => n.toISOString().slice(0,10);
+      const today = new Date(); const next = new Date(); next.setMonth(next.getMonth()+1);
+      k.fields.forEach((f,i)=>{ const el=g("f_"+i); if(!el) return; if(f.col==="issued" && !el.value) el.value=iso(today); if(f.col==="expires" && !el.value) el.value=iso(next); });
+    }
     g("f_notes").value = d.notes||"";
     g("recFile").value="";
     g("recDocNow").innerHTML = (rec&&rec.docName) ? `Current: ${esc(rec.docName)} — uploading a new file replaces it. <a href="#" id="rmDoc">Remove</a>` : "";
@@ -290,10 +422,19 @@
     if(!fd.get("title")){ g("recMsg").textContent="A title is required."; g("recMsg").className="msg err"; return; }
     g("recSave").disabled=true; g("recMsg").textContent="Saving…"; g("recMsg").className="msg";
     try{
+      // A PO-only subcontractor (no local record yet) is materialised first so
+      // its name resolves everywhere and its PO link is confirmed.
+      if(CUR_IS_SUB && !CUR_SUB_LOCAL){
+        await authFetch("/hr/subcontractor",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:CUR_NAME})}).then(x=>x.json()).catch(()=>{});
+        CUR_SUB_LOCAL=true; SUBS_LOADED=false;
+      }
       const r=await authFetch("/hr/record",{method:"POST",body:fd}).then(x=>x.json());
       if(!r.ok) throw new Error(r.error||"save failed");
       g("recModal").classList.remove("show");
-      openPerson(CUR_USER, CUR_NAME, false);
+      // If this was a quick "Log check" from the drivers tab (person view not
+      // open), go back to the drivers list; otherwise reopen the person.
+      if(RETURN_TAB==="drivers" && g("personView").classList.contains("hide")){ DRIVERS_LOADED=false; showTab("drivers"); loadDrivers(); }
+      else openPerson(CUR_USER, CUR_NAME, false, CUR_IS_SUB, CUR_SUB_LOCAL);
     }catch(e){ g("recMsg").textContent="Couldn’t save — "+e.message; g("recMsg").className="msg err"; }
     finally{ g("recSave").disabled=false; }
   }
