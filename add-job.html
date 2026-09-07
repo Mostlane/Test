@@ -288,6 +288,11 @@
         <div class="hint">Used to predict the engineer's day length when optimising routes.</div>
       </div>
 
+      <!-- Specialist job types — collapsed by default to keep the form clean -->
+      <details class="field-group" id="jobTypeExtra" style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc">
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;color:#003468;list-style:none">🧰 Specialist job type <span class="hint" style="font-weight:400">— firestopping, electrical test, pump maintenance, standby, EM/PAT (tap to open)</span></summary>
+      <div style="margin-top:10px">
+
       <!-- Firestopping job -->
       <div class="field-group">
         <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
@@ -336,6 +341,9 @@
         </div>
         <div class="hint" id="emHint">Auto-fills the certificate-import text + duration. Yearly EM = 3h (PAT runs in the first 45 min); Monthly EM flick test = 30 min; PAT alone = 45 min. EM cert numbers come from last year's compliance certs.</div>
       </div>
+
+      </div>
+      </details>
 
       <!-- On-site requirements -->
       <div class="field-group" id="reqGroup">
@@ -922,22 +930,68 @@ async function init(){
     g.style.pointerEvents = on ? "none" : "";
     $("fsHint").style.color = on ? "#b45309" : "";
   });
-  // Pump maintenance: reveal the store picker + dim the standard requirements
-  // (the pump form is the completion). Stores load from the /pump config.
+  // Pump maintenance: reveal the store picker, load the stores, and AUTO-FILL the
+  // whole job from the chosen pump site — site type + site (so the office doesn't
+  // pick it), a "{Site} Pump Test {Mon}{YY}" job name and a ready description.
   (function(){
     var pm = $("pumpMaintenance"); if(!pm) return;
     var MAPI = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    var PUMP_STORES = [];
+    // client key (retail/els/…) -> the siteType dropdown's option label
+    var CLIENT_LABEL = { retail:"Retail", els:"ELS", els_private:"ELS Private", cobra:"Cobra", wenzels:"Wenzel’s", fbc:"FBC", chapplins:"Chapplins", projects:"Projects" };
+    function monYY(){
+      var v = $("scheduledAt") && $("scheduledAt").value ? new Date($("scheduledAt").value) : new Date();
+      if(isNaN(v)) v = new Date();
+      var mon = v.toLocaleString("en-GB",{month:"short"});
+      return mon + String(v.getFullYear()).slice(-2);
+    }
+    function pumpDesc(store){
+      return "Sump pump monthly maintenance — " + (store.name||"") + ".\n"
+        + "Complete the on-site pump form: safety pre-check, the monthly checklist, photos/video of the maintenance, and both signatures.";
+    }
+    function setJobName(siteName){
+      var jn = $("jobName"); if(!jn) return;
+      jn.value = (siteName||"") + " Pump Test " + monYY();
+      window.jobNameAuto = jn.value;
+    }
+    async function applyPumpStore(){
+      var id = $("pumpStore") ? $("pumpStore").value : "";
+      var store = PUMP_STORES.filter(function(s){ return s.id===id; })[0];
+      if(!store) return;
+      // Description
+      $("description").value = pumpDesc(store);
+      // Site type + site — select the real portal site when the store is linked.
+      var label = CLIENT_LABEL[(store.client||"").toLowerCase()] || "";
+      if(store.siteCode && label){
+        $("siteType").value = label;
+        try{ await populateSites(); }catch(e){}
+        var sel = $("siteSelect");
+        if(sel){ sel.value = store.siteCode; }
+        if(sel && sel.value === store.siteCode){ handleSiteChange(); setJobName($("siteName").value || store.name); return; }
+      }
+      // Fallback (not linked yet, e.g. Eastbourne): fill the hidden site fields direct.
+      $("siteName").value = store.name || "";
+      $("siteCode").value = store.siteCode || "";
+      $("address").value = store.address || "";
+      $("postcode").value = store.postcode || "";
+      setJobName(store.name);
+      applyReqDefaults();
+    }
     fetch(MAPI + "/pump/stores", { headers: { "Authorization": "Bearer " + (localStorage.getItem("mostlaneToken")||"") } })
       .then(function(r){ return r.json(); })
       .then(function(d){ var sel = $("pumpStore"); if(!sel) return;
-        if(d && d.ok && (d.stores||[]).length){ sel.innerHTML = d.stores.map(function(s){ return '<option value="'+s.id+'">'+ (s.name||s.id) +'</option>'; }).join(""); }
+        PUMP_STORES = (d && d.ok && d.stores) ? d.stores : [];
+        if(PUMP_STORES.length){ sel.innerHTML = PUMP_STORES.map(function(s){ return '<option value="'+s.id+'">'+ (s.name||s.id) +'</option>'; }).join(""); }
         else sel.innerHTML = '<option value="">No pump stores configured</option>';
+        if(pm.checked && PUMP_STORES.length) applyPumpStore();
       }).catch(function(){ var sel=$("pumpStore"); if(sel) sel.innerHTML='<option value="">Couldn\'t load stores</option>'; });
     pm.addEventListener("change", function(){
       var on = this.checked;
       var w = $("pumpStoreWrap"); if(w) w.style.display = on ? "block" : "none";
       var g = $("reqGroup"); g.style.opacity = on ? "0.45" : ""; g.style.pointerEvents = on ? "none" : "";
+      if(on && PUMP_STORES.length) applyPumpStore();
     });
+    if($("pumpStore")) $("pumpStore").addEventListener("change", function(){ if(pm.checked) applyPumpStore(); });
   })();
   applyReqDefaults();
 

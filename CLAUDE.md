@@ -2739,9 +2739,28 @@ it on the job → submits → office review → **Mostlane-branded PDF filed to 
   & file / ⬆ upload replacement / 🗑 delete; deep-links `?open=<id>`). Entry point:
   **🚰 Pump review** button on sla-main.html (office roles). Submit pushes the office
   review queue (`sendToPermission`); finalise pushes the engineer. _headers no-cache on
-  pump-review.html + pump-form.js. **Store site codes are blank at seed** — set each
-  store's `siteCode` (POST /pump/config) so its finalised PDF files to that site's
-  Documents. **TODO/next:** Help guide; optional store→portal-site auto-match by name.
+  pump-review.html + pump-form.js.
+- **Stores linked to portal sites + Add-Job AUTO-FILL (Sep 2026):** each store carries
+  `siteCode`+`client`+`address`+`postcode` in the config. Five are linked (Binfield
+  0382, Wickham 0066, Shanklin 0125, Wimbledon 0404, Newport ELS 0682 — all Co-op
+  retail/els); **Eastbourne is left unlinked** (3 possible retail stores — awaiting
+  Jamie's pick). On add-job.html, ticking 🚰 Pump Maintenance + picking a store
+  **auto-fills the whole job**: selects the Site type + Site dropdowns (via the store's
+  client→label + siteCode; falls back to the hidden site fields when unlinked), sets the
+  **description**, and names the job **"{Site} Pump Test {Mon}{YY}"** (e.g. "Binfield,
+  Forest Road Pump Test Sep26"). `/pump/stores` returns the link fields; the five
+  specialist job-type blocks (Firestopping · Electrical test · Pump Maintenance ·
+  Standby/fallback · Compliance test type) are wrapped in a collapsed
+  **🧰 Specialist job type** `<details>` to keep the form clean.
+- **Finalise files to the compliance chart's PUMP section (Sep 2026):** finalise calls
+  **`fileCertificatePdf(scheme:"coop", type:"pump", code:<siteCode>, bump:false)`** so the
+  PDF lands as the site's **current pump document** (and surfaces in Site Documents via
+  the /sla/site/docs compliance injection). **bump:false on purpose** — pump maintenance
+  is MONTHLY but the compliance `pump` line is an annual due date, so filing a monthly
+  record must NOT roll it. Unlinked stores (Eastbourne) skip compliance filing — the PDF
+  still lives on the record + review page. The review page **prompts "Do you want to
+  download the PDF?"** right after finalise. **TODO/next:** confirm which Eastbourne
+  store (link it); Help guide.
 
 ## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
 Re-attending a finished job is a NEW linked job, never a re-open of the old one
