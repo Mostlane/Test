@@ -2648,6 +2648,20 @@ it straight onto the compliance chart (rolling the next-due date).
   box. **Seeded live from Jamie's register 349→999** (649 numbers; loaded straight
   to D1, customer site names D1-only never the repo): missing **949 & 960**, blanks
   **615, 618–629, 666**, next number **1000**. _headers no-cache.
+  **Auto-add from the compliance-check pass (Sep 2026):** cert_register gained a
+  `source` column (self-migrating; ""=typed/imported, "scan"=auto-read). When the
+  **compliance-review pass** (compliance-review.html "🔍 Run compliance checks")
+  reads each stored 5-year EICR via MLEICR, it now also picks up the certificate's
+  printed number (`analyze().ref`) and — only when that's a CLEAN whole number
+  (`/^0*\d{1,6}$/`, 1–99999) — fire-and-forget POSTs it to **POST
+  /certs/register/auto** `{number, job:<site name>}` (office-gated). That endpoint
+  **INSERT-OR-IGNOREs** (NEVER overwrites a number the office typed) and stamps
+  `source='scan'`, so re-running the pass is safe and idempotent; the register page
+  badges scan-added rows **"from a cert scan"** for a human to verify. Refs with
+  letters/prefixes are skipped (added by hand). This is the "auto-add a new 5-year
+  cert's number to the schedule" path — capture happens when the cert is verified,
+  not at upload (the number lives inside the PDF, which only the browser engine
+  reads reliably).
 - **Client-order intake → approve a remedial (Sep 2026):** a bot (e.g. Grok watching
   the client's Concerto REM/R-order emails) POSTs each order to **POST
   /certs/remedials/order-inbound** (PUBLIC_ROUTES; token verified in-handler —

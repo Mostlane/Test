@@ -34,6 +34,7 @@
     tr.missing{background:#fdf2f2;} tr.blank{background:#fffaf0;}
     .tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:700;margin-left:6px;}
     .tag.miss{background:#fee2e2;color:#b91c1c;} .tag.blank{background:#fef3c7;color:#92400e;}
+    .tag.scan{background:#e0f2fe;color:#075985;}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
     #impBox{display:none;}
     #impText{width:100%;min-height:120px;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:13px monospace;}
@@ -110,7 +111,7 @@
 
     function render() {
       if (!DATA) return;
-      const map = {}; (DATA.entries||[]).forEach(e => map[e.number] = e.job);
+      const map = {}, src = {}; (DATA.entries||[]).forEach(e => { map[e.number] = e.job; src[e.number] = e.source || ""; });
       const q = g("search").value.trim().toLowerCase();
       const min = DATA.min||0, max = DATA.max||0;
       let html = "", shown = 0;
@@ -128,7 +129,8 @@
         const job = has ? map[n] : "";
         if (!matches(n, job)) continue;
         const cls = !has ? "missing" : (!String(job).trim() ? "blank" : "");
-        const tag = !has ? '<span class="tag miss">missing</span>' : (!String(job).trim() ? '<span class="tag blank">blank</span>' : '');
+        let tag = !has ? '<span class="tag miss">missing</span>' : (!String(job).trim() ? '<span class="tag blank">blank</span>' : '');
+        if (has && src[n] === "scan") tag += '<span class="tag scan">from a cert scan</span>';
         html += rowFor(n, job, cls, tag);
         shown++;
       }

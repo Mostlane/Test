@@ -9583,6 +9583,10 @@ async function ensureTables2(env) {
     tenant_id TEXT, number INTEGER, job TEXT, cert_type TEXT DEFAULT 'fiveYear',
     created_at TEXT, updated_at TEXT, updated_by TEXT,
     PRIMARY KEY (tenant_id, number))`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run();
+  } catch (e) {
+  }
 }
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -11321,8 +11325,8 @@ PAT: Import certificate number ${num2}-${yr}`;
   }
   if (sub === "/register" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    const { results } = await env.DB.prepare("SELECT number, job FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
-    const rows = (results || []).map((r) => ({ number: r.number, job: r.job || "" }));
+    const { results } = await env.DB.prepare("SELECT number, job, source FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
+    const rows = (results || []).map((r) => ({ number: r.number, job: r.job || "", source: r.source || "" }));
     const nums = rows.map((r) => r.number);
     const max = nums.length ? Math.max(...nums) : 0;
     const min = nums.length ? Math.min(...nums) : 0;
@@ -11349,6 +11353,17 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!Number.isFinite(number)) return error("Missing number", 400, env, request);
     await env.DB.prepare("DELETE FROM cert_register WHERE tenant_id=? AND number=?").bind(tid, number).run();
     return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/register/auto" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number) || number < 1 || number > 99999) return json({ ok: true, added: false, reason: "out-of-range" }, {}, env, request);
+    const job = String(b.job || "").slice(0, 300);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const res = await env.DB.prepare("INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, number, job, "fiveYear", now, now, me, "scan").run();
+    const added = !!(res && res.meta && res.meta.changes);
+    return json({ ok: true, added, number }, {}, env, request);
   }
   if (sub === "/register/import" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);

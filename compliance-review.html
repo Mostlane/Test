@@ -200,6 +200,21 @@
             if (attn) attention++;
             await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ code: t.code, type: t.type, outcome: outcomeStr, summary: summ.headline, flags: flags, attention: attn, fileId: chosen.d.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+            // Auto-add this EICR's certificate number to the 5-year register if it's a
+            // clean whole number (e.g. "1000"). Never overwrites a number already there
+            // (server INSERT-OR-IGNOREs), so it only fills genuinely-new numbers and is
+            // safe to run every pass. Anything with letters/prefixes is skipped (the
+            // office adds those by hand). Best-effort — never blocks the review save.
+            try {
+              var refRaw = String((chosen.result && chosen.result.ref) || "").trim();
+              if (/^0*\d{1,6}$/.test(refRaw)) {
+                var refNum = parseInt(refRaw, 10);
+                if (refNum >= 1 && refNum <= 99999) {
+                  authFetch("/certs/register/auto", { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ number: refNum, job: t.name || t.code || "" }) }).catch(function () {});
+                }
+              }
+            } catch (e) {}
           } else if (unreadable) {
             attention++;
             await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
