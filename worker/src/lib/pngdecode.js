@@ -8,6 +8,12 @@
 //
 //   await decodePngToRgb(bytes, opts) -> { width, height, rgb } | null
 //
+// opts.maxPixels — override the 4-MP guard (photos: pass ~40e6).
+// opts.maxEdge   — subsample so the OUTPUT's longest edge is ≤ this many px
+//                  (e.g. 1000 for a PDF photo). The un-filter runs two scanlines
+//                  at a time and only sampled pixels are kept, so a 12-MP camera
+//                  PNG never allocates a 36 MB RGB buffer.
+//
 // opts.signature:true — for drawn signatures. Many are captured with a pen colour
 // taken from the page theme, so a light/white stroke on a transparent background
 // comes out invisible on white. When the image is largely transparent (a drawn
@@ -45,7 +51,10 @@ export async function decodePngToRgb(bytes, opts = {}) {
       p = d + len + 4; // + CRC
     }
     if (!width || !height || bitDepth !== 8 || interlace !== 0) return null;
-    if (width * height > MAX_PIXELS) return null;
+    if (width * height > (opts.maxPixels || MAX_PIXELS)) return null;
+    // Sampling step: keep every `step`-th pixel/row so the output fits maxEdge.
+    const step = opts.maxEdge ? Math.max(1, Math.ceil(Math.max(width, height) / opts.maxEdge)) : 1;
+    const ow = Math.ceil(width / step), oh = Math.ceil(height / step);
 
     const ch = colorType === 0 ? 1 : colorType === 2 ? 3 : colorType === 3 ? 1
       : colorType === 4 ? 2 : colorType === 6 ? 4 : 0;
@@ -63,16 +72,18 @@ export async function decodePngToRgb(bytes, opts = {}) {
     // Un-filter scanlines (per-line filter byte + Sub/Up/Average/Paeth).
     const bpp = ch, stride = width * ch;
     if (raw.length < height * (stride + 1)) return null;
-    const out = new Uint8Array(height * stride);
+    // `out` holds only the SAMPLED pixels (ow × oh); the un-filter itself keeps
+    // just the current + previous full scanlines.
+    const out = new Uint8Array(ow * oh * ch);
+    let prev = new Uint8Array(stride), cur = new Uint8Array(stride);
     let ip = 0;
     for (let y = 0; y < height; y++) {
       const filter = raw[ip++];
-      const rowOff = y * stride, prevOff = (y - 1) * stride;
       for (let x = 0; x < stride; x++) {
         const rv = raw[ip++];
-        const a = x >= bpp ? out[rowOff + x - bpp] : 0;
-        const b = y > 0 ? out[prevOff + x] : 0;
-        const c = (y > 0 && x >= bpp) ? out[prevOff + x - bpp] : 0;
+        const a = x >= bpp ? cur[x - bpp] : 0;
+        const b = y > 0 ? prev[x] : 0;
+        const c = (y > 0 && x >= bpp) ? prev[x - bpp] : 0;
         let val;
         switch (filter) {
           case 0: val = rv; break;
@@ -85,11 +96,16 @@ export async function decodePngToRgb(bytes, opts = {}) {
           }
           default: return null;
         }
-        out[rowOff + x] = val & 255;
+        cur[x] = val & 255;
       }
+      if (y % step === 0) {
+        const oy = y / step, rowOff = oy * ow * ch;
+        for (let ox = 0; ox < ow; ox++) { const sx = ox * step * ch; for (let k = 0; k < ch; k++) out[rowOff + ox * ch + k] = cur[sx + k]; }
+      }
+      const t = prev; prev = cur; cur = t;
     }
 
-    const npx = width * height;
+    const npx = ow * oh;
     const px = (pix) => {
       let r, g, bl, al = 255;
       if (colorType === 0) { r = g = bl = out[pix]; }
@@ -126,6 +142,6 @@ export async function decodePngToRgb(bytes, opts = {}) {
         rgb[o++] = ((bl * al) + 255 * inv) / 255 | 0;
       }
     }
-    return { width, height, rgb };
+    return { width: ow, height: oh, rgb };
   } catch { return null; }
 }
