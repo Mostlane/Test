@@ -23250,6 +23250,46 @@ async function handle22(request, env, ctx, url, sess) {
     const rows = await computeDriverChecks(db);
     return json({ ok: true, rows, due: rows.filter((r) => r.status === "due").length }, {}, env, request);
   }
+  if (path === "/hr/matrix" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const kind = KINDS.includes(q.get("kind")) ? q.get("kind") : "qualification";
+    const fieldOnly = q.get("field") === "1";
+    const { results: users } = await db.prepare(
+      "SELECT username, first_name, last_name, status, profile FROM users WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const active = (users || []).filter((u) => {
+      const s = String(u.status || "").trim().toLowerCase();
+      return s === "" || s === "active";
+    });
+    const staffTypeOf3 = (u) => {
+      try {
+        return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const people = fieldOnly ? active.filter((u) => staffTypeOf3(u) !== "office") : active;
+    const { results: recs } = await db.prepare(
+      "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
+    ).bind(db.tenantId, kind).all();
+    const titles = /* @__PURE__ */ new Set();
+    const best = {};
+    for (const r of recs || []) {
+      const t = String(r.title || "").trim();
+      if (!t) continue;
+      titles.add(t);
+      const pm = best[r.username] = best[r.username] || {};
+      const cur = pm[t];
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
+    }
+    const competencies = [...titles].sort((a, b) => a.localeCompare(b));
+    const rows = people.map((u) => ({
+      username: u.username,
+      name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username,
+      cells: best[u.username] || {}
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    return json({ ok: true, kind, competencies, rows }, {}, env, request);
+  }
   if (path === "/hr/record" && method === "POST") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
     const form = await request.formData();
