@@ -153,6 +153,10 @@ async function ensureTables(env) {
     tenant_id TEXT, number INTEGER, job TEXT, cert_type TEXT DEFAULT 'fiveYear',
     created_at TEXT, updated_at TEXT, updated_by TEXT,
     PRIMARY KEY (tenant_id, number))`).run();
+  // `source` marks how a row got here ("" = typed/imported, "scan" = auto-read
+  // from a certificate PDF during the compliance-check pass) so the register can
+  // badge auto-added rows for the office to verify. Self-migrating.
+  try { await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run(); } catch (e) {}
 }
 const STAGES = ["to_quote", "quoted", "approved", "invoiced"];
 const REMEDIAL_CHARGE = 50;   // £ per failed EM LIGHT (batteries are priced by the supplier, no £50)
@@ -1761,8 +1765,8 @@ export async function handle(request, env, ctx, url, sess) {
   // (numbers not yet used) + blanks (numbers with no job assigned).
   if (sub === "/register" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    const { results } = await env.DB.prepare("SELECT number, job FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
-    const rows = (results || []).map(r => ({ number: r.number, job: r.job || "" }));
+    const { results } = await env.DB.prepare("SELECT number, job, source FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
+    const rows = (results || []).map(r => ({ number: r.number, job: r.job || "", source: r.source || "" }));
     const nums = rows.map(r => r.number);
     const max = nums.length ? Math.max(...nums) : 0;
     const min = nums.length ? Math.min(...nums) : 0;
@@ -1791,6 +1795,26 @@ export async function handle(request, env, ctx, url, sess) {
     if (!Number.isFinite(number)) return error("Missing number", 400, env, request);
     await env.DB.prepare("DELETE FROM cert_register WHERE tenant_id=? AND number=?").bind(tid, number).run();
     return json({ ok: true }, {}, env, request);
+  }
+  // POST /certs/register/auto {number, job} — auto-add a cert number read from a
+  // certificate PDF (the compliance-check pass). Deliberately CONSERVATIVE: it
+  // NEVER overwrites a number that already exists (INSERT OR IGNORE), so it can't
+  // clobber a number the office typed; it only fills a genuinely-new number, and
+  // stamps source='scan' so the register can flag it for a human to verify.
+  if (sub === "/register/auto" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    // Only accept a clean, plausible register number (a whole number 1–99999);
+    // anything else (a third-party ref with letters, a huge id) is left for the
+    // office to add by hand rather than risk polluting the register.
+    if (!Number.isFinite(number) || number < 1 || number > 99999) return json({ ok: true, added: false, reason: "out-of-range" }, {}, env, request);
+    const job = String(b.job || "").slice(0, 300);
+    const now = new Date().toISOString();
+    const res = await env.DB.prepare("INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by,source) VALUES (?,?,?,?,?,?,?,?)")
+      .bind(tid, number, job, "fiveYear", now, now, me, "scan").run();
+    const added = !!(res && res.meta && res.meta.changes);
+    return json({ ok: true, added, number }, {}, env, request);
   }
   // POST /certs/register/import — bulk load. Body {text} (one "number  job" per
   // line — a leading "(052)" note is ignored, a number-only line = blank job) OR
