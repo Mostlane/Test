@@ -121,7 +121,7 @@ const SCHEME_DEFAULTS = {
     pv:        { years: 1, amberDays: 90, redDays: 30 },
     ev:        { years: 1, amberDays: 90, redDays: 30 },
     forecourt: { years: 1, amberDays: 90, redDays: 30 },
-    pump:      { years: 1, amberDays: 90, redDays: 30 },
+    pump:      { months: 1, amberDays: 14, redDays: 7 },   // sump-pump MONTHLY maintenance
   },
   fareham: {
     fiveYear:  { years: 5, amberDays: 90, redDays: 30 },
