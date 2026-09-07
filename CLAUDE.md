@@ -2341,7 +2341,9 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
 
 ## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
 A live at-a-glance office view of where every field engineer is right now.
-**GET /sla/live** (office: FullAccess|SLAAdmin|SLA) computes, per field engineer
+**GET /sla/live** (FullAccess|SLAAdmin|**WhereEveryone** — its own Users Admin toggle under
+"Jobs & SLA", Sep 2026; the plain SLA perm no longer opens it, so engineers don't see
+each other's whereabouts unless granted) computes, per field engineer
 (staffType≠office, active), using each engineer's OWN per-engineer slice
 (`effStatus`/`effSchedule`, NOT the release-gated for-engineer view — the office sees
 the true plan): the job they're **on now** (effStatus Travelling / In Progress, incl.

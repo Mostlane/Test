@@ -12435,8 +12435,8 @@ async function handle10(request, env, ctx, url, sess) {
   if (subpath === "/live" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const permSet = await userPerms(env, tenantId, sess);
-    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("SLA")))
-      return jsonResponse({ error: "Office access required" }, headers, 403);
+    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("WhereEveryone")))
+      return jsonResponse({ error: "Needs the Where's everyone permission" }, headers, 403);
     const today = londonNow().date;
     const londonDay = (iso) => {
       try {
@@ -18625,8 +18625,10 @@ var PERMISSION_KEYS = [
   // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
   "Chapplins",
   // the Chapplins customer area (directory + compliance chart)
-  "CableCalc"
+  "CableCalc",
   // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
+  "WhereEveryone"
+  // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
 ];
 function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
