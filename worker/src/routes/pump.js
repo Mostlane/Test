@@ -33,6 +33,7 @@ import { logoBytes } from "../lib/logo.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser, sendToPermission } from "./push.js";
 import { fileCertificatePdf } from "./compliance.js";
+import { decodePngToRgb } from "../lib/pngdecode.js";
 
 const GENERAL = [
   "Chamber free of debris or obstructions", "Water level within expected range when idle",
@@ -112,6 +113,67 @@ function dataUrlToBytes(u) {
   if (!/^data:image\//i.test(s) || i < 0) return null;
   try { const bin = atob(s.slice(i + 1)); const out = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k); return out; } catch { return null; }
 }
+// ── Images for the PDF ────────────────────────────────────────────────────────
+// lib/pdf.js embeds baseline JPEG as-is; anything else must be decoded to raw
+// RGB. Canvas signatures are PNG data-URLs; iPhone photos arrive as JPEG (or PNG
+// screenshots). HEIC/other formats can't be decoded here — they're listed by name.
+const isJpeg = b => b && b.length > 3 && b[0] === 0xFF && b[1] === 0xD8;
+const isPng = b => b && b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+async function sigImage(dataUrl) {
+  const b = dataUrlToBytes(dataUrl); if (!b) return null;
+  if (isJpeg(b)) return { jpeg: b };
+  if (isPng(b)) { const d = await decodePngToRgb(b, { signature: true }); return d ? { rgb: d.rgb, w: d.width, h: d.height } : null; }
+  return null;
+}
+// Nearest-neighbour downscale of raw RGB so a 12-MP PNG doesn't become a 36 MB page.
+function shrinkRgb(rgb, w, h, maxEdge) {
+  const s = Math.max(w, h) / maxEdge; if (s <= 1) return { rgb, w, h };
+  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
+  const out = new Uint8Array(nw * nh * 3);
+  for (let y = 0; y < nh; y++) { const sy = Math.min(h - 1, Math.floor(y * s)); for (let x = 0; x < nw; x++) { const sx = Math.min(w - 1, Math.floor(x * s)); const si = (sy * w + sx) * 3, di = (y * nw + x) * 3; out[di] = rgb[si]; out[di + 1] = rgb[si + 1]; out[di + 2] = rgb[si + 2]; } }
+  return { rgb: out, w: nw, h: nh };
+}
+async function deflate(bytes) {
+  try {
+    const cs = new CompressionStream("deflate");   // zlib-wrapped = PDF FlateDecode
+    const w = cs.writable.getWriter(); w.write(bytes); w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  } catch { return null; }
+}
+async function photoImage(env, m) {
+  try {
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key); if (!o) return null;
+    const b = new Uint8Array(await o.arrayBuffer());
+    if (isJpeg(b)) return { jpeg: b, name: m.name || "" };
+    if (isPng(b)) {
+      const d = await decodePngToRgb(b); if (!d) return null;
+      const s = shrinkRgb(d.rgb, d.width, d.height, 1000);
+      const z = await deflate(s.rgb);
+      return z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" };
+    }
+    return null;
+  } catch { return null; }
+}
+const MAX_PDF_PHOTOS = 12;
+// Everything the PDF builder needs from a record row: decoded signatures +
+// embedded photos (+ names of videos / anything that couldn't be embedded).
+async function pdfMeta(env, d) {
+  const media = Array.isArray(d.media) ? d.media : [];
+  const photos = [], skipped = [], videos = [];
+  for (const m of media) {
+    if (!m || !m.key) continue;
+    if (m.kind === "video") { videos.push(m.name || "video"); continue; }
+    if (photos.length >= MAX_PDF_PHOTOS) { skipped.push(m.name || "photo"); continue; }
+    const img = await photoImage(env, m);
+    if (img) photos.push(img); else skipped.push(m.name || "photo");
+  }
+  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
+}
+async function buildPdfFor(env, rec) {
+  const d = shapeRow(rec);
+  return buildPumpPdf(d, await pdfMeta(env, d));
+}
+
 function shapeRow(r) { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d }; }
 
 // Build the record object the PDF builder + form expect, merging the store template.
@@ -360,7 +422,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!rec) return error("Not found", 404, env, request);
     if (!(await canWrite(rec)) && !isOffice) return error("Not allowed", 403, env, request);
     const d = shapeRow(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes(d.engSig), dmSig: dataUrlToBytes(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${(d.storeName || rec.id)}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
   }
 
@@ -371,7 +433,7 @@ export async function handle(request, env, ctx, url, sess) {
     const rec = await loadRec(String(b.id || ""));
     if (!rec) return error("Not found", 404, env, request);
     const d = shapeRow(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes(d.engSig), dmSig: dataUrlToBytes(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     const now = new Date().toISOString();
     const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
     if (env.JOB_FILES) { try { await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } }); } catch {} }
