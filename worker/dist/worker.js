@@ -9571,6 +9571,18 @@ async function ensureTables2(env) {
     } catch {
     }
   }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS client_orders (
+    id TEXT PRIMARY KEY, tenant_id TEXT, external_id TEXT, order_number TEXT,
+    client TEXT, priority INTEGER, order_value REAL, currency TEXT,
+    title TEXT, detail TEXT, description TEXT, job_category TEXT, observation_codes TEXT,
+    already_done INTEGER, store_code TEXT, site_name TEXT, sr_ref TEXT, site_raw TEXT,
+    notified_at TEXT, link TEXT, source TEXT, status TEXT,
+    matched_kind TEXT, matched_cert_id TEXT, matched_job_id TEXT, match_note TEXT,
+    created_at TEXT, updated_at TEXT, actioned_at TEXT, actioned_by TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cert_register (
+    tenant_id TEXT, number INTEGER, job TEXT, cert_type TEXT DEFAULT 'fiveYear',
+    created_at TEXT, updated_at TEXT, updated_by TEXT,
+    PRIMARY KEY (tenant_id, number))`).run();
 }
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -9839,6 +9851,142 @@ async function reissueCleanCertForRemedialJob(env, tid, job) {
   } catch {
     return null;
   }
+}
+async function matchOrderToRemedial(env, tid, o) {
+  const code = padCode(o.storeCode), num2 = numOf(o.storeCode);
+  if (!code && !num2) return null;
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT cert_id, site_code, site_name, cert_number, stage FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted') ORDER BY created_at DESC LIMIT 200"
+    ).bind(tid).all();
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2);
+    if (cands.length) {
+      const r = cands[0];
+      return { kind: "em", certId: r.cert_id, note: `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})` + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
+    }
+  } catch {
+  }
+  try {
+    const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
+    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num2);
+    if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
+  } catch {
+  }
+  return null;
+}
+function shapeOrder(r) {
+  let codes = [];
+  try {
+    codes = JSON.parse(r.observation_codes || "[]");
+  } catch {
+  }
+  return {
+    id: r.id,
+    externalId: r.external_id || "",
+    orderNumber: r.order_number || "",
+    client: r.client || "",
+    priority: r.priority,
+    orderValue: r.order_value,
+    currency: r.currency || "GBP",
+    title: r.title || "",
+    detail: r.detail || "",
+    jobCategory: r.job_category || "",
+    observationCodes: codes,
+    alreadyDone: r.already_done === 1,
+    storeCode: r.store_code || "",
+    siteName: r.site_name || "",
+    srRef: r.sr_ref || "",
+    notifiedAt: r.notified_at || "",
+    link: r.link || "",
+    source: r.source || "",
+    status: r.status || "new",
+    matchedKind: r.matched_kind || "",
+    matchedCertId: r.matched_cert_id || "",
+    matchedJobId: r.matched_job_id || "",
+    matchNote: r.match_note || "",
+    createdAt: r.created_at || ""
+  };
+}
+async function handleOrderInbound(env, tid, b, ctx, request) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const extId = String(b.externalId || b.messageId || "").slice(0, 200);
+  const orderNumber = String(b.orderNumber || "").slice(0, 60);
+  const storeCode = padCode(b.storeCode || (b.siteRaw ? (String(b.siteRaw).match(/\d{2,5}/) || [])[0] : ""));
+  const siteName = String(b.siteName || "").slice(0, 160);
+  const srRef = String(b.srRef || "").slice(0, 40);
+  const detail = String(b.detail || b.description || "").replace(/https?:\/\/\S+/g, "").replace(/\n{2,}/g, "\n").trim().slice(0, 1e3);
+  const title = String(b.title || `Order ${orderNumber} \u2014 ${siteName || storeCode}`).slice(0, 200);
+  let id = null, created = true;
+  if (extId) {
+    const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND external_id=? LIMIT 1").bind(tid, extId).first().catch(() => null);
+    if (ex) {
+      id = ex.id;
+      created = false;
+    }
+  }
+  if (!id && orderNumber) {
+    const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND order_number=? LIMIT 1").bind(tid, orderNumber).first().catch(() => null);
+    if (ex) {
+      id = ex.id;
+      created = false;
+    }
+  }
+  if (!id) id = "ord-" + crypto.randomUUID();
+  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber });
+  const status = m ? "matched" : "new";
+  await env.DB.prepare(`INSERT INTO client_orders
+    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET order_number=excluded.order_number, client=excluded.client, priority=excluded.priority,
+      order_value=excluded.order_value, currency=excluded.currency, title=excluded.title, detail=excluded.detail,
+      description=excluded.description, job_category=excluded.job_category, observation_codes=excluded.observation_codes,
+      already_done=excluded.already_done, store_code=excluded.store_code, site_name=excluded.site_name, sr_ref=excluded.sr_ref,
+      site_raw=excluded.site_raw, notified_at=excluded.notified_at, link=excluded.link,
+      status=CASE WHEN client_orders.status IN ('actioned','dismissed') THEN client_orders.status ELSE excluded.status END,
+      matched_kind=excluded.matched_kind, matched_cert_id=excluded.matched_cert_id, matched_job_id=excluded.matched_job_id,
+      match_note=excluded.match_note, updated_at=excluded.updated_at`).bind(
+    id,
+    tid,
+    extId || null,
+    orderNumber || null,
+    String(b.client || "").slice(0, 80),
+    Number(b.priority) || null,
+    b.orderValue != null ? Number(b.orderValue) : null,
+    String(b.currency || "GBP").slice(0, 8),
+    title,
+    detail,
+    String(b.description || "").slice(0, 4e3),
+    String(b.jobCategory || "").slice(0, 20),
+    JSON.stringify(Array.isArray(b.observationCodes) ? b.observationCodes.slice(0, 40) : []),
+    b.alreadyDoneOnSite ? 1 : 0,
+    storeCode || null,
+    siteName || null,
+    srRef || null,
+    String(b.siteRaw || "").slice(0, 200),
+    String(b.notifiedAt || now).slice(0, 40),
+    String(b.link || "").slice(0, 800) || null,
+    String(b.source || "concerto").slice(0, 40),
+    status,
+    m ? m.kind : null,
+    m ? m.certId || null : null,
+    m ? m.jobId || null : null,
+    m ? m.note : null,
+    now,
+    now
+  ).run();
+  if (ctx && ctx.waitUntil) {
+    const site = siteName || storeCode || "a site";
+    const body = m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 no matching remedial found yet. Review it in the remedials tracker.`;
+    ctx.waitUntil(sendToPermission(
+      env,
+      tid,
+      ["FullAccess", "SLAAdmin", "Compliance"],
+      { title: m ? "Client order \u2014 approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true },
+      ""
+    ).catch(() => {
+    }));
+  }
+  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
 }
 async function getConfig(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
@@ -10183,6 +10331,29 @@ async function handle9(request, env, ctx, url, sess) {
     const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404 });
     return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+  }
+  if (url.pathname === "/certs/remedials/order-inbound") {
+    const secret = (env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    const m0 = request.method.toUpperCase();
+    if (m0 === "GET") {
+      let fp = null;
+      if (secret) {
+        const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+        fp = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+      }
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, use: "POST the Concerto order JSON with header Authorization: Bearer <token>" }, {}, env, request);
+    }
+    if (m0 === "POST") {
+      if (!secret) return json({ ok: false, error: "Order intake isn't configured (set ORDERS_INBOUND_TOKEN or TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
+      const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      let diff = tok.length === secret.length ? 0 : 1;
+      for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+      if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
+      const oTid = await resolveTenantId(env, request);
+      await ensureTables2(env);
+      const ob = await request.json().catch(() => ({}));
+      return await handleOrderInbound(env, oTid, ob, ctx, request);
+    }
   }
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
@@ -10895,6 +11066,50 @@ PAT: Import certificate number ${num2}-${yr}`;
     ).bind(tid).all();
     return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
   }
+  if (sub === "/remedials/orders" && method === "GET") {
+    if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
+    const all = q.get("all") === "1";
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
+    ).bind(tid).all();
+    return json({ ok: true, orders: (results || []).map(shapeOrder) }, {}, env, request);
+  }
+  if (sub === "/remedials/order-action" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const oid = String(b.id || "").trim();
+    const action = String(b.action || "").toLowerCase();
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, oid).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (action === "dismiss") {
+      await env.DB.prepare("UPDATE client_orders SET status='dismissed', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, oid).run();
+      return json({ ok: true, status: "dismissed" }, {}, env, request);
+    }
+    if (action === "reopen") {
+      const st = ord.matched_cert_id || ord.matched_job_id ? "matched" : "new";
+      await env.DB.prepare("UPDATE client_orders SET status=?, actioned_at=NULL, actioned_by=NULL WHERE tenant_id=? AND id=?").bind(st, tid, oid).run();
+      return json({ ok: true, status: st }, {}, env, request);
+    }
+    if (action === "approve") {
+      let jobId = null, note = "";
+      if (ord.matched_kind === "em" && ord.matched_cert_id) {
+        const lj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "light").catch(() => null);
+        const bj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "battery").catch(() => null);
+        jobId = bj || lj;
+        await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id), lights_job_id=COALESCE(?,lights_job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, bj, lj, tid, ord.matched_cert_id).run();
+        note = jobId ? "Works job raised \u2014 case approved." : "Case approved (no pending fittings to raise).";
+      } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
+        jobId = ord.matched_job_id;
+        note = "Open the electrical-test job to raise the remedial works job.";
+      } else {
+        return json({ ok: false, error: "This order isn't matched to a remedial \u2014 open the tracker and link it manually." }, { status: 400 }, env, request);
+      }
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=COALESCE(?,matched_job_id), actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(jobId, now, me, tid, oid).run();
+      return json({ ok: true, status: "actioned", jobId, note }, {}, env, request);
+    }
+    return error("Unknown action", 400, env, request);
+  }
   if (sub === "/remedials/ack" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
@@ -11104,9 +11319,80 @@ PAT: Import certificate number ${num2}-${yr}`;
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
   }
+  if (sub === "/register" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT number, job FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
+    const rows = (results || []).map((r) => ({ number: r.number, job: r.job || "" }));
+    const nums = rows.map((r) => r.number);
+    const max = nums.length ? Math.max(...nums) : 0;
+    const min = nums.length ? Math.min(...nums) : 0;
+    const have = new Set(nums);
+    const gaps = [];
+    for (let n = min; n <= max; n++) if (!have.has(n)) gaps.push(n);
+    const blanks = rows.filter((r) => !String(r.job || "").trim()).map((r) => r.number);
+    return json({ ok: true, entries: rows, count: rows.length, min, max, next: max + 1, gaps, blanks }, {}, env, request);
+  }
+  if (sub === "/register" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number) || number < 1 || number > 999999) return error("A valid number is required.", 400, env, request);
+    const job = String(b.job || "").slice(0, 300);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=excluded.job, updated_at=excluded.updated_at, updated_by=excluded.updated_by").bind(tid, number, job, "fiveYear", now, now, me).run();
+    return json({ ok: true, number, job }, {}, env, request);
+  }
+  if (sub === "/register/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number)) return error("Missing number", 400, env, request);
+    await env.DB.prepare("DELETE FROM cert_register WHERE tenant_id=? AND number=?").bind(tid, number).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/register/import" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let entries = [];
+    if (Array.isArray(b.entries)) {
+      entries = b.entries.map((e) => ({ number: parseInt(e.number, 10), job: String(e.job || "").slice(0, 300) })).filter((e) => Number.isFinite(e.number));
+    } else if (typeof b.text === "string") {
+      for (const line of b.text.split(/\r?\n/)) {
+        const m = line.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
+        if (!m) continue;
+        entries.push({ number: parseInt(m[1], 10), job: String(m[2] || "").trim().slice(0, 300) });
+      }
+    }
+    if (!entries.length) return error("Nothing to import \u2014 paste lines like '349<tab>Corsham Remedials'.", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let imported = 0;
+    for (let i = 0; i < entries.length; i += 40) {
+      const chunk = entries.slice(i, i + 40);
+      await env.DB.batch(chunk.map((e) => env.DB.prepare(
+        // Keep an existing non-empty job if the incoming job is blank.
+        "INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=CASE WHEN excluded.job<>'' THEN excluded.job ELSE cert_register.job END, updated_at=excluded.updated_at, updated_by=excluded.updated_by"
+      ).bind(tid, e.number, e.job, "fiveYear", now, now, me)));
+      imported += chunk.length;
+    }
+    if (b.fillGaps) {
+      const nums = entries.map((e) => e.number);
+      const min = Math.min(...nums), max = Math.max(...nums);
+      const { results } = await env.DB.prepare("SELECT number FROM cert_register WHERE tenant_id=?").bind(tid).all();
+      const have = new Set((results || []).map((r) => r.number));
+      const missing = [];
+      for (let n = min; n <= max; n++) if (!have.has(n)) missing.push(n);
+      for (let i = 0; i < missing.length; i += 40) {
+        await env.DB.batch(missing.slice(i, i + 40).map((n) => env.DB.prepare(
+          "INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?)"
+        ).bind(tid, n, "", "fiveYear", now, now, me)));
+      }
+    }
+    const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
+    return json({ ok: true, imported, count: row ? row.n : imported, next: (row && row.mx ? row.mx : 0) + 1 }, {}, env, request);
+  }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG, STAGES, REMEDIAL_CHARGE, yy, normEng, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var T, DEFAULT_CONFIG, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -11120,6 +11406,7 @@ var init_certs = __esm({
     init_filesign();
     init_email();
     init_batterypdf();
+    init_tenantdb();
     T = (t) => t === "pat" ? "pat" : "em";
     DEFAULT_CONFIG = {
       // Default client used to seed a NEW cert when the previous cert didn't supply one
@@ -11157,6 +11444,10 @@ var init_certs = __esm({
     };
     STAGES = ["to_quote", "quoted", "approved", "invoiced"];
     REMEDIAL_CHARGE = 50;
+    numOf = (v) => {
+      const d = String(v ?? "").replace(/\D/g, "");
+      return d ? String(Number(d)) : "";
+    };
     yy = () => String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
     normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     cap = (s) => {
@@ -11823,7 +12114,7 @@ async function handle10(request, env, ctx, url, sess) {
       const terms = q.split(/\s+/).map((t) => t.replace(/[%_\\]/g, "")).filter(Boolean).slice(0, 8);
       if (terms.length) {
         const where = terms.map(() => "search LIKE ?").join(" AND ");
-        const likes = terms.map((t) => "%" + t + "%");
+        const likes = terms.map((t) => "%" + likeKey(t, 40) + "%");
         total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
         ({ results: rows } = await db.prepare(`SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
@@ -11874,7 +12165,7 @@ async function handle10(request, env, ctx, url, sess) {
       }
       if (!siteCodeR && digits) siteCodeR = digits.padStart(4, "0");
       if (!body.force) {
-        const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
+        const dkey = likeKey(desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, ""), 40);
         if (dkey) {
           const { results } = await db.prepare(
             "SELECT id, helpdesk_ref, status, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id<>? AND lower(data) LIKE ? LIMIT 30"
@@ -13953,6 +14244,17 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
 async function readJson2(r) {
   const t = await r.text();
   return t ? JSON.parse(t) : {};
+}
+function likeKey(str, maxBytes = 40) {
+  let out = "";
+  let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch;
+    bytes += b;
+  }
+  return out;
 }
 function jsonResponse(data, headers, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -29751,6 +30053,17 @@ function slugify(name) {
 init_http();
 init_auth();
 init_sla();
+function likeKey2(str, maxBytes = 40) {
+  let out = "";
+  let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch;
+    bytes += b;
+  }
+  return out;
+}
 var RULES_KEY = (tid) => `ai:jobrules:${tid}`;
 var HQ_POSTCODE2 = "PO15 5RQ";
 async function getRules2(env, tid) {
@@ -29824,7 +30137,7 @@ async function resolveSite2(env, tid, query) {
   } catch {
   }
   try {
-    const like = "%" + q.replace(/[%_]/g, "") + "%";
+    const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
     const { results } = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND active=1 AND site_name LIKE ? ORDER BY length(site_name) LIMIT 6").bind(tid, like).all();
     if (results && results.length === 1) return siteOut(results[0]);
     if (results && results.length > 1) return { ok: false, ambiguous: results.map((r) => `${r.site_number} ${r.site_name}`) };
@@ -29928,9 +30241,9 @@ var FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return [];
-  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
   const numRun = (q.match(/\d{3,}/) || [])[0];
-  const likeNum = numRun ? "%" + numRun + "%" : like;
+  const likeNum = numRun ? "%" + likeKey2(numRun) + "%" : like;
   try {
     const { results } = await env.DB.prepare(
       "SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, updated_at, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR lower(status) LIKE lower(?) OR lower(data) LIKE lower(?)) ORDER BY (CASE WHEN lower(status) LIKE lower(?) THEN 0 ELSE 1 END), (CASE WHEN status IN ('Complete','Closed','Closed Jobs','Invoiced','Cancelled') THEN 1 ELSE 0 END), updated_at DESC LIMIT 60"
@@ -30433,7 +30746,7 @@ function dueSummary(dueJson) {
 async function toolFindSite(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { count: 0, sites: [] };
-  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
   const num2 = q.replace(/\D/g, "");
   const binds = [tid, like, like];
   let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
@@ -30465,7 +30778,7 @@ async function toolFindCompliance(env, tid, caps2, query, scheme) {
   }
   const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
   if (bare) {
-    const like = "%" + bare.replace(/[%_]/g, "") + "%";
+    const like = "%" + likeKey2(bare.replace(/[%_]/g, "")) + "%";
     const num2 = bare.replace(/\D/g, "");
     sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
     binds.push(like, like);
@@ -30622,7 +30935,7 @@ async function toolCertNumbers(env, tid, store) {
 }
 async function toolFindVehicle(env, tid, caps2, query) {
   if (!caps2.vehicles) return { denied: true, message: "You don't have Vehicles access." };
-  const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
+  const like = "%" + likeKey2(String(query || "").replace(/[%_]/g, "")) + "%";
   try {
     const { results } = await env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND (reg LIKE ? OR make LIKE ? OR model LIKE ?) LIMIT 12").bind(tid, like, like, like).all().catch(() => env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND reg LIKE ? LIMIT 12").bind(tid, like).all());
     const vehicles = (results || []).map((r) => ({ reg: r.reg, make: r.make, model: r.model, motDue: r.mot_due, taxDue: r.tax_due, nextService: r.next_service }));
@@ -31425,6 +31738,7 @@ function md5Hex(bytes) {
 init_http();
 init_auth();
 init_push();
+init_tenantdb();
 var TASK_AREAS = [
   { key: "", label: "\u2014 none (manual only) \u2014", auto: "", page: "" },
   { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit", page: "vehicles.html" },
@@ -31451,6 +31765,12 @@ async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
+    try {
+      await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run();
+    } catch {
+    }
+  }
 }
 function lonYMD(d) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -31576,10 +31896,131 @@ function shapeTask(t) {
     active: t.active !== 0,
     areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
     areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
-    createdBy: t.created_by || ""
+    createdBy: t.created_by || "",
+    category: t.category || "",
+    refDate: t.ref_date || "",
+    createdAt: t.created_at || "",
+    link: t.link || ""
   };
 }
 async function handle32(request, env, ctx, url, sess) {
+  const methodTop = request.method.toUpperCase();
+  const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
+  if (subTop === "/inbound") {
+    const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    if (methodTop === "GET") {
+      let fp = null;
+      if (secret) {
+        const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+        fp = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+      }
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, tokenVar: env.TASKS_INBOUND_TOKEN ? "TASKS_INBOUND_TOKEN" : env.JOBS_INBOUND_TOKEN ? "JOBS_INBOUND_TOKEN" : null, use: "POST JSON (Authorization: Bearer <token>). Create: {title, externalId, ...}. Close: {externalId, action:'done'} or {externalId, action:'delete'}." }, {}, env, request);
+    }
+    if (methodTop === "POST") {
+      if (!secret) return json({ ok: false, error: "Task intake isn't configured (set TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
+      const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      let diff = tok.length === secret.length ? 0 : 1;
+      for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+      if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
+      const tid2 = await resolveTenantId(env, request);
+      await ensureTables4(env);
+      const b = await request.json().catch(() => ({}));
+      const action = String(b.action || "").toLowerCase();
+      const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      const isDone = action === "done" || action === "complete" || b.done === true || b.resolve === true;
+      const isDelete = action === "delete" || action === "remove" || b.delete === true;
+      if (isDone || isDelete) {
+        if (!extKey0) return json({ ok: false, error: "externalId is required to mark done / delete a task" }, { status: 400 }, env, request);
+        const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid2, extKey0).first().catch(() => null);
+        if (!row) return json({ ok: true, found: false, note: "No task with that externalId (already removed, or never created)." }, {}, env, request);
+        if (isDelete) {
+          await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid2, row.id).run();
+          await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid2, row.id).run();
+          return json({ ok: true, found: true, removed: true, id: row.id }, {}, env, request);
+        }
+        let who = [];
+        try {
+          who = JSON.parse(row.assignees || "[]");
+        } catch {
+        }
+        const nowD = (/* @__PURE__ */ new Date()).toISOString();
+        for (const u of who) {
+          await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at").bind(tid2, row.id, u, "once", nowD, "inbound").run();
+        }
+        return json({ ok: true, found: true, done: true, id: row.id }, {}, env, request);
+      }
+      const title = String(b.title || "").trim().slice(0, 300);
+      if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
+      const owner = String(env.OWNER_USERNAME || "Jamie Line");
+      let want = Array.isArray(b.assignees) ? b.assignees : b.assignee ? [b.assignee] : [];
+      want = want.map((s) => String(s || "").trim()).filter(Boolean);
+      if (!want.length) want = [owner];
+      const assignees = [];
+      for (const w of want) {
+        let u = null;
+        try {
+          const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid2, w, w, w).first();
+          u = r && r.username;
+        } catch {
+        }
+        assignees.push(u || w);
+      }
+      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+      const link = String(b.link || urlInDetail || "").slice(0, 800);
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(/* @__PURE__ */ new Date());
+      const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+      const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
+      const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
+      const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      let id = null, created = true;
+      if (extKey) {
+        try {
+          const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid2, extKey).first();
+          if (ex) {
+            id = ex.id;
+            created = false;
+          }
+        } catch {
+        }
+      }
+      if (!id) id = "email-" + crypto.randomUUID();
+      await env.DB.prepare(`INSERT INTO admin_tasks
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`).bind(
+        id,
+        tid2,
+        title,
+        detail,
+        JSON.stringify(assignees),
+        "once",
+        dueTime,
+        null,
+        null,
+        null,
+        dueDate,
+        "",
+        "",
+        1,
+        "inbound",
+        now,
+        now,
+        String(b.source || "outlook").slice(0, 40),
+        extKey || null,
+        category,
+        refDate,
+        link || null
+      ).run();
+      if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid2, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
+      }))));
+      return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
+    }
+  }
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
@@ -31669,13 +32110,14 @@ async function handle32(request, env, ctx, url, sess) {
     const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
     const id = String(b.id || "") || crypto.randomUUID();
     const existing = b.id ? await env.DB.prepare("SELECT created_at, created_by FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
+    const category = b.category != null ? String(b.category).trim().slice(0, 40) : "";
     await env.DB.prepare(`INSERT INTO admin_tasks
-      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, category)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
         recurrence=excluded.recurrence, due_time=excluded.due_time, due_dow=excluded.due_dow, due_dom=excluded.due_dom,
         due_month=excluded.due_month, due_date=excluded.due_date, area=excluded.area, auto_match=excluded.auto_match,
-        active=excluded.active, updated_at=excluded.updated_at`).bind(
+        active=excluded.active, updated_at=excluded.updated_at, category=excluded.category`).bind(
       id,
       tid,
       title,
@@ -31692,7 +32134,8 @@ async function handle32(request, env, ctx, url, sess) {
       b.active === false ? 0 : 1,
       existing && existing.created_by || me,
       existing && existing.created_at || now,
-      now
+      now,
+      category
     ).run();
     if (ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid, u, { title: "New task assigned", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
     }))));
@@ -33935,7 +34378,18 @@ async function handle35(request, env, ctx, url, sess) {
     if (!description) return error("Description required", 400, env, request);
     const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
     if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
-    const days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    let days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    if (b.includeWeekends !== true) {
+      const londonDow = (iso) => {
+        const s = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+        const [y, m, d] = s.split("-").map(Number);
+        return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      };
+      days = days.filter((d) => {
+        const dow = londonDow(d.scheduledAt);
+        return dow !== 0 && dow !== 6;
+      });
+    }
     if (!days.length) return error("No days given", 400, env, request);
     if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
     const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
@@ -36169,6 +36623,16 @@ var PUBLIC_ROUTES = [
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],
+  // connection self-check (fingerprint only, no secret)
+  // Machine-to-machine TASK intake (e.g. an Outlook "emails to reply to" bot) —
+  // TASKS_INBOUND_TOKEN (or JOBS_INBOUND_TOKEN) verified in-handler.
+  ["POST", "/tasks/inbound"],
+  ["GET", "/tasks/inbound"],
+  // connection self-check (fingerprint only, no secret)
+  // Machine-to-machine CLIENT-ORDER intake (e.g. a Concerto REM/R-order email bot) —
+  // ORDERS_INBOUND_TOKEN (or TASKS_/JOBS_INBOUND_TOKEN) verified in-handler.
+  ["POST", "/certs/remedials/order-inbound"],
+  ["GET", "/certs/remedials/order-inbound"],
   // connection self-check (fingerprint only, no secret)
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
   ["GET", "/sla/archive-file"],

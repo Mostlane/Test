@@ -692,7 +692,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   day, how many days, daily start/finish, **reveal time** (the evening before),
   include-weekends. The client builds each day's absolute `scheduledAt` (London)
   and POSTs **/project/create-day-series** (projects-api.js), which creates one
-  SLA job per day linked by **`job.seriesId`**, each with
+  SLA job per day. **Weekend guard (Sep 2026):** the "Include weekends" checkbox is
+  now RESET after each series is created (it used to stick, so a one-off weekend
+  series silently carried "include weekends" into the NEXT project — that's how a
+  Saturday day slipped into Chris/Steve's P0006 drip), the client POSTs
+  **`includeWeekends`**, and **create-day-series DROPS any Sat/Sun day server-side
+  unless `includeWeekends===true`** (Europe/London weekday) — so a project drip can
+  never land on a weekend by accident, even from a stale client.
+  Each day is linked by **`job.seriesId`**, each with
   `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
   now **configurable** — `londonHourDayBefore`). The office sees every day in the
   scheduler; the engineer only sees a day from the reveal time the evening before.
@@ -2619,6 +2626,47 @@ it straight onto the compliance chart (rolling the next-due date).
   toReview+withEngineers with an "Awaiting from engineers / In your review queue"
   breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
   (same `/certs/status?range=30d&count=1` fetch, jget-cached).
+- **EICR 5-year certificate NUMBER register (Sep 2026):** a STANDALONE running
+  register of Mostlane's own EICR/5-year certificate numbers (349→…) so the office
+  can see at a glance the **next number** to allocate and spot **gaps/blanks**. Own
+  table **`cert_register`** (self-migrating; PK tenant_id+number, `job`, `cert_type`
+  default fiveYear) — DELIBERATELY separate from the `certificates` table (that's the
+  portal-generated EM/PAT certs; this is just a number log covering the whole
+  history, most of which predates portal certs). Endpoints (office
+  FullAccess|SLAAdmin|Compliance): **GET /certs/register** (entries + `count`/`min`/
+  `max`/`next=max+1` + `gaps` [missing sequence numbers] + `blanks` [numbers with no
+  job]), **POST /certs/register** `{number, job}` (upsert one — inline-edit a row or
+  add the next), **POST /certs/register/delete** `{number}`, **POST
+  /certs/register/import** (`{text}` one "number  job" per line — a leading "(052)"
+  note ignored, number-only line = blank; OR `{entries:[{number,job}]}`; upserts,
+  a blank job never overwrites a set one; `{fillGaps:true}` also inserts missing
+  sequence numbers as blanks). Front-end **cert-register.html** (📇 Register button
+  on cert-review.html) = a big **Next certificate number** banner, a gaps/blanks
+  warning ("Add these as blanks"), a searchable table newest-first with each `job`
+  an inline-editable input (autosaves; a missing number shows a red "type a job to
+  add it" row; the next number sits at the top as a quick-add), and a paste-import
+  box. **Seeded live from Jamie's register 349→999** (649 numbers; loaded straight
+  to D1, customer site names D1-only never the repo): missing **949 & 960**, blanks
+  **615, 618–629, 666**, next number **1000**. _headers no-cache.
+- **Client-order intake → approve a remedial (Sep 2026):** a bot (e.g. Grok watching
+  the client's Concerto REM/R-order emails) POSTs each order to **POST
+  /certs/remedials/order-inbound** (PUBLIC_ROUTES; token verified in-handler —
+  **ORDERS_INBOUND_TOKEN** if set, else TASKS_/JOBS_INBOUND_TOKEN). Body carries the
+  Concerto fields (`orderNumber, client, priority, orderValue, storeCode, siteName,
+  srRef, siteRaw, description/detail, jobCategory, observationCodes, notifiedAt,
+  externalId, link, source`). Stored in table **`client_orders`** (dedupe by
+  `externalId` then `orderNumber`), and **matched by store code** to a remedial
+  AWAITING APPROVAL — an EM remedial case (`em_remedial_acks` stage to_quote/quoted)
+  or an electrical-test job carrying `remedials` with no works job yet. Pushes the
+  office (`actionable`, deep-links `cert-review.html?orders=1`). **NOT auto-actioned**
+  — the office confirms with one tap. Endpoints (office): **GET /certs/remedials/orders**
+  (`?all=1`), **POST /certs/remedials/order-action** `{id, action:"approve"|"dismiss"
+  |"reopen"}` — `approve` on an EM match raises the works job(s) (`createRemedialJobForCert`
+  light+battery) + advances the ack to `approved`; on an elec match it links the job to
+  raise the works there. Front-end: **📥 Client orders** button + modal on
+  cert-review.html (To-action / All, per-order match note + ✅ Approve & raise works /
+  Dismiss + Open-email/Open-job). GET /certs/remedials/order-inbound = a no-secret
+  connection check.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
@@ -3095,6 +3143,42 @@ POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
 ~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
 user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
+**Task types / filtering (Sep 2026):** admin_tasks gained **`category`** (self-
+migrating) — a type label ("Emails" / "Compliance" / …) so My Tasks can filter by
+type; and **`ref_date`** = a task's "as of" date (an email's RECEIVED date) so the
+portal shows the **real age** + a **⚠ warning past 7 days**, self-updating rather
+than frozen in the title. **my-tasks.html** now: category **filter chips** (All +
+each type, live counts; hidden when there's only one plain group), **oldest-first**
+ordering (by `ref_date` else created), an **age pill** ("N days ago", red ⚠ + a red
+card border once past the flag age) for email-style tasks (a due/overdue pill still
+shows for scheduled ones), a **category pill** per card, and it strips a leading
+"13d · " age prefix a bot may bake into the title (the portal owns the age now).
+The **flag/warn threshold is a per-user SETTING on the page** ("⚑ Flag & warn when
+older than N days", default 7, shown only when there are age-based tasks) — saved to
+localStorage (instant) + mirrored to **/prefs `taskFlagAge`** so it follows the user
+across devices. **Clean detail + email link (Sep 2026):** the email URL is kept OUT
+of the summary text — admin_tasks gained a **`link`** column; inbound stores the link
+there (and STRIPS any URL a bot pasted into `detail`, capturing it as the link),
+`shapeTask` returns `link`, and my-tasks.html renders it as a tidy **"📧 Open email
+↗"** button while stripping any `https?://…` from the shown detail (so the older
+tasks that had the URL glued in also read clean). `shapeTask`
+returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
+**Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
+token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
+**JOBS_INBOUND_TOKEN**) lets an external tool (e.g. an Outlook "emails I need to
+reply to" bot / Grok) create a **one-off** task in someone's list. Body
+`{title (req), detail?, link?, assignee?/assignees[]?, dueDate? (YYYY-MM-DD,
+default today), dueTime? (HH:MM, default 17:00), externalId?, source?, category?
+(default "Emails"), date? (the email's received date → age + >7-day warning)}`. Assignee
+defaults to **OWNER_USERNAME**; each is resolved to a real portal username (exact →
+case-insensitive → "first last"). **Dedupe by `externalId`** (an email message-id):
+re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
++ `ext_key` cols on admin_tasks). GET /tasks/inbound = a no-secret connection check
+(configured? + token fingerprint). Task is `recurrence:"once"`, no auto-match — the
+assignee ticks it on my-tasks.html when they've replied. **Close the loop:** the
+same POST with **`{externalId, action:"done"}`** marks it complete (drops off the
+attention count, shows ticked) and **`{externalId, action:"delete"}`** removes it —
+so the bot clears a task once it sees a sent reply. No-match = success (idempotent).
 
 ## Notifications system
 - **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
@@ -3726,6 +3810,11 @@ is kept as documentation of the hot pages.)
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
+optional **TASKS_INBOUND_TOKEN** (dedicated m2m token for POST /tasks/inbound —
+an external "emails to reply to" bot; falls back to JOBS_INBOUND_TOKEN if unset),
+optional **ORDERS_INBOUND_TOKEN** (dedicated m2m token for POST
+/certs/remedials/order-inbound — the client-order/Concerto email bot; falls back to
+TASKS_INBOUND_TOKEN then JOBS_INBOUND_TOKEN),
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —

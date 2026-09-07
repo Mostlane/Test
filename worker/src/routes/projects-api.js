@@ -662,9 +662,21 @@ export async function handle(request, env, ctx, url, sess) {
     if (!description) return error("Description required", 400, env, request);
     const engineers = Array.isArray(b.engineers) ? b.engineers.map(s => String(s || "").trim()).filter(Boolean) : [];
     if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
-    const days = Array.isArray(b.days)
+    let days = Array.isArray(b.days)
       ? b.days.map(d => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes }))
         .filter(d => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    // Authoritative weekend guard: unless the office explicitly ticked "Include
+    // weekends", NEVER create a Saturday/Sunday day — even if the client sent one
+    // (e.g. a stale checkbox). The office should never get project drip days on a
+    // weekend by accident. Weekday computed in Europe/London.
+    if (b.includeWeekends !== true) {
+      const londonDow = (iso) => {
+        const s = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+        const [y, m, d] = s.split("-").map(Number);
+        return new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=Sun … 6=Sat
+      };
+      days = days.filter(d => { const dow = londonDow(d.scheduledAt); return dow !== 0 && dow !== 6; });
+    }
     if (!days.length) return error("No days given", 400, env, request);
     if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
     const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;

@@ -38,6 +38,8 @@
     <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
     <h1>📄 Certificate review</h1>
     <a class="btn ghost sm" href="cert-jobs.html" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);text-decoration:none;">🗂 EM/PAT jobs</a>
+    <a class="btn ghost sm" href="cert-register.html" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);text-decoration:none;">📇 Register</a>
+    <button class="btn ghost sm" id="ordersBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">📥 Client orders</button>
     <button class="btn ghost sm" id="remedBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">💷 EM remedials</button>
     <button class="btn ghost sm" id="notifyBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">🔔 Notify list</button>
   </header>
@@ -55,6 +57,21 @@
         <button class="btn ghost sm rmtab" data-view="all">All (incl. invoiced)</button>
       </div>
       <div id="rmBody"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
+  <!-- Client orders — incoming approvals (Concerto REM/R-orders) matched to a remedial awaiting approval -->
+  <div id="ordersModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:720px;margin:24px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">📥 Client orders</h2>
+        <button class="btn ghost sm" id="omClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 8px;">Client approvals your email bot fed in. A matched order can raise the remedial works job with one tap.</p>
+      <div style="display:flex;gap:6px;margin:6px 0 10px" id="omTabs">
+        <button class="btn ghost sm omtab" data-view="open">To action</button>
+        <button class="btn ghost sm omtab" data-view="all">All</button>
+      </div>
+      <div id="omBody"><p class="muted">Loading…</p></div>
     </div>
   </div>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
@@ -341,6 +358,67 @@
     g("rmClose").onclick = () => g("remedModal").style.display = "none";
     g("remedModal").onclick = e => { if (e.target === g("remedModal")) g("remedModal").style.display = "none"; };
     [].forEach.call(document.querySelectorAll(".rmtab"), b => b.onclick = () => { RM_VIEW = b.dataset.view; loadTracker(); });
+
+    // ── Client orders ────────────────────────────────────────────────────────────
+    let OM_VIEW = "open";
+    function openOrders(){ g("ordersModal").style.display="block"; loadOrders(); }
+    g("ordersBtn").onclick = openOrders;
+    g("omClose").onclick = () => g("ordersModal").style.display = "none";
+    g("ordersModal").onclick = e => { if (e.target === g("ordersModal")) g("ordersModal").style.display = "none"; };
+    [].forEach.call(document.querySelectorAll(".omtab"), b => b.onclick = () => { OM_VIEW = b.dataset.view; loadOrders(); });
+    async function loadOrders(){
+      [].forEach.call(document.querySelectorAll(".omtab"), b => b.style.fontWeight = (b.dataset.view === OM_VIEW ? "800" : "600"));
+      g("omBody").innerHTML = '<p class="muted">Loading…</p>';
+      let d=null;
+      try { d = await authFetch("/certs/remedials/orders" + (OM_VIEW==="all"?"?all=1":"")).then(r=>r.json()); }
+      catch { g("omBody").innerHTML = '<p class="msg err">Couldn\'t load orders.</p>'; return; }
+      const orders = (d && d.orders) || [];
+      if (!orders.length) { g("omBody").innerHTML = '<p class="muted">'+(OM_VIEW==="all"?"No client orders yet.":"Nothing to action — no unmatched or pending orders. 🎉")+'</p>'; return; }
+      g("omBody").innerHTML = orders.map(orderRow).join("");
+      const setMsg = (oid,t,err) => { const m=g("omBody").querySelector('[data-omsg="'+CSS.escape(oid)+'"]'); if(m){ m.textContent=t; m.className="rcase-msg msg"+(err?" err":" ok"); } };
+      g("omBody").querySelectorAll("[data-oapprove]").forEach(b => b.onclick = async () => {
+        const oid=b.dataset.oapprove; b.disabled=true; setMsg(oid,"Raising the works job…");
+        try { const r = await authFetch("/certs/remedials/order-action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:oid,action:"approve"})}).then(x=>x.json());
+          if (r&&r.ok){ setMsg(oid,(r.note||"Done")+(r.jobId?"":""), false); loadOrders(); if(r.jobId&&r.status==="actioned"){ /* leave a link */ } }
+          else { setMsg(oid,(r&&r.error)||"Couldn't approve.",true); b.disabled=false; } }
+        catch { setMsg(oid,"Couldn't approve.",true); b.disabled=false; }
+      });
+      g("omBody").querySelectorAll("[data-odismiss]").forEach(b => b.onclick = async () => {
+        const oid=b.dataset.odismiss; b.disabled=true;
+        try { const r = await authFetch("/certs/remedials/order-action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:oid,action:"dismiss"})}).then(x=>x.json());
+          if (r&&r.ok) loadOrders(); else { setMsg(oid,"Couldn't dismiss.",true); b.disabled=false; } }
+        catch { setMsg(oid,"Couldn't dismiss.",true); b.disabled=false; }
+      });
+    }
+    function orderRow(o){
+      const matched = o.matchedKind==="em"||o.matchedKind==="elec";
+      const badge = o.status==="actioned" ? '<span class="badge" style="background:#d8f0e0;color:#0e7a3b">Actioned</span>'
+        : o.status==="dismissed" ? '<span class="badge draft">Dismissed</span>'
+        : matched ? '<span class="badge" style="background:#e0f2e9;color:#0e7a3b">Matched</span>'
+        : '<span class="badge review">No match yet</span>';
+      const val = (o.orderValue!=null) ? (" · £"+Number(o.orderValue).toFixed(2)) : "";
+      const site = o.siteName || o.storeCode || "—";
+      let acts="";
+      if (o.status==="new" || o.status==="matched") {
+        if (o.matchedKind==="em") acts += '<button class="btn green sm" data-oapprove="'+esc(o.id)+'">✅ Approve &amp; raise works job</button> ';
+        else if (o.matchedKind==="elec" && o.matchedJobId) acts += '<a class="btn sm" href="/job-view.html?jobId='+encodeURIComponent(o.matchedJobId)+'" style="text-decoration:none">➜ Open job to raise works</a> ';
+        acts += '<button class="btn ghost sm" data-odismiss="'+esc(o.id)+'">Dismiss</button>';
+      } else if (o.matchedJobId) {
+        acts += '<a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(o.matchedJobId)+'" style="text-decoration:none">Open job →</a>';
+      }
+      if (o.link) acts += ' <a class="btn ghost sm" href="'+esc(o.link)+'" target="_blank" rel="noopener" style="text-decoration:none">📧 Email</a>';
+      return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          + '<b style="font-size:14.5px">'+esc(site)+'</b> <span class="muted">'+esc(o.orderNumber||"")+val+'</span>'
+          + '<span style="margin-left:auto">'+badge+'</span></div>'
+        + '<div class="muted" style="margin:4px 0 6px">'+esc(o.title||"")+(o.srRef?' · '+esc(o.srRef):'')+(o.jobCategory?' · '+esc(o.jobCategory):'')+'</div>'
+        + (o.matchNote?'<div style="font-size:12.5px;color:#0e7a3b;margin-bottom:6px">🔗 '+esc(o.matchNote)+'</div>':'<div style="font-size:12.5px;color:#b45309;margin-bottom:6px">No matching remedial awaiting approval — check the site.</div>')
+        + (o.detail?'<div class="muted" style="margin-bottom:6px">'+esc(o.detail)+'</div>':'')
+        + '<div class="rcase-msg msg" data-omsg="'+esc(o.id)+'"></div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap">'+acts+'</div></div>';
+    }
+    // Deep-link from the push: ?orders=1 opens the orders modal.
+    if (new URLSearchParams(location.search).get("orders")==="1") setTimeout(openOrders, 300);
 
     function caseRow(c) {
       const [bg, fg] = STAGE_COL[c.stage] || STAGE_COL.to_quote;
