@@ -51,6 +51,7 @@ import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: p
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
+import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
 import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
@@ -124,6 +125,7 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
+  ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
@@ -461,6 +463,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/compliance/file"],
   // EM remedial battery photos streamed for <img> — signed URL, verified in-handler.
   ["GET", "/certs/photo"],
+  // Pump maintenance photos/videos streamed inline — signed URL, verified in-handler.
+  ["GET", "/pump/media"],
   // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
   // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
   // (The handler re-resolves a real session for logged-in admins on these too.)

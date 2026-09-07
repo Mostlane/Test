@@ -472,13 +472,13 @@ async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey
   const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
   const rs = 4096;
-  const header2 = concat(
+  const header3 = concat(
     salt,
     new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
     new Uint8Array([asPubRaw.length]),
     asPubRaw
   );
-  return concat(header2, ciphertext);
+  return concat(header3, ciphertext);
 }
 async function importVapidPrivate(env) {
   const pub = b64urlToBytes(env.VAPID_PUBLIC);
@@ -495,10 +495,10 @@ async function importVapidPrivate(env) {
 }
 async function vapidAuth(env, endpoint) {
   const aud = new URL(endpoint).origin;
-  const header2 = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const header3 = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
   const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
   const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
-  const signingInput = header2 + "." + payload;
+  const signingInput = header3 + "." + payload;
   const key = await importVapidPrivate(env);
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
   return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
@@ -4020,9 +4020,9 @@ function buildJobSheetPdf(data = {}, meta = {}) {
   if (data.sla) {
     heading("SLA");
     ensure7(18);
-    const pill2 = data.sla.met ? "SLA achieved" : "SLA not achieved";
-    doc.text(M2, y + 9, pill2, { size: 9.5, bold: true, color: data.sla.met ? OK : BAD });
-    if (data.sla.target) doc.text(M2 + textWidth(pill2, 9.5) + 16, y + 9, "Target: " + data.sla.target, { size: 9, color: GREY2 });
+    const pill3 = data.sla.met ? "SLA achieved" : "SLA not achieved";
+    doc.text(M2, y + 9, pill3, { size: 9.5, bold: true, color: data.sla.met ? OK : BAD });
+    if (data.sla.target) doc.text(M2 + textWidth(pill3, 9.5) + 16, y + 9, "Target: " + data.sla.target, { size: 9, color: GREY2 });
     y += 16;
   }
   if (data.time && data.time.total) {
@@ -5720,9 +5720,9 @@ async function handle6(request, env, ctx) {
   function isAdminAuthorised() {
     const secret = env.SITELOG_ADMIN_SECRET || "";
     if (!secret) return false;
-    const header2 = request.headers.get("x-admin-secret") ?? "";
-    if (!header2) return false;
-    return constantTimeEqual(header2, secret);
+    const header3 = request.headers.get("x-admin-secret") ?? "";
+    if (!header3) return false;
+    return constantTimeEqual(header3, secret);
   }
   function requireAdmin2() {
     if (!isAdminAuthorised()) {
@@ -13352,6 +13352,8 @@ async function handle10(request, env, ctx, url, sess) {
         emKind: src.emKind,
         pat: src.pat,
         elecTest: src.elecTest,
+        pumpMaintenance: src.pumpMaintenance,
+        pumpStore: src.pumpStore,
         workArea: src.workArea || void 0,
         projectId: src.projectId || void 0,
         assignedEngineers: engineers,
@@ -14191,6 +14193,7 @@ function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
   if (job && (job.emTest || job.pat)) return [];
   if (isElecTest(job)) return [];
+  if (job && job.pumpMaintenance) return [];
   if (isAuditJob(job)) return auditMissing(job);
   if (job && job.investigateOnly) return [];
   const miss = [];
@@ -14794,6 +14797,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // works job (photos carried, duration/cost stripped). Preserved across re-saves.
     elecTest: body.elecTest !== void 0 ? !!body.elecTest : existing?.elecTest || false,
     remedials: normRemedials(body.remedials, existing),
+    // Pump (sump-pump) monthly maintenance job: produces a per-store checklist
+    // record (pump_records table) + photos/video + engineer & store-DM signatures,
+    // completed on the job then submitted for office review → branded PDF filed to
+    // the site. `pumpStore` = the chosen store's id in the pump config. Preserved.
+    pumpMaintenance: body.pumpMaintenance !== void 0 ? !!body.pumpMaintenance : existing?.pumpMaintenance || false,
+    pumpStore: body.pumpStore !== void 0 ? String(body.pumpStore || "") : existing?.pumpStore || "",
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -14962,6 +14971,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
   if (patch.elecTest !== void 0) job.elecTest = !!patch.elecTest;
   if (patch.remedials !== void 0) job.remedials = normRemedials(patch.remedials, job);
+  if (patch.pumpMaintenance !== void 0) job.pumpMaintenance = !!patch.pumpMaintenance;
+  if (patch.pumpStore !== void 0) job.pumpStore = String(patch.pumpStore || "");
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== void 0) job.revisitOf = String(patch.revisitOf || "") || null;
@@ -15515,11 +15526,11 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   }
   if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M7 = await driveMatrix(env, pts);
-  const baseSeq = solveRoute(M7.mins);
+  const M8 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M8.mins);
   let order = baseSeq, aiUsed = false, aiReason = "";
   if (useAI && env.ANTHROPIC_API_KEY) {
-    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M7.mins, dayStart, notes, baseSeq });
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M8.mins, dayStart, notes, baseSeq });
     if (ai.ok) {
       const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
       const uniq = [...new Set(seq)];
@@ -15538,7 +15549,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const legs = [];
   let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
   for (const p of order) {
-    const dMin = M7.mins[cur][p], dMi = M7.miles[cur][p];
+    const dMin = M8.mins[cur][p], dMi = M8.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
     const j = jobs[p - 1];
@@ -15548,7 +15559,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     t = arrival + j.durationMin;
     cur = p;
   }
-  const homeMin = M7.mins[cur][0], homeMi = M7.miles[cur][0];
+  const homeMin = M8.mins[cur][0], homeMi = M8.miles[cur][0];
   driveMins += homeMin;
   driveMiles += homeMi;
   let lunch = null;
@@ -15568,7 +15579,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     dayStart,
     aiUsed,
     aiReason,
-    matrixSource: M7.source,
+    matrixSource: M8.source,
     home: { postcode: home.postcode },
     legs,
     lunch,
@@ -15582,7 +15593,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
-      source: M7.source
+      source: M8.source
     },
     warnings
   };
@@ -15684,23 +15695,23 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
-  let M7;
-  if (pts.length <= 90) M7 = await roadMatrix(pts);
+  let M8;
+  if (pts.length <= 90) M8 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
-    M7 = { mins, source: "estimate" };
+    M8 = { mins, source: "estimate" };
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
   const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
-  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M7.mins[i][k2] += FERRY;
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M8.mins[i][k2] += FERRY;
   const insertCost = (ei, k) => {
     const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
     let bDelta = Infinity, bPos = 1;
     for (let pos = 1; pos < route.length; pos++) {
       const a = route[pos - 1], b = route[pos];
-      const delta = M7.mins[a][p] + M7.mins[p][b] - M7.mins[a][b];
+      const delta = M8.mins[a][p] + M8.mins[p][b] - M8.mins[a][b];
       if (delta < bDelta) {
         bDelta = delta;
         bPos = pos;
@@ -15708,7 +15719,7 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     return { pos: bPos, delta: bDelta };
   };
-  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M7.mins[pE(ei)][pJ(k)]));
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M8.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
   const unassigned = [], handled = /* @__PURE__ */ new Set();
   const remoteByArea = {};
@@ -15718,13 +15729,13 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => {
-      const c = Math.min(...ks.map((k) => M7.mins[pE(ei)][pJ(k)]));
+      const c = Math.min(...ks.map((k) => M8.mins[pE(ei)][pJ(k)]));
       if (c < bestCost) {
         bestCost = c;
         bestE = ei;
       }
     });
-    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M7.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M8.mins[pE(bestE)][pJ(k)])) : Infinity;
     const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
     const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
     if (!justified) {
@@ -15770,13 +15781,13 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
   const plan = engs.map((e, ei) => {
     const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
-    const subCost = sub.map((a) => sub.map((b) => M7.mins[a][b]));
+    const subCost = sub.map((a) => sub.map((b) => M8.mins[a][b]));
     const solved = solveRoute(subCost);
     const orderedK = solved.map((si) => e.seq[si - 1]);
     const legs = [];
     let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
-      const p = pJ(k), dMin = M7.mins[cur][p];
+      const p = pJ(k), dMin = M8.mins[cur][p];
       drive += dMin;
       const j = jobs[k];
       let arrival = t + dMin;
@@ -15791,12 +15802,12 @@ async function autoScheduleDay(env, tenantId, body) {
       t = arrival + j.durationMin;
       cur = p;
     }
-    const homeMin = orderedK.length ? M7.mins[cur][pE(ei)] : 0;
+    const homeMin = orderedK.length ? M8.mins[cur][pE(ei)] : 0;
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, blocks: e.blk.map((b) => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })), legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  let matrixSource = M7.source;
-  if (M7.source !== "osrm" && plan.length) {
+  let matrixSource = M8.source;
+  if (M8.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     const engBlk = new Map(engs.map((e) => [e.username, e.blk]));
@@ -23623,7 +23634,7 @@ async function handle23(request, env, ctx, url, sess) {
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
     const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
-    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
+    const siteKeyOf3 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
       return bySite[key] || (bySite[key] = {
@@ -23669,7 +23680,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!name) continue;
         const resolved = resolveSite(reg, name);
         const s = siteFor(name, resolved);
-        const sKey = siteKeyOf2(resolved, name);
+        const sKey = siteKeyOf3(resolved, name);
         seededProjects[sKey] = { id: p.id, number: p.number };
       }
     } catch {
@@ -23680,7 +23691,7 @@ async function handle23(request, env, ctx, url, sess) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
         const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
-        const sKey = siteKeyOf2(resolved, slSite.siteCode);
+        const sKey = siteKeyOf3(resolved, slSite.siteCode);
         for (const p of slSite.people || []) {
           if (!p.costedVisits) continue;
           const portalUser = (p.portalUsername || "").trim();
@@ -23718,7 +23729,7 @@ async function handle23(request, env, ctx, url, sess) {
     for (const d of days) {
       for (const e of d.entries) {
         const s = siteFor(e.site, e.resolved);
-        const sKey = siteKeyOf2(e.resolved, e.site);
+        const sKey = siteKeyOf3(e.resolved, e.site);
         const cu = canonEng(e.user);
         if (slCovered.has(sKey + "::" + normName(cu))) continue;
         const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
@@ -23757,7 +23768,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!engList.length) continue;
         const siteLabel = j.siteName || j.siteCode || "(no site)";
         const resolved = resolveSite(reg, j.siteName || j.siteCode || "");
-        const sKey = siteKeyOf2(resolved, j.siteName || j.siteCode);
+        const sKey = siteKeyOf3(resolved, j.siteName || j.siteCode);
         let s = null;
         for (const rawEng of engList) {
           if (!rawEng) continue;
@@ -23828,7 +23839,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!v.check_in_at || !v.check_out_at) continue;
         const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
         const resolved = resolveSiteCode(reg, v.site_code);
-        const sKey = siteKeyOf2(resolved, v.site_code);
+        const sKey = siteKeyOf3(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
         if (!rt) continue;
         const site = bySite[sKey];
@@ -28374,7 +28385,7 @@ function wrap4(str, size, maxW) {
 }
 function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
-  const L2 = 56, R2 = 539, W6 = R2 - L2;
+  const L2 = 56, R2 = 539, W7 = R2 - L2;
   let y = 44;
   try {
     const lw = 150, lh = lw * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
@@ -28389,7 +28400,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label2, val2) => {
     doc.text(L2, y, label2, { size: 11, bold: true });
-    for (const ln of wrap4(val2 || "", 11, W6 - 70)) {
+    for (const ln of wrap4(val2 || "", 11, W7 - 70)) {
       doc.text(L2 + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -28408,7 +28419,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap4(para, 11, W6)) {
+    for (const ln of wrap4(para, 11, W7)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -28427,7 +28438,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L2, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap4("I confirm that I have read and understood the content of this memo.", 11, W6)) {
+  for (const ln of wrap4("I confirm that I have read and understood the content of this memo.", 11, W7)) {
     doc.text(L2, y, ln, { size: 11 });
     y += 16;
   }
@@ -31618,9 +31629,9 @@ async function buildAuthHeader(wwwAuth, user, pass, methodHttp, uri) {
   h += extra;
   return h;
 }
-function parseAuthParams(header2) {
+function parseAuthParams(header3) {
   const out = {};
-  const s = header2.replace(/^\s*[A-Za-z]+\s+/, "");
+  const s = header3.replace(/^\s*[A-Za-z]+\s+/, "");
   const re = /(\w+)\s*=\s*(?:"([^"]*)"|([^,]*))/g;
   let m;
   while (m = re.exec(s)) out[m[1].toLowerCase()] = m[2] !== void 0 ? m[2] : (m[3] || "").trim();
@@ -31813,7 +31824,7 @@ function mondayOf5(ymd2) {
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now) {
   const today = lonYMD(now);
-  const [Y, M7] = today.split("-").map(Number);
+  const [Y, M8] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -31834,7 +31845,7 @@ function occurrence(task, now) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M7 - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M8 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -32228,38 +32239,846 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
 // src/index.js
 init_certs();
 
+// src/routes/pump.js
+init_http();
+init_auth();
+
+// src/lib/pumppdf.js
+init_pdf();
+var W5 = 595;
+var H3 = 842;
+var M5 = 40;
+var CW2 = W5 - M5 * 2;
+var NAVY4 = [0, 0.204, 0.408];
+var NAVY_D2 = [0, 0.145, 0.29];
+var INK4 = [0.1, 0.13, 0.18];
+var MUTE3 = [0.46, 0.51, 0.58];
+var FAINT2 = [0.62, 0.66, 0.72];
+var BG2 = [0.953, 0.965, 0.977];
+var CARD3 = [1, 1, 1];
+var BORDER2 = [0.886, 0.906, 0.933];
+var HAIR3 = [0.92, 0.935, 0.955];
+var ZEBRA2 = [0.972, 0.98, 0.99];
+var ACCENT2 = [0.04, 0.42, 0.52];
+var GREEN2 = [0.09, 0.63, 0.29];
+var RED2 = [0.83, 0.16, 0.16];
+var GREY4 = [0.6, 0.64, 0.7];
+var HEADSUB2 = [0.78, 0.85, 0.93];
+var S3 = (v) => toWinAnsi(String(v == null ? "" : v));
+var ROW_H2 = 19;
+var THEAD_H2 = 22;
+var CARD_PAD2 = 14;
+var GAP2 = 14;
+var HEADER_H2 = 84;
+function fit3(str, size, maxW) {
+  str = S3(str);
+  if (textWidth(str, size) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
+  return s + "...";
+}
+function wrap6(str, size, maxW, maxLines) {
+  const words = S3(str).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) <= maxW) {
+      cur = t;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = w;
+    if (maxLines && lines.length >= maxLines) break;
+  }
+  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+function instrLines(str, size, maxW) {
+  const out = [];
+  String(str || "").split(/\r?\n/).forEach((raw) => {
+    const t = raw.trim();
+    if (!t) {
+      out.push("");
+      return;
+    }
+    wrap6(t, size, maxW).forEach((l) => out.push(l));
+  });
+  return out;
+}
+function tracked2(doc, x, y, str, { size = 6.5, color = MUTE3, track = 1.2, alignRight = false, bold = true } = {}) {
+  const chars = [...S3(str).toUpperCase()];
+  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
+  let cx = alignRight ? x - total : x;
+  for (const c of chars) {
+    doc.text(cx, y, c, { size, bold, color });
+    cx += textWidth(c, size) + track;
+  }
+  return total;
+}
+function dot2(doc, cx, cy, r, color, hollow) {
+  if (hollow) {
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+    doc.roundRect(cx - r - 0.6, cy - r - 0.6, r * 2 + 1.2, r * 2 + 1.2, r + 0.6, { fill: BORDER2 });
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+  } else doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
+}
+function pill2(doc, x, yTop, label2, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
+  const w = textWidth(S3(label2), size) + padX * 2;
+  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
+  doc.text(x + padX, yTop + h - 4, S3(label2), { size, bold: true, color: textColor });
+  return w;
+}
+function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
+  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
+  doc.roundRect(x, y, w, h, r, { fill: fill2 });
+}
+function pageBg2(doc) {
+  doc.rect(0, 0, W5, H3, { fill: BG2 });
+}
+function ansOf(a) {
+  const s = String(a || "").toLowerCase();
+  if (/^y/.test(s)) return "yes";
+  if (/^n\/?a/.test(s) || s === "na") return "na";
+  if (/^n/.test(s)) return "no";
+  return "";
+}
+function statusOf2(rec) {
+  const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
+  const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
+  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
+  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
+}
+function header2(doc, rec, meta, slim) {
+  const y = 30, h = slim ? 40 : HEADER_H2;
+  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY4);
+  if (!slim) doc.roundRect(M5, y, CW2, 5, 2.5, { fill: NAVY_D2 });
+  if (meta.logo) {
+    try {
+      const g = jpegInfo(meta.logo);
+      const hh = slim ? 18 : 24;
+      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
+    } catch {
+    }
+  }
+  if (slim) {
+    tracked2(doc, W5 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
+    doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+    return y + h;
+  }
+  const st = statusOf2(rec);
+  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
+  tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
+  doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  if (rec.date) doc.text(W5 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  return y + h;
+}
+function footer2(doc, pageNo, pageCount) {
+  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
+  doc.text(W5 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
+}
+function instrH(rec) {
+  return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
+}
+function safetyH(rec) {
+  return CARD_PAD2 + 14 + (rec.safety || []).length * 16 + 4;
+}
+function detailsH2(rec) {
+  if (!String(rec.detailsNo || "").trim()) return 0;
+  return CARD_PAD2 + 14 + wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).length * 11 + 4;
+}
+function instrCard(doc, y, rec) {
+  const h = instrH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
+    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
+    yy2 += 11;
+  });
+  return h;
+}
+function safetyCard(doc, y, rec) {
+  const h = safetyH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  (rec.safety || []).forEach((s) => {
+    const ok = ansOf(s.answer) === "yes";
+    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
+    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
+    pill2(doc, W5 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
+    yy2 += 16;
+  });
+  return h;
+}
+function checksCard(doc, rows, startIndex, y, count) {
+  const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
+  if (count != null) doc.text(W5 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
+  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
+  const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
+  const headY = y + 26 + THEAD_H2 - 8;
+  tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
+  ["Yes", "No", "N/A"].forEach((lab, k) => {
+    const cx = [cYes, cNo, cNa][k];
+    const lw = textWidth(lab, 6);
+    doc.text(cx - lw / 2, headY, lab, { size: 6, color: MUTE3 });
+  });
+  let ry = y + 26 + THEAD_H2;
+  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
+  rows.forEach((r, i) => {
+    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
+    const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
+    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
+    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
+    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
+    dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
+    ry += ROW_H2;
+  });
+  return h;
+}
+function detailsCard2(doc, y, rec) {
+  const h = detailsH2(rec);
+  if (!h) return 0;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
+    yy2 += 11;
+  });
+  return h;
+}
+function mediaLine(rec) {
+  const np = (rec.photos || []).length, nv = (rec.videos || []).length;
+  const bits = [];
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos"));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos"));
+  return bits.length ? bits.join(" \xB7 ") + " attached in the portal record" : "";
+}
+function signatureCard2(doc, y, rec, meta) {
+  const declLines = wrap6(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
+  const media = mediaLine(rec);
+  const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  declLines.forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
+    yy2 += 11;
+  });
+  if (media) {
+    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
+    yy2 += 14;
+  }
+  const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
+  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
+  const bw = 200, y2 = y + h - 54;
+  const blocks = [
+    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
+    { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
+  ];
+  blocks.forEach((b) => {
+    if (b.sig) {
+      try {
+        const g = jpegInfo(b.sig);
+        const hh = 30;
+        doc.image(b.sig, b.x, y2 - 6, Math.min(bw, hh * (g.w / g.h)), hh);
+      } catch {
+      }
+    }
+    doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
+    doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
+    tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
+  });
+  return h;
+}
+function buildPumpPdf(record, meta = {}) {
+  const rec = record || {};
+  rec.checks = Array.isArray(rec.checks) ? rec.checks : [];
+  const introBottom = 30 + HEADER_H2 + GAP2 + instrH(rec) + GAP2 + safetyH(rec) + GAP2;
+  const bottomLimit = H3 - 40;
+  const cap2 = (top) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H2 + 12)) / ROW_H2));
+  const slimTop = 30 + 40 + GAP2;
+  const page1Cap = cap2(introBottom), laterCap = cap2(slimTop);
+  const pages = [];
+  pages.push({ start: 0, rows: rec.checks.slice(0, page1Cap), intro: true, top: introBottom });
+  let i = page1Cap;
+  while (i < rec.checks.length) {
+    pages.push({ start: i, rows: rec.checks.slice(i, i + laterCap), intro: false, top: slimTop });
+    i += laterCap;
+  }
+  if (!pages.length) pages.push({ start: 0, rows: [], intro: true, top: introBottom });
+  const last = pages[pages.length - 1];
+  const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
+  const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
+  const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0);
+  const doc = new PdfDoc(W5, H3);
+  pages.forEach((pg, idx) => {
+    if (idx > 0) doc.newPage(W5, H3);
+    pageBg2(doc);
+    if (pg.intro) {
+      header2(doc, rec, meta, false);
+      let yy2 = 30 + HEADER_H2 + GAP2;
+      yy2 += instrCard(doc, yy2, rec) + GAP2;
+      yy2 += safetyCard(doc, yy2, rec) + GAP2;
+      checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
+    } else {
+      header2(doc, rec, meta, true);
+      checksCard(doc, pg.rows, pg.start, pg.top, null);
+    }
+    footer2(doc, idx + 1, totalPages);
+  });
+  let ty;
+  if (trailOwnPage) {
+    doc.newPage(W5, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, totalPages, totalPages);
+    ty = slimTop;
+  } else ty = lastBottom + GAP2;
+  const dh = detailsCard2(doc, ty, rec);
+  if (dh) ty += dh + GAP2;
+  signatureCard2(doc, ty, rec, meta);
+  return doc.bytes();
+}
+
+// src/routes/pump.js
+init_logo();
+init_filesign();
+init_push();
+var GENERAL = [
+  "Chamber free of debris or obstructions",
+  "Water level within expected range when idle",
+  "Pump body free from corrosion or damage",
+  "Electrical cables undamaged and away from water",
+  "Discharge pipe secure and supported",
+  "Float switch activates pump when lifted",
+  "Pump runs smoothly with no unusual noise/vibration",
+  "Water discharges fully through outlet",
+  "Pump switches off automatically after emptying",
+  "Discharge outlet clear of blockages or freezing",
+  "Non-return/check valve prevents backflow (where Fitted)",
+  "Sump chamber inlet screen free of debris",
+  "Inspection details recorded in log"
+];
+var BINFIELD_CHECKS = [
+  "Chamber free of debris or obstructions",
+  "Water level within expected range when idle",
+  "Pump body free from corrosion or damage",
+  "Electrical cables undamaged and away from water",
+  "Discharge pipe secure and supported",
+  "Float switch activates pump when lifted",
+  "Pump runs smoothly with no unusual noise/vibration",
+  "Water discharges fully through outlet",
+  "Pump switches off automatically after emptying",
+  "Discharge outlet clear of blockages or freezing",
+  "Non-return/check valve prevents backflow",
+  "Sump chamber inlet screen free of debris",
+  "Control panel or alarm system functioning",
+  "Inspection details recorded in log"
+];
+var WICKHAM_CHECKS = BINFIELD_CHECKS.concat([
+  "Water Pumping into ditch",
+  "Ditch inlet & outlet clear from debris",
+  "Ditch generally tidy of debris",
+  "CCTV receiving power"
+]);
+var INSTR = {
+  binfield: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nAlarm float switch:\n- Located in the basement, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (warehouse).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+  wickham: "The sump pump is in the rear garden of the store, under a manhole in the grass (approx. 5 m deep).\nAccessing the pump: pull it up carefully using the rope, then lower it back down slowly after checks.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 5 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nDitch maintenance:\n- Clear all debris from both ends of the ditch to maintain flow.\n- Remove any debris along the ditch length as well.\n\nAlarm float switch:\n- Located in the manhole, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (just inside the rear doors).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+  eastbourne: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+  shanklin: "The sump pump is in the basement in the BOH area of the store.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nElectrical Cut Off switch:\n- Located on the wall, above the pump.\n- Tilting it should activate the contactors above the basement and cut all 230v electricity to the lighting and tube heaters.\n- When the float switch is released, the contactor should re-engage and bring the 230v power back on.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+  wimbledon: "There are two pumps to test in this store.\n\nFirst pump - located in a hatch in the staff room.\n- Remove the skirting and lift the hatch to access.\n- This area must be shut off while the hatch is open and all staff notified of the risk.\n\nSecond pump - located in the rear area of the store basement (not occupied by Co-op).\n- Key can be acquired via the store manager.\n- Walk inside the unit, turn back on yourself, and you will see the pump.\n\nPriming the pump:\n- Fill buckets from the store's cleaners' sink tap (approx. 2 buckets) and pour into the sump.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+  newportels: "The sump pump is in the basement below the reception desk printer.\nThe printer will need moving to complete the test.\nStaff must be notified, and the area barriered off.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n\nImportant:\n- Ensure the hatch is fitted back correctly and flush.\n- Always leave both the pump and the alarm float switch in their correct positions after maintenance."
+};
+var DEFAULT_CONFIG3 = {
+  declaration: "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.",
+  contractor: { tradingTitle: "Mostlane", address: "Unit A5, Segensworth Business Centre, Titchfield", postcode: "PO15 5RQ" },
+  safety: [
+    { id: "barrier", label: "Area made safe and barriered off correctly to prevent injury (e.g. someone falling into the open hatch/sump)" },
+    { id: "notified", label: "Store staff have been notified that the works are being carried out" }
+  ],
+  stores: [
+    { id: "binfield", name: "Binfield", siteCode: "", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
+    { id: "wickham", name: "Wickham", siteCode: "", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
+    { id: "eastbourne", name: "Eastbourne", siteCode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+    { id: "shanklin", name: "Shanklin", siteCode: "", instructions: INSTR.shanklin, checks: GENERAL.slice() },
+    { id: "wimbledon", name: "Wimbledon", siteCode: "", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
+    { id: "newportels", name: "Newport ELS", siteCode: "", instructions: INSTR.newportels, checks: GENERAL.slice() }
+  ]
+};
+var normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+var siteKeyOf2 = (s) => {
+  const t = String(s || "").trim();
+  return t ? /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+};
+async function ensureTables5(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
+    tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
+    status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
+    created_at TEXT, updated_at TEXT, r2_final_key TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+}
+async function getConfig4(env, tid) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
+  if (row && row.value) {
+    try {
+      const c = JSON.parse(row.value);
+      if (c && Array.isArray(c.stores)) return c;
+    } catch {
+    }
+  }
+  await saveConfig2(env, tid, DEFAULT_CONFIG3);
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG3));
+}
+async function saveConfig2(env, tid, c) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
+}
+async function getJob3(env, tid, id) {
+  try {
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+function storeById(cfg, id) {
+  return (cfg.stores || []).find((s) => s.id === id) || null;
+}
+function dataUrlToBytes2(u) {
+  const s = String(u || "");
+  const i = s.indexOf(",");
+  if (!/^data:image\//i.test(s) || i < 0) return null;
+  try {
+    const bin = atob(s.slice(i + 1));
+    const out = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+    return out;
+  } catch {
+    return null;
+  }
+}
+function shapeRow2(r) {
+  let d = {};
+  try {
+    d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d };
+}
+function seedRecord(cfg, store, job) {
+  return {
+    store: store.id,
+    storeName: store.name,
+    siteCode: store.siteCode || "",
+    instructions: store.instructions || "",
+    declaration: cfg.declaration || "",
+    safety: (cfg.safety || []).map((s) => ({ id: s.id, label: s.label, answer: "" })),
+    checks: (store.checks || []).map((c) => ({ label: c, answer: "" })),
+    detailsNo: "",
+    declarationAgreed: "",
+    date: "",
+    engineerName: "",
+    dmName: "",
+    engSig: "",
+    dmSig: "",
+    media: []
+  };
+}
+async function maybeCompletePumpJob(env, tid, rec) {
+  try {
+    if (!rec || !rec.job_id) return false;
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, rec.job_id).first();
+    if (!row) return false;
+    let job;
+    try {
+      job = JSON.parse(row.data);
+    } catch {
+      return false;
+    }
+    if (!job.pumpMaintenance) return false;
+    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
+    if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    job.status = "Complete";
+    job.updatedAt = now;
+    job.closedAt = job.closedAt || now;
+    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
+    if (engs.length) {
+      job.engStatus = job.engStatus || {};
+      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "pump" };
+    }
+    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function resignMedia(env, origin, rec) {
+  if (!rec || !Array.isArray(rec.media)) return rec;
+  for (const m of rec.media) {
+    if (m && m.key) {
+      try {
+        m.url = await signedFileUrl(env, origin, "/pump/media", m.key);
+      } catch {
+      }
+    }
+  }
+  return rec;
+}
+async function handle33(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  if (method === "GET" && url.pathname === "/pump/media") {
+    const key = url.searchParams.get("key") || "";
+    if (!key.startsWith("pump/")) return new Response("Bad key", { status: 400 });
+    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
+    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream", "Cache-Control": "public, max-age=86400" } });
+  }
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  await ensureTables5(env);
+  const perms = await permissionsFor(env, tid, me);
+  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
+  const canWrite = async (rec) => {
+    if (isOffice) return true;
+    if (!rec) return true;
+    if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
+    try {
+      const job = rec.job_id ? await getJob3(env, tid, String(rec.job_id)) : null;
+      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
+      return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
+    } catch {
+      return false;
+    }
+  };
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getConfig4(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      if (!isOffice) return error("Office access required", 403, env, request);
+      const b = await request.json().catch(() => ({}));
+      const cur = await getConfig4(env, tid);
+      const next = { ...cur };
+      if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
+      if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
+      if (Array.isArray(b.safety)) next.safety = b.safety.map((s, i) => ({ id: String(s.id || "s" + i), label: String(s.label || "").slice(0, 300) })).filter((s) => s.label);
+      if (Array.isArray(b.stores)) next.stores = b.stores.map((s) => ({
+        id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
+        name: String(s.name || "").slice(0, 120),
+        siteCode: String(s.siteCode || "").slice(0, 20),
+        instructions: String(s.instructions || "").slice(0, 4e3),
+        checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
+      })).filter((s) => s.name);
+      await saveConfig2(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  if (sub === "/stores" && method === "GET") {
+    const cfg = await getConfig4(env, tid);
+    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "" })) }, {}, env, request);
+  }
+  if (sub === "/for-job" && method === "GET") {
+    const jobId = q.get("jobId") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const cfg = await getConfig4(env, tid);
+    const job = await getJob3(env, tid, jobId);
+    let storeId = q.get("store") || job && job.pumpStore || "";
+    const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
+    if (existing) {
+      const rec = shapeRow2(existing);
+      await resignMedia(env, url.origin, rec);
+      const store2 = storeById(cfg, rec.store) || null;
+      return json({ ok: true, record: rec, store: store2, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+    }
+    const store = storeById(cfg, storeId) || (cfg.stores || [])[0];
+    if (!store) return error("No pump stores configured", 400, env, request);
+    const seeded = seedRecord(cfg, store, job);
+    seeded.date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    if (job) seeded.engineerName = "";
+    return json({ ok: true, record: { id: null, jobId, status: "draft", ...seeded }, store, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+  }
+  if (sub === "/save" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "");
+    let rec = null, id = b.id ? String(b.id) : "";
+    if (id) rec = await loadRec(id);
+    if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cfg = await getConfig4(env, tid);
+    const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
+    const sanSig = (v) => {
+      const s = String(v || "");
+      return /^data:image\//.test(s) && s.length <= 4e5 ? s : rec ? void 0 : "";
+    };
+    const data = {
+      storeName: store ? store.name : b.storeName || "",
+      instructions: store ? store.instructions : b.instructions || "",
+      declaration: cfg.declaration || "",
+      safety: Array.isArray(b.safety) ? b.safety.map((s) => ({ id: String(s.id || ""), label: String(s.label || ""), answer: String(s.answer || "") })) : [],
+      checks: Array.isArray(b.checks) ? b.checks.map((c) => ({ label: String(c.label || ""), answer: String(c.answer || "") })) : [],
+      detailsNo: String(b.detailsNo || "").slice(0, 4e3),
+      declarationAgreed: b.declarationAgreed === true || String(b.declarationAgreed || "").toLowerCase().startsWith("y") ? "yes" : "",
+      date: String(b.date || "").slice(0, 20),
+      engineerName: String(b.engineerName || "").slice(0, 120),
+      dmName: String(b.dmName || "").slice(0, 120),
+      media: rec ? shapeRow2(rec).media || [] : []
+    };
+    const es = sanSig(b.engSig);
+    if (es !== void 0) data.engSig = es;
+    else if (rec) data.engSig = shapeRow2(rec).engSig || "";
+    const ds = sanSig(b.dmSig);
+    if (ds !== void 0) data.dmSig = ds;
+    else if (rec) data.dmSig = shapeRow2(rec).dmSig || "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (!id) {
+      id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    }
+    const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
+    const storeId = store ? store.id : rec ? rec.store : "";
+    if (rec) {
+      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
+    }
+    const saved = await loadRec(id);
+    const out = shapeRow2(saved);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/media" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const id = String(form.get("id") || "");
+    const kind = String(form.get("kind") || "photo") === "video" ? "video" : "photo";
+    const file = form.get("file");
+    if (!id || !file || typeof file.arrayBuffer !== "function") return error("id + file required", 400, env, request);
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (rec.status === "final") return error("Record finalised", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cap2 = kind === "video" ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length > cap2) return error(kind === "video" ? "Video too large (max 95 MB \u2014 keep the clip short)" : "Photo too large (max 12 MB)", 413, env, request);
+    const ext = (String(file.name || "").match(/\.([a-z0-9]{2,5})$/i) || [, kind === "video" ? "mp4" : "jpg"])[1].toLowerCase();
+    const key = `pump/${tid}/${id}/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg") } });
+    const d = shapeRow2(rec);
+    const media = Array.isArray(d.media) ? d.media : [];
+    media.push({ key, kind, name: String(file.name || kind + "." + ext).slice(0, 160) });
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const urlOut = await signedFileUrl(env, url.origin, "/pump/media", key);
+    return json({ ok: true, key, kind, name: media[media.length - 1].name, url: urlOut }, {}, env, request);
+  }
+  if (sub === "/media-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""), key = String(b.key || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    if (key.startsWith("pump/") && env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.delete(key);
+      } catch {
+      }
+    }
+    const d = shapeRow2(rec);
+    const media = (Array.isArray(d.media) ? d.media : []).filter((m) => m.key !== key);
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/submit" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const fresh = await loadRec(id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: "\u{1F6B0} Pump maintenance submitted",
+      body: `${shapeRow2(rec).storeName || "A store"} \u2014 ready for office review`,
+      url: "/pump-review.html",
+      tag: "pump-review"
+    }, me).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
+  }
+  if (sub === "/one" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const out = shapeRow2(rec);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/review" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status IN ('draft','review') ORDER BY updated_at DESC LIMIT 200").bind(tid).all();
+    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
+  }
+  if (sub === "/list" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const store = q.get("store") || "";
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status='final' AND (?='' OR store=?) ORDER BY updated_at DESC LIMIT 200").bind(tid, store, store).all();
+    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
+  }
+  if (sub === "/pdf" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const d = shapeRow2(rec);
+    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
+  }
+  if (sub === "/finalise" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const d = shapeRow2(rec);
+    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    if (env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+      } catch {
+      }
+    }
+    let filedToSite = false;
+    const code = rec.site_code || d.siteCode || "";
+    if (code && env.JOB_FILES) {
+      try {
+        const key = `sitedocs/${siteKeyOf2(code)}/Pump Maintenance/${Date.now()}-Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`;
+        await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+        filedToSite = true;
+      } catch {
+      }
+    }
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    if (rec.engineer) ctx && ctx.waitUntil && ctx.waitUntil(sendToUser(env, tid, rec.engineer, { title: "\u{1F6B0} Pump record filed", body: `${d.storeName || "Pump"} maintenance record finalised`, url: "/pump-review.html", tag: "pump-final" }).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow2(fresh), filedToSite }, {}, env, request);
+  }
+  if (sub === "/upload" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const rec = await loadRec(String(form.get("id") || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") return error("file required", 400, env, request);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, (/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
+  }
+  if (sub === "/reopen" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    if (env.JOB_FILES) {
+      try {
+        const l = await env.JOB_FILES.list({ prefix: `pump/${tid}/${rec.id}/` });
+        for (const o of l.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {
+      }
+    }
+    await env.DB.prepare("DELETE FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + url.pathname, 404, env, request);
+}
+
 // src/routes/cablecalc.js
 init_http();
 init_auth();
 
 // src/lib/cablecalcpdf.js
 init_pdf();
-var W5 = 595;
-var H3 = 842;
-var M5 = 40;
-var CW2 = W5 - M5 * 2;
-var S3 = (v) => toWinAnsi(String(v == null ? "" : v));
-var NAVY4 = [0, 0.2, 0.41];
-var INK4 = [0.09, 0.14, 0.22];
-var GREY4 = [0.42, 0.47, 0.53];
-var CARD3 = [0.97, 0.98, 0.99];
-var BORDER2 = [0.84, 0.87, 0.9];
-var GREEN2 = [0.13, 0.55, 0.3];
-var RED2 = [0.78, 0.16, 0.16];
+var W6 = 595;
+var H4 = 842;
+var M6 = 40;
+var CW3 = W6 - M6 * 2;
+var S4 = (v) => toWinAnsi(String(v == null ? "" : v));
+var NAVY5 = [0, 0.2, 0.41];
+var INK5 = [0.09, 0.14, 0.22];
+var GREY5 = [0.42, 0.47, 0.53];
+var CARD4 = [0.97, 0.98, 0.99];
+var BORDER3 = [0.84, 0.87, 0.9];
+var GREEN3 = [0.13, 0.55, 0.3];
+var RED3 = [0.78, 0.16, 0.16];
 var AMBER = [0.7, 0.44, 0.03];
-var ZEBRA2 = [0.955, 0.965, 0.975];
+var ZEBRA3 = [0.955, 0.965, 0.975];
 function card(doc, x, y, w, h, r = 10) {
-  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
-  doc.roundRect(x, y, w, h, r, { fill: CARD3 });
+  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER3 });
+  doc.roundRect(x, y, w, h, r, { fill: CARD4 });
 }
 function label(doc, x, y, str) {
-  doc.text(x, y, S3(str).toUpperCase(), { size: 6.6, color: GREY4 });
+  doc.text(x, y, S4(str).toUpperCase(), { size: 6.6, color: GREY5 });
 }
 function val(doc, x, y, str, opt = {}) {
-  doc.text(x, y, S3(str), Object.assign({ size: 9.5, color: INK4 }, opt));
+  doc.text(x, y, S4(str), Object.assign({ size: 9.5, color: INK5 }, opt));
 }
-function wrap6(str, width, size) {
-  const words = S3(str).split(/\s+/);
+function wrap7(str, width, size) {
+  const words = S4(str).split(/\s+/);
   const lines = [];
   let cur = "";
   for (const w of words) {
@@ -32284,36 +33103,36 @@ function wrap6(str, width, size) {
   return lines;
 }
 function buildCableCalcPdf(record, meta = {}) {
-  const doc = new PdfDoc(W5, H3);
+  const doc = new PdfDoc(W6, H4);
   const inp = record.inputs || {};
   const v = record.values || {};
   const checks = record.checks || [];
   const m = record.meta || {};
-  doc.rect(0, 0, W5, 92, { fill: NAVY4 });
+  doc.rect(0, 0, W6, 92, { fill: NAVY5 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 30;
-      doc.image(meta.logo, M5, 20, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M6, 20, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  doc.text(M5, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
-  doc.text(W5 - M5, 34, S3(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W5 - M5, 50, S3("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
-  doc.text(W5 - M5, 64, S3("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(M6, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
+  doc.text(W6 - M6, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W6 - M6, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W6 - M6, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
   const overall = record.incomplete ? "INCOMPLETE" : record.pass ? "COMPLIANT" : "NOT COMPLIANT";
-  const oc = record.incomplete ? AMBER : record.pass ? GREEN2 : RED2;
+  const oc = record.incomplete ? AMBER : record.pass ? GREEN3 : RED3;
   const pw = textWidth(overall, 9) + 22;
-  doc.roundRect(M5, 108, pw, 20, 10, { fill: oc });
-  doc.text(M5 + 11, 122, overall, { size: 9, bold: true, color: [1, 1, 1] });
-  doc.text(M5 + pw + 12, 122, S3(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK4 });
+  doc.roundRect(M6, 108, pw, 20, 10, { fill: oc });
+  doc.text(M6 + 11, 122, overall, { size: 9, bold: true, color: [1, 1, 1] });
+  doc.text(M6 + pw + 12, 122, S4(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK5 });
   let y = 144;
-  const colW = (CW2 - 14) / 2, cx2 = M5 + colW + 14;
+  const colW = (CW3 - 14) / 2, cx2 = M6 + colW + 14;
   const cardH = 128;
-  card(doc, M5, y, colW, cardH);
+  card(doc, M6, y, colW, cardH);
   card(doc, cx2, y, colW, cardH);
-  label(doc, M5 + 12, y + 16, "Circuit");
+  label(doc, M6 + 12, y + 16, "Circuit");
   label(doc, cx2 + 12, y + 16, "Installation");
   const phase = inp.phases === 3 ? "3-phase 400 V" : "1-phase 230 V";
   const left = [
@@ -32335,8 +33154,8 @@ function buildCableCalcPdf(record, meta = {}) {
   const rowGap = 17.5;
   left.forEach((r, i) => {
     const ry = y + 34 + i * rowGap;
-    label(doc, M5 + 12, ry, r[0]);
-    val(doc, M5 + 12, ry + 11, r[1]);
+    label(doc, M6 + 12, ry, r[0]);
+    val(doc, M6 + 12, ry + 11, r[1]);
   });
   right.forEach((r, i) => {
     const ry = y + 34 + i * rowGap;
@@ -32344,8 +33163,8 @@ function buildCableCalcPdf(record, meta = {}) {
     val(doc, cx2 + 12, ry + 11, r[1]);
   });
   y += cardH + 14;
-  card(doc, M5, y, CW2, 34);
-  label(doc, M5 + 12, y + 14, "Correction factors (BS 7671 App 4)");
+  card(doc, M6, y, CW3, 34);
+  label(doc, M6 + 12, y + 14, "Correction factors (BS 7671 App 4)");
   const facs = [
     ["Ca", v.Ca && v.Ca.value],
     ["Cg", v.Cg && v.Cg.value],
@@ -32353,14 +33172,14 @@ function buildCableCalcPdf(record, meta = {}) {
     ["Cc", v.Cc && v.Cc.value],
     ["Product", v.factorProduct]
   ];
-  let fx = M5 + 12;
+  let fx = M6 + 12;
   facs.forEach((f) => {
     const t = f[0] + " " + (f[1] == null ? "\u2014" : f[1]);
-    doc.text(fx, y + 27, S3(t), { size: 9, color: INK4, bold: f[0] === "Product" });
+    doc.text(fx, y + 27, S4(t), { size: 9, color: INK5, bold: f[0] === "Product" });
     fx += textWidth(t, 9) + 26;
   });
   y += 34 + 16;
-  doc.text(M5, y, "Verification", { size: 11, bold: true, color: NAVY4 });
+  doc.text(M6, y, "Verification", { size: 11, bold: true, color: NAVY5 });
   y += 8;
   const cols = [
     { key: "res", label: "", w: 0.05, align: "c" },
@@ -32368,32 +33187,32 @@ function buildCableCalcPdf(record, meta = {}) {
     { key: "reg", label: "BS 7671", w: 0.14 },
     { key: "detail", label: "Result", w: 0.47 }
   ];
-  card(doc, M5, y, CW2, 20, 6);
-  let cxp = M5 + 8;
+  card(doc, M6, y, CW3, 20, 6);
+  let cxp = M6 + 8;
   cols.forEach((c) => {
-    if (c.label) doc.text(c.align === "c" ? cxp + CW2 * c.w / 2 - textWidth(c.label, 7) / 2 : cxp, y + 13, c.label.toUpperCase(), { size: 7, color: GREY4 });
-    cxp += CW2 * c.w;
+    if (c.label) doc.text(c.align === "c" ? cxp + CW3 * c.w / 2 - textWidth(c.label, 7) / 2 : cxp, y + 13, c.label.toUpperCase(), { size: 7, color: GREY5 });
+    cxp += CW3 * c.w;
   });
   y += 24;
   const rowH = 9;
   checks.forEach((c, i) => {
-    const detailLines = wrap6(c.detail || "", CW2 * 0.47 - 12, 8.4);
+    const detailLines = wrap7(c.detail || "", CW3 * 0.47 - 12, 8.4);
     const rh = Math.max(20, 8 + detailLines.length * 10.5);
-    if (i % 2) doc.rect(M5, y - 4, CW2, rh, { fill: ZEBRA2 });
-    let cxr = M5 + 8;
-    const dotc = c.pass === true ? GREEN2 : c.pass === false ? RED2 : AMBER;
-    doc.roundRect(M5 + CW2 * 0.05 / 2 - 3.5, y + 1, 7, 7, 3.5, { fill: dotc });
-    cxr += CW2 * 0.05;
-    doc.text(cxr, y + 8, S3(c.label), { size: 8.6, bold: true, color: INK4 });
-    cxr += CW2 * 0.34;
-    doc.text(cxr, y + 8, S3(c.reg), { size: 8, color: GREY4 });
-    cxr += CW2 * 0.14;
-    detailLines.forEach((ln, k) => doc.text(cxr, y + 8 + k * 10.5, ln, { size: 8.4, color: INK4 }));
+    if (i % 2) doc.rect(M6, y - 4, CW3, rh, { fill: ZEBRA3 });
+    let cxr = M6 + 8;
+    const dotc = c.pass === true ? GREEN3 : c.pass === false ? RED3 : AMBER;
+    doc.roundRect(M6 + CW3 * 0.05 / 2 - 3.5, y + 1, 7, 7, 3.5, { fill: dotc });
+    cxr += CW3 * 0.05;
+    doc.text(cxr, y + 8, S4(c.label), { size: 8.6, bold: true, color: INK5 });
+    cxr += CW3 * 0.34;
+    doc.text(cxr, y + 8, S4(c.reg), { size: 8, color: GREY5 });
+    cxr += CW3 * 0.14;
+    detailLines.forEach((ln, k) => doc.text(cxr, y + 8 + k * 10.5, ln, { size: 8.4, color: INK5 }));
     y += rh;
   });
   y += 12;
-  card(doc, M5, y, CW2, 58);
-  label(doc, M5 + 12, y + 15, "Key figures");
+  card(doc, M6, y, CW3, 58);
+  label(doc, M6 + 12, y + 15, "Key figures");
   const figs = [
     ["Ib", v.Ib, "A"],
     ["In", v.In, "A"],
@@ -32404,37 +33223,37 @@ function buildCableCalcPdf(record, meta = {}) {
     ["Fault current", v.faultCurrent, "A"],
     ["Min CPC", v.minCpcCsa, "mm\xB2"]
   ];
-  const perRow = 4, fw = CW2 / perRow;
+  const perRow = 4, fw = CW3 / perRow;
   figs.forEach((f, i) => {
     const col = i % perRow, row = Math.floor(i / perRow);
-    const fxx = M5 + 12 + col * fw, fyy = y + 30 + row * 20;
-    doc.text(fxx, fyy, S3(f[0]), { size: 7.4, color: GREY4 });
-    doc.text(fxx + 62, fyy, S3((f[1] == null ? "\u2014" : f[1]) + (f[1] == null ? "" : " " + f[2])), { size: 8.6, bold: true, color: INK4 });
+    const fxx = M6 + 12 + col * fw, fyy = y + 30 + row * 20;
+    doc.text(fxx, fyy, S4(f[0]), { size: 7.4, color: GREY5 });
+    doc.text(fxx + 62, fyy, S4((f[1] == null ? "\u2014" : f[1]) + (f[1] == null ? "" : " " + f[2])), { size: 8.6, bold: true, color: INK5 });
   });
   y += 58 + 12;
   if ((record.warnings || []).length) {
     record.warnings.forEach((w) => {
-      const lines = wrap6("\u2022 " + w, CW2 - 8, 8);
-      lines.forEach((ln, k) => doc.text(M5, y + k * 10, ln, { size: 8, color: AMBER }));
+      const lines = wrap7("\u2022 " + w, CW3 - 8, 8);
+      lines.forEach((ln, k) => doc.text(M6, y + k * 10, ln, { size: 8, color: AMBER }));
       y += lines.length * 10 + 3;
     });
     y += 4;
   }
-  if (y > H3 - 120) {
-    doc.newPage(W5, H3);
-    y = M5;
+  if (y > H4 - 120) {
+    doc.newPage(W6, H4);
+    y = M6;
   }
-  card(doc, M5, y, CW2, 66);
-  label(doc, M5 + 12, y + 15, "Declaration");
-  doc.text(M5 + 12, y + 30, S3("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK4 });
-  doc.text(M5 + 12, y + 44, S3("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK4 });
-  doc.text(W5 - M5 - 12, y + 30, S3("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK4, alignRight: true });
-  doc.text(M5 + 12, y + 58, S3("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY4 });
+  card(doc, M6, y, CW3, 66);
+  label(doc, M6 + 12, y + 15, "Declaration");
+  doc.text(M6 + 12, y + 30, S4("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
+  doc.text(M6 + 12, y + 44, S4("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
+  doc.text(W6 - M6 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
+  doc.text(M6 + 12, y + 58, S4("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
   const total = doc.pages.length;
   for (let p = 0; p < total; p++) {
-    doc.lineOn(p, M5, H3 - 30, W5 - M5, { grey: true });
-    doc.textOn(p, M5, H3 - 18, "Mostlane Cable Calculator \u2014 checking aid, not a substitute for BS 7671 / a competent person", { size: 6.6, grey: true });
-    doc.textOn(p, W5 - M5, H3 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
+    doc.lineOn(p, M6, H4 - 30, W6 - M6, { grey: true });
+    doc.textOn(p, M6, H4 - 18, "Mostlane Cable Calculator \u2014 checking aid, not a substitute for BS 7671 / a competent person", { size: 6.6, grey: true });
+    doc.textOn(p, W6 - M6, H4 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
   }
   return doc.bytes();
 }
@@ -32448,13 +33267,13 @@ function devLabel(inp) {
 init_logo();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables5(env) {
+async function ensureTables6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
-async function getConfig4(env, tid) {
+async function getConfig5(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
   return Object.assign({
@@ -32486,13 +33305,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables5(env);
+  await ensureTables6(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -32516,11 +33335,11 @@ async function handle33(request, env, ctx, url, sess) {
     return json({ ok: true, data: SEED }, {}, env, request);
   }
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig4(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig5(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!canManage2) return error("Manage access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const next = Object.assign(await getConfig4(env, tid), b || {});
+      const next = Object.assign(await getConfig5(env, tid), b || {});
       await saveKV(env, tid, CFG_KEY4(tid), next);
       return json({ ok: true, config: next }, {}, env, request);
     }
@@ -32695,8 +33514,8 @@ var LOGO_W = 76;
 var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
 var PW = 842;
 var PH = 595;
-var M6 = 26;
-var ROW_H2 = 14.5;
+var M7 = 26;
+var ROW_H3 = 14.5;
 var LINE_H = 10;
 var ROW_PAD = 4.5;
 var MAX_NAME_LINES = 5;
@@ -32710,16 +33529,16 @@ var COLS2 = [
   { key: "days", label: "Days", w: 26 }
 ];
 var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-var GRID_X = M6 + LEFT_W;
-var GRID_W = PW - M6 - GRID_X;
+var GRID_X = M7 + LEFT_W;
+var GRID_W = PW - M7 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
   COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
   LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-  GRID_X = M6 + LEFT_W;
-  GRID_W = PW - M6 - GRID_X;
+  GRID_X = M7 + LEFT_W;
+  GRID_W = PW - M7 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
@@ -32809,7 +33628,7 @@ function buildProgrammePdf(data, meta = {}) {
   }));
   for (const t of tasks) {
     t._lines = wrapLines2(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
-    t._h = Math.max(ROW_H2, t._lines.length * LINE_H + ROW_PAD);
+    t._h = Math.max(ROW_H3, t._lines.length * LINE_H + ROW_PAD);
   }
   const hasExtra = tasks.some((t) => t.extra);
   const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
@@ -32835,7 +33654,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const bodyH = PH - M6 - headerBlockH - HDR_H - footerH - M6;
+  const bodyH = PH - M7 - headerBlockH - HDR_H - footerH - M7;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -32858,12 +33677,12 @@ function buildProgrammePdf(data, meta = {}) {
     }
     if (cur.length) pages.push({ win, rows: cur });
   }
-  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H2))) });
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H3))) });
   const doc = new PdfDoc(PW, PH);
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
-  let lastGridBot = M6 + 100;
+  let lastGridBot = M7 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -32872,39 +33691,39 @@ function buildProgrammePdf(data, meta = {}) {
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
-      let tx = M6;
+      let tx = M7;
       if (LOGO_BYTES) {
         try {
-          doc.image(LOGO_BYTES, M6, M6 - 2, LOGO_W, LOGO_H);
-          tx = M6 + LOGO_W + 12;
+          doc.image(LOGO_BYTES, M7, M7 - 2, LOGO_W, LOGO_H);
+          tx = M7 + LOGO_W + 12;
         } catch (e) {
         }
       }
-      let y = M6 + 14;
+      let y = M7 + 14;
       doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
-      doc.text(PW - M6, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      doc.text(PW - M7, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
         doc.text(tx, y, subBits, { size: 9, grey: true });
       }
-      doc.text(PW - M6, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      doc.text(PW - M7, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
       const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
-      if (rangeLbl) doc.text(PW - M6, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      if (rangeLbl) doc.text(PW - M7, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
-      const legendRightL1 = PW - M6 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M6, line = 0, dropped = 0;
+      const legendRightL1 = PW - M7 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M7, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M6;
+        const right = line === 0 ? legendRightL1 : PW - M7;
         if (lx + w > right) {
           if (line === 0) {
             line = 1;
-            lx = M6;
+            lx = M7;
           } else {
             dropped++;
             continue;
@@ -32917,10 +33736,10 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M6;
+        const right = line === 0 ? legendRightL1 : PW - M7;
         if (lx + w > right && line === 0) {
           line = 1;
-          lx = M6;
+          lx = M7;
         }
         const ly = y + line * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
@@ -32929,11 +33748,11 @@ function buildProgrammePdf(data, meta = {}) {
         lx += w;
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
-      y = M6 + headerBlockH;
+      y = M7 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
-      doc.rect(M6, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
-      let cx = M6;
+      doc.rect(M7, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M7;
       for (const col of COLS2) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
@@ -32965,21 +33784,21 @@ function buildProgrammePdf(data, meta = {}) {
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
-      doc.line(M6, gridTop, M6 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
-      doc.line(M6, gridTop + HDR_H, M6 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M7, gridTop, M7 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M7, gridTop + HDR_H, M7 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
       rows.forEach((t) => {
         const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M6 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M7 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M6 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M6 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
+          doc.rect(M7 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M7 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M6 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M6 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
-        doc.text(M6 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M6, ry + rh, M6 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start) doc.text(M7 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M7 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M7 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M7, ry + rh, M7 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -32992,7 +33811,7 @@ function buildProgrammePdf(data, meta = {}) {
             if (t.extra) doc.poly([[x, cy - 6.3], [x + 6.3, cy], [x, cy + 6.3], [x - 6.3, cy]], { fill: EXTRA_COL });
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
-            const bh = ROW_H2 - 5;
+            const bh = ROW_H3 - 5;
             const barTop = ry + (rh - bh) / 2;
             let i = 0;
             while (i < marked.length) {
@@ -33009,20 +33828,20 @@ function buildProgrammePdf(data, meta = {}) {
         }
         ry += rh;
       });
-      doc.rect(M6, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M7, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       lastGridBot = gridBot;
-      const fy = PH - M6 + 6;
+      const fy = PH - M7 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
-      doc.text(M6, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
-      doc.text(PW - M6, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+      doc.text(M7, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW - M7, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    const PAD = 10, LH = 12, contentW = PW - 2 * M6 - 2 * PAD;
+    const PAD = 10, LH = 12, contentW = PW - 2 * M7 - 2 * PAD;
     const notesLines = notes ? wrapLines2(notes, contentW, 10, 0) : [];
     const plainW = plain.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
     const discW = disc.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
@@ -33035,15 +33854,15 @@ function buildProgrammePdf(data, meta = {}) {
     }
     const boxH = 2 * PAD + adv;
     let boxTop, ownPage = false;
-    if (lastGridBot + 14 + boxH <= PH - M6) {
+    if (lastGridBot + 14 + boxH <= PH - M7) {
       boxTop = lastGridBot + 14;
     } else {
       doc.newPage(PW, PH);
-      boxTop = M6 + 14;
+      boxTop = M7 + 14;
       ownPage = true;
     }
-    doc.roundRect(M6, boxTop, PW - 2 * M6, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
-    const x0 = M6 + PAD;
+    doc.roundRect(M7, boxTop, PW - 2 * M7, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M7 + PAD;
     let ny = boxTop + PAD + 10;
     const para = (lines, x) => {
       for (const ln of lines) {
@@ -33070,14 +33889,14 @@ function buildProgrammePdf(data, meta = {}) {
         para(w, x0 + 12);
       }
     }
-    if (ownPage) doc.text(M6, PH - M6 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    if (ownPage) doc.text(M7, PH - M7 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }
 
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables6(env) {
+async function ensureTables7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -33227,14 +34046,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle34(request, env, ctx, url) {
+async function handle35(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables6(env);
+  await ensureTables7(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -33831,7 +34650,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables7(env) {
+async function ensureTables8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -34001,7 +34820,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -34025,7 +34844,7 @@ async function handle35(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables7(env);
+  await ensureTables8(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -35090,7 +35909,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -35342,7 +36161,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -35615,7 +36434,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -35802,7 +36621,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -36121,7 +36940,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -36261,7 +37080,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle12],
   ["*", "/upload-asset-thumb", handle12],
   ["*", "/delete-asset-image", handle12],
-  ["*", "/sla/workever", handle39],
+  ["*", "/sla/workever", handle40],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle10],
   ["*", "/stats", handle20],
@@ -36336,23 +37155,25 @@ var ROUTES = [
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs", handle9],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/cablecalc", handle33],
+  ["*", "/pump", handle33],
+  // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
+  ["*", "/cablecalc", handle34],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle34],
+  ["*", "/prog", handle35],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle35],
+  ["*", "/projects", handle36],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle35],
+  ["*", "/project", handle36],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle36],
+  ["*", "/health/", handle37],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle40],
+  ["*", "/comms", handle41],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle40],
+  ["*", "/customer", handle41],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle37],
+  ["*", "/tuya", handle38],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle38]
+  ["*", "/fra", handle39]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -36659,6 +37480,8 @@ var PUBLIC_ROUTES = [
   ["GET", "/compliance/file"],
   // EM remedial battery photos streamed for <img> — signed URL, verified in-handler.
   ["GET", "/certs/photo"],
+  // Pump maintenance photos/videos streamed inline — signed URL, verified in-handler.
+  ["GET", "/pump/media"],
   // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
   // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
   // (The handler re-resolves a real session for logged-in admins on these too.)

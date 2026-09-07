@@ -304,6 +304,17 @@
         <div class="hint">Tick for an electrical test (EICR etc.). On the job the engineer records a <b>remedial works list</b> — each item with a code (C1/C2/C3/FI), what needs doing, rough duration, an approximate material cost and photos. When you get the order, one tap on the job turns those remedials into a new works job to allocate.</div>
       </div>
 
+      <!-- Pump maintenance job -->
+      <div class="field-group">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
+          <input type="checkbox" id="pumpMaintenance" style="width:auto"> 🚰 Pump Maintenance
+        </label>
+        <label id="pumpStoreWrap" style="display:none;margin:8px 0 0">Which pump / store
+          <select id="pumpStore" style="width:100%;padding:8px;margin-top:3px"><option value="">Loading stores…</option></select>
+        </label>
+        <div class="hint">Tick for a sump-pump monthly maintenance visit. Pick the store — the engineer gets that store's set form (a required safety pre-check, the location &amp; method instructions, the monthly Yes/No/N-A checklist, photo &amp; video upload, and both signatures). Completing it submits it for office review, which files a Mostlane PDF to the site.</div>
+      </div>
+
       <!-- Standby / fallback job (dormant pool) -->
       <div class="field-group">
         <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
@@ -789,15 +800,17 @@ async function handleSubmit(evt){
     scheduledAt: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : toIsoOrNull($("scheduledAt").value),
     durationMinutes: Number($("expectedDuration").value) || 60,
     workArea: ($("workArea") && $("workArea").value) || undefined,
-    requiresRA: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqRA").checked,
-    requiresSignature: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqSig").checked,
-    requiresPhoto: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqPhoto").checked,
-    requiresNote: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqNote").checked,
+    requiresRA: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqRA").checked,
+    requiresSignature: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqSig").checked,
+    requiresPhoto: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqPhoto").checked,
+    requiresNote: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqNote").checked,
     firestopping: $("firestopping").checked,
     elecTest: $("elecTest") ? $("elecTest").checked : false,
     emTest: $("emTest") ? $("emTest").checked : false,
     emKind: ($("emTest") && $("emTest").checked) ? emKindVal() : "",
     pat: $("patTest") ? $("patTest").checked : false,
+    pumpMaintenance: $("pumpMaintenance") ? $("pumpMaintenance").checked : false,
+    pumpStore: ($("pumpMaintenance") && $("pumpMaintenance").checked && $("pumpStore")) ? $("pumpStore").value : "",
     release: buildRelease(),
     originator: getLoggedInUser() || undefined
   };
@@ -909,6 +922,23 @@ async function init(){
     g.style.pointerEvents = on ? "none" : "";
     $("fsHint").style.color = on ? "#b45309" : "";
   });
+  // Pump maintenance: reveal the store picker + dim the standard requirements
+  // (the pump form is the completion). Stores load from the /pump config.
+  (function(){
+    var pm = $("pumpMaintenance"); if(!pm) return;
+    var MAPI = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    fetch(MAPI + "/pump/stores", { headers: { "Authorization": "Bearer " + (localStorage.getItem("mostlaneToken")||"") } })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ var sel = $("pumpStore"); if(!sel) return;
+        if(d && d.ok && (d.stores||[]).length){ sel.innerHTML = d.stores.map(function(s){ return '<option value="'+s.id+'">'+ (s.name||s.id) +'</option>'; }).join(""); }
+        else sel.innerHTML = '<option value="">No pump stores configured</option>';
+      }).catch(function(){ var sel=$("pumpStore"); if(sel) sel.innerHTML='<option value="">Couldn\'t load stores</option>'; });
+    pm.addEventListener("change", function(){
+      var on = this.checked;
+      var w = $("pumpStoreWrap"); if(w) w.style.display = on ? "block" : "none";
+      var g = $("reqGroup"); g.style.opacity = on ? "0.45" : ""; g.style.pointerEvents = on ? "none" : "";
+    });
+  })();
   applyReqDefaults();
 
   // Load sites
