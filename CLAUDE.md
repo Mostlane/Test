@@ -4556,6 +4556,20 @@ files to this public repo.
   on `.sheet` inputs `scrollIntoView({block:"center"})` after a ~280ms keyboard-
   settle delay. The signature canvas keeps `touch-action:none` (draw, don't scroll)
   — scroll happens on the rest of the sheet.
+- **iOS PWA: fixed bars drift a keyboard-height up the screen (Sep 2026).** In the
+  installed app, after the keyboard has been up on a form page (engineer-job audit
+  checklists etc.), WebKit can leave the LAYOUT viewport shifted from the VISIBLE one —
+  then EVERY `position:fixed` element (purple View-As bar, field `.tabbar`, the navy
+  `#mlStatusCap`) sits ~350px too high and slides as you scroll; the cap vanishes off
+  the top. Not a transform issue this time (none present) and not reproducible in
+  Chromium. Fix = portal-config `pinFixedBars()`: on visualViewport resize/scroll +
+  focusout, when `vv.offsetTop`/`vv.height` disagree with the window it pins those
+  three to the visual viewport's own edges (`top = offsetTop + height − h`, bars
+  stacked View-As then tabbar; cap `top = offsetTop`), skipped while an input has
+  focus, and restores the inline styles the moment they agree again; focusout also
+  fires a zero-distance `scrollTo` nudge so WebKit re-places fixed elements after
+  the keyboard closes. Any NEW fixed bar should be added to its `SEL` list.
+  portal-config `?v=28`, SW `mostlane-v116`.
 - **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
   Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
   and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
