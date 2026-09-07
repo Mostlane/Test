@@ -32610,7 +32610,7 @@ var DEFAULT_CONFIG3 = {
   stores: [
     { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
     { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
-    { id: "eastbourne", name: "Eastbourne", siteCode: "", client: "retail", address: "", postcode: "", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+    { id: "eastbourne", name: "Eastbourne", siteCode: "0356", client: "retail", address: "Eastbourne, Lindfield Road", postcode: "BN22 0AU", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
     { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
     { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
     { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
