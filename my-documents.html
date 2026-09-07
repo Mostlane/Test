@@ -47,6 +47,13 @@
     <div id="pendingList"></div>
   </div>
 
+  <!-- My qualifications / licences / insurances (read-only self-view) -->
+  <div class="card" id="myRecordsCard" style="display:none;">
+    <h2>📋 My qualifications, licences &amp; insurances</h2>
+    <p class="sub">Your records held by the office. To add or change one, speak to the office.</p>
+    <div id="myRecordsList"></div>
+  </div>
+
   <!-- Admin controls (Full access only) -->
   <div class="adminbar" id="adminBar" style="display:none;">
     <label class="lbl">Manage a staff member's file</label>
@@ -309,8 +316,38 @@ async function loadPending(){
   }catch(e){ /* non-fatal */ }
 }
 
+const REC_KINDS = { qualification:"🎓 Qualifications & tickets", insurance:"📄 Insurances", licence:"🚗 Driving licences", licence_check:"✅ Licence checks" };
+function recBadge(x){
+  if(x.status==="expired") return `<span style="color:#dc2626;font-weight:600">Expired ${fmtDate(x.expires)}</span>`;
+  if(x.status==="expiring") return `<span style="color:#b45309;font-weight:600">Expires ${fmtDate(x.expires)}</span>`;
+  if(x.status==="valid") return `<span style="color:#16a34a">Valid to ${fmtDate(x.expires)}</span>`;
+  return `<span style="color:#64748b">No expiry</span>`;
+}
+async function loadMyRecords(){
+  try{
+    const d = await authFetch("/hr/records").then(r=>r.json());
+    const recs = (d && d.records) || [];
+    if(!recs.length) return;   // card stays hidden
+    let html = "";
+    Object.keys(REC_KINDS).forEach(k=>{
+      const list = recs.filter(x=>x.kind===k);
+      if(!list.length) return;
+      html += `<div class="cat">${REC_KINDS[k]}</div>`;
+      html += list.map(x=>`
+        <div class="doc" style="background:#fff;">
+          <div class="nm"><b>${esc(x.title||"Record")}</b><span>${[x.number?("No. "+esc(x.number)):"", esc(x.issuer||""), recBadge(x)].filter(Boolean).join(" · ")}</span></div>
+          ${x.docUrl?`<button class="btn small" data-recdoc="${esc(x.docUrl)}" data-recn="${esc(x.docName||"Document")}">📄 View</button>`:""}
+        </div>`).join("");
+    });
+    document.getElementById("myRecordsList").innerHTML = html;
+    document.getElementById("myRecordsCard").style.display = "block";
+    document.querySelectorAll("[data-recdoc]").forEach(b=>b.onclick=()=>{ const u=b.dataset.recdoc, n=b.dataset.recn;
+      if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
+  }catch(e){ /* non-fatal */ }
+}
 function init(){
   loadPending();
+  loadMyRecords();
   if(full){
     document.getElementById("adminBar").style.display = "block";
     document.getElementById("upBtn").addEventListener("click", doUpload);

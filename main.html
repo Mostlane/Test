@@ -366,6 +366,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 </a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
+    <a class="button" href="employees.html" id="StaffRecords"><span class="emoji">👷</span> Employees</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
     <a class="button" href="chapplins.html" id="Chapplins"><span class="emoji">🏠</span> Chapplins</a>
     <a class="button" href="eicr-check.html" id="EicrCheck"><span class="emoji">⚡</span> EICR Check</a>
@@ -433,6 +434,7 @@ const MAP = window.ML_PERM_MAP || {
   Weekly: ["Weekly"],
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
+  StaffRecords: ["StaffRecords"],
   Chapplins: ["Chapplins"],
   EicrCheck: ["EicrCheck"],
   CableCalc: ["CableCalc"],
@@ -1724,6 +1726,28 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
+    // ── Widget: Employee records — qualifications/licences/insurances expiring ──
+    HUB.register({
+      id: "staffrecords", emoji: "👷", title: "Employee records", area: "staffrecords",
+      can: function (p) { return yes(p.FullAccess) || yes(p.StaffRecords); },
+      load: function (card) {
+        return jget("/hr/attention").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var expired = d.expired || 0, expiring = d.expiring || 0, total = d.count || 0;
+          var rows = "";
+          if (expired) rows += metric("Expired", expired, "bad");
+          if (expiring) rows += metric("Expiring soon", expiring, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "👷", title: "Employee records",
+            big: total, sub: "qualification" + (total === 1 ? "" : "s") + " / licences need attention",
+            tone: expired ? "bad" : (expiring ? "warn" : ""),
+            ok: total ? "" : "All qualifications, licences & insurances in date.",
+            rows: rows, actions: act("employees.html", "Open employees", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Compliance — certificates overdue / due soon (Co-op chart) ───
     HUB.register({
       id: "compliance", emoji: "✔️", title: "Compliance", area: "compliance",
@@ -1935,6 +1959,8 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
         { area: "compliance", ok: yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance), emoji: "📄", href: "cert-status.html", get: "/certs/status?range=30d&count=1",
           calc: function (d) { if (!d || !d.ok || !d.counts) return null; return { n: (d.counts.toReview || 0) + (d.counts.withEngineers || 0), label: "EM/PAT certs outstanding", bad: false }; } },
+        { area: "staffrecords", ok: yes(p.FullAccess) || yes(p.StaffRecords), emoji: "👷", href: "employees.html", get: "/hr/attention",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.count || 0, label: "staff records expiring", bad: (d.expired || 0) > 0 }; } },
         { area: "memos", ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
           calc: function (d) { if (!d || !d.ok) return null; var n = (d.memos || []).filter(function (m) { return m.status === "sent" && (m.total - m.signed) > 0; }).length; return { n: n, label: "memos unsigned", bad: false }; } },
         { area: "timesheets", ok: yes(p.FullAccess) || yes(p.TimesheetAdmin), emoji: "⏱️", href: "timesheets-admin.html", get: "/ts/admin/overview",
