@@ -1149,9 +1149,11 @@ var init_pdf = __esm({
       // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
       // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
       // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
-      imageRGB(rgb, iw, ih, x, yTop, w, h) {
+      // opt.deflated=true → `rgb` is the zlib-deflated sample stream (FlateDecode),
+      // which keeps a photo page to a fraction of the raw size.
+      imageRGB(rgb, iw, ih, x, yTop, w, h, opt = {}) {
         const idx = this.images.length;
-        this.images.push({ rgb, w: iw, h: ih });
+        this.images.push({ rgb, w: iw, h: ih, flate: !!opt.deflated });
         const y = this._page.h - yTop - h;
         this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
         return this;
@@ -1244,7 +1246,7 @@ var init_pdf = __esm({
         const enc3 = new TextEncoder();
         const nImg = this.images.length;
         const imgMeta = this.images.map((im) => {
-          if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+          if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: im.flate ? "/FlateDecode" : null };
           const b = im && im.jpeg ? im.jpeg : im;
           const d = jpegInfo(b);
           const cs = d.comps === 1 ? "/DeviceGray" : d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
@@ -32274,7 +32276,6 @@ var H3 = 842;
 var M5 = 40;
 var CW2 = W5 - M5 * 2;
 var NAVY4 = [0, 0.204, 0.408];
-var NAVY_D2 = [0, 0.145, 0.29];
 var INK4 = [0.1, 0.13, 0.18];
 var MUTE3 = [0.46, 0.51, 0.58];
 var FAINT2 = [0.62, 0.66, 0.72];
@@ -32360,6 +32361,33 @@ function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
 function pageBg2(doc) {
   doc.rect(0, 0, W5, H3, { fill: BG2 });
 }
+function imgSize(img) {
+  if (!img) return null;
+  if (img.jpeg) {
+    try {
+      const g = jpegInfo(img.jpeg);
+      return { w: g.w || 1, h: g.h || 1 };
+    } catch {
+      return null;
+    }
+  }
+  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
+  return null;
+}
+function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
+  const sz = imgSize(img);
+  if (!sz) return null;
+  const s = Math.min(maxW / sz.w, maxH / sz.h);
+  const w = sz.w * s, h = sz.h * s;
+  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
+  try {
+    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
+    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
+  } catch {
+    return null;
+  }
+  return { w, h, x: dx, y: dy };
+}
 function ansOf(a) {
   const s = String(a || "").toLowerCase();
   if (/^y/.test(s)) return "yes";
@@ -32376,7 +32404,6 @@ function statusOf2(rec) {
 function header2(doc, rec, meta, slim) {
   const y = 30, h = slim ? 40 : HEADER_H2;
   cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY4);
-  if (!slim) doc.roundRect(M5, y, CW2, 5, 2.5, { fill: NAVY_D2 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
@@ -32476,16 +32503,50 @@ function detailsCard2(doc, y, rec) {
   });
   return h;
 }
-function mediaLine(rec) {
-  const np = (rec.photos || []).length, nv = (rec.videos || []).length;
+function mediaLine(rec, meta) {
+  const media = Array.isArray(rec.media) ? rec.media : [];
+  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
+  const embedded = (meta.photos || []).length;
   const bits = [];
-  if (np) bits.push(np + (np === 1 ? " photo" : " photos"));
-  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos"));
-  return bits.length ? bits.join(" \xB7 ") + " attached in the portal record" : "";
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
+  return bits.length ? bits.join(" \xB7 ") : "";
+}
+var PHOTOS_PER_PAGE = 4;
+function photoPages(meta) {
+  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
+}
+function photoPage(doc, rec, meta, pageIdx) {
+  const photos = meta.photos || [];
+  const start = pageIdx * PHOTOS_PER_PAGE;
+  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
+  const top = 30 + 40 + GAP2;
+  const gap = 12;
+  const cw = (CW2 - gap) / 2, ch = 292;
+  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
+  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
+  slice.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
+    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
+    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
+    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
+    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
+  });
+  const last = pageIdx === photoPages(meta) - 1;
+  if (last) {
+    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
+    let yy2 = top + 30 + 2 * (ch + 10) + 6;
+    extras.slice(0, 6).forEach((t) => {
+      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
+      yy2 += 11;
+    });
+  }
 }
 function signatureCard2(doc, y, rec, meta) {
   const declLines = wrap6(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
-  const media = mediaLine(rec);
+  const media = mediaLine(rec, meta);
   const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
   cardBox2(doc, M5, y, CW2, h);
   tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
@@ -32506,14 +32567,7 @@ function signatureCard2(doc, y, rec, meta) {
     { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
   ];
   blocks.forEach((b) => {
-    if (b.sig) {
-      try {
-        const g = jpegInfo(b.sig);
-        const hh = 30;
-        doc.image(b.sig, b.x, y2 - 6, Math.min(bw, hh * (g.w / g.h)), hh);
-      } catch {
-      }
-    }
+    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
     doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
     doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
     tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
@@ -32540,7 +32594,8 @@ function buildPumpPdf(record, meta = {}) {
   const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
   const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
   const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
-  const totalPages = pages.length + (trailOwnPage ? 1 : 0);
+  const nPhotoPages = photoPages(meta);
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
   const doc = new PdfDoc(W5, H3);
   pages.forEach((pg, idx) => {
     if (idx > 0) doc.newPage(W5, H3);
@@ -32568,6 +32623,14 @@ function buildPumpPdf(record, meta = {}) {
   const dh = detailsCard2(doc, ty, rec);
   if (dh) ty += dh + GAP2;
   signatureCard2(doc, ty, rec, meta);
+  const before = pages.length + (trailOwnPage ? 1 : 0);
+  for (let p = 0; p < nPhotoPages; p++) {
+    doc.newPage(W5, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, before + p + 1, totalPages);
+    photoPage(doc, rec, meta, p);
+  }
   return doc.bytes();
 }
 
@@ -32576,6 +32639,7 @@ init_logo();
 init_filesign();
 init_push();
 init_compliance();
+init_pngdecode();
 var GENERAL = [
   "Chamber free of debris or obstructions",
   "Water level within expected range when idle",
@@ -32683,6 +32747,88 @@ function dataUrlToBytes2(u) {
   } catch {
     return null;
   }
+}
+var isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
+var isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
+async function sigImage(dataUrl) {
+  const b = dataUrlToBytes2(dataUrl);
+  if (!b) return null;
+  if (isJpeg(b)) return { jpeg: b };
+  if (isPng(b)) {
+    const d = await decodePngToRgb(b, { signature: true });
+    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
+  }
+  return null;
+}
+function shrinkRgb(rgb, w, h, maxEdge) {
+  const s = Math.max(w, h) / maxEdge;
+  if (s <= 1) return { rgb, w, h };
+  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
+  const out = new Uint8Array(nw * nh * 3);
+  for (let y = 0; y < nh; y++) {
+    const sy = Math.min(h - 1, Math.floor(y * s));
+    for (let x = 0; x < nw; x++) {
+      const sx = Math.min(w - 1, Math.floor(x * s));
+      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
+      out[di] = rgb[si];
+      out[di + 1] = rgb[si + 1];
+      out[di + 2] = rgb[si + 2];
+    }
+  }
+  return { rgb: out, w: nw, h: nh };
+}
+async function deflate(bytes) {
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter();
+    w.write(bytes);
+    w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+async function photoImage(env, m) {
+  try {
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
+    if (!o) return null;
+    const b = new Uint8Array(await o.arrayBuffer());
+    if (isJpeg(b)) return { jpeg: b, name: m.name || "" };
+    if (isPng(b)) {
+      const d = await decodePngToRgb(b);
+      if (!d) return null;
+      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
+      const z = await deflate(s.rgb);
+      return z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+var MAX_PDF_PHOTOS = 12;
+async function pdfMeta(env, d) {
+  const media = Array.isArray(d.media) ? d.media : [];
+  const photos = [], skipped = [], videos = [];
+  for (const m of media) {
+    if (!m || !m.key) continue;
+    if (m.kind === "video") {
+      videos.push(m.name || "video");
+      continue;
+    }
+    if (photos.length >= MAX_PDF_PHOTOS) {
+      skipped.push(m.name || "photo");
+      continue;
+    }
+    const img = await photoImage(env, m);
+    if (img) photos.push(img);
+    else skipped.push(m.name || "photo");
+  }
+  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
+}
+async function buildPdfFor(env, rec) {
+  const d = shapeRow2(rec);
+  return buildPumpPdf(d, await pdfMeta(env, d));
 }
 function shapeRow2(r) {
   let d = {};
@@ -32987,7 +33133,7 @@ async function handle33(request, env, ctx, url, sess) {
     if (!rec) return error("Not found", 404, env, request);
     if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
     const d = shapeRow2(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
   }
   if (sub === "/finalise" && method === "POST") {
@@ -32996,7 +33142,7 @@ async function handle33(request, env, ctx, url, sess) {
     const rec = await loadRec(String(b.id || ""));
     if (!rec) return error("Not found", 404, env, request);
     const d = shapeRow2(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
     if (env.JOB_FILES) {
