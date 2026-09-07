@@ -147,6 +147,12 @@ async function ensureTables(env) {
     notified_at TEXT, link TEXT, source TEXT, status TEXT,
     matched_kind TEXT, matched_cert_id TEXT, matched_job_id TEXT, match_note TEXT,
     created_at TEXT, updated_at TEXT, actioned_at TEXT, actioned_by TEXT)`).run();
+  // EICR (5-year) certificate-NUMBER register — a sequential log of cert number →
+  // job the office keeps, so the next number is always clear and gaps are visible.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cert_register (
+    tenant_id TEXT, number INTEGER, job TEXT, cert_type TEXT DEFAULT 'fiveYear',
+    created_at TEXT, updated_at TEXT, updated_by TEXT,
+    PRIMARY KEY (tenant_id, number))`).run();
 }
 const STAGES = ["to_quote", "quoted", "approved", "invoiced"];
 const REMEDIAL_CHARGE = 50;   // £ per failed EM LIGHT (batteries are priced by the supplier, no £50)
@@ -1748,6 +1754,88 @@ export async function handle(request, env, ctx, url, sess) {
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
+  }
+
+  // ── EICR 5-year certificate NUMBER register (office) ──────────────────────────
+  // GET /certs/register — the whole register + the next number + sequence gaps
+  // (numbers not yet used) + blanks (numbers with no job assigned).
+  if (sub === "/register" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT number, job FROM cert_register WHERE tenant_id=? ORDER BY number").bind(tid).all();
+    const rows = (results || []).map(r => ({ number: r.number, job: r.job || "" }));
+    const nums = rows.map(r => r.number);
+    const max = nums.length ? Math.max(...nums) : 0;
+    const min = nums.length ? Math.min(...nums) : 0;
+    const have = new Set(nums);
+    const gaps = []; for (let n = min; n <= max; n++) if (!have.has(n)) gaps.push(n);
+    const blanks = rows.filter(r => !String(r.job || "").trim()).map(r => r.number);
+    return json({ ok: true, entries: rows, count: rows.length, min, max, next: max + 1, gaps, blanks }, {}, env, request);
+  }
+  // POST /certs/register {number, job} — add or edit one number's job.
+  if (sub === "/register" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number) || number < 1 || number > 999999) return error("A valid number is required.", 400, env, request);
+    const job = String(b.job || "").slice(0, 300);
+    const now = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=excluded.job, updated_at=excluded.updated_at, updated_by=excluded.updated_by")
+      .bind(tid, number, job, "fiveYear", now, now, me).run();
+    return json({ ok: true, number, job }, {}, env, request);
+  }
+  // POST /certs/register/delete {number}
+  if (sub === "/register/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const number = parseInt(b.number, 10);
+    if (!Number.isFinite(number)) return error("Missing number", 400, env, request);
+    await env.DB.prepare("DELETE FROM cert_register WHERE tenant_id=? AND number=?").bind(tid, number).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  // POST /certs/register/import — bulk load. Body {text} (one "number  job" per
+  // line — a leading "(052)" note is ignored, a number-only line = blank job) OR
+  // {entries:[{number,job}]}. Upserts; empty jobs never overwrite a set one.
+  // {fillGaps:true} also inserts any missing sequence numbers as blank entries.
+  if (sub === "/register/import" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let entries = [];
+    if (Array.isArray(b.entries)) {
+      entries = b.entries.map(e => ({ number: parseInt(e.number, 10), job: String(e.job || "").slice(0, 300) })).filter(e => Number.isFinite(e.number));
+    } else if (typeof b.text === "string") {
+      for (const line of b.text.split(/\r?\n/)) {
+        const m = line.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
+        if (!m) continue;
+        entries.push({ number: parseInt(m[1], 10), job: String(m[2] || "").trim().slice(0, 300) });
+      }
+    }
+    if (!entries.length) return error("Nothing to import — paste lines like '349<tab>Corsham Remedials'.", 400, env, request);
+    const now = new Date().toISOString();
+    let imported = 0;
+    for (let i = 0; i < entries.length; i += 40) {
+      const chunk = entries.slice(i, i + 40);
+      await env.DB.batch(chunk.map(e => env.DB.prepare(
+        // Keep an existing non-empty job if the incoming job is blank.
+        "INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) " +
+        "ON CONFLICT(tenant_id,number) DO UPDATE SET job=CASE WHEN excluded.job<>'' THEN excluded.job ELSE cert_register.job END, updated_at=excluded.updated_at, updated_by=excluded.updated_by"
+      ).bind(tid, e.number, e.job, "fiveYear", now, now, me)));
+      imported += chunk.length;
+    }
+    // Optionally fill sequence gaps with blank placeholders so the register is contiguous.
+    if (b.fillGaps) {
+      const nums = entries.map(e => e.number);
+      const min = Math.min(...nums), max = Math.max(...nums);
+      const { results } = await env.DB.prepare("SELECT number FROM cert_register WHERE tenant_id=?").bind(tid).all();
+      const have = new Set((results || []).map(r => r.number));
+      const missing = []; for (let n = min; n <= max; n++) if (!have.has(n)) missing.push(n);
+      for (let i = 0; i < missing.length; i += 40) {
+        await env.DB.batch(missing.slice(i, i + 40).map(n => env.DB.prepare(
+          "INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?)"
+        ).bind(tid, n, "", "fiveYear", now, now, me)));
+      }
+    }
+    const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
+    return json({ ok: true, imported, count: row ? row.n : imported, next: (row && row.mx ? row.mx : 0) + 1 }, {}, env, request);
   }
 
   return error("Not found: " + url.pathname, 404, env, request);

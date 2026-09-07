@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Certificate Register</title>
+  <script src="/portal-config.js?v=27"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:860px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;}
+    .next{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+    .next .big{font-size:40px;font-weight:800;color:var(--brand);line-height:1;}
+    .next .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;}
+    .next .stat{font-size:13px;color:#334;}
+    .warnbox{background:#fffaf0;border:1px solid #f6e0b5;color:#7a5b00;border-radius:12px;padding:10px 13px;margin-bottom:12px;font-size:13.5px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px;margin-bottom:12px;}
+    #search{width:100%;padding:10px 12px;border:1px solid #ccd5dd;border-radius:10px;font-size:14px;margin-bottom:8px;}
+    table{width:100%;border-collapse:collapse;}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;text-align:left;padding:6px 8px;border-bottom:2px solid #eef2f6;}
+    td{padding:4px 8px;border-bottom:1px solid #f2f5f8;vertical-align:middle;}
+    td.num{font-weight:800;color:var(--brand);width:74px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+    td .ji{width:100%;border:1px solid transparent;background:transparent;border-radius:7px;padding:7px 8px;font-size:14px;font-family:inherit;color:#1f2937;}
+    td .ji:focus{border-color:#bcd0e8;background:#fff;outline:none;}
+    tr.missing td.num{color:var(--bad);} tr.missing .ji::placeholder{color:#c0392b;}
+    tr.missing{background:#fdf2f2;} tr.blank{background:#fffaf0;}
+    .tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:700;margin-left:6px;}
+    .tag.miss{background:#fee2e2;color:#b91c1c;} .tag.blank{background:#fef3c7;color:#92400e;}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+    #impBox{display:none;}
+    #impText{width:100%;min-height:120px;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:13px monospace;}
+    .saved{color:var(--ok);font-size:12px;margin-left:8px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
+    <h1>📇 Certificate register</h1>
+    <button class="btn ghost sm" id="impBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">⤵ Import / paste</button>
+  </header>
+
+  <div class="wrap">
+    <div class="next" id="nextBox"><div class="muted">Loading…</div></div>
+    <div id="gapBox"></div>
+
+    <div class="card" id="impBox">
+      <p class="muted" style="margin:0 0 6px;">Paste your list — one per line as <b>number</b> then the job (tab or spaces between). A leading "(052)" note is ignored; a number on its own is a blank entry.</p>
+      <textarea id="impText" placeholder="349&#9;Corsham Remedials&#10;350&#9;Freshwater, Afton Road&#10;…"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn" id="impRun">Import</button>
+        <label class="muted" style="display:flex;align-items:center;gap:5px;"><input type="checkbox" id="impFill" style="width:auto;"> also fill sequence gaps as blanks</label>
+        <span class="saved" id="impMsg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="Search a number or job…">
+      </div>
+      <div id="msg" class="saved" style="min-height:14px;"></div>
+      <table><thead><tr><th>No.</th><th>Job</th></tr></thead><tbody id="rows"><tr><td colspan="2" class="muted" style="padding:16px;">Loading…</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    let DATA = null;
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r=>r.json());
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      g("impBtn").onclick = () => { g("impBox").style.display = g("impBox").style.display==="block"?"none":"block"; };
+      g("impRun").onclick = doImport;
+      g("search").addEventListener("input", render);
+      load();
+    })();
+
+    async function load() {
+      let d=null;
+      try { d = await authFetch("/certs/register").then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("rows").innerHTML='<tr><td colspan="2" class="muted" style="padding:16px;color:#b00020">Couldn\'t load the register.</td></tr>'; return; }
+      DATA = d;
+      // Next number
+      g("nextBox").innerHTML = d.count
+        ? '<div><div class="lbl">Next certificate number</div><div class="big">'+d.next+'</div></div>'
+          + '<div class="stat">'+d.count+' certificate'+(d.count===1?"":"s")+' logged<br>range '+d.min+'–'+d.max+'</div>'
+        : '<div class="muted">No certificates yet — import your list to begin.</div>';
+      // Gaps
+      const gaps = d.gaps||[], blanks = d.blanks||[];
+      let gb = "";
+      if (gaps.length) gb += '<div class="warnbox">⚠ '+gaps.length+' missing number'+(gaps.length===1?"":"s")+' in the sequence: <b>'+gaps.join(", ")+'</b> <button class="btn sm" id="addGaps" style="margin-left:8px;">Add these as blanks</button></div>';
+      if (blanks.length) gb += '<div class="warnbox" style="background:#f7f9fb;border-color:#e2e8f0;color:#475569;">'+blanks.length+' number'+(blanks.length===1?"":"s")+' with no job yet: '+blanks.slice(0,40).join(", ")+(blanks.length>40?"…":"")+'</div>';
+      g("gapBox").innerHTML = gb;
+      if (gaps.length) g("addGaps").onclick = async () => { g("addGaps").disabled=true; for (const n of gaps) { await authFetch("/certs/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({number:n,job:""})}).catch(()=>{}); } load(); };
+      render();
+    }
+
+    function render() {
+      if (!DATA) return;
+      const map = {}; (DATA.entries||[]).forEach(e => map[e.number] = e.job);
+      const q = g("search").value.trim().toLowerCase();
+      const min = DATA.min||0, max = DATA.max||0;
+      let html = "", shown = 0;
+      // Newest first is more useful for "what did I just do / what's next".
+      // Show the NEXT number at the very top as a quick-add row.
+      const rowFor = (n, job, cls, tag) => {
+        return '<tr class="'+cls+'"><td class="num">'+n+(tag||'')+'</td>'
+          + '<td><input class="ji" data-n="'+n+'" value="'+esc(job||"")+'" placeholder="'+(cls==="missing"?"— missing — type a job to add it":"job / site")+'"></td></tr>';
+      };
+      const matches = (n, job) => !q || String(n).includes(q) || String(job||"").toLowerCase().includes(q);
+      // Next-number quick add (only when not searching).
+      if (!q && DATA.count) html += rowFor(DATA.next, "", "blank", '<span class="tag blank">next</span>');
+      for (let n = max; n >= min; n--) {
+        const has = Object.prototype.hasOwnProperty.call(map, n);
+        const job = has ? map[n] : "";
+        if (!matches(n, job)) continue;
+        const cls = !has ? "missing" : (!String(job).trim() ? "blank" : "");
+        const tag = !has ? '<span class="tag miss">missing</span>' : (!String(job).trim() ? '<span class="tag blank">blank</span>' : '');
+        html += rowFor(n, job, cls, tag);
+        shown++;
+      }
+      g("rows").innerHTML = html || '<tr><td colspan="2" class="muted" style="padding:16px;">No matches.</td></tr>';
+      [].forEach.call(g("rows").querySelectorAll(".ji"), inp => {
+        inp.addEventListener("change", async () => {
+          const n = parseInt(inp.dataset.n,10), job = inp.value;
+          try { const r = await authFetch("/certs/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({number:n,job})}).then(x=>x.json());
+            if (r&&r.ok){ flash("Saved ✓"); DATA=null; setTimeout(load, 400); } } catch { flash("Save failed", true); }
+        });
+      });
+    }
+    function flash(t, err){ const m=g("msg"); m.textContent=t; m.style.color=err?"#b00020":"#0a7d33"; setTimeout(()=>{ if(m.textContent===t) m.textContent=""; }, 1500); }
+
+    async function doImport() {
+      const text = g("impText").value.trim();
+      if (!text) { g("impMsg").textContent="Paste your list first."; return; }
+      g("impRun").disabled=true; g("impMsg").textContent="Importing…"; g("impMsg").style.color="#6b7a90";
+      try {
+        const r = await authFetch("/certs/register/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text, fillGaps: g("impFill").checked})}).then(x=>x.json());
+        if (r&&r.ok){ g("impMsg").textContent="Imported "+r.imported+" — "+r.count+" total, next "+r.next; g("impMsg").style.color="#0a7d33"; g("impText").value=""; g("impBox").style.display="none"; load(); }
+        else { g("impMsg").textContent=(r&&r.error)||"Import failed"; g("impMsg").style.color="#b00020"; }
+      } catch { g("impMsg").textContent="Import failed"; g("impMsg").style.color="#b00020"; }
+      g("impRun").disabled=false;
+    }
+  </script>
+</body>
+</html>

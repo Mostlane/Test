@@ -2626,6 +2626,28 @@ it straight onto the compliance chart (rolling the next-due date).
   toReview+withEngineers with an "Awaiting from engineers / In your review queue"
   breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
   (same `/certs/status?range=30d&count=1` fetch, jget-cached).
+- **EICR 5-year certificate NUMBER register (Sep 2026):** a STANDALONE running
+  register of Mostlane's own EICR/5-year certificate numbers (349→…) so the office
+  can see at a glance the **next number** to allocate and spot **gaps/blanks**. Own
+  table **`cert_register`** (self-migrating; PK tenant_id+number, `job`, `cert_type`
+  default fiveYear) — DELIBERATELY separate from the `certificates` table (that's the
+  portal-generated EM/PAT certs; this is just a number log covering the whole
+  history, most of which predates portal certs). Endpoints (office
+  FullAccess|SLAAdmin|Compliance): **GET /certs/register** (entries + `count`/`min`/
+  `max`/`next=max+1` + `gaps` [missing sequence numbers] + `blanks` [numbers with no
+  job]), **POST /certs/register** `{number, job}` (upsert one — inline-edit a row or
+  add the next), **POST /certs/register/delete** `{number}`, **POST
+  /certs/register/import** (`{text}` one "number  job" per line — a leading "(052)"
+  note ignored, number-only line = blank; OR `{entries:[{number,job}]}`; upserts,
+  a blank job never overwrites a set one; `{fillGaps:true}` also inserts missing
+  sequence numbers as blanks). Front-end **cert-register.html** (📇 Register button
+  on cert-review.html) = a big **Next certificate number** banner, a gaps/blanks
+  warning ("Add these as blanks"), a searchable table newest-first with each `job`
+  an inline-editable input (autosaves; a missing number shows a red "type a job to
+  add it" row; the next number sits at the top as a quick-add), and a paste-import
+  box. **Seeded live from Jamie's register 349→999** (649 numbers; loaded straight
+  to D1, customer site names D1-only never the repo): missing **949 & 960**, blanks
+  **615, 618–629, 666**, next number **1000**. _headers no-cache.
 - **Client-order intake → approve a remedial (Sep 2026):** a bot (e.g. Grok watching
   the client's Concerto REM/R-order emails) POSTs each order to **POST
   /certs/remedials/order-inbound** (PUBLIC_ROUTES; token verified in-handler —
