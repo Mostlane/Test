@@ -373,12 +373,31 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
 
-    // 3) round-trip miles for the site: the admin's site_miles register first
-    //    (already a round-trip figure), else a HQ→site geocode × road factor × 2.
+    // 3) round-trip miles + drive TIME for the site.
+    //    Miles: the admin's site_miles register first (already a round-trip figure),
+    //    else the real Google driving distance, else a HQ→site geocode × factor × 2.
+    //    Drive time: the REAL Google Distance Matrix driving duration (HQ↔site, ×2
+    //    for the round trip) — NOT a flat 30 mph assumption. The 30 mph estimate is
+    //    kept only as a fallback when GOOGLE_MAPS_KEY is unset or the API errors.
     let rtMiles = 0, milesSource = "unknown";
+    let rtDriveMins = 0, travelSource = "estimate";
     const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
     if (key) { try { const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).first(); if (row && row.miles != null) { rtMiles = Number(row.miles) || 0; milesSource = "register"; } } catch {} }
+    if (sitePc && (env.GOOGLE_MAPS_KEY || "")) {
+      try {
+        const gu = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC)
+          + "&destinations=" + encodeURIComponent(sitePc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
+        const gr = await fetch(gu); const gd = await gr.json();
+        const el = gd && gd.status === "OK" && gd.rows && gd.rows[0] && gd.rows[0].elements && gd.rows[0].elements[0];
+        if (el && el.status === "OK") {
+          rtDriveMins = r1((el.duration.value / 60) * 2);   // one-way seconds → round-trip minutes
+          travelSource = "google";
+          if (!rtMiles) { rtMiles = r1((el.distance.value / 1609.344) * 2); milesSource = "google"; }
+        }
+      } catch {}
+    }
     if (!rtMiles && sitePc) { const base = await geoPc(HQ_PC), dest = await geoPc(sitePc); if (base && dest) { rtMiles = r1(havMi(base, dest) * ROAD_FACTOR * 2); milesSource = "geocoded"; } }
+    if (!rtDriveMins) rtDriveMins = rtMiles > 0 ? r1((rtMiles / SPEED_MPH) * 60) : 0;   // 30 mph fallback
 
     // 4) rates (hourly; a day rate → /8)
     const rates = await ratesMap(env, tid);
@@ -390,7 +409,7 @@ export async function handle(request, env, ctx, url, sess) {
       const rate = hourlyOf(u); if (rate == null) anyNoRate = true;
       const days = e.days.size || 0;
       const engMiles = rtMiles * days;
-      const tMins = rtMiles > 0 ? (rtMiles / SPEED_MPH) * 60 * days : 0;
+      const tMins = rtDriveMins * days;   // real Google round-trip drive time (× days), 30 mph only as fallback
       const oCost = rate != null ? (e.mins / 60) * rate : 0;
       const tCost = rate != null ? (tMins / 60) * rate : 0;
       const fCost = engMiles * FUEL_PER_MILE;
@@ -407,7 +426,7 @@ export async function handle(request, env, ctx, url, sess) {
     const labourCost = onSiteCost + travelCost;
     const total = labourCost + fuelCost + materials;
     return json({
-      ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, roundTripMiles: r1(rtMiles),
+      ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, travelSource, roundTripMiles: r1(rtMiles), roundTripDriveMins: r1(rtDriveMins),
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows.length },
