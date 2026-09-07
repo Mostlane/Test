@@ -83,7 +83,7 @@
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r=>r.json());
-        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.SLA==="Yes")) { alert("This page needs SLA, SLA Admin or Full Access."); location.href="/main.html"; return; }
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.WhereEveryone==="Yes")) { alert("This page needs the Where's everyone permission (Users Admin → Jobs & SLA)."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
       g("refresh").onclick = load;
       g("dmClose").onclick = () => { g("dayModal").style.display="none"; };

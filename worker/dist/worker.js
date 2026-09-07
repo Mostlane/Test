@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -12435,8 +12430,8 @@ async function handle10(request, env, ctx, url, sess) {
   if (subpath === "/live" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const permSet = await userPerms(env, tenantId, sess);
-    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("SLA")))
-      return jsonResponse({ error: "Office access required" }, headers, 403);
+    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("WhereEveryone")))
+      return jsonResponse({ error: "Needs the Where's everyone permission" }, headers, 403);
     const today = londonNow().date;
     const londonDay = (iso) => {
       try {
@@ -18614,8 +18609,10 @@ var PERMISSION_KEYS = [
   // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
   "Chapplins",
   // the Chapplins customer area (directory + compliance chart)
-  "CableCalc"
+  "CableCalc",
   // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
+  "WhereEveryone"
+  // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
 ];
 function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -30660,9 +30657,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
