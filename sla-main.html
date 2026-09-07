@@ -247,7 +247,7 @@
         <div class="toolwrap">
           <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
           <div class="toolmenu" id="toolsMenu" hidden>
-            <a href="engineers-live.html" class="btn" title="Live: where every engineer is right now">📍 Where's everyone</a>
+            <a href="engineers-live.html" class="btn" id="whereLink" style="display:none" title="Live: where every engineer is right now">📍 Where's everyone</a>
             <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
             <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
             <a href="you.html" class="btn" title="Your personal screen">👤 You</a>
@@ -273,6 +273,10 @@
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
+        }
+        // "Where's everyone" has its own permission (SLA Admin / Full Access always see it).
+        if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.WhereEveryone)) {
+          var wl = document.getElementById("whereLink"); if (wl) wl.style.display = "";
         }
         // Certificate review queue — office roles that can issue EM/PAT certs.
         if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance)) {

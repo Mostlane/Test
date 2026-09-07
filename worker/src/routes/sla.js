@@ -1073,12 +1073,12 @@ export async function handle(request, env, ctx, url, sess) {
      project/fallback day). Uses each engineer's OWN per-engineer status + schedule
      (effStatus/effSchedule), NOT the release-gated for-engineer view, so the office
      sees the true plan. Returns the whole planned day per engineer for the modal.
-     Office view (FullAccess | SLAAdmin | SLA). */
+     Office view (FullAccess | SLAAdmin | WhereEveryone — the dedicated toggle in Users Admin). */
   if (subpath === "/live" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const permSet = await userPerms(env, tenantId, sess);
-    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("SLA")))
-      return jsonResponse({ error: "Office access required" }, headers, 403);
+    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("WhereEveryone")))
+      return jsonResponse({ error: "Needs the Where's everyone permission" }, headers, 403);
     const today = londonNow().date;
     const londonDay = (iso) => { try { const d = new Date(iso); return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); } catch { return ""; } };
     const allJobs = (await listJobs(env, tenantId)).filter(j => j && String(j.status || "").toLowerCase() !== "cancelled");

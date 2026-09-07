@@ -461,6 +461,7 @@ const PERMISSION_KEYS = [
   "EicrCheck",       // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
   "Chapplins",       // the Chapplins customer area (directory + compliance chart)
   "CableCalc",       // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
+  "WhereEveryone",   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly
