@@ -734,7 +734,7 @@ export async function handle(request, env, ctx, url, sess) {
       const terms = q.split(/\s+/).map(t => t.replace(/[%_\\]/g, "")).filter(Boolean).slice(0, 8);
       if (terms.length) {
         const where = terms.map(() => "search LIKE ?").join(" AND ");
-        const likes = terms.map(t => "%" + t + "%");
+        const likes = terms.map(t => "%" + likeKey(t, 40) + "%");   // D1: LIKE pattern ≤ 50 bytes
         total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
         ({ results: rows } = await db.prepare(`SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
@@ -789,7 +789,10 @@ export async function handle(request, env, ctx, url, sess) {
       // the caller can offer to open it instead. (This is exactly the David Molloy
       // 0107 "wall above the sink" case.)
       if (!body.force) {
-        const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
+        // D1 caps a LIKE pattern at 50 BYTES ("LIKE or GLOB pattern too complex"
+        // otherwise), so the SQL pre-filter uses only a short byte-safe prefix;
+        // the exact 80-char comparison below is done in JS on the candidates.
+        const dkey = likeKey(desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, ""), 40);
         if (dkey) {
           const { results } = await db.prepare(
             "SELECT id, helpdesk_ref, status, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id<>? AND lower(data) LIKE ? LIMIT 30"
@@ -2934,6 +2937,18 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
 }
 
 async function readJson(r) { const t = await r.text(); return t ? JSON.parse(t) : {}; }
+
+// Trim a string to at most `maxBytes` UTF-8 bytes (never splitting a character)
+// for use inside a LIKE pattern — D1 rejects patterns over 50 bytes.
+function likeKey(str, maxBytes = 40) {
+  let out = ""; let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch; bytes += b;
+  }
+  return out;
+}
 
 function jsonResponse(data, headers, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
