@@ -326,7 +326,7 @@ export async function handle(request, env, ctx, url, sess) {
     const fresh = await loadRec(id);
     try { await maybeCompletePumpJob(env, tid, fresh); } catch {}
     ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
-      title: "🚰 Pump maintenance submitted", body: `${shapeRow(rec).storeName || "A store"} — ready for office review`, url: "/pump-review.html", tag: "pump-review",
+      title: "🚰 Pump maintenance submitted", body: `${shapeRow(rec).storeName || "A store"} — ready for office review`, url: "/cert-review.html?pump=" + encodeURIComponent(id), tag: "pump-review",
     }, me).catch(() => {}));
     return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
   }

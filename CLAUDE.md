@@ -2611,6 +2611,21 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
+  engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
+  status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
+  the page merges `GET /pump/review` (+ `/pump/list` when "Show issued") into the
+  queue, renders pump rows with 🚰 "Pump maintenance", and opens them in-page
+  (`openPump`: MLPump office/view mount + **🏁 Approve & file to compliance** →
+  POST /pump/finalise, which draws the PDF and `fileCertificatePdf`s it as the
+  store's CURRENT `pump` doc on the coop chart, rolling the monthly due date; plus
+  upload-replacement / preview / delete). Deep-link `cert-review.html?pump=<id>`
+  (the submit push now points there). **/certs/status** (tracker + hub card) counts
+  pump jobs (`job.pumpMaintenance`) as type `pump`, joined to `pump_records` by
+  job_id, so "Certificates to review" includes them; cert-status.html rows link to
+  the pump deep-link. **pump-review.html is now a redirect stub** to cert-review
+  (sla-main's 🚰 link repointed). The hub card is titled "Certificates to review".
+
 - **Certificate TRACKER + home-page card (Sep 2026):** **GET /certs/status?range=today|7d|30d|all**
   (office; `count=1` = tallies only) is a **JOB-based** view — one row per EM/PAT
   **job × the type(s) it needs** (em/pat), joined to its certificate, so a cert that

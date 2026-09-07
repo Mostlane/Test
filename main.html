@@ -1751,7 +1751,7 @@ const MAP = window.ML_PERM_MAP || {
     // ── Widget: EM & PAT certificates — how many you're waiting on (with the
     //    engineers, or in your review queue). Opens the certificate tracker. ────
     HUB.register({
-      id: "certs", emoji: "📄", title: "EM & PAT certificates", area: "compliance",
+      id: "certs", emoji: "📄", title: "Certificates to review", area: "compliance",
       can: function (p) { return yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance); },
       load: function (card) {
         return jget("/certs/status?range=30d&count=1").then(function (d) {
@@ -1763,10 +1763,10 @@ const MAP = window.ML_PERM_MAP || {
           if (c.toReview) rows += metric("In your review queue", c.toReview, "warn");
           if (c.uploaded) rows += metric("Uploaded (last 30 days)", c.uploaded, "ok");
           card.innerHTML = cardHtml({
-            emoji: "📄", title: "EM & PAT certificates",
+            emoji: "📄", title: "Certificates to review",
             big: outstanding, sub: "certificate" + (outstanding === 1 ? "" : "s") + " outstanding",
             tone: outstanding ? "warn" : "",
-            ok: outstanding ? "" : (c.expected ? "All EM & PAT certificates received & filed." : "No EM/PAT certificates recently."),
+            ok: outstanding ? "" : (c.expected ? "All EM, PAT & pump certificates received & filed." : "No certificates recently."),
             rows: rows, actions: act("cert-status.html", "Open certificate tracker", true)
           });
         });
