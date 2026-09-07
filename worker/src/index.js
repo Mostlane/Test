@@ -36,6 +36,7 @@ import * as hs from "./routes/hs.js";               // DONE  (H&S documents: ind
 import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks — replaces Jotform walkaround)
 import * as stats from "./routes/stats.js";        // DONE  (Full-access portal stats dashboard)
 import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + company documents)
+import * as staffrecords from "./routes/staffrecords.js"; // DONE  (employee records: qualifications, insurances, licences)
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
@@ -60,6 +61,7 @@ import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reco
 import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
+import { sweepStaffRecordReminders } from "./routes/staffrecords.js"; // cron: employee-record expiry reminders
 import { sweepTimesheetReminders } from "./routes/timesheets.js"; // cron: timesheet deadline reminder
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -82,6 +84,7 @@ const ROUTES = [
   ["*", "/sla",        sla.handle],
   ["*", "/stats",      stats.handle],
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
+  ["*", "/hr/",        staffrecords.handle], // employee records (qualifications, insurances, licences, licence checks)
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/push",       push.handle],      // web push subscriptions + test send
@@ -292,6 +295,8 @@ const worker = {
       ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
       // Timesheet deadline reminder — self-gates to the ~3h before the deadline.
       ctx.waitUntil(sweepTimesheetReminders(env).catch(e => console.error("scheduled timesheet reminder:", e)));
+      // Employee-record expiry reminder — self-gates to ~08:00 London, deduped per day.
+      ctx.waitUntil(sweepStaffRecordReminders(env).catch(e => console.error("scheduled staff-record reminder:", e)));
       // SiteLog auto-close of open visits (was the standalone worker's daily
       // cron). Idempotent — only closes prior-day still-open visits — so it's
       // safe running hourly and safe alongside the old worker's cron until the
@@ -438,6 +443,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-photo"],
   // Maintenance-record documents opened in a new tab — signed URL.
   ["GET", "/fleet/maintenance-doc"],
+  // Employee-record documents (certs/scans) — signed URL, verified in-handler.
+  ["GET", "/hr/record-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)

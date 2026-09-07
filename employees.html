@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<script src="/portal-config.js?v=27"></script>
+<script src="/auth.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Employees — Mostlane</title>
+<link rel="stylesheet" href="/portal.css?v=1">
+<script src="docviewer.js?v=7"></script>
+<style>
+  :root{ --brand:#003468; --line:#d7dee6; --ink:#1c2530; --muted:#5a6675; }
+  *{box-sizing:border-box}
+  body{ margin:0; font:15px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif; color:var(--ink); background:#eef2f6; }
+  header.page{ background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:12px 16px; display:flex; align-items:center; gap:12px; }
+  header.page h1{ font-size:18px; margin:0; flex:1; }
+  .wrap{ max-width:1000px; margin:0 auto; padding:16px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:14px; }
+  .btn{ background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 15px; font:600 14px/1 inherit; cursor:pointer; }
+  .btn.small{ padding:6px 11px; font-size:13px; }
+  .btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--line); }
+  .btn.danger{ background:#fff; color:#c0392b; border:1px solid #f0c9c4; }
+  input,select,textarea{ font:14px/1.4 inherit; padding:9px 10px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; color:var(--ink); }
+  label.field{ display:block; margin:8px 0; }
+  label.field .lbl{ display:block; font-size:12.5px; color:var(--muted); margin-bottom:3px; font-weight:600; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .two{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .muted{ color:var(--muted); }
+  .chip{ display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:999px; font-size:12.5px; font-weight:600; border:1px solid var(--line); background:#f4f7fb; }
+  .chip.red{ background:#fdecea; color:#c0392b; border-color:#f0c9c4; }
+  .chip.amber{ background:#fef7e6; color:#8a6100; border-color:#f0dfae; }
+  .chip.green{ background:#e8f5ec; color:#2b7a4b; border-color:#bcd3c4; }
+  .chip.grey{ background:#eef1f5; color:#5a6675; }
+  .emp{ display:flex; align-items:center; gap:12px; padding:12px 6px; border-bottom:1px solid #eef1f5; cursor:pointer; }
+  .emp:hover{ background:#f7fafd; }
+  .emp .nm{ flex:1; font-weight:600; }
+  .rec{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:8px 0; }
+  .rec .top{ display:flex; align-items:flex-start; gap:8px; }
+  .rec .top .t{ flex:1; font-weight:600; }
+  .rec .meta{ font-size:13px; color:var(--muted); margin-top:3px; }
+  .rec .acts{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .sec h2{ font-size:16px; margin:16px 0 4px; display:flex; align-items:center; gap:8px; }
+  .modal{ position:fixed; inset:0; background:rgba(10,22,40,.5); display:none; align-items:flex-start; justify-content:center; z-index:1000; padding:20px; overflow:auto; }
+  .modal.show{ display:flex; }
+  .sheet{ background:#fff; border-radius:14px; max-width:520px; width:100%; padding:18px; }
+  .hide{ display:none !important; }
+  .msg{ font-size:14px; min-height:18px; }
+  .msg.ok{ color:#2b7a4b; } .msg.err{ color:#c0392b; }
+  .search{ margin-bottom:10px; }
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
+  <h1 id="pageTitle">Employees</h1>
+</header>
+
+<div class="wrap">
+
+  <!-- LIST (admin) -->
+  <div id="listView" class="hide">
+    <div class="card">
+      <input id="empSearch" class="search" type="search" placeholder="Search staff by name…">
+      <div id="empList"><p class="muted">Loading staff…</p></div>
+    </div>
+  </div>
+
+  <!-- PERSON -->
+  <div id="personView" class="hide">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="personName" style="margin:0"></h2>
+        <button class="btn ghost small hide" id="backToList">‹ All staff</button>
+      </div>
+      <p id="personSub" class="muted" style="margin:4px 0 0"></p>
+    </div>
+    <div id="sections"></div>
+  </div>
+
+  <p id="topMsg" class="msg"></p>
+</div>
+
+<!-- Add / edit record -->
+<div class="modal" id="recModal">
+  <div class="sheet">
+    <h2 id="recModalTitle" style="margin:.1em 0 .4em">Add record</h2>
+    <div id="recFields"></div>
+    <label class="field"><span class="lbl">Attach a document (certificate / scan) — optional</span>
+      <input type="file" id="recFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx"></label>
+    <p id="recDocNow" class="muted" style="font-size:13px"></p>
+    <p id="recMsg" class="msg"></p>
+    <div class="row" style="justify-content:flex-end;margin-top:8px">
+      <button class="btn ghost" id="recCancel">Cancel</button>
+      <button class="btn" id="recSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = (window.MOSTLANE_API || "").replace(/\/+$/,"");
+  function authFetch(path, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+(localStorage.getItem("mostlaneToken")||"") }, opts.headers||{}); return fetch(API+path, opts); }
+  const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const g = id => document.getElementById(id);
+  const fmtDate = s => { if(!s) return ""; const d=new Date(String(s).slice(0,10)+"T00:00:00"); return isNaN(d)?s:d.toLocaleDateString("en-GB"); };
+
+  // The four record types + their fields. `col` maps to a fixed column; anything
+  // prefixed "data." rides in the record's data JSON.
+  const KINDS = [
+    { kind:"qualification", emoji:"🎓", label:"Qualifications & tickets", one:"qualification",
+      titleLabel:"Title / type (e.g. CSCS, SMSTS, First Aid)", titlePh:"CSCS Card",
+      fields:[ {col:"number",label:"Certificate / card number"}, {col:"issuer",label:"Awarding body"},
+               {col:"issued",label:"Issued",type:"date"}, {col:"expires",label:"Expires",type:"date"} ] },
+    { kind:"insurance", emoji:"📄", label:"Insurances", one:"insurance",
+      titleLabel:"Cover type (e.g. Public Liability)", titlePh:"Public Liability",
+      fields:[ {col:"issuer",label:"Insurer"}, {col:"number",label:"Policy number"},
+               {col:"data.cover",label:"Cover amount (£)"}, {col:"issued",label:"Start date",type:"date"},
+               {col:"expires",label:"Renewal / expiry",type:"date"} ] },
+    { kind:"licence", emoji:"🚗", label:"Driving licences", one:"driving licence",
+      titleLabel:"Licence type", titlePh:"Driving Licence", titleDef:"Driving Licence",
+      fields:[ {col:"number",label:"Licence number"}, {col:"data.categories",label:"Categories (e.g. B, C1, CE)"},
+               {col:"data.points",label:"Points / endorsements"}, {col:"issued",label:"Issued",type:"date"},
+               {col:"expires",label:"Expires",type:"date"} ] },
+    { kind:"licence_check", emoji:"✅", label:"Licence checks (DVLA)", one:"licence check",
+      titleLabel:"Check", titlePh:"DVLA licence check", titleDef:"DVLA licence check",
+      fields:[ {col:"issued",label:"Checked on",type:"date"}, {col:"data.result",label:"Result / points found"},
+               {col:"data.checkedBy",label:"Checked by"}, {col:"expires",label:"Next check due",type:"date"} ] },
+  ];
+  const kindDef = k => KINDS.find(x=>x.kind===k);
+
+  let ME=null, CAN=false, CUR_USER="", CUR_NAME="", editing=null, editKind="";
+
+  (async ()=>{
+    try{
+      const me = await authFetch("/auth/me").then(r=>r.json());
+      if(!me.ok){ location.href="main.html"; return; }
+      ME = me.user;
+      CAN = me.user.FullAccess==="Yes" || me.user.StaffRecords==="Yes";
+    }catch(e){ location.href="main.html"; return; }
+    if(CAN){ g("listView").classList.remove("hide"); loadList(); }
+    else { // self-view: own records only, read-only
+      g("pageTitle").textContent = "My records";
+      openPerson(ME.username, ((ME.FirstName||"")+" "+(ME.LastName||"")).trim()||ME.username, true);
+    }
+    wireModal();
+  })();
+
+  // ── Staff list ───────────────────────────────────────────────────────────
+  let ROWS=[];
+  async function loadList(){
+    try{
+      const r = await authFetch("/hr/overview").then(x=>x.json());
+      ROWS = (r&&r.rows)||[];
+      renderList();
+    }catch(e){ g("empList").innerHTML='<p class="msg err">Couldn’t load staff.</p>'; }
+  }
+  function statusChips(c){
+    const out=[];
+    if(c.expired) out.push(`<span class="chip red">⚠ ${c.expired} expired</span>`);
+    if(c.expiring) out.push(`<span class="chip amber">⏳ ${c.expiring} expiring</span>`);
+    if(c.total && !c.expired && !c.expiring) out.push(`<span class="chip green">✓ up to date</span>`);
+    out.push(`<span class="chip grey">${c.total||0} record${(c.total===1)?"":"s"}</span>`);
+    return out.join(" ");
+  }
+  function renderList(){
+    const q=(g("empSearch").value||"").toLowerCase().trim();
+    const rows = ROWS.filter(r=>!q || r.name.toLowerCase().includes(q));
+    if(!rows.length){ g("empList").innerHTML='<p class="muted">No staff match.</p>'; return; }
+    g("empList").innerHTML = rows.map(r=>`
+      <div class="emp" data-u="${esc(r.username)}" data-n="${esc(r.name)}">
+        <span class="nm">${esc(r.name)}</span>
+        <span class="row" style="gap:5px">${statusChips(r.counts)}</span>
+      </div>`).join("");
+    document.querySelectorAll(".emp").forEach(el=>el.onclick=()=>openPerson(el.dataset.u, el.dataset.n, false));
+  }
+  g("empSearch").addEventListener("input", renderList);
+
+  // ── Person view ──────────────────────────────────────────────────────────
+  async function openPerson(username, name, selfOnly){
+    CUR_USER=username; CUR_NAME=name;
+    g("listView").classList.add("hide"); g("personView").classList.remove("hide");
+    g("personName").textContent = name;
+    g("backToList").classList.toggle("hide", !CAN);
+    g("personSub").textContent = "Loading…";
+    g("sections").innerHTML="";
+    try{
+      const r = await authFetch("/hr/records?user="+encodeURIComponent(username)).then(x=>x.json());
+      const recs = (r&&r.records)||[];
+      const manage = CAN && r.canManage;
+      const exp = recs.filter(x=>x.status==="expired").length, soon = recs.filter(x=>x.status==="expiring").length;
+      g("personSub").innerHTML = recs.length ? `${recs.length} record${recs.length===1?"":"s"}` + (exp?` · <span style="color:#c0392b">${exp} expired</span>`:"") + (soon?` · <span style="color:#8a6100">${soon} expiring</span>`:"") : "No records yet.";
+      g("sections").innerHTML = KINDS.map(k=>{
+        const list = recs.filter(x=>x.kind===k.kind);
+        return `<div class="card sec">
+          <h2>${k.emoji} ${esc(k.label)} ${manage?`<button class="btn small" data-add="${k.kind}" style="margin-left:auto">+ Add</button>`:""}</h2>
+          <div>${ list.length ? list.map(x=>recHtml(x,manage)).join("") : `<p class="muted" style="margin:6px 0">None recorded.</p>` }</div>
+        </div>`;
+      }).join("");
+      // wire
+      document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>openRec(b.dataset.add,null));
+      document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{ const rec=recs.find(x=>x.id===b.dataset.edit); openRec(rec.kind,rec); });
+      document.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>delRec(b.dataset.del, b.dataset.t));
+      document.querySelectorAll("[data-doc]").forEach(b=>b.onclick=()=>{ const u=b.dataset.doc, n=b.dataset.dn||"Document";
+        if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
+    }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
+  }
+  function badge(x){
+    if(x.status==="expired") return `<span class="chip red">Expired ${fmtDate(x.expires)}</span>`;
+    if(x.status==="expiring") return `<span class="chip amber">Expires ${fmtDate(x.expires)} · ${x.daysLeft}d</span>`;
+    if(x.status==="valid") return `<span class="chip green">Valid to ${fmtDate(x.expires)}</span>`;
+    return `<span class="chip grey">No expiry</span>`;
+  }
+  function recHtml(x,manage){
+    const d=x.data||{};
+    const bits=[];
+    if(x.number) bits.push("No. "+esc(x.number));
+    if(x.issuer) bits.push(esc(x.issuer));
+    if(d.categories) bits.push("Cat "+esc(d.categories));
+    if(d.points) bits.push(esc(d.points)+" pts");
+    if(d.cover) bits.push("£"+esc(d.cover));
+    if(d.result) bits.push("Result: "+esc(d.result));
+    if(d.checkedBy) bits.push("by "+esc(d.checkedBy));
+    if(x.issued) bits.push((x.kind==="licence_check"?"Checked ":"Issued ")+fmtDate(x.issued));
+    return `<div class="rec">
+      <div class="top"><span class="t">${esc(x.title||kindDef(x.kind).one)}</span>${badge(x)}</div>
+      ${bits.length?`<div class="meta">${bits.join(" · ")}</div>`:""}
+      <div class="acts">
+        ${x.docUrl?`<button class="btn ghost small" data-doc="${esc(x.docUrl)}" data-dn="${esc(x.docName||"Document")}">📄 View document</button>`:""}
+        ${manage?`<button class="btn ghost small" data-edit="${esc(x.id)}">✏️ Edit</button>`:""}
+        ${manage?`<button class="btn danger small" data-del="${esc(x.id)}" data-t="${esc(x.title||"")}">🗑 Delete</button>`:""}
+      </div>
+    </div>`;
+  }
+  g("backToList").onclick=()=>{ g("personView").classList.add("hide"); g("listView").classList.remove("hide"); loadList(); };
+
+  // ── Add / edit modal ───────────────────────────────────────────────────────
+  function openRec(kind, rec){
+    editKind = kind; editing = rec || null;
+    const k = kindDef(kind);
+    g("recModalTitle").textContent = (rec?"Edit ":"Add ") + k.one;
+    // Title field first, then the kind's fields.
+    let html = `<label class="field"><span class="lbl">${esc(k.titleLabel)}</span><input id="f_title" type="text" placeholder="${esc(k.titlePh||"")}"></label>`;
+    html += `<div class="two">`;
+    k.fields.forEach((f,i)=>{
+      const id="f_"+i;
+      const t = f.type==="date" ? "date" : "text";
+      html += `<label class="field"><span class="lbl">${esc(f.label)}</span><input id="${id}" data-col="${esc(f.col)}" type="${t}"></label>`;
+    });
+    html += `</div>`;
+    html += `<label class="field"><span class="lbl">Notes (optional)</span><textarea id="f_notes" rows="2"></textarea></label>`;
+    g("recFields").innerHTML = html;
+    // Prefill
+    const cur = rec || {};
+    const d = (rec&&rec.data)||{};
+    g("f_title").value = cur.title || (k.titleDef||"");
+    k.fields.forEach((f,i)=>{
+      const el=g("f_"+i); if(!el) return;
+      if(f.col.startsWith("data.")) el.value = d[f.col.slice(5)]||"";
+      else el.value = cur[f.col]||"";
+    });
+    g("f_notes").value = d.notes||"";
+    g("recFile").value="";
+    g("recDocNow").innerHTML = (rec&&rec.docName) ? `Current: ${esc(rec.docName)} — uploading a new file replaces it. <a href="#" id="rmDoc">Remove</a>` : "";
+    if(g("rmDoc")) g("rmDoc").onclick=(e)=>{ e.preventDefault(); g("recDocNow").dataset.remove="1"; g("recDocNow").innerHTML="Document will be removed on save."; };
+    g("recDocNow").dataset.remove="";
+    g("recMsg").textContent=""; g("recMsg").className="msg";
+    g("recModal").classList.add("show");
+  }
+  function wireModal(){
+    g("recCancel").onclick=()=>g("recModal").classList.remove("show");
+    g("recModal").onclick=e=>{ if(e.target===g("recModal")) g("recModal").classList.remove("show"); };
+    g("recSave").onclick=saveRec;
+  }
+  async function saveRec(){
+    const k=kindDef(editKind);
+    const fd=new FormData();
+    fd.set("username", CUR_USER); fd.set("kind", editKind);
+    if(editing) fd.set("id", editing.id);
+    fd.set("title", g("f_title").value.trim());
+    const data={};
+    k.fields.forEach((f,i)=>{
+      const el=g("f_"+i); if(!el) return;
+      const val=el.value.trim();
+      if(f.col.startsWith("data.")){ if(val) data[f.col.slice(5)]=val; }
+      else fd.set(f.col, val);
+    });
+    const notes=g("f_notes").value.trim(); if(notes) data.notes=notes;
+    fd.set("data", JSON.stringify(data));
+    const file=g("recFile").files[0]; if(file) fd.set("file", file);
+    if(g("recDocNow").dataset.remove==="1") fd.set("removeDoc","1");
+    if(!fd.get("title")){ g("recMsg").textContent="A title is required."; g("recMsg").className="msg err"; return; }
+    g("recSave").disabled=true; g("recMsg").textContent="Saving…"; g("recMsg").className="msg";
+    try{
+      const r=await authFetch("/hr/record",{method:"POST",body:fd}).then(x=>x.json());
+      if(!r.ok) throw new Error(r.error||"save failed");
+      g("recModal").classList.remove("show");
+      openPerson(CUR_USER, CUR_NAME, false);
+    }catch(e){ g("recMsg").textContent="Couldn’t save — "+e.message; g("recMsg").className="msg err"; }
+    finally{ g("recSave").disabled=false; }
+  }
+  async function delRec(id, title){
+    const ok = window.MLUI ? await MLUI.confirm('Delete "'+(title||"this record")+'"? This also removes its attached document.',{danger:true,okLabel:"Delete"}) : confirm("Delete this record?");
+    if(!ok) return;
+    try{ await authFetch("/hr/record/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(x=>x.json());
+      openPerson(CUR_USER, CUR_NAME, false);
+    }catch(e){ g("topMsg").textContent="Couldn’t delete."; g("topMsg").className="msg err"; }
+  }
+</script>
+</body>
+</html>

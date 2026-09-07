@@ -439,6 +439,7 @@ const USER_AREAS = [
   { key: "memos",          label: "Company memos",         perm: "FullAccess" },
   { key: "timesheets",     label: "Engineer timesheets",   perm: "TimesheetAdmin" },
   { key: "messages",       label: "Messages",              perm: "" },
+  { key: "staffrecords",   label: "Employee records",      perm: "StaffRecords" },
 ];
 const PERMISSION_KEYS = [
   "FullAccess", "Users", "DeviceAdmin", "CheckInOut", "Vehicles", "Holiday",
@@ -460,6 +461,7 @@ const PERMISSION_KEYS = [
   "YardGateAnywhere",// exempt from the yard-gate geofence (operate from anywhere)
   "EicrCheck",       // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
   "Chapplins",       // the Chapplins customer area (directory + compliance chart)
+  "StaffRecords",    // HR: manage staff qualifications, insurances, licences + licence checks
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly

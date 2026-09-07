@@ -1116,6 +1116,29 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
   front-end my-documents.html.
+- `staffrecords.js` — **Employee records (HR): qualifications/tickets,
+  insurances, driving licences + licence (DVLA) checks, WITH expiry tracking
+  + reminders (Sep 2026)**. ONE self-migrating table **staff_records**
+  (tenant/id/username/kind/title/number/issuer/issued/expires/data JSON/doc_key;
+  kind ∈ qualification|insurance|licence|licence_check; kind-specific extras ride
+  in `data`). One optional document per record in R2 `staffrec/<tid>/<user>/<id>/`,
+  served via signed **GET /hr/record-file** (PUBLIC_ROUTES, sig-verified).
+  `statusOf(expires)` → expired | expiring (≤30d) | valid | none. Routes (mounted
+  `/hr/`): **GET /hr/records?user=** (a person's records; non-admins forced to
+  their OWN — the read-only self-view), **GET /hr/overview** (per-person counts
+  for the list), **GET /hr/attention** (expiring/expired across everyone — home
+  hub + cron), **POST /hr/record** (create/update, multipart, file optional),
+  **POST /hr/record/delete**. Manage gate = **FullAccess|StaffRecords** (new
+  PERMISSION_KEY + USER_AREAS `staffrecords`); any session may read its own.
+  Cron **`sweepStaffRecordReminders`** (index.js daily block, self-gates ~08:00
+  London, deduped per day in app_config `staffrec:reminded:<tid>`) pushes
+  FullAccess|StaffRecords a glanceable "N expired · N expiring" summary. Front-end
+  **employees.html** (👷 Employees tile + sidebar "Time & HR", StaffRecords|
+  FullAccess): staff list with expiring/expired chips → per-person view with the
+  four sections, add/edit/delete records, expiry badges, doc view (docviewer).
+  A field/office employee sees their OWN records read-only on **my-documents.html**
+  ("📋 My qualifications, licences & insurances" card). Home-hub widget + overview
+  KPI (`staffrecords` area). _headers + SW `mostlane-v115`.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.

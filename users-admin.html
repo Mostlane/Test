@@ -452,7 +452,7 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
-      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins"];
+      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins","StaffRecords"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -474,13 +474,14 @@
       YardGate:"Yard gate — open + see status",
       YardGateAnywhere:"Yard gate — operate from anywhere (skip the at-the-yard geofence)",
       EicrCheck:"EICR Check tool (BS 7671 PDF checker)",
-      Chapplins:"Chapplins customer area"
+      Chapplins:"Chapplins customer area",
+      StaffRecords:"Employee records (qualifications, licences, insurances)"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
     // appears here exactly once.
     const PERM_GROUPS = [
-      { title:"Administration",       perms:["Users","DeviceAdmin"] },
+      { title:"Administration",       perms:["Users","DeviceAdmin","StaffRecords"] },
       { title:"Sites & assets",       perms:["Sites","AddSite","Assets","AssetAdmin","SiteLog"] },
       { title:"Jobs & SLA",           perms:["SLA","SLAAdmin","Forms"] },
       { title:"Time & hours",         perms:["CheckInOut","EngTimesheet","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","OfficeTimesheet","Weekly"] },
