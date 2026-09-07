@@ -63,10 +63,25 @@
     function af(path, o) { o = o || {}; o.headers = Object.assign({ "Authorization": "Bearer " + TOKEN }, o.headers || {}); return fetch((path.indexOf("http") === 0 ? path : API + path), o); }
     function setStatus(t) { statusEl.textContent = t || ""; }
 
-    af("/pump/for-job?jobId=" + encodeURIComponent(opt.jobId || "") + "&store=" + encodeURIComponent(opt.store || ""))
-      .then(function (r) { return r.json(); })
-      .then(function (d) { if (!d || !d.ok) { setStatus("Couldn't load the form."); return; } REC = d.record; render(); setStatus(""); })
-      .catch(function () { setStatus("Couldn't load the form."); });
+    // Office/view: load the EXACT record by id (the queue row that was tapped).
+    // Engineer: the job's record (or a fresh seeded one for that store).
+    var loadUrl = opt.recordId
+      ? "/pump/one?id=" + encodeURIComponent(opt.recordId)
+      : "/pump/for-job?jobId=" + encodeURIComponent(opt.jobId || "") + "&store=" + encodeURIComponent(opt.store || "");
+    function loadFail(msg) {
+      setStatus("");
+      body.innerHTML = '<div class="card" style="border-color:#e6b3ba;background:#fff5f5;color:#b00020;font-weight:600">Couldn\'t load the pump record' + (msg ? " — " + esc(msg) : "") + '.<br><span style="font-weight:400;color:#6b7a90">Pull down to refresh and try again. If it keeps happening, tell the office which store and date.</span></div>';
+    }
+    af(loadUrl)
+      .then(function (r) { return r.json().then(function (d) { return { st: r.status, d: d }; }); })
+      .then(function (x) {
+        var d = x.d;
+        if (!d || !d.ok || !d.record) { loadFail((d && d.error) || ("HTTP " + x.st)); return; }
+        REC = d.record;
+        try { render(); setStatus(""); }
+        catch (e) { loadFail("display error: " + (e && e.message)); }
+      })
+      .catch(function (e) { loadFail(e && e.message); });
 
     function queueSave(now) {
       if (RO) return;
