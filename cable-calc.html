@@ -8,7 +8,7 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="stylesheet" href="portal.css?v=1">
   <script src="auth.js"></script>
-  <script src="cable-calc-engine.js?v=1"></script>
+  <script src="cable-calc-engine.js?v=2"></script>
   <script src="xlsx-lite.js"></script>
   <style>
     body{font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#0f2438;background:transparent;margin:0}
@@ -76,7 +76,7 @@
 
     <!-- ───────── CALCULATOR ───────── -->
     <div class="panel" id="p-calc">
-      <div id="sampleBanner" class="sample-banner hide">⚠ Using SAMPLE cable data — verify/replace it against your manufacturer datasheet on the <b>Datasheet data</b> tab before issuing any report.</div>
+      <div id="sampleBanner" class="sample-banner hide">⚠ Cable ratings are loaded from BS 7671 but <b>not yet independently verified</b> — spot-check the values against the book before relying on any report.</div>
       <div class="cols">
         <div>
           <div class="card">
@@ -290,7 +290,7 @@
   ]).then(function(res){
     CFG=(res[0]&&res[0].config)||{};
     DATA=(res[1]&&res[1].data)||{cables:[]};
-    if(DATA.sample) $("sampleBanner").classList.remove("hide");
+    if(DATA.sample || DATA.unverified) $("sampleBanner").classList.remove("hide");
     if(CFG.engineer) DATA._eng=CFG.engineer;
     fillCables(); recalc();
   });
@@ -508,7 +508,7 @@
     var btn=this; btn.disabled=true;
     af("/cablecalc/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:DATA})})
       .then(function(r){return r.json();}).then(function(j){
-        if(j&&j.ok){ DATA=j.data; DATA.sample=false; $("sampleBanner").classList.add("hide"); (window.MLUI?MLUI.toast:alert)("Datasheet data saved"); fillCables(); recalc(); }
+        if(j&&j.ok){ DATA=j.data; DATA.sample=false; DATA.unverified=false; $("sampleBanner").classList.add("hide"); (window.MLUI?MLUI.toast:alert)("Datasheet data saved"); fillCables(); recalc(); }
         else alert("Save failed");
       }).catch(function(){alert("Save failed");}).finally(function(){btn.disabled=false;});
   };

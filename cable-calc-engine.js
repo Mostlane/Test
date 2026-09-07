@@ -128,10 +128,16 @@
     if (!m) return { err: "No data for reference method " + inp.method + " on this cable", cable: cab };
     var row = m[String(inp.csa)];
     if (!row) return { err: "No " + inp.csa + " mm² row for method " + inp.method, cable: cab };
+    // Single-core cables carry BOTH ratings: iz/vd = single-phase (2-cable),
+    // iz3/vd3 = three-phase (3/4-cable). Pick by the circuit's phase; fall back
+    // to the single-phase value (2-core/T&E/SWA cables store only iz/vd).
+    var threePh = inp.phases === 3;
+    var iz = (threePh && row.iz3 != null) ? row.iz3 : row.iz;
+    var vd = (threePh && row.vd3 != null) ? row.vd3 : row.vd;
     return {
       cable: cab,
-      izTab: num(row.iz),        // tabulated current-carrying capacity (A)
-      mvam: num(row.vd)          // mV/A/m (voltage drop per amp per metre)
+      izTab: num(iz),            // tabulated current-carrying capacity (A)
+      mvam: num(vd)              // mV/A/m (voltage drop per amp per metre)
     };
   }
 

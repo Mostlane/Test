@@ -32047,6 +32047,7 @@ async function handle33(request, env, ctx, url, sess) {
       if (!b || !b.data || !Array.isArray(b.data.cables)) return error("Invalid data", 400, env, request);
       const clean = Object.assign({}, b.data);
       delete clean.sample;
+      delete clean.unverified;
       await saveKV(env, tid, DATA_KEY(tid), clean);
       return json({ ok: true, data: clean }, {}, env, request);
     }
