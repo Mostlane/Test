@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10828,7 +10823,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (range === "7d") from = daysAgo(6);
     else if (range === "30d") from = daysAgo(29);
     else if (range !== "all") from = today;
-    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat));
+    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat || j.pumpMaintenance));
     const certByKey = {};
     const jobIds = jobs.map((j) => String(j.id));
     for (let i = 0; i < jobIds.length; i += 100) {
@@ -10839,6 +10834,10 @@ PAT: Import certificate number ${num2}-${yr}`;
         `SELECT id,type,status,job_id,cert_number,engineer,created_at,updated_at,submitted_at,finalised_at FROM certificates WHERE tenant_id=? AND job_id IN (${ph})`
       ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
       for (const r of rows) certByKey[String(r.job_id) + "::" + r.type] = r;
+      const prows = (await env.DB.prepare(
+        `SELECT id,status,job_id,engineer,created_at,updated_at FROM pump_records WHERE tenant_id=? AND job_id IN (${ph})`
+      ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of prows) certByKey[String(r.job_id) + "::pump"] = { ...r, type: "pump", cert_number: "", submitted_at: r.status !== "draft" ? r.updated_at : null, finalised_at: r.status === "final" ? r.updated_at : null };
     }
     const isCancelled = (s) => /cancel/i.test(String(s || ""));
     const items = [];
@@ -10848,6 +10847,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       const types = [];
       if (j.emTest) types.push("em");
       if (j.pat) types.push("pat");
+      if (j.pumpMaintenance) types.push("pump");
       for (const type of types) {
         const cert = certByKey[String(j.id) + "::" + type] || null;
         const status = cert ? cert.status : "notstarted";
@@ -30674,9 +30674,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
@@ -32936,7 +32936,7 @@ async function handle33(request, env, ctx, url, sess) {
     ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
       title: "\u{1F6B0} Pump maintenance submitted",
       body: `${shapeRow2(rec).storeName || "A store"} \u2014 ready for office review`,
-      url: "/pump-review.html",
+      url: "/cert-review.html?pump=" + encodeURIComponent(id),
       tag: "pump-review"
     }, me).catch(() => {
     }));

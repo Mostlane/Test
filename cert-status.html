@@ -46,7 +46,7 @@
 <body>
   <header class="page">
     <a class="ml-back" href="/main.html" style="text-decoration:none;">‹ Back</a>
-    <h1>📄 EM &amp; PAT certificates</h1>
+    <h1>📄 Certificates</h1>
     <a class="chip" href="cert-review.html" style="text-decoration:none;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">Review queue →</a>
   </header>
 
@@ -59,7 +59,7 @@
     </div>
 
     <div class="card">
-      <p class="greet" id="greet">Every EM &amp; PAT certificate and where it's up to.</p>
+      <p class="greet" id="greet">Every EM, PAT and pump-maintenance certificate and where it's up to.</p>
       <div class="sumrow" id="summary"></div>
     </div>
 
@@ -125,20 +125,20 @@
       if (!items.length) { g("list").innerHTML = '<p class="muted" style="padding:8px 4px;">No EM/PAT certificates in this period.</p>'; return; }
       let h = '<div class="muted" style="margin-bottom:4px;padding:0 4px;">' + items.length + ' certificate' + (items.length===1?"":"s") + ' — tap to open.</div>';
       items.forEach(it => {
-        const em = it.type === "pat" ? "🔌" : "💡";
+        const em = it.type === "pump" ? "🚰" : (it.type === "pat" ? "🔌" : "💡");
         const site = it.site || it.siteCode || "—";
         const st = statusLabel(it);
         const when = it.finalisedAt || it.submittedAt || it.activityAt || it.scheduledAt;
-        h += '<div class="item" data-cert="'+esc(it.certId)+'" data-job="'+esc(it.jobId)+'" data-status="'+esc(it.status)+'">'
+        h += '<div class="item" data-cert="'+esc(it.certId)+'" data-job="'+esc(it.jobId)+'" data-status="'+esc(it.status)+'" data-type="'+esc(it.type)+'">'
           + '<div class="em">'+em+'</div>'
-          + '<div class="m"><div class="t">'+esc(site)+' <span class="muted">· '+(it.type==="pat"?"PAT":"EM")+'</span></div>'
+          + '<div class="m"><div class="t">'+esc(site)+' <span class="muted">· '+(it.type==="pump"?"Pump":(it.type==="pat"?"PAT":"EM"))+'</span></div>'
           + '<div class="s">'+(it.siteCode?esc(it.siteCode)+' · ':'')+(when?fmtDT(when):'')+'</div></div>'
           + '<span class="badge '+st.cls+'">'+st.badge+'</span></div>';
       });
       g("list").innerHTML = h;
       [].forEach.call(g("list").querySelectorAll(".item"), el => el.onclick = () => {
-        const cert = el.dataset.cert, job = el.dataset.job, status = el.dataset.status;
-        if (cert && status !== "notstarted") location.href = "cert-review.html?open=" + encodeURIComponent(cert);
+        const cert = el.dataset.cert, job = el.dataset.job, status = el.dataset.status, type = el.dataset.type;
+        if (cert && status !== "notstarted") location.href = "cert-review.html?" + (type === "pump" ? "pump=" : "open=") + encodeURIComponent(cert);
         else if (job) location.href = "job-view.html?jobId=" + encodeURIComponent(job);
       });
     }

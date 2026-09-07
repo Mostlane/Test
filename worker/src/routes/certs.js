@@ -1297,8 +1297,8 @@ export async function handle(request, env, ctx, url, sess) {
     else if (range === "30d") from = daysAgo(29);
     else if (range !== "all") from = today;   // default = today
 
-    // Every live EM/PAT job (dormant fallback templates + archive already excluded).
-    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat));
+    // Every live EM/PAT/pump job (dormant fallback templates + archive already excluded).
+    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat || j.pumpMaintenance));
     // Certificate rows for those jobs, keyed job_id::type.
     const certByKey = {};
     const jobIds = jobs.map(j => String(j.id));
@@ -1310,6 +1310,13 @@ export async function handle(request, env, ctx, url, sess) {
         `SELECT id,type,status,job_id,cert_number,engineer,created_at,updated_at,submitted_at,finalised_at FROM certificates WHERE tenant_id=? AND job_id IN (${ph})`
       ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
       for (const r of rows) certByKey[String(r.job_id) + "::" + r.type] = r;
+      // Pump maintenance records (routes/pump.js) are the "certificate" for a
+      // pump job — same statuses (draft → review → final). Table may not exist
+      // yet on a fresh DB, so fail soft.
+      const prows = (await env.DB.prepare(
+        `SELECT id,status,job_id,engineer,created_at,updated_at FROM pump_records WHERE tenant_id=? AND job_id IN (${ph})`
+      ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of prows) certByKey[String(r.job_id) + "::pump"] = { ...r, type: "pump", cert_number: "", submitted_at: r.status !== "draft" ? r.updated_at : null, finalised_at: r.status === "final" ? r.updated_at : null };
     }
 
     const isCancelled = s => /cancel/i.test(String(s || ""));
@@ -1321,6 +1328,7 @@ export async function handle(request, env, ctx, url, sess) {
       const types = [];
       if (j.emTest) types.push("em");
       if (j.pat) types.push("pat");
+      if (j.pumpMaintenance) types.push("pump");
       for (const type of types) {
         const cert = certByKey[String(j.id) + "::" + type] || null;
         const status = cert ? cert.status : "notstarted";
