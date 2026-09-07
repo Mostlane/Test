@@ -64,7 +64,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (!canManage) return error("Manage access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
       if (!b || !b.data || !Array.isArray(b.data.cables)) return error("Invalid data", 400, env, request);
-      const clean = Object.assign({}, b.data); delete clean.sample;   // saved data is not sample
+      const clean = Object.assign({}, b.data); delete clean.sample; delete clean.unverified;   // a manual save counts as reviewed
       await saveKV(env, tid, DATA_KEY(tid), clean);
       return json({ ok: true, data: clean }, {}, env, request);
     }
