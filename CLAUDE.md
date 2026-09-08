@@ -4734,6 +4734,23 @@ files to this public repo.
   scratchpad `backsim.cjs` (reported loop, multi-parent round trip, same-job
   excursion collapse, cold start — all resolve, none loop). portal-config bumped to
   `?v=19` across all pages so the fix reaches phones; SW cache `mostlane-v83`.
+- **Schedule dates are YEAR-CHECKED, client + server (8 Sep 2026).** Daniel
+  Walker's 16 Sep job "wasn't on the scheduler": the editor had saved it with
+  `scheduledAt = 2006-09-16` (a mistyped year in the date box) and every dated
+  view — scheduler, engineer day, live board — correctly showed nothing for a job
+  twenty years in the past. Nothing validated the year anywhere. Now
+  **`badScheduleDate(iso,label)` / `badScheduleIn(body)`** (exported from sla.js)
+  refuse any `scheduledAt`/`scheduledEnd`/`scheduledStart`/`scheduleForEngineer`/
+  `engSchedule` slice whose year is outside **now−1 … now+3** with a 400 that
+  names the year ("Scheduled start has the year 2006 — check the date"). Applied
+  to POST /sla/jobs, PATCH /sla/jobs/{id}, PUT /sla/job/{id}, /project/create-job
+  + /project/create-day-series (each day) and /fleet/renewal-status. Client side
+  the same rule runs BEFORE the save in sla-jobedit.js (`mljeBadDate`, `?v=30`),
+  add-job.html (`badScheduleYear`) and the scheduler quick modal, and the date
+  inputs carry `min`/`max` for the same window; the editor + scheduler now show
+  the worker's own error text instead of "HTTP 400". Covered by
+  `worker/tools/test-auth-gates.mjs` (5 cases). The 2006 row was repaired in D1
+  by hand. If a job "isn't showing", check `scheduled_at` for an absurd year first.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

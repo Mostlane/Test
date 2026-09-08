@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -11798,6 +11793,8 @@ var init_certs = __esm({
 // src/routes/sla.js
 var sla_exports = {};
 __export(sla_exports, {
+  badScheduleDate: () => badScheduleDate,
+  badScheduleIn: () => badScheduleIn,
   bumpAiUsage: () => bumpAiUsage,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
   handle: () => handle10,
@@ -11810,6 +11807,33 @@ __export(sla_exports, {
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases
 });
+function badScheduleDate(iso, label2 = "Scheduled date") {
+  if (iso === void 0 || iso === null || iso === "") return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return `${label2} isn't a valid date/time.`;
+  const y = new Date(t).getUTCFullYear(), now = (/* @__PURE__ */ new Date()).getUTCFullYear();
+  if (y < now - SCHED_YEARS_BACK || y > now + SCHED_YEARS_FWD)
+    return `${label2} has the year ${y} \u2014 check the date (expected ${now - SCHED_YEARS_BACK}\u2013${now + SCHED_YEARS_FWD}).`;
+  return null;
+}
+function badScheduleIn(body) {
+  if (!body || typeof body !== "object") return null;
+  let e = badScheduleDate(body.scheduledAt, "Scheduled start") || badScheduleDate(body.scheduledStart, "Scheduled start") || badScheduleDate(body.scheduledEnd, "Scheduled finish");
+  if (e) return e;
+  const sfe = body.scheduleForEngineer;
+  if (sfe && typeof sfe === "object") {
+    e = badScheduleDate(sfe.scheduledAt, "Engineer's start") || badScheduleDate(sfe.scheduledEnd, "Engineer's finish");
+    if (e) return e;
+  }
+  if (body.engSchedule && typeof body.engSchedule === "object") {
+    for (const [k, v] of Object.entries(body.engSchedule)) {
+      if (!v || typeof v !== "object") continue;
+      e = badScheduleDate(v.scheduledAt, `${k}'s start`) || badScheduleDate(v.scheduledEnd, `${k}'s finish`);
+      if (e) return e;
+    }
+  }
+  return null;
+}
 async function handle10(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -12378,6 +12402,10 @@ async function handle10(request, env, ctx, url, sess) {
   if (subpath === "/jobs" && method === "POST") {
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson2(request);
+    {
+      const bad = badScheduleIn(payload);
+      if (bad) return jsonResponse({ error: bad }, headers, 400);
+    }
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob2(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
@@ -13166,6 +13194,10 @@ async function handle10(request, env, ctx, url, sess) {
     const id = safeDecode(subpath.split("/").filter(Boolean)[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     const body = await readJson2(request);
+    {
+      const bad = badScheduleIn(body);
+      if (bad) return jsonResponse({ error: bad }, headers, 400);
+    }
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
       scheduledEnd: body.scheduledEnd,
@@ -13983,6 +14015,10 @@ async function handle10(request, env, ctx, url, sess) {
     if (method === "PATCH") {
       const before = await getJob2(env, tenantId, id);
       const body = await readJson2(request);
+      {
+        const bad = badScheduleIn(body);
+        if (bad) return jsonResponse({ error: bad }, headers, 400);
+      }
       if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
         if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
         const dR = decorateJobWithLiveSla(before);
@@ -17414,7 +17450,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG2, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG2, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -17431,6 +17467,8 @@ var init_sla = __esm({
     init_logo();
     init_pdftext();
     init_statusemail();
+    SCHED_YEARS_BACK = 1;
+    SCHED_YEARS_FWD = 3;
     PHOTO_STAGES = ["Before", "During", "After"];
     MIN_COMPLETE_NOTE = 15;
     CANONICAL_STATUSES = [
@@ -27427,6 +27465,10 @@ async function handle25(request, env, ctx, url, sess) {
     const cur = map[rk] || (map[rk] = {});
     const prevJobId = cur[type] && cur[type].jobId;
     if (b.status === "pending") {
+      {
+        const bad = badScheduleIn(b);
+        if (bad) return jr4({ error: bad }, headers, 400);
+      }
       const entry = {
         note: typeof b.note === "string" ? b.note.slice(0, 300) : "",
         by: sess && sess.user && sess.user.username || "",
@@ -31574,9 +31616,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
@@ -36229,6 +36271,10 @@ async function handle37(request, env, ctx, url, sess) {
       if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
     } catch {
     }
+    {
+      const bad = badScheduleIn(b);
+      if (bad) return error(bad, 400, env, request);
+    }
     const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
     const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : void 0;
     const payload = {
@@ -36270,6 +36316,10 @@ async function handle37(request, env, ctx, url, sess) {
     const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
     if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
     let days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    for (const d of days) {
+      const bad = badScheduleDate(d.scheduledAt, "Series day");
+      if (bad) return error(bad, 400, env, request);
+    }
     if (b.includeWeekends !== true) {
       const londonDow = (iso) => {
         const s = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });

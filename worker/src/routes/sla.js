@@ -29,6 +29,44 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
 import { onStatusTransition } from "../lib/statusemail.js";
 
+// ── Schedule-date sanity ───────────────────────────────────────────────
+// A job scheduled with a mistyped year (2006 typed for 2026, 8 Sep 2026) was
+// accepted verbatim, so it sat in the DB dated twenty years ago and fell
+// outside every dated view — the scheduler, the engineer's day, the live
+// board. A schedule date must land within a plausible window of NOW; anything
+// else is a typo and is refused with a message naming the year it got.
+const SCHED_YEARS_BACK = 1, SCHED_YEARS_FWD = 3;
+export function badScheduleDate(iso, label = "Scheduled date") {
+  if (iso === undefined || iso === null || iso === "") return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return `${label} isn't a valid date/time.`;
+  const y = new Date(t).getUTCFullYear(), now = new Date().getUTCFullYear();
+  if (y < now - SCHED_YEARS_BACK || y > now + SCHED_YEARS_FWD)
+    return `${label} has the year ${y} — check the date (expected ${now - SCHED_YEARS_BACK}–${now + SCHED_YEARS_FWD}).`;
+  return null;
+}
+// Every schedule field a client can send on a job body, in one check.
+export function badScheduleIn(body) {
+  if (!body || typeof body !== "object") return null;
+  let e = badScheduleDate(body.scheduledAt, "Scheduled start")
+    || badScheduleDate(body.scheduledStart, "Scheduled start")
+    || badScheduleDate(body.scheduledEnd, "Scheduled finish");
+  if (e) return e;
+  const sfe = body.scheduleForEngineer;
+  if (sfe && typeof sfe === "object") {
+    e = badScheduleDate(sfe.scheduledAt, "Engineer's start") || badScheduleDate(sfe.scheduledEnd, "Engineer's finish");
+    if (e) return e;
+  }
+  if (body.engSchedule && typeof body.engSchedule === "object") {
+    for (const [k, v] of Object.entries(body.engSchedule)) {
+      if (!v || typeof v !== "object") continue;
+      e = badScheduleDate(v.scheduledAt, `${k}'s start`) || badScheduleDate(v.scheduledEnd, `${k}'s finish`);
+      if (e) return e;
+    }
+  }
+  return null;
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -645,6 +683,7 @@ export async function handle(request, env, ctx, url, sess) {
     // below); machine intake uses /sla/inbound.
     if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson(request);
+    { const bad = badScheduleIn(payload); if (bad) return jsonResponse({ error: bad }, headers, 400); }
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
@@ -1491,6 +1530,7 @@ export async function handle(request, env, ctx, url, sess) {
     const id = safeDecode(subpath.split("/").filter(Boolean)[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     const body = await readJson(request);
+    { const bad = badScheduleIn(body); if (bad) return jsonResponse({ error: bad }, headers, 400); }
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
       scheduledEnd: body.scheduledEnd,
@@ -2273,6 +2313,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
       const body = await readJson(request);
+      { const bad = badScheduleIn(body); if (bad) return jsonResponse({ error: bad }, headers, 400); }
 
       // Offline replay guard: if this exact op already landed, return the job
       // as-is instead of re-applying (no duplicate history/notifications).

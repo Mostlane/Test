@@ -245,7 +245,7 @@
       <div class="row">
         <div class="col field-group">
           <label for="scheduledAt">Allocate for <span class="hint">(date &amp; time)</span></label>
-          <input type="datetime-local" id="scheduledAt" name="scheduledAt">
+          <input type="datetime-local" id="scheduledAt" name="scheduledAt" step="300">
           <div class="hint">When the engineer should do it.</div>
         </div>
         <div class="col field-group">
@@ -440,6 +440,16 @@ function toIsoOrNull(value){
   const d = new Date(value);
   if(isNaN(d)) return null;
   return d.toISOString();
+}
+// A mistyped year (2006 for 2026) once went through and the job vanished from
+// the scheduler. Same window as the worker: now−1 … now+3.
+function badScheduleYear(value, label){
+  if(!value) return null;
+  const d = new Date(value);
+  if(isNaN(d)) return label + " isn't a valid date.";
+  const y = d.getFullYear(), now = new Date().getFullYear();
+  if(y < now - 1 || y > now + 3) return label + " has the year " + y + " — check the date.";
+  return null;
 }
 // ── EM light test + PAT: auto certificate text + duration ──
 var EM_SETS = {};              // store code -> EM cert "set number"
@@ -775,6 +785,10 @@ async function handleSubmit(evt){
 
   const description = $("description").value.trim();
   const siteName = $("siteName").value.trim();
+  {
+    const badDate = badScheduleYear($("scheduledAt").value, "Allocated date");
+    if(badDate){ statusEl.textContent = "⚠ " + badDate; statusEl.classList.add("err"); $("scheduledAt").focus(); return; }
+  }
   if(!siteName || !description){
     statusEl.textContent = "Please pick a site and enter a description.";
     statusEl.classList.add("err");
@@ -881,6 +895,7 @@ async function init(){
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
 
   $("jobForm").addEventListener("submit", handleSubmit);
+  { const y = new Date().getFullYear(); const el = $("scheduledAt"); el.min = (y - 1) + "-01-01T00:00"; el.max = (y + 3) + "-12-31T23:59"; }
   initPhotoPicker();
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
   try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
