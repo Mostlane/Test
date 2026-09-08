@@ -329,8 +329,9 @@ export async function handle(request, env, ctx, url, sess) {
   // ── Training matrix — competencies (columns) × staff (rows) ──────────────────
   // Pivots the records of one kind (default `qualification`) into a grid so the
   // office can see at a glance who holds what and when each expires. Columns are
-  // the distinct record TITLES; each cell is that person's latest record of that
-  // title (the one with the furthest-out expiry) + its status.
+  // the distinct record TITLES that carry an expiry date (permanent/no-expiry
+  // certs are excluded) plus any managed "+ Add column" competencies; each cell
+  // is that person's latest record of that title (furthest-out expiry) + status.
   if (path === "/hr/matrix" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
     const kind = KINDS.includes(q.get("kind")) ? q.get("kind") : "qualification";
@@ -345,16 +346,20 @@ export async function handle(request, env, ctx, url, sess) {
       "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
     ).bind(db.tenantId, kind).all();
     const titles = new Set();
+    const withExpiry = new Set();                        // titles where at least one record has an expiry date
     const best = {};                                    // username -> title -> {expires, id, status}
     for (const r of (recs || [])) {
       const t = String(r.title || "").trim();
       if (!t) continue;
-      titles.add(t);
+      if (String(r.expires || "").trim()) withExpiry.add(t);
       const pm = (best[r.username] = best[r.username] || {});
       const cur = pm[t];
       // keep the record that expires latest (blank expiry ranks lowest)
       if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf(r.expires) };
     }
+    // Only competencies that carry an expiry date get a column — a permanent /
+    // no-expiry qualification just clutters the tracker.
+    for (const t of withExpiry) titles.add(t);
     // Managed columns (added via "+ Add column") appear even with no records yet.
     for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
     const competencies = [...titles].sort((a, b) => a.localeCompare(b));

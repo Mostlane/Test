@@ -23335,15 +23335,17 @@ async function handle22(request, env, ctx, url, sess) {
       "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
     ).bind(db.tenantId, kind).all();
     const titles = /* @__PURE__ */ new Set();
+    const withExpiry = /* @__PURE__ */ new Set();
     const best = {};
     for (const r of recs || []) {
       const t = String(r.title || "").trim();
       if (!t) continue;
-      titles.add(t);
+      if (String(r.expires || "").trim()) withExpiry.add(t);
       const pm = best[r.username] = best[r.username] || {};
       const cur = pm[t];
       if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
     }
+    for (const t of withExpiry) titles.add(t);
     for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
     const competencies = [...titles].sort((a, b) => a.localeCompare(b));
     const rows = people.map((u) => ({

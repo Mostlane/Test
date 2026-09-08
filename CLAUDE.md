@@ -1169,8 +1169,9 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     result as proof). _headers + SW `mostlane-v115`+.
   - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
     records of one kind (default `qualification`) into a grid — competencies
-    (distinct record TITLES) as columns × active staff as rows; each cell = that
-    person's latest record of that title (furthest-out expiry) + status
+    (distinct record TITLES **that carry an expiry date** — permanent/no-expiry
+    certs are excluded — plus managed columns) as columns × active staff as rows;
+    each cell = that person's latest record of that title (furthest-out expiry) + status
     (valid/expiring/expired/none). employees.html **📊 Training matrix** tab:
     sticky name column, colour-coded cells, kind selector, "field engineers only"
     toggle, **CSV + Print** export. **Interactive (like the compliance chart):**
