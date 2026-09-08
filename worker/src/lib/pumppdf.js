@@ -7,8 +7,10 @@
 //   record = { store, storeName, siteCode, date, ref, instructions,
 //              safety:[{label,answer}], checks:[{label,answer}], detailsNo,
 //              declaration, declarationAgreed, engineerName, dmName,
-//              photos:[{name}], videos:[{name}] }
-//   meta   = { logo, engSig, dmSig }   (JPEG byte arrays; engSig/dmSig optional)
+//              media:[{key,kind,name}] }
+//   meta   = { logo (JPEG bytes), engSig, dmSig, photos:[img], videos:[name], skipped:[name] }
+//   where an `img` is { jpeg } (baseline JPEG bytes) or { rgb, w, h, deflated }
+//   (decoded PNG samples, optionally zlib-deflated) — see routes/pump.js.
 import { PdfDoc, textWidth, jpegInfo, toWinAnsi } from "./pdf.js";
 
 const W = 595, H = 842, M = 40, CW = W - M * 2;
@@ -54,6 +56,24 @@ function pill(doc, x, yTop, label, { fill, textColor = [1, 1, 1], size = 7, padX
 }
 function cardBox(doc, x, y, w, h, r = 12, fill = CARD) { doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER }); doc.roundRect(x, y, w, h, r, { fill }); }
 function pageBg(doc) { doc.rect(0, 0, W, H, { fill: BG }); }
+// Draw a { jpeg } or { rgb, w, h, deflated } image scaled to fit in (maxW × maxH),
+// centred in that box. Returns the drawn size, or null if nothing drawable.
+function imgSize(img) {
+  if (!img) return null;
+  if (img.jpeg) { try { const g = jpegInfo(img.jpeg); return { w: g.w || 1, h: g.h || 1 }; } catch { return null; } }
+  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
+  return null;
+}
+function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
+  const sz = imgSize(img); if (!sz) return null;
+  const s = Math.min(maxW / sz.w, maxH / sz.h); const w = sz.w * s, h = sz.h * s;
+  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
+  try {
+    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
+    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
+  } catch { return null; }
+  return { w, h, x: dx, y: dy };
+}
 
 function ansOf(a) { const s = String(a || "").toLowerCase(); if (/^y/.test(s)) return "yes"; if (/^n\/?a/.test(s) || s === "na") return "na"; if (/^n/.test(s)) return "no"; return ""; }
 function statusOf(rec) {
@@ -65,7 +85,6 @@ function statusOf(rec) {
 
 function header(doc, rec, meta, slim) {
   const y = 30, h = slim ? 40 : HEADER_H; cardBox(doc, M, y, CW, h, slim ? 12 : 14, NAVY);
-  if (!slim) doc.roundRect(M, y, CW, 5, 2.5, { fill: NAVY_D });
   if (meta.logo) { try { const g = jpegInfo(meta.logo); const hh = slim ? 18 : 24; doc.image(meta.logo, M + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh); } catch {} }
   if (slim) { tracked(doc, W - M - 16, y + 17, "Sump Pump Maintenance — continued", { size: 7, color: HEADSUB, alignRight: true }); doc.text(W - M - 16, y + 31, S(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true }); return y + h; }
   const st = statusOf(rec); pill(doc, M + 20, y + 52, st.label, { fill: st.color, size: 7 });
@@ -129,15 +148,43 @@ function detailsCard(doc, y, rec) {
   let yy = y + 32; wrap(rec.detailsNo, 8.5, CW - CARD_PAD * 2, 8).forEach(l => { doc.text(M + CARD_PAD, yy, l, { size: 8.5, color: INK }); yy += 11; });
   return h;
 }
-function mediaLine(rec) {
-  const np = (rec.photos || []).length, nv = (rec.videos || []).length; const bits = [];
-  if (np) bits.push(np + (np === 1 ? " photo" : " photos"));
-  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos"));
-  return bits.length ? bits.join(" · ") + " attached in the portal record" : "";
+function mediaLine(rec, meta) {
+  const media = Array.isArray(rec.media) ? rec.media : [];
+  const np = media.filter(m => m && m.kind !== "video").length, nv = media.filter(m => m && m.kind === "video").length;
+  const embedded = (meta.photos || []).length; const bits = [];
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " — viewable in the portal record");
+  return bits.length ? bits.join(" · ") : "";
+}
+// Photo pages: 2 × 2 grid per page, each photo captioned. Videos (and any photo
+// that couldn't be embedded, e.g. HEIC) are listed by name at the foot.
+const PHOTOS_PER_PAGE = 4;
+function photoPages(meta) { return Math.ceil(((meta && meta.photos) || []).length / PHOTOS_PER_PAGE); }
+function photoPage(doc, rec, meta, pageIdx) {
+  const photos = meta.photos || []; const start = pageIdx * PHOTOS_PER_PAGE; const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
+  const top = 30 + 40 + GAP; const gap = 12;
+  const cw = (CW - gap) / 2, ch = 292;
+  cardBox(doc, M, top, CW, H - 40 - top - 6);
+  tracked(doc, M + CARD_PAD, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "–" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT });
+  slice.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M + CARD_PAD + col * (cw - CARD_PAD + gap / 2), y = top + 30 + row * (ch + 10);
+    const boxW = cw - CARD_PAD - gap / 2, boxH = ch - 18;
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA });
+    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
+    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT });
+    doc.text(x + 2, y + boxH + 12, fit((start + i + 1) + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE });
+  });
+  const last = pageIdx === photoPages(meta) - 1;
+  if (last) {
+    const extras = [].concat((meta.videos || []).map(n => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map(n => "Not embedded: " + n));
+    let yy = top + 30 + 2 * (ch + 10) + 6;
+    extras.slice(0, 6).forEach(t => { doc.text(M + CARD_PAD, yy, fit(t, 7.5, CW - CARD_PAD * 2), { size: 7.5, color: FAINT }); yy += 11; });
+  }
 }
 function signatureCard(doc, y, rec, meta) {
   const declLines = wrap(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW - 40, 4);
-  const media = mediaLine(rec);
+  const media = mediaLine(rec, meta);
   const h = CARD_PAD + 14 + declLines.length * 11 + (media ? 14 : 0) + 66; cardBox(doc, M, y, CW, h);
   tracked(doc, M + CARD_PAD, y + 18, "Declaration", { size: 6.5, color: ACCENT });
   let yy = y + 32; declLines.forEach(l => { doc.text(M + CARD_PAD, yy, l, { size: 8.5, color: MUTE }); yy += 11; });
@@ -151,7 +198,7 @@ function signatureCard(doc, y, rec, meta) {
     { x: W - M - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" },
   ];
   blocks.forEach(b => {
-    if (b.sig) { try { const g = jpegInfo(b.sig); const hh = 30; doc.image(b.sig, b.x, y2 - 6, Math.min(bw, hh * (g.w / g.h)), hh); } catch {} }
+    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
     doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER, lw: 0.7 });
     doc.text(b.x, y2 + 42, S(b.name || "—"), { size: 9, bold: true, color: INK });
     tracked(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT });
@@ -175,7 +222,8 @@ export function buildPumpPdf(record, meta = {}) {
   const lastBottom = last.top + 20 + THEAD_H + last.rows.length * ROW_H + 12;
   const trailH = (detailsH(rec) ? detailsH(rec) + GAP : 0) + 150;
   const trailOwnPage = lastBottom + GAP + trailH > H - 40;
-  const totalPages = pages.length + (trailOwnPage ? 1 : 0);
+  const nPhotoPages = photoPages(meta);
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
 
   const doc = new PdfDoc(W, H);
   pages.forEach((pg, idx) => {
@@ -199,5 +247,11 @@ export function buildPumpPdf(record, meta = {}) {
   else ty = lastBottom + GAP;
   const dh = detailsCard(doc, ty, rec); if (dh) ty += dh + GAP;
   signatureCard(doc, ty, rec, meta);
+  // Photo pages (2 × 2 per page) after the sign-off.
+  const before = pages.length + (trailOwnPage ? 1 : 0);
+  for (let p = 0; p < nPhotoPages; p++) {
+    doc.newPage(W, H); pageBg(doc); header(doc, rec, meta, true); footer(doc, before + p + 1, totalPages);
+    photoPage(doc, rec, meta, p);
+  }
   return doc.bytes();
 }

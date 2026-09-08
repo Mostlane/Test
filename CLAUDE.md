@@ -1123,6 +1123,78 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
   front-end my-documents.html.
+- `staffrecords.js` — **Employee records (HR): qualifications/tickets,
+  insurances, driving licences + licence (DVLA) checks, WITH expiry tracking
+  + reminders (Sep 2026)**. ONE self-migrating table **staff_records**
+  (tenant/id/username/kind/title/number/issuer/issued/expires/data JSON/doc_key;
+  kind ∈ qualification|insurance|licence|licence_check; kind-specific extras ride
+  in `data`). One optional document per record in R2 `staffrec/<tid>/<user>/<id>/`,
+  served via signed **GET /hr/record-file** (PUBLIC_ROUTES, sig-verified).
+  `statusOf(expires)` → expired | expiring (≤30d) | valid | none. Routes (mounted
+  `/hr/`): **GET /hr/records?user=** (a person's records; non-admins forced to
+  their OWN — the read-only self-view), **GET /hr/overview** (per-person counts
+  for the list), **GET /hr/attention** (expiring/expired across everyone — home
+  hub + cron), **POST /hr/record** (create/update, multipart, file optional),
+  **POST /hr/record/delete**. Manage gate = **FullAccess|StaffRecords** (new
+  PERMISSION_KEY + USER_AREAS `staffrecords`); any session may read its own.
+  Cron **`sweepStaffRecordReminders`** (index.js daily block, self-gates ~08:00
+  London, deduped per day in app_config `staffrec:reminded:<tid>`) pushes
+  FullAccess|StaffRecords a glanceable "N expired · N expiring" summary. Front-end
+  **employees.html** (👷 Employees tile + sidebar "Time & HR", StaffRecords|
+  FullAccess): staff list with expiring/expired chips → per-person view with the
+  four sections, add/edit/delete records, expiry badges, doc view (docviewer).
+  A field/office employee sees their OWN records read-only on **my-documents.html**
+  ("📋 My qualifications, licences & insurances" card). Home-hub widget + overview
+  KPI (`staffrecords` area).
+  - **Subcontractors (non-portal people) — bidirectionally linked to the PO
+    system (Sep 2026):** table **staff_subcontractors** (main D1; keyed by
+    `name_key` = normalised name, matching the PO `subcontractors` table which is
+    name-unique). Records attach to a subcontractor via `staff_records.username =
+    "sub:"+name_key`. **GET /hr/subcontractors** MERGES local subs with the PO
+    system's (`env.PO_DB.subcontractors`) — so a sub added in the PO system
+    auto-appears here (`inPO`/`local` flags), and **POST /hr/subcontractor**
+    (name/trade/contact/phone/email) upserts locally AND pushes to PO
+    (`INSERT … ON CONFLICT set active=1`); **POST /hr/subcontractor/delete**
+    deactivates in both. All PO calls fail soft when PO_DB is unbound. A PO-only
+    sub is materialised locally (POST /hr/subcontractor) the first time a record
+    is attached. employees.html has **Staff / Subcontractors / Licence checks**
+    tabs.
+  - **Monthly driver licence checks (proof register):** **GET /hr/driver-checks**
+    = every active user with `vehicle_assigned` set, their latest `licence_check`,
+    and a **done|due** status (done = a check logged in the current calendar
+    month). The licence-check add form defaults **Checked on = today, Next due =
+    +1 month**. Drivers due this month are folded into **/hr/attention** (`driverChecksDue`),
+    the home-hub card, and the daily cron summary. The employees.html "Licence
+    checks" tab lists each driver with a one-tap **Log check** (attach the DVLA
+    result as proof). _headers + SW `mostlane-v115`+.
+  - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
+    records of one kind (default `qualification`) into a grid — competencies
+    (distinct record TITLES) as columns × active staff as rows; each cell = that
+    person's latest record of that title (furthest-out expiry) + status
+    (valid/expiring/expired/none). employees.html **📊 Training matrix** tab:
+    sticky name column, colour-coded cells, kind selector, "field engineers only"
+    toggle, **CSV + Print** export. **Interactive (like the compliance chart):**
+    **drag a certificate onto a cell** (or tap it) → the add/edit modal opens with
+    the engineer + competency locked, set the expiry + attach the file → POST
+    /hr/record → the cell colours by status; tapping the **name** opens the person.
+    **Managed columns:** "＋ Add column" adds a competency via **POST
+    /hr/matrix/column** (app_config `staff:matrixcols:<tid>` = {kind:[names]}), so a
+    column can exist before anyone holds it; GET /hr/matrix merges managed columns
+    with the distinct record titles. (+/delete column endpoints admin-gated.)
+  - **Certificate auto-extract (Sep 2026):** the add/edit record modal is a
+    **drop zone**; on attaching a file the client extracts details and pre-fills
+    EMPTY fields (title / cert number / awarding body / issued / expiry). **POST
+    /hr/extract-cert** (Claude, fail-soft — no key ⇒ `{}`) reads the **filename +
+    PDF text** (PDF.js in-browser; scanned PDFs sent as a base64 `document`
+    block) **AND photographed certs / driving-licence IMAGES** (jpg/png/webp/gif
+    sent as a base64 `image` block for OCR). AI result wins; a local filename
+    heuristic (`nameHints`) fills anything the AI leaves blank. Same flow whether
+    the file is dropped on a matrix cell, dropped in the modal, or picked.
+    **Driving licences:** the extractor reads the numbered photocard fields —
+    **4a→issued, 4b→expires, 4c/DVLA→issuer, 5→number**; if 4b can't be read the
+    client defaults **expires = issued + 10 years** (the UK photocard rule for
+    under-70s, flagged "please confirm"), and typing the issue date on a licence
+    record auto-fills the same +10y expiry when blank.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
@@ -2611,6 +2683,21 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
+  engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
+  status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
+  the page merges `GET /pump/review` (+ `/pump/list` when "Show issued") into the
+  queue, renders pump rows with 🚰 "Pump maintenance", and opens them in-page
+  (`openPump`: MLPump office/view mount + **🏁 Approve & file to compliance** →
+  POST /pump/finalise, which draws the PDF and `fileCertificatePdf`s it as the
+  store's CURRENT `pump` doc on the coop chart, rolling the monthly due date; plus
+  upload-replacement / preview / delete). Deep-link `cert-review.html?pump=<id>`
+  (the submit push now points there). **/certs/status** (tracker + hub card) counts
+  pump jobs (`job.pumpMaintenance`) as type `pump`, joined to `pump_records` by
+  job_id, so "Certificates to review" includes them; cert-status.html rows link to
+  the pump deep-link. **pump-review.html is now a redirect stub** to cert-review
+  (sla-main's 🚰 link repointed). The hub card is titled "Certificates to review".
+
 - **Certificate TRACKER + home-page card (Sep 2026):** **GET /certs/status?range=today|7d|30d|all**
   (office; `count=1` = tallies only) is a **JOB-based** view — one row per EM/PAT
   **job × the type(s) it needs** (em/pat), joined to its certificate, so a cert that

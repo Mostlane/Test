@@ -1154,9 +1154,11 @@ var init_pdf = __esm({
       // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
       // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
       // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
-      imageRGB(rgb, iw, ih, x, yTop, w, h) {
+      // opt.deflated=true → `rgb` is the zlib-deflated sample stream (FlateDecode),
+      // which keeps a photo page to a fraction of the raw size.
+      imageRGB(rgb, iw, ih, x, yTop, w, h, opt = {}) {
         const idx = this.images.length;
-        this.images.push({ rgb, w: iw, h: ih });
+        this.images.push({ rgb, w: iw, h: ih, flate: !!opt.deflated });
         const y = this._page.h - yTop - h;
         this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
         return this;
@@ -1249,7 +1251,7 @@ var init_pdf = __esm({
         const enc3 = new TextEncoder();
         const nImg = this.images.length;
         const imgMeta = this.images.map((im) => {
-          if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+          if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: im.flate ? "/FlateDecode" : null };
           const b = im && im.jpeg ? im.jpeg : im;
           const d = jpegInfo(b);
           const cs = d.comps === 1 ? "/DeviceGray" : d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
@@ -4234,7 +4236,9 @@ async function decodePngToRgb(bytes, opts = {}) {
       p = d + len + 4;
     }
     if (!width || !height || bitDepth !== 8 || interlace !== 0) return null;
-    if (width * height > MAX_PIXELS) return null;
+    if (width * height > (opts.maxPixels || MAX_PIXELS)) return null;
+    const step = opts.maxEdge ? Math.max(1, Math.ceil(Math.max(width, height) / opts.maxEdge)) : 1;
+    const ow = Math.ceil(width / step), oh = Math.ceil(height / step);
     const ch = colorType === 0 ? 1 : colorType === 2 ? 3 : colorType === 3 ? 1 : colorType === 4 ? 2 : colorType === 6 ? 4 : 0;
     if (!ch) return null;
     if (colorType === 3 && !palette) return null;
@@ -4251,16 +4255,16 @@ async function decodePngToRgb(bytes, opts = {}) {
     const raw = new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(ds)).arrayBuffer());
     const bpp = ch, stride = width * ch;
     if (raw.length < height * (stride + 1)) return null;
-    const out = new Uint8Array(height * stride);
+    const out = new Uint8Array(ow * oh * ch);
+    let prev = new Uint8Array(stride), cur = new Uint8Array(stride);
     let ip = 0;
     for (let y = 0; y < height; y++) {
       const filter = raw[ip++];
-      const rowOff = y * stride, prevOff = (y - 1) * stride;
       for (let x = 0; x < stride; x++) {
         const rv = raw[ip++];
-        const a = x >= bpp ? out[rowOff + x - bpp] : 0;
-        const b = y > 0 ? out[prevOff + x] : 0;
-        const c = y > 0 && x >= bpp ? out[prevOff + x - bpp] : 0;
+        const a = x >= bpp ? cur[x - bpp] : 0;
+        const b = y > 0 ? prev[x] : 0;
+        const c = y > 0 && x >= bpp ? prev[x - bpp] : 0;
         let val2;
         switch (filter) {
           case 0:
@@ -4283,10 +4287,20 @@ async function decodePngToRgb(bytes, opts = {}) {
           default:
             return null;
         }
-        out[rowOff + x] = val2 & 255;
+        cur[x] = val2 & 255;
       }
+      if (y % step === 0) {
+        const oy = y / step, rowOff = oy * ow * ch;
+        for (let ox = 0; ox < ow; ox++) {
+          const sx = ox * step * ch;
+          for (let k = 0; k < ch; k++) out[rowOff + ox * ch + k] = cur[sx + k];
+        }
+      }
+      const t = prev;
+      prev = cur;
+      cur = t;
     }
-    const npx = width * height;
+    const npx = ow * oh;
     const px = (pix) => {
       let r, g, bl, al = 255;
       if (colorType === 0) {
@@ -4336,7 +4350,7 @@ async function decodePngToRgb(bytes, opts = {}) {
         rgb[o++] = (bl * al + 255 * inv) / 255 | 0;
       }
     }
-    return { width, height, rgb };
+    return { width: ow, height: oh, rgb };
   } catch {
     return null;
   }
@@ -7877,8 +7891,8 @@ async function handle6(request, env, ctx) {
     if (!obj) return new Response("File missing", { status: 404, headers: corsFor(request) });
     const headers = corsFor(request);
     headers["Content-Type"] = doc.content_type || "application/octet-stream";
-    const safeName5 = (doc.file_name || "document").replace(/["\\\r\n]/g, "");
-    headers["Content-Disposition"] = (download ? "attachment" : "inline") + '; filename="' + safeName5 + '"';
+    const safeName6 = (doc.file_name || "document").replace(/["\\\r\n]/g, "");
+    headers["Content-Disposition"] = (download ? "attachment" : "inline") + '; filename="' + safeName6 + '"';
     headers["Access-Control-Expose-Headers"] = "Content-Disposition";
     headers["Cache-Control"] = "private, max-age=60";
     return new Response(obj.body, { headers });
@@ -8033,8 +8047,8 @@ async function handle7(request, env, ctx, url, sess) {
     const siteNumber = form && String(form.get("siteNumber") || "").trim();
     const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
     if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName5 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName5}`;
+    const safeName6 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName6}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
     const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
     return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
@@ -10828,7 +10842,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (range === "7d") from = daysAgo(6);
     else if (range === "30d") from = daysAgo(29);
     else if (range !== "all") from = today;
-    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat));
+    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat || j.pumpMaintenance));
     const certByKey = {};
     const jobIds = jobs.map((j) => String(j.id));
     for (let i = 0; i < jobIds.length; i += 100) {
@@ -10839,6 +10853,10 @@ PAT: Import certificate number ${num2}-${yr}`;
         `SELECT id,type,status,job_id,cert_number,engineer,created_at,updated_at,submitted_at,finalised_at FROM certificates WHERE tenant_id=? AND job_id IN (${ph})`
       ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
       for (const r of rows) certByKey[String(r.job_id) + "::" + r.type] = r;
+      const prows = (await env.DB.prepare(
+        `SELECT id,status,job_id,engineer,created_at,updated_at FROM pump_records WHERE tenant_id=? AND job_id IN (${ph})`
+      ).bind(tid, ...chunk).all().catch(() => ({ results: [] }))).results || [];
+      for (const r of prows) certByKey[String(r.job_id) + "::pump"] = { ...r, type: "pump", cert_number: "", submitted_at: r.status !== "draft" ? r.updated_at : null, finalised_at: r.status === "final" ? r.updated_at : null };
     }
     const isCancelled = (s) => /cancel/i.test(String(s || ""));
     const items = [];
@@ -10848,6 +10866,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       const types = [];
       if (j.emTest) types.push("em");
       if (j.pat) types.push("pat");
+      if (j.pumpMaintenance) types.push("pump");
       for (const type of types) {
         const cert = certByKey[String(j.id) + "::" + type] || null;
         const status = cert ? cert.status : "notstarted";
@@ -11651,7 +11670,7 @@ async function handle10(request, env, ctx, url, sess) {
         return null;
       }
     };
-    const safeName5 = (s) => String(s || "file").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 90);
+    const safeName6 = (s) => String(s || "file").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 90);
     const padRef = (n) => "0".repeat(Math.max(0, 5 - String(n).length)) + n;
     const padRef2 = (n) => String(n).padStart(2, "0");
     if (subpath === "/firestop/config") {
@@ -11721,10 +11740,10 @@ async function handle10(request, env, ctx, url, sess) {
       const mats = await getFsMaterials(env, tenantId);
       const m = mats.find((x) => x.id === pid);
       if (!m) return jsonResponse({ error: "Product not found" }, headers, 404);
-      const key = `firestopspec/${tenantId}/${pid}/${Date.now()}-${safeName5(file.name)}`;
+      const key = `firestopspec/${tenantId}/${pid}/${Date.now()}-${safeName6(file.name)}`;
       await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
       m.docs = m.docs || [];
-      m.docs.push({ id: "doc-" + crypto.randomUUID().slice(0, 8), name: file.name || safeName5(file.name), key });
+      m.docs.push({ id: "doc-" + crypto.randomUUID().slice(0, 8), name: file.name || safeName6(file.name), key });
       await saveFsMaterials(env, tenantId, mats);
       return jsonResponse({ ok: true }, headers);
     }
@@ -11869,7 +11888,7 @@ async function handle10(request, env, ctx, url, sess) {
       const rec = job.firestop || {};
       const pdf = await buildJobPdf(job);
       const refName = rec.ref || job.helpdeskRef || job.id;
-      const files = [{ name: `RIA form ${safeName5(refName)}.pdf`, data: pdf }];
+      const files = [{ name: `RIA form ${safeName6(refName)}.pdf`, data: pdf }];
       const mats = await getFsMaterials(env, tenantId);
       const usedIds = /* @__PURE__ */ new Set();
       (rec.seals || []).forEach((s) => (s.productIds || []).forEach((id) => usedIds.add(id)));
@@ -11882,11 +11901,11 @@ async function handle10(request, env, ctx, url, sess) {
           seen.add(d.key);
           const bytes = await r2Bytes(d.key);
           if (!bytes) continue;
-          files.push({ name: `Product specification/${safeName5([m.manufacturer, m.name].filter(Boolean).join(" "))} - ${safeName5(d.name)}`, data: bytes });
+          files.push({ name: `Product specification/${safeName6([m.manufacturer, m.name].filter(Boolean).join(" "))} - ${safeName6(d.name)}`, data: bytes });
         }
       }
       const zip = buildZip(files);
-      const zn = `Firestopping ${safeName5(refName)}.zip`;
+      const zn = `Firestopping ${safeName6(refName)}.zip`;
       return new Response(zip.buffer, { status: 200, headers: { ...headers, "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${zn.replace(/[^\w.\- ]+/g, "_")}"`, "Cache-Control": "no-store" } });
     }
     return jsonResponse({ error: "Unknown firestop route" }, headers, 404);
@@ -12467,7 +12486,7 @@ async function handle10(request, env, ctx, url, sess) {
     }
     const isDone = (s) => DONE_STATES.has(String(s || "").toLowerCase());
     const isActive = (s) => s === "In Progress" || s === "Travelling";
-    const shape = (a) => a ? {
+    const shape2 = (a) => a ? {
       jobId: a.job.id,
       ref: a.job.helpdeskRef || a.job.reference || "",
       site: a.job.siteName || a.job.helpdeskRef || a.job.reference || "",
@@ -12497,7 +12516,7 @@ async function handle10(request, env, ctx, url, sess) {
       const next = upcoming[0] || null;
       const planned = todays.slice().sort((x, y) => String(x.scheduledAt || "~").localeCompare(String(y.scheduledAt || "~")));
       const category = current ? "on_job" : next ? "should_be" : onLeave ? "off" : "idle";
-      return { username: u.username, name, onLeave, category, current: shape(current), next: shape(next), planned: planned.map(shape), count: todays.length };
+      return { username: u.username, name, onLeave, category, current: shape2(current), next: shape2(next), planned: planned.map(shape2), count: todays.length };
     }).sort((a, b) => a.name.localeCompare(b.name));
     return jsonResponse({ ok: true, date: today, engineers }, headers);
   }
@@ -17442,7 +17461,7 @@ async function handle11(request, env, ctx, url, sess) {
     }
     return set;
   }
-  function computeUsage(all, sys, username, allowance, todayISO) {
+  function computeUsage(all, sys, username, allowance, todayISO2) {
     const dayMap = {};
     for (const h of all) {
       if (h.username !== username || h.status !== "Approved") continue;
@@ -17467,7 +17486,7 @@ async function handle11(request, env, ctx, url, sess) {
       const m = dayMap[di];
       const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
       booked += v;
-      if (di <= todayISO) bookedTD += v;
+      if (di <= todayISO2) bookedTD += v;
     }
     const covered = bookedHolidayDates(all, username);
     let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
@@ -17479,7 +17498,7 @@ async function handle11(request, env, ctx, url, sess) {
         continue;
       }
       if (covered.has(s.date)) continue;
-      const passed = (s.date || "") <= todayISO;
+      const passed = (s.date || "") <= todayISO2;
       if (s.kind === "shutdown") {
         shut += s.days || 1;
         if (passed) shutTD += s.days || 1;
@@ -18571,7 +18590,8 @@ var USER_AREAS = [
   { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
   { key: "memos", label: "Company memos", perm: "FullAccess" },
   { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
-  { key: "messages", label: "Messages", perm: "" }
+  { key: "messages", label: "Messages", perm: "" },
+  { key: "staffrecords", label: "Employee records", perm: "StaffRecords" }
 ];
 var PERMISSION_KEYS = [
   "FullAccess",
@@ -18628,8 +18648,10 @@ var PERMISSION_KEYS = [
   // the Chapplins customer area (directory + compliance chart)
   "CableCalc",
   // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
-  "WhereEveryone"
+  "WhereEveryone",
   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
+  "StaffRecords"
+  // HR: manage staff qualifications, insurances, licences + licence checks
 ];
 function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -19600,7 +19622,7 @@ async function handle12(request, env, ctx, url, sess) {
     const me = sess.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
-    const shape = async (r) => {
+    const shape2 = async (r) => {
       const a = await getAsset(env, tenantId, r.asset_id);
       return {
         id: r.id,
@@ -19624,14 +19646,14 @@ async function handle12(request, env, ctx, url, sess) {
       admin ? "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='') ORDER BY id DESC LIMIT 100" : "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=? ORDER BY id DESC LIMIT 100"
     ).bind(db.tenantId, me).all();
     const out = { ok: true, mine: [], toAction: [], all: null };
-    for (const r of mineR || []) out.mine.push(await shape(r));
-    for (const r of toMe || []) if (r.requested_by !== me) out.toAction.push(await shape(r));
+    for (const r of mineR || []) out.mine.push(await shape2(r));
+    for (const r of toMe || []) if (r.requested_by !== me) out.toAction.push(await shape2(r));
     if (admin && url.searchParams.get("all") === "1") {
       const { results: allR } = await db.prepare(
         "SELECT * FROM asset_requests WHERE tenant_id=? ORDER BY id DESC LIMIT 300"
       ).bind(db.tenantId).all();
       out.all = [];
-      for (const r of allR || []) out.all.push(await shape(r));
+      for (const r of allR || []) out.all.push(await shape2(r));
     }
     return json4(out);
   }
@@ -22947,6 +22969,542 @@ async function deletePersonalDocs(env, tenantId, username) {
   return n;
 }
 
+// src/routes/staffrecords.js
+init_http();
+init_auth();
+init_tenantdb();
+init_filesign();
+init_push();
+var KINDS = ["qualification", "insurance", "licence", "licence_check"];
+var EXPIRING_DAYS = 30;
+var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
+async function ensureTable2(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
+    tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
+    title TEXT, number TEXT, issuer TEXT, issued TEXT, expires TEXT,
+    data TEXT, doc_key TEXT, doc_name TEXT,
+    created_by TEXT, created_at TEXT, updated_at TEXT
+  )`).run();
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_staffrec_user ON staff_records(tenant_id, username)").run();
+  } catch {
+  }
+}
+async function ensureSubTable(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS staff_subcontractors (
+    tenant_id INTEGER, name_key TEXT, name TEXT, trade TEXT, contact TEXT, phone TEXT, email TEXT,
+    active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT,
+    PRIMARY KEY (tenant_id, name_key)
+  )`).run();
+}
+var nameKeyOf = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+var SUB_PREFIX = "sub:";
+var isSubUser = (u) => String(u || "").startsWith(SUB_PREFIX);
+async function poAddSubcontractor(env, name) {
+  if (!env.PO_DB || !name) return;
+  try {
+    await env.PO_DB.prepare("INSERT INTO subcontractors (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active=1").bind(name).run();
+  } catch {
+  }
+}
+async function poSetSubcontractorActive(env, name, active) {
+  if (!env.PO_DB || !name) return;
+  try {
+    await env.PO_DB.prepare("UPDATE subcontractors SET active=? WHERE name=?").bind(active ? 1 : 0, name).run();
+  } catch {
+  }
+}
+async function poListSubcontractors(env) {
+  if (!env.PO_DB) return [];
+  try {
+    const { results } = await env.PO_DB.prepare("SELECT name, active FROM subcontractors").all();
+    return results || [];
+  } catch {
+    return [];
+  }
+}
+async function getMatrixCols(db, kind) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:matrixcols:" + db.tenantId).first();
+    const all = row && row.value ? JSON.parse(row.value) : {};
+    return Array.isArray(all[kind]) ? all[kind] : [];
+  } catch {
+    return [];
+  }
+}
+async function anthropicTool2(env, { system, userContent, schema, toolName, maxTokens }) {
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1024, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: userContent }] })
+    });
+  } catch {
+    return null;
+  }
+  if (!resp.ok) return null;
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return null;
+  }
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  return block?.input || null;
+}
+async function setMatrixCols(db, kind, cols) {
+  let all = {};
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:matrixcols:" + db.tenantId).first();
+    all = row && row.value ? JSON.parse(row.value) : {};
+  } catch {
+  }
+  all[kind] = cols;
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:matrixcols:" + db.tenantId, JSON.stringify(all)).run();
+}
+var todayISO = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const d = /* @__PURE__ */ new Date(String(dateStr).slice(0, 10) + "T00:00:00Z");
+  if (isNaN(d)) return null;
+  return Math.round((d - /* @__PURE__ */ new Date(todayISO() + "T00:00:00Z")) / 864e5);
+}
+function statusOf2(expires) {
+  const n = daysUntil(expires);
+  if (n === null) return "none";
+  if (n < 0) return "expired";
+  if (n <= EXPIRING_DAYS) return "expiring";
+  return "valid";
+}
+function parseData(s) {
+  try {
+    const v = JSON.parse(s || "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+async function shape(env, origin, r) {
+  const rec = {
+    id: r.id,
+    username: r.username,
+    kind: r.kind,
+    title: r.title || "",
+    number: r.number || "",
+    issuer: r.issuer || "",
+    issued: r.issued || "",
+    expires: r.expires || "",
+    data: parseData(r.data),
+    docName: r.doc_name || "",
+    createdBy: r.created_by || "",
+    createdAt: r.created_at || "",
+    updatedAt: r.updated_at || "",
+    status: statusOf2(r.expires),
+    daysLeft: daysUntil(r.expires)
+  };
+  if (r.doc_key) rec.docUrl = await signedFileUrl(env, origin, "/hr/record-file", r.doc_key);
+  return rec;
+}
+async function computeDriverChecks(db) {
+  let drivers = [];
+  try {
+    const { results } = await db.prepare(
+      "SELECT username, first_name, last_name, status, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
+    ).bind(db.tenantId).all();
+    drivers = (results || []).filter((u) => {
+      const s = String(u.status || "").trim().toLowerCase();
+      return s === "" || s === "active";
+    });
+  } catch {
+    return [];
+  }
+  const latest = {};
+  try {
+    const { results } = await db.prepare(
+      "SELECT username, issued, expires FROM staff_records WHERE tenant_id=? AND kind='licence_check'"
+    ).bind(db.tenantId).all();
+    for (const r of results || []) {
+      const cur = latest[r.username];
+      if (!cur || String(r.issued || "") > String(cur.issued || "")) latest[r.username] = { issued: r.issued || "", expires: r.expires || "" };
+    }
+  } catch {
+  }
+  const month = todayISO().slice(0, 7);
+  return drivers.map((u) => {
+    const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+    const l = latest[u.username] || null;
+    const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
+    const nextDue = l ? l.expires || "" : "";
+    return { username: u.username, name, reg: u.vehicle_assigned || "", lastChecked: l ? l.issued : "", nextDue, status: doneThisMonth ? "done" : "due" };
+  }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
+}
+async function handle22(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const q = url.searchParams;
+  if (path === "/hr/record-file" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("staffrec/")) return error("Bad key", 400, env, request);
+    if (!sess && !await verifyFileSig(env, key, q)) return error("Link expired or invalid", 403, env, request);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers: corsHeaders(env, request) });
+    return new Response(obj.body, { status: 200, headers: {
+      ...corsHeaders(env, request),
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const isAdmin = perms.FullAccess === "Yes" || perms.StaffRecords === "Yes";
+  const db = tenantDB(env, sess.tenantId);
+  await ensureTable2(db);
+  const me = sess.user.username;
+  if (path === "/hr/records" && method === "GET") {
+    let user = q.get("user") || me;
+    if (!isAdmin) user = me;
+    const { results } = await db.prepare(
+      "SELECT * FROM staff_records WHERE tenant_id=? AND username=? ORDER BY kind, expires IS NULL, expires"
+    ).bind(db.tenantId, user).all();
+    const records = [];
+    for (const r of results || []) records.push(await shape(env, url.origin, r));
+    return json({ ok: true, user, canManage: isAdmin, records }, {}, env, request);
+  }
+  if (path === "/hr/overview" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const { results: users } = await db.prepare(
+      "SELECT username, first_name, last_name, status, employment_type FROM users WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const active = (users || []).filter((u) => {
+      const s = String(u.status || "").trim().toLowerCase();
+      return s === "" || s === "active";
+    });
+    const { results: recs } = await db.prepare(
+      "SELECT username, kind, expires FROM staff_records WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const byUser = {};
+    for (const r of recs || []) {
+      const k = byUser[r.username] = byUser[r.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
+      k.total++;
+      k[statusOf2(r.expires)]++;
+    }
+    const rows = active.map((u) => {
+      const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+      const c = byUser[u.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
+      return { username: u.username, name, employmentType: u.employment_type || "", counts: c };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return json({ ok: true, rows }, {}, env, request);
+  }
+  if (path === "/hr/attention" && method === "GET") {
+    if (!isAdmin) return json({ ok: true, count: 0, items: [] }, {}, env, request);
+    const { results } = await db.prepare(
+      "SELECT id, username, kind, title, expires FROM staff_records WHERE tenant_id=? AND expires IS NOT NULL AND expires<>''"
+    ).bind(db.tenantId).all();
+    const nameById = {};
+    try {
+      const { results: us } = await db.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const u of us || []) nameById[u.username] = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+    } catch {
+    }
+    try {
+      await ensureSubTable(db);
+      const { results: subs } = await db.prepare("SELECT name_key, name FROM staff_subcontractors WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const s of subs || []) nameById[SUB_PREFIX + s.name_key] = s.name;
+    } catch {
+    }
+    const items = [];
+    for (const r of results || []) {
+      const st = statusOf2(r.expires);
+      if (st !== "expired" && st !== "expiring") continue;
+      items.push({ id: r.id, username: r.username, name: nameById[r.username] || (isSubUser(r.username) ? r.username.slice(SUB_PREFIX.length) : r.username), subcontractor: isSubUser(r.username), kind: r.kind, title: r.title || "", expires: r.expires, status: st, daysLeft: daysUntil(r.expires) });
+    }
+    items.sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
+    let driverChecksDue = 0;
+    try {
+      driverChecksDue = (await computeDriverChecks(db)).filter((d) => d.status === "due").length;
+    } catch {
+    }
+    return json({ ok: true, count: items.length + driverChecksDue, expired: items.filter((i) => i.status === "expired").length, expiring: items.filter((i) => i.status === "expiring").length, driverChecksDue, items }, {}, env, request);
+  }
+  if (path === "/hr/subcontractors" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    await ensureSubTable(db);
+    const { results: local } = await db.prepare("SELECT * FROM staff_subcontractors WHERE tenant_id=?").bind(db.tenantId).all();
+    const byKey = {};
+    for (const s of local || []) byKey[s.name_key] = { name: s.name, nameKey: s.name_key, trade: s.trade || "", contact: s.contact || "", phone: s.phone || "", email: s.email || "", active: s.active !== 0, inPO: false, local: true, counts: { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 } };
+    for (const p of await poListSubcontractors(env)) {
+      const k = nameKeyOf(p.name);
+      if (!k) continue;
+      if (byKey[k]) byKey[k].inPO = true;
+      else byKey[k] = { name: p.name, nameKey: k, trade: "", contact: "", phone: "", email: "", active: p.active !== 0, inPO: true, local: false, counts: { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 } };
+    }
+    try {
+      const { results: recs } = await db.prepare("SELECT username, expires FROM staff_records WHERE tenant_id=? AND username LIKE 'sub:%'").bind(db.tenantId).all();
+      for (const r of recs || []) {
+        const k = r.username.slice(SUB_PREFIX.length);
+        if (byKey[k]) {
+          byKey[k].counts.total++;
+          byKey[k].counts[statusOf2(r.expires)]++;
+        }
+      }
+    } catch {
+    }
+    const rows = Object.values(byKey).sort((a, b) => a.name.localeCompare(b.name));
+    return json({ ok: true, rows }, {}, env, request);
+  }
+  if (path === "/hr/subcontractor" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    await ensureSubTable(db);
+    const b = await request.json().catch(() => ({}));
+    const name = String(b.name || "").trim().slice(0, 160);
+    if (!name) return error("A subcontractor name is required.", 400, env, request);
+    const key = nameKeyOf(name);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = await db.prepare("SELECT name_key FROM staff_subcontractors WHERE tenant_id=? AND name_key=?").bind(db.tenantId, key).first();
+    const trade = String(b.trade || "").slice(0, 120), contact = String(b.contact || "").slice(0, 120), phone = String(b.phone || "").slice(0, 60), email = String(b.email || "").slice(0, 160);
+    const active = b.active === false ? 0 : 1;
+    if (existing) {
+      await db.prepare("UPDATE staff_subcontractors SET name=?, trade=?, contact=?, phone=?, email=?, active=?, updated_at=? WHERE tenant_id=? AND name_key=?").bind(name, trade, contact, phone, email, active, now, db.tenantId, key).run();
+    } else {
+      await db.prepare("INSERT INTO staff_subcontractors (tenant_id, name_key, name, trade, contact, phone, email, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, key, name, trade, contact, phone, email, active, now, now).run();
+    }
+    if (active) ctx?.waitUntil ? ctx.waitUntil(poAddSubcontractor(env, name)) : await poAddSubcontractor(env, name);
+    return json({ ok: true, nameKey: key, username: SUB_PREFIX + key }, {}, env, request);
+  }
+  if (path === "/hr/subcontractor/delete" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    await ensureSubTable(db);
+    const b = await request.json().catch(() => ({}));
+    const name = String(b.name || "").trim();
+    const key = nameKeyOf(name);
+    if (!key) return error("Missing name", 400, env, request);
+    await db.prepare("UPDATE staff_subcontractors SET active=0, updated_at=? WHERE tenant_id=? AND name_key=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, key).run();
+    await poSetSubcontractorActive(env, name, false);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/hr/driver-checks" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const rows = await computeDriverChecks(db);
+    return json({ ok: true, rows, due: rows.filter((r) => r.status === "due").length }, {}, env, request);
+  }
+  if (path === "/hr/matrix" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const kind = KINDS.includes(q.get("kind")) ? q.get("kind") : "qualification";
+    const fieldOnly = q.get("field") === "1";
+    const { results: users } = await db.prepare(
+      "SELECT username, first_name, last_name, status, profile FROM users WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const active = (users || []).filter((u) => {
+      const s = String(u.status || "").trim().toLowerCase();
+      return s === "" || s === "active";
+    });
+    const staffTypeOf3 = (u) => {
+      try {
+        return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const people = fieldOnly ? active.filter((u) => staffTypeOf3(u) !== "office") : active;
+    const { results: recs } = await db.prepare(
+      "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
+    ).bind(db.tenantId, kind).all();
+    const titles = /* @__PURE__ */ new Set();
+    const best = {};
+    for (const r of recs || []) {
+      const t = String(r.title || "").trim();
+      if (!t) continue;
+      titles.add(t);
+      const pm = best[r.username] = best[r.username] || {};
+      const cur = pm[t];
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
+    }
+    for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
+    const competencies = [...titles].sort((a, b) => a.localeCompare(b));
+    const rows = people.map((u) => ({
+      username: u.username,
+      name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username,
+      cells: best[u.username] || {}
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    return json({ ok: true, kind, competencies, rows }, {}, env, request);
+  }
+  if (path === "/hr/matrix/column" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    const name = String(b.name || "").trim().slice(0, 120);
+    if (!name) return error("A column name is required.", 400, env, request);
+    const cols = await getMatrixCols(db, kind);
+    if (!cols.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      cols.push(name);
+      await setMatrixCols(db, kind, cols);
+    }
+    return json({ ok: true, columns: cols }, {}, env, request);
+  }
+  if (path === "/hr/matrix/column/delete" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    const name = String(b.name || "").trim();
+    const cols = (await getMatrixCols(db, kind)).filter((c) => c.toLowerCase() !== name.toLowerCase());
+    await setMatrixCols(db, kind, cols);
+    return json({ ok: true, columns: cols }, {}, env, request);
+  }
+  if (path === "/hr/extract-cert" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!env.ANTHROPIC_API_KEY) return json({ ok: true, result: {} }, {}, env, request);
+    const filename = String(b.filename || "").slice(0, 300);
+    const text = String(b.text || "").slice(0, 6e4);
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    if (!filename && !text && !b.pdfBase64 && !b.imageBase64) return json({ ok: true, result: {} }, {}, env, request);
+    const schema = { type: "object", properties: {
+      title: { type: "string", description: "The qualification / certificate name or type (e.g. CSCS Card, SMSTS, First Aid at Work, Asbestos Awareness). For an insurance, the cover type; for a licence, the licence type." },
+      number: { type: "string", description: "The certificate / card / registration / policy number, if present." },
+      issuer: { type: "string", description: "The awarding body / issuing organisation / training provider / insurer." },
+      issued: { type: "string", description: "Issue / completion date as YYYY-MM-DD, if present." },
+      expires: { type: "string", description: "Expiry / renewal / valid-until date as YYYY-MM-DD, if present." }
+    }, required: [] };
+    const system = "You extract details from a UK construction worker's certificate/qualification document for a training record. Use BOTH the file name and the document text/image. Return only what the source clearly supports \u2014 leave a field blank rather than guessing. Dates must be YYYY-MM-DD.\n\nIf it is a UK PHOTOCARD DRIVING LICENCE, read the numbered fields on the front: field 4a = the licence ISSUE date (put in `issued`); field 4b = the photocard EXPIRY date (put in `expires` \u2014 this is the date the card must be renewed, NOT the entitlement/category dates in section 9/11); field 4c = the issuing authority, usually DVLA (put in `issuer`); field 5 = the driver number (put in `number`); set `title` to \"Driving Licence\". Do NOT use the holder's date of birth (field 3) or the category expiry dates as the licence expiry \u2014 only 4b.";
+    const userContent = [];
+    if (b.pdfBase64 && typeof b.pdfBase64 === "string" && b.pdfBase64.length < 8e6) {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: b.pdfBase64 } });
+    }
+    const okImg = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (b.imageBase64 && typeof b.imageBase64 === "string" && b.imageBase64.length < 8e6 && okImg.includes(b.imageType)) {
+      userContent.push({ type: "image", source: { type: "base64", media_type: b.imageType, data: b.imageBase64 } });
+    }
+    userContent.push({ type: "text", text: "RECORD TYPE: " + kind + "\nFILE NAME: " + (filename || "(none)") + "\n\n--- DOCUMENT TEXT ---\n" + (text || "(none \u2014 read the attached file)") });
+    const result = await anthropicTool2(env, { system, userContent, schema, toolName: "extract_cert", maxTokens: 800 });
+    return json({ ok: true, result: result || {} }, {}, env, request);
+  }
+  if (path === "/hr/record" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const form = await request.formData();
+    const id = String(form.get("id") || "").trim();
+    const username = String(form.get("username") || "").trim();
+    const kind = String(form.get("kind") || "").trim();
+    if (!username) return error("Employee is required", 400, env, request);
+    if (!KINDS.includes(kind)) return error("Unknown record type", 400, env, request);
+    const title = String(form.get("title") || "").trim().slice(0, 200);
+    const number = String(form.get("number") || "").trim().slice(0, 120);
+    const issuer = String(form.get("issuer") || "").trim().slice(0, 160);
+    const issued = String(form.get("issued") || "").trim().slice(0, 10);
+    const expires = String(form.get("expires") || "").trim().slice(0, 10);
+    let data = {};
+    try {
+      data = JSON.parse(String(form.get("data") || "{}"));
+    } catch {
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let existing = null;
+    if (id) existing = await db.prepare("SELECT * FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    const recId = existing ? existing.id : "SR-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    let docKey = existing ? existing.doc_key || "" : "";
+    let docName = existing ? existing.doc_name || "" : "";
+    const file = form.get("file");
+    if (file && typeof file === "object" && file.size) {
+      if (file.size > 25 * 1024 * 1024) return error("File too large (max 25 MB).", 400, env, request);
+      const key = `staffrec/${db.tenantId}/${username}/${recId}/${Date.now()}-${safeName3(file.name)}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { by: me, at: now } });
+      if (docKey && docKey !== key) {
+        try {
+          await env.JOB_FILES.delete(docKey);
+        } catch {
+        }
+      }
+      docKey = key;
+      docName = file.name || safeName3(file.name);
+    } else if (String(form.get("removeDoc") || "") === "1" && docKey) {
+      try {
+        await env.JOB_FILES.delete(docKey);
+      } catch {
+      }
+      docKey = "";
+      docName = "";
+    }
+    if (existing) {
+      await db.prepare(`UPDATE staff_records SET username=?, kind=?, title=?, number=?, issuer=?, issued=?, expires=?, data=?, doc_key=?, doc_name=?, updated_at=? WHERE tenant_id=? AND id=?`).bind(username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, now, db.tenantId, recId).run();
+    } else {
+      await db.prepare(`INSERT INTO staff_records (tenant_id, id, username, kind, title, number, issuer, issued, expires, data, doc_key, doc_name, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(db.tenantId, recId, username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, me, now, now).run();
+    }
+    const row = await db.prepare("SELECT * FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, recId).first();
+    return json({ ok: true, record: await shape(env, url.origin, row) }, {}, env, request);
+  }
+  if (path === "/hr/record/delete" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("Missing id", 400, env, request);
+    const row = await db.prepare("SELECT doc_key FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (row && row.doc_key) {
+      try {
+        await env.JOB_FILES.delete(row.doc_key);
+      } catch {
+      }
+    }
+    await db.prepare("DELETE FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown HR route", 404, env, request);
+}
+async function sweepStaffRecordReminders(env) {
+  const tid = 1;
+  let londonHour = 8;
+  try {
+    londonHour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).format(/* @__PURE__ */ new Date()));
+  } catch {
+  }
+  if (londonHour < 8) return;
+  const db = tenantDB(env, tid);
+  try {
+    await ensureTable2(db);
+  } catch {
+    return;
+  }
+  const dayKey = todayISO();
+  const cfgKey = `staffrec:reminded:${tid}`;
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, cfgKey).first();
+    if (row && row.value === dayKey) return;
+  } catch {
+  }
+  const { results } = await db.prepare(
+    "SELECT username, kind, title, expires FROM staff_records WHERE tenant_id=? AND expires IS NOT NULL AND expires<>''"
+  ).bind(tid).all().catch(() => ({ results: [] }));
+  let expired = 0, expiring = 0;
+  for (const r of results || []) {
+    const st = statusOf2(r.expires);
+    if (st === "expired") expired++;
+    else if (st === "expiring") expiring++;
+  }
+  let driverDue = 0;
+  try {
+    driverDue = (await computeDriverChecks(db)).filter((d) => d.status === "due").length;
+  } catch {
+  }
+  if (expired + expiring + driverDue > 0) {
+    const bits = [];
+    if (expired) bits.push(`${expired} expired`);
+    if (expiring) bits.push(`${expiring} expiring soon`);
+    if (driverDue) bits.push(`${driverDue} driver licence check${driverDue === 1 ? "" : "s"} due this month`);
+    await sendToPermission(env, tid, ["FullAccess", "StaffRecords"], {
+      title: expired ? "\u26A0\uFE0F Employee records need attention" : "Employee records / licence checks due",
+      body: `${bits.join(" \xB7 ")}.`,
+      url: "/employees.html",
+      tag: "staff-records-expiry"
+    });
+  }
+  try {
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, cfgKey, dayKey).run();
+  } catch {
+  }
+}
+
 // src/routes/privacy.js
 init_http();
 init_auth();
@@ -23047,7 +23605,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -23159,7 +23717,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -23462,7 +24020,7 @@ async function handle23(request, env, ctx, url, sess) {
       e.days.add(String(s.started_at).slice(0, 10));
     }
     const normIdL = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-    const todayISO = londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    const todayISO2 = londonDate3((/* @__PURE__ */ new Date()).toISOString());
     const plannedEng = /* @__PURE__ */ new Set();
     if (!/^cancelled$/i.test(String(jd.status || ""))) {
       const engs = Array.isArray(jd.assignedEngineers) && jd.assignedEngineers.length ? jd.assignedEngineers : jd.assignedTo ? [jd.assignedTo] : [];
@@ -23473,7 +24031,7 @@ async function handle23(request, env, ctx, url, sess) {
         const startISO = es.scheduledAt || jd.scheduledAt;
         if (!startISO) continue;
         const day = String(startISO).slice(0, 10);
-        if (day > todayISO) continue;
+        if (day > todayISO2) continue;
         let mins = 0;
         const endISO = es.scheduledEnd || jd.scheduledEnd;
         if (endISO) {
@@ -25448,7 +26006,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -28105,7 +28663,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -28351,7 +28909,7 @@ async function readJson6(r) {
   }
 }
 var lc2 = (s) => String(s || "").toLowerCase();
-var safeName3 = (s) => String(s || "memo").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+var safeName4 = (s) => String(s || "memo").replace(/[^\w.\-]+/g, "_").slice(0, 60);
 async function isFull2(env, tid, me) {
   try {
     const p = await permissionsFor(env, tid, me);
@@ -28497,7 +29055,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -28670,14 +29228,14 @@ async function handle26(request, env, ctx, url, sess) {
       const mm = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
       if (mm) {
         const bin = Uint8Array.from(atob(mm[2]), (c) => c.charCodeAt(0));
-        sigKey = `memos/${tid}/${id}/${safeName3(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
+        sigKey = `memos/${tid}/${id}/${safeName4(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
         await env.JOB_FILES.put(sigKey, bin, { httpMetadata: { contentType: "image/" + mm[1] } });
         if (mm[1] === "jpeg") sigJpeg = bin;
       }
     } catch {
     }
     const pdf = buildMemoPdf(memo, signerName, at, { sigJpeg, ip });
-    const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName3(memo.m_re || "memo")}.pdf`;
+    const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName4(memo.m_re || "memo")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: "Memo \u2014 " + (memo.m_re || "Company memo"), by: "Signed acknowledgement" }
@@ -28957,7 +29515,7 @@ async function readJson7(r) {
   }
 }
 var lc3 = (s) => String(s || "").toLowerCase();
-var safeName4 = (s) => String(s || "document").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+var safeName5 = (s) => String(s || "document").replace(/[^\w.\-]+/g, "_").slice(0, 60);
 async function isFull3(env, tid, me) {
   try {
     const p = await permissionsFor(env, tid, me);
@@ -29005,7 +29563,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -29065,7 +29623,7 @@ async function handle27(request, env, ctx, url, sess) {
     const b = await readJson7(request);
     const p = parseDataUrl(b.signature);
     if (!p) return jr7({ error: "A drawn signature is required" }, headers, 400);
-    const key = `docsig/${tid}/issuer/${safeName4(me)}.${p.ext}`;
+    const key = `docsig/${tid}/issuer/${safeName5(me)}.${p.ext}`;
     await env.JOB_FILES.put(key, p.bytes, { httpMetadata: { contentType: "image/" + (p.isJpeg ? "jpeg" : "png") } });
     await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, issuerCfgKey(me), key).run();
     return jr7({ ok: true }, headers);
@@ -29181,7 +29739,7 @@ async function handle27(request, env, ctx, url, sess) {
     let sigKey = null, signerJpeg = null;
     const p = parseDataUrl(b.signature);
     if (p) {
-      sigKey = `docsig/${tid}/sign/${id}/${safeName4(me)}.${p.ext}`;
+      sigKey = `docsig/${tid}/sign/${id}/${safeName5(me)}.${p.ext}`;
       try {
         await env.JOB_FILES.put(sigKey, p.bytes, { httpMetadata: { contentType: "image/" + (p.isJpeg ? "jpeg" : "png") } });
         if (p.isJpeg) signerJpeg = p.bytes;
@@ -29200,7 +29758,7 @@ async function handle27(request, env, ctx, url, sess) {
       signerIp: ip,
       signerUa: ua
     });
-    const docKey = `staffdocs/${tid}/user/${me}/Agreements/${ts}-${safeName4(s.title_snapshot || "document")}.pdf`;
+    const docKey = `staffdocs/${tid}/user/${me}/Agreements/${ts}-${safeName5(s.title_snapshot || "document")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: (s.title_snapshot || "Document") + " \u2014 signed", by: "Signed " + at }
@@ -29286,7 +29844,7 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -29525,7 +30083,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
@@ -30994,7 +31552,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -31425,7 +31983,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -31953,7 +32511,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -32274,7 +32832,6 @@ var H3 = 842;
 var M5 = 40;
 var CW2 = W5 - M5 * 2;
 var NAVY4 = [0, 0.204, 0.408];
-var NAVY_D2 = [0, 0.145, 0.29];
 var INK4 = [0.1, 0.13, 0.18];
 var MUTE3 = [0.46, 0.51, 0.58];
 var FAINT2 = [0.62, 0.66, 0.72];
@@ -32360,6 +32917,33 @@ function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
 function pageBg2(doc) {
   doc.rect(0, 0, W5, H3, { fill: BG2 });
 }
+function imgSize(img) {
+  if (!img) return null;
+  if (img.jpeg) {
+    try {
+      const g = jpegInfo(img.jpeg);
+      return { w: g.w || 1, h: g.h || 1 };
+    } catch {
+      return null;
+    }
+  }
+  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
+  return null;
+}
+function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
+  const sz = imgSize(img);
+  if (!sz) return null;
+  const s = Math.min(maxW / sz.w, maxH / sz.h);
+  const w = sz.w * s, h = sz.h * s;
+  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
+  try {
+    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
+    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
+  } catch {
+    return null;
+  }
+  return { w, h, x: dx, y: dy };
+}
 function ansOf(a) {
   const s = String(a || "").toLowerCase();
   if (/^y/.test(s)) return "yes";
@@ -32367,7 +32951,7 @@ function ansOf(a) {
   if (/^n/.test(s)) return "no";
   return "";
 }
-function statusOf2(rec) {
+function statusOf3(rec) {
   const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
   const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
   if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
@@ -32376,7 +32960,6 @@ function statusOf2(rec) {
 function header2(doc, rec, meta, slim) {
   const y = 30, h = slim ? 40 : HEADER_H2;
   cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY4);
-  if (!slim) doc.roundRect(M5, y, CW2, 5, 2.5, { fill: NAVY_D2 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
@@ -32390,7 +32973,7 @@ function header2(doc, rec, meta, slim) {
     doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
     return y + h;
   }
-  const st = statusOf2(rec);
+  const st = statusOf3(rec);
   pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
   tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
   doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
@@ -32476,16 +33059,50 @@ function detailsCard2(doc, y, rec) {
   });
   return h;
 }
-function mediaLine(rec) {
-  const np = (rec.photos || []).length, nv = (rec.videos || []).length;
+function mediaLine(rec, meta) {
+  const media = Array.isArray(rec.media) ? rec.media : [];
+  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
+  const embedded = (meta.photos || []).length;
   const bits = [];
-  if (np) bits.push(np + (np === 1 ? " photo" : " photos"));
-  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos"));
-  return bits.length ? bits.join(" \xB7 ") + " attached in the portal record" : "";
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
+  return bits.length ? bits.join(" \xB7 ") : "";
+}
+var PHOTOS_PER_PAGE = 4;
+function photoPages(meta) {
+  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
+}
+function photoPage(doc, rec, meta, pageIdx) {
+  const photos = meta.photos || [];
+  const start = pageIdx * PHOTOS_PER_PAGE;
+  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
+  const top = 30 + 40 + GAP2;
+  const gap = 12;
+  const cw = (CW2 - gap) / 2, ch = 292;
+  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
+  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
+  slice.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
+    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
+    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
+    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
+    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
+  });
+  const last = pageIdx === photoPages(meta) - 1;
+  if (last) {
+    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
+    let yy2 = top + 30 + 2 * (ch + 10) + 6;
+    extras.slice(0, 6).forEach((t) => {
+      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
+      yy2 += 11;
+    });
+  }
 }
 function signatureCard2(doc, y, rec, meta) {
   const declLines = wrap6(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
-  const media = mediaLine(rec);
+  const media = mediaLine(rec, meta);
   const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
   cardBox2(doc, M5, y, CW2, h);
   tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
@@ -32506,14 +33123,7 @@ function signatureCard2(doc, y, rec, meta) {
     { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
   ];
   blocks.forEach((b) => {
-    if (b.sig) {
-      try {
-        const g = jpegInfo(b.sig);
-        const hh = 30;
-        doc.image(b.sig, b.x, y2 - 6, Math.min(bw, hh * (g.w / g.h)), hh);
-      } catch {
-      }
-    }
+    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
     doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
     doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
     tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
@@ -32540,7 +33150,8 @@ function buildPumpPdf(record, meta = {}) {
   const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
   const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
   const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
-  const totalPages = pages.length + (trailOwnPage ? 1 : 0);
+  const nPhotoPages = photoPages(meta);
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
   const doc = new PdfDoc(W5, H3);
   pages.forEach((pg, idx) => {
     if (idx > 0) doc.newPage(W5, H3);
@@ -32568,6 +33179,14 @@ function buildPumpPdf(record, meta = {}) {
   const dh = detailsCard2(doc, ty, rec);
   if (dh) ty += dh + GAP2;
   signatureCard2(doc, ty, rec, meta);
+  const before = pages.length + (trailOwnPage ? 1 : 0);
+  for (let p = 0; p < nPhotoPages; p++) {
+    doc.newPage(W5, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, before + p + 1, totalPages);
+    photoPage(doc, rec, meta, p);
+  }
   return doc.bytes();
 }
 
@@ -32576,6 +33195,7 @@ init_logo();
 init_filesign();
 init_push();
 init_compliance();
+init_pngdecode();
 var GENERAL = [
   "Chamber free of debris or obstructions",
   "Water level within expected range when idle",
@@ -32684,6 +33304,89 @@ function dataUrlToBytes2(u) {
     return null;
   }
 }
+var isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
+var isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
+async function sigImage(dataUrl) {
+  const b = dataUrlToBytes2(dataUrl);
+  if (!b) return null;
+  if (isJpeg(b)) return { jpeg: b };
+  if (isPng(b)) {
+    const d = await decodePngToRgb(b, { signature: true });
+    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
+  }
+  return null;
+}
+function shrinkRgb(rgb, w, h, maxEdge) {
+  const s = Math.max(w, h) / maxEdge;
+  if (s <= 1) return { rgb, w, h };
+  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
+  const out = new Uint8Array(nw * nh * 3);
+  for (let y = 0; y < nh; y++) {
+    const sy = Math.min(h - 1, Math.floor(y * s));
+    for (let x = 0; x < nw; x++) {
+      const sx = Math.min(w - 1, Math.floor(x * s));
+      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
+      out[di] = rgb[si];
+      out[di + 1] = rgb[si + 1];
+      out[di + 2] = rgb[si + 2];
+    }
+  }
+  return { rgb: out, w: nw, h: nh };
+}
+async function deflate(bytes) {
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter();
+    w.write(bytes);
+    w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+async function photoImage(env, m) {
+  try {
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
+    if (!o) return { why: "file missing" };
+    const b = new Uint8Array(await o.arrayBuffer());
+    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
+    if (isPng(b)) {
+      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
+      if (!d) return { why: "PNG couldn't be decoded" };
+      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
+      const z = await deflate(s.rgb);
+      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
+    }
+    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
+  } catch (e) {
+    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
+  }
+}
+var MAX_PDF_PHOTOS = 12;
+async function pdfMeta(env, d) {
+  const media = Array.isArray(d.media) ? d.media : [];
+  const photos = [], skipped = [], videos = [];
+  for (const m of media) {
+    if (!m || !m.key) continue;
+    if (m.kind === "video") {
+      videos.push(m.name || "video");
+      continue;
+    }
+    if (photos.length >= MAX_PDF_PHOTOS) {
+      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
+      continue;
+    }
+    const r = await photoImage(env, m);
+    if (r.img) photos.push(r.img);
+    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
+  }
+  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
+}
+async function buildPdfFor(env, rec) {
+  const d = shapeRow2(rec);
+  return buildPumpPdf(d, await pdfMeta(env, d));
+}
 function shapeRow2(r) {
   let d = {};
   try {
@@ -32754,7 +33457,7 @@ async function resignMedia(env, origin, rec) {
   }
   return rec;
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (method === "GET" && url.pathname === "/pump/media") {
     const key = url.searchParams.get("key") || "";
@@ -32957,7 +33660,7 @@ async function handle33(request, env, ctx, url, sess) {
     ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
       title: "\u{1F6B0} Pump maintenance submitted",
       body: `${shapeRow2(rec).storeName || "A store"} \u2014 ready for office review`,
-      url: "/pump-review.html",
+      url: "/cert-review.html?pump=" + encodeURIComponent(id),
       tag: "pump-review"
     }, me).catch(() => {
     }));
@@ -32987,7 +33690,7 @@ async function handle33(request, env, ctx, url, sess) {
     if (!rec) return error("Not found", 404, env, request);
     if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
     const d = shapeRow2(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
   }
   if (sub === "/finalise" && method === "POST") {
@@ -32996,7 +33699,7 @@ async function handle33(request, env, ctx, url, sess) {
     const rec = await loadRec(String(b.id || ""));
     if (!rec) return error("Not found", 404, env, request);
     const d = shapeRow2(rec);
-    const bytes = buildPumpPdf(d, { logo: logoBytes(), engSig: dataUrlToBytes2(d.engSig), dmSig: dataUrlToBytes2(d.dmSig) });
+    const bytes = await buildPdfFor(env, rec);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
     if (env.JOB_FILES) {
@@ -33338,7 +34041,7 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -34079,7 +34782,7 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle35(request, env, ctx, url) {
+async function handle36(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -34853,7 +35556,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -35419,7 +36122,7 @@ async function handle36(request, env, ctx, url, sess) {
     const jobIsMine = (j) => engsOf(j).some((e) => String(e).toLowerCase() === meLower || normId2(e) === meNorm);
     const segPairs = /* @__PURE__ */ new Set();
     for (const s of segs) segPairs.add(String(s.job_id) + "::" + normId2(s.username));
-    const todayISO = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    const todayISO2 = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
     for (const j of projectJobs) {
       if (/^cancelled$/i.test(String(j.status || ""))) continue;
       for (const rawEng of engsOf(j)) {
@@ -35429,7 +36132,7 @@ async function handle36(request, env, ctx, url, sess) {
         const startISO = es.scheduledAt || j.scheduledAt;
         if (!startISO) continue;
         const date = String(startISO).slice(0, 10);
-        if (date > todayISO) continue;
+        if (date > todayISO2) continue;
         let mins = 0;
         const endISO = es.scheduledEnd || j.scheduledEnd;
         if (endISO) {
@@ -35644,7 +36347,7 @@ var SLOW_MS = 2500;
 var PROBE_SLOW_MS = 1500;
 var RETAIN_DAYS = 30;
 var TABLE_READY = false;
-async function ensureTable2(env) {
+async function ensureTable3(env) {
   if (TABLE_READY) return;
   try {
     await env.DB.prepare(
@@ -35667,7 +36370,7 @@ async function ensureTable2(env) {
 }
 async function recordEvent(env, tenantId, { kind, endpoint, message, status, ms }) {
   try {
-    await ensureTable2(env);
+    await ensureTable3(env);
     const res = await env.DB.prepare(
       "INSERT INTO health_events (tenant_id, kind, endpoint, message, status, ms, at) VALUES (?,?,?,?,?,?,?)"
     ).bind(
@@ -35725,7 +36428,7 @@ function probeList(env) {
 }
 async function runHealthChecks(env, tenantId) {
   const tid = tenantId || 1;
-  await ensureTable2(env);
+  await ensureTable3(env);
   const checks = [];
   for (const [name, desc, fn] of probeList(env)) {
     const t0 = Date.now();
@@ -35942,7 +36645,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -35968,7 +36671,7 @@ async function handle37(request, env, ctx, url, sess) {
   const perms = new Set((permRows.results || []).map((r) => r.permission));
   if (!perms.has("FullAccess")) return json3({ error: "Full access only" }, 403, env, request);
   const tid = sess.tenantId;
-  await ensureTable2(env);
+  await ensureTable3(env);
   const method = request.method.toUpperCase();
   if (url.pathname === "/health/run" && method === "POST") {
     const [snap, integrity] = await Promise.all([runHealthChecks(env, tid), runIntegrityChecks(env, tid)]);
@@ -36194,7 +36897,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -36467,7 +37170,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -36654,7 +37357,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -36973,7 +37676,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -37113,27 +37816,29 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle12],
   ["*", "/upload-asset-thumb", handle12],
   ["*", "/delete-asset-image", handle12],
-  ["*", "/sla/workever", handle40],
+  ["*", "/sla/workever", handle41],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle10],
   ["*", "/stats", handle20],
   ["*", "/staff", handle21],
   // staff personal + company documents
-  ["*", "/privacy", handle22],
+  ["*", "/hr/", handle22],
+  // employee records (qualifications, insurances, licences, licence checks)
+  ["*", "/privacy", handle23],
   // GDPR data export + erasure
-  ["*", "/fleet", handle24],
+  ["*", "/fleet", handle25],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle25],
+  ["*", "/messages", handle26],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle26],
+  ["*", "/memos", handle27],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle27],
+  ["*", "/documents", handle28],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle30],
+  ["*", "/ai", handle31],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -37145,17 +37850,17 @@ var ROUTES = [
   ["*", "/import-sites", handle7],
   ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle23],
+  ["*", "/sites/register", handle24],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle23],
+  ["*", "/ledger", handle24],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle23],
+  ["*", "/costing", handle24],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle23],
+  ["*", "/exceptions", handle24],
   // needs-a-human-eye list
   ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle28],
+  ["*", "/chapplins", handle29],
   // Chapplins customer: site tenants (current/previous) + directory
   ["*", "/settings", handle13],
   ["*", "/oncall", handle13],
@@ -37180,33 +37885,33 @@ var ROUTES = [
   // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck", handle19],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle29],
+  ["*", "/po", handle30],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle31],
+  ["*", "/cctv", handle32],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle32],
+  ["*", "/tasks", handle33],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs", handle9],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle33],
+  ["*", "/pump", handle34],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle34],
+  ["*", "/cablecalc", handle35],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle35],
+  ["*", "/prog", handle36],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle36],
+  ["*", "/projects", handle37],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle36],
+  ["*", "/project", handle37],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle37],
+  ["*", "/health/", handle38],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle41],
+  ["*", "/comms", handle42],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle41],
+  ["*", "/customer", handle42],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle38],
+  ["*", "/tuya", handle39],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle39]
+  ["*", "/fra", handle40]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -37309,6 +38014,7 @@ var worker = {
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
       ctx.waitUntil(sweepTimesheetReminders(env).catch((e) => console.error("scheduled timesheet reminder:", e)));
+      ctx.waitUntil(sweepStaffRecordReminders(env).catch((e) => console.error("scheduled staff-record reminder:", e)));
       if (env.SITELOG_DB) ctx.waitUntil(sweepAutoClose(env).catch((e) => console.error("scheduled sitelog auto-close:", e)));
     }
   },
@@ -37489,6 +38195,8 @@ var PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-photo"],
   // Maintenance-record documents opened in a new tab — signed URL.
   ["GET", "/fleet/maintenance-doc"],
+  // Employee-record documents (certs/scans) — signed URL, verified in-handler.
+  ["GET", "/hr/record-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],

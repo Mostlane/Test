@@ -439,6 +439,7 @@ const USER_AREAS = [
   { key: "memos",          label: "Company memos",         perm: "FullAccess" },
   { key: "timesheets",     label: "Engineer timesheets",   perm: "TimesheetAdmin" },
   { key: "messages",       label: "Messages",              perm: "" },
+  { key: "staffrecords",   label: "Employee records",      perm: "StaffRecords" },
 ];
 const PERMISSION_KEYS = [
   "FullAccess", "Users", "DeviceAdmin", "CheckInOut", "Vehicles", "Holiday",
@@ -462,6 +463,7 @@ const PERMISSION_KEYS = [
   "Chapplins",       // the Chapplins customer area (directory + compliance chart)
   "CableCalc",       // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
   "WhereEveryone",   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
+  "StaffRecords",    // HR: manage staff qualifications, insurances, licences + licence checks
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly

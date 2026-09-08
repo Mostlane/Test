@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="cert-form.js?v=19"></script>
+  <script src="pump-form.js?v=2"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -114,7 +115,9 @@
       // Deep-link from the certificate tracker: ?open=<certId> opens that cert
       // straight away (issued certs included, so a filed one can be re-opened).
       const OPEN_ID = new URLSearchParams(location.search).get("open") || "";
+      const OPEN_PUMP = new URLSearchParams(location.search).get("pump") || "";
       if (OPEN_ID) { SHOW_ISSUED = true; await loadList(); openCert(OPEN_ID); }
+      else if (OPEN_PUMP) { SHOW_ISSUED = true; await loadList(); openPump(OPEN_PUMP); }
       else loadList();
     })();
 
@@ -124,22 +127,89 @@
       let certs = [];
       try { const d = await authFetch("/certs/review" + (SHOW_ISSUED ? "?all=1" : "")).then(r=>r.json()); certs = (d && d.certs) || []; }
       catch { g("wrap").innerHTML = '<p class="msg err" style="padding:20px;">Couldn\'t load the review queue.</p>'; return; }
+      // Pump maintenance records submitted by engineers sit in the SAME queue
+      // (they file to the site's Pump compliance section on finalise). Fail-soft:
+      // a pump lookup error never hides the EM/PAT certs.
+      try {
+        const pr = await authFetch("/pump/review").then(r=>r.json());
+        let pumps = (pr && pr.records) || [];
+        if (SHOW_ISSUED) { try { const pl = await authFetch("/pump/list").then(r=>r.json()); pumps = pumps.concat((pl && pl.records) || []); } catch {} }
+        pumps.forEach(p => certs.push({ kind: "pump", id: p.id, type: "pump", status: p.status, engineer: p.engineer,
+          submittedAt: p.updatedAt, updatedAt: p.updatedAt, installation: { name: p.storeName || p.store || "Pump" }, siteCode: p.siteCode || "", rows: null, pumpDate: p.date || "" }));
+        certs.sort((a, b) => String(b.submittedAt || b.updatedAt || "").localeCompare(String(a.submittedAt || a.updatedAt || "")));
+      } catch {}
       var toggle = '<div style="margin-bottom:8px"><button class="btn ghost sm" id="toggleIssued">'+(SHOW_ISSUED?"Show pending only":"Show issued certs too")+'</button></div>';
       if (!certs.length) { g("wrap").innerHTML = toggle + '<div class="card"><p class="muted">'+(SHOW_ISSUED?"No certificates found.":"Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.")+'</p></div>'; g("toggleIssued").onclick=function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); }; return; }
       let h = toggle + '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit'+(SHOW_ISSUED?", issue or re-issue.":" and issue.")+'</div>';
       certs.forEach(c => {
-        const em = c.type==="pat" ? "🔌" : "💡";
+        const em = c.kind==="pump" ? "🚰" : (c.type==="pat" ? "🔌" : "💡");
         const site = (c.installation && c.installation.name) || c.siteCode || "—";
         var badge = c.status==="final" ? '<span class="badge" style="background:#d8f0e0;color:#0e7a3b">Issued'+(c.certNumber?" "+esc(c.certNumber):"")+'</span>' : '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span>';
-        h += '<div class="item" data-id="'+esc(c.id)+'"><div class="em">'+em+'</div><div class="m">'
-          + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.type==="pat"?"PAT":"EM")+'</span></div>'
-          + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")+'</div></div>'
+        h += '<div class="item" data-id="'+esc(c.id)+'" data-kind="'+esc(c.kind||"cert")+'"><div class="em">'+em+'</div><div class="m">'
+          + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.kind==="pump"?"Pump maintenance":(c.type==="pat"?"PAT":"EM"))+'</span></div>'
+          + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.kind==="pump"?(c.pumpDate?"visit "+esc(c.pumpDate):"monthly visit"):((c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")))+'</div></div>'
           + badge+'</div>';
       });
       h += '</div>';
       g("wrap").innerHTML = h;
       g("toggleIssued").onclick = function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); };
-      [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => openCert(el.dataset.id));
+      [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => (el.dataset.kind==="pump" ? openPump(el.dataset.id) : openCert(el.dataset.id)));
+    }
+
+    // ── Pump maintenance record (engineer's per-store form) — review, finalise
+    //    (draws the branded PDF + files it to the site's Pump compliance section,
+    //    rolling the next-due date), upload a replacement, or delete. ────────────
+    async function openPump(id) {
+      let rec = null;
+      try { const d = await authFetch("/pump/one?id="+encodeURIComponent(id)).then(r=>r.json()); rec = d && d.record; } catch {}
+      if (!rec) { alert("Couldn't open that pump record."); return; }
+      const isFinal = rec.status === "final";
+      g("wrap").innerHTML =
+        '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
+        + '<div class="card"><h2 style="margin:0 0 4px;font-size:17px;color:#003468">🚰 '+esc(rec.storeName||rec.store||"Pump")+'</h2>'
+        + '<div class="muted">'+esc(rec.engineer||"")+(rec.date?" · visit "+esc(rec.date):"")+' · '+(isFinal?"Filed to compliance":(rec.status==="review"?"Submitted — awaiting your review":"Draft — still with the engineer"))+'</div></div>'
+        + '<div class="card"><div id="pumpHost"></div></div>'
+        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">'+(isFinal?"Filed pump record":"Approve this pump record")+'</h2>'
+        + '<div class="finbar">'
+        + (isFinal ? '' : '<button class="btn green" id="pumpFinBtn">🏁 Approve &amp; file to compliance</button>')
+        + '<button class="btn ghost sm" id="pumpPdfBtn">⬇ Preview PDF</button>'
+        + '<button class="btn ghost sm" id="pumpUpBtn">⬆ Upload replacement PDF</button>'
+        + '<button class="btn red sm" id="pumpDelBtn">🗑 Delete</button>'
+        + '<input type="file" id="pumpUpFile" accept="application/pdf" style="display:none">'
+        + '</div><div class="msg" id="pumpMsg"></div>'
+        + '<div class="muted" style="margin-top:8px">'+(isFinal
+            ? "Already filed under this store's Pump section on the compliance chart."
+            : "Approving draws the Mostlane PDF, files it under this store's Pump section on the compliance chart and rolls the next monthly due date.")+'</div></div>';
+      g("backList").onclick = loadList;
+      const pmsg = (t, err) => { const m = g("pumpMsg"); if (m) { m.textContent = t || ""; m.className = "msg" + (err ? " err" : ""); } };
+      if (!window.MLPump) { g("pumpHost").innerHTML = '<p class="msg err">The pump form script didn\'t load — pull down to refresh.</p>'; return; }
+      window.MLPump.mount(g("pumpHost"), { recordId: id, jobId: rec.jobId||"", store: rec.store||"", mode: isFinal ? "view" : "office", api: API, token: localStorage.getItem("mostlaneToken") });
+      g("pumpPdfBtn").onclick = () => authFetch("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()).then(b=>window.open(URL.createObjectURL(b),"_blank")).catch(()=>pmsg("Couldn't build the PDF.", true));
+      if (g("pumpFinBtn")) g("pumpFinBtn").onclick = async function(){
+        this.disabled = true; pmsg("Approving…");
+        try {
+          const d = await authFetch("/pump/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r=>r.json());
+          if (d && d.ok) {
+            pmsg(d.filedToSite ? "Approved and filed to the site's Pump compliance section ✓" : "Approved ✓ (this store isn't linked to a portal site yet, so nothing was filed to the chart)");
+            const dl = window.MLUI ? await MLUI.confirm("Download a copy of the pump record PDF?", { title:"Pump record approved ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Download the PDF?");
+            if (dl) { try { const b = await authFetch("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()); window.open(URL.createObjectURL(b),"_blank"); } catch {} }
+            loadList();
+          } else { pmsg((d && d.error) || "Approve failed", true); this.disabled = false; }
+        } catch { pmsg("Approve failed", true); this.disabled = false; }
+      };
+      g("pumpUpBtn").onclick = () => g("pumpUpFile").click();
+      g("pumpUpFile").onchange = async function(){
+        if (!this.files[0]) return; pmsg("Uploading…");
+        const fd = new FormData(); fd.append("id", id); fd.append("file", this.files[0]);
+        try { const d = await authFetch("/pump/upload", { method:"POST", body: fd }).then(r=>r.json()); if (d && d.ok) { pmsg("Replacement PDF filed ✓"); loadList(); } else pmsg((d && d.error) || "Upload failed", true); }
+        catch { pmsg("Upload failed", true); }
+      };
+      g("pumpDelBtn").onclick = async function(){
+        const ok = window.MLUI ? await MLUI.confirm("Delete this pump record permanently?", { danger:true, okLabel:"Delete" }) : confirm("Delete this pump record?");
+        if (!ok) return;
+        try { const d = await authFetch("/pump/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r=>r.json()); if (d && d.ok) loadList(); else pmsg((d && d.error) || "Delete failed", true); }
+        catch { pmsg("Delete failed", true); }
+      };
     }
 
     async function openCert(id) {
