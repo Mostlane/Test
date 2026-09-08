@@ -57,6 +57,8 @@
   table.mx td.cell{ cursor:pointer; }
   td.st-valid{ background:#e8f5ec; color:#2b7a4b; } td.st-expiring{ background:#fef7e6; color:#8a6100; }
   td.st-expired{ background:#fdecea; color:#c0392b; font-weight:600; } td.st-none{ background:#fff; color:#c7ced6; }
+  .rec-drop{ border:2px dashed var(--line); border-radius:10px; padding:14px; text-align:center; color:var(--muted); background:#fafcfe; margin-bottom:6px; }
+  .rec-drop.drag{ border-color:var(--brand); background:#eef4fb; }
 </style>
 </head>
 <body>
@@ -152,8 +154,13 @@
   <div class="sheet">
     <h2 id="recModalTitle" style="margin:.1em 0 .4em">Add record</h2>
     <div id="recFields"></div>
-    <label class="field"><span class="lbl">Attach a document (certificate / scan) — optional</span>
-      <input type="file" id="recFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx"></label>
+    <span class="lbl" style="display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:3px">Certificate / document — optional</span>
+    <div id="recDrop" class="rec-drop">
+      <div>📄 Drag a certificate here, or <button type="button" id="recPick" class="btn ghost small" style="vertical-align:middle">choose a file</button></div>
+      <div class="muted" style="font-size:12px;margin-top:4px">We’ll try to read the number, awarding body &amp; expiry for you.</div>
+      <input type="file" id="recFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" style="display:none">
+    </div>
+    <p id="recExtract" class="msg" style="min-height:0"></p>
     <p id="recDocNow" class="muted" style="font-size:13px"></p>
     <p id="recMsg" class="msg"></p>
     <div class="row" style="justify-content:flex-end;margin-top:8px">
@@ -450,6 +457,7 @@
     if(droppedFile && g("recFile")){
       try{ const dt=new DataTransfer(); dt.items.add(droppedFile); g("recFile").files=dt.files;
         g("recDocNow").innerHTML = "Attaching: <b>"+esc(droppedFile.name)+"</b>"; }catch(e){}
+      onCertFile(droppedFile);          // auto-read the dropped certificate
     }
   }
   g("mxAddCol").onclick=async ()=>{
@@ -480,6 +488,62 @@
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Training matrix</title><style>body{font:12px Arial;padding:16px}h1{font-size:16px}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;text-align:center}td:first-child,th:first-child{text-align:left}.e{background:#fdecea}.w{background:#fef7e6}.v{background:#e8f5ec}</style></head><body><h1>Training matrix — '+esc(g("mxKind").options[g("mxKind").selectedIndex].text)+'</h1><div>'+new Date().toLocaleDateString("en-GB")+'</div>'+legend+'<table><thead><tr><th>Engineer</th>'+m.competencies.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+m.rows.map(row=>'<tr><td>'+esc(row.name)+'</td>'+m.competencies.map(c=>{const cell=row.cells[c];const cl=cell?(cell.status==="expired"?"e":cell.status==="expiring"?"w":"v"):"";return '<td class="'+cl+'">'+(cell?(cell.expires?fmtDate(cell.expires):"✓"):"—")+'</td>';}).join("")+'</tr>').join("")+'</tbody></table></body></html>');
     w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
   };
+
+  // ── Certificate auto-extract (fills EMPTY fields from filename + PDF) ─────────
+  let _pdfjs=null;
+  function loadPdfJs(){
+    if(_pdfjs) return Promise.resolve(_pdfjs);
+    if(window.pdfjsLib){ window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs=window.pdfjsLib; return Promise.resolve(_pdfjs); }
+    return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; _pdfjs=window.pdfjsLib; res(_pdfjs); }catch(e){ rej(e); } };
+      s.onerror=()=>rej(new Error("pdf load")); document.head.appendChild(s); });
+  }
+  const readB64=f=>new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(String(fr.result||"").split(",")[1]||""); fr.onerror=()=>r(""); fr.readAsDataURL(f); });
+  async function pdfText(f){ try{ const lib=await loadPdfJs(); const buf=await f.arrayBuffer(); const pdf=await lib.getDocument({data:buf}).promise; let out="";
+    for(let p=1;p<=Math.min(pdf.numPages,20);p++){ const pg=await pdf.getPage(p); const c=await pg.getTextContent(); out+=c.items.map(it=>it.str).join(" ")+"\n"; } return out; }catch(e){ return ""; } }
+  // Local filename heuristic: pull a long digit-run as the cert number, and a
+  // leading label as a title guess (e.g. "CSCS 12345678 J Smith.pdf").
+  function nameHints(name){
+    const base=String(name||"").replace(/\.[a-z0-9]+$/i,"").replace(/[_]+/g," ").trim();
+    const num=((base.match(/\b(\d[\d\/-]{4,})\b/)||[])[1]||"").replace(/^[^\d]+|[^\d]+$/g,"");
+    let title=""; const m=base.match(/^([A-Za-z][A-Za-z &\/-]{2,40}?)(?=[\s-]*\d|$)/); if(m) title=m[1].trim();
+    return { number:num, title:title };
+  }
+  function setFieldIfEmpty(col, val){
+    if(!val || !String(val).trim()) return;
+    const el = col==="title" ? g("f_title") : document.querySelector('#recFields [data-col="'+(window.CSS&&CSS.escape?CSS.escape(col):col)+'"]');
+    if(el && !el.value.trim()) el.value=String(val).trim();
+  }
+  async function onCertFile(file){
+    if(!file) return;
+    const st=g("recExtract"); st.className="msg"; st.textContent="Reading the certificate…";
+    const kind=editKind||"qualification";
+    const h=nameHints(file.name);
+    let text="", pdfBase64="", imageBase64="", imageType="";
+    const nm=(file.name||"").toLowerCase();
+    const IMG={ ".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".gif":"image/gif" };
+    const imgExt=Object.keys(IMG).find(e=>nm.endsWith(e));
+    try{
+      if(nm.endsWith(".pdf")){
+        const t=await pdfText(file);
+        if(t && t.trim().length>=40) text=t; else if(file.size<8000000) pdfBase64=await readB64(file);
+      } else if(imgExt && file.size<8000000){
+        // Driving licences / photographed certs — send the image for OCR.
+        imageBase64=await readB64(file); imageType=IMG[imgExt];
+      }
+    }catch(e){}
+    try{
+      const r=await authFetch("/hr/extract-cert",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,text:text.slice(0,60000),pdfBase64,imageBase64,imageType,kind})}).then(x=>x.json());
+      const d=(r&&r.result)||{};
+      // AI result wins (it reads the filename AND the document); the local
+      // filename heuristic only fills anything the AI left blank.
+      setFieldIfEmpty("title", d.title); setFieldIfEmpty("number", d.number); setFieldIfEmpty("issuer", d.issuer);
+      setFieldIfEmpty("issued", d.issued); setFieldIfEmpty("expires", d.expires);
+      setFieldIfEmpty("title", h.title); setFieldIfEmpty("number", h.number);
+      const got=[d.title&&"title",d.number&&"number",d.issuer&&"awarding body",d.expires&&"expiry"].filter(Boolean);
+      st.className="msg ok"; st.textContent = got.length ? ("✓ Read "+got.join(", ")+" — check & adjust.") : (h.number||h.title ? "✓ Read from the file name — check & adjust." : "Add the details below.");
+    }catch(e){ setFieldIfEmpty("title", h.title); setFieldIfEmpty("number", h.number); st.className="msg"; st.textContent = (h.number||h.title) ? "✓ Read from the file name — check & adjust." : ""; }
+  }
 
   // ── Add / edit modal ───────────────────────────────────────────────────────
   function openRec(kind, rec){
@@ -514,6 +578,7 @@
     }
     g("f_notes").value = d.notes||"";
     g("recFile").value="";
+    if(g("recExtract")){ g("recExtract").textContent=""; g("recExtract").className="msg"; }
     g("recDocNow").innerHTML = (rec&&rec.docName) ? `Current: ${esc(rec.docName)} — uploading a new file replaces it. <a href="#" id="rmDoc">Remove</a>` : "";
     if(g("rmDoc")) g("rmDoc").onclick=(e)=>{ e.preventDefault(); g("recDocNow").dataset.remove="1"; g("recDocNow").innerHTML="Document will be removed on save."; };
     g("recDocNow").dataset.remove="";
@@ -524,6 +589,17 @@
     g("recCancel").onclick=()=>g("recModal").classList.remove("show");
     g("recModal").onclick=e=>{ if(e.target===g("recModal")) g("recModal").classList.remove("show"); };
     g("recSave").onclick=saveRec;
+    // File picker + drag-drop into the record modal, with auto-extract.
+    if(g("recPick")) g("recPick").onclick=()=>g("recFile").click();
+    if(g("recFile")) g("recFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(f){ g("recDocNow").innerHTML="Attaching: <b>"+esc(f.name)+"</b>"; g("recDocNow").dataset.remove=""; onCertFile(f); } };
+    const drop=g("recDrop");
+    if(drop){
+      ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.add("drag"); }));
+      ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{ e.preventDefault(); drop.classList.remove("drag"); }));
+      drop.addEventListener("drop",e=>{ const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(!f) return;
+        try{ const dt=new DataTransfer(); dt.items.add(f); g("recFile").files=dt.files; }catch(_){}
+        g("recDocNow").innerHTML="Attaching: <b>"+esc(f.name)+"</b>"; g("recDocNow").dataset.remove=""; onCertFile(f); });
+    }
   }
   async function saveRec(){
     const k=kindDef(editKind);

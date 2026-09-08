@@ -1181,6 +1181,15 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     /hr/matrix/column** (app_config `staff:matrixcols:<tid>` = {kind:[names]}), so a
     column can exist before anyone holds it; GET /hr/matrix merges managed columns
     with the distinct record titles. (+/delete column endpoints admin-gated.)
+  - **Certificate auto-extract (Sep 2026):** the add/edit record modal is a
+    **drop zone**; on attaching a file the client extracts details and pre-fills
+    EMPTY fields (title / cert number / awarding body / issued / expiry). **POST
+    /hr/extract-cert** (Claude, fail-soft — no key ⇒ `{}`) reads the **filename +
+    PDF text** (PDF.js in-browser; scanned PDFs sent as a base64 `document`
+    block) **AND photographed certs / driving-licence IMAGES** (jpg/png/webp/gif
+    sent as a base64 `image` block for OCR). AI result wins; a local filename
+    heuristic (`nameHints`) fills anything the AI leaves blank. Same flow whether
+    the file is dropped on a matrix cell, dropped in the modal, or picked.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
