@@ -1194,7 +1194,10 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     **4a→issued, 4b→expires, 4c/DVLA→issuer, 5→number**; if 4b can't be read the
     client defaults **expires = issued + 10 years** (the UK photocard rule for
     under-70s, flagged "please confirm"), and typing the issue date on a licence
-    record auto-fills the same +10y expiry when blank.
+    record auto-fills the same +10y expiry when blank. **iPhone HEIC/HEIF photos
+    are converted to JPEG in the browser** (lazy-loaded heic2any from jsdelivr)
+    before OCR + upload, so a photographed licence reads AND stores viewable;
+    fails soft to the original file if the converter can't load.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
