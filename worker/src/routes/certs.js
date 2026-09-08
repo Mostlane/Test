@@ -31,6 +31,8 @@ import { createOrUpdateJobFromPayload, listJobs } from "./sla.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
+import { decodePngToRgb } from "../lib/pngdecode.js";
+import { shrinkRgb, deflate } from "./pump.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 
 const TYPES = ["em", "pat"];
@@ -1663,6 +1665,32 @@ export async function handle(request, env, ctx, url, sess) {
       const { results } = await env.DB.prepare(`SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY fitting_no, id`).bind(tid, ...chunk).all().catch(() => ({ results: [] }));
       for (const r of (results || [])) (out[r.cert_id] = out[r.cert_id] || []).push(r);
     }
+    // Rows logged before the fitting number / photos were captured (pre-Sep-2026
+    // certs) show "Fitting ?" — re-derive them from the certificate itself. Row
+    // ids are "<certId>:<i>" where i indexes the cert's failed rows in order.
+    for (const certId of Object.keys(out)) {
+      const rows = out[certId];
+      if (!rows.some(r => r.fitting_no == null || !r.photos || r.photos === "[]")) continue;
+      try {
+        const cert = await loadCert(certId); if (!cert) continue;
+        const rec = shapeRow(cert);
+        const fails = (Array.isArray(rec.rows) ? rec.rows : []).map((r, i) => ({ r, i })).filter(x => isRealRemedial(x.r.remedial));
+        const ups = [];
+        for (const row of rows) {
+          const idx = Number(String(row.id).split(":").pop());
+          const f = fails[idx]; if (!f) continue;
+          const no = f.r.no != null && f.r.no !== "" ? (Number(f.r.no) || (f.i + 1)) : (f.i + 1);
+          const keys = Array.isArray(f.r.remedial && f.r.remedial.photos) ? f.r.remedial.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [];
+          const needNo = row.fitting_no == null, needPh = (!row.photos || row.photos === "[]") && keys.length;
+          if (!needNo && !needPh) continue;
+          if (needNo) row.fitting_no = no;
+          if (needPh) row.photos = JSON.stringify(keys);
+          ups.push(env.DB.prepare("UPDATE em_remedials SET fitting_no=?, photos=? WHERE tenant_id=? AND id=?").bind(row.fitting_no, row.photos || "[]", tid, row.id));
+        }
+        if (ups.length) await env.DB.batch(ups);
+        rows.sort((a, b) => (a.fitting_no ?? 1e9) - (b.fitting_no ?? 1e9) || String(a.id).localeCompare(String(b.id)));
+      } catch {}
+    }
     return out;
   };
 
@@ -1913,10 +1941,29 @@ export async function handle(request, env, ctx, url, sess) {
     let certId = "", code = "", postBody = {};
     if (method === "POST") { postBody = await request.json().catch(() => ({})); certId = String(postBody.certId || "").trim(); code = String(postBody.code || "").trim(); }
     else { certId = String(q.get("certId") || "").trim(); code = String(q.get("code") || "").trim(); }
+    // Each photo on file becomes {jpeg} / {rgb,w,h} (embeddable) or {why} (a
+    // reason the PDF prints) — a photo the engineer took must never just vanish.
     const loadImgs = async (keys) => {
       const imgs = [];
-      for (const k of (keys || []).slice(0, 4)) { const key = (k && k.key) || (typeof k === "string" ? k : ""); if (!key) continue;
-        try { const o = env.JOB_FILES && await env.JOB_FILES.get(key); if (o) imgs.push(new Uint8Array(await o.arrayBuffer())); } catch {} }
+      for (const k of (keys || []).slice(0, 4)) {
+        const key = (k && k.key) || (typeof k === "string" ? k : ""); if (!key) continue;
+        try {
+          const o = env.JOB_FILES && await env.JOB_FILES.get(key);
+          if (!o) { imgs.push({ why: "photo file missing from storage" }); continue; }
+          const b = new Uint8Array(await o.arrayBuffer());
+          if (b.length > 2 && b[0] === 0xFF && b[1] === 0xD8) { imgs.push({ jpeg: b }); continue; }
+          if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50) {
+            const d = await decodePngToRgb(b, { maxPixels: 60e6, maxEdge: 900 });
+            if (!d) { imgs.push({ why: "PNG couldn't be decoded" }); continue; }
+            const s = shrinkRgb(d.rgb, d.width, d.height, 900);
+            const z = await deflate(s.rgb);
+            imgs.push(z ? { rgb: z, w: s.w, h: s.h, deflated: true } : { rgb: s.rgb, w: s.w, h: s.h });
+            continue;
+          }
+          const ct = (o.httpMetadata && o.httpMetadata.contentType) || "";
+          imgs.push({ why: /heic|heif/i.test(ct) ? "HEIC photo — not embeddable" : "unsupported image format" + (ct ? " (" + ct + ")" : "") });
+        } catch (e) { imgs.push({ why: "photo couldn't be read" }); }
+      }
       return imgs;
     };
     const items = []; let siteName = "", certNumber = "";

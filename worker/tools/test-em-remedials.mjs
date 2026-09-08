@@ -11,7 +11,11 @@ const CERT = { id:"C1", tenant_id:"1", type:"em", status:"final", job_id:"J1", s
   ] }) };
 function makeEnv(scenario) {
   const calls = [], writes = [];
-  let rems = scenario === "allonsite"
+  let rems = scenario === "legacy"
+    ? [{ id:"C1:0", cert_id:"C1", tenant_id:"1", kind:"light", status:"pending", replaced_on_site:0, fitting_no:null, light_ref:"Stock room", site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:"[]", charge:50 },
+       { id:"C1:1", cert_id:"C1", tenant_id:"1", kind:"battery", status:"pending", replaced_on_site:0, fitting_no:null, light_ref:"Back corridor", battery_spec:"4.8V 4Ah NiCd", battery_qty:2, site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:"[]", charge:50 },
+       { id:"C1:2", cert_id:"C1", tenant_id:"1", kind:"light", status:"done", replaced_on_site:1, fitting_no:null, light_ref:"Office", site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:"[]", charge:50 }]
+    : scenario === "allonsite"
     ? [{ id:"C1:0", cert_id:"C1", tenant_id:"1", kind:"light", status:"done", replaced_on_site:1, fitting_no:14, light_ref:"Office", site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:"[]", charge:50 }]
     : [{ id:"C1:0", cert_id:"C1", tenant_id:"1", kind:"light", status:"pending", replaced_on_site:0, fitting_no:3, light_ref:"Stock room", light_spec:"3W LED bulkhead", site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:'["certremedial/1/C1/a.jpg"]', charge:50 },
        { id:"C1:1", cert_id:"C1", tenant_id:"1", kind:"battery", status:"pending", replaced_on_site:0, fitting_no:11, light_ref:"Back corridor", battery_spec:"4.8V 4Ah NiCd", battery_qty:2, site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:'["certremedial/1/C1/b.jpg"]', charge:50 },
@@ -81,4 +85,14 @@ let fail = 0; const ok = (name, cond, extra="") => { console.log((cond?"PASS":"F
   ok("re-issued rows flipped to Pass with (Replaced) and same number", rows && rows.filter(r => /\(Replaced\)/.test(r.comments||"")).length===3 && rows.every(r => !r.remedial) && re.cert_number==="0622-26");
   ok("filed to compliance (R2 put + compliance_files insert)", E.writes.some(w => /INSERT INTO compliance_files|compliance_files/i.test(w.sql)) && Object.keys(E.env.JOB_FILES.store).some(k => /^compliance\//.test(k)), Object.keys(E.env.JOB_FILES.store).filter(k=>/^compliance/.test(k)).join(","));
 }
+
+{ // Rows logged before fitting_no/photos were captured (pre-Sep-2026 certs) heal from the cert.
+  const E = makeEnv("legacy");
+  const bd = await call(E.env, "GET", "/certs/remedials/board");
+  const c = bd.body && bd.body.cases && bd.body.cases[0];
+  ok("legacy rows: fitting numbers re-derived from the cert", c && c.items.map(i=>i.no).join(",")==="3,11,14", c && c.items.map(i=>i.no).join(","));
+  const up = E.writes.filter(w => /UPDATE em_remedials SET fitting_no=\?, photos=\?/.test(w.sql));
+  ok("legacy rows: healed values persisted (3 updates, photos filled)", up.length===3 && up.every(w => w.binds[0]!=null) && JSON.parse(up[0].binds[1]).length>=1, String(up.length));
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");

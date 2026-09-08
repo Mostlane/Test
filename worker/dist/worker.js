@@ -9440,17 +9440,34 @@ function header(doc, meta) {
   doc.line(M4, y, W3 - M4, y, { stroke: HAIR2, lw: 0.8 });
   return y + 16;
 }
-function itemBlock(doc, it, idx, y) {
-  const photos = (it.photos || []).map((b) => {
-    try {
-      return { b, g: jpegInfo(b) };
-    } catch {
-      return null;
+function prepPhotos(list) {
+  const draw = [], skipped = [];
+  for (const p of list || []) {
+    if (!p) continue;
+    if (p.why) {
+      skipped.push(p.why);
+      continue;
     }
-  }).filter(Boolean);
+    if (p.rgb && p.w && p.h) {
+      draw.push({ rgb: p, w: p.w, h: p.h });
+      continue;
+    }
+    const b = p.jpeg || p;
+    try {
+      const g = jpegInfo(b);
+      draw.push({ b, w: g.w, h: g.h });
+    } catch {
+      skipped.push("photo isn't a readable JPEG/PNG");
+    }
+  }
+  return { draw, skipped };
+}
+function itemBlock(doc, it, idx, y) {
+  const { draw: photos, skipped } = prepPhotos(it.photos);
   const photoH = photos.length ? 96 : 0;
   const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M4 * 2 - 24, 2) : [];
-  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + 14;
+  const skipLine = skipped.length ? skipped.length + " photo" + (skipped.length > 1 ? "s" : "") + " on file not embedded: " + skipped.join("; ") : "";
+  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + (skipLine ? 11 : 0) + 14;
   if (y + blockH > H2 - M4) {
     doc.newPage(W3, H2);
     y = M4 + 6;
@@ -9473,14 +9490,19 @@ function itemBlock(doc, it, idx, y) {
     ty += 4;
     let cx = px;
     for (const p of photos) {
-      const w = Math.min(150, photoH * (p.g.w / p.g.h));
+      const w = Math.min(150, photoH * (p.w / p.h));
       if (cx + w > W3 - M4 - 8) break;
       try {
-        doc.image(p.b, cx, ty, w, photoH);
+        if (p.rgb) doc.imageRGB(p.rgb.rgb, p.rgb.w, p.rgb.h, cx, ty, w, photoH, { deflated: !!p.rgb.deflated });
+        else doc.image(p.b, cx, ty, w, photoH);
       } catch {
       }
       cx += w + 8;
     }
+    ty += photoH + 8;
+  }
+  if (skipLine) {
+    doc.text(px, ty, fit2(skipLine, 8, W3 - M4 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
   }
   return y + blockH + 12;
 }
@@ -9509,10 +9531,981 @@ var init_batterypdf = __esm({
   }
 });
 
+// src/lib/pumppdf.js
+function fit3(str, size, maxW) {
+  str = S3(str);
+  if (textWidth(str, size) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
+  return s + "...";
+}
+function wrap4(str, size, maxW, maxLines) {
+  const words = S3(str).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) <= maxW) {
+      cur = t;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = w;
+    if (maxLines && lines.length >= maxLines) break;
+  }
+  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+function instrLines(str, size, maxW) {
+  const out = [];
+  String(str || "").split(/\r?\n/).forEach((raw) => {
+    const t = raw.trim();
+    if (!t) {
+      out.push("");
+      return;
+    }
+    wrap4(t, size, maxW).forEach((l) => out.push(l));
+  });
+  return out;
+}
+function tracked2(doc, x, y, str, { size = 6.5, color = MUTE3, track = 1.2, alignRight = false, bold = true } = {}) {
+  const chars = [...S3(str).toUpperCase()];
+  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
+  let cx = alignRight ? x - total : x;
+  for (const c of chars) {
+    doc.text(cx, y, c, { size, bold, color });
+    cx += textWidth(c, size) + track;
+  }
+  return total;
+}
+function dot2(doc, cx, cy, r, color, hollow) {
+  if (hollow) {
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+    doc.roundRect(cx - r - 0.6, cy - r - 0.6, r * 2 + 1.2, r * 2 + 1.2, r + 0.6, { fill: BORDER2 });
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+  } else doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
+}
+function pill2(doc, x, yTop, label2, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
+  const w = textWidth(S3(label2), size) + padX * 2;
+  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
+  doc.text(x + padX, yTop + h - 4, S3(label2), { size, bold: true, color: textColor });
+  return w;
+}
+function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
+  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
+  doc.roundRect(x, y, w, h, r, { fill: fill2 });
+}
+function pageBg2(doc) {
+  doc.rect(0, 0, W4, H3, { fill: BG2 });
+}
+function imgSize(img) {
+  if (!img) return null;
+  if (img.jpeg) {
+    try {
+      const g = jpegInfo(img.jpeg);
+      return { w: g.w || 1, h: g.h || 1 };
+    } catch {
+      return null;
+    }
+  }
+  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
+  return null;
+}
+function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
+  const sz = imgSize(img);
+  if (!sz) return null;
+  const s = Math.min(maxW / sz.w, maxH / sz.h);
+  const w = sz.w * s, h = sz.h * s;
+  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
+  try {
+    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
+    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
+  } catch {
+    return null;
+  }
+  return { w, h, x: dx, y: dy };
+}
+function ansOf(a) {
+  const s = String(a || "").toLowerCase();
+  if (/^y/.test(s)) return "yes";
+  if (/^n\/?a/.test(s) || s === "na") return "na";
+  if (/^n/.test(s)) return "no";
+  return "";
+}
+function statusOf2(rec) {
+  const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
+  const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
+  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
+  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
+}
+function header2(doc, rec, meta, slim) {
+  const y = 30, h = slim ? 40 : HEADER_H2;
+  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY3);
+  if (meta.logo) {
+    try {
+      const g = jpegInfo(meta.logo);
+      const hh = slim ? 18 : 24;
+      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
+    } catch {
+    }
+  }
+  if (slim) {
+    tracked2(doc, W4 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
+    doc.text(W4 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+    return y + h;
+  }
+  const st = statusOf2(rec);
+  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
+  tracked2(doc, W4 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
+  doc.text(W4 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  if (rec.date) doc.text(W4 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W4 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  return y + h;
+}
+function footer2(doc, pageNo, pageCount) {
+  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
+  doc.text(W4 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
+}
+function instrH(rec) {
+  return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
+}
+function safetyH(rec) {
+  return CARD_PAD2 + 14 + (rec.safety || []).length * 16 + 4;
+}
+function detailsH2(rec) {
+  if (!String(rec.detailsNo || "").trim()) return 0;
+  return CARD_PAD2 + 14 + wrap4(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).length * 11 + 4;
+}
+function instrCard(doc, y, rec) {
+  const h = instrH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
+    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
+    yy2 += 11;
+  });
+  return h;
+}
+function safetyCard(doc, y, rec) {
+  const h = safetyH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  (rec.safety || []).forEach((s) => {
+    const ok = ansOf(s.answer) === "yes";
+    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
+    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
+    pill2(doc, W4 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
+    yy2 += 16;
+  });
+  return h;
+}
+function checksCard(doc, rows, startIndex, y, count) {
+  const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
+  if (count != null) doc.text(W4 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
+  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
+  const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
+  const headY = y + 26 + THEAD_H2 - 8;
+  tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
+  ["Yes", "No", "N/A"].forEach((lab, k) => {
+    const cx = [cYes, cNo, cNa][k];
+    const lw = textWidth(lab, 6);
+    doc.text(cx - lw / 2, headY, lab, { size: 6, color: MUTE3 });
+  });
+  let ry = y + 26 + THEAD_H2;
+  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
+  rows.forEach((r, i) => {
+    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
+    const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
+    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
+    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
+    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
+    dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
+    ry += ROW_H2;
+  });
+  return h;
+}
+function detailsCard2(doc, y, rec) {
+  const h = detailsH2(rec);
+  if (!h) return 0;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  wrap4(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
+    yy2 += 11;
+  });
+  return h;
+}
+function mediaLine(rec, meta) {
+  const media = Array.isArray(rec.media) ? rec.media : [];
+  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
+  const embedded = (meta.photos || []).length;
+  const bits = [];
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
+  return bits.length ? bits.join(" \xB7 ") : "";
+}
+function photoPages(meta) {
+  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
+}
+function photoPage(doc, rec, meta, pageIdx) {
+  const photos = meta.photos || [];
+  const start = pageIdx * PHOTOS_PER_PAGE;
+  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
+  const top = 30 + 40 + GAP2;
+  const gap = 12;
+  const cw = (CW2 - gap) / 2, ch = 292;
+  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
+  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
+  slice.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
+    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
+    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
+    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
+    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
+  });
+  const last = pageIdx === photoPages(meta) - 1;
+  if (last) {
+    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
+    let yy2 = top + 30 + 2 * (ch + 10) + 6;
+    extras.slice(0, 6).forEach((t) => {
+      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
+      yy2 += 11;
+    });
+  }
+}
+function signatureCard2(doc, y, rec, meta) {
+  const declLines = wrap4(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
+  const media = mediaLine(rec, meta);
+  const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  declLines.forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
+    yy2 += 11;
+  });
+  if (media) {
+    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
+    yy2 += 14;
+  }
+  const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
+  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
+  const bw = 200, y2 = y + h - 54;
+  const blocks = [
+    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
+    { x: W4 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
+  ];
+  blocks.forEach((b) => {
+    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
+    doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
+    doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
+    tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
+  });
+  return h;
+}
+function buildPumpPdf(record, meta = {}) {
+  const rec = record || {};
+  rec.checks = Array.isArray(rec.checks) ? rec.checks : [];
+  const introBottom = 30 + HEADER_H2 + GAP2 + instrH(rec) + GAP2 + safetyH(rec) + GAP2;
+  const bottomLimit = H3 - 40;
+  const cap2 = (top) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H2 + 12)) / ROW_H2));
+  const slimTop = 30 + 40 + GAP2;
+  const page1Cap = cap2(introBottom), laterCap = cap2(slimTop);
+  const pages = [];
+  pages.push({ start: 0, rows: rec.checks.slice(0, page1Cap), intro: true, top: introBottom });
+  let i = page1Cap;
+  while (i < rec.checks.length) {
+    pages.push({ start: i, rows: rec.checks.slice(i, i + laterCap), intro: false, top: slimTop });
+    i += laterCap;
+  }
+  if (!pages.length) pages.push({ start: 0, rows: [], intro: true, top: introBottom });
+  const last = pages[pages.length - 1];
+  const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
+  const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
+  const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
+  const nPhotoPages = photoPages(meta);
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
+  const doc = new PdfDoc(W4, H3);
+  pages.forEach((pg, idx) => {
+    if (idx > 0) doc.newPage(W4, H3);
+    pageBg2(doc);
+    if (pg.intro) {
+      header2(doc, rec, meta, false);
+      let yy2 = 30 + HEADER_H2 + GAP2;
+      yy2 += instrCard(doc, yy2, rec) + GAP2;
+      yy2 += safetyCard(doc, yy2, rec) + GAP2;
+      checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
+    } else {
+      header2(doc, rec, meta, true);
+      checksCard(doc, pg.rows, pg.start, pg.top, null);
+    }
+    footer2(doc, idx + 1, totalPages);
+  });
+  let ty;
+  if (trailOwnPage) {
+    doc.newPage(W4, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, totalPages, totalPages);
+    ty = slimTop;
+  } else ty = lastBottom + GAP2;
+  const dh = detailsCard2(doc, ty, rec);
+  if (dh) ty += dh + GAP2;
+  signatureCard2(doc, ty, rec, meta);
+  const before = pages.length + (trailOwnPage ? 1 : 0);
+  for (let p = 0; p < nPhotoPages; p++) {
+    doc.newPage(W4, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, before + p + 1, totalPages);
+    photoPage(doc, rec, meta, p);
+  }
+  return doc.bytes();
+}
+var W4, H3, M5, CW2, NAVY3, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA2, ACCENT2, GREEN2, RED2, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
+var init_pumppdf = __esm({
+  "src/lib/pumppdf.js"() {
+    init_pdf();
+    W4 = 595;
+    H3 = 842;
+    M5 = 40;
+    CW2 = W4 - M5 * 2;
+    NAVY3 = [0, 0.204, 0.408];
+    INK4 = [0.1, 0.13, 0.18];
+    MUTE3 = [0.46, 0.51, 0.58];
+    FAINT2 = [0.62, 0.66, 0.72];
+    BG2 = [0.953, 0.965, 0.977];
+    CARD3 = [1, 1, 1];
+    BORDER2 = [0.886, 0.906, 0.933];
+    HAIR3 = [0.92, 0.935, 0.955];
+    ZEBRA2 = [0.972, 0.98, 0.99];
+    ACCENT2 = [0.04, 0.42, 0.52];
+    GREEN2 = [0.09, 0.63, 0.29];
+    RED2 = [0.83, 0.16, 0.16];
+    GREY4 = [0.6, 0.64, 0.7];
+    HEADSUB2 = [0.78, 0.85, 0.93];
+    S3 = (v) => toWinAnsi(String(v == null ? "" : v));
+    ROW_H2 = 19;
+    THEAD_H2 = 22;
+    CARD_PAD2 = 14;
+    GAP2 = 14;
+    HEADER_H2 = 84;
+    PHOTOS_PER_PAGE = 4;
+  }
+});
+
+// src/routes/pump.js
+async function ensureTables2(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
+    tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
+    status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
+    created_at TEXT, updated_at TEXT, r2_final_key TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+}
+async function getConfig(env, tid) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
+  if (row && row.value) {
+    try {
+      const c = JSON.parse(row.value);
+      if (c && Array.isArray(c.stores)) return c;
+    } catch {
+    }
+  }
+  await saveConfig(env, tid, DEFAULT_CONFIG);
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+async function saveConfig(env, tid, c) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
+}
+async function getJob(env, tid, id) {
+  try {
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+function storeById(cfg, id) {
+  return (cfg.stores || []).find((s) => s.id === id) || null;
+}
+function dataUrlToBytes(u) {
+  const s = String(u || "");
+  const i = s.indexOf(",");
+  if (!/^data:image\//i.test(s) || i < 0) return null;
+  try {
+    const bin = atob(s.slice(i + 1));
+    const out = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+    return out;
+  } catch {
+    return null;
+  }
+}
+async function sigImage(dataUrl) {
+  const b = dataUrlToBytes(dataUrl);
+  if (!b) return null;
+  if (isJpeg(b)) return { jpeg: b };
+  if (isPng(b)) {
+    const d = await decodePngToRgb(b, { signature: true });
+    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
+  }
+  return null;
+}
+function shrinkRgb(rgb, w, h, maxEdge) {
+  const s = Math.max(w, h) / maxEdge;
+  if (s <= 1) return { rgb, w, h };
+  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
+  const out = new Uint8Array(nw * nh * 3);
+  for (let y = 0; y < nh; y++) {
+    const sy = Math.min(h - 1, Math.floor(y * s));
+    for (let x = 0; x < nw; x++) {
+      const sx = Math.min(w - 1, Math.floor(x * s));
+      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
+      out[di] = rgb[si];
+      out[di + 1] = rgb[si + 1];
+      out[di + 2] = rgb[si + 2];
+    }
+  }
+  return { rgb: out, w: nw, h: nh };
+}
+async function deflate(bytes) {
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter();
+    w.write(bytes);
+    w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+async function photoImage(env, m) {
+  try {
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
+    if (!o) return { why: "file missing" };
+    const b = new Uint8Array(await o.arrayBuffer());
+    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
+    if (isPng(b)) {
+      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
+      if (!d) return { why: "PNG couldn't be decoded" };
+      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
+      const z = await deflate(s.rgb);
+      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
+    }
+    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
+  } catch (e) {
+    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
+  }
+}
+async function pdfMeta(env, d) {
+  const media = Array.isArray(d.media) ? d.media : [];
+  const photos = [], skipped = [], videos = [];
+  for (const m of media) {
+    if (!m || !m.key) continue;
+    if (m.kind === "video") {
+      videos.push(m.name || "video");
+      continue;
+    }
+    if (photos.length >= MAX_PDF_PHOTOS) {
+      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
+      continue;
+    }
+    const r = await photoImage(env, m);
+    if (r.img) photos.push(r.img);
+    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
+  }
+  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
+}
+async function buildPdfFor(env, rec) {
+  const d = shapeRow(rec);
+  return buildPumpPdf(d, await pdfMeta(env, d));
+}
+function shapeRow(r) {
+  let d = {};
+  try {
+    d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d };
+}
+function seedRecord(cfg, store, job) {
+  return {
+    store: store.id,
+    storeName: store.name,
+    siteCode: store.siteCode || "",
+    instructions: store.instructions || "",
+    declaration: cfg.declaration || "",
+    safety: (cfg.safety || []).map((s) => ({ id: s.id, label: s.label, answer: "" })),
+    checks: (store.checks || []).map((c) => ({ label: c, answer: "" })),
+    detailsNo: "",
+    declarationAgreed: "",
+    date: "",
+    engineerName: "",
+    dmName: "",
+    engSig: "",
+    dmSig: "",
+    media: []
+  };
+}
+async function maybeCompletePumpJob(env, tid, rec) {
+  try {
+    if (!rec || !rec.job_id) return false;
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, rec.job_id).first();
+    if (!row) return false;
+    let job;
+    try {
+      job = JSON.parse(row.data);
+    } catch {
+      return false;
+    }
+    if (!job.pumpMaintenance) return false;
+    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
+    if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    job.status = "Complete";
+    job.updatedAt = now;
+    job.closedAt = job.closedAt || now;
+    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
+    if (engs.length) {
+      job.engStatus = job.engStatus || {};
+      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "pump" };
+    }
+    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function resignMedia(env, origin, rec) {
+  if (!rec || !Array.isArray(rec.media)) return rec;
+  for (const m of rec.media) {
+    if (m && m.key) {
+      try {
+        m.url = await signedFileUrl(env, origin, "/pump/media", m.key);
+      } catch {
+      }
+    }
+  }
+  return rec;
+}
+async function handle9(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  if (method === "GET" && url.pathname === "/pump/media") {
+    const key = url.searchParams.get("key") || "";
+    if (!key.startsWith("pump/")) return new Response("Bad key", { status: 400 });
+    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
+    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream", "Cache-Control": "public, max-age=86400" } });
+  }
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  await ensureTables2(env);
+  const perms = await permissionsFor(env, tid, me);
+  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
+  const canWrite = async (rec) => {
+    if (isOffice) return true;
+    if (!rec) return true;
+    if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
+    try {
+      const job = rec.job_id ? await getJob(env, tid, String(rec.job_id)) : null;
+      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
+      return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
+    } catch {
+      return false;
+    }
+  };
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      if (!isOffice) return error("Office access required", 403, env, request);
+      const b = await request.json().catch(() => ({}));
+      const cur = await getConfig(env, tid);
+      const next = { ...cur };
+      if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
+      if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
+      if (Array.isArray(b.safety)) next.safety = b.safety.map((s, i) => ({ id: String(s.id || "s" + i), label: String(s.label || "").slice(0, 300) })).filter((s) => s.label);
+      if (Array.isArray(b.stores)) next.stores = b.stores.map((s) => ({
+        id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
+        name: String(s.name || "").slice(0, 120),
+        siteCode: String(s.siteCode || "").slice(0, 20),
+        client: String(s.client || "").slice(0, 40),
+        address: String(s.address || "").slice(0, 300),
+        postcode: String(s.postcode || "").slice(0, 20),
+        instructions: String(s.instructions || "").slice(0, 4e3),
+        checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
+      })).filter((s) => s.name);
+      await saveConfig(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  if (sub === "/stores" && method === "GET") {
+    const cfg = await getConfig(env, tid);
+    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
+  }
+  if (sub === "/for-job" && method === "GET") {
+    const jobId = q.get("jobId") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const cfg = await getConfig(env, tid);
+    const job = await getJob(env, tid, jobId);
+    let storeId = q.get("store") || job && job.pumpStore || "";
+    const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
+    if (existing) {
+      const rec = shapeRow(existing);
+      await resignMedia(env, url.origin, rec);
+      const store2 = storeById(cfg, rec.store) || null;
+      return json({ ok: true, record: rec, store: store2, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+    }
+    const store = storeById(cfg, storeId) || (cfg.stores || [])[0];
+    if (!store) return error("No pump stores configured", 400, env, request);
+    const seeded = seedRecord(cfg, store, job);
+    seeded.date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    if (job) seeded.engineerName = "";
+    return json({ ok: true, record: { id: null, jobId, status: "draft", ...seeded }, store, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+  }
+  if (sub === "/save" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "");
+    let rec = null, id = b.id ? String(b.id) : "";
+    if (id) rec = await loadRec(id);
+    if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cfg = await getConfig(env, tid);
+    const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
+    const sanSig = (v) => {
+      const s = String(v || "");
+      return /^data:image\//.test(s) && s.length <= 4e5 ? s : rec ? void 0 : "";
+    };
+    const data = {
+      storeName: store ? store.name : b.storeName || "",
+      instructions: store ? store.instructions : b.instructions || "",
+      declaration: cfg.declaration || "",
+      safety: Array.isArray(b.safety) ? b.safety.map((s) => ({ id: String(s.id || ""), label: String(s.label || ""), answer: String(s.answer || "") })) : [],
+      checks: Array.isArray(b.checks) ? b.checks.map((c) => ({ label: String(c.label || ""), answer: String(c.answer || "") })) : [],
+      detailsNo: String(b.detailsNo || "").slice(0, 4e3),
+      declarationAgreed: b.declarationAgreed === true || String(b.declarationAgreed || "").toLowerCase().startsWith("y") ? "yes" : "",
+      date: String(b.date || "").slice(0, 20),
+      engineerName: String(b.engineerName || "").slice(0, 120),
+      dmName: String(b.dmName || "").slice(0, 120),
+      media: rec ? shapeRow(rec).media || [] : []
+    };
+    const es = sanSig(b.engSig);
+    if (es !== void 0) data.engSig = es;
+    else if (rec) data.engSig = shapeRow(rec).engSig || "";
+    const ds = sanSig(b.dmSig);
+    if (ds !== void 0) data.dmSig = ds;
+    else if (rec) data.dmSig = shapeRow(rec).dmSig || "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (!id) {
+      id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    }
+    const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
+    const storeId = store ? store.id : rec ? rec.store : "";
+    if (rec) {
+      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
+    }
+    const saved = await loadRec(id);
+    const out = shapeRow(saved);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/media" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const id = String(form.get("id") || "");
+    const kind = String(form.get("kind") || "photo") === "video" ? "video" : "photo";
+    const file = form.get("file");
+    if (!id || !file || typeof file.arrayBuffer !== "function") return error("id + file required", 400, env, request);
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (rec.status === "final") return error("Record finalised", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cap2 = kind === "video" ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length > cap2) return error(kind === "video" ? "Video too large (max 95 MB \u2014 keep the clip short)" : "Photo too large (max 12 MB)", 413, env, request);
+    const ext = (String(file.name || "").match(/\.([a-z0-9]{2,5})$/i) || [, kind === "video" ? "mp4" : "jpg"])[1].toLowerCase();
+    const key = `pump/${tid}/${id}/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg") } });
+    const d = shapeRow(rec);
+    const media = Array.isArray(d.media) ? d.media : [];
+    media.push({ key, kind, name: String(file.name || kind + "." + ext).slice(0, 160) });
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const urlOut = await signedFileUrl(env, url.origin, "/pump/media", key);
+    return json({ ok: true, key, kind, name: media[media.length - 1].name, url: urlOut }, {}, env, request);
+  }
+  if (sub === "/media-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""), key = String(b.key || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    if (key.startsWith("pump/") && env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.delete(key);
+      } catch {
+      }
+    }
+    const d = shapeRow(rec);
+    const media = (Array.isArray(d.media) ? d.media : []).filter((m) => m.key !== key);
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/submit" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const fresh = await loadRec(id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: "\u{1F6B0} Pump maintenance submitted",
+      body: `${shapeRow(rec).storeName || "A store"} \u2014 ready for office review`,
+      url: "/cert-review.html?pump=" + encodeURIComponent(id),
+      tag: "pump-review"
+    }, me).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
+  }
+  if (sub === "/one" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const out = shapeRow(rec);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/review" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status IN ('draft','review') ORDER BY updated_at DESC LIMIT 200").bind(tid).all();
+    return json({ ok: true, records: (results || []).map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/list" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const store = q.get("store") || "";
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status='final' AND (?='' OR store=?) ORDER BY updated_at DESC LIMIT 200").bind(tid, store, store).all();
+    return json({ ok: true, records: (results || []).map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/pdf" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const d = shapeRow(rec);
+    const bytes = await buildPdfFor(env, rec);
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
+  }
+  if (sub === "/finalise" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const d = shapeRow(rec);
+    const bytes = await buildPdfFor(env, rec);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    if (env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+      } catch {
+      }
+    }
+    let filedToSite = false;
+    const code = rec.site_code || d.siteCode || "";
+    if (code) {
+      try {
+        await fileCertificatePdf(env, tid, {
+          scheme: "coop",
+          code,
+          type: "pump",
+          bytes,
+          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
+          docDate: d.date || now.slice(0, 10),
+          bump: true,
+          source: "pump:" + rec.id,
+          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
+        });
+        filedToSite = true;
+      } catch {
+      }
+    }
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    if (rec.engineer) ctx && ctx.waitUntil && ctx.waitUntil(sendToUser(env, tid, rec.engineer, { title: "\u{1F6B0} Pump record filed", body: `${d.storeName || "Pump"} maintenance record finalised`, url: "/pump-review.html", tag: "pump-final" }).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow(fresh), filedToSite }, {}, env, request);
+  }
+  if (sub === "/upload" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const rec = await loadRec(String(form.get("id") || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") return error("file required", 400, env, request);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, (/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
+  }
+  if (sub === "/reopen" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    if (env.JOB_FILES) {
+      try {
+        const l = await env.JOB_FILES.list({ prefix: `pump/${tid}/${rec.id}/` });
+        for (const o of l.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {
+      }
+    }
+    await env.DB.prepare("DELETE FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + url.pathname, 404, env, request);
+}
+var GENERAL, BINFIELD_CHECKS, WICKHAM_CHECKS, INSTR, DEFAULT_CONFIG, normEng, isJpeg, isPng, MAX_PDF_PHOTOS;
+var init_pump = __esm({
+  "src/routes/pump.js"() {
+    init_http();
+    init_auth();
+    init_pumppdf();
+    init_logo();
+    init_filesign();
+    init_push();
+    init_compliance();
+    init_pngdecode();
+    GENERAL = [
+      "Chamber free of debris or obstructions",
+      "Water level within expected range when idle",
+      "Pump body free from corrosion or damage",
+      "Electrical cables undamaged and away from water",
+      "Discharge pipe secure and supported",
+      "Float switch activates pump when lifted",
+      "Pump runs smoothly with no unusual noise/vibration",
+      "Water discharges fully through outlet",
+      "Pump switches off automatically after emptying",
+      "Discharge outlet clear of blockages or freezing",
+      "Non-return/check valve prevents backflow (where Fitted)",
+      "Sump chamber inlet screen free of debris",
+      "Inspection details recorded in log"
+    ];
+    BINFIELD_CHECKS = [
+      "Chamber free of debris or obstructions",
+      "Water level within expected range when idle",
+      "Pump body free from corrosion or damage",
+      "Electrical cables undamaged and away from water",
+      "Discharge pipe secure and supported",
+      "Float switch activates pump when lifted",
+      "Pump runs smoothly with no unusual noise/vibration",
+      "Water discharges fully through outlet",
+      "Pump switches off automatically after emptying",
+      "Discharge outlet clear of blockages or freezing",
+      "Non-return/check valve prevents backflow",
+      "Sump chamber inlet screen free of debris",
+      "Control panel or alarm system functioning",
+      "Inspection details recorded in log"
+    ];
+    WICKHAM_CHECKS = BINFIELD_CHECKS.concat([
+      "Water Pumping into ditch",
+      "Ditch inlet & outlet clear from debris",
+      "Ditch generally tidy of debris",
+      "CCTV receiving power"
+    ]);
+    INSTR = {
+      binfield: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nAlarm float switch:\n- Located in the basement, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (warehouse).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      wickham: "The sump pump is in the rear garden of the store, under a manhole in the grass (approx. 5 m deep).\nAccessing the pump: pull it up carefully using the rope, then lower it back down slowly after checks.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 5 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nDitch maintenance:\n- Clear all debris from both ends of the ditch to maintain flow.\n- Remove any debris along the ditch length as well.\n\nAlarm float switch:\n- Located in the manhole, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (just inside the rear doors).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      eastbourne: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      shanklin: "The sump pump is in the basement in the BOH area of the store.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nElectrical Cut Off switch:\n- Located on the wall, above the pump.\n- Tilting it should activate the contactors above the basement and cut all 230v electricity to the lighting and tube heaters.\n- When the float switch is released, the contactor should re-engage and bring the 230v power back on.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      wimbledon: "There are two pumps to test in this store.\n\nFirst pump - located in a hatch in the staff room.\n- Remove the skirting and lift the hatch to access.\n- This area must be shut off while the hatch is open and all staff notified of the risk.\n\nSecond pump - located in the rear area of the store basement (not occupied by Co-op).\n- Key can be acquired via the store manager.\n- Walk inside the unit, turn back on yourself, and you will see the pump.\n\nPriming the pump:\n- Fill buckets from the store's cleaners' sink tap (approx. 2 buckets) and pour into the sump.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      newportels: "The sump pump is in the basement below the reception desk printer.\nThe printer will need moving to complete the test.\nStaff must be notified, and the area barriered off.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n\nImportant:\n- Ensure the hatch is fitted back correctly and flush.\n- Always leave both the pump and the alarm float switch in their correct positions after maintenance."
+    };
+    DEFAULT_CONFIG = {
+      declaration: "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.",
+      contractor: { tradingTitle: "Mostlane", address: "Unit A5, Segensworth Business Centre, Titchfield", postcode: "PO15 5RQ" },
+      safety: [
+        { id: "barrier", label: "Area made safe and barriered off correctly to prevent injury (e.g. someone falling into the open hatch/sump)" },
+        { id: "notified", label: "Store staff have been notified that the works are being carried out" }
+      ],
+      stores: [
+        { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
+        { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
+        { id: "eastbourne", name: "Eastbourne", siteCode: "0356", client: "retail", address: "Eastbourne, Lindfield Road", postcode: "BN22 0AU", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+        { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
+        { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
+        { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
+      ]
+    };
+    normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
+    isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
+    MAX_PDF_PHOTOS = 12;
+  }
+});
+
 // src/routes/certs.js
 var certs_exports = {};
 __export(certs_exports, {
-  handle: () => handle9,
+  handle: () => handle10,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob
 });
 function clientForSiteClient(sc) {
@@ -9536,7 +10529,7 @@ async function backfillClient(env, tid, rec) {
   if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
-async function ensureTables2(env) {
+async function ensureTables3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
     job_id TEXT, site_code TEXT, cert_number TEXT,
@@ -9830,14 +10823,14 @@ async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate 
   let emKind = cert.type === "em" ? rec.emKind || "" : "";
   if (cert.type === "em" && !emKind) {
     try {
-      const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+      const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
       emKind = jb && jb.emKind || "";
     } catch {
     }
   }
   rec.certNumber = number;
   rec.status = "final";
-  const sig = dataUrlToBytes(rec.signature);
+  const sig = dataUrlToBytes2(rec.signature);
   let logo = null;
   try {
     logo = logoBytes();
@@ -9874,7 +10867,7 @@ async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = fa
   const pend = results || [];
   if (!pend.length) return null;
   const jobId = "emrem:" + certId;
-  const existing = await getJob(env, tid, jobId).catch(() => null);
+  const existing = await getJob2(env, tid, jobId).catch(() => null);
   if (existing) return existing.id;
   const first = pend[0];
   const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
@@ -9991,7 +10984,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
   let filed = false;
   try {
     const nrow = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId4).first();
-    const rec = shapeRow(nrow);
+    const rec = shapeRow2(nrow);
     await fileCertNow(env, tid, nrow, rec, orig.cert_number || rec.certNumber || "", { bump: false, docDate: now.slice(0, 10), by: "auto (remedial works)" });
     filed = true;
   } catch {
@@ -10017,7 +11010,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
 }
 async function reissueCleanCertForRemedialJob(env, tid, job) {
   try {
-    await ensureTables2(env);
+    await ensureTables3(env);
     const jid = String(job && job.id || "");
     if (!jid.startsWith("emrem:")) return null;
     const certId = jid.slice(6).replace(/:(L|B)$/i, "");
@@ -10166,29 +11159,29 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
 }
-async function getConfig(env, tid) {
+async function getConfig2(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
   let c = null;
   try {
     c = row ? JSON.parse(row.value) : null;
   } catch {
   }
-  if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG2));
   return {
-    client: { ...DEFAULT_CONFIG.client, ...c.client || {} },
-    contractor: { ...DEFAULT_CONFIG.contractor, ...c.contractor || {} },
-    em: { ...DEFAULT_CONFIG.em, ...c.em || {} },
-    pat: { ...DEFAULT_CONFIG.pat, ...c.pat || {} },
+    client: { ...DEFAULT_CONFIG2.client, ...c.client || {} },
+    contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
+    em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
+    pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} },
     reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
     supplierName: typeof c.supplierName === "string" ? c.supplierName : "",
     supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : "",
     supplierCc: typeof c.supplierCc === "string" ? c.supplierCc : ""
   };
 }
-async function saveConfig(env, tid, c) {
+async function saveConfig2(env, tid, c) {
   await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:config:" + tid, JSON.stringify(c)).run();
 }
-function dataUrlToBytes(u) {
+function dataUrlToBytes2(u) {
   const s = String(u || "");
   const i = s.indexOf(",");
   if (!/^data:image\//i.test(s) || i < 0) return null;
@@ -10201,7 +11194,7 @@ function dataUrlToBytes(u) {
     return null;
   }
 }
-async function getJob(env, tid, id) {
+async function getJob2(env, tid, id) {
   try {
     const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
     return row ? JSON.parse(row.data) : null;
@@ -10241,7 +11234,7 @@ async function maybeCompleteCertJob(env, tid, cert) {
     const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
     if (engs.length >= 2) {
       job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "cert" };
+      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "cert" };
     } else if (job.engStatus) {
       for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now, by: "cert" };
     }
@@ -10479,7 +11472,7 @@ async function suggestNumber(env, tid, code, type, opts = {}) {
   if (opts.kind === "monthly") return set + "-" + monthYY(opts.date);
   return set + "-" + yy();
 }
-function shapeRow(cert) {
+function shapeRow2(cert) {
   let d = {};
   try {
     d = JSON.parse(cert.data) || {};
@@ -10502,7 +11495,7 @@ function shapeRow(cert) {
   };
   return normalizeRemedials(rec);
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -10529,7 +11522,7 @@ async function handle9(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const oTid = await resolveTenantId(env, request);
-      await ensureTables2(env);
+      await ensureTables3(env);
       const ob = await request.json().catch(() => ({}));
       return await handleOrderInbound(env, oTid, ob, ctx, request);
     }
@@ -10539,7 +11532,7 @@ async function handle9(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/certs(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables2(env);
+  await ensureTables3(env);
   const perms = await permissionsFor(env, tid, me);
   const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
   const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
@@ -10549,7 +11542,7 @@ async function handle9(request, env, ctx, url, sess) {
     const m = String(me || "").toLowerCase().trim();
     if (String(cert.engineer || "").toLowerCase().trim() === m) return true;
     try {
-      const job = cert.job_id ? await getJob(env, tid, String(cert.job_id)) : null;
+      const job = cert.job_id ? await getJob2(env, tid, String(cert.job_id)) : null;
       const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
       return engs.some((e) => String(e || "").toLowerCase().trim() === m);
     } catch {
@@ -10557,11 +11550,11 @@ async function handle9(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig2(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig(env, tid);
+      const cur = await getConfig2(env, tid);
       const next = {
         client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
@@ -10572,7 +11565,7 @@ async function handle9(request, env, ctx, url, sess) {
         supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail,
         supplierCc: typeof b.supplierCc === "string" ? b.supplierCc.slice(0, 200) : cur.supplierCc
       };
-      await saveConfig(env, tid, next);
+      await saveConfig2(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }
   }
@@ -10629,7 +11622,7 @@ async function handle9(request, env, ctx, url, sess) {
   if (sub === "/jobs/create-next" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const src = await getJob(env, tid, String(b.jobId || ""));
+    const src = await getJob2(env, tid, String(b.jobId || ""));
     if (!src) return error("Job not found", 404, env, request);
     let months = Number(b.months);
     if (!Number.isFinite(months) || months < 1 || months > 60) months = src.emKind === "monthly" ? 1 : 12;
@@ -10815,7 +11808,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const type = T(q.get("type"));
     let code = q.get("code") || "";
     if (!code && q.get("jobId")) {
-      const job = await getJob(env, tid, String(q.get("jobId")));
+      const job = await getJob2(env, tid, String(q.get("jobId")));
       code = job ? job.siteCode || "" : "";
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
@@ -10825,8 +11818,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
-    const config = await getConfig(env, tid);
-    const job = await getJob(env, tid, jobId);
+    const config = await getConfig2(env, tid);
+    const job = await getJob2(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
     let siteData = {};
@@ -10839,7 +11832,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
     if (existing) {
-      const exRec = shapeRow(existing);
+      const exRec = shapeRow2(existing);
       await backfillClient(env, tid, exRec);
       await resignRemedialPhotos(env, url.origin, exRec);
       return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
@@ -10938,7 +11931,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       url: "/cert-review.html",
       tag: "cert-review:" + cert.id
     };
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     const chosen = (cfg.reviewers || []).filter((u) => String(u).toLowerCase() !== String(me).toLowerCase());
     if (chosen.length) {
       ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
@@ -10953,9 +11946,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -10968,10 +11961,10 @@ PAT: Import certificate number ${num2}-${yr}`;
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const oneRec = shapeRow(cert);
+    const oneRec = shapeRow2(cert);
     await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
-    return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
+    return json({ ok: true, record: oneRec, config: await getConfig2(env, tid) }, {}, env, request);
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -10979,7 +11972,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const rows = (await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND status IN " + statuses + " ORDER BY COALESCE(submitted_at,finalised_at,updated_at) DESC LIMIT 300"
     ).bind(tid).all()).results || [];
-    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+    return json({ ok: true, certs: rows.map(shapeRow2) }, {}, env, request);
   }
   if (sub === "/status" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -11066,14 +12059,14 @@ PAT: Import certificate number ${num2}-${yr}`;
     const rows = (await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND site_code=? AND type=? ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 100"
     ).bind(tid, code, type).all()).results || [];
-    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+    return json({ ok: true, certs: rows.map(shapeRow2) }, {}, env, request);
   }
   if (sub === "/finalise" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
@@ -11081,7 +12074,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
@@ -11089,7 +12082,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type, { kind: emKind, date: docDate })).trim();
     rec.certNumber = number;
     rec.status = "final";
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -11146,7 +12139,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code.", 400, env, request);
@@ -11156,14 +12149,14 @@ PAT: Import certificate number ${num2}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
     }
     rec.certNumber = number;
     rec.status = "final";
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -11261,6 +12254,32 @@ PAT: Import certificate number ${num2}-${yr}`;
       const { results } = await env.DB.prepare(`SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY fitting_no, id`).bind(tid, ...chunk).all().catch(() => ({ results: [] }));
       for (const r of results || []) (out[r.cert_id] = out[r.cert_id] || []).push(r);
     }
+    for (const certId of Object.keys(out)) {
+      const rows = out[certId];
+      if (!rows.some((r) => r.fitting_no == null || !r.photos || r.photos === "[]")) continue;
+      try {
+        const cert = await loadCert(certId);
+        if (!cert) continue;
+        const rec = shapeRow2(cert);
+        const fails = (Array.isArray(rec.rows) ? rec.rows : []).map((r, i) => ({ r, i })).filter((x) => isRealRemedial(x.r.remedial));
+        const ups = [];
+        for (const row of rows) {
+          const idx = Number(String(row.id).split(":").pop());
+          const f = fails[idx];
+          if (!f) continue;
+          const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
+          const keys = Array.isArray(f.r.remedial && f.r.remedial.photos) ? f.r.remedial.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean) : [];
+          const needNo = row.fitting_no == null, needPh = (!row.photos || row.photos === "[]") && keys.length;
+          if (!needNo && !needPh) continue;
+          if (needNo) row.fitting_no = no;
+          if (needPh) row.photos = JSON.stringify(keys);
+          ups.push(env.DB.prepare("UPDATE em_remedials SET fitting_no=?, photos=? WHERE tenant_id=? AND id=?").bind(row.fitting_no, row.photos || "[]", tid, row.id));
+        }
+        if (ups.length) await env.DB.batch(ups);
+        rows.sort((a, b) => (a.fitting_no ?? 1e9) - (b.fitting_no ?? 1e9) || String(a.id).localeCompare(String(b.id)));
+      } catch {
+      }
+    }
     return out;
   };
   if (sub === "/remedials/outstanding" && method === "GET") {
@@ -11277,7 +12296,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       try {
         const cert = await loadCert(r.cert_id);
         if (cert) {
-          const q2 = buildQuoteText(shapeRow(cert), r.site_code);
+          const q2 = buildQuoteText(shapeRow2(cert), r.site_code);
           c.quoteText = q2 ? q2.text : "";
           c.quoteTotal = q2 ? q2.total : 0;
         }
@@ -11378,7 +12397,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!isOffice) return error("Office access required", 403, env, request);
     const cert = await loadCert(String(q.get("certId") || q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     const siteName = rec.installation && rec.installation.name || rec.client && rec.client.name || cert.site_code;
     const quote = buildQuoteText(rec, cert.site_code || rec.siteCode);
     if (!quote) return json({ ok: true, text: "", count: 0, total: 0, message: "No failed fittings on this certificate." }, {}, env, request);
@@ -11405,7 +12424,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
     const jobId = row.job_id || "emrem:" + certId;
     try {
-      const job = await getJob(env, tid, jobId);
+      const job = await getJob2(env, tid, jobId);
       if (job && /AWAITING BATTERIES/.test(String(job.description || ""))) {
         await createOrUpdateJobFromPayload(env, tid, { id: jobId, description: String(job.description).replace(/^⏳ AWAITING BATTERIES[^\n]*\n\n?/, "") });
       }
@@ -11424,8 +12443,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!isOffice) return error("Office access required", 403, env, request);
     const cert = await loadCert(String(q.get("certId") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
-    const cfg = await getConfig(env, tid);
+    const rec = shapeRow2(cert);
+    const cfg = await getConfig2(env, tid);
     const code = padCode(cert.site_code || rec.siteCode) || "";
     const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
     const reference = `${code}-EM-${yr}`;
@@ -11508,8 +12527,30 @@ ${con.tradingTitle || "Mostlane"}`;
         if (!key) continue;
         try {
           const o = env.JOB_FILES && await env.JOB_FILES.get(key);
-          if (o) imgs.push(new Uint8Array(await o.arrayBuffer()));
-        } catch {
+          if (!o) {
+            imgs.push({ why: "photo file missing from storage" });
+            continue;
+          }
+          const b = new Uint8Array(await o.arrayBuffer());
+          if (b.length > 2 && b[0] === 255 && b[1] === 216) {
+            imgs.push({ jpeg: b });
+            continue;
+          }
+          if (b.length > 8 && b[0] === 137 && b[1] === 80) {
+            const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 900 });
+            if (!d) {
+              imgs.push({ why: "PNG couldn't be decoded" });
+              continue;
+            }
+            const s = shrinkRgb(d.rgb, d.width, d.height, 900);
+            const z = await deflate(s.rgb);
+            imgs.push(z ? { rgb: z, w: s.w, h: s.h, deflated: true } : { rgb: s.rgb, w: s.w, h: s.h });
+            continue;
+          }
+          const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+          imgs.push({ why: /heic|heif/i.test(ct) ? "HEIC photo \u2014 not embeddable" : "unsupported image format" + (ct ? " (" + ct + ")" : "") });
+        } catch (e) {
+          imgs.push({ why: "photo couldn't be read" });
         }
       }
       return imgs;
@@ -11519,7 +12560,7 @@ ${con.tradingTitle || "Mostlane"}`;
     if (certId) {
       const cert = await loadCert(certId);
       if (!cert) return error("Certificate not found", 404, env, request);
-      const rec = shapeRow(cert);
+      const rec = shapeRow2(cert);
       siteName = rec.installation && rec.installation.name || cert.site_code || "";
       certNumber = rec.certNumber || cert.cert_number || "";
       const batt = (rec.rows || []).filter((r2) => r2.remedial && isRealRemedial(r2.remedial) && r2.remedial.kind === "battery");
@@ -11543,7 +12584,7 @@ ${con.tradingTitle || "Mostlane"}`;
       }
     } else return error("certId or code required", 400, env, request);
     if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     let logo = null;
     try {
       logo = logoBytes();
@@ -11566,7 +12607,7 @@ ${con.tradingTitle || "Mostlane"}`;
     if (!toAddr) return error("Enter the supplier's email address.", 400, env, request);
     if (toAddr !== cfg.supplierEmail || ccAddr !== (cfg.supplierCc || "")) {
       try {
-        await saveConfig(env, tid, { ...cfg, supplierEmail: toAddr, supplierCc: ccAddr });
+        await saveConfig2(env, tid, { ...cfg, supplierEmail: toAddr, supplierCc: ccAddr });
       } catch {
       }
     }
@@ -11718,7 +12759,7 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var T, DEFAULT_CONFIG2, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -11732,9 +12773,11 @@ var init_certs = __esm({
     init_filesign();
     init_email();
     init_batterypdf();
+    init_pngdecode();
+    init_pump();
     init_tenantdb();
     T = (t) => t === "pat" ? "pat" : "em";
-    DEFAULT_CONFIG = {
+    DEFAULT_CONFIG2 = {
       // Default client used to seed a NEW cert when the previous cert didn't supply one
       // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
       // wins over this, and it's never applied over a value the office has typed.
@@ -11777,7 +12820,7 @@ var init_certs = __esm({
       return d ? String(Number(d)) : "";
     };
     yy = () => String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
-    normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     cap = (s) => {
       s = String(s || "").trim();
       return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
@@ -11797,7 +12840,7 @@ __export(sla_exports, {
   badScheduleIn: () => badScheduleIn,
   bumpAiUsage: () => bumpAiUsage,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
-  handle: () => handle10,
+  handle: () => handle11,
   listFallbackTemplates: () => listFallbackTemplates,
   listJobs: () => listJobs,
   notifyNewlyAssigned: () => notifyNewlyAssigned,
@@ -11834,7 +12877,7 @@ function badScheduleIn(body) {
   }
   return null;
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -11842,7 +12885,7 @@ async function handle10(request, env, ctx, url, sess) {
   const subpath = url.pathname.replace(/^\/sla(?=\/|$)/, "") || "/";
   const searchParams = url.searchParams;
   if (subpath === "/config") {
-    if (method === "GET") return jsonResponse(await getConfig2(env, tenantId), headers);
+    if (method === "GET") return jsonResponse(await getConfig3(env, tenantId), headers);
     if (method === "POST") {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
@@ -12103,7 +13146,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const jobId = method === "GET" ? searchParams.get("jobId") : null;
       if (method === "GET") {
-        const job = await getJob2(env, tenantId, jobId);
+        const job = await getJob3(env, tenantId, jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
@@ -12123,7 +13166,7 @@ async function handle10(request, env, ctx, url, sess) {
       }
       if (method === "POST") {
         const b = await readJson2(request);
-        const job = await getJob2(env, tenantId, b.jobId);
+        const job = await getJob3(env, tenantId, b.jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const rec = b.record && typeof b.record === "object" ? b.record : {};
         if (!String(rec.ref || "").trim()) {
@@ -12197,7 +13240,7 @@ async function handle10(request, env, ctx, url, sess) {
     };
     if (subpath === "/firestop/pdf" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob2(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const pdf = await buildJobPdf(job);
       const fn = `RIA form ${job.firestop && job.firestop.ref || job.helpdeskRef || job.id}.pdf`;
@@ -12205,7 +13248,7 @@ async function handle10(request, env, ctx, url, sess) {
     }
     if (subpath === "/firestop/bundle" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob2(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const rec = job.firestop || {};
       const pdf = await buildJobPdf(job);
@@ -12347,7 +13390,7 @@ async function handle10(request, env, ctx, url, sess) {
       changedBy: "zapier"
     };
     const beforeId = payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob2(env, tenantId, beforeId)) : null;
+    const before = beforeId ? await d1Retry(() => getJob3(env, tenantId, beforeId)) : null;
     if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
       const ia = await getInboundAssign(env, tenantId);
       const eng = inboundEngineerFor(ia, priority);
@@ -12407,7 +13450,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (bad) return jsonResponse({ error: bad }, headers, 400);
     }
     const beforeId = payload.id || payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob2(env, tenantId, beforeId)) : null;
+    const before = beforeId ? await d1Retry(() => getJob3(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
@@ -12983,7 +14026,7 @@ async function handle10(request, env, ctx, url, sess) {
     for (const id of rec.jobIds) {
       let job = null;
       try {
-        job = await getJob2(env, tenantId, id);
+        job = await getJob3(env, tenantId, id);
       } catch {
       }
       if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) {
@@ -13185,7 +14228,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (perms.FullAccess !== "Yes") return jsonResponse({ error: "Forbidden" }, headers, 403);
     const q = safeDecode(searchParams.get("id") || "");
     const hexOf = (s) => [...String(s)].map((c) => c.codePointAt(0).toString(16).padStart(2, "0")).join(" ");
-    const byId = q ? await getJob2(env, tenantId, q) : null;
+    const byId = q ? await getJob3(env, tenantId, q) : null;
     const needle = q.toLowerCase();
     const near = (await listJobs(env, tenantId)).filter((j) => String(j.id).toLowerCase().includes(needle) || String(j.helpdeskRef || "").toLowerCase().includes(needle)).slice(0, 5).map((j) => ({ id: j.id, idHex: hexOf(j.id), ref: j.helpdeskRef, status: j.status, exactMatch: j.id === q }));
     return jsonResponse({ ok: true, lookedUp: q, lookedUpHex: hexOf(q), foundById: !!byId, similar: near }, headers);
@@ -13206,7 +14249,7 @@ async function handle10(request, env, ctx, url, sess) {
       release: body.release,
       changedBy: body.changedBy || "scheduler"
     };
-    const before = await getJob2(env, tenantId, id);
+    const before = await getJob3(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
@@ -13220,7 +14263,7 @@ async function handle10(request, env, ctx, url, sess) {
     const id = safeDecode(parts[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     if (method === "GET" && parts[2] === "export") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -13234,7 +14277,7 @@ async function handle10(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "export.pdf") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -13251,7 +14294,7 @@ async function handle10(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "sheet.pdf") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const j = decorateJobWithLiveSla(job);
       const copyType = searchParams.get("type") === "client" ? "client" : "mostlane";
@@ -13423,7 +14466,7 @@ async function handle10(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       let overrides = {}, jobSig = null, customerName = "";
       try {
-        const j = await getJob2(env, tenantId, id);
+        const j = await getJob3(env, tenantId, id);
         overrides = j && j.photoStages || {};
         jobSig = j && j.signature;
         if (j) customerName = await resolveCustomerName(env, tenantId, j);
@@ -13467,7 +14510,7 @@ async function handle10(request, env, ctx, url, sess) {
       const stageRaw = String(form.get("stage") || searchParams.get("stage") || "done");
       const stage = stageRaw === "ref" || stageRaw === "extra" ? stageRaw : "done";
       if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === itemId);
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -13510,7 +14553,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "audit-item" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === String(b.itemId || ""));
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -13585,7 +14628,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "create-works-job" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const wbody = await readJson2(request).catch(() => ({}));
       const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
@@ -13593,7 +14636,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
       if (!rem.length) return jsonResponse({ error: "Pick at least one remedial to turn into works." }, headers, 400);
       if (src.remedialsWorksJobId) {
-        const ex = await getJob2(env, tenantId, src.remedialsWorksJobId).catch(() => null);
+        const ex = await getJob3(env, tenantId, src.remedialsWorksJobId).catch(() => null);
         if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
       }
       const newId4 = crypto.randomUUID();
@@ -13657,7 +14700,7 @@ async function handle10(request, env, ctx, url, sess) {
       src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
       await saveJob(env, tenantId, src);
       try {
-        const nj = await getJob2(env, tenantId, job.id);
+        const nj = await getJob3(env, tenantId, job.id);
         if (nj) {
           nj.fromRemedialsOf = id;
           await saveJob(env, tenantId, nj);
@@ -13669,7 +14712,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const rb = await readJson2(request).catch(() => ({}));
       const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : void 0;
@@ -13733,7 +14776,7 @@ async function handle10(request, env, ctx, url, sess) {
         }
       }
       try {
-        const nj = await getJob2(env, tenantId, job.id);
+        const nj = await getJob3(env, tenantId, job.id);
         if (nj) {
           if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
           if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
@@ -13780,7 +14823,7 @@ async function handle10(request, env, ctx, url, sess) {
     }
     if (parts[2] === "visits" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
@@ -13799,7 +14842,7 @@ async function handle10(request, env, ctx, url, sess) {
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
       const all = await listJobs(env, tenantId, { includeDormant: true });
@@ -13819,7 +14862,7 @@ async function handle10(request, env, ctx, url, sess) {
       const { filename, stage } = await readJson2(request);
       if (!filename) return jsonResponse({ error: "filename required" }, headers, 400);
       const st = PHOTO_STAGES.includes(stage) ? stage : "";
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       job.photoStages = job.photoStages || {};
       if (st) job.photoStages[filename] = st;
@@ -13832,14 +14875,14 @@ async function handle10(request, env, ctx, url, sess) {
       const { signedBy, signedAt, signatureBase64, opId } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
       if (opId && !await firstTime(env, tenantId, opId, "sig:" + id)) {
-        const cur = await getJob2(env, tenantId, id);
+        const cur = await getJob3(env, tenantId, id);
         return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
       }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
       await env.JOB_FILES.put(key, binary, { httpMetadata: { contentType: "image/png" } });
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (job) {
         job.signature = { signedBy, signedAt, fileKey: key };
         job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -13850,7 +14893,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "hold-approve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -13877,7 +14920,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const body = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -13908,7 +14951,7 @@ async function handle10(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const reason = String(b.reason || "").trim();
       if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       job.raBlock = {
@@ -13935,7 +14978,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "em-timer" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       if (String(b.action || "start") === "clear") {
@@ -13952,7 +14995,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
@@ -13971,7 +15014,7 @@ async function handle10(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (method === "GET") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
@@ -13984,7 +15027,7 @@ async function handle10(request, env, ctx, url, sess) {
       const perms = await permissionsFor(env, tenantId, sess.user.username);
       if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const delScope = searchParams.get("scope");
       let targets = [job];
@@ -14013,7 +15056,7 @@ async function handle10(request, env, ctx, url, sess) {
       }, headers);
     }
     if (method === "PATCH") {
-      const before = await getJob2(env, tenantId, id);
+      const before = await getJob3(env, tenantId, id);
       const body = await readJson2(request);
       {
         const bad = badScheduleIn(body);
@@ -14954,7 +15997,7 @@ async function notifyNewlyAssigned(env, tid, before, after) {
     });
   }
 }
-async function getJob2(env, tenantId, id) {
+async function getJob3(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
@@ -15052,9 +16095,9 @@ async function saveJob(env, tenantId, job) {
   ).run();
 }
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
-  const cfg = await getConfig2(env, tenantId);
+  const cfg = await getConfig3(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
-  const existing = await getJob2(env, tenantId, id);
+  const existing = await getJob3(env, tenantId, id);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
@@ -15231,7 +16274,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   return job;
 }
 async function patchJob(env, tenantId, id, patch, ctx) {
-  const job = await getJob2(env, tenantId, id);
+  const job = await getJob3(env, tenantId, id);
   if (!job) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
@@ -15360,7 +16403,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
-    const cfg = await getConfig2(env, tenantId);
+    const cfg = await getConfig3(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
   }
   if (jobIsProject(job)) {
@@ -15545,7 +16588,7 @@ async function jobCoordServer(env, job) {
   return null;
 }
 async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
-  const target = await getJob2(env, tenantId, jobId);
+  const target = await getJob3(env, tenantId, jobId);
   if (!target) return { ok: false, error: "job not found" };
   const eng = normId(engineer || "");
   const tKey = siteKeyOf(target.siteCode);
@@ -16650,13 +17693,13 @@ function inboundEngineerFor(cfg, priority) {
   }
   return "";
 }
-async function getConfig2(env, tenantId) {
+async function getConfig3(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_config'").bind(tenantId).first();
-  return row ? JSON.parse(row.value) : DEFAULT_CONFIG2;
+  return row ? JSON.parse(row.value) : DEFAULT_CONFIG3;
 }
 async function setConfig(env, tenantId, body) {
-  const merged = { ...DEFAULT_CONFIG2, ...body };
+  const merged = { ...DEFAULT_CONFIG3, ...body };
   const db = tenantDB(env, tenantId);
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
@@ -16960,7 +18003,7 @@ async function sweepFallbacks(env, tid = 1) {
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
-      const src = await getJob2(env, tid, fb.jobId);
+      const src = await getJob3(env, tid, fb.jobId);
       if (!src) continue;
       let payload = null;
       if (src.fallbackTemplate) {
@@ -17450,7 +18493,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG2, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -17497,7 +18540,7 @@ var init_sla = __esm({
     _archiveReady = false;
     _archiveFilesReady = false;
     _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
-    DEFAULT_CONFIG2 = {
+    DEFAULT_CONFIG3 = {
       priorities: {
         "Priority 1": { hours: 4 },
         "Priority 2": { hours: 24 },
@@ -17550,7 +18593,7 @@ var holidays_exports = {};
 __export(holidays_exports, {
   approvedLeaveInRange: () => approvedLeaveInRange,
   bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle11,
+  handle: () => handle12,
   jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
   remindPendingHolidays: () => remindPendingHolidays
 });
@@ -17655,7 +18698,7 @@ async function remindPendingHolidays(env, tid = 1) {
   } catch {
   }
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -19253,7 +20296,7 @@ function isSuppressed(rules, type, user, key) {
 
 // src/routes/assets.js
 init_push();
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -20179,7 +21222,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -20544,7 +21587,7 @@ init_auth();
 init_sitelog_api();
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -20979,7 +22022,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -21197,7 +22240,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -21318,7 +22361,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -21492,7 +22535,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -22272,7 +23315,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -22968,7 +24011,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -23212,7 +24255,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -23407,7 +24450,7 @@ function daysUntil(dateStr) {
   if (isNaN(d)) return null;
   return Math.round((d - /* @__PURE__ */ new Date(todayISO() + "T00:00:00Z")) / 864e5);
 }
-function statusOf2(expires) {
+function statusOf3(expires) {
   const n = daysUntil(expires);
   if (n === null) return "none";
   if (n < 0) return "expired";
@@ -23437,7 +24480,7 @@ async function shape(env, origin, r) {
     createdBy: r.created_by || "",
     createdAt: r.created_at || "",
     updatedAt: r.updated_at || "",
-    status: statusOf2(r.expires),
+    status: statusOf3(r.expires),
     daysLeft: daysUntil(r.expires)
   };
   if (r.doc_key) rec.docUrl = await signedFileUrl(env, origin, "/hr/record-file", r.doc_key);
@@ -23493,11 +24536,11 @@ async function computeDriverChecks(db) {
       nextDue,
       status: doneThisMonth ? "done" : "due",
       licenceExpiry,
-      licenceStatus: statusOf2(licenceExpiry)
+      licenceStatus: statusOf3(licenceExpiry)
     };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -23547,7 +24590,7 @@ async function handle22(request, env, ctx, url, sess) {
     for (const r of recs || []) {
       const k = byUser[r.username] = byUser[r.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
       k.total++;
-      k[statusOf2(r.expires)]++;
+      k[statusOf3(r.expires)]++;
     }
     const rows = active.map((u) => {
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
@@ -23575,7 +24618,7 @@ async function handle22(request, env, ctx, url, sess) {
     }
     const items = [];
     for (const r of results || []) {
-      const st = statusOf2(r.expires);
+      const st = statusOf3(r.expires);
       if (st !== "expired" && st !== "expiring") continue;
       items.push({ id: r.id, username: r.username, name: nameById[r.username] || (isSubUser(r.username) ? r.username.slice(SUB_PREFIX.length) : r.username), subcontractor: isSubUser(r.username), kind: r.kind, title: r.title || "", expires: r.expires, status: st, daysLeft: daysUntil(r.expires) });
     }
@@ -23605,7 +24648,7 @@ async function handle22(request, env, ctx, url, sess) {
         const k = r.username.slice(SUB_PREFIX.length);
         if (byKey[k]) {
           byKey[k].counts.total++;
-          byKey[k].counts[statusOf2(r.expires)]++;
+          byKey[k].counts[statusOf3(r.expires)]++;
         }
       }
     } catch {
@@ -23679,7 +24722,7 @@ async function handle22(request, env, ctx, url, sess) {
       if (String(r.expires || "").trim()) withExpiry.add(t);
       const pm = best[r.username] = best[r.username] || {};
       const cur = pm[t];
-      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf3(r.expires) };
     }
     for (const t of withExpiry) titles.add(t);
     for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
@@ -23837,7 +24880,7 @@ async function sweepStaffRecordReminders(env) {
   ).bind(tid).all().catch(() => ({ results: [] }));
   let expired = 0, expiring = 0;
   for (const r of results || []) {
-    const st = statusOf2(r.expires);
+    const st = statusOf3(r.expires);
     if (st === "expired") expired++;
     else if (st === "expiring") expiring++;
   }
@@ -23964,7 +25007,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -24076,7 +25119,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -26365,7 +27408,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -29026,7 +30069,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -29315,7 +30358,7 @@ function fmtWhen2(iso) {
     return iso;
   }
 }
-function wrap4(str, size, maxW) {
+function wrap5(str, size, maxW) {
   const words = String(str || "").split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
@@ -29345,7 +30388,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label2, val2) => {
     doc.text(L2, y, label2, { size: 11, bold: true });
-    for (const ln of wrap4(val2 || "", 11, W7 - 70)) {
+    for (const ln of wrap5(val2 || "", 11, W7 - 70)) {
       doc.text(L2 + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -29364,7 +30407,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap4(para, 11, W7)) {
+    for (const ln of wrap5(para, 11, W7)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -29383,7 +30426,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L2, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap4("I confirm that I have read and understood the content of this memo.", 11, W7)) {
+  for (const ln of wrap5("I confirm that I have read and understood the content of this memo.", 11, W7)) {
     doc.text(L2, y, ln, { size: 11 });
     y += 16;
   }
@@ -29418,7 +30461,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -29623,8 +30666,8 @@ init_pdf();
 init_logo();
 var L = 56;
 var R = 539;
-var W4 = R - L;
-var NAVY3 = [0, 0.2, 0.41];
+var W5 = R - L;
+var NAVY4 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
 var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -29645,7 +30688,7 @@ function fmtWhen3(iso) {
     return String(iso || "");
   }
 }
-function wrap5(str, size, maxW) {
+function wrap6(str, size, maxW) {
   const words = String(str == null ? "" : str).split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
@@ -29669,8 +30712,8 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch {
     y = 96;
   }
-  for (const ln of wrap5(String(docObj.title || "Document"), 20, W4)) {
-    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY3 });
+  for (const ln of wrap6(String(docObj.title || "Document"), 20, W5)) {
+    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
     y += 26;
   }
   y += 2;
@@ -29708,8 +30751,8 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       const t = line.replace(/^#\s+/, "");
       need(24);
       y += 6;
-      for (const ln of wrap5(t, 15, W4)) {
-        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY3 });
+      for (const ln of wrap6(t, 15, W5)) {
+        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY4 });
         y += 20;
       }
       y += 2;
@@ -29719,15 +30762,15 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       const t = line.replace(/^##\s+/, "");
       need(20);
       y += 4;
-      for (const ln of wrap5(t, 12, W4)) {
-        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY3 });
+      for (const ln of wrap6(t, 12, W5)) {
+        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY4 });
         y += 16;
       }
       continue;
     }
     if (/^[-•]\s+/.test(line)) {
       const t = line.replace(/^[-•]\s+/, "");
-      const parts2 = wrap5(t, 10.5, W4 - 16);
+      const parts2 = wrap6(t, 10.5, W5 - 16);
       need(parts2.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
       for (let i = 0; i < parts2.length; i++) {
@@ -29737,7 +30780,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y += 2;
       continue;
     }
-    const parts = wrap5(line, 10.5, W4);
+    const parts = wrap6(line, 10.5, W5);
     need(parts.length * 15);
     for (const ln of parts) {
       doc.text(L, y, ln, { size: 10.5 });
@@ -29749,7 +30792,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   need(200);
   doc.hr(L, y, R, { grey: true });
   y += 20;
-  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY3 });
+  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY4 });
   y += 22;
   const block = (label2, name, sigJpeg, whenLine, extra) => {
     need(110);
@@ -29926,7 +30969,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -30152,7 +31195,7 @@ init_auth();
 var CLIENT = "chapplins";
 var SCHEME = "chapplins";
 var _ready = false;
-async function ensureTables3(env, tenantId) {
+async function ensureTables4(env, tenantId) {
   if (_ready) return;
   const db = tenantDB(env, tenantId);
   await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
@@ -30207,14 +31250,14 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
-  await ensureTables3(env, tenantId);
+  await ensureTables4(env, tenantId);
   if (path === "/chapplins/sites" && method === "GET") {
     const { results: siteRows } = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
@@ -30446,7 +31489,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
@@ -30467,7 +31510,7 @@ async function handle30(request, env, ctx, url, sess) {
   };
   try {
     if (path === "/api/status" && method === "GET") return jr8(await getSystemStatus(db));
-    if (path === "/api/config" && method === "GET") return jr8(await getConfig3(db));
+    if (path === "/api/config" && method === "GET") return jr8(await getConfig4(db));
     if (path === "/api/suppliers" && method === "GET") return jr8(await getSuppliers(db));
     if (path === "/api/subcontractors" && method === "GET") return jr8(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr8(await getTrades(db));
@@ -30557,7 +31600,7 @@ async function getConfigMap(db) {
   for (const r of rows.results) map[r.key] = r.value;
   return map;
 }
-async function getConfig3(db) {
+async function getConfig4(db) {
   return await getConfigMap(db);
 }
 async function updateConfig(db, body) {
@@ -31915,7 +32958,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -32346,7 +33389,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -32727,7 +33770,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables4(env) {
+async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -32874,7 +33917,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -32894,7 +33937,7 @@ async function handle33(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const tid2 = await resolveTenantId(env, request);
-      await ensureTables4(env);
+      await ensureTables5(env);
       const b = await request.json().catch(() => ({}));
       const action = String(b.action || "").toLowerCase();
       const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -32997,7 +34040,7 @@ async function handle33(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables4(env);
+  await ensureTables5(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -33183,968 +34226,7 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
 
 // src/index.js
 init_certs();
-
-// src/routes/pump.js
-init_http();
-init_auth();
-
-// src/lib/pumppdf.js
-init_pdf();
-var W5 = 595;
-var H3 = 842;
-var M5 = 40;
-var CW2 = W5 - M5 * 2;
-var NAVY4 = [0, 0.204, 0.408];
-var INK4 = [0.1, 0.13, 0.18];
-var MUTE3 = [0.46, 0.51, 0.58];
-var FAINT2 = [0.62, 0.66, 0.72];
-var BG2 = [0.953, 0.965, 0.977];
-var CARD3 = [1, 1, 1];
-var BORDER2 = [0.886, 0.906, 0.933];
-var HAIR3 = [0.92, 0.935, 0.955];
-var ZEBRA2 = [0.972, 0.98, 0.99];
-var ACCENT2 = [0.04, 0.42, 0.52];
-var GREEN2 = [0.09, 0.63, 0.29];
-var RED2 = [0.83, 0.16, 0.16];
-var GREY4 = [0.6, 0.64, 0.7];
-var HEADSUB2 = [0.78, 0.85, 0.93];
-var S3 = (v) => toWinAnsi(String(v == null ? "" : v));
-var ROW_H2 = 19;
-var THEAD_H2 = 22;
-var CARD_PAD2 = 14;
-var GAP2 = 14;
-var HEADER_H2 = 84;
-function fit3(str, size, maxW) {
-  str = S3(str);
-  if (textWidth(str, size) <= maxW) return str;
-  let s = str;
-  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
-  return s + "...";
-}
-function wrap6(str, size, maxW, maxLines) {
-  const words = S3(str).split(/\s+/).filter(Boolean);
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    const t = cur ? cur + " " + w : w;
-    if (textWidth(t, size) <= maxW) {
-      cur = t;
-      continue;
-    }
-    if (cur) lines.push(cur);
-    cur = w;
-    if (maxLines && lines.length >= maxLines) break;
-  }
-  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
-  return lines.length ? lines : [""];
-}
-function instrLines(str, size, maxW) {
-  const out = [];
-  String(str || "").split(/\r?\n/).forEach((raw) => {
-    const t = raw.trim();
-    if (!t) {
-      out.push("");
-      return;
-    }
-    wrap6(t, size, maxW).forEach((l) => out.push(l));
-  });
-  return out;
-}
-function tracked2(doc, x, y, str, { size = 6.5, color = MUTE3, track = 1.2, alignRight = false, bold = true } = {}) {
-  const chars = [...S3(str).toUpperCase()];
-  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
-  let cx = alignRight ? x - total : x;
-  for (const c of chars) {
-    doc.text(cx, y, c, { size, bold, color });
-    cx += textWidth(c, size) + track;
-  }
-  return total;
-}
-function dot2(doc, cx, cy, r, color, hollow) {
-  if (hollow) {
-    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
-    doc.roundRect(cx - r - 0.6, cy - r - 0.6, r * 2 + 1.2, r * 2 + 1.2, r + 0.6, { fill: BORDER2 });
-    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
-  } else doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
-}
-function pill2(doc, x, yTop, label2, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
-  const w = textWidth(S3(label2), size) + padX * 2;
-  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
-  doc.text(x + padX, yTop + h - 4, S3(label2), { size, bold: true, color: textColor });
-  return w;
-}
-function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
-  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
-  doc.roundRect(x, y, w, h, r, { fill: fill2 });
-}
-function pageBg2(doc) {
-  doc.rect(0, 0, W5, H3, { fill: BG2 });
-}
-function imgSize(img) {
-  if (!img) return null;
-  if (img.jpeg) {
-    try {
-      const g = jpegInfo(img.jpeg);
-      return { w: g.w || 1, h: g.h || 1 };
-    } catch {
-      return null;
-    }
-  }
-  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
-  return null;
-}
-function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
-  const sz = imgSize(img);
-  if (!sz) return null;
-  const s = Math.min(maxW / sz.w, maxH / sz.h);
-  const w = sz.w * s, h = sz.h * s;
-  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
-  try {
-    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
-    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
-  } catch {
-    return null;
-  }
-  return { w, h, x: dx, y: dy };
-}
-function ansOf(a) {
-  const s = String(a || "").toLowerCase();
-  if (/^y/.test(s)) return "yes";
-  if (/^n\/?a/.test(s) || s === "na") return "na";
-  if (/^n/.test(s)) return "no";
-  return "";
-}
-function statusOf3(rec) {
-  const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
-  const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
-  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
-  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
-}
-function header2(doc, rec, meta, slim) {
-  const y = 30, h = slim ? 40 : HEADER_H2;
-  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY4);
-  if (meta.logo) {
-    try {
-      const g = jpegInfo(meta.logo);
-      const hh = slim ? 18 : 24;
-      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
-    } catch {
-    }
-  }
-  if (slim) {
-    tracked2(doc, W5 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
-    doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
-    return y + h;
-  }
-  const st = statusOf3(rec);
-  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
-  tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
-  doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
-  if (rec.date) doc.text(W5 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
-  return y + h;
-}
-function footer2(doc, pageNo, pageCount) {
-  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
-  doc.text(W5 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
-}
-function instrH(rec) {
-  return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
-}
-function safetyH(rec) {
-  return CARD_PAD2 + 14 + (rec.safety || []).length * 16 + 4;
-}
-function detailsH2(rec) {
-  if (!String(rec.detailsNo || "").trim()) return 0;
-  return CARD_PAD2 + 14 + wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).length * 11 + 4;
-}
-function instrCard(doc, y, rec) {
-  const h = instrH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
-    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
-    yy2 += 11;
-  });
-  return h;
-}
-function safetyCard(doc, y, rec) {
-  const h = safetyH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  (rec.safety || []).forEach((s) => {
-    const ok = ansOf(s.answer) === "yes";
-    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
-    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
-    pill2(doc, W5 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
-    yy2 += 16;
-  });
-  return h;
-}
-function checksCard(doc, rows, startIndex, y, count) {
-  const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
-  if (count != null) doc.text(W5 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
-  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
-  const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
-  const headY = y + 26 + THEAD_H2 - 8;
-  tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
-  ["Yes", "No", "N/A"].forEach((lab, k) => {
-    const cx = [cYes, cNo, cNa][k];
-    const lw = textWidth(lab, 6);
-    doc.text(cx - lw / 2, headY, lab, { size: 6, color: MUTE3 });
-  });
-  let ry = y + 26 + THEAD_H2;
-  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
-  rows.forEach((r, i) => {
-    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
-    const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
-    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
-    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
-    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
-    dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
-    ry += ROW_H2;
-  });
-  return h;
-}
-function detailsCard2(doc, y, rec) {
-  const h = detailsH2(rec);
-  if (!h) return 0;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
-    yy2 += 11;
-  });
-  return h;
-}
-function mediaLine(rec, meta) {
-  const media = Array.isArray(rec.media) ? rec.media : [];
-  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
-  const embedded = (meta.photos || []).length;
-  const bits = [];
-  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
-  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
-  return bits.length ? bits.join(" \xB7 ") : "";
-}
-var PHOTOS_PER_PAGE = 4;
-function photoPages(meta) {
-  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
-}
-function photoPage(doc, rec, meta, pageIdx) {
-  const photos = meta.photos || [];
-  const start = pageIdx * PHOTOS_PER_PAGE;
-  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
-  const top = 30 + 40 + GAP2;
-  const gap = 12;
-  const cw = (CW2 - gap) / 2, ch = 292;
-  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
-  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
-  slice.forEach((p, i) => {
-    const col = i % 2, row = Math.floor(i / 2);
-    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
-    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
-    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
-    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
-    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
-    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
-  });
-  const last = pageIdx === photoPages(meta) - 1;
-  if (last) {
-    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
-    let yy2 = top + 30 + 2 * (ch + 10) + 6;
-    extras.slice(0, 6).forEach((t) => {
-      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
-      yy2 += 11;
-    });
-  }
-}
-function signatureCard2(doc, y, rec, meta) {
-  const declLines = wrap6(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
-  const media = mediaLine(rec, meta);
-  const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  declLines.forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
-    yy2 += 11;
-  });
-  if (media) {
-    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
-    yy2 += 14;
-  }
-  const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
-  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
-  const bw = 200, y2 = y + h - 54;
-  const blocks = [
-    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
-    { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
-  ];
-  blocks.forEach((b) => {
-    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
-    doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
-    doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
-    tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
-  });
-  return h;
-}
-function buildPumpPdf(record, meta = {}) {
-  const rec = record || {};
-  rec.checks = Array.isArray(rec.checks) ? rec.checks : [];
-  const introBottom = 30 + HEADER_H2 + GAP2 + instrH(rec) + GAP2 + safetyH(rec) + GAP2;
-  const bottomLimit = H3 - 40;
-  const cap2 = (top) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H2 + 12)) / ROW_H2));
-  const slimTop = 30 + 40 + GAP2;
-  const page1Cap = cap2(introBottom), laterCap = cap2(slimTop);
-  const pages = [];
-  pages.push({ start: 0, rows: rec.checks.slice(0, page1Cap), intro: true, top: introBottom });
-  let i = page1Cap;
-  while (i < rec.checks.length) {
-    pages.push({ start: i, rows: rec.checks.slice(i, i + laterCap), intro: false, top: slimTop });
-    i += laterCap;
-  }
-  if (!pages.length) pages.push({ start: 0, rows: [], intro: true, top: introBottom });
-  const last = pages[pages.length - 1];
-  const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
-  const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
-  const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
-  const nPhotoPages = photoPages(meta);
-  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
-  const doc = new PdfDoc(W5, H3);
-  pages.forEach((pg, idx) => {
-    if (idx > 0) doc.newPage(W5, H3);
-    pageBg2(doc);
-    if (pg.intro) {
-      header2(doc, rec, meta, false);
-      let yy2 = 30 + HEADER_H2 + GAP2;
-      yy2 += instrCard(doc, yy2, rec) + GAP2;
-      yy2 += safetyCard(doc, yy2, rec) + GAP2;
-      checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
-    } else {
-      header2(doc, rec, meta, true);
-      checksCard(doc, pg.rows, pg.start, pg.top, null);
-    }
-    footer2(doc, idx + 1, totalPages);
-  });
-  let ty;
-  if (trailOwnPage) {
-    doc.newPage(W5, H3);
-    pageBg2(doc);
-    header2(doc, rec, meta, true);
-    footer2(doc, totalPages, totalPages);
-    ty = slimTop;
-  } else ty = lastBottom + GAP2;
-  const dh = detailsCard2(doc, ty, rec);
-  if (dh) ty += dh + GAP2;
-  signatureCard2(doc, ty, rec, meta);
-  const before = pages.length + (trailOwnPage ? 1 : 0);
-  for (let p = 0; p < nPhotoPages; p++) {
-    doc.newPage(W5, H3);
-    pageBg2(doc);
-    header2(doc, rec, meta, true);
-    footer2(doc, before + p + 1, totalPages);
-    photoPage(doc, rec, meta, p);
-  }
-  return doc.bytes();
-}
-
-// src/routes/pump.js
-init_logo();
-init_filesign();
-init_push();
-init_compliance();
-init_pngdecode();
-var GENERAL = [
-  "Chamber free of debris or obstructions",
-  "Water level within expected range when idle",
-  "Pump body free from corrosion or damage",
-  "Electrical cables undamaged and away from water",
-  "Discharge pipe secure and supported",
-  "Float switch activates pump when lifted",
-  "Pump runs smoothly with no unusual noise/vibration",
-  "Water discharges fully through outlet",
-  "Pump switches off automatically after emptying",
-  "Discharge outlet clear of blockages or freezing",
-  "Non-return/check valve prevents backflow (where Fitted)",
-  "Sump chamber inlet screen free of debris",
-  "Inspection details recorded in log"
-];
-var BINFIELD_CHECKS = [
-  "Chamber free of debris or obstructions",
-  "Water level within expected range when idle",
-  "Pump body free from corrosion or damage",
-  "Electrical cables undamaged and away from water",
-  "Discharge pipe secure and supported",
-  "Float switch activates pump when lifted",
-  "Pump runs smoothly with no unusual noise/vibration",
-  "Water discharges fully through outlet",
-  "Pump switches off automatically after emptying",
-  "Discharge outlet clear of blockages or freezing",
-  "Non-return/check valve prevents backflow",
-  "Sump chamber inlet screen free of debris",
-  "Control panel or alarm system functioning",
-  "Inspection details recorded in log"
-];
-var WICKHAM_CHECKS = BINFIELD_CHECKS.concat([
-  "Water Pumping into ditch",
-  "Ditch inlet & outlet clear from debris",
-  "Ditch generally tidy of debris",
-  "CCTV receiving power"
-]);
-var INSTR = {
-  binfield: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nAlarm float switch:\n- Located in the basement, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (warehouse).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  wickham: "The sump pump is in the rear garden of the store, under a manhole in the grass (approx. 5 m deep).\nAccessing the pump: pull it up carefully using the rope, then lower it back down slowly after checks.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 5 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nDitch maintenance:\n- Clear all debris from both ends of the ditch to maintain flow.\n- Remove any debris along the ditch length as well.\n\nAlarm float switch:\n- Located in the manhole, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (just inside the rear doors).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  eastbourne: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  shanklin: "The sump pump is in the basement in the BOH area of the store.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nElectrical Cut Off switch:\n- Located on the wall, above the pump.\n- Tilting it should activate the contactors above the basement and cut all 230v electricity to the lighting and tube heaters.\n- When the float switch is released, the contactor should re-engage and bring the 230v power back on.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  wimbledon: "There are two pumps to test in this store.\n\nFirst pump - located in a hatch in the staff room.\n- Remove the skirting and lift the hatch to access.\n- This area must be shut off while the hatch is open and all staff notified of the risk.\n\nSecond pump - located in the rear area of the store basement (not occupied by Co-op).\n- Key can be acquired via the store manager.\n- Walk inside the unit, turn back on yourself, and you will see the pump.\n\nPriming the pump:\n- Fill buckets from the store's cleaners' sink tap (approx. 2 buckets) and pour into the sump.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  newportels: "The sump pump is in the basement below the reception desk printer.\nThe printer will need moving to complete the test.\nStaff must be notified, and the area barriered off.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n\nImportant:\n- Ensure the hatch is fitted back correctly and flush.\n- Always leave both the pump and the alarm float switch in their correct positions after maintenance."
-};
-var DEFAULT_CONFIG3 = {
-  declaration: "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.",
-  contractor: { tradingTitle: "Mostlane", address: "Unit A5, Segensworth Business Centre, Titchfield", postcode: "PO15 5RQ" },
-  safety: [
-    { id: "barrier", label: "Area made safe and barriered off correctly to prevent injury (e.g. someone falling into the open hatch/sump)" },
-    { id: "notified", label: "Store staff have been notified that the works are being carried out" }
-  ],
-  stores: [
-    { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
-    { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
-    { id: "eastbourne", name: "Eastbourne", siteCode: "0356", client: "retail", address: "Eastbourne, Lindfield Road", postcode: "BN22 0AU", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
-    { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
-    { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
-    { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
-  ]
-};
-var normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
-async function ensureTables5(env) {
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
-    tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
-    status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
-    created_at TEXT, updated_at TEXT, r2_final_key TEXT,
-    PRIMARY KEY (tenant_id, id))`).run();
-}
-async function getConfig4(env, tid) {
-  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
-  if (row && row.value) {
-    try {
-      const c = JSON.parse(row.value);
-      if (c && Array.isArray(c.stores)) return c;
-    } catch {
-    }
-  }
-  await saveConfig2(env, tid, DEFAULT_CONFIG3);
-  return JSON.parse(JSON.stringify(DEFAULT_CONFIG3));
-}
-async function saveConfig2(env, tid, c) {
-  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
-}
-async function getJob3(env, tid, id) {
-  try {
-    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
-    return row ? JSON.parse(row.data) : null;
-  } catch {
-    return null;
-  }
-}
-function storeById(cfg, id) {
-  return (cfg.stores || []).find((s) => s.id === id) || null;
-}
-function dataUrlToBytes2(u) {
-  const s = String(u || "");
-  const i = s.indexOf(",");
-  if (!/^data:image\//i.test(s) || i < 0) return null;
-  try {
-    const bin = atob(s.slice(i + 1));
-    const out = new Uint8Array(bin.length);
-    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
-    return out;
-  } catch {
-    return null;
-  }
-}
-var isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
-var isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
-async function sigImage(dataUrl) {
-  const b = dataUrlToBytes2(dataUrl);
-  if (!b) return null;
-  if (isJpeg(b)) return { jpeg: b };
-  if (isPng(b)) {
-    const d = await decodePngToRgb(b, { signature: true });
-    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
-  }
-  return null;
-}
-function shrinkRgb(rgb, w, h, maxEdge) {
-  const s = Math.max(w, h) / maxEdge;
-  if (s <= 1) return { rgb, w, h };
-  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
-  const out = new Uint8Array(nw * nh * 3);
-  for (let y = 0; y < nh; y++) {
-    const sy = Math.min(h - 1, Math.floor(y * s));
-    for (let x = 0; x < nw; x++) {
-      const sx = Math.min(w - 1, Math.floor(x * s));
-      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
-      out[di] = rgb[si];
-      out[di + 1] = rgb[si + 1];
-      out[di + 2] = rgb[si + 2];
-    }
-  }
-  return { rgb: out, w: nw, h: nh };
-}
-async function deflate(bytes) {
-  try {
-    const cs = new CompressionStream("deflate");
-    const w = cs.writable.getWriter();
-    w.write(bytes);
-    w.close();
-    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
-  } catch {
-    return null;
-  }
-}
-async function photoImage(env, m) {
-  try {
-    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
-    if (!o) return { why: "file missing" };
-    const b = new Uint8Array(await o.arrayBuffer());
-    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
-    if (isPng(b)) {
-      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
-      if (!d) return { why: "PNG couldn't be decoded" };
-      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
-      const z = await deflate(s.rgb);
-      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
-    }
-    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
-    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
-  } catch (e) {
-    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
-  }
-}
-var MAX_PDF_PHOTOS = 12;
-async function pdfMeta(env, d) {
-  const media = Array.isArray(d.media) ? d.media : [];
-  const photos = [], skipped = [], videos = [];
-  for (const m of media) {
-    if (!m || !m.key) continue;
-    if (m.kind === "video") {
-      videos.push(m.name || "video");
-      continue;
-    }
-    if (photos.length >= MAX_PDF_PHOTOS) {
-      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
-      continue;
-    }
-    const r = await photoImage(env, m);
-    if (r.img) photos.push(r.img);
-    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
-  }
-  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
-}
-async function buildPdfFor(env, rec) {
-  const d = shapeRow2(rec);
-  return buildPumpPdf(d, await pdfMeta(env, d));
-}
-function shapeRow2(r) {
-  let d = {};
-  try {
-    d = JSON.parse(r.data || "{}");
-  } catch {
-  }
-  return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d };
-}
-function seedRecord(cfg, store, job) {
-  return {
-    store: store.id,
-    storeName: store.name,
-    siteCode: store.siteCode || "",
-    instructions: store.instructions || "",
-    declaration: cfg.declaration || "",
-    safety: (cfg.safety || []).map((s) => ({ id: s.id, label: s.label, answer: "" })),
-    checks: (store.checks || []).map((c) => ({ label: c, answer: "" })),
-    detailsNo: "",
-    declarationAgreed: "",
-    date: "",
-    engineerName: "",
-    dmName: "",
-    engSig: "",
-    dmSig: "",
-    media: []
-  };
-}
-async function maybeCompletePumpJob(env, tid, rec) {
-  try {
-    if (!rec || !rec.job_id) return false;
-    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, rec.job_id).first();
-    if (!row) return false;
-    let job;
-    try {
-      job = JSON.parse(row.data);
-    } catch {
-      return false;
-    }
-    if (!job.pumpMaintenance) return false;
-    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
-    if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    job.status = "Complete";
-    job.updatedAt = now;
-    job.closedAt = job.closedAt || now;
-    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
-    if (engs.length) {
-      job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "pump" };
-    }
-    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
-    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function resignMedia(env, origin, rec) {
-  if (!rec || !Array.isArray(rec.media)) return rec;
-  for (const m of rec.media) {
-    if (m && m.key) {
-      try {
-        m.url = await signedFileUrl(env, origin, "/pump/media", m.key);
-      } catch {
-      }
-    }
-  }
-  return rec;
-}
-async function handle34(request, env, ctx, url, sess) {
-  const method = request.method.toUpperCase();
-  if (method === "GET" && url.pathname === "/pump/media") {
-    const key = url.searchParams.get("key") || "";
-    if (!key.startsWith("pump/")) return new Response("Bad key", { status: 400 });
-    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
-    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
-    if (!obj) return new Response("Not found", { status: 404 });
-    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream", "Cache-Control": "public, max-age=86400" } });
-  }
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const tid = sess.tenantId, me = sess.user.username;
-  const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
-  const q = url.searchParams;
-  await ensureTables5(env);
-  const perms = await permissionsFor(env, tid, me);
-  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
-  const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
-  const canWrite = async (rec) => {
-    if (isOffice) return true;
-    if (!rec) return true;
-    if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
-    try {
-      const job = rec.job_id ? await getJob3(env, tid, String(rec.job_id)) : null;
-      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
-      return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
-    } catch {
-      return false;
-    }
-  };
-  if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig4(env, tid) }, {}, env, request);
-    if (method === "POST") {
-      if (!isOffice) return error("Office access required", 403, env, request);
-      const b = await request.json().catch(() => ({}));
-      const cur = await getConfig4(env, tid);
-      const next = { ...cur };
-      if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
-      if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
-      if (Array.isArray(b.safety)) next.safety = b.safety.map((s, i) => ({ id: String(s.id || "s" + i), label: String(s.label || "").slice(0, 300) })).filter((s) => s.label);
-      if (Array.isArray(b.stores)) next.stores = b.stores.map((s) => ({
-        id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
-        name: String(s.name || "").slice(0, 120),
-        siteCode: String(s.siteCode || "").slice(0, 20),
-        client: String(s.client || "").slice(0, 40),
-        address: String(s.address || "").slice(0, 300),
-        postcode: String(s.postcode || "").slice(0, 20),
-        instructions: String(s.instructions || "").slice(0, 4e3),
-        checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
-      })).filter((s) => s.name);
-      await saveConfig2(env, tid, next);
-      return json({ ok: true, config: next }, {}, env, request);
-    }
-  }
-  if (sub === "/stores" && method === "GET") {
-    const cfg = await getConfig4(env, tid);
-    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
-  }
-  if (sub === "/for-job" && method === "GET") {
-    const jobId = q.get("jobId") || "";
-    if (!jobId) return error("jobId required", 400, env, request);
-    const cfg = await getConfig4(env, tid);
-    const job = await getJob3(env, tid, jobId);
-    let storeId = q.get("store") || job && job.pumpStore || "";
-    const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
-    if (existing) {
-      const rec = shapeRow2(existing);
-      await resignMedia(env, url.origin, rec);
-      const store2 = storeById(cfg, rec.store) || null;
-      return json({ ok: true, record: rec, store: store2, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
-    }
-    const store = storeById(cfg, storeId) || (cfg.stores || [])[0];
-    if (!store) return error("No pump stores configured", 400, env, request);
-    const seeded = seedRecord(cfg, store, job);
-    seeded.date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    if (job) seeded.engineerName = "";
-    return json({ ok: true, record: { id: null, jobId, status: "draft", ...seeded }, store, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
-  }
-  if (sub === "/save" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const jobId = String(b.jobId || "");
-    let rec = null, id = b.id ? String(b.id) : "";
-    if (id) rec = await loadRec(id);
-    if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cfg = await getConfig4(env, tid);
-    const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
-    const sanSig = (v) => {
-      const s = String(v || "");
-      return /^data:image\//.test(s) && s.length <= 4e5 ? s : rec ? void 0 : "";
-    };
-    const data = {
-      storeName: store ? store.name : b.storeName || "",
-      instructions: store ? store.instructions : b.instructions || "",
-      declaration: cfg.declaration || "",
-      safety: Array.isArray(b.safety) ? b.safety.map((s) => ({ id: String(s.id || ""), label: String(s.label || ""), answer: String(s.answer || "") })) : [],
-      checks: Array.isArray(b.checks) ? b.checks.map((c) => ({ label: String(c.label || ""), answer: String(c.answer || "") })) : [],
-      detailsNo: String(b.detailsNo || "").slice(0, 4e3),
-      declarationAgreed: b.declarationAgreed === true || String(b.declarationAgreed || "").toLowerCase().startsWith("y") ? "yes" : "",
-      date: String(b.date || "").slice(0, 20),
-      engineerName: String(b.engineerName || "").slice(0, 120),
-      dmName: String(b.dmName || "").slice(0, 120),
-      media: rec ? shapeRow2(rec).media || [] : []
-    };
-    const es = sanSig(b.engSig);
-    if (es !== void 0) data.engSig = es;
-    else if (rec) data.engSig = shapeRow2(rec).engSig || "";
-    const ds = sanSig(b.dmSig);
-    if (ds !== void 0) data.dmSig = ds;
-    else if (rec) data.dmSig = shapeRow2(rec).dmSig || "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    if (!id) {
-      id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-    }
-    const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
-    const storeId = store ? store.id : rec ? rec.store : "";
-    if (rec) {
-      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
-    } else {
-      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
-    }
-    const saved = await loadRec(id);
-    const out = shapeRow2(saved);
-    await resignMedia(env, url.origin, out);
-    return json({ ok: true, record: out }, {}, env, request);
-  }
-  if (sub === "/media" && method === "POST") {
-    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
-    const form = await request.formData().catch(() => null);
-    if (!form) return error("multipart required", 400, env, request);
-    const id = String(form.get("id") || "");
-    const kind = String(form.get("kind") || "photo") === "video" ? "video" : "photo";
-    const file = form.get("file");
-    if (!id || !file || typeof file.arrayBuffer !== "function") return error("id + file required", 400, env, request);
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (rec.status === "final") return error("Record finalised", 409, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cap2 = kind === "video" ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
-    const buf = new Uint8Array(await file.arrayBuffer());
-    if (buf.length > cap2) return error(kind === "video" ? "Video too large (max 95 MB \u2014 keep the clip short)" : "Photo too large (max 12 MB)", 413, env, request);
-    const ext = (String(file.name || "").match(/\.([a-z0-9]{2,5})$/i) || [, kind === "video" ? "mp4" : "jpg"])[1].toLowerCase();
-    const key = `pump/${tid}/${id}/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg") } });
-    const d = shapeRow2(rec);
-    const media = Array.isArray(d.media) ? d.media : [];
-    media.push({ key, kind, name: String(file.name || kind + "." + ext).slice(0, 160) });
-    const data = { ...d };
-    delete data.id;
-    delete data.jobId;
-    delete data.store;
-    delete data.siteCode;
-    delete data.status;
-    delete data.engineer;
-    delete data.createdAt;
-    delete data.updatedAt;
-    data.media = media;
-    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    const urlOut = await signedFileUrl(env, url.origin, "/pump/media", key);
-    return json({ ok: true, key, kind, name: media[media.length - 1].name, url: urlOut }, {}, env, request);
-  }
-  if (sub === "/media-delete" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || ""), key = String(b.key || "");
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    if (key.startsWith("pump/") && env.JOB_FILES) {
-      try {
-        await env.JOB_FILES.delete(key);
-      } catch {
-      }
-    }
-    const d = shapeRow2(rec);
-    const media = (Array.isArray(d.media) ? d.media : []).filter((m) => m.key !== key);
-    const data = { ...d };
-    delete data.id;
-    delete data.jobId;
-    delete data.store;
-    delete data.siteCode;
-    delete data.status;
-    delete data.engineer;
-    delete data.createdAt;
-    delete data.updatedAt;
-    data.media = media;
-    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (sub === "/submit" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || "");
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    const fresh = await loadRec(id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
-      title: "\u{1F6B0} Pump maintenance submitted",
-      body: `${shapeRow2(rec).storeName || "A store"} \u2014 ready for office review`,
-      url: "/cert-review.html?pump=" + encodeURIComponent(id),
-      tag: "pump-review"
-    }, me).catch(() => {
-    }));
-    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
-  }
-  if (sub === "/one" && method === "GET") {
-    const rec = await loadRec(q.get("id") || "");
-    if (!rec) return error("Not found", 404, env, request);
-    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
-    const out = shapeRow2(rec);
-    await resignMedia(env, url.origin, out);
-    return json({ ok: true, record: out }, {}, env, request);
-  }
-  if (sub === "/review" && method === "GET") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status IN ('draft','review') ORDER BY updated_at DESC LIMIT 200").bind(tid).all();
-    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
-  }
-  if (sub === "/list" && method === "GET") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const store = q.get("store") || "";
-    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status='final' AND (?='' OR store=?) ORDER BY updated_at DESC LIMIT 200").bind(tid, store, store).all();
-    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
-  }
-  if (sub === "/pdf" && method === "GET") {
-    const rec = await loadRec(q.get("id") || "");
-    if (!rec) return error("Not found", 404, env, request);
-    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
-    const d = shapeRow2(rec);
-    const bytes = await buildPdfFor(env, rec);
-    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
-  }
-  if (sub === "/finalise" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    const d = shapeRow2(rec);
-    const bytes = await buildPdfFor(env, rec);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
-    if (env.JOB_FILES) {
-      try {
-        await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
-      } catch {
-      }
-    }
-    let filedToSite = false;
-    const code = rec.site_code || d.siteCode || "";
-    if (code) {
-      try {
-        await fileCertificatePdf(env, tid, {
-          scheme: "coop",
-          code,
-          type: "pump",
-          bytes,
-          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
-          docDate: d.date || now.slice(0, 10),
-          bump: true,
-          source: "pump:" + rec.id,
-          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
-        });
-        filedToSite = true;
-      } catch {
-      }
-    }
-    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
-    const fresh = await loadRec(rec.id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    if (rec.engineer) ctx && ctx.waitUntil && ctx.waitUntil(sendToUser(env, tid, rec.engineer, { title: "\u{1F6B0} Pump record filed", body: `${d.storeName || "Pump"} maintenance record finalised`, url: "/pump-review.html", tag: "pump-final" }).catch(() => {
-    }));
-    return json({ ok: true, record: shapeRow2(fresh), filedToSite }, {}, env, request);
-  }
-  if (sub === "/upload" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
-    const form = await request.formData().catch(() => null);
-    if (!form) return error("multipart required", 400, env, request);
-    const rec = await loadRec(String(form.get("id") || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    const file = form.get("file");
-    if (!file || typeof file.arrayBuffer !== "function") return error("file required", 400, env, request);
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
-    await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
-    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, (/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
-    const fresh = await loadRec(rec.id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
-  }
-  if (sub === "/reopen" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (sub === "/delete" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    if (env.JOB_FILES) {
-      try {
-        const l = await env.JOB_FILES.list({ prefix: `pump/${tid}/${rec.id}/` });
-        for (const o of l.objects || []) await env.JOB_FILES.delete(o.key);
-      } catch {
-      }
-    }
-    await env.DB.prepare("DELETE FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, rec.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Not found: " + url.pathname, 404, env, request);
-}
+init_pump();
 
 // src/routes/cablecalc.js
 init_http();
@@ -38179,37 +38261,37 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
-  ["*", "/holiday", handle11],
-  ["*", "/asset", handle12],
+  ["*", "/holiday", handle12],
+  ["*", "/asset", handle13],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle12],
+  ["*", "/transfer", handle13],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle12],
-  ["*", "/upload-asset-thumb", handle12],
-  ["*", "/delete-asset-image", handle12],
+  ["*", "/upload-asset-image", handle13],
+  ["*", "/upload-asset-thumb", handle13],
+  ["*", "/delete-asset-image", handle13],
   ["*", "/sla/workever", handle41],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle10],
-  ["*", "/stats", handle20],
-  ["*", "/staff", handle21],
+  ["*", "/sla", handle11],
+  ["*", "/stats", handle21],
+  ["*", "/staff", handle22],
   // staff personal + company documents
-  ["*", "/hr/", handle22],
+  ["*", "/hr/", handle23],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle23],
+  ["*", "/privacy", handle24],
   // GDPR data export + erasure
-  ["*", "/fleet", handle25],
+  ["*", "/fleet", handle26],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle26],
+  ["*", "/messages", handle27],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle27],
+  ["*", "/memos", handle28],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle28],
+  ["*", "/documents", handle29],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle31],
+  ["*", "/ai", handle32],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -38221,50 +38303,50 @@ var ROUTES = [
   ["*", "/import-sites", handle7],
   ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle24],
+  ["*", "/sites/register", handle25],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle24],
+  ["*", "/ledger", handle25],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle24],
+  ["*", "/costing", handle25],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle24],
+  ["*", "/exceptions", handle25],
   // needs-a-human-eye list
   ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle29],
+  ["*", "/chapplins", handle30],
   // Chapplins customer: site tenants (current/previous) + directory
-  ["*", "/settings", handle13],
-  ["*", "/oncall", handle13],
-  ["*", "/daily-logs", handle13],
-  ["*", "/notify", handle13],
+  ["*", "/settings", handle14],
+  ["*", "/oncall", handle14],
+  ["*", "/daily-logs", handle14],
+  ["*", "/notify", handle14],
   // notification audit log
-  ["*", "/prefs", handle13],
+  ["*", "/prefs", handle14],
   // per-user cross-device markers
-  ["*", "/menu-config", handle13],
+  ["*", "/menu-config", handle14],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle13],
+  ["*", "/audit", handle14],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle14],
-  ["*", "/sitelog-launch", handle14],
-  ["*", "/office", handle15],
+  ["*", "/sitelog", handle15],
+  ["*", "/sitelog-launch", handle15],
+  ["*", "/office", handle16],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle16],
+  ["*", "/key", handle17],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle17],
+  ["*", "/theme", handle18],
   // per-user colour theme + background
-  ["*", "/hs/", handle18],
+  ["*", "/hs/", handle19],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle19],
+  ["*", "/vancheck", handle20],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle30],
+  ["*", "/po", handle31],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle32],
+  ["*", "/cctv", handle33],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle33],
+  ["*", "/tasks", handle34],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/certs", handle9],
+  ["*", "/certs", handle10],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle34],
+  ["*", "/pump", handle9],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/cablecalc", handle35],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
