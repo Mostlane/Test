@@ -128,7 +128,8 @@
     <div id="tab-drivers" class="tabpane hide">
       <div class="card">
         <h2 style="margin:0 0 2px;font-size:16px">🚗 Monthly driver licence checks</h2>
-        <p class="muted" style="font-size:13px;margin:0 0 10px">Every driver with a company vehicle should have a licence check logged each month. Tap <b>Log check</b> to record one (with proof).</p>
+        <p class="muted" style="font-size:13px;margin:0 0 10px">Every driver with a company vehicle should have a licence check logged each month. Tap <b>Log check</b> to record one (with proof).<br>
+          <b>🔁 Check</b> = our monthly DVLA check (30-day). <b>🚗 Licence exp</b> = when their photocard driving licence itself expires (field 4b) — two different dates.</p>
         <div id="driverList"><p class="muted">Loading…</p></div>
       </div>
     </div>
@@ -212,12 +213,12 @@
     { kind:"licence", emoji:"🚗", label:"Driving licences", one:"driving licence",
       titleLabel:"Licence type", titlePh:"Driving Licence", titleDef:"Driving Licence",
       fields:[ {col:"number",label:"Licence number"}, {col:"data.categories",label:"Categories (e.g. B, C1, CE)"},
-               {col:"data.points",label:"Points / endorsements"}, {col:"issued",label:"Issued",type:"date"},
-               {col:"expires",label:"Expires",type:"date"} ] },
+               {col:"data.points",label:"Points / endorsements"}, {col:"issued",label:"Issue date (4a)",type:"date"},
+               {col:"expires",label:"Licence expiry (photocard 4b)",type:"date"} ] },
     { kind:"licence_check", emoji:"✅", label:"Licence checks (DVLA)", one:"licence check",
       titleLabel:"Check", titlePh:"DVLA licence check", titleDef:"DVLA licence check",
       fields:[ {col:"issued",label:"Checked on",type:"date"}, {col:"data.result",label:"Result / points found"},
-               {col:"data.checkedBy",label:"Checked by"}, {col:"expires",label:"Next check due",type:"date"} ] },
+               {col:"data.checkedBy",label:"Checked by"}, {col:"expires",label:"Next check due (monthly)",type:"date"} ] },
   ];
   const kindDef = k => KINDS.find(x=>x.kind===k);
 
@@ -310,10 +311,14 @@
     }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
   }
   function badge(x){
-    if(x.status==="expired") return `<span class="chip red">Expired ${fmtDate(x.expires)}</span>`;
-    if(x.status==="expiring") return `<span class="chip amber">Expires ${fmtDate(x.expires)} · ${x.daysLeft}d</span>`;
-    if(x.status==="valid") return `<span class="chip green">Valid to ${fmtDate(x.expires)}</span>`;
-    return `<span class="chip grey">No expiry</span>`;
+    // Word the date by record type so a monthly check's "next due" is never
+    // mistaken for the photocard licence's expiry.
+    const noun = x.kind==="licence_check" ? "Next check" : (x.kind==="licence" ? "Licence" : "");
+    const exp = fmtDate(x.expires);
+    if(x.status==="expired"){ return x.kind==="licence_check" ? `<span class="chip red">Check overdue (${exp})</span>` : `<span class="chip red">${noun?noun+" expired":"Expired"} ${exp}</span>`; }
+    if(x.status==="expiring"){ return x.kind==="licence_check" ? `<span class="chip amber">Next check ${exp} · ${x.daysLeft}d</span>` : `<span class="chip amber">${noun?noun+" expires":"Expires"} ${exp} · ${x.daysLeft}d</span>`; }
+    if(x.status==="valid"){ return x.kind==="licence_check" ? `<span class="chip green">Next check ${exp}</span>` : `<span class="chip green">${noun?noun+" valid to":"Valid to"} ${exp}</span>`; }
+    return `<span class="chip grey">${x.kind==="licence_check"?"No next check set":"No expiry"}</span>`;
   }
   function recHtml(x,manage){
     const d=x.data||{};
@@ -391,11 +396,17 @@
   }
   function renderDrivers(){
     if(!DRIVERS.length){ g("driverList").innerHTML='<p class="muted">No drivers with a company vehicle assigned.</p>'; return; }
+    const licPill = d => {
+      if(!d.licenceExpiry) return `<span class="chip grey" title="No driving licence on file">🚗 Licence: not on file</span>`;
+      const cls = d.licenceStatus==="expired" ? "red" : (d.licenceStatus==="expiring" ? "amber" : "green");
+      return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${fmtDate(d.licenceExpiry)}</span>`;
+    };
     g("driverList").innerHTML = DRIVERS.map(d=>`
       <div class="emp">
         <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
         <span class="row" style="gap:6px">
-          ${d.status==="due" ? `<span class="chip amber">Due this month</span>` : `<span class="chip green">✓ Checked ${fmtDate(d.lastChecked)}</span>`}
+          ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${fmtDate(d.lastChecked)}</span>`}
+          ${licPill(d)}
           <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
           <button class="btn ghost small" data-open="${esc(d.username)}" data-n="${esc(d.name)}">History</button>
         </span>

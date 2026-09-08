@@ -1198,6 +1198,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     are converted to JPEG in the browser** (lazy-loaded heic2any from jsdelivr)
     before OCR + upload, so a photographed licence reads AND stores viewable;
     fails soft to the original file if the converter can't load.
+    **Two distinct driver dates (never conflate):** a `licence` record's `expires`
+    is the **photocard licence expiry (4b, ~10y)** — labelled "Licence expiry
+    (photocard 4b)"; a `licence_check` record's `expires` is the **next monthly
+    DVLA check due (30-day)** — labelled "Next check due (monthly)". Badges are
+    kind-aware ("Licence valid to…" vs "Next check…"), and the drivers tab shows
+    BOTH as separate pills (🔁 monthly check · 🚗 Licence exp). computeDriverChecks
+    returns `licenceExpiry`/`licenceStatus` (latest licence record) alongside the
+    monthly `status`/`nextDue`.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.

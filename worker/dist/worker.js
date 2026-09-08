@@ -23131,13 +23131,34 @@ async function computeDriverChecks(db) {
     }
   } catch {
   }
+  const lic = {};
+  try {
+    const { results } = await db.prepare(
+      "SELECT username, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
+    ).bind(db.tenantId).all();
+    for (const r of results || []) {
+      const cur = lic[r.username];
+      if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
+    }
+  } catch {
+  }
   const month = todayISO().slice(0, 7);
   return drivers.map((u) => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
     const l = latest[u.username] || null;
     const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
     const nextDue = l ? l.expires || "" : "";
-    return { username: u.username, name, reg: u.vehicle_assigned || "", lastChecked: l ? l.issued : "", nextDue, status: doneThisMonth ? "done" : "due" };
+    const licenceExpiry = lic[u.username] || "";
+    return {
+      username: u.username,
+      name,
+      reg: u.vehicle_assigned || "",
+      lastChecked: l ? l.issued : "",
+      nextDue,
+      status: doneThisMonth ? "done" : "due",
+      licenceExpiry,
+      licenceStatus: statusOf2(licenceExpiry)
+    };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
 async function handle22(request, env, ctx, url, sess) {
