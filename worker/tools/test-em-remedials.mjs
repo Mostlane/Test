@@ -22,6 +22,7 @@ function makeEnv(scenario) {
        { id:"C1:2", cert_id:"C1", tenant_id:"1", kind:"light", status:"done", replaced_on_site:1, fitting_no:14, light_ref:"Office", site_code:"0622", site_name:"Co-op Shanklin", cert_number:"0622-26", photos:"[]", charge:50 }];
   const ack = { cert_id:"C1", tenant_id:"1", cert_number:"0622-26", site_code:"0622", site_name:"Co-op Shanklin", fittings: rems.length, charge: rems.length*50, onsite: rems.filter(r=>r.status==="done").length, pending: rems.filter(r=>r.status==="pending").length, batteries: rems.filter(r=>r.kind==="battery").length, stage:"quoted", status_label: scenario==="allonsite"?"onsite":"works", created_at:"2026-09-07T13:40:00Z" };
   const jobs = {}; const inserted = {};
+  if (scenario === "owner") jobs.J1 = { id:"J1", status:"Scheduled", assignedEngineers:["Ryan Diggens"], assignedTo:"Ryan Diggens" };
   const db = { prepare(sql) { let binds=[]; const st = {
     bind(...a){ binds=a; return st; },
     async first(){ calls.push(sql.slice(0,80));
@@ -36,7 +37,7 @@ function makeEnv(scenario) {
       if (/COUNT\(\*\)/i.test(sql)) return { n:0, c:0 };
       return null; },
     async all(){ calls.push(sql.slice(0,80));
-      if (/FROM user_permissions/i.test(sql)) return { results:[{ permission:"FullAccess", value:1 }] };
+      if (/FROM user_permissions/i.test(sql)) return { results: binds.some(b => /ryan|other guy/i.test(String(b))) ? [] : [{ permission:"FullAccess", value:1 }] };
       if (/FROM em_remedials WHERE/i.test(sql)) { let rows = rems; if (/status='pending'/i.test(sql)) rows = rows.filter(r=>r.status==="pending"); return { results: rows }; }
       if (/FROM em_remedial_acks/i.test(sql)) return { results:[ack] };
       if (/FROM sla_jobs WHERE tenant_id=\? AND id LIKE/i.test(sql)) return { results: Object.values(jobs).map(j=>({id:j.id,status:j.status})) };
@@ -57,6 +58,14 @@ async function call(env, method, path, body) {
   const url = new URL("https://api.test" + path);
   const req = new Request(url, { method, headers:{ Authorization:"Bearer T", "Content-Type":"application/json" }, body: body ? JSON.stringify(body) : undefined });
   const res = await certs.handle(req, env, { waitUntil(){} }, url, sess);
+  let j=null; try { j = await res.clone().json(); } catch {}
+  return { status: res.status, body: j };
+}
+async function callAs(env, who, method, path, body) {
+  const url = new URL("https://api.test" + path);
+  const isForm = body instanceof FormData;
+  const req = new Request(url, { method, headers: Object.assign({ Authorization:"Bearer T" }, isForm ? {} : { "Content-Type":"application/json" }), body: body ? (isForm ? body : JSON.stringify(body)) : undefined });
+  const res = await certs.handle(req, env, { waitUntil(){} }, url, { user:{ username: who, tenant_id:"1" }, tenantId:"1", session:{ token:"T" } });
   let j=null; try { j = await res.clone().json(); } catch {}
   return { status: res.status, body: j };
 }
@@ -106,6 +115,24 @@ let fail = 0; const ok = (name, cond, extra="") => { console.log((cond?"PASS":"F
   ok("fitting-update: case re-derived (no batteries, works)", E.writes.some(w => /UPDATE em_remedial_acks SET fittings=/.test(w.sql) && w.binds[4]===0 && w.binds[6]==="works"));
   const bad = await call(E.env, "POST", "/certs/remedials/fitting-update", { certId:"C1", id:"C1:9", kind:"light" });
   ok("fitting-update: unknown fitting refused", bad.status===404);
+}
+
+
+{ // Certificate ownership: the job's ASSIGNED engineer may add photos even when the
+  // office created the cert row (Southbourne: Ryan's 9 uploads bounced 403 because
+  // Tanya's job-view autosave had stamped her as the cert's engineer).
+  const E = makeEnv("owner");
+  const fd = new FormData(); fd.append("certId", "C1"); fd.append("file", new Blob([new Uint8Array([0xff,0xd8,0xff,0xe0,0,0])], { type:"image/jpeg" }), "battery.jpg");
+  const r = await callAs(E.env, "Ryan Diggens", "POST", "/certs/photo", fd);
+  ok("assigned engineer can upload a photo to a cert the office created", r.status===200 && r.body && r.body.key && /^certremedial\/1\/C1\//.test(r.body.key), r.status + " " + JSON.stringify(r.body));
+  const fd2 = new FormData(); fd2.append("certId", "C1"); fd2.append("file", new Blob([1]), "x.jpg");
+  const r2 = await callAs(E.env, "Other Guy", "POST", "/certs/photo", fd2);
+  ok("engineer NOT on the job is still refused", r2.status===403, String(r2.status));
+  const r3 = await callAs(E.env, "Ryan Diggens", "GET", "/certs/one?id=C1");
+  ok("assigned engineer can open the cert", r3.status===200, String(r3.status));
+  const sv = await callAs(E.env, "Jamie Line", "POST", "/certs/save", { type:"em", jobId:"J1", siteCode:"0622", rows:[] });
+  const ins = E.writes.find(w => /INSERT INTO certificates/.test(w.sql) && w.binds[4]==="J1");
+  ok("office-created cert is owned by the job's engineer", sv.status===200 && ins && ins.binds[8]==="Ryan Diggens", ins ? String(ins.binds[8]) : "no insert");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");

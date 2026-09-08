@@ -11791,7 +11791,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!certId || !file || typeof file === "string") return error("Missing certId or file", 400, env, request);
     const cert = await loadCert(certId);
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
     const rand = Math.abs((Date.now() ^ certId.length * 2654435761) % 1e6);
     const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
@@ -11907,9 +11907,18 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     if (!existing) {
       id = "CERT-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      let owner = me;
+      if (isOffice && b.jobId) {
+        try {
+          const j = await getJob2(env, tid, String(b.jobId));
+          const engs = j ? Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [] : [];
+          if (engs.length && !engs.some((e) => String(e || "").toLowerCase().trim() === String(me || "").toLowerCase().trim())) owner = String(engs[0]);
+        } catch {
+        }
+      }
       await env.DB.prepare(
         "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), me, now, now).run();
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
     } else {
       await env.DB.prepare(
         "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
@@ -11945,7 +11954,7 @@ PAT: Import certificate number ${num2}-${yr}`;
   if (sub === "/pdf" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
     const sig = dataUrlToBytes2(rec.signature);
@@ -11960,7 +11969,7 @@ PAT: Import certificate number ${num2}-${yr}`;
   if (sub === "/one" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const oneRec = shapeRow2(cert);
     await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
@@ -12765,7 +12774,7 @@ ${con.tradingTitle || "Mostlane"}`;
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (cert.status === "final") return error("A finalised certificate can't be deleted here.", 409, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
   }
