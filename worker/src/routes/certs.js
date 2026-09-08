@@ -1654,7 +1654,7 @@ export async function handle(request, env, ctx, url, sess) {
     awaitingBatteries: !!(r.awaiting_batteries && !r.batteries_arrived_at), batteriesArrivedAt: r.batteries_arrived_at || null,
     statusLabel: r.status_label || (r.lights_pending ? "works" : (r.pending ? "batteries" : "onsite")),
     reissueCertId: r.reissue_cert_id || null,
-    items: (fittings || []).map(f => ({ no: f.fitting_no, ref: f.light_ref, kind: f.kind === "battery" ? "battery" : "light",
+    items: (fittings || []).map(f => ({ id: f.id, no: f.fitting_no, ref: f.light_ref, kind: f.kind === "battery" ? "battery" : "light",
       replacedOnSite: !!f.replaced_on_site, spec: f.kind === "battery" ? (f.battery_spec || "") : (f.light_spec || ""), qty: f.battery_qty || 0, note: f.note || "" })),
   });
   // Per-fitting rows for a set of cases (one query, grouped by cert).
@@ -1821,6 +1821,88 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     return json({ ok: true, stage: to, jobId, case: row ? shapeCase(row) : null }, {}, env, request);
+  }
+
+  // POST /certs/remedials/fitting-update {certId, id, kind?, replacedOnSite?} —
+  // the office corrects what the engineer logged on ONE fitting after finalise
+  // (Frome: four bulkheads logged as "batteries" that actually need new lights).
+  // Rewrites the certificate row AND the em_remedials row, then re-derives the
+  // case counts / status label from the rows (stage untouched). Once a works job
+  // exists its audit items are rewritten too, so the engineer sees the right ask.
+  if (sub === "/remedials/fitting-update" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || "").trim(), rowId = String(b.id || "").trim();
+    const kind = b.kind === undefined ? undefined : (b.kind === "battery" ? "battery" : "light");
+    const onsite = b.replacedOnSite === undefined ? undefined : !!b.replacedOnSite;
+    if (!certId || !rowId || (kind === undefined && onsite === undefined)) return error("Missing certId/id or nothing to change", 400, env, request);
+    const ack = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!ack) return error("No remedial case for that certificate", 404, env, request);
+    if (["done", "invoiced"].includes(ack.stage || "")) return error("This case is finished — the certificate has already been re-issued.", 409, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow(cert);
+    const rows = Array.isArray(rec.rows) ? rec.rows : [];
+    const fails = rows.map((r, i) => ({ r, i })).filter(x => isRealRemedial(x.r.remedial));
+    const f = fails[Number(String(rowId).split(":").pop())];
+    if (!f || !f.r.remedial) return error("That fitting isn't on the certificate", 404, env, request);
+    const rem = f.r.remedial;
+    const trail = [];
+    const wasKind = rem.kind === "battery" ? "battery" : "light";
+    if (kind !== undefined && kind !== wasKind) {
+      trail.push("Office changed to " + (kind === "battery" ? "batteries" : "light replacement") + " (engineer had logged "
+        + (wasKind === "battery" ? "batteries" + (rem.batterySpec ? ": " + rem.batterySpec : "") : "light replacement" + (rem.lightSpec ? ": " + rem.lightSpec : "")) + ")");
+      rem.kind = kind;
+    }
+    if (onsite !== undefined && onsite !== (rem.replacedOnSite === true)) { trail.push("Office marked " + (onsite ? "replaced on site" : "not replaced on site")); rem.replacedOnSite = onsite; }
+    if (trail.length) rem.note = [String(rem.note || "").trim(), ...trail].filter(Boolean).join(" · ");
+    rem.failed = true;
+    rows[f.i].remedial = rem; rec.rows = rows;
+    const nowIso = new Date().toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const isB = rem.kind === "battery";
+    await env.DB.prepare("UPDATE em_remedials SET kind=?, light_spec=?, battery_spec=?, battery_qty=?, replaced_on_site=?, status=?, note=? WHERE tenant_id=? AND id=?")
+      .bind(isB ? "battery" : "light", isB ? "" : String(rem.lightSpec || ""), isB ? String(rem.batterySpec || "") : "", isB ? (Number(rem.batteryQty) || 0) : 0,
+        rem.replacedOnSite ? 1 : 0, rem.replacedOnSite ? "done" : "pending", rem.note || "", tid, rowId).run();
+    // Re-derive the case from its rows.
+    const all = fails.map(x => { const m = x.r.remedial || {}; return { kind: m.kind === "battery" ? "battery" : "light", replaced: m.replacedOnSite === true }; });
+    const pend = all.filter(x => !x.replaced);
+    const battPend = pend.filter(x => x.kind === "battery").length;
+    await env.DB.prepare("UPDATE em_remedial_acks SET fittings=?, charge=?, onsite=?, pending=?, batteries=?, lights_pending=?, status_label=?, awaiting_batteries=CASE WHEN ?=0 THEN 0 ELSE awaiting_batteries END WHERE tenant_id=? AND cert_id=?")
+      .bind(all.length, all.length * REMEDIAL_CHARGE, all.length - pend.length, pend.length, all.filter(x => x.kind === "battery").length, pend.filter(x => x.kind !== "battery").length, caseStatusLabel(all), battPend, tid, certId).run();
+    // A works job already raised carries one audit item per fitting — rewrite that
+    // fitting's line (and the AWAITING BATTERIES flag) so the engineer reads the truth.
+    let jobFixed = false;
+    try {
+      const jobId = ack.job_id || ("emrem:" + certId);
+      const jr = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+      if (jr && jr.data) {
+        const job = JSON.parse(jr.data);
+        const no = f.r.no != null && f.r.no !== "" ? (Number(f.r.no) || (f.i + 1)) : (f.i + 1);
+        const ref = String(f.r.comments || "").trim();
+        const what = isB
+          ? "Replace batteries" + (rem.batterySpec ? " — " + rem.batterySpec : "") + (rem.batteryQty ? " ×" + rem.batteryQty : "")
+          : "Replace light fitting" + (rem.lightSpec ? " — " + rem.lightSpec : "");
+        const line = `Fitting ${no}${ref && !/^light \d+$/i.test(ref) ? " (" + ref + ")" : ""} — ${what}${rem.note ? " · " + rem.note : ""}`;
+        let hit = false;
+        job.auditItems = (Array.isArray(job.auditItems) ? job.auditItems : []).map(it => {
+          const t = String((it && it.text) || "");
+          if (it && new RegExp("^Fitting " + no + "\\b").test(t)) { hit = true; return { ...it, text: line }; }
+          return it;
+        });
+        // Summary line: "N light fittings to replace + batteries in N fittings".
+        const lightsN = pend.filter(x => x.kind !== "battery").length;
+        const summary = [lightsN ? `${lightsN} light fitting${lightsN === 1 ? "" : "s"} to replace` : "", battPend ? `batteries in ${battPend} fitting${battPend === 1 ? "" : "s"}` : ""].filter(Boolean).join(" + ");
+        let desc = String(job.description || "");
+        desc = desc.replace(/\) — [^.]*\. Each fitting is a checklist item below/, ") — " + summary + ". Each fitting is a checklist item below");
+        if (!battPend) desc = desc.replace(/^⏳ AWAITING BATTERIES[^\n]*\n+/u, "");
+        if (desc !== job.description) { job.description = desc; hit = true; }
+        if (hit) { job.updatedAt = nowIso; await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run(); jobFixed = true; }
+      }
+    } catch {}
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    const fit = await fittingsFor([certId]);
+    return json({ ok: true, jobFixed, case: row ? shapeCase(row, fit[certId] || []) : null }, {}, env, request);
   }
 
   // GET /certs/remedials/quote-text?certId= — the copy-and-paste CLIENT quote for

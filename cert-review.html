@@ -556,10 +556,21 @@
       if (c.pending) bits.push(c.pending + " to attend");
       const battPending = (c.items || []).some(it => it.kind === "battery" && !it.replacedOnSite);
       // Per-fitting lines: "Fitting 3 — Light replacement · replaced on site".
+      // The office can correct what the engineer logged (fault kind / replaced on
+      // site) right here until the case is finished — Frome's four bulkheads were
+      // logged as "batteries" but needed new lights.
+      const editable = c.stage !== "done" && c.stage !== "invoiced";
+      const selCss = 'font:inherit;font-size:12px;padding:1px 4px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f2438;';
       const fitLines = (c.items || []).map(it =>
-        '<div style="font-size:12.5px;color:#334155">Fitting ' + esc(it.no != null ? it.no : "?") + ' — ' + (it.kind === "battery" ? "Batteries" : "Light replacement")
+        '<div style="font-size:12.5px;color:#334155;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:2px 0">Fitting ' + esc(it.no != null ? it.no : "?") + ' — '
+        + (editable && it.id
+          ? '<select data-fk="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" style="' + selCss + '" title="Change what this fitting needs"><option value="light"' + (it.kind === "battery" ? "" : " selected") + '>Light replacement</option><option value="battery"' + (it.kind === "battery" ? " selected" : "") + '>Batteries</option></select>'
+          : (it.kind === "battery" ? "Batteries" : "Light replacement"))
         + (it.spec ? ' <span class="muted">(' + esc(it.spec) + (it.qty ? ' ×' + esc(it.qty) : '') + ')</span>' : '')
-        + ' · <span style="color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '">' + (it.replacedOnSite ? "replaced on site" : (it.kind === "battery" ? "batteries required" : "works required")) + '</span></div>').join("");
+        + ' · ' + (editable && it.id
+          ? '<select data-fo="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" style="' + selCss + 'color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '" title="Was it replaced on site?"><option value="0"' + (it.replacedOnSite ? "" : " selected") + '>' + (it.kind === "battery" ? "batteries required" : "works required") + '</option><option value="1"' + (it.replacedOnSite ? " selected" : "") + '>replaced on site</option></select>'
+          : '<span style="color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '">' + (it.replacedOnSite ? "replaced on site" : (it.kind === "battery" ? "batteries required" : "works required")) + '</span>')
+        + '</div>').join("");
       let acts = '';
       acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy quote text</button>';
       if (battPending && c.stage !== "done" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery quote PDF</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Email supplier</button>';
@@ -602,6 +613,17 @@
           if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
         catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
       });
+      // Per-fitting corrections (fault kind / replaced on site) → fitting-update.
+      const fitFix = async (sel, body) => {
+        const cid = sel.dataset.c; sel.disabled = true; setMsg(cid, "Updating fitting…");
+        try {
+          const r = await authFetch("/certs/remedials/fitting-update", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(Object.assign({ certId: cid, id: sel.dataset.fk || sel.dataset.fo }, body)) }).then(x=>x.json());
+          if (r && r.ok) { if (window.MLUI && MLUI.toast) MLUI.toast(r.jobFixed ? "Fitting updated — works job checklist updated too" : "Fitting updated"); loadTracker(); }
+          else { setMsg(cid, (r&&r.error)||"Couldn't update the fitting.", true); sel.disabled=false; }
+        } catch { setMsg(cid, "Couldn't update the fitting.", true); sel.disabled=false; }
+      };
+      g("rmBody").querySelectorAll("[data-fk]").forEach(s => s.onchange = () => fitFix(s, { kind: s.value }));
+      g("rmBody").querySelectorAll("[data-fo]").forEach(s => s.onchange = () => fitFix(s, { replacedOnSite: s.value === "1" }));
       g("rmBody").querySelectorAll("[data-quote]").forEach(b => b.onclick = async () => {
         const cid = b.dataset.quote; setMsg(cid, "Building quote…");
         try {

@@ -43,6 +43,7 @@ function makeEnv(scenario) {
       return { results:[] }; },
     async run(){ calls.push(sql.slice(0,80)); writes.push({ sql, binds });
       if (/INSERT INTO certificates/i.test(sql)) inserted[binds[0]] = { id:binds[0], tenant_id:binds[1], type:binds[2], status:binds[3], job_id:binds[4], site_code:binds[5], cert_number:binds[6], data:binds[7], engineer:binds[8] };
+      if (/UPDATE em_remedials SET kind=\?, light_spec=\?/i.test(sql)) { const row = rems.find(r => r.id === binds[8]); if (row) { row.kind=binds[0]; row.light_spec=binds[1]; row.battery_spec=binds[2]; row.battery_qty=binds[3]; row.replaced_on_site=binds[4]; row.status=binds[5]; row.note=binds[6]; } }
       if (/INSERT INTO sla_jobs|UPDATE sla_jobs/i.test(sql)) { const d = binds.find(b => typeof b === "string" && b.startsWith("{")); if (d) { const j = JSON.parse(d); jobs[j.id] = j; } }
       if (/UPDATE em_remedial_acks SET/i.test(sql)) { const m = sql.match(/stage='(\w+)'/); if (m) ack.stage = m[1]; if (/awaiting_batteries=\?/.test(sql)) ack.awaiting_batteries = binds[1]; if (/awaiting_batteries=0/.test(sql)) ack.awaiting_batteries = 0; if (/reissue_cert_id=\?/.test(sql)) ack.reissue_cert_id = binds[0]; }
       return { meta:{ last_row_id:1, changes:1 } }; },
@@ -93,6 +94,18 @@ let fail = 0; const ok = (name, cond, extra="") => { console.log((cond?"PASS":"F
   ok("legacy rows: fitting numbers re-derived from the cert", c && c.items.map(i=>i.no).join(",")==="3,11,14", c && c.items.map(i=>i.no).join(","));
   const up = E.writes.filter(w => /UPDATE em_remedials SET fitting_no=\?, photos=\?/.test(w.sql));
   ok("legacy rows: healed values persisted (3 updates, photos filled)", up.length===3 && up.every(w => w.binds[0]!=null) && JSON.parse(up[0].binds[1]).length>=1, String(up.length));
+}
+
+
+{ // Office corrects a fitting the engineer logged as batteries → light replacement.
+  const E = makeEnv("mixed");
+  const r = await call(E.env, "POST", "/certs/remedials/fitting-update", { certId:"C1", id:"C1:1", kind:"light" });
+  const it = r.body && r.body.case && r.body.case.items.find(i => i.id === "C1:1");
+  ok("fitting-update: row rewritten to light", r.status===200 && it && it.kind==="light", JSON.stringify(it));
+  ok("fitting-update: cert data row corrected + trail note", E.writes.some(w => /UPDATE certificates SET data=/.test(w.sql) && /"kind":"light"/.test(w.binds[0]) && /engineer had logged batteries: 4.8V 4Ah NiCd/.test(w.binds[0])));
+  ok("fitting-update: case re-derived (no batteries, works)", E.writes.some(w => /UPDATE em_remedial_acks SET fittings=/.test(w.sql) && w.binds[4]===0 && w.binds[6]==="works"));
+  const bad = await call(E.env, "POST", "/certs/remedials/fitting-update", { certId:"C1", id:"C1:9", kind:"light" });
+  ok("fitting-update: unknown fitting refused", bad.status===404);
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
