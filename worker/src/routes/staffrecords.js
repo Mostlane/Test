@@ -75,6 +75,24 @@ async function getMatrixCols(db, kind) {
     return Array.isArray(all[kind]) ? all[kind] : [];
   } catch { return []; }
 }
+// Anthropic Messages API with a forced tool → structured JSON. Local copy of the
+// shared pattern (supports a base64 PDF `document` block for scanned certs).
+async function anthropicTool(env, { system, userContent, schema, toolName, maxTokens }) {
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1024, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: userContent }] }),
+    });
+  } catch { return null; }
+  if (!resp.ok) return null;
+  let payload; try { payload = await resp.json(); } catch { return null; }
+  const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === toolName) : null;
+  return block?.input || null;
+}
+
 async function setMatrixCols(db, kind, cols) {
   let all = {};
   try { const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:matrixcols:" + db.tenantId).first(); all = row && row.value ? JSON.parse(row.value) : {}; } catch {}
@@ -352,6 +370,41 @@ export async function handle(request, env, ctx, url, sess) {
     const cols = (await getMatrixCols(db, kind)).filter(c => c.toLowerCase() !== name.toLowerCase());
     await setMatrixCols(db, kind, cols);
     return json({ ok: true, columns: cols }, {}, env, request);
+  }
+
+  // ── Auto-extract certificate details (title / number / issuer / dates) ───────
+  // Reads the filename + the certificate's text (or a scanned PDF via OCR) and
+  // returns structured fields to pre-fill the add-record form. Fails SOFT — an
+  // empty result just means "fill it in yourself" (the client still applies its
+  // own filename heuristic). Nothing is stored.
+  if (path === "/hr/extract-cert" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!env.ANTHROPIC_API_KEY) return json({ ok: true, result: {} }, {}, env, request);
+    const filename = String(b.filename || "").slice(0, 300);
+    const text = String(b.text || "").slice(0, 60000);
+    const kind = KINDS.includes(b.kind) ? b.kind : "qualification";
+    if (!filename && !text && !b.pdfBase64 && !b.imageBase64) return json({ ok: true, result: {} }, {}, env, request);
+    const schema = { type: "object", properties: {
+      title: { type: "string", description: "The qualification / certificate name or type (e.g. CSCS Card, SMSTS, First Aid at Work, Asbestos Awareness). For an insurance, the cover type; for a licence, the licence type." },
+      number: { type: "string", description: "The certificate / card / registration / policy number, if present." },
+      issuer: { type: "string", description: "The awarding body / issuing organisation / training provider / insurer." },
+      issued: { type: "string", description: "Issue / completion date as YYYY-MM-DD, if present." },
+      expires: { type: "string", description: "Expiry / renewal / valid-until date as YYYY-MM-DD, if present." },
+    }, required: [] };
+    const system = "You extract details from a UK construction worker's certificate/qualification document for a training record. Use BOTH the file name and the document text. Return only what the source clearly supports — leave a field blank rather than guessing. Dates must be YYYY-MM-DD.";
+    const userContent = [];
+    if (b.pdfBase64 && typeof b.pdfBase64 === "string" && b.pdfBase64.length < 8000000) {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: b.pdfBase64 } });
+    }
+    // A photographed certificate or driving licence — Claude reads it by vision.
+    const okImg = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (b.imageBase64 && typeof b.imageBase64 === "string" && b.imageBase64.length < 8000000 && okImg.includes(b.imageType)) {
+      userContent.push({ type: "image", source: { type: "base64", media_type: b.imageType, data: b.imageBase64 } });
+    }
+    userContent.push({ type: "text", text: "RECORD TYPE: " + kind + "\nFILE NAME: " + (filename || "(none)") + "\n\n--- DOCUMENT TEXT ---\n" + (text || "(none — read the attached file)") });
+    const result = await anthropicTool(env, { system, userContent, schema, toolName: "extract_cert", maxTokens: 800 });
+    return json({ ok: true, result: result || {} }, {}, env, request);
   }
 
   // ── Create / update (multipart; file optional) ───────────────────────────────
