@@ -23369,7 +23369,7 @@ async function handle22(request, env, ctx, url, sess) {
       issued: { type: "string", description: "Issue / completion date as YYYY-MM-DD, if present." },
       expires: { type: "string", description: "Expiry / renewal / valid-until date as YYYY-MM-DD, if present." }
     }, required: [] };
-    const system = "You extract details from a UK construction worker's certificate/qualification document for a training record. Use BOTH the file name and the document text. Return only what the source clearly supports \u2014 leave a field blank rather than guessing. Dates must be YYYY-MM-DD.";
+    const system = "You extract details from a UK construction worker's certificate/qualification document for a training record. Use BOTH the file name and the document text/image. Return only what the source clearly supports \u2014 leave a field blank rather than guessing. Dates must be YYYY-MM-DD.\n\nIf it is a UK PHOTOCARD DRIVING LICENCE, read the numbered fields on the front: field 4a = the licence ISSUE date (put in `issued`); field 4b = the photocard EXPIRY date (put in `expires` \u2014 this is the date the card must be renewed, NOT the entitlement/category dates in section 9/11); field 4c = the issuing authority, usually DVLA (put in `issuer`); field 5 = the driver number (put in `number`); set `title` to \"Driving Licence\". Do NOT use the holder's date of birth (field 3) or the category expiry dates as the licence expiry \u2014 only 4b.";
     const userContent = [];
     if (b.pdfBase64 && typeof b.pdfBase64 === "string" && b.pdfBase64.length < 8e6) {
       userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: b.pdfBase64 } });
