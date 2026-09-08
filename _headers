@@ -179,6 +179,8 @@
   Cache-Control: no-cache
 /cert-status.html
   Cache-Control: no-cache
+/certs-overdue.html
+  Cache-Control: no-cache
 /cert-register.html
   Cache-Control: no-cache
 /engineers-live.html
