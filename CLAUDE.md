@@ -2742,6 +2742,20 @@ it straight onto the compliance chart (rolling the next-due date).
   exported from pump.js) and PRINTS a "N photos on file not embedded: <reason>"
   line for anything it can't embed (missing file / HEIC / unreadable) instead of
   silently dropping it. Covered by `test-em-remedials.mjs` ("legacy rows").
+- **Office correction of a logged fitting (8 Sep 2026):** the Frome engineer logged four
+  bulkheads as "Batteries" that actually need NEW LIGHTS — and the office had already
+  pressed PO received, so the works job read "Replace batteries". The tracker's
+  per-fitting lines are now **inline selects** (fault kind: Light replacement /
+  Batteries; and works-or-batteries required / replaced on site) until the case is
+  done/invoiced → **POST /certs/remedials/fitting-update** `{certId, id, kind?,
+  replacedOnSite?}` (office). It rewrites the CERTIFICATE row (with an audit trail in
+  the note: "Office changed to … (engineer had logged batteries: <spec>)"), the
+  `em_remedials` row, re-derives the case counts/`status_label`/£ (stage untouched),
+  and if the works job (`emrem:<certId>`) already exists rewrites that fitting's
+  checklist line + the description summary (and drops AWAITING BATTERIES when no
+  battery fitting is left). Frome (0622-26) was corrected in D1 by hand the same way
+  (cert rows, em_remedials, ack, job items). Refused once done/invoiced (the clean cert
+  is already re-issued). Covered by `test-em-remedials.mjs` ("fitting-update").
 - **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
   engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
   status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
