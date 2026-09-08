@@ -10888,7 +10888,12 @@ async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = fa
         if (!obj) continue;
         const fn = String(key).split("/").pop();
         const dstKey = `jobs/${jobId}/audit/${itemId}/${fn}`;
-        await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+        const bytes = await obj.arrayBuffer();
+        await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+        try {
+          await env.JOB_FILES.put(dstKey + ".thumb", bytes, { httpMetadata: obj.httpMetadata });
+        } catch {
+        }
         refPhotos.push(dstKey);
         n++;
       } catch {
@@ -12547,6 +12552,10 @@ PAT: Import certificate number ${num2}-${yr}`;
         if (item) {
           const dstKey = `jobs/${jobId}/audit/${item.id}/${key.split("/").pop()}`;
           await env.JOB_FILES.put(dstKey, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          try {
+            await env.JOB_FILES.put(dstKey + ".thumb", buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          } catch {
+          }
           item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
           item.refPhotos.push(dstKey);
           job.updatedAt = nowIso;
@@ -14816,10 +14825,11 @@ async function handle11(request, env, ctx, url, sess) {
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
             const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+            const bytes = await obj.arrayBuffer();
+            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
             try {
               const t = await env.JOB_FILES.get(srcKey + ".thumb");
-              if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata });
+              await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata });
             } catch {
             }
             refPhotos.push(dstKey);

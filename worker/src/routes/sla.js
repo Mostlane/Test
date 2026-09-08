@@ -1924,8 +1924,9 @@ export async function handle(request, env, ctx, url, sess) {
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
             const dstKey = `jobs/${newId}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
-            try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata }); } catch {}
+            const bytes = await obj.arrayBuffer();
+            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+            try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata }); } catch {}
             refPhotos.push(dstKey);
           } catch {}
         }

@@ -3,7 +3,7 @@
 // the same scope (the old push-only service-worker.js), so there's just one.
 
 <<<<<<< HEAD
-const CACHE_NAME = "mostlane-v117";
+const CACHE_NAME = "mostlane-v118";
 =======
 const CACHE_NAME = "mostlane-v115";
 >>>>>>> claude/gdpr-report-export-rajgs5
