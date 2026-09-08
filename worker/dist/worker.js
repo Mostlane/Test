@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -23628,15 +23633,17 @@ async function handle22(request, env, ctx, url, sess) {
       "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
     ).bind(db.tenantId, kind).all();
     const titles = /* @__PURE__ */ new Set();
+    const withExpiry = /* @__PURE__ */ new Set();
     const best = {};
     for (const r of recs || []) {
       const t = String(r.title || "").trim();
       if (!t) continue;
-      titles.add(t);
+      if (String(r.expires || "").trim()) withExpiry.add(t);
       const pm = best[r.username] = best[r.username] || {};
       const cur = pm[t];
       if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
     }
+    for (const t of withExpiry) titles.add(t);
     for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
     const competencies = [...titles].sort((a, b) => a.localeCompare(b));
     const rows = people.map((u) => ({
@@ -31567,9 +31574,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
