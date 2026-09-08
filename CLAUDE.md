@@ -2727,6 +2727,21 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Pre-v2 remedial rows: "Fitting ?" + missing photos (8 Sep 2026).** The two EM
+  cases finalised BEFORE the v2 deploy (Southbourne 0339-26 on 4 Sep, Frome 0622-26
+  at 08:44 on 8 Sep) were logged by the old `processEmRemedials`, before the
+  `fitting_no` column existed, so the tracker printed "Fitting ?". Backfilled in D1
+  by hand (row id `<certId>:<i>` = the i-th failed row of the cert, in order) AND
+  `fittingsFor` now SELF-HEALS: any case with a null fitting_no / empty photos is
+  re-derived from the certificate's own rows and persisted. Photos: Frome's four
+  photos ARE on file (one per fitting, JPEG keys in both the cert and em_remedials);
+  Southbourne has NONE — its engineer's build marked the fittings `failed:false`
+  (caught by `isRealRemedial`), so the photo requirement never fired and no photo
+  was ever taken — nothing to recover. The battery enquiry PDF (`batterypdf.js`
+  `prepPhotos`) now embeds PNGs too (decoded via pngdecode + shrinkRgb/deflate,
+  exported from pump.js) and PRINTS a "N photos on file not embedded: <reason>"
+  line for anything it can't embed (missing file / HEIC / unreadable) instead of
+  silently dropping it. Covered by `test-em-remedials.mjs` ("legacy rows").
 - **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
   engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
   status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
