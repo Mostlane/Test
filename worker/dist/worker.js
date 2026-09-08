@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -276,7 +271,7 @@ async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   ).bind(token, username, tenantId, expires).run();
   return token;
 }
-async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
+async function sendEmail(env, { to, subject, html, text, replyTo, attachments, cc }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
   if (env.RESEND_API_KEY) {
@@ -284,6 +279,7 @@ async function sendEmail(env, { to, subject, html, text, replyTo, attachments })
     try {
       const payload = { from, to, subject, html, text: body };
       if (replyTo) payload.reply_to = replyTo;
+      if (cc) payload.cc = Array.isArray(cc) ? cc : String(cc).split(/[,;]/).map((s) => s.trim()).filter(Boolean);
       if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -9552,7 +9548,7 @@ async function ensureTables2(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
-  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT"]) {
+  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT", "light_spec TEXT", "fitting_no INTEGER"]) {
     try {
       await env.DB.prepare(`ALTER TABLE em_remedials ADD COLUMN ${col}`).run();
     } catch {
@@ -9579,7 +9575,15 @@ async function ensureTables2(env) {
     "lights_pending INTEGER",
     "lights_job_id TEXT",
     "reissue_cert_id TEXT",
-    "reissue_at TEXT"
+    "reissue_at TEXT",
+    // the auto-generated clean cert after the works
+    // v2 pipeline (Sep 2026): to_quote → quoted → in_works | done → invoiced
+    "status_label TEXT",
+    "po_received_at TEXT",
+    "po_received_by TEXT",
+    "awaiting_batteries INTEGER",
+    "batteries_arrived_at TEXT",
+    "works_done_at TEXT"
   ]) {
     try {
       await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run();
@@ -9602,6 +9606,12 @@ async function ensureTables2(env) {
     await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run();
   } catch (e) {
   }
+}
+function caseStatusLabel(rows) {
+  const pend = rows.filter((r) => !r.replaced);
+  if (pend.some((r) => r.kind !== "battery")) return "works";
+  if (pend.length) return "batteries";
+  return "onsite";
 }
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -9626,8 +9636,10 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     const rem = r.remedial || {};
     const kind = rem.kind === "battery" ? "battery" : "light";
     return {
+      no: r.no != null && r.no !== "" ? Number(r.no) || i + 1 : i + 1,
       ref: String(r.comments || "").trim() || "Light " + (i + 1),
       replaced: rem.replacedOnSite === true,
+      lightSpec: kind === "light" ? String(rem.lightSpec || "") : "",
       note: rem.note || "",
       failed: isRealRemedial(rem),
       kind,
@@ -9657,14 +9669,15 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const lights = fails.filter((f) => !isBatt(f));
   const batteries = fails.filter(isBatt);
   const lightsPending = pending.filter((f) => !isBatt(f)).length;
-  const lightCharge = lights.length * REMEDIAL_CHARGE;
+  const lightCharge = fails.length * REMEDIAL_CHARGE;
+  const statusLabel = caseStatusLabel(fails);
   try {
     await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
   } catch {
   }
   const stmts = fails.map((f, i) => env.DB.prepare(
-    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos,light_spec,fitting_no)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     certRow.id + ":" + i,
     tid,
@@ -9675,7 +9688,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.ref,
     f.note,
     f.replaced ? 1 : 0,
-    isBatt(f) ? 0 : REMEDIAL_CHARGE,
+    REMEDIAL_CHARGE,
     f.replaced ? "done" : "pending",
     null,
     certRow.engineer || "",
@@ -9683,7 +9696,9 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.kind,
     f.batterySpec,
     f.batteryQty,
-    JSON.stringify(f.photos)
+    JSON.stringify(f.photos),
+    f.lightSpec,
+    f.no
   ));
   try {
     for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
@@ -9713,23 +9728,29 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       lightsPending,
       now
     ).run();
+    await env.DB.prepare("UPDATE em_remedial_acks SET status_label=?, po_received_at=NULL, po_received_by=NULL, awaiting_batteries=0, batteries_arrived_at=NULL, works_done_at=NULL WHERE tenant_id=? AND cert_id=?").bind(statusLabel, tid, certRow.id).run();
   } catch {
   }
   return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length };
 }
-function buildLightQuoteText(rec, siteName) {
+function buildQuoteText(rec, code) {
   const rows = Array.isArray(rec.rows) ? rec.rows : [];
-  const nums = [];
+  const lines = [], numbers = [];
   rows.forEach((r, i) => {
     const rem = r.remedial;
-    if (rem && isRealRemedial(rem) && rem.kind !== "battery") nums.push(r.no != null ? r.no : i + 1);
+    if (!rem || !isRealRemedial(rem)) return;
+    const no = r.no != null && r.no !== "" ? r.no : i + 1;
+    const fault = rem.kind === "battery" ? "Batteries" : "Light replacement";
+    const where = rem.replacedOnSite === true ? " (replaced on site)" : "";
+    numbers.push(no);
+    lines.push(`Fitting ${no} - ${fault}${where} - \xA3${REMEDIAL_CHARGE}`);
   });
-  if (!nums.length) return null;
-  const total = nums.length * REMEDIAL_CHARGE;
-  const list = nums.join(", ");
-  const text = `Failed fitting number${nums.length === 1 ? "" : "s"}: ${list}
-Cost of works: \xA3${REMEDIAL_CHARGE} per light${nums.length === 1 ? "" : " = \xA3" + total}`;
-  return { text, count: nums.length, total, numbers: nums };
+  if (!lines.length) return null;
+  const total = lines.length * REMEDIAL_CHARGE;
+  const text = `Failed EM fittings at store ${padCode(code) || code || ""}:
+` + lines.join("\n") + `
+Total: ${lines.length} fitting${lines.length === 1 ? "" : "s"} - \xA3${total}`;
+  return { text, count: lines.length, total, numbers };
 }
 async function createRemedialJobForCert(env, tid, certId, kind) {
   const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending'").bind(tid, certId).all();
@@ -9803,6 +9824,136 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
     return null;
   }
 }
+async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate = "", by = "auto" } = {}) {
+  const code = padCode(cert.site_code || rec.siteCode);
+  if (!code) throw new Error("no store code");
+  let emKind = cert.type === "em" ? rec.emKind || "" : "";
+  if (cert.type === "em" && !emKind) {
+    try {
+      const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+      emKind = jb && jb.emKind || "";
+    } catch {
+    }
+  }
+  rec.certNumber = number;
+  rec.status = "final";
+  const sig = dataUrlToBytes(rec.signature);
+  let logo = null;
+  try {
+    logo = logoBytes();
+  } catch {
+  }
+  const bytes = buildCertPdf(rec, { logo, signature: sig });
+  let fileScheme = "coop", fileType = cert.type;
+  try {
+    const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+    if (String(srow && srow.client || "").toLowerCase() === "fbc") {
+      fileScheme = "fareham";
+      if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly";
+    }
+  } catch {
+  }
+  const dd = /^\d{4}-\d{2}-\d{2}/.test(String(docDate || "")) ? String(docDate).slice(0, 10) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const filed = await fileCertificatePdf(env, tid, {
+    scheme: fileScheme,
+    code,
+    type: fileType,
+    bytes,
+    filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+    docDate: dd,
+    bump,
+    source: "cert:" + cert.id,
+    label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
+  });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, by, now, tid, cert.id).run();
+  return filed;
+}
+async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = false } = {}) {
+  const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending' ORDER BY fitting_no, id").bind(tid, certId).all();
+  const pend = results || [];
+  if (!pend.length) return null;
+  const jobId = "emrem:" + certId;
+  const existing = await getJob(env, tid, jobId).catch(() => null);
+  if (existing) return existing.id;
+  const first = pend[0];
+  const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
+  const auditItems = [];
+  let n = 0;
+  for (const r of pend) {
+    const itemId = crypto.randomUUID();
+    const refPhotos = [];
+    let keys = [];
+    try {
+      keys = JSON.parse(r.photos || "[]");
+    } catch {
+    }
+    for (const key of Array.isArray(keys) ? keys : []) {
+      if (!key || typeof key !== "string" || n >= 40 || !env.JOB_FILES) continue;
+      try {
+        const obj = await env.JOB_FILES.get(key);
+        if (!obj) continue;
+        const fn = String(key).split("/").pop();
+        const dstKey = `jobs/${jobId}/audit/${itemId}/${fn}`;
+        await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+        refPhotos.push(dstKey);
+        n++;
+      } catch {
+      }
+    }
+    const isB = r.kind === "battery";
+    const what = isB ? "Replace batteries" + (r.battery_spec ? " \u2014 " + r.battery_spec : "") + (r.battery_qty ? " \xD7" + r.battery_qty : "") : "Replace light fitting" + (r.light_spec ? " \u2014 " + r.light_spec : "");
+    const no = r.fitting_no != null ? r.fitting_no : "";
+    auditItems.push({ id: itemId, text: `Fitting ${no}${r.light_ref && !/^light \d+$/i.test(r.light_ref) ? " (" + r.light_ref + ")" : ""} \u2014 ${what}${r.note ? " \xB7 " + r.note : ""}`, refPhotos });
+  }
+  const lights = pend.filter((r) => r.kind !== "battery").length, batts = pend.length - lights;
+  const summary = [lights ? `${lights} light fitting${lights === 1 ? "" : "s"} to replace` : "", batts ? `batteries in ${batts} fitting${batts === 1 ? "" : "s"}` : ""].filter(Boolean).join(" + ");
+  const desc = (awaitingBatteries ? "\u23F3 AWAITING BATTERIES \u2014 do not book until the batteries have arrived (the office will clear this).\n\n" : "") + `EM remedial works at ${siteName} (from EM certificate ${first.cert_number}) \u2014 ${summary}. Each fitting is a checklist item below; photograph each one once replaced.`;
+  try {
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      id: jobId,
+      reference: "EM remedial \u2014 " + (siteCode || siteName),
+      status: "Pending",
+      priority: "Priority 4",
+      description: desc,
+      siteName,
+      siteCode,
+      originator: "em-remedial",
+      auditItems,
+      requiresRA: true,
+      requiresSignature: false,
+      requiresPhoto: false,
+      requiresNote: false,
+      assignedEngineers: []
+    });
+    if (job && job.id) {
+      const ids = pend.map((r) => r.id);
+      try {
+        for (let i = 0; i < ids.length; i += 20) await env.DB.batch(ids.slice(i, i + 20).map((rid) => env.DB.prepare("UPDATE em_remedials SET job_id=? WHERE tenant_id=? AND id=?").bind(job.id, tid, rid)));
+      } catch {
+      }
+    }
+    return job && job.id;
+  } catch {
+    return null;
+  }
+}
+async function poReceived(env, tid, certId, me, ctx) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const { results } = await env.DB.prepare("SELECT kind, status FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certId).all();
+  const rows = results || [];
+  const pend = rows.filter((r) => r.status === "pending");
+  await env.DB.prepare("UPDATE em_remedial_acks SET po_received_at=?, po_received_by=?, approved_at=COALESCE(approved_at,?), approved_by=COALESCE(approved_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, now, me, tid, certId).run();
+  if (!pend.length) {
+    const newId4 = await reissueCleanCert(env, tid, certId, ctx);
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='done', works_done_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    return { stage: "done", reissueCertId: newId4 };
+  }
+  const awaiting = pend.some((r) => r.kind === "battery");
+  const jobId = await createRemedialWorksJob(env, tid, certId, { awaitingBatteries: awaiting });
+  await env.DB.prepare("UPDATE em_remedial_acks SET stage='in_works', job_id=COALESCE(?,job_id), awaiting_batteries=? WHERE tenant_id=? AND cert_id=?").bind(jobId, awaiting ? 1 : 0, tid, certId).run();
+  return { stage: "in_works", jobId, awaitingBatteries: awaiting };
+}
 async function reissueCleanCert(env, tid, certId, ctx) {
   const orig = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, certId).first();
   if (!orig || orig.type !== "em") return null;
@@ -9833,19 +9984,27 @@ async function reissueCleanCert(env, tid, certId, ctx) {
   });
   if (!changed) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const newData = { ...data, rows: cleanRows, reissueOf: certId };
+  const newData = { ...data, rows: cleanRows, reissueOf: certId, replacedAt: now };
   await env.DB.prepare(
     "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
   ).bind(newId4, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now, now, now).run();
+  let filed = false;
   try {
-    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=? WHERE tenant_id=? AND cert_id=?").bind(newId4, now, tid, certId).run();
+    const nrow = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId4).first();
+    const rec = shapeRow(nrow);
+    await fileCertNow(env, tid, nrow, rec, orig.cert_number || rec.certNumber || "", { bump: false, docDate: now.slice(0, 10), by: "auto (remedial works)" });
+    filed = true;
+  } catch {
+  }
+  try {
+    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=?, works_done_at=COALESCE(works_done_at,?), stage=CASE WHEN COALESCE(stage,'')='invoiced' THEN stage ELSE 'done' END WHERE tenant_id=? AND cert_id=?").bind(newId4, now, now, tid, certId).run();
   } catch {
   }
   try {
     const site = newData.installation && newData.installation.name || orig.site_code || "";
     const p = sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
-      title: "Updated EM certificate ready",
-      body: `Remedial works complete at ${site} \u2014 a clean EM certificate has been auto-generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass, marked "(Replaced)"). Review and issue it.`,
+      title: filed ? "Updated EM certificate filed" : "Updated EM certificate ready",
+      body: filed ? `${site}: the EM certificate has been re-issued with ${changed} fitting${changed === 1 ? "" : "s"} marked "Replaced" and filed to the compliance chart. Tap to download.` : `${site}: a clean EM certificate was generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass) but couldn't be filed automatically \u2014 review and issue it.`,
       url: "/cert-review.html?open=" + newId4,
       tag: "cert-reissue:" + newId4
     });
@@ -10022,7 +10181,8 @@ async function getConfig(env, tid) {
     pat: { ...DEFAULT_CONFIG.pat, ...c.pat || {} },
     reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
     supplierName: typeof c.supplierName === "string" ? c.supplierName : "",
-    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : ""
+    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : "",
+    supplierCc: typeof c.supplierCc === "string" ? c.supplierCc : ""
   };
 }
 async function saveConfig(env, tid, c) {
@@ -10409,7 +10569,8 @@ async function handle9(request, env, ctx, url, sess) {
         pat: { ...cur.pat, ...b.pat || {} },
         reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers,
         supplierName: typeof b.supplierName === "string" ? b.supplierName.slice(0, 120) : cur.supplierName,
-        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail
+        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail,
+        supplierCc: typeof b.supplierCc === "string" ? b.supplierCc.slice(0, 200) : cur.supplierCc
       };
       await saveConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
@@ -11054,7 +11215,11 @@ PAT: Import certificate number ${num2}-${yr}`;
     const pending = rows.filter((r) => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
   }
-  const shapeCase = (r) => ({
+  const stageOf = (r) => {
+    const s = r.stage || "to_quote";
+    return s === "approved" ? "in_works" : s;
+  };
+  const shapeCase = (r, fittings) => ({
     certId: r.cert_id,
     certNumber: r.cert_number,
     siteName: r.site_name || r.site_code,
@@ -11066,21 +11231,61 @@ PAT: Import certificate number ${num2}-${yr}`;
     batteries: r.batteries || 0,
     lightsPending: r.lights_pending || 0,
     lightsJobId: r.lights_job_id || null,
-    stage: r.stage || "to_quote",
-    jobId: r.job_id || null,
+    stage: stageOf(r),
+    jobId: r.job_id || r.lights_job_id || null,
     createdAt: r.created_at,
     quotedAt: r.quoted_at,
     approvedAt: r.approved_at,
     invoicedAt: r.invoiced_at,
-    reissueCertId: r.reissue_cert_id || null
+    poReceivedAt: r.po_received_at || null,
+    worksDoneAt: r.works_done_at || null,
+    awaitingBatteries: !!(r.awaiting_batteries && !r.batteries_arrived_at),
+    batteriesArrivedAt: r.batteries_arrived_at || null,
+    statusLabel: r.status_label || (r.lights_pending ? "works" : r.pending ? "batteries" : "onsite"),
+    reissueCertId: r.reissue_cert_id || null,
+    items: (fittings || []).map((f) => ({
+      no: f.fitting_no,
+      ref: f.light_ref,
+      kind: f.kind === "battery" ? "battery" : "light",
+      replacedOnSite: !!f.replaced_on_site,
+      spec: f.kind === "battery" ? f.battery_spec || "" : f.light_spec || "",
+      qty: f.battery_qty || 0,
+      note: f.note || ""
+    }))
   });
+  const fittingsFor = async (certIds) => {
+    const out = {};
+    const ids = (certIds || []).filter(Boolean);
+    for (let i = 0; i < ids.length; i += 60) {
+      const chunk = ids.slice(i, i + 60);
+      const { results } = await env.DB.prepare(`SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY fitting_no, id`).bind(tid, ...chunk).all().catch(() => ({ results: [] }));
+      for (const r of results || []) (out[r.cert_id] = out[r.cert_id] || []).push(r);
+    }
+    return out;
+  };
   if (sub === "/remedials/outstanding" && method === "GET") {
     if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const { results } = await env.DB.prepare(
       "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
     ).bind(tid, now).all();
-    return json({ ok: true, remedials: (results || []).map(shapeCase) }, {}, env, request);
+    const rows = results || [];
+    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    const out = [];
+    for (const r of rows) {
+      const c = shapeCase(r, fit4[r.cert_id]);
+      try {
+        const cert = await loadCert(r.cert_id);
+        if (cert) {
+          const q2 = buildQuoteText(shapeRow(cert), r.site_code);
+          c.quoteText = q2 ? q2.text : "";
+          c.quoteTotal = q2 ? q2.total : 0;
+        }
+      } catch {
+      }
+      out.push(c);
+    }
+    return json({ ok: true, remedials: out }, {}, env, request);
   }
   if (sub === "/remedials/board" && method === "GET") {
     if (!isOffice) return json({ ok: true, cases: [] }, {}, env, request);
@@ -11088,7 +11293,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     const { results } = await env.DB.prepare(
       `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
     ).bind(tid).all();
-    return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
+    const rows = results || [];
+    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    return json({ ok: true, cases: rows.map((r) => shapeCase(r, fit4[r.cert_id])) }, {}, env, request);
   }
   if (sub === "/remedials/orders" && method === "GET") {
     if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
@@ -11118,11 +11325,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (action === "approve") {
       let jobId = null, note = "";
       if (ord.matched_kind === "em" && ord.matched_cert_id) {
-        const lj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "light").catch(() => null);
-        const bj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "battery").catch(() => null);
-        jobId = bj || lj;
-        await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id), lights_job_id=COALESCE(?,lights_job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, bj, lj, tid, ord.matched_cert_id).run();
-        note = jobId ? "Works job raised \u2014 case approved." : "Case approved (no pending fittings to raise).";
+        const res = await poReceived(env, tid, ord.matched_cert_id, me, ctx);
+        jobId = res.jobId || null;
+        note = res.stage === "done" ? "All fittings were replaced on site \u2014 updated certificate filed to compliance." : res.awaitingBatteries ? "Works job raised (awaiting batteries)." : "Works job raised.";
       } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
         jobId = ord.matched_job_id;
         note = "Open the electrical-test job to raise the remedial works job.";
@@ -11156,9 +11361,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!certId || STAGES.indexOf(to) < 0) return error("Missing certId or bad stage", 400, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let jobId = null;
-    if (to === "approved") {
-      jobId = await createRemedialJobForCert(env, tid, certId, "battery");
-      await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, jobId, tid, certId).run();
+    if (to === "approved" || to === "in_works" || to === "done") {
+      const res = await poReceived(env, tid, certId, me, ctx);
+      jobId = res.jobId || null;
     } else if (to === "invoiced") {
       await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
     } else if (to === "to_quote") {
@@ -11175,9 +11380,82 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow(cert);
     const siteName = rec.installation && rec.installation.name || rec.client && rec.client.name || cert.site_code;
-    const quote = buildLightQuoteText(rec, siteName);
-    if (!quote) return json({ ok: true, text: "", count: 0, total: 0, message: "No light-fitting remedials on this certificate." }, {}, env, request);
+    const quote = buildQuoteText(rec, cert.site_code || rec.siteCode);
+    if (!quote) return json({ ok: true, text: "", count: 0, total: 0, message: "No failed fittings on this certificate." }, {}, env, request);
     return json({ ok: true, ...quote, site: siteName, certNumber: rec.certNumber || "" }, {}, env, request);
+  }
+  if (sub === "/remedials/po-received" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const exists = await env.DB.prepare("SELECT cert_id FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!exists) return error("No remedial case for that certificate", 404, env, request);
+    const res = await poReceived(env, tid, certId, me, ctx);
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    return json({ ok: true, ...res, case: row ? shapeCase(row, (await fittingsFor([certId]))[certId]) : null }, {}, env, request);
+  }
+  if (sub === "/remedials/batteries-arrived" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!row) return error("No remedial case for that certificate", 404, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    const jobId = row.job_id || "emrem:" + certId;
+    try {
+      const job = await getJob(env, tid, jobId);
+      if (job && /AWAITING BATTERIES/.test(String(job.description || ""))) {
+        await createOrUpdateJobFromPayload(env, tid, { id: jobId, description: String(job.description).replace(/^⏳ AWAITING BATTERIES[^\n]*\n\n?/, "") });
+      }
+    } catch {
+    }
+    ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "Batteries arrived \u2014 EM remedial ready to book",
+      body: `${row.site_name || row.site_code}: the batteries for the EM remedial have arrived. The works job can be scheduled now.`,
+      url: "/job-view.html?jobId=" + encodeURIComponent(jobId),
+      tag: "em-batt:" + certId
+    }, me).catch(() => {
+    }));
+    return json({ ok: true, jobId }, {}, env, request);
+  }
+  if (sub === "/remedials/email-draft" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const cert = await loadCert(String(q.get("certId") || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow(cert);
+    const cfg = await getConfig(env, tid);
+    const code = padCode(cert.site_code || rec.siteCode) || "";
+    const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
+    const reference = `${code}-EM-${yr}`;
+    const hour = Number((/* @__PURE__ */ new Date()).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+    const greet = hour < 12 ? "Good morning" : "Good afternoon";
+    let who = me;
+    try {
+      const u = await env.DB.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+      if (u && (u.first_name || u.last_name)) who = [u.first_name, u.last_name].filter(Boolean).join(" ");
+    } catch {
+    }
+    const con = cfg.contractor || {};
+    const body = `${greet},
+
+Please see attached document showing batteries required and quantities. If you could please send us a quotation including delivery times and use reference ${reference}.
+
+Kind regards,
+${who}
+${con.tradingTitle || "Mostlane"}`;
+    const site = rec.installation && rec.installation.name || code;
+    return json({
+      ok: true,
+      to: cfg.supplierEmail || "",
+      cc: cfg.supplierCc || "",
+      supplierName: cfg.supplierName || "",
+      subject: `Battery quotation request \u2014 ${reference}${site ? " (" + site + ")" : ""}`,
+      body,
+      reference,
+      filename: `Battery enquiry ${reference}.pdf`
+    }, {}, env, request);
   }
   if (sub === "/remedials/raise-lights" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -11214,11 +11492,11 @@ PAT: Import certificate number ${num2}-${yr}`;
   }
   if (sub === "/remedials/supplier-pdf" || sub === "/remedials/supplier-email") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    let certId = "", code = "";
+    let certId = "", code = "", postBody = {};
     if (method === "POST") {
-      const b = await request.json().catch(() => ({}));
-      certId = String(b.certId || "").trim();
-      code = String(b.code || "").trim();
+      postBody = await request.json().catch(() => ({}));
+      certId = String(postBody.certId || "").trim();
+      code = String(postBody.code || "").trim();
     } else {
       certId = String(q.get("certId") || "").trim();
       code = String(q.get("code") || "").trim();
@@ -11282,7 +11560,17 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (method === "GET") {
       return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${fname}"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
     }
-    if (!cfg.supplierEmail) return error("Set a supplier email first (cert-review \u2192 \u{1F4E7} Supplier).", 400, env, request);
+    const bodyIn = postBody || {};
+    const toAddr = String(bodyIn.to || cfg.supplierEmail || "").trim();
+    const ccAddr = String(bodyIn.cc != null ? bodyIn.cc : cfg.supplierCc || "").trim();
+    if (!toAddr) return error("Enter the supplier's email address.", 400, env, request);
+    if (toAddr !== cfg.supplierEmail || ccAddr !== (cfg.supplierCc || "")) {
+      try {
+        await saveConfig(env, tid, { ...cfg, supplierEmail: toAddr, supplierCc: ccAddr });
+      } catch {
+      }
+    }
+    cfg.supplierEmail = toAddr;
     let b64 = "";
     try {
       let s = "";
@@ -11293,10 +11581,13 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     const site = siteName || "site";
     const escH = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    const customBody = String(bodyIn.body || "").trim();
     const r = await sendEmail(env, {
       to: cfg.supplierEmail,
-      subject: `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
-      html: `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p><p>Many thanks,<br>${escH(cfg.contractor && cfg.contractor.tradingTitle || "Mostlane")}</p>`,
+      cc: ccAddr || void 0,
+      subject: String(bodyIn.subject || "").trim() || `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
+      html: customBody ? `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escH(customBody)}</div>` : `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p>`,
+      text: customBody || void 0,
       attachments: [{ filename: fname, content: b64 }]
     });
     if (!r || r.ok === false) return error(r && r.error || "Couldn't send the email (check RESEND_API_KEY / supplier email).", 502, env, request);
@@ -11475,9 +11766,11 @@ var init_certs = __esm({
       reviewers: [],
       // Battery supplier — where the "please quote these batteries" enquiry PDF is emailed.
       supplierName: "",
-      supplierEmail: ""
+      supplierEmail: "",
+      supplierCc: ""
+      // optional CC on the battery enquiry email (remembered)
     };
-    STAGES = ["to_quote", "quoted", "approved", "invoiced"];
+    STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
     REMEDIAL_CHARGE = 50;
     numOf = (v) => {
       const d = String(v ?? "").replace(/\D/g, "");
@@ -31274,9 +31567,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });

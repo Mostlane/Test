@@ -262,8 +262,21 @@
     function updateListHead() {
       const el = container.querySelector("#mlcCnt"); if (!el) return;
       const n = rec.rows.length, fails = rec.rows.filter(isFail).length, done = rec.rows.filter(isComplete).length;
+      // Break the failures down by what each needs: lights to replace · batteries · replaced on site.
+      let breakdown = "";
+      if (type === "em" && fails) {
+        const rems = rec.rows.map(r => r.remedial).filter(rm => rm && isRealRem(rm));
+        const onsite = rems.filter(rm => rm.replacedOnSite === true).length;
+        const lights = rems.filter(rm => rm.replacedOnSite !== true && rm.kind !== "battery").length;
+        const batts = rems.filter(rm => rm.replacedOnSite !== true && rm.kind === "battery").length;
+        const bits = [];
+        if (lights) bits.push(lights + (lights === 1 ? " light" : " lights"));
+        if (batts) bits.push(batts + " batteries");
+        if (onsite) bits.push(onsite + " replaced on site");
+        if (bits.length) breakdown = ": " + bits.join(" · ");
+      }
       el.innerHTML = '<span class="ok">' + done + " of " + n + " completed</span>"
-        + (fails ? ' · <span class="bad" data-jump="1">⚠ ' + fails + " failed</span>" : (done === n && n ? ' · <span class="ok">✓ all pass</span>' : ""));
+        + (fails ? ' · <span class="bad" data-jump="1">⚠ ' + fails + " failed" + esc(breakdown) + "</span>" : (done === n && n ? ' · <span class="ok">✓ all pass</span>' : ""));
       const j = el.querySelector("[data-jump]");
       if (j) j.onclick = () => { const f = container.querySelector(".mlrow.fail"); if (f) f.scrollIntoView({ behavior: "smooth", block: "center" }); };
     }
@@ -310,19 +323,19 @@
       if (!editable) {
         if (!on) return "";
         const what = kind === "battery"
-          ? "Batteries" + (rem.batterySpec ? " — " + esc(rem.batterySpec) : "") + (rem.batteryQty ? " ×" + esc(rem.batteryQty) : "")
-          : "Replacement light (£50)";
-        const where = rem.replacedOnSite === true ? "done on site" : rem.replacedOnSite === false ? "remedial required" : "outcome not set";
+          ? "Batteries (£50)" + (rem.batterySpec ? " — " + esc(rem.batterySpec) : "") + (rem.batteryQty ? " ×" + esc(rem.batteryQty) : "")
+          : "Replacement light (£50)" + (rem.lightSpec ? " — " + esc(rem.lightSpec) : "");
+        const where = rem.replacedOnSite === true ? "replaced on site" : rem.replacedOnSite === false ? (kind === "battery" ? "batteries required" : "works required") : "outcome not set";
         const thumbs = photos.map(p => '<img class="mlrem-th" src="' + esc((p && p.url) || "") + '">').join("");
         return '<div class="mlrem ro"><span class="mlrem-tag">⚠ Fitting failed — ' + what + ' · ' + where + '</span>'
           + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '')
           + (thumbs ? '<div class="mlrem-photos">' + thumbs + '</div>' : '') + '</div>';
       }
       const hint = kind === "battery"
-        ? (onsite === "yes" ? 'Batteries replaced on site — NO £50 (supplier prices the batteries). Add spec, qty & photos.'
-          : onsite === "no" ? 'Shown as FAILED — batteries go on a supplier enquiry to price (NO £50). Add spec, qty & photos.'
+        ? (onsite === "yes" ? 'Batteries replaced on site — the office charges £50 for this fitting. Add the battery spec, qty & photos.'
+          : onsite === "no" ? 'Shown as FAILED — the office quotes £50 and orders the batteries from the supplier. Add the spec, qty & photos.'
           : 'Add the battery spec, quantity and photos for the supplier.')
-        : (onsite === "no" ? 'Shown as FAILED on the certificate — a remedial job is raised and the office quoted £50. Add a photo of the failed fitting.'
+        : (onsite === "no" ? 'Shown as FAILED on the certificate — the office quotes £50 and a works job is raised once ordered. Add the fitting type and a photo.'
           : onsite === "yes" ? 'Certificate reads "Fitting failed, replaced on site" — the office charges the client £50. Add a photo of the fitting.'
           : 'Choose whether it was replaced on site, and add a photo of the failed fitting.');
       const thumbs = photos.map((p, pi) => '<span class="mlrem-thw"><img class="mlrem-th" src="' + esc((p && p.url) || "") + '"><button type="button" class="mlrem-thx" data-rem="delphoto" data-i="' + i + '" data-p="' + pi + '">✕</button></span>').join("");
@@ -345,7 +358,7 @@
               + '<input type="text" class="mlrem-bspec" data-rem="bspec" data-i="' + i + '" placeholder="Battery type / spec (e.g. 4.8V 4Ah NiCd)" value="' + esc(rem.batterySpec || "") + '">'
               + '<input type="number" inputmode="numeric" class="mlrem-bqty" data-rem="bqty" data-i="' + i + '" placeholder="Qty" value="' + esc(rem.batteryQty == null ? "" : rem.batteryQty) + '">'
               + '</div>'
-            : '')
+            : '<input type="text" class="mlrem-note mlrem-lspec" data-rem="lspec" data-i="' + i + '" placeholder="Fitting type / spec for the replacement (optional, e.g. 3W LED bulkhead, maintained)" value="' + esc(rem.lightSpec || "") + '">')
           + '<span class="mlrem-q">Photos of the failed fitting</span>'
           + '<div class="mlrem-photos">' + thumbs + '</div>'
           + '<button type="button" class="mlrem-addphoto" data-rem="addphoto" data-i="' + i + '">📷 Add photo</button>'
@@ -456,6 +469,9 @@
       }));
       container.querySelectorAll('[data-rem="note"]').forEach(el => el.addEventListener("input", () => {
         const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.note = el.value; rem.failed = true; queueSave();
+      }));
+      container.querySelectorAll('[data-rem="lspec"]').forEach(el => el.addEventListener("input", () => {
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.lightSpec = el.value; rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="bspec"]').forEach(el => el.addEventListener("input", () => {
         const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.batterySpec = el.value; rem.failed = true; queueSave();
