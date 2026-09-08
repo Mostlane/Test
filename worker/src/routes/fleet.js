@@ -19,7 +19,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { evalAlerts, answerWord } from "./vancheck.js";
 import { loadRegister, resolveSite } from "./costing.js";
-import { createOrUpdateJobFromPayload, reconcileRelease } from "./sla.js";
+import { createOrUpdateJobFromPayload, reconcileRelease, badScheduleIn } from "./sla.js";
 import { approvedLeaveInRange } from "./holidays.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
@@ -1593,6 +1593,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cur = map[rk] || (map[rk] = {});
     const prevJobId = cur[type] && cur[type].jobId;
     if (b.status === "pending") {
+      { const bad = badScheduleIn(b); if (bad) return jr({ error: bad }, headers, 400); }
       const entry = {
         note: typeof b.note === "string" ? b.note.slice(0, 300) : "",
         by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString(),

@@ -27,7 +27,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
-import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries, badScheduleIn, badScheduleDate } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
 import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
 
@@ -617,6 +617,7 @@ export async function handle(request, env, ctx, url, sess) {
       ).bind(tenantId, row.number).first();
     } catch {}
     let siteData = {}; try { if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data); } catch {}
+    { const bad = badScheduleIn(b); if (bad) return error(bad, 400, env, request); }
     const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt))
       ? new Date(b.scheduledAt).toISOString() : undefined;
     const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : undefined;
@@ -665,6 +666,7 @@ export async function handle(request, env, ctx, url, sess) {
     let days = Array.isArray(b.days)
       ? b.days.map(d => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes }))
         .filter(d => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    for (const d of days) { const bad = badScheduleDate(d.scheduledAt, "Series day"); if (bad) return error(bad, 400, env, request); }
     // Authoritative weekend guard: unless the office explicitly ticked "Include
     // weekends", NEVER create a Saturday/Sunday day — even if the client sent one
     // (e.g. a stale checkbox). The office should never get project drip days on a
