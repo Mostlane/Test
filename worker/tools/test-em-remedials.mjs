@@ -135,4 +135,18 @@ let fail = 0; const ok = (name, cond, extra="") => { console.log((cond?"PASS":"F
   ok("office-created cert is owned by the job's engineer", sv.status===200 && ins && ins.binds[8]==="Ryan Diggens", ins ? String(ins.binds[8]) : "no insert");
 }
 
+
+{ // Office attaches a photo to one fitting after finalise (works job already raised).
+  const E = makeEnv("mixed");
+  E.jobs["emrem:C1"] = { id:"emrem:C1", status:"Pending", auditItems:[{ id:"it-3", text:"Fitting 3 (Stock room) — Replace light fitting", refPhotos:[] }, { id:"it-11", text:"Fitting 11 (Back corridor) — Replace batteries", refPhotos:[] }] };
+  E.ack.job_id = "emrem:C1";
+  const fd = new FormData(); fd.append("certId", "C1"); fd.append("id", "C1:1"); fd.append("file", new Blob([new Uint8Array([0xff,0xd8,0xff,0xe0,0,0])], { type:"image/jpeg" }), "f.jpg");
+  const r = await callAs(E.env, "Jamie Line", "POST", "/certs/remedials/fitting-photo", fd);
+  ok("fitting-photo: stored + counted", r.status===200 && r.body && r.body.photos===2 && /^certremedial\/1\/C1\//.test(r.body.key), r.status + " " + JSON.stringify(r.body));
+  ok("fitting-photo: cert row carries the new key", E.writes.some(w => /UPDATE certificates SET data=/.test(w.sql) && w.binds[0].includes(r.body.key)));
+  ok("fitting-photo: em_remedials row updated", E.writes.some(w => /UPDATE em_remedials SET photos=\?/.test(w.sql) && w.binds[0].includes(r.body.key) && w.binds[2]==="C1:1"));
+  const job = E.jobs["emrem:C1"];
+  ok("fitting-photo: works-job item 11 gets the reference photo", r.body.jobFixed===true && job.auditItems[1].refPhotos.length===1 && /^jobs\/emrem:C1\/audit\/it-11\//.test(job.auditItems[1].refPhotos[0]) && job.auditItems[0].refPhotos.length===0, JSON.stringify(job.auditItems.map(i=>i.refPhotos)));
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");

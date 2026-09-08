@@ -12250,6 +12250,14 @@ PAT: Import certificate number ${num2}-${yr}`;
       no: f.fitting_no,
       ref: f.light_ref,
       kind: f.kind === "battery" ? "battery" : "light",
+      photos: (() => {
+        try {
+          const p = JSON.parse(f.photos || "[]");
+          return Array.isArray(p) ? p.length : 0;
+        } catch {
+          return 0;
+        }
+      })(),
       replacedOnSite: !!f.replaced_on_site,
       spec: f.kind === "battery" ? f.battery_spec || "" : f.light_spec || "",
       qty: f.battery_qty || 0,
@@ -12495,6 +12503,61 @@ PAT: Import certificate number ${num2}-${yr}`;
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     const fit4 = await fittingsFor([certId]);
     return json({ ok: true, jobFixed, case: row ? shapeCase(row, fit4[certId] || []) : null }, {}, env, request);
+  }
+  if (sub === "/remedials/fitting-photo" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const certId = String(form && form.get("certId") || "").trim();
+    const rowId = String(form && form.get("id") || "").trim();
+    if (!certId || !rowId || !file || typeof file === "string") return error("Missing certId, id or file", 400, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow2(cert);
+    const rows = Array.isArray(rec.rows) ? rec.rows : [];
+    const fails = rows.map((r, i) => ({ r, i })).filter((x) => isRealRemedial(x.r.remedial));
+    const f = fails[Number(String(rowId).split(":").pop())];
+    if (!f || !f.r.remedial) return error("That fitting isn't on the certificate", 404, env, request);
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength > 6 * 1024 * 1024) return error("Photo too large", 413, env, request);
+    const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const rand = Math.abs((Date.now() ^ certId.length * 2654435761) % 1e6);
+    const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const rem = f.r.remedial;
+    rem.photos = Array.isArray(rem.photos) ? rem.photos : [];
+    rem.photos.push({ key });
+    rem.failed = true;
+    rows[f.i].remedial = rem;
+    rec.rows = rows;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const keys = rem.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean);
+    await env.DB.prepare("UPDATE em_remedials SET photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(keys), tid, rowId).run();
+    let jobFixed = false;
+    try {
+      const ack = await env.DB.prepare("SELECT job_id FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+      const jobId = ack && ack.job_id || "emrem:" + certId;
+      const jr8 = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+      if (jr8 && jr8.data) {
+        const job = JSON.parse(jr8.data);
+        const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
+        const item = (Array.isArray(job.auditItems) ? job.auditItems : []).find((it) => it && new RegExp("^Fitting " + no + "\\b").test(String(it.text || "")));
+        if (item) {
+          const dstKey = `jobs/${jobId}/audit/${item.id}/${key.split("/").pop()}`;
+          await env.JOB_FILES.put(dstKey, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
+          item.refPhotos.push(dstKey);
+          job.updatedAt = nowIso;
+          await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
+          jobFixed = true;
+        }
+      }
+    } catch {
+    }
+    const urlOut = await signedFileUrl(env, url.origin, "/certs/photo", key);
+    return json({ ok: true, key, url: urlOut, photos: keys.length, jobFixed }, {}, env, request);
   }
   if (sub === "/remedials/quote-text" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);

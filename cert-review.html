@@ -570,6 +570,8 @@
         + ' · ' + (editable && it.id
           ? '<select data-fo="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" style="' + selCss + 'color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '" title="Was it replaced on site?"><option value="0"' + (it.replacedOnSite ? "" : " selected") + '>' + (it.kind === "battery" ? "batteries required" : "works required") + '</option><option value="1"' + (it.replacedOnSite ? " selected" : "") + '>replaced on site</option></select>'
           : '<span style="color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '">' + (it.replacedOnSite ? "replaced on site" : (it.kind === "battery" ? "batteries required" : "works required")) + '</span>')
+        + ' · <span class="muted" title="Photos on file">📷 ' + (it.photos || 0) + '</span>'
+        + (it.id ? ' <button class="btn ghost sm" style="padding:1px 7px;font-size:11.5px" data-fph="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" title="Add a photo of this fitting">＋ photo</button>' : '')
         + '</div>').join("");
       let acts = '';
       acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy quote text</button>';
@@ -622,6 +624,32 @@
           else { setMsg(cid, (r&&r.error)||"Couldn't update the fitting.", true); sel.disabled=false; }
         } catch { setMsg(cid, "Couldn't update the fitting.", true); sel.disabled=false; }
       };
+      // Office adds a photo to a fitting (e.g. the engineer's uploads were refused at the time).
+      const shrinkToJpeg = file => new Promise(resolve => {
+        const img = new Image(); const u = URL.createObjectURL(file);
+        const done = v => { URL.revokeObjectURL(u); resolve(v); };
+        const t = setTimeout(() => done(file), 8000);
+        img.onload = () => { try { let w = img.width, h = img.height, m = 1400; if (w > h && w > m) { h = Math.round(h * m / w); w = m; } else if (h > m) { w = Math.round(w * m / h); h = m; }
+          const cv = document.createElement("canvas"); cv.width = w; cv.height = h; cv.getContext("2d").drawImage(img, 0, 0, w, h);
+          cv.toBlob(b => { clearTimeout(t); done(b || file); }, "image/jpeg", 0.82); } catch { clearTimeout(t); done(file); } };
+        img.onerror = () => { clearTimeout(t); done(file); };
+        img.src = u;
+      });
+      g("rmBody").querySelectorAll("[data-fph]").forEach(b => b.onclick = () => {
+        const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+        inp.onchange = async () => {
+          const file = inp.files && inp.files[0]; if (!file) return;
+          const cid = b.dataset.c; b.disabled = true; setMsg(cid, "Uploading photo…");
+          try {
+            const blob = await shrinkToJpeg(file);
+            const fd = new FormData(); fd.append("certId", cid); fd.append("id", b.dataset.fph); fd.append("file", blob, "fitting.jpg");
+            const r = await authFetch("/certs/remedials/fitting-photo", { method:"POST", body: fd }).then(x=>x.json());
+            if (r && r.ok) { if (window.MLUI && MLUI.toast) MLUI.toast(r.jobFixed ? "Photo added — also on the works job" : "Photo added"); loadTracker(); }
+            else { setMsg(cid, (r&&r.error)||"Photo upload failed.", true); b.disabled=false; }
+          } catch { setMsg(cid, "Photo upload failed.", true); b.disabled=false; }
+        };
+        document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+      });
       g("rmBody").querySelectorAll("[data-fk]").forEach(s => s.onchange = () => fitFix(s, { kind: s.value }));
       g("rmBody").querySelectorAll("[data-fo]").forEach(s => s.onchange = () => fitFix(s, { replacedOnSite: s.value === "1" }));
       g("rmBody").querySelectorAll("[data-quote]").forEach(b => b.onclick = async () => {
