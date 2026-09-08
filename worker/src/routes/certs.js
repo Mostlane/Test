@@ -1249,7 +1249,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!certId || !file || typeof file === "string") return error("Missing certId or file", 400, env, request);
     const cert = await loadCert(certId);
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const rand = Math.abs((Date.now() ^ (certId.length * 2654435761)) % 1e6);
     const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
@@ -1358,9 +1358,21 @@ export async function handle(request, env, ctx, url, sess) {
 
     if (!existing) {
       id = "CERT-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      // Owner = the job's assigned engineer when an OFFICE user creates the row
+      // (job-view's certificate panel autosaves the moment it opens, which used to
+      // stamp the office user as "engineer" — the real engineer's photo uploads
+      // then bounced with "Not your certificate" until canWriteCert covered them).
+      let owner = me;
+      if (isOffice && b.jobId) {
+        try {
+          const j = await getJob(env, tid, String(b.jobId));
+          const engs = j ? (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : [])) : [];
+          if (engs.length && !engs.some(e => String(e || "").toLowerCase().trim() === String(me || "").toLowerCase().trim())) owner = String(engs[0]);
+        } catch {}
+      }
       await env.DB.prepare(
         "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), me, now, now).run();
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
     } else {
       await env.DB.prepare(
         "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
@@ -1402,7 +1414,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/pdf" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
@@ -1416,7 +1428,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/one" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     const oneRec = shapeRow(cert); await backfillClient(env, tid, oneRec); await resignRemedialPhotos(env, url.origin, oneRec);
     return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
   }
@@ -2135,7 +2147,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (cert.status === "final") return error("A finalised certificate can't be deleted here.", 409, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
   }

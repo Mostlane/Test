@@ -2756,6 +2756,17 @@ it straight onto the compliance chart (rolling the next-due date).
   battery fitting is left). Frome (0622-26) was corrected in D1 by hand the same way
   (cert rows, em_remedials, ack, job items). Refused once done/invoiced (the clean cert
   is already re-issued). Covered by `test-em-remedials.mjs` ("fitting-update").
+- **Certificate OWNERSHIP = the job's assigned engineer, not the row's creator (8 Sep
+  2026).** Southbourne 0339-26 has no remedial photos because Ryan's NINE photo
+  uploads on 4 Sep were all refused 403 "Not your certificate": Tanya had opened the
+  job-view certificate panel first (office mode autosaves on open) so the row's
+  `engineer` was Tanya, and `/certs/photo` (+ `/pdf`, `/one`, `/delete`) still used
+  the old creator-only check while `/save` + `/submit` had already moved to
+  `canWriteCert` (office, creator, OR anyone on the job's `assignedEngineers`). All
+  four now use `canWriteCert`, and a NEW cert row created by an office user for a
+  job is stamped with the job's first assigned engineer. The photos were never
+  stored (rejected before the R2 put) — nothing to recover; the works visit must
+  photograph them. Covered by `test-em-remedials.mjs` ("Certificate ownership").
 - **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
   engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
   status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
