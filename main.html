@@ -1742,7 +1742,7 @@ const MAP = window.ML_PERM_MAP || {
             big: overdue || soon, sub: overdue ? "certificate" + (overdue === 1 ? "" : "s") + " overdue" : "due within 30 days",
             tone: overdue ? "bad" : soon ? "warn" : "",
             ok: (overdue || soon) ? "" : "All certificates in date.",
-            rows: rows, actions: act("compliance.html", "Open compliance", true)
+            rows: rows, actions: (overdue ? act("certs-overdue.html?scheme=coop", "View overdue certs", true) : "") + act("compliance.html", "Open compliance", !overdue)
           });
         });
       }
@@ -1924,7 +1924,7 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (d) { if (!d || d.uncosted == null) return null; return { n: d.uncosted, label: "POs to price", bad: false }; } },
         { area: "holidays", ok: yes(p.FullAccess) || yes(p.HolidayAdmin), emoji: "🌴", href: "holiday-admin.html", get: "/holiday/all?year=" + yr,
           calc: function (a) { if (!Array.isArray(a)) return null; return { n: a.filter(function (h) { return h.status === "Pending"; }).length, label: "holidays to approve", bad: false }; } },
-        { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
+        { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "certs-overdue.html?scheme=coop", get: "/compliance/stores",
           calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
         { area: "compliance", ok: yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance), emoji: "📄", href: "cert-status.html", get: "/certs/status?range=30d&count=1",
           calc: function (d) { if (!d || !d.ok || !d.counts) return null; return { n: (d.counts.toReview || 0) + (d.counts.withEngineers || 0), label: "EM/PAT certs outstanding", bad: false }; } },
