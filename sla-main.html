@@ -226,7 +226,9 @@
     .wheel .item.sel{color:#0f172a;font-weight:700;}
     .wheelsep{font-size:18px;font-weight:700;color:#64748b;z-index:1;}
     #forbidden{display:none;margin:26px auto;max-width:480px;padding:20px;background:#fff;border-radius:12px;text-align:center;color:#b91c1c;border:1px solid #fca5a5;}
-  </style>
+    /* Priority 1 (emergency) — bold red so it can't be missed on the board */
+  tr.p1 .ref, tr.p1 .sitename, tr.p1 .pri, .mjob.p1 .ref, .mjob.p1 .mjob-title, .mjob.p1 .pri { color:#b91c1c !important; font-weight:700 !important; }
+</style>
 </head>
 <body>
 <div class="shell">
@@ -594,6 +596,8 @@ function fmtSched(job){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
+// Priority 1 (emergency) jobs read bold red on the board — ref, site + P1 label.
+function isP1(j){ return !isProjectJob(j) && /1/.test(String((j&&j.priority)||"")); }
 // Projects carry no priority level and no SLA — blank both on the board.
 function isProjectJob(j){ return /^p\d/i.test(String((j&&j.siteCode)||"")) || /project/i.test(String((j&&(j.storeType||j.client))||"")); }
 // EM 3-hour drain-down timer chip — mirrors the engineer job-list chip so the
@@ -795,13 +799,14 @@ function render(){
 
     const tr = document.createElement("tr");
     tr.dataset.jobId = j.id;
+    if (isP1(j)) tr.classList.add("p1");
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
-      <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
+      <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
         <div class="sitename">${name || site}</div>
         <div class="small muted">${addr}</div>
@@ -822,12 +827,12 @@ function render(){
     tbody.appendChild(tr);
 
     const card = document.createElement("div");
-    card.className = "mjob";
+    card.className = "mjob" + (isP1(j) ? " p1" : "");
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
         ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
-        <span class="small nowrap">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
+        <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
