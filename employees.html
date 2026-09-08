@@ -514,6 +514,17 @@
     const el = col==="title" ? g("f_title") : document.querySelector('#recFields [data-col="'+(window.CSS&&CSS.escape?CSS.escape(col):col)+'"]');
     if(el && !el.value.trim()) el.value=String(val).trim();
   }
+  const colInput = col => document.querySelector('#recFields [data-col="'+(window.CSS&&CSS.escape?CSS.escape(col):col)+'"]');
+  const addYearsISO = (iso,n) => { const d=new Date(String(iso).slice(0,10)+"T00:00:00"); if(isNaN(d)) return ""; d.setFullYear(d.getFullYear()+n); return d.toISOString().slice(0,10); };
+  // A UK photocard driving licence (field 4b) is valid 10 years from issue (4a)
+  // for under-70s. If we have the issue date but not the expiry, default it to
+  // issue + 10 years so the record still tracks — the office can adjust.
+  function licenceExpiryFallback(){
+    if((editKind||"")!=="licence") return false;
+    const iss=colInput("issued"), exp=colInput("expires");
+    if(iss && exp && iss.value.trim() && !exp.value.trim()){ exp.value=addYearsISO(iss.value,10); return true; }
+    return false;
+  }
   async function onCertFile(file){
     if(!file) return;
     const st=g("recExtract"); st.className="msg"; st.textContent="Reading the certificate…";
@@ -540,9 +551,12 @@
       setFieldIfEmpty("title", d.title); setFieldIfEmpty("number", d.number); setFieldIfEmpty("issuer", d.issuer);
       setFieldIfEmpty("issued", d.issued); setFieldIfEmpty("expires", d.expires);
       setFieldIfEmpty("title", h.title); setFieldIfEmpty("number", h.number);
+      const est = licenceExpiryFallback();
       const got=[d.title&&"title",d.number&&"number",d.issuer&&"awarding body",d.expires&&"expiry"].filter(Boolean);
-      st.className="msg ok"; st.textContent = got.length ? ("✓ Read "+got.join(", ")+" — check & adjust.") : (h.number||h.title ? "✓ Read from the file name — check & adjust." : "Add the details below.");
-    }catch(e){ setFieldIfEmpty("title", h.title); setFieldIfEmpty("number", h.number); st.className="msg"; st.textContent = (h.number||h.title) ? "✓ Read from the file name — check & adjust." : ""; }
+      st.className="msg ok";
+      st.textContent = (got.length ? ("✓ Read "+got.join(", ")) : (h.number||h.title ? "✓ Read from the file name" : "Add the details below"))
+        + (est ? " · expiry set to issue + 10 years (photocard 4b) — please confirm" : "") + " — check & adjust.";
+    }catch(e){ setFieldIfEmpty("title", h.title); setFieldIfEmpty("number", h.number); licenceExpiryFallback(); st.className="msg"; st.textContent = (h.number||h.title) ? "✓ Read from the file name — check & adjust." : ""; }
   }
 
   // ── Add / edit modal ───────────────────────────────────────────────────────
@@ -575,6 +589,12 @@
       const iso = n => n.toISOString().slice(0,10);
       const today = new Date(); const next = new Date(); next.setMonth(next.getMonth()+1);
       k.fields.forEach((f,i)=>{ const el=g("f_"+i); if(!el) return; if(f.col==="issued" && !el.value) el.value=iso(today); if(f.col==="expires" && !el.value) el.value=iso(next); });
+    }
+    // Driving licence: typing the issue date auto-fills expiry = +10 years (the
+    // photocard 4b rule) when expiry is still blank; the office can override.
+    if(kind==="licence"){
+      const iss=colInput("issued");
+      if(iss) iss.addEventListener("change", ()=>{ if(licenceExpiryFallback() && g("recExtract")){ g("recExtract").className="msg ok"; g("recExtract").textContent="Expiry set to issue + 10 years (photocard 4b) — please confirm."; } });
     }
     g("f_notes").value = d.notes||"";
     g("recFile").value="";

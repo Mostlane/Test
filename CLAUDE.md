@@ -1190,6 +1190,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     sent as a base64 `image` block for OCR). AI result wins; a local filename
     heuristic (`nameHints`) fills anything the AI leaves blank. Same flow whether
     the file is dropped on a matrix cell, dropped in the modal, or picked.
+    **Driving licences:** the extractor reads the numbered photocard fields —
+    **4a→issued, 4b→expires, 4c/DVLA→issuer, 5→number**; if 4b can't be read the
+    client defaults **expires = issued + 10 years** (the UK photocard rule for
+    under-70s, flagged "please confirm"), and typing the issue date on a licence
+    record auto-fills the same +10y expiry when blank.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
