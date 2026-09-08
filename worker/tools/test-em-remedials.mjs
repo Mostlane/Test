@@ -149,4 +149,13 @@ let fail = 0; const ok = (name, cond, extra="") => { console.log((cond?"PASS":"F
   ok("fitting-photo: works-job item 11 gets the reference photo", r.body.jobFixed===true && job.auditItems[1].refPhotos.length===1 && /^jobs\/emrem:C1\/audit\/it-11\//.test(job.auditItems[1].refPhotos[0]) && job.auditItems[0].refPhotos.length===0, JSON.stringify(job.auditItems.map(i=>i.refPhotos)));
 }
 
+
+{ // Office corrects a battery fitting's spec + quantity.
+  const E = makeEnv("mixed");
+  const r = await call(E.env, "POST", "/certs/remedials/fitting-update", { certId:"C1", id:"C1:1", spec:"4500mAh 2.4v", qty:2 });
+  const it = r.body && r.body.case && r.body.case.items.find(i => i.id === "C1:1");
+  ok("fitting-update: spec + qty rewritten", r.status===200 && it && it.spec==="4500mAh 2.4v" && it.qty===2 && it.kind==="battery", JSON.stringify(it));
+  ok("fitting-update: cert row carries the new spec", E.writes.some(w => /UPDATE certificates SET data=/.test(w.sql) && /"batterySpec":"4500mAh 2.4v"/.test(w.binds[0]) && /"batteryQty":2/.test(w.binds[0])));
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");

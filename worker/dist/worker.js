@@ -12422,7 +12422,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     const certId = String(b.certId || "").trim(), rowId = String(b.id || "").trim();
     const kind = b.kind === void 0 ? void 0 : b.kind === "battery" ? "battery" : "light";
     const onsite = b.replacedOnSite === void 0 ? void 0 : !!b.replacedOnSite;
-    if (!certId || !rowId || kind === void 0 && onsite === void 0) return error("Missing certId/id or nothing to change", 400, env, request);
+    const spec = b.spec === void 0 ? void 0 : String(b.spec || "").trim().slice(0, 120);
+    const qty = b.qty === void 0 ? void 0 : Math.max(0, Math.min(99, Number(b.qty) || 0));
+    if (!certId || !rowId || kind === void 0 && onsite === void 0 && spec === void 0 && qty === void 0) return error("Missing certId/id or nothing to change", 400, env, request);
     const ack = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     if (!ack) return error("No remedial case for that certificate", 404, env, request);
     if (["done", "invoiced"].includes(ack.stage || "")) return error("This case is finished \u2014 the certificate has already been re-issued.", 409, env, request);
@@ -12444,6 +12446,12 @@ PAT: Import certificate number ${num2}-${yr}`;
       trail.push("Office marked " + (onsite ? "replaced on site" : "not replaced on site"));
       rem.replacedOnSite = onsite;
     }
+    const nowBatt = rem.kind === "battery";
+    if (spec !== void 0) {
+      if (nowBatt) rem.batterySpec = spec;
+      else rem.lightSpec = spec;
+    }
+    if (qty !== void 0 && nowBatt) rem.batteryQty = qty;
     if (trail.length) rem.note = [String(rem.note || "").trim(), ...trail].filter(Boolean).join(" \xB7 ");
     rem.failed = true;
     rows[f.i].remedial = rem;

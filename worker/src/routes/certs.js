@@ -1852,7 +1852,9 @@ export async function handle(request, env, ctx, url, sess) {
     const certId = String(b.certId || "").trim(), rowId = String(b.id || "").trim();
     const kind = b.kind === undefined ? undefined : (b.kind === "battery" ? "battery" : "light");
     const onsite = b.replacedOnSite === undefined ? undefined : !!b.replacedOnSite;
-    if (!certId || !rowId || (kind === undefined && onsite === undefined)) return error("Missing certId/id or nothing to change", 400, env, request);
+    const spec = b.spec === undefined ? undefined : String(b.spec || "").trim().slice(0, 120);
+    const qty = b.qty === undefined ? undefined : Math.max(0, Math.min(99, Number(b.qty) || 0));
+    if (!certId || !rowId || (kind === undefined && onsite === undefined && spec === undefined && qty === undefined)) return error("Missing certId/id or nothing to change", 400, env, request);
     const ack = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     if (!ack) return error("No remedial case for that certificate", 404, env, request);
     if (["done", "invoiced"].includes(ack.stage || "")) return error("This case is finished — the certificate has already been re-issued.", 409, env, request);
@@ -1872,6 +1874,11 @@ export async function handle(request, env, ctx, url, sess) {
       rem.kind = kind;
     }
     if (onsite !== undefined && onsite !== (rem.replacedOnSite === true)) { trail.push("Office marked " + (onsite ? "replaced on site" : "not replaced on site")); rem.replacedOnSite = onsite; }
+    // Spec / quantity: the office corrects what's needed (battery spec + qty, or
+    // the light spec). No trail line — the spec itself is the record.
+    const nowBatt = rem.kind === "battery";
+    if (spec !== undefined) { if (nowBatt) rem.batterySpec = spec; else rem.lightSpec = spec; }
+    if (qty !== undefined && nowBatt) rem.batteryQty = qty;
     if (trail.length) rem.note = [String(rem.note || "").trim(), ...trail].filter(Boolean).join(" · ");
     rem.failed = true;
     rows[f.i].remedial = rem; rec.rows = rows;
