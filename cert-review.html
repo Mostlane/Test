@@ -52,7 +52,7 @@
         <h2 style="margin:0;font-size:17px;flex:1;">💷 EM remedials tracker</h2>
         <button class="btn ghost sm" id="rmClose">Close</button>
       </div>
-      <p class="muted" style="margin:0 0 8px;">Every failed-fitting remedial and where it's up to — quote → order/approve → invoice — so none get forgotten.</p>
+      <p class="muted" style="margin:0 0 8px;">Every failed-fitting case and where it's up to: quote sent → PO received → works (or straight to the updated certificate when everything was replaced on site) → invoiced.</p>
       <div style="display:flex;gap:6px;margin:6px 0 10px" id="rmTabs">
         <button class="btn ghost sm rmtab" data-view="open">Open</button>
         <button class="btn ghost sm rmtab" data-view="all">All (incl. invoiced)</button>
@@ -76,6 +76,29 @@
     </div>
   </div>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <!-- Battery supplier email — pre-written, editable, copy or send with the enquiry PDF attached -->
+  <div id="battMailModal" style="display:none;position:fixed;inset:0;z-index:5001;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:640px;margin:30px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">📧 Battery quotation request</h2>
+        <button class="btn ghost sm" id="bmClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 10px;">The enquiry PDF (spec, quantities and the engineer's photos) is attached when you send from here. To and CC are remembered for next time.</p>
+      <div class="finbar" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+        <div><label>To (supplier)</label><input type="email" id="bmTo" placeholder="supplier@example.com" style="width:100%"></div>
+        <div><label>CC (optional)</label><input type="text" id="bmCc" placeholder="you@mostlane.com" style="width:100%"></div>
+      </div>
+      <div style="margin-top:8px"><label>Subject</label><input type="text" id="bmSubject" style="width:100%"></div>
+      <div style="margin-top:8px"><label>Email text</label><textarea id="bmBody" style="width:100%;box-sizing:border-box;min-height:190px;font:14px/1.5 'Segoe UI',system-ui,sans-serif;border:1px solid #cbd5e1;border-radius:9px;padding:9px"></textarea></div>
+      <div class="msg" id="bmMsg" style="margin-top:6px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn green" id="bmSend">📧 Send with PDF attached</button>
+        <button class="btn ghost sm" id="bmCopy">📋 Copy email text</button>
+        <button class="btn ghost sm" id="bmPdf">⬇ Download enquiry PDF</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Who gets pushed when an engineer submits a cert for review -->
   <div id="notifyModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
@@ -252,15 +275,7 @@
             if (w) w.location = u; else window.location = u;
           } catch { if(w) w.close(); g("battMsg").textContent = "Couldn't build the PDF."; g("battMsg").className="msg err"; }
         };
-        g("battEmail").onclick = async function(){
-          this.disabled = true; g("battMsg").textContent = "Sending…"; g("battMsg").className="msg";
-          try {
-            const d = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: id }) }).then(r=>r.json());
-            if (d && d.ok) { g("battMsg").textContent = "Sent to "+d.sentTo+" ✓"; g("battMsg").className="msg ok"; }
-            else { g("battMsg").textContent = (d && d.error) || "Couldn't send."; g("battMsg").className="msg err"; }
-          } catch { g("battMsg").textContent = "Couldn't send."; g("battMsg").className="msg err"; }
-          this.disabled = false;
-        };
+        g("battEmail").onclick = function(){ openBattMail(id, function(t){ g("battMsg").textContent = t; g("battMsg").className = "msg ok"; }); };
       }
 
       // Fetch the finalised cert PDF and hand it to the browser as a download.
@@ -422,8 +437,50 @@
     // ── EM remedials tracker (pipeline) ────────────────────────────────────────
     let RM_VIEW = "open";
     const money = n => "£" + (Number(n) || 0).toFixed(0);
-    const STAGE_LABEL = { to_quote:"To quote", quoted:"Quoted", approved:"Approved / ordered", invoiced:"Invoiced ✓" };
-    const STAGE_COL = { to_quote:["#fff4e6","#b45309"], quoted:["#eef4ff","#1d4ed8"], approved:["#eef9f0","#0a7d33"], invoiced:["#f1f5f9","#475569"] };
+    const STAGE_LABEL = { to_quote:"To quote", quoted:"Quoted — awaiting PO", approved:"In works", in_works:"In works", done:"Cert updated ✓", invoiced:"Invoiced ✓" };
+    const STAGE_COL = { to_quote:["#fff4e6","#b45309"], quoted:["#eef4ff","#1d4ed8"], approved:["#eef9f0","#0a7d33"], in_works:["#eef9f0","#0a7d33"], done:["#e6f4ea","#166534"], invoiced:["#f1f5f9","#475569"] };
+    const STATUS_TEXT = { works:"Works required", batteries:"Batteries required", onsite:"Replaced on site" };
+    const STATUS_COL = { works:"#b00020", batteries:"#b45309", onsite:"#0a7d33" };
+    // Download a certificate PDF as a file (used for the auto-filed updated cert).
+    async function downloadPdfFile(cid, name){
+      const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid)); if (!r.ok) throw new Error("pdf");
+      const u = URL.createObjectURL(await r.blob()); const a = document.createElement("a"); a.href = u; a.download = (name||"certificate")+".pdf"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u), 4000);
+    }
+    // ── Battery supplier email modal (draft from the server; copy or send) ─────
+    let BM_CERT = "", BM_DONE = null;
+    function openBattMail(certId, onSent){
+      BM_CERT = certId; BM_DONE = onSent || null;
+      g("battMailModal").style.display = "block";
+      g("bmMsg").textContent = "Preparing the email…"; g("bmMsg").className = "msg";
+      ["bmTo","bmCc","bmSubject","bmBody"].forEach(k => g(k).value = "");
+      authFetch("/certs/remedials/email-draft?certId="+encodeURIComponent(certId)).then(r=>r.json()).then(d => {
+        if (!d || !d.ok) { g("bmMsg").textContent = (d && d.error) || "Couldn't prepare the email."; g("bmMsg").className = "msg err"; return; }
+        g("bmTo").value = d.to || ""; g("bmCc").value = d.cc || ""; g("bmSubject").value = d.subject || ""; g("bmBody").value = d.body || "";
+        g("bmMsg").textContent = d.to ? "" : "Enter the supplier's email — it'll be remembered."; g("bmMsg").className = "msg";
+      }).catch(() => { g("bmMsg").textContent = "Couldn't prepare the email."; g("bmMsg").className = "msg err"; });
+    }
+    g("bmClose").onclick = () => g("battMailModal").style.display = "none";
+    g("battMailModal").onclick = e => { if (e.target === g("battMailModal")) g("battMailModal").style.display = "none"; };
+    g("bmCopy").onclick = async () => {
+      const t = "To: " + g("bmTo").value + (g("bmCc").value ? "\nCC: " + g("bmCc").value : "") + "\nSubject: " + g("bmSubject").value + "\n\n" + g("bmBody").value;
+      try { await navigator.clipboard.writeText(t); g("bmMsg").textContent = "✓ Email text copied"; g("bmMsg").className = "msg ok"; }
+      catch { g("bmBody").focus(); g("bmBody").select(); g("bmMsg").textContent = "Select and copy the text above."; g("bmMsg").className = "msg"; }
+    };
+    g("bmPdf").onclick = async () => {
+      const w = window.open("", "_blank");
+      try { const r = await authFetch("/certs/remedials/supplier-pdf?certId="+encodeURIComponent(BM_CERT)); if (!r.ok) throw new Error(); const u = URL.createObjectURL(await r.blob()); if (w) w.location = u; else window.location = u; }
+      catch { if (w) w.close(); g("bmMsg").textContent = "Couldn't build the PDF."; g("bmMsg").className = "msg err"; }
+    };
+    g("bmSend").onclick = async function(){
+      const to = g("bmTo").value.trim(); if (!to) { g("bmMsg").textContent = "Enter the supplier's email address."; g("bmMsg").className = "msg err"; return; }
+      this.disabled = true; g("bmMsg").textContent = "Sending…"; g("bmMsg").className = "msg";
+      try {
+        const d = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: BM_CERT, to, cc: g("bmCc").value.trim(), subject: g("bmSubject").value, body: g("bmBody").value }) }).then(r=>r.json());
+        if (d && d.ok) { g("bmMsg").textContent = "Sent to " + d.sentTo + " ✓ (PDF attached)"; g("bmMsg").className = "msg ok"; if (BM_DONE) BM_DONE("Sent to " + d.sentTo + " ✓"); }
+        else { g("bmMsg").textContent = (d && d.error) || "Couldn't send."; g("bmMsg").className = "msg err"; }
+      } catch { g("bmMsg").textContent = "Couldn't send."; g("bmMsg").className = "msg err"; }
+      this.disabled = false;
+    };
     g("remedBtn").onclick = () => { g("remedModal").style.display = "block"; loadTracker(); };
     g("rmClose").onclick = () => g("remedModal").style.display = "none";
     g("remedModal").onclick = e => { if (e.target === g("remedModal")) g("remedModal").style.display = "none"; };
@@ -492,36 +549,37 @@
 
     function caseRow(c) {
       const [bg, fg] = STAGE_COL[c.stage] || STAGE_COL.to_quote;
+      const status = STATUS_TEXT[c.statusLabel] || STATUS_TEXT.onsite, statusCol = STATUS_COL[c.statusLabel] || STATUS_COL.onsite;
       const bits = [];
-      if (c.charge) bits.push(money(c.charge) + " in lights");
-      if (c.batteries) bits.push(c.batteries + " battery" + (c.batteries === 1 ? "" : " sets"));
-      if (c.onsite) bits.push(c.onsite + " done on site");
+      if (c.charge) bits.push(money(c.charge) + " to quote");
+      if (c.onsite) bits.push(c.onsite + " replaced on site");
       if (c.pending) bits.push(c.pending + " to attend");
+      const battPending = (c.items || []).some(it => it.kind === "battery" && !it.replacedOnSite);
+      // Per-fitting lines: "Fitting 3 — Light replacement · replaced on site".
+      const fitLines = (c.items || []).map(it =>
+        '<div style="font-size:12.5px;color:#334155">Fitting ' + esc(it.no != null ? it.no : "?") + ' — ' + (it.kind === "battery" ? "Batteries" : "Light replacement")
+        + (it.spec ? ' <span class="muted">(' + esc(it.spec) + (it.qty ? ' ×' + esc(it.qty) : '') + ')</span>' : '')
+        + ' · <span style="color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '">' + (it.replacedOnSite ? "replaced on site" : (it.kind === "battery" ? "batteries required" : "works required")) + '</span></div>').join("");
       let acts = '';
-      // LIGHTS (agreed £50/light — no supplier, no approval): copy the client quote
-      // + raise the works job on demand.
-      if (c.charge) acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy client quote (£50/light)</button>';
-      if (c.lightsPending && !c.lightsJobId && c.stage !== "invoiced") acts += ' <button class="btn sm" data-raiselights="'+esc(c.certId)+'">🔧 Raise lights job</button>';
-      // Stage pipeline — the approval/order steps apply to BATTERIES; a lights-only
-      // case goes straight to invoiced (no order needed).
+      acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy quote text</button>';
+      if (battPending && c.stage !== "done" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery quote PDF</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Email supplier</button>';
       if (c.stage === "to_quote") acts += ' <button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
-      else if (c.stage === "quoted") acts += (c.batteries
-        ? ' <button class="btn sm" data-adv="approved" data-c="'+esc(c.certId)+'">📦 Order received → raise batteries job</button>'
-        : ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>');
-      else if (c.stage === "approved") acts += ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
-      if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
-      if (c.jobId || c.lightsJobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.lightsJobId||c.jobId)+'" style="text-decoration:none">Open job →</a>';
-      // Once the works are done → generate the clean certificate (failures → Pass,
-      // marked "(Replaced)"). Auto-fires when the works job completes; this is the
-      // on-demand control. Hidden once already reissued.
-      if ((c.jobId || c.lightsJobId) && !c.reissueCertId) acts += ' <button class="btn sm" data-reissue="'+esc(c.certId)+'" title="Generate the clean certificate — failures become Pass, marked (Replaced)">♻ Issue updated cert</button>';
-      if (c.reissueCertId) acts += ' <a class="btn ghost sm" href="cert-review.html?open='+encodeURIComponent(c.reissueCertId)+'" style="text-decoration:none">♻ Updated cert →</a>';
-      if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open">↩</button>';
+      else if (c.stage === "quoted") acts += ' <button class="btn green sm" data-po="'+esc(c.certId)+'" title="'+(c.statusLabel==="onsite"?"Everything was replaced on site — files the updated certificate straight to compliance":"Raises the works job for the fittings still to attend")+'">📦 PO received</button>';
+      else if (c.stage === "in_works") {
+        if (c.awaitingBatteries) acts += ' <button class="btn sm" data-batt="'+esc(c.certId)+'">🔋 Batteries arrived</button>';
+        if (c.jobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.jobId)+'" style="text-decoration:none">Open works job →</a>';
+        if (c.jobId && !c.reissueCertId) acts += ' <button class="btn ghost sm" data-reissue="'+esc(c.certId)+'" title="Works done but the job wasn\'t completed in the portal? File the updated certificate now.">♻ File updated cert now</button>';
+      }
+      else if (c.stage === "done") acts += ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
+      if (c.reissueCertId) acts += ' <button class="btn ghost sm" data-dl="'+esc(c.reissueCertId)+'" data-num="'+esc(c.certNumber||"")+'">⬇ Updated cert PDF</button> <a class="btn ghost sm" href="cert-review.html?open='+encodeURIComponent(c.reissueCertId)+'" style="text-decoration:none">♻ Open →</a>';
+      if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open from the start">↩</button>';
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
           + '<b style="font-size:14.5px">'+esc(c.siteName||c.siteCode||"Site")+'</b> <span class="muted">Cert '+esc(c.certNumber||"")+'</span>'
           + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||c.stage)+'</span></div>'
-        + '<div class="muted" style="margin:4px 0 8px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
+        + '<div style="margin:4px 0 4px;font-weight:700;color:'+statusCol+'">'+esc(status)+(c.awaitingBatteries?' <span class="badge" style="background:#fff4e6;color:#b45309">⏳ awaiting batteries</span>':'')+'</div>'
+        + '<div class="muted" style="margin:0 0 6px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
+        + (fitLines ? '<div style="margin:0 0 8px;padding:6px 8px;background:#f8fafc;border-radius:8px">'+fitLines+'</div>' : '')
         + '<div class="rcase-msg msg" data-msg="'+esc(c.certId)+'"></div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap">'+acts+'</div></div>';
     }
@@ -533,7 +591,7 @@
       catch { g("rmBody").innerHTML = '<p class="msg err">Couldn\'t load the tracker.</p>'; return; }
       const cases = (d && d.cases) || [];
       if (!cases.length) { g("rmBody").innerHTML = '<p class="muted">Nothing here — no open EM remedials. 🎉</p>'; return; }
-      const order = { to_quote:0, quoted:1, approved:2, invoiced:3 };
+      const order = { to_quote:0, quoted:1, approved:2, in_works:2, done:3, invoiced:4 };
       cases.sort((a,b) => (order[a.stage]||0) - (order[b.stage]||0));
       g("rmBody").innerHTML = cases.map(caseRow).join("");
       const setMsg = (cid, t, err) => { const m = g("rmBody").querySelector('[data-msg="'+CSS.escape(cid)+'"]'); if (m) { m.textContent = t; m.className = "rcase-msg msg" + (err?" err":" ok"); } };
@@ -560,6 +618,30 @@
           }
         } catch { setMsg(cid, "Couldn't build the quote.", true); }
       });
+      g("rmBody").querySelectorAll("[data-po]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.po; b.disabled = true; setMsg(cid, "Recording the PO…");
+        try {
+          const r = await authFetch("/certs/remedials/po-received", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (!r || !r.ok) { setMsg(cid, (r&&r.error)||"Couldn't record the PO.", true); b.disabled=false; return; }
+          if (r.stage === "done" && r.reissueCertId) {
+            const num = (r.case && r.case.certNumber) || "";
+            const dl = window.MLUI ? await MLUI.confirm("All fittings were replaced on site, so the updated certificate has been filed to the compliance chart. Download a copy?", { title:"Certificate updated ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Updated certificate filed. Download a copy?");
+            if (dl) { try { await downloadPdfFile(r.reissueCertId, "EM certificate " + num + " (updated)"); } catch {} }
+          } else if (r.stage === "in_works") {
+            if (window.MLUI && MLUI.toast) MLUI.toast(r.awaitingBatteries ? "Works job raised — flagged awaiting batteries" : "Works job raised — assign it on the scheduler");
+          }
+          loadTracker();
+        } catch { setMsg(cid, "Couldn't record the PO.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-batt]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.batt; b.disabled = true; setMsg(cid, "Clearing the awaiting-batteries flag…");
+        try { const r = await authFetch("/certs/remedials/batteries-arrived", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
+        catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+        try { await downloadPdfFile(b.dataset.dl, "EM certificate " + (b.dataset.num||"") + " (updated)"); } catch { alert("Couldn't download the PDF."); }
+      });
       g("rmBody").querySelectorAll("[data-raiselights]").forEach(b => b.onclick = async () => {
         const cid = b.dataset.raiselights; b.disabled = true; setMsg(cid, "Raising lights job…");
         try {
@@ -571,7 +653,7 @@
         const cid = b.dataset.reissue; b.disabled = true; setMsg(cid, "Generating updated certificate…");
         try {
           const r = await authFetch("/certs/remedials/reissue", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
-          if (r && r.ok && r.id) location.href = "cert-review.html?open=" + encodeURIComponent(r.id);
+          if (r && r.ok && r.id) { setMsg(cid, "Updated certificate filed to compliance ✓"); loadTracker(); }
           else { setMsg(cid, (r&&r.error)||"Couldn't generate the updated certificate.", true); b.disabled=false; }
         } catch { setMsg(cid, "Couldn't generate the updated certificate.", true); b.disabled=false; }
       });
@@ -582,12 +664,7 @@
           const u = URL.createObjectURL(await r.blob()); if (w) w.location = u; else window.location = u;
         } catch { if(w) w.close(); setMsg(cid, "Couldn't build the PDF.", true); }
       });
-      g("rmBody").querySelectorAll("[data-battmail]").forEach(b => b.onclick = async () => {
-        const cid = b.dataset.battmail; b.disabled = true; setMsg(cid, "Sending…");
-        try { const r = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
-          if (r && r.ok) setMsg(cid, "Sent to "+r.sentTo+" ✓"); else setMsg(cid, (r&&r.error)||"Couldn't send.", true); }
-        catch { setMsg(cid, "Couldn't send.", true); } b.disabled = false;
-      });
+      g("rmBody").querySelectorAll("[data-battmail]").forEach(b => b.onclick = () => openBattMail(b.dataset.battmail, t => setMsg(b.dataset.battmail, t)));
     }
   </script>
 </body>

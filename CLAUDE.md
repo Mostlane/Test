@@ -2664,6 +2664,38 @@ it straight onto the compliance chart (rolling the next-due date).
   Notify modal (saved via /certs/config). The blocking gate's wording folds in
   batteries ("N need batteries — supplier quote"). portal-config `?v=21`, cert-form
   `?v=10`, SW `mostlane-v85`.
+- **EM remedials v2 (Sep 2026 — Jamie's spec, supersedes the pipeline notes below):**
+  **£50 per failed fitting, light OR batteries, replaced on site or not.** Engineer marks
+  each failed fitting: fault (Replace light → optional `lightSpec`; Batteries → spec +
+  qty), "Done on site?" Yes/No, photos (required). cert-form's list header breaks the
+  failures down ("⚠ 9 failed: 3 lights · 4 batteries · 2 replaced on site"). Case status
+  (`em_remedial_acks.status_label`, worst-first) = **works** (a light not replaced) >
+  **batteries** (batteries not replaced) > **onsite** (all replaced). **Stages:**
+  `to_quote` (the blocking portal-config pop-up — now shows the CLIENT QUOTE TEXT with a
+  📋 Copy button; "✓ Quote sent" → `quoted`) → `quoted` (waits on the tracker for the
+  client's PO) → **📦 PO received** (`POST /certs/remedials/po-received` = `poReceived()`)
+  → either `done` (nothing left to attend: `reissueCleanCert` now **AUTO-FILES** the clean
+  cert — same number, failed rows → Pass + "(Replaced)", `fileCertNow()` to the chart,
+  bump:false — and offers the PDF) or `in_works` (`createRemedialWorksJob`: ONE
+  site-audit job `emrem:<certId>`, one checklist item per pending fitting with the
+  engineer's photos as refPhotos, unassigned, RA on / other gates off; flagged
+  **"⏳ AWAITING BATTERIES"** in its description when any battery fitting is pending →
+  **🔋 Batteries arrived** (`/remedials/batteries-arrived`) strips it + pushes SLA admins)
+  → engineer completes the audit job → `sla.js maybeReissueAfterRemedial` →
+  `reissueCleanCertForRemedialJob` → auto-filed clean cert → `done` → **🧾 Invoiced**.
+  Legacy `approved` reads as `in_works`. **Quote text** (`buildQuoteText`, GET
+  `/remedials/quote-text`): "Failed EM fittings at store 0622:" + one full line per
+  fitting ("Fitting 3 - Light replacement - £50", "(replaced on site)" suffix where so)
+  + "Total: N fittings - £N". **Supplier email:** GET `/remedials/email-draft?certId=`
+  = To/CC (remembered in cert:config `supplierEmail`/`supplierCc`), subject, body
+  ("Good morning/afternoon" by London time, reference `<store>-EM-<YY>`, signed with
+  the user's name); cert-review's 📧 modal edits it, 📋 copies it, 📄 downloads the
+  battery enquiry PDF, 📧 sends it with the PDF attached (POST `/remedials/supplier-email`
+  `{certId,to,cc,subject,body}` — persists To/CC; lib/email.js gained `cc`). The
+  tracker (💷 EM remedials) shows status text + per-fitting lines and the stage's
+  button; the `/remedials/board` + `/outstanding` payloads carry `items[]`,
+  `statusLabel`, `awaitingBatteries`, `quoteText`. Client-order approve
+  (`/remedials/order-action`) = PO received. **Test:** `node worker/tools/test-em-remedials.mjs`.
 - **EM remedial PIPELINE + continuous tracker (Aug 2026):** a finalised EM cert
   with failures opens a **case** (`em_remedial_acks`, `stage` col) that moves
   **to_quote → quoted → approved → invoiced**, so nothing is forgotten. The
