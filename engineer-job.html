@@ -1040,7 +1040,9 @@
     var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
     var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
     host.innerHTML=items.map(function(it,i){
-      var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy">'; };
+      // Reference photos copied from a certificate / added by the office have no
+      // ".thumb" copy — fall back to the full photo rather than a broken tile.
+      var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}">'; };
       var refs=(it.refPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref"); }).join("");
       var extra=(it.extraPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref au-extra"); }).join("");
       var pending=pend[it.id] && !(it.done&&it.donePhoto);

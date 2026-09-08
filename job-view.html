@@ -1055,7 +1055,7 @@ function renderAuditView(){
   const doneN = items.filter(it => it.done && it.donePhoto).length;
   const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + items.length + " done";
   const cell = (p, cls, label) => p && (p.url || p.thumb)
-    ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt=""><figcaption>'+label+'</figcaption></figure>'
+    ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt="" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}"><figcaption>'+label+'</figcaption></figure>'
     : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
   const rowsHtml = items.map((it, i) => {
     const refs = (it.refPhotoUrls || []);

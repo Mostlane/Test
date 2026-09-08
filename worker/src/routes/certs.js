@@ -411,7 +411,11 @@ async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = fa
         const obj = await env.JOB_FILES.get(key); if (!obj) continue;
         const fn = String(key).split("/").pop();
         const dstKey = `jobs/${jobId}/audit/${itemId}/${fn}`;
-        await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+        const bytes = await obj.arrayBuffer();
+        await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+        // The checklist tile shows "<key>.thumb"; these sources have none, so the
+        // same (already client-shrunk) bytes serve as the thumb.
+        try { await env.JOB_FILES.put(dstKey + ".thumb", bytes, { httpMetadata: obj.httpMetadata }); } catch {}
         refPhotos.push(dstKey); n++;
       } catch {}
     }
@@ -1966,6 +1970,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (item) {
           const dstKey = `jobs/${jobId}/audit/${item.id}/${key.split("/").pop()}`;
           await env.JOB_FILES.put(dstKey, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          try { await env.JOB_FILES.put(dstKey + ".thumb", buf, { httpMetadata: { contentType: file.type || "image/jpeg" } }); } catch {}
           item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : []; item.refPhotos.push(dstKey);
           job.updatedAt = nowIso;
           await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
