@@ -2767,6 +2767,14 @@ it straight onto the compliance chart (rolling the next-due date).
   job is stamped with the job's first assigned engineer. The photos were never
   stored (rejected before the R2 put) — nothing to recover; the works visit must
   photograph them. Covered by `test-em-remedials.mjs` ("Certificate ownership").
+- **Office adds a photo to a fitting after finalise (8 Sep 2026):** tracker fitting
+  lines show "📷 N" + a **＋ photo** button (office) → **POST
+  /certs/remedials/fitting-photo** (multipart `certId,id,file`; client-shrunk JPEG
+  like cert-form). Stores to `certremedial/<tid>/<certId>/…`, appends to the cert
+  row's `remedial.photos`, the `em_remedials.photos` JSON, and — when the works job
+  (`emrem:<certId>`) exists — copies it into `jobs/<jobId>/audit/<itemId>/` as that
+  fitting's reference photo. Built for Southbourne (engineer's uploads had been
+  refused). Covered by `test-em-remedials.mjs` ("fitting-photo").
 - **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
   engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
   status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
