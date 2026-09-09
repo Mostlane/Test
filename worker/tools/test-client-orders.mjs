@@ -12,6 +12,8 @@ globalThis.fetch = async () => { throw new Error("no network in test"); };
 function makeEnv() {
   const jobs = {};       // id → job JSON
   const orders = {};     // id → client_orders row
+  const acks = [];       // em_remedial_acks rows (cert_id, site_code, site_name, cert_number, stage, job_id)
+  const rems = [];       // em_remedials rows (id, cert_id, kind, status, fitting_no, photos, site_code, site_name, cert_number)
   const files = {};      // R2 keys
   const users = {
     "Office Olly": { staffType: "office" },
@@ -33,6 +35,8 @@ function makeEnv() {
       if (/FROM sla_jobs WHERE tenant_id = \? AND id = \?/.test(sql)) { const j = jobs[binds[1]]; return j ? { data: JSON.stringify(j) } : null; }
       if (/FROM sla_jobs WHERE tenant_id=\? AND id=\?/.test(sql)) { const j = jobs[binds[1]]; return j ? { data: JSON.stringify(j) } : null; }
       if (/SELECT profile FROM users/.test(sql)) { const u = users[binds[1]]; return u ? { profile: JSON.stringify(u) } : null; }
+      if (/FROM em_remedial_acks WHERE tenant_id=\? AND cert_id=\?/.test(sql)) return acks.find(a => a.cert_id === binds[1]) || null;
+      if (/SELECT unlinked_job_id FROM client_orders/.test(sql)) { const o = orders[binds[1]]; return o ? { unlinked_job_id: o.unlinked_job_id || null } : null; }
       if (/FROM client_orders WHERE tenant_id=\? AND external_id=\?/.test(sql)) return Object.values(orders).find(o => o.external_id === binds[1]) || null;
       if (/FROM client_orders WHERE tenant_id=\? AND order_number=\?/.test(sql)) return Object.values(orders).filter(o => o.order_number === binds[1] && (!/status<>'dismissed'/.test(sql) || o.status !== "dismissed"))[0] || null;
       if (/FROM client_orders WHERE tenant_id=\? AND id=\?/.test(sql)) return orders[binds[1]] || null;
@@ -42,7 +46,10 @@ function makeEnv() {
       if (/SELECT permission, value FROM user_permissions/.test(sql)) return { results: (perms[binds[1]] || []).map(p => ({ permission: p, value: 1 })) };
       if (/SELECT permission FROM user_permissions/.test(sql)) return { results: (perms[binds[1]] || []).map(p => ({ permission: p })) };
       if (/helpdesk_ref=\?/.test(sql)) return { results: rows().filter(j => j.helpdeskRef === binds[1]).map(j => ({ data: JSON.stringify(j) })) };
-      if (/helpdesk_ref LIKE \?/.test(sql)) { const pre = String(binds[1]).replace(/%$/, ""); return { results: rows().filter(j => String(j.helpdeskRef || "").startsWith(pre) && j.helpdeskRef !== binds[2]).map(j => ({ data: JSON.stringify(j) })) }; }
+      if (/helpdesk_ref LIKE \?/.test(sql)) { const re = new RegExp("^" + String(binds[1]).split("%").map(x => x.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&")).join(".*") + "$"); return { results: rows().filter(j => re.test(String(j.helpdeskRef || ""))).map(j => ({ data: JSON.stringify(j) })) }; }
+      if (/FROM em_remedial_acks WHERE tenant_id=\? AND COALESCE\(stage/.test(sql)) return { results: acks.filter(a => ["to_quote", "quoted", "approved", "in_works"].includes(a.stage || "to_quote")) };
+      if (/FROM em_remedials WHERE tenant_id=\? AND cert_id=\?/.test(sql)) return { results: rems.filter(r => r.cert_id === binds[1] && (!/status='pending'/.test(sql) || r.status === "pending")) };
+      if (/FROM client_orders WHERE tenant_id=\? AND matched_cert_id=\?/.test(sql)) return { results: Object.values(orders).filter(o => o.matched_cert_id === binds[1] && ["new", "matched"].includes(o.status)) };
       if (/^SELECT data FROM sla_jobs WHERE tenant_id\s*=\s*\?\s*$/.test(sql.trim())) return { results: rows().map(j => ({ data: JSON.stringify(j) })) };
       if (/FROM client_orders WHERE tenant_id=\? ORDER BY/.test(sql)) return { results: Object.values(orders) };
       return { results: [] }; },
@@ -52,21 +59,32 @@ function makeEnv() {
         const cols = /INSERT INTO client_orders\s*\(([^)]+)\)/.exec(sql)[1].split(",").map(c => c.trim());
         const row = {}; cols.forEach((c, i) => row[c] = binds[i]);
         const ex = orders[row.id];
-        if (ex) { Object.assign(ex, row, { status: ["actioned", "dismissed"].includes(ex.status) ? ex.status : row.status }); } else orders[row.id] = row;
+        // ON CONFLICT: status keeps actioned/dismissed; the email copy is COALESCEd (a re-send without it keeps the stored one)
+        if (ex) { for (const k of ["email_subject", "email_from", "email_text"]) if (row[k] == null) row[k] = ex[k]; Object.assign(ex, row, { status: ["actioned", "dismissed"].includes(ex.status) ? ex.status : row.status }); } else orders[row.id] = row;
       }
       else if (/UPDATE client_orders SET/.test(sql)) {
+        // Generic SET parser: col=? (binds in order) | col='lit' | col=NULL | col=CASE…END (the
+        // "keep dismissed/actioned else linked" status rule).
         const o = orders[binds[binds.length - 1]]; if (!o) return { meta: {} };
-        if (/matched_job_id=\?/.test(sql)) o.matched_job_id = binds[0];
-        if (/matched_kind='job'/.test(sql)) o.matched_kind = "job";
-        if (/ELSE 'linked'/.test(sql) && !["dismissed", "actioned"].includes(o.status)) o.status = "linked";
-        if (/status='dismissed'/.test(sql)) o.status = "dismissed";
-        if (/SET status=\?, actioned_at=NULL/.test(sql)) o.status = binds[0];
+        const set = /SET ([\s\S]*?) WHERE /.exec(sql)[1]; let bi = 0;
+        for (const m of set.matchAll(/(\w+)=(\?|NULL|'([^']*)'|CASE[\s\S]*?END)/g)) {
+          const col = m[1], v = m[2];
+          if (v === "?") o[col] = binds[bi++];
+          else if (v === "NULL") o[col] = null;
+          else if (v.startsWith("'")) o[col] = m[3];
+          else if (/ELSE 'linked'/.test(v)) { if (!["dismissed", "actioned"].includes(o.status)) o.status = "linked"; }
+        }
+      }
+      else if (/UPDATE em_remedial_acks SET/.test(sql)) {
+        const a = acks.find(x => x.cert_id === binds[binds.length - 1]); if (!a) return { meta: {} };
+        if (/stage='in_works'/.test(sql)) { a.stage = "in_works"; a.job_id = binds[0] || a.job_id; }
+        if (/stage='done'/.test(sql)) a.stage = "done";
       }
       return { meta: {} }; },
   }; return st; }, batch(s) { return Promise.all(s.map(x => x.run())); } };
   const r2 = { async list({ prefix }) { return { objects: Object.keys(files).filter(k => k.startsWith(prefix)).map(key => ({ key })), truncated: false }; },
     async get(k) { return files[k] != null ? { body: files[k], httpMetadata: {}, customMetadata: {} } : null; }, async put(k, body) { files[k] = body; }, async delete() {} };
-  return { env: { DB: db, JOB_FILES: r2, ASSET_BUCKET: r2, JOBS_INBOUND_TOKEN: "tok" }, jobs, orders, files };
+  return { env: { DB: db, JOB_FILES: r2, ASSET_BUCKET: r2, JOBS_INBOUND_TOKEN: "tok" }, jobs, orders, files, acks, rems };
 }
 const sessOf = u => ({ user: { username: u }, tenantId: 1 });
 const J = async (mod, path, sess, opts = {}) => {
@@ -154,6 +172,84 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   ok("dismissed order → make-job refused", mk.status === 400 && /dismissed/.test(mk.body.error || ""));
   const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
   ok("board shows it under dismissed", b.body.orders[0].stage === "dismissed");
+}
+const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { env: E.env, method: "POST", headers: { authorization: "Bearer tok" }, body });
+{ // 6. LATE EM order: the office already pressed PO received by hand (case in_works, works job exists) → links straight to the works job
+  const E = makeEnv();
+  E.jobs["emrem:CERT-A"] = { id: "emrem:CERT-A", helpdeskRef: "EM remedial — 0335", status: "Scheduled", createdAt: "2026-09-08T10:00:00.000Z", siteCode: "0335", siteName: "Test Store", assignedEngineers: ["Field Fred"] };
+  E.acks.push({ cert_id: "CERT-A", site_code: "0335", site_name: "Test Store", cert_number: "0335-26", stage: "in_works", job_id: "emrem:CERT-A" });
+  const r = await inbound(E, { orderNumber: "R29051", client: "Southern Co-op", priority: 3, orderValue: 200, storeCode: "0335", siteName: "Test Store", description: "4x failed lights", externalId: "<ord-6@concerto>" });
+  const o = Object.values(E.orders)[0], j = E.jobs["emrem:CERT-A"];
+  ok("late EM order → linked to the existing works job, value stamped", r.status === 200 && r.body.status === "linked" && r.body.jobId === "emrem:CERT-A" && j.orderNumber === "R29051" && j.orderValue === 200 && j.clientOrderId === o.id, JSON.stringify(r.body));
+  ok("order keeps its certificate match (kind em) alongside the job link", o.matched_kind === "em" && o.matched_cert_id === "CERT-A" && o.matched_job_id === "emrem:CERT-A" && o.status === "linked", JSON.stringify({ k: o.matched_kind, c: o.matched_cert_id, j: o.matched_job_id, s: o.status }));
+  const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
+  ok("board shows it live on the works job", b.body.orders[0].stage === "live" && b.body.orders[0].job.id === "emrem:CERT-A");
+}
+{ // 7. order arrives while the EM case is still QUOTED → matched; approving from the order raises the works job AND stamps the value on it
+  const E = makeEnv();
+  E.acks.push({ cert_id: "CERT-B", site_code: "0335", site_name: "Test Store", cert_number: "0335-26", stage: "quoted", job_id: null });
+  E.rems.push({ id: "CERT-B:0", cert_id: "CERT-B", kind: "light", status: "pending", fitting_no: 3, photos: "[]", site_code: "0335", site_name: "Test Store", cert_number: "0335-26" });
+  const r = await inbound(E, { orderNumber: "R29052", client: "Southern Co-op", priority: 3, orderValue: 50, storeCode: "0335", siteName: "Test Store", description: "Fitting 3 - Light replacement - £50", externalId: "<ord-7@concerto>" });
+  const oid = Object.values(E.orders)[0].id;
+  ok("order matched to the waiting EM case (no job yet)", r.status === 200 && r.body.status === "matched" && r.body.matchedKind === "em" && !r.body.jobId, JSON.stringify(r.body));
+  const ap = await J(certs, "/certs/remedials/order-action", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid, action: "approve" } });
+  const wj = E.jobs["emrem:CERT-B"];
+  ok("approve → works job raised with the order number + value on it", ap.status === 200 && ap.body.jobId === "emrem:CERT-B" && wj && wj.orderNumber === "R29052" && wj.orderValue === 50 && wj.clientOrderId === oid, JSON.stringify(ap.body));
+  ok("order actioned + linked to the works job", E.orders[oid].status === "actioned" && E.orders[oid].matched_job_id === "emrem:CERT-B" && E.orders[oid].matched_kind === "em");
+}
+{ // 8. the office presses PO received on the TRACKER instead (order already matched, waiting) → same result
+  const E = makeEnv();
+  E.acks.push({ cert_id: "CERT-C", site_code: "0335", site_name: "Test Store", cert_number: "0335-26", stage: "quoted", job_id: null });
+  E.rems.push({ id: "CERT-C:0", cert_id: "CERT-C", kind: "light", status: "pending", fitting_no: 1, photos: "[]", site_code: "0335", site_name: "Test Store", cert_number: "0335-26" });
+  await inbound(E, { orderNumber: "R29053", client: "Southern Co-op", orderValue: 50, storeCode: "0335", siteName: "Test Store", externalId: "<ord-8@concerto>" });
+  const oid = Object.values(E.orders)[0].id;
+  const po = await J(certs, "/certs/remedials/po-received", sessOf("Office Olly"), { env: E.env, method: "POST", body: { certId: "CERT-C" } });
+  const wj = E.jobs["emrem:CERT-C"];
+  ok("PO received on the tracker → the waiting order is linked to the works job + value stamped", po.status === 200 && wj && wj.orderNumber === "R29053" && wj.orderValue === 50 && E.orders[oid].matched_job_id === "emrem:CERT-C" && E.orders[oid].status === "actioned", JSON.stringify(po.body));
+}
+{ // 9. a hand-made job whose reference CONTAINS the order number links; a near-miss never does
+  const E = makeEnv();
+  E.jobs["j-hand"] = { id: "j-hand", helpdeskRef: "R29051- EM remedial — 0335", status: "Scheduled", createdAt: "2026-09-08T10:00:00.000Z", siteCode: "0335", siteName: "Test Store" };
+  const miss = await inbound(E, { orderNumber: "R2905", client: "Southern Co-op", orderValue: 1, storeCode: "0335", externalId: "<ord-9a@concerto>" });
+  ok("R2905 does NOT claim the R29051 job (whole-token match)", miss.status === 200 && miss.body.status === "new" && !miss.body.jobId && E.jobs["j-hand"].orderValue == null, JSON.stringify(miss.body));
+  const hit = await inbound(E, { orderNumber: "R29051", client: "Southern Co-op", orderValue: 200, storeCode: "0335", externalId: "<ord-9b@concerto>" });
+  ok("R29051 links to the job whose reference contains it", hit.status === 200 && hit.body.status === "linked" && hit.body.jobId === "j-hand" && E.jobs["j-hand"].orderValue === 200 && E.jobs["j-hand"].orderNumber === "R29051", JSON.stringify(hit.body));
+}
+{ // 10. UNLINK: the job forgets the order, the order goes back to needs-a-job, and nothing automatic re-attaches that pair
+  const E = makeEnv();
+  await inbound(E, { orderNumber: "00099999/2", client: "Southern Co-op", orderValue: 439, storeCode: "0335", siteName: "Test Store", externalId: "<ord-10@concerto>" });
+  const oid = Object.values(E.orders)[0].id;
+  ok("setup: linked to the same-ref job", E.orders[oid].matched_job_id === "00099999/2" && E.jobs["00099999/2"].orderValue === 439);
+  const denied = await J(certs, "/certs/orders/unlink", sessOf("Field Fred"), { env: E.env, method: "POST", body: { id: oid } });
+  ok("unlink refused to a field engineer", denied.status === 403);
+  const un = await J(certs, "/certs/orders/unlink", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid } });
+  const j = E.jobs["00099999/2"], o = E.orders[oid];
+  ok("unlink → job forgets number/value/link + notes who did it", un.status === 200 && un.body.jobId === "00099999/2" && j.orderValue == null && j.orderNumber == null && j.clientOrderId == null && (j.events || []).some(e => /unlinked from this job by Office Olly/.test(e.note)), JSON.stringify(un.body));
+  ok("order back to new, job remembered as unlinked", o.status === "new" && !o.matched_job_id && !o.matched_kind && o.unlinked_job_id === "00099999/2", JSON.stringify({ s: o.status, u: o.unlinked_job_id }));
+  const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
+  ok("board: needs a job again (no visual re-attach by reference)", b.body.orders[0].stage === "needs_job" && !b.body.orders[0].job);
+  const again = await inbound(E, { orderNumber: "00099999/2", client: "Southern Co-op", orderValue: 439, storeCode: "0335", siteName: "Test Store", externalId: "<ord-10@concerto>" });
+  ok("the same email re-sent does NOT re-link the unlinked pair", again.status === 200 && again.body.status === "new" && !again.body.jobId && E.jobs["00099999/2"].orderValue == null, JSON.stringify(again.body));
+  const r2 = await J(sla, "/sla/inbound", null, { env: E.env, method: "POST", headers: { Authorization: "Bearer tok" }, body: { reference: "00099999/2", description: "Re-sent job alert", siteCode: "0335", priority: "Priority 3" } });
+  ok("the job arriving again does NOT pick the unlinked order up", r2.status === 200 && E.jobs["00099999/2"].orderValue == null && E.orders[oid].status === "new", JSON.stringify({ v: E.jobs["00099999/2"].orderValue, s: E.orders[oid].status }));
+  const mk = await J(certs, "/certs/orders/make-job", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid } });
+  ok("make-job after unlink → a different job, never the unlinked one", mk.status === 200 && mk.body.jobId !== "00099999/2" && E.jobs[mk.body.jobId] && E.jobs[mk.body.jobId].orderValue === 439, JSON.stringify(mk.body));
+  const relink = await J(certs, "/certs/orders/link", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid, jobId: "00099999/2" } });
+  ok("the office can still hand-link it back deliberately", relink.status === 200 && E.jobs["00099999/2"].orderValue === 439 && E.orders[oid].matched_job_id === "00099999/2");
+}
+{ // 11. a COPY of the order email travels with the order — readable by any office user, never by the field
+  const E = makeEnv();
+  await inbound(E, { orderNumber: "00099996/2", client: "Southern Co-op", orderValue: 10, storeCode: "0335", externalId: "<ord-11@concerto>",
+    emailSubject: "Order number 00099996/2 from Southern Coop", emailFrom: "noreply@concerto.co.uk", emailText: "Concerto\nOrder number 00099996/2\nPriority : Priority 3\nOrder value : £10.00\nFix the thing\nFor :\n0335 - Test Store SR00001" });
+  const oid = Object.values(E.orders)[0].id;
+  const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
+  ok("board flags the stored copy (hasEmail) without shipping the text", b.body.orders[0].hasEmail === true && !("emailText" in b.body.orders[0]) && b.body.orders[0].emailSubject === "Order number 00099996/2 from Southern Coop");
+  const em = await J(certs, "/certs/orders/email?id=" + encodeURIComponent(oid), sessOf("Office Olly"), { env: E.env });
+  ok("office reads the email copy", em.status === 200 && /Fix the thing/.test(em.body.text) && em.body.from === "noreply@concerto.co.uk" && em.body.subject === "Order number 00099996/2 from Southern Coop", JSON.stringify(em.body));
+  const emF = await J(certs, "/certs/orders/email?id=" + encodeURIComponent(oid), sessOf("Field Fred"), { env: E.env });
+  ok("email copy refused to a field engineer", emF.status === 403);
+  await inbound(E, { orderNumber: "00099996/2", client: "Southern Co-op", orderValue: 10, storeCode: "0335", externalId: "<ord-11@concerto>" });
+  ok("a re-send without the copy keeps the stored copy", !!E.orders[oid].email_text && /Fix the thing/.test(E.orders[oid].email_text));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

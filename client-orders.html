@@ -45,6 +45,13 @@
     .msg{font-size:12.5px;margin-top:6px;} .msg.err{color:var(--bad);} .msg.ok{color:var(--ok);}
     .earlier{font-size:12.5px;color:#475569;margin-top:3px;}
     #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+    /* the stored copy of an order email */
+    #emBack{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:16px;}
+    #emBox{background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+    #emBox .hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e7eb;}
+    #emBox .hd h3{margin:0;font-size:16px;flex:1;}
+    #emMeta{white-space:pre-wrap;font-size:12.5px;color:#475569;padding:10px 16px;border-bottom:1px solid #f1f5f9;}
+    #emBody{white-space:pre-wrap;font-size:14px;line-height:1.5;padding:14px 16px;overflow:auto;font-family:inherit;}
   </style>
 </head>
 <body>
@@ -53,6 +60,12 @@
     <h1>📥 Client orders</h1>
     <button class="btn ghost" id="refresh" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">↻</button>
   </header>
+
+  <div id="emBack" role="dialog" aria-modal="true"><div id="emBox">
+    <div class="hd"><h3 id="emTitle">Email</h3><button class="btn ghost" id="emClose">✕ Close</button></div>
+    <div id="emMeta"></div>
+    <div id="emBody"></div>
+  </div></div>
 
   <div class="wrap">
     <div id="forbidden">🚫 Client orders carry financial information, which is visible to Full Access users and office staff only.</div>
@@ -150,8 +163,10 @@
       } else if (o.stage === "dismissed") {
         acts += '<button class="btn ghost" data-reopen="' + esc(o.id) + '">↩ Reopen</button>';
       }
-      if(j) acts += ' <a class="btn ghost" href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">Open job →</a>';
-      if(o.link) acts += ' <a class="btn ghost" href="' + esc(o.link) + '" target="_blank" rel="noopener">📧 Email</a>';
+      if(j) acts += ' <a class="btn ghost" href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">Open job →</a>'
+        + ' <button class="btn ghost" data-unlink="' + esc(o.id) + '" title="This order is not for that job">✂ Unlink</button>';
+      if(o.hasEmail) acts += ' <button class="btn ghost" data-email="' + esc(o.id) + '">📧 View email</button>';
+      else if(o.link) acts += ' <a class="btn ghost" href="' + esc(o.link) + '" target="_blank" rel="noopener">📧 Email</a>';
       return '<div class="ocard ' + esc(o.stage) + '" id="o' + esc(o.id) + '">'
         + '<div class="top"><span class="ref">' + esc(o.orderNumber || "(no number)") + '</span>'
         + (o.client ? '<span class="pill p-client">' + esc(o.client) + '</span>' : '')
@@ -189,6 +204,16 @@
           if(r && r.ok) load(); else { setMsg(id, "Couldn't dismiss.", true); b.disabled = false; } }
         catch(e){ setMsg(id, "Couldn't dismiss.", true); b.disabled = false; }
       });
+      [].forEach.call(document.querySelectorAll("[data-unlink]"), b => b.onclick = async () => {
+        const id = b.dataset.unlink, o = (DATA.orders||[]).find(x => x.id === id) || {};
+        const q = "Unlink order " + (o.orderNumber || "") + " from job " + ((o.job && o.job.ref) || "") + "?\n\nThe job forgets the order value and the order goes back to Needs a job. It won't re-link to that job automatically.";
+        if(!(window.MLUI ? await MLUI.confirm(q, { title:"Unlink order", okLabel:"Unlink", danger:true }) : confirm(q))) return;
+        b.disabled = true;
+        try{ const r = await authFetch("/certs/orders/unlink", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) }).then(x => x.json());
+          if(r && r.ok) load(); else { setMsg(id, (r && r.error) || "Couldn't unlink.", true); b.disabled = false; } }
+        catch(e){ setMsg(id, "Couldn't unlink.", true); b.disabled = false; }
+      });
+      [].forEach.call(document.querySelectorAll("[data-email]"), b => b.onclick = () => openEmail(b.dataset.email));
       [].forEach.call(document.querySelectorAll("[data-reopen]"), b => b.onclick = async () => {
         const id = b.dataset.reopen; b.disabled = true;
         try{ const r = await authFetch("/certs/remedials/order-action", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id, action:"reopen" }) }).then(x => x.json());
@@ -196,6 +221,20 @@
         catch(e){ setMsg(id, "Couldn't reopen.", true); b.disabled = false; }
       });
     }
+    async function openEmail(id){
+      const o = (DATA.orders||[]).find(x => x.id === id) || {};
+      g("emTitle").textContent = "Order " + (o.orderNumber || "") + " — email";
+      g("emMeta").textContent = ""; g("emBody").textContent = "Loading…";
+      g("emBack").style.display = "flex";
+      try{
+        const r = await authFetch("/certs/orders/email?id=" + encodeURIComponent(id)).then(x => x.json());
+        if(!r || !r.ok) throw new Error((r && r.error) || "no copy");
+        g("emMeta").textContent = [r.from ? "From: " + r.from : "", r.at ? "Received: " + fmtDT(r.at) : "", r.subject ? "Subject: " + r.subject : ""].filter(Boolean).join("\n");
+        g("emBody").textContent = r.text || "(no text was stored for this email)";
+      }catch(e){ g("emBody").textContent = "Couldn't load the email copy."; }
+    }
+    g("emClose").onclick = () => { g("emBack").style.display = "none"; };
+    g("emBack").onclick = e => { if(e.target === g("emBack")) g("emBack").style.display = "none"; };
     g("refresh").onclick = load;
     g("clientSel").onchange = render;
     g("q").oninput = render;

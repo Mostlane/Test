@@ -288,7 +288,11 @@ async function cancelJob(env, ctx, fetchSelf, c, msg) {
    office then matches/approves it against a remedial. Same in-process trick. */
 async function fileOrder(env, ctx, fetchSelf, order, msg) {
   const tok = (env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "");
-  const body = { ...order, externalId: msg.messageId || undefined, notifiedAt: msg.receivedAt || undefined, link: undefined };
+  // A copy of the email rides with the order so any office user can read it from
+  // the board (the mailbox itself is one person's Outlook).
+  const body = { ...order, externalId: msg.messageId || undefined, notifiedAt: msg.receivedAt || undefined, link: undefined,
+    emailSubject: String(msg.subject || "").slice(0, 300) || undefined, emailFrom: String(msg.from || "").slice(0, 200) || undefined,
+    emailText: String(msg.text || "").slice(0, 12000) || undefined };
   const req = new Request("https://mostlane-api.internal/certs/remedials/order-inbound", {
     method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + tok }, body: JSON.stringify(body) });
   try {

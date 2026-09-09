@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10640,6 +10635,12 @@ async function ensureTables3(env) {
     await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run();
   } catch (e) {
   }
+  for (const col of ["email_subject TEXT", "email_from TEXT", "email_text TEXT", "unlinked_job_id TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE client_orders ADD COLUMN " + col).run();
+    } catch (e) {
+    }
+  }
 }
 function caseStatusLabel(rows) {
   const pend = rows.filter((r) => !r.replaced);
@@ -10991,6 +10992,18 @@ async function poReceived(env, tid, certId, me, ctx) {
   const awaiting = pend.some((r) => r.kind === "battery");
   const jobId = await createRemedialWorksJob(env, tid, certId, { awaitingBatteries: awaiting });
   await env.DB.prepare("UPDATE em_remedial_acks SET stage='in_works', job_id=COALESCE(?,job_id), awaiting_batteries=? WHERE tenant_id=? AND cert_id=?").bind(jobId, awaiting ? 1 : 0, tid, certId).run();
+  if (jobId) {
+    try {
+      const { results: results2 } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND matched_cert_id=? AND status IN ('new','matched') ORDER BY created_at DESC LIMIT 5").bind(tid, certId).all();
+      for (const r of results2 || []) {
+        const o = shapeOrder(r);
+        if (o.unlinkedJobId && o.unlinkedJobId === jobId) continue;
+        await linkOrderToJobById(env, tid, o, jobId, me, { kind: "em" });
+        await env.DB.prepare("UPDATE client_orders SET status='actioned', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, r.id).run();
+      }
+    } catch {
+    }
+  }
   return { stage: "in_works", jobId, awaitingBatteries: awaiting };
 }
 async function reissueCleanCert(env, tid, certId, ctx) {
@@ -11074,12 +11087,21 @@ async function matchOrderToRemedial(env, tid, o) {
   if (!code && !num2) return null;
   try {
     const { results } = await env.DB.prepare(
-      "SELECT cert_id, site_code, site_name, cert_number, stage FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted') ORDER BY created_at DESC LIMIT 200"
+      "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
-    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2);
+    const skip = String(o.unlinkedJobId || "");
+    const waiting = (r) => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
-      return { kind: "em", certId: r.cert_id, note: `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})` + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
+      const late = !waiting(r) && r.job_id;
+      return {
+        kind: "em",
+        certId: r.cert_id,
+        jobId: late ? r.job_id : null,
+        stage: r.stage || "to_quote",
+        note: (late ? `Late order \u2014 EM cert ${r.cert_number || ""} at ${r.site_name || code} already has its works job (stage ${r.stage})` : `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})`) + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "")
+      };
     }
   } catch {
   }
@@ -11121,7 +11143,11 @@ function shapeOrder(r) {
     matchedCertId: r.matched_cert_id || "",
     matchedJobId: r.matched_job_id || "",
     matchNote: r.match_note || "",
-    createdAt: r.created_at || ""
+    createdAt: r.created_at || "",
+    unlinkedJobId: r.unlinked_job_id || "",
+    hasEmail: r.has_email != null ? !!Number(r.has_email) : !!r.email_text,
+    emailSubject: r.email_subject || "",
+    emailFrom: r.email_from || ""
   };
 }
 async function handleOrderInbound(env, tid, b, ctx, request) {
@@ -11149,11 +11175,22 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     }
   }
   if (!id) id = "ord-" + crypto.randomUUID();
-  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber });
+  let unlinkedJobId = "";
+  if (!created) {
+    try {
+      const ex = await env.DB.prepare("SELECT unlinked_job_id FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      unlinkedJobId = ex && ex.unlinked_job_id || "";
+    } catch {
+    }
+  }
+  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber, unlinkedJobId });
   const status = m ? "matched" : "new";
+  const emailSubject = String(b.emailSubject || "").slice(0, 300) || null;
+  const emailFrom = String(b.emailFrom || "").slice(0, 200) || null;
+  const emailText = String(b.emailText || "").slice(0, 12e3) || null;
   await env.DB.prepare(`INSERT INTO client_orders
-    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,email_subject,email_from,email_text)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET order_number=excluded.order_number, client=excluded.client, priority=excluded.priority,
       order_value=excluded.order_value, currency=excluded.currency, title=excluded.title, detail=excluded.detail,
       description=excluded.description, job_category=excluded.job_category, observation_codes=excluded.observation_codes,
@@ -11161,7 +11198,9 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       site_raw=excluded.site_raw, notified_at=excluded.notified_at, link=excluded.link,
       status=CASE WHEN client_orders.status IN ('actioned','dismissed') THEN client_orders.status ELSE excluded.status END,
       matched_kind=excluded.matched_kind, matched_cert_id=excluded.matched_cert_id, matched_job_id=excluded.matched_job_id,
-      match_note=excluded.match_note, updated_at=excluded.updated_at`).bind(
+      match_note=excluded.match_note, updated_at=excluded.updated_at,
+      email_subject=COALESCE(excluded.email_subject, client_orders.email_subject), email_from=COALESCE(excluded.email_from, client_orders.email_from),
+      email_text=COALESCE(excluded.email_text, client_orders.email_text)`).bind(
     id,
     tid,
     extId || null,
@@ -11189,23 +11228,32 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     m ? m.jobId || null : null,
     m ? m.note : null,
     now,
-    now
+    now,
+    emailSubject,
+    emailFrom,
+    emailText
   ).run();
+  const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
   let linkedJob = null;
   if (!m) {
     try {
-      linkedJob = await linkOrderToExistingJob(env, tid, { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null });
+      linkedJob = await linkOrderToExistingJob(env, tid, oShape);
+    } catch {
+    }
+  } else if (m.jobId) {
+    try {
+      linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" });
     } catch {
     }
   }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
     ctx.waitUntil(sendToPermission(
       env,
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m ? "Client order \u2014 approve remedial" : "Client order received", body, url: m ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
+      { title: m && !linkedJob ? "Client order \u2014 approve remedial" : "Client order received", body, url: m && !linkedJob ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
       "",
       { officeOnly: true }
     ).catch(() => {
@@ -12391,15 +12439,10 @@ PAT: Import certificate number ${num2}-${yr}`;
   if (sub === "/orders" && method === "GET") {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const client = String(q.get("client") || "").trim().toLowerCase();
-    const { results } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600").bind(tid).all();
+    const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600`).bind(tid).all();
     const rows = (results || []).map(shapeOrder);
     const all = await listJobs(env, tid);
     const byId = new Map(all.map((j) => [j.id, j]));
-    const byRef = /* @__PURE__ */ new Map();
-    for (const j of all) {
-      const r = String(j.helpdeskRef || "").trim();
-      if (r && !byRef.has(r)) byRef.set(r, j);
-    }
     let doneNames = /* @__PURE__ */ new Set();
     try {
       const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
@@ -12413,7 +12456,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st);
     };
     const shaped = rows.map((o) => {
-      const j = o.matchedKind === "job" && o.matchedJobId && byId.get(o.matchedJobId) || o.orderNumber && byRef.get(o.orderNumber) || null;
+      const j = o.matchedJobId && byId.get(o.matchedJobId) || null;
       const incident = (/^(\d{5,12})\/\d{1,3}$/.exec(o.orderNumber || "") || [])[1] || "";
       const earlier = incident ? all.filter((x) => new RegExp("^" + incident + "/\\d{1,3}$").test(String(x.helpdeskRef || "")) && (!j || x.id !== j.id)).map((x) => ({ id: x.id, ref: x.helpdeskRef || x.id, status: x.status || "" })) : [];
       const stage = o.status === "dismissed" ? "dismissed" : !j ? "needs_job" : finished(j) ? "done" : "live";
@@ -12439,6 +12482,22 @@ PAT: Import certificate number ${num2}-${yr}`;
     const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes: Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : void 0, assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [] });
     return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null }, {}, env, request);
   }
+  if (sub === "/orders/unlink" && method === "POST") {
+    if (!await canSeeMoney(env, tid, me) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (!ord.matched_job_id) return error("This order isn't linked to a job", 400, env, request);
+    const jobId = String(ord.matched_job_id);
+    const job = await unlinkOrderFromJob(env, tid, shapeOrder(ord), me);
+    return json({ ok: true, jobId, ref: job ? job.helpdeskRef || job.id : jobId }, {}, env, request);
+  }
+  if (sub === "/orders/email" && method === "GET") {
+    if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
+    const ord = await env.DB.prepare("SELECT id, order_number, notified_at, link, email_subject, email_from, email_text FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(q.get("id") || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    return json({ ok: true, id: ord.id, orderNumber: ord.order_number || "", at: ord.notified_at || "", link: ord.link || "", subject: ord.email_subject || "", from: ord.email_from || "", text: ord.email_text || "" }, {}, env, request);
+  }
   if (sub === "/orders/link" && method === "POST") {
     if (!await canSeeMoney(env, tid, me) || !isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
@@ -12453,7 +12512,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
     const all = q.get("all") === "1";
     const { results } = await env.DB.prepare(
-      `SELECT * FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
+      `SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
     ).bind(tid).all();
     return json({ ok: true, orders: (results || []).map(shapeOrder) }, {}, env, request);
   }
@@ -12479,6 +12538,12 @@ PAT: Import certificate number ${num2}-${yr}`;
       if (ord.matched_kind === "em" && ord.matched_cert_id) {
         const res = await poReceived(env, tid, ord.matched_cert_id, me, ctx);
         jobId = res.jobId || null;
+        if (jobId) {
+          try {
+            await linkOrderToJobById(env, tid, shapeOrder(ord), jobId, me, { kind: "em" });
+          } catch {
+          }
+        }
         note = res.stage === "done" ? "All fittings were replaced on site \u2014 updated certificate filed to compliance." : res.awaitingBatteries ? "Works job raised (awaiting batteries)." : "Works job raised.";
       } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
         jobId = ord.matched_job_id;
@@ -13052,7 +13117,7 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG2, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var T, DEFAULT_CONFIG2, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -13107,6 +13172,7 @@ var init_certs = __esm({
       supplierCc: ""
       // optional CC on the battery enquiry email (remembered)
     };
+    ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
     REMEDIAL_CHARGE = 50;
     numOf = (v) => {
@@ -13148,7 +13214,8 @@ __export(sla_exports, {
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
   sweepFallbacks: () => sweepFallbacks,
-  sweepJobReleases: () => sweepJobReleases
+  sweepJobReleases: () => sweepJobReleases,
+  unlinkOrderFromJob: () => unlinkOrderFromJob
 });
 function badScheduleDate(iso, label2 = "Scheduled date") {
   if (iso === void 0 || iso === null || iso === "") return null;
@@ -16455,11 +16522,33 @@ async function stampOrderOnJob(env, tenantId, job, o) {
   await saveJob(env, tenantId, job);
   return job;
 }
-async function markOrderLinked(env, tenantId, orderId, jobId) {
+async function markOrderLinked(env, tenantId, orderId, jobId, kind) {
+  const k = kind === "em" || kind === "elec" ? kind : "job";
   try {
-    await env.DB.prepare("UPDATE client_orders SET matched_kind='job', matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(jobId, (/* @__PURE__ */ new Date()).toISOString(), tenantId, orderId).run();
+    await env.DB.prepare("UPDATE client_orders SET matched_kind=?, matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(k, jobId, (/* @__PURE__ */ new Date()).toISOString(), tenantId, orderId).run();
   } catch {
   }
+}
+async function unlinkOrderFromJob(env, tenantId, o, by) {
+  if (!o || !o.id) return null;
+  const jobId = String(o.matchedJobId || "").trim();
+  let job = null;
+  if (jobId) {
+    job = await getJob3(env, tenantId, jobId);
+    if (job && (job.clientOrderId === o.id || o.orderNumber && job.orderNumber === o.orderNumber)) {
+      delete job.orderNumber;
+      delete job.orderValue;
+      delete job.clientOrderId;
+      (job.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by: by || "office", type: "note", note: "Client order " + (o.orderNumber || "") + " unlinked from this job" + (by ? " by " + by : "") });
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+    }
+  }
+  try {
+    await env.DB.prepare("UPDATE client_orders SET matched_job_id=NULL, matched_kind=NULL, matched_cert_id=NULL, match_note=NULL, unlinked_job_id=?, status='new', actioned_at=NULL, actioned_by=NULL, updated_at=? WHERE tenant_id=? AND id=?").bind(jobId || null, (/* @__PURE__ */ new Date()).toISOString(), tenantId, o.id).run();
+  } catch {
+  }
+  return job;
 }
 async function applyOrderToJob(env, tenantId, job) {
   const ref = String(job && job.helpdeskRef || "").trim();
@@ -16472,6 +16561,7 @@ async function applyOrderToJob(env, tenantId, job) {
   }
   if (!row) return null;
   const o = shapeOrderRow(row);
+  if (o.unlinkedJobId && o.unlinkedJobId === job.id) return null;
   await stampOrderOnJob(env, tenantId, job, o);
   await markOrderLinked(env, tenantId, o.id, job.id);
   return o;
@@ -16479,7 +16569,10 @@ async function applyOrderToJob(env, tenantId, job) {
 async function linkOrderToExistingJob(env, tenantId, o) {
   const ref = String(o && o.orderNumber || "").trim();
   if (!ref) return null;
-  const jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter((j) => String(j.helpdeskRef || "") === ref || j.id === ref);
+  const skip = String(o && o.unlinkedJobId || "");
+  let jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter((j) => String(j.helpdeskRef || "") === ref || j.id === ref);
+  if (!jobs.length) jobs = await jobsWithRefContaining(env, tenantId, ref);
+  jobs = jobs.filter((j) => j.id !== skip);
   if (!jobs.length) return null;
   const finished = await jobFinishedFor(env, tenantId);
   const open = jobs.filter((j) => !finished(j));
@@ -16488,7 +16581,24 @@ async function linkOrderToExistingJob(env, tenantId, o) {
   await markOrderLinked(env, tenantId, o.id, pick.id);
   return pick;
 }
-async function linkOrderToJobById(env, tenantId, o, jobId, by) {
+async function jobsWithRefContaining(env, tenantId, ref) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? LIMIT 50").bind(tenantId, "%" + ref + "%").all()).results || [];
+  } catch {
+    return [];
+  }
+  const re = new RegExp("(^|[^A-Za-z0-9])" + ref.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&") + "([^A-Za-z0-9]|$)");
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate && re.test(String(j.helpdeskRef || "")));
+}
+async function linkOrderToJobById(env, tenantId, o, jobId, by, opts = {}) {
   const job = await getJob3(env, tenantId, jobId);
   if (!job) return null;
   await stampOrderOnJob(env, tenantId, job, o);
@@ -16502,7 +16612,7 @@ async function linkOrderToJobById(env, tenantId, o, jobId, by) {
     } catch {
     }
   }
-  await markOrderLinked(env, tenantId, o.id, jobId);
+  await markOrderLinked(env, tenantId, o.id, jobId, opts.kind);
   return job;
 }
 async function raiseJobForOrder(env, tenantId, o, opts = {}) {
@@ -19222,7 +19332,7 @@ var init_sla = __esm({
     isCancelledStatus = (s) => String(s || "").toLowerCase() === "cancelled";
     RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
     orderRefIncident = (ref) => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").trim()) || [])[1] || "";
-    shapeOrderRow = (r) => r ? { id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new" } : null;
+    shapeOrderRow = (r) => r ? { id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new", unlinkedJobId: r.unlinked_job_id || "" } : null;
     MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
     NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
     isOpenJobStatus = (s) => !NEARBY_FINISHED.has(String(s || ""));
@@ -22912,7 +23022,15 @@ async function cancelJob(env, ctx, fetchSelf, c, msg) {
 }
 async function fileOrder(env, ctx, fetchSelf, order, msg) {
   const tok = env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "";
-  const body = { ...order, externalId: msg.messageId || void 0, notifiedAt: msg.receivedAt || void 0, link: void 0 };
+  const body = {
+    ...order,
+    externalId: msg.messageId || void 0,
+    notifiedAt: msg.receivedAt || void 0,
+    link: void 0,
+    emailSubject: String(msg.subject || "").slice(0, 300) || void 0,
+    emailFrom: String(msg.from || "").slice(0, 200) || void 0,
+    emailText: String(msg.text || "").slice(0, 12e3) || void 0
+  };
   const req = new Request("https://mostlane-api.internal/certs/remedials/order-inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + tok },
@@ -33928,9 +34046,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
