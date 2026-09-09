@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>My Timesheet — Mostlane</title>
-<script src="/portal-config.js?v=32"></script>
+<script src="/portal-config.js?v=33"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
 <script src="auth.js"></script>
 <style>
@@ -130,16 +130,19 @@
   /* save status */
   .savebar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;justify-content:center;z-index:50;pointer-events:none}
   .savebar .st{background:rgba(15,27,42,.85);color:#e8eef7;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:999px;padding:8px 18px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(3,22,52,.3);transition:opacity .3s}
-  #adminLink{margin-left:auto;font-size:13px;background:rgba(255,255,255,.15);padding:6px 10px;border-radius:9px;display:none}
+  #adminLink,#officeLink{font-size:13px;background:rgba(255,255,255,.15);padding:6px 10px;border-radius:9px;display:none;white-space:nowrap}
+  #officeLink{margin-left:auto}
 </style>
 </head>
 <body>
-<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>⏱️ My Timesheet</h1><a id="adminLink" href="timesheets-admin.html">⚙ Admin</a></header>
+<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>⏱️ My Timesheet</h1><a id="officeLink" href="office-timesheet.html" title="The whole office team's week">💼 Office</a><a id="adminLink" href="timesheets-admin.html" title="Everyone's engineer timesheets + invoices">🧾 Engineer timesheets</a></header>
 <script>
   (function(){ try{
     var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
     var yes = v => String(v||"").toLowerCase() === "yes";
-    if (yes(p.FullAccess) || yes(p.TimesheetAdmin)) document.getElementById("adminLink").style.display = "";
+    if (yes(p.FullAccess) || yes(p.TimesheetAdmin)) document.getElementById("adminLink").style.display = "inline-block";
+    if (yes(p.FullAccess)) document.getElementById("officeLink").style.display = "inline-block";
+    else document.getElementById("adminLink").style.marginLeft = "auto";
   }catch(e){} })();
 </script>
 <div class="wrap">

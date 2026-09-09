@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=32"></script>
+  <script src="/portal-config.js?v=33"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -275,7 +275,7 @@
           ["<b>My Hours</b> (sidebar or menu) shows your week: each day's clock times and total, plus the week total at the top. Use <b>← Prev / Next →</b> to look at other weeks.", "myhours.png"],
         ]},
         { icon: "⏱️", title: "Fill in your weekly timesheet", perms: ["EngTimesheet"], steps: [
-          ["Open <b>My Timesheet</b> from the menu. Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
+          ["Open <b>Timesheets</b> from the menu (it opens straight on your own week — the office sees everyone's and reaches yours with the <b>⏱️ My timesheet</b> button). Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
           ["Any deductions the office has set for you (30&nbsp;minutes travel each way, or a lunch break on longer days) are shown greyed on each day and taken off automatically — the green figure is your <b>paid</b> time."],
           ["If you claim <b>mileage</b>: just pick the site in the <b>job box</b> — the mileage claim is <b>added automatically</b> with the office’s preset miles for that site. Miles can’t be typed in; if a site shows <i>no preset</i>, ask the office to set its mileage. Tap ✕ on a claim to withdraw it. For anywhere unknown, tap <b>🧮</b> for an estimate, or type the miles. If your account has the 10-mile radius rule, the first and last 10 miles of each day are deducted automatically."],
           ["Everything <b>saves automatically as you type</b> — the bar at the bottom shows “Saved ✓”. Come back and change things any time until the week is invoiced."],
@@ -288,13 +288,13 @@
           ["All your past invoices are listed under the card — tap <b>Open</b> to view or re-download any of them."],
         ]},
         { icon: "🧾", title: "Engineer timesheets & invoices (admin)", perms: ["TimesheetAdmin"], steps: [
-          ["<b>Engineer Timesheets</b> shows everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
+          ["The <b>Timesheets</b> tile opens on <b>Engineer Timesheets</b> — everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
           ["<b>⚙️ Settings</b> is where you set <b>who gets the 30-minute travel deduction</b> (each way), <b>who has lunch deducted</b>, who gets <b>fuel</b> (the mileage switch), their rate (per hour or per day), pence per mile, home postcode and next invoice number. It also holds the company details printed on invoices."],
           ["<b>🗺️ Site mileage</b> holds the round-trip miles paid for each site (from base). <b>⚡ Work out missing</b> estimates every portal site's figure in one go; type over any value to correct it, and add one-off sites at the top. Engineers' mileage boxes fill from this list automatically."],
           ["<b>🧾 Invoices</b> lists every generated invoice — open the PDF or delete a wrong one (that unlocks the engineer's week and frees the number)."],
         ]},
         { icon: "💼", title: "The office timesheet (admin)", perms: ["OfficeTimesheet"], steps: [
-          ["<b>Office Timesheet</b> shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
+          ["Open <b>Timesheets</b> then <b>💼 Office timesheet</b> (top right). It shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
           ["A <b>running</b> tag means they're still clocked in — that open session isn't counted until they clock out (or you close it)."],
           ["<b>✏️ Edit</b> a person to correct clock times — the original automatic times are kept and shown struck through, so edits are always visible. Voided segments count as zero."],
           ["<b>Download CSV</b> exports the week for payroll; <b>Print</b> makes a paper copy."],
