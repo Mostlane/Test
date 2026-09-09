@@ -4194,6 +4194,33 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   dedupe-by-reference, forgiving priority/date parsing and assignment push are all
   identical to the old zap. `originator:"email"`. No change to sla.js.
 - The `email()` handler **never throws** (a thrown email handler bounces the mail).
+- **Production-grade intake (9 Sep 2026 — "take Zapier out of the loop"):** the
+  handler now runs a shared **`processEmail()`** pipeline (used by the live email
+  handler, the office test box and re-run) with: an **allow-list** (app_config
+  `email:intake` = `{enabled, allowFrom:[domains/addresses]}`, defaults
+  concerto.co.uk + mostlane.com — anything else is logged `ignored` and NEVER sent
+  to the AI), **dedupe by Message-ID** (a re-delivered email is `duplicate`, no
+  second job), **forward handling** — Outlook "forward as attachment"
+  (`message/rfc822` parts are walked and the ORIGINAL From surfaced) and inline
+  "FW:" forwards (the `From:` block in the body gives `origFrom`, judged by the
+  allow-list), and the Concerto template regex now also reads the **target
+  Response / Completion date-times** (Europe/London → ISO; `respondBy`/`completeBy`
+  in the logged fields; the AI schema carries them too). **Every email is logged**
+  in table **`inbound_emails`** (self-migrating: message_id, from, orig_from,
+  subject, outcome created|updated|dropped|ignored|duplicate|failed|dryrun, reason,
+  reference, job_id, fields JSON, text). **Office API `/email-intake/*`**
+  (FullAccess|SLAAdmin; index.js passes `worker.fetch` so it reuses /sla/inbound
+  in-process): GET `/status` (config + last email + 7-day counts + aiConfigured /
+  inboundConfigured), GET `/log`, POST `/test` `{subject, body, from?, commit?}`
+  (dry-run unless commit — the test box), POST `/rerun` `{id}` (force past the
+  allow-list/dedupe), GET/POST `/config`. Page **email-intake.html** (SLA Settings →
+  📨 Email intake): status lights, paste-an-email test box, recent-emails table with
+  ↻ Re-run, allow-list editor, and the set-up steps (also in DEPLOY.md §4). Concerto
+  emails land in **jamie@mostlane.com** (enquiries@ is not a REST-enabled mailbox),
+  so the Outlook rule lives on Jamie's mailbox. Test:
+  `node worker/tools/test-email-intake.mjs` (synthetic Concerto-shaped emails only).
+  **Cutover plan:** run alongside the zap (dedupe-by-reference makes both paths
+  upsert the same job), watch the log, then disable the zap.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
