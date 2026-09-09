@@ -253,6 +253,37 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
+/* The client cancelled a job / withdrew a quote request → POST /sla/inbound
+   {action:"cancel"} in-process. Outcomes: cancelled (a job marked Cancelled, or
+   the cancellation NOTED on an already-finished job), review (no job on the board
+   for that incident, or a quote withdrawn on a job already Scheduled/in hand —
+   the office decides), failed. */
+async function cancelJob(env, ctx, fetchSelf, c, msg) {
+  const body = { action: "cancel", kind: c.kind || "job", reference: c.reference || undefined, incident: c.incident || undefined,
+    reason: c.reason || "", by: c.by || "client", at: msg.receivedAt || undefined };
+  const req = new Request("https://mostlane-api.internal/sla/inbound", {
+    method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") }, body: JSON.stringify(body) });
+  const what = c.kind === "quote" ? "Quote request withdrawn by the client" : "Job cancelled by the client";
+  const label = c.reference || c.incident || "";
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {}; try { out = await resp.clone().json(); } catch {}
+    if (resp.status === 404 || (out && out.notFound)) return { outcome: "review", reason: what + " (" + label + ") but there's NO job for that incident on the board — check whether we hold it under another reference, then dismiss", reference: label, payload: body };
+    if (!resp.ok) return { outcome: "failed", reason: (out && out.error) || ("HTTP " + resp.status), status: resp.status, reference: label, payload: body };
+    if (out.noted) return { outcome: "cancelled", reason: what + " — job " + (out.reference || label) + " was already " + out.status + ", so nothing changed; the cancellation is noted on the job card", status: resp.status, reference: out.reference || label, jobId: out.id || "", payload: body };
+    const done = Array.isArray(out.cancelled) ? out.cancelled : [];
+    const heldList = Array.isArray(out.held) ? out.held : [];
+    if (!done.length && heldList.length) {
+      const h = heldList[0];
+      return { outcome: "review", reason: what + " but job " + h.reference + " is " + h.status + (h.engineers && h.engineers.length ? " with " + h.engineers.join(", ") : "") + " — decide whether to cancel it (open the job) or leave it, then dismiss this", status: resp.status, reference: h.reference, jobId: h.id, payload: body };
+    }
+    const d = done[0] || {};
+    const who = d.engineers && d.engineers.length ? " — " + d.engineers.join(", ") + " told" : "";
+    return { outcome: "cancelled", reason: what + " — job " + (d.reference || label) + " marked Cancelled (was " + (d.previousStatus || "?") + ")" + who + (c.reason ? " · \"" + c.reason.slice(0, 120) + "\"" : "") + (heldList.length ? " · " + heldList.length + " other visit(s) left as they are" : ""), status: resp.status, reference: d.reference || label, jobId: d.id || "", payload: body };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: label, payload: body };
+  }
+}
 /* File a Concerto order sheet into the client-orders intake (certs.js) — the
    office then matches/approves it against a remedial. Same in-process trick. */
 async function fileOrder(env, ctx, fetchSelf, order, msg) {
@@ -272,7 +303,8 @@ async function fileOrder(env, ctx, fetchSelf, order, msg) {
 
 /* ── The pipeline (shared by the live email handler, the test box and re-run) ──
    Returns {outcome, reason, fields, reference, jobId, status, template, source}.
-   outcome ∈ created | updated | order (client order filed) | review (held for a
+   outcome ∈ created | updated | order (client order filed) | cancelled (a client
+   cancellation applied/noted on the job) | review (held for a
    human) | dropped (not a job) | ignored (sender not allowed / intake off) |
    duplicate (this message-id already made a job) | failed | dryrun.            */
 export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
@@ -292,7 +324,7 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
   if (!opts.dryRun && !opts.force && msg.messageId) {
     try {
-      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order') LIMIT 1`).bind(tid, msg.messageId).first();
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order','cancelled') LIMIT 1`).bind(tid, msg.messageId).first();
       if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
     } catch {}
   }
@@ -300,6 +332,12 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "cancel") {
+      const c = { ...(r.cancel || {}), action: "cancel", isJob: false };
+      if (r.missing && r.missing.length) return { ...out, fields: c, outcome: "review", reason: tm.tpl.label + " — couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out, fields: c, outcome: "dryrun", reason: "Would mark job " + (c.reference || c.incident) + " as Cancelled" + (c.kind === "quote" ? " (quote request withdrawn — only if the job is still waiting)" : "") + (c.reason ? " — \"" + c.reason.slice(0, 100) + "\"" : ""), reference: c.reference || c.incident || "" };
+      return { ...out, fields: c, ...(await cancelJob(env, ctx, fetchSelf, c, msg)) };
+    }
     if (r.kind === "order") {
       if (r.missing && r.missing.length) return { ...out, fields: r.order, outcome: "review", reason: tm.tpl.label + " — couldn't read: " + r.missing.join(", ") };
       if (opts.dryRun) return { ...out, fields: r.order, outcome: "dryrun", reason: "Would file client order " + r.order.orderNumber + " for store " + r.order.storeCode + " (client orders, not the job board)", reference: r.order.orderNumber };

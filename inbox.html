@@ -145,7 +145,7 @@
     var adm=holds.length+flags.length;
     return {messages:msg, jobs:jobN, admin:adm, all:msg+jobN+adm};
   }
-  function openJobs(){ return jobs.filter(function(j){ return ["Complete","Closed Jobs","Invoiced"].indexOf(j.status||"")<0; }); }
+  function openJobs(){ return jobs.filter(function(j){ return ["Complete","Closed Jobs","Invoiced","Cancelled"].indexOf(j.status||"")<0; }); }
   function jobName(j){ try{ return (window.mlJobName?window.mlJobName(j):"")||j.siteName||j.helpdeskRef||j.id; }catch(e){ return j.siteName||j.helpdeskRef||j.id; } }
 
   function renderFilters(){

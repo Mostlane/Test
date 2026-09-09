@@ -579,6 +579,14 @@ export async function handle(request, env, ctx, url, sess) {
     if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
 
     const b = await readJson(request);
+    // ── action:"cancel" — the client cancelled a job (Concerto "Cancelled Job" /
+    // "Quote … Cancel request" emails). Finds the incident's job(s) and marks the
+    // OPEN one Cancelled with a timestamp + the client's reason; a job we've
+    // already finished only gets the cancellation NOTED on it (never un-completed).
+    if (b && String(b.action || "").toLowerCase() === "cancel") {
+      const r = await cancelIncidentJobs(env, tenantId, ctx, b);
+      return jsonResponse(r, headers, r.ok ? 200 : (r.notFound ? 404 : 400));
+    }
     if (!b || (!String(b.reference || "").trim() && !String(b.description || "").trim()))
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
 
@@ -3037,7 +3045,7 @@ function jsonResponse(data, headers, status = 200) {
 
 const CANONICAL_STATUSES = [
   "Pending","Scheduled","Travelling","In Progress",
-  "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote"
+  "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote","Cancelled"
 ];
 
 // `extra` = the tenant's custom category NAMES (strings). A job explicitly set
@@ -3050,7 +3058,10 @@ function normalizeStatus(status, extra) {
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
-  if (s === "closed" || s === "cancelled") return "Closed Jobs";
+  if (s === "closed") return "Closed Jobs";
+  // "Cancelled" is its OWN status (Sep 2026) — it used to collapse into Closed
+  // Jobs, so a client cancellation was indistinguishable from an invoiced job.
+  if (s === "cancelled" || s === "canceled" || s === "cancel") return "Cancelled";
   const all = (Array.isArray(extra) && extra.length) ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
   return all.find(x => x.toLowerCase() === s) || "Pending";
 }
@@ -3085,6 +3096,23 @@ function assignedList(job) {
    statuses so filters/badges still work. */
 function isMultiEng(job) { return assignedList(job).length >= 2; }
 const DONE_STATES = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+/* ── Cancellation stamps (Sep 2026) ──
+   A job that moves INTO "Cancelled" carries WHEN it happened, WHO did it and WHY
+   (cancelledAt / cancelledBy / cancelReason / cancelSource) — the board pill and
+   the job card show them. Moving back OUT of Cancelled (reinstated) clears the
+   stamps; the statusHistory keeps the full trail either way. `opts` may carry
+   {by, reason, source:"office"|"client"|"email", at}. */
+function stampCancelled(job, opts = {}) {
+  const now = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : new Date().toISOString();
+  job.cancelledAt = now;
+  job.cancelledBy = String(opts.by || "").slice(0, 80) || "office";
+  job.cancelReason = String(opts.reason || "").slice(0, 500);
+  job.cancelSource = opts.source || "office";
+}
+function clearCancelled(job) {
+  delete job.cancelledAt; delete job.cancelledBy; delete job.cancelReason; delete job.cancelSource;
+}
+const isCancelledStatus = s => String(s || "").toLowerCase() === "cancelled";
 // One engineer's status on a job (their own slice, else the shared status —
 // which also covers legacy jobs and an engineer not yet diverged).
 function effStatus(job, engNorm) {
@@ -3501,6 +3529,83 @@ async function stampVisitGroup(env, tenantId, groupId) {
   const cnt = members.length;
   for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
 }
+/* Every live job belonging to a Concerto incident: by exact reference ("NNNNNNNN/1"),
+   by the incident number's suffixes ("NNNNNNNN/%"), or by id. Dormant fallback
+   templates are never matched. */
+async function findIncidentJobs(env, tenantId, { reference, incident }) {
+  const db = tenantDB(env, tenantId);
+  const ref = String(reference || "").trim();
+  const inc = String(incident || "").trim() || ((/^(\d{5,12})\/\d{1,3}$/.exec(ref) || [])[1] || "");
+  const parse = rows => (rows || []).map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate);
+  const seen = new Map();
+  const add = list => { for (const j of list) if (j && !seen.has(j.id)) seen.set(j.id, j); };
+  if (ref) {
+    try { add(parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results)); } catch {}
+    try { const j = await getJob(env, tenantId, ref); if (j && !j.fallbackTemplate) add([j]); } catch {}
+  }
+  if (inc) {
+    let sibs = [];
+    try { sibs = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, inc + "/%").all()).results); } catch {}
+    add(sibs.filter(j => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
+    try { const j = await getJob(env, tenantId, inc); if (j && !j.fallbackTemplate) add([j]); } catch {}
+  }
+  return [...seen.values()];
+}
+/* The client cancelled an incident. `b` = {reference?, incident?, reason?, by?,
+   kind:"job"|"quote", at?}. Rules:
+   - an OPEN job for the incident → status Cancelled + stamps (cancelledAt = the
+     email's time, cancelledBy = the client, cancelReason = their comment); its
+     engineers + the SLA admins are pushed so nobody drives to a cancelled job;
+   - kind "quote" (the client withdrew a QUOTE REQUEST) only cancels a job that is
+     still WAITING (Pending / Quote / On Hold / Order) — a job already Scheduled
+     or being worked is returned as `held` for the office to decide, because a
+     withdrawn quote doesn't always mean "don't attend";
+   - every job for the incident already FINISHED → nothing is un-completed: the
+     newest one gets `clientCancelled` noted (shown on the card) and `noted:true`;
+   - no job at all → {ok:false, notFound:true}. */
+async function cancelIncidentJobs(env, tenantId, ctx, b) {
+  const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const reason = String(b.reason || "").trim().slice(0, 500);
+  const by = String(b.by || "client").trim().slice(0, 80);
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : new Date().toISOString();
+  const open = jobs.filter(j => !finished(j));
+  const newest = list => list.slice().sort((a, b2) => String(b2.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  if (!open.length) {
+    const j = newest(jobs);
+    j.clientCancelled = { at, by, reason, reference: String(b.reference || b.incident || ""), kind };
+    (j.events ||= []).push({ at, by, type: "note", note: "Client cancelled " + (kind === "quote" ? "the quote request" : "this job") + " after it was " + j.status + (reason ? " — " + reason : "") });
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status, kind };
+  }
+  const WAITING = new Set(["pending", "quote", "on hold", "order"]);
+  const held = kind === "quote" ? open.filter(j => !WAITING.has(String(j.status || "").toLowerCase())) : [];
+  const targets = open.filter(j => !held.includes(j));
+  const cancelled = [];
+  const now = new Date().toISOString();
+  for (const j of targets) {
+    const prevStatus = j.status;
+    j.status = "Cancelled";
+    (j.statusHistory ||= []).push({ status: "Cancelled", at: now, by, note: reason || undefined });
+    stampCancelled(j, { by, reason, source: "client", at });
+    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now, by };
+    (j.events ||= []).push({ at: now, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " — " + reason : "") });
+    j.updatedAt = now;
+    await saveJob(env, tenantId, j);
+    const engs = assignedList(j);
+    cancelled.push({ id: j.id, reference: j.helpdeskRef || j.id, previousStatus: prevStatus, engineers: engs, scheduledAt: j.scheduledAt || null });
+    // Tell the engineer(s) on it + the office. Not actionable: nothing to do but not go.
+    const title = "❌ Job cancelled — " + (j.helpdeskRef || j.id);
+    const body = (j.siteName || j.siteCode || "") + (reason ? " · " + reason : "") + (prevStatus ? " · was " + prevStatus : "");
+    for (const e of engs) ctx?.waitUntil?.(sendToUser(env, tenantId, e, { title, body: body.slice(0, 180), url: "/engineer-job.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {}));
+    ctx?.waitUntil?.(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], { title, body: (body + (engs.length ? " · " + engs.join(", ") : " · unassigned")).slice(0, 180), url: "/job-view.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {}));
+    try { await resolveNotificationsByTag(env, tenantId, "hold-approve:" + j.id, { title: "Job cancelled", body: (j.helpdeskRef || j.id) + " — cancelled by the client" }); } catch {}
+  }
+  return { ok: true, kind, cancelled, ...(held.length ? { held: held.map(j => ({ id: j.id, reference: j.helpdeskRef || j.id, status: j.status, engineers: assignedList(j) })) } : {}) };
+}
 // Deleting a job removes the DRAFT / submitted (unverified) certificates it made,
 // but NEVER one the office has finalised (status='final') — those are filed on the
 // compliance chart and their PDF must survive. Draft/review certs hold no separate
@@ -3810,6 +3915,10 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Cancellation stamps survive a re-save (set/cleared below on the transition).
+    cancelledAt: existing?.cancelledAt, cancelledBy: existing?.cancelledBy, cancelReason: existing?.cancelReason, cancelSource: existing?.cancelSource,
+    // A client's cancellation that arrived AFTER we finished the job (noted, no status change).
+    clientCancelled: existing?.clientCancelled,
     // Engineer-captured packs survive an office re-save.
     quote: existing?.quote, riskAssessment: existing?.riskAssessment,
     hold: existing?.hold, order: existing?.order, signature: existing?.signature,
@@ -3828,6 +3937,8 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   };
 
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now });
+  else if (!isCancelledStatus(status) && isCancelledStatus(existing?.status)) clearCancelled(job);
   // Seed a slice for any newly-added engineer (existing engineers keep theirs).
   seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
   pruneEngSchedule(job);   // drop per-engineer times for anyone no longer on the job
@@ -4022,8 +4133,11 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
     }
+    const wasCancelled = isCancelledStatus(job.status);
     job.status = rollupStatus(job);
     if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now });
+    else if (!isCancelledStatus(job.status) && wasCancelled) clearCancelled(job);
   } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map(c => c.name);
     const s = normalizeStatus(patch.status, catNames);
@@ -4036,6 +4150,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now });
+      else if (job.cancelledAt) clearCancelled(job);
+    } else if (isCancelledStatus(s) && patch.cancelReason !== undefined && !job.cancelReason) {
+      job.cancelReason = String(patch.cancelReason || "").slice(0, 500);   // reason added after the fact
     }
     // Office override on a multi-engineer job: keep every engineer's slice in step
     // so the board rollup matches what the office set.
@@ -5180,7 +5298,7 @@ function computeSlaTarget(raisedAt, priority, cfg) {
 
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
-  const state = (job.status === "Closed Jobs" || job.status === "Complete")
+  const state = (job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled")
     ? "OK" : (Date.now() > target ? "BREACHED" : "OK");
   // Release info for the office board (engineers never receive hidden jobs, so
   // this only surfaces on the admin views): mode, computed instant, label.

@@ -13544,6 +13544,10 @@ async function handle11(request, env, ctx, url, sess) {
     for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
     if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
     const b = await readJson2(request);
+    if (b && String(b.action || "").toLowerCase() === "cancel") {
+      const r = await cancelIncidentJobs(env, tenantId, ctx, b);
+      return jsonResponse(r, headers, r.ok ? 200 : r.notFound ? 404 : 400);
+    }
     if (!b || !String(b.reference || "").trim() && !String(b.description || "").trim())
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
     const pm = /^p(?:riority)?\s*[.:-]?\s*([1-4])$/i.exec(String(b.priority || "").trim());
@@ -15902,7 +15906,8 @@ function normalizeStatus(status, extra) {
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
-  if (s === "closed" || s === "cancelled") return "Closed Jobs";
+  if (s === "closed") return "Closed Jobs";
+  if (s === "cancelled" || s === "canceled" || s === "cancel") return "Cancelled";
   const all = Array.isArray(extra) && extra.length ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
   return all.find((x) => x.toLowerCase() === s) || "Pending";
 }
@@ -15921,6 +15926,19 @@ function assignedList(job) {
 }
 function isMultiEng(job) {
   return assignedList(job).length >= 2;
+}
+function stampCancelled(job, opts = {}) {
+  const now = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  job.cancelledAt = now;
+  job.cancelledBy = String(opts.by || "").slice(0, 80) || "office";
+  job.cancelReason = String(opts.reason || "").slice(0, 500);
+  job.cancelSource = opts.source || "office";
+}
+function clearCancelled(job) {
+  delete job.cancelledAt;
+  delete job.cancelledBy;
+  delete job.cancelReason;
+  delete job.cancelSource;
 }
 function effStatus(job, engNorm) {
   if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
@@ -16296,6 +16314,94 @@ async function stampVisitGroup(env, tenantId, groupId) {
     }
   }
 }
+async function findIncidentJobs(env, tenantId, { reference, incident }) {
+  const db = tenantDB(env, tenantId);
+  const ref = String(reference || "").trim();
+  const inc = String(incident || "").trim() || ((/^(\d{5,12})\/\d{1,3}$/.exec(ref) || [])[1] || "");
+  const parse2 = (rows) => (rows || []).map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate);
+  const seen = /* @__PURE__ */ new Map();
+  const add = (list) => {
+    for (const j of list) if (j && !seen.has(j.id)) seen.set(j.id, j);
+  };
+  if (ref) {
+    try {
+      add(parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results));
+    } catch {
+    }
+    try {
+      const j = await getJob3(env, tenantId, ref);
+      if (j && !j.fallbackTemplate) add([j]);
+    } catch {
+    }
+  }
+  if (inc) {
+    let sibs = [];
+    try {
+      sibs = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, inc + "/%").all()).results);
+    } catch {
+    }
+    add(sibs.filter((j) => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
+    try {
+      const j = await getJob3(env, tenantId, inc);
+      if (j && !j.fallbackTemplate) add([j]);
+    } catch {
+    }
+  }
+  return [...seen.values()];
+}
+async function cancelIncidentJobs(env, tenantId, ctx, b) {
+  const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const reason = String(b.reason || "").trim().slice(0, 500);
+  const by = String(b.by || "client").trim().slice(0, 80);
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  const open = jobs.filter((j) => !finished(j));
+  const newest = (list) => list.slice().sort((a, b2) => String(b2.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  if (!open.length) {
+    const j = newest(jobs);
+    j.clientCancelled = { at, by, reason, reference: String(b.reference || b.incident || ""), kind };
+    (j.events ||= []).push({ at, by, type: "note", note: "Client cancelled " + (kind === "quote" ? "the quote request" : "this job") + " after it was " + j.status + (reason ? " \u2014 " + reason : "") });
+    j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, j);
+    return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status, kind };
+  }
+  const WAITING = /* @__PURE__ */ new Set(["pending", "quote", "on hold", "order"]);
+  const held = kind === "quote" ? open.filter((j) => !WAITING.has(String(j.status || "").toLowerCase())) : [];
+  const targets = open.filter((j) => !held.includes(j));
+  const cancelled = [];
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const j of targets) {
+    const prevStatus = j.status;
+    j.status = "Cancelled";
+    (j.statusHistory ||= []).push({ status: "Cancelled", at: now, by, note: reason || void 0 });
+    stampCancelled(j, { by, reason, source: "client", at });
+    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now, by };
+    (j.events ||= []).push({ at: now, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " \u2014 " + reason : "") });
+    j.updatedAt = now;
+    await saveJob(env, tenantId, j);
+    const engs = assignedList(j);
+    cancelled.push({ id: j.id, reference: j.helpdeskRef || j.id, previousStatus: prevStatus, engineers: engs, scheduledAt: j.scheduledAt || null });
+    const title = "\u274C Job cancelled \u2014 " + (j.helpdeskRef || j.id);
+    const body = (j.siteName || j.siteCode || "") + (reason ? " \xB7 " + reason : "") + (prevStatus ? " \xB7 was " + prevStatus : "");
+    for (const e of engs) ctx?.waitUntil?.(sendToUser(env, tenantId, e, { title, body: body.slice(0, 180), url: "/engineer-job.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {
+    }));
+    ctx?.waitUntil?.(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], { title, body: (body + (engs.length ? " \xB7 " + engs.join(", ") : " \xB7 unassigned")).slice(0, 180), url: "/job-view.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {
+    }));
+    try {
+      await resolveNotificationsByTag(env, tenantId, "hold-approve:" + j.id, { title: "Job cancelled", body: (j.helpdeskRef || j.id) + " \u2014 cancelled by the client" });
+    } catch {
+    }
+  }
+  return { ok: true, kind, cancelled, ...held.length ? { held: held.map((j) => ({ id: j.id, reference: j.helpdeskRef || j.id, status: j.status, engineers: assignedList(j) })) } : {} };
+}
 async function purgeUnverifiedCertsForJob(env, tenantId, jobId) {
   if (!jobId) return;
   try {
@@ -16544,6 +16650,13 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Cancellation stamps survive a re-save (set/cleared below on the transition).
+    cancelledAt: existing?.cancelledAt,
+    cancelledBy: existing?.cancelledBy,
+    cancelReason: existing?.cancelReason,
+    cancelSource: existing?.cancelSource,
+    // A client's cancellation that arrived AFTER we finished the job (noted, no status change).
+    clientCancelled: existing?.clientCancelled,
     // Engineer-captured packs survive an office re-save.
     quote: existing?.quote,
     riskAssessment: existing?.riskAssessment,
@@ -16562,6 +16675,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now });
+  else if (!isCancelledStatus(status) && isCancelledStatus(existing?.status)) clearCancelled(job);
   seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
   pruneEngSchedule(job);
   await saveJob(env, tenantId, job);
@@ -16720,8 +16835,11 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
     }
+    const wasCancelled = isCancelledStatus(job.status);
     job.status = rollupStatus(job);
     if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now });
+    else if (!isCancelledStatus(job.status) && wasCancelled) clearCancelled(job);
   } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
     const s = normalizeStatus(patch.status, catNames);
@@ -16731,6 +16849,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now });
+      else if (job.cancelledAt) clearCancelled(job);
+    } else if (isCancelledStatus(s) && patch.cancelReason !== void 0 && !job.cancelReason) {
+      job.cancelReason = String(patch.cancelReason || "").slice(0, 500);
     }
     if (isMultiEng(job) && job.engStatus) {
       for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
@@ -17950,7 +18072,7 @@ function computeSlaTarget(raisedAt, priority, cfg) {
 }
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
-  const state = job.status === "Closed Jobs" || job.status === "Complete" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
+  const state = job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
   let releaseView;
   if (job.seriesSkipped) {
     releaseView = { mode: "skipped", at: null, label: "Skipped \u2014 engineer had another job that day", series: true };
@@ -18787,7 +18909,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -18818,11 +18940,13 @@ var init_sla = __esm({
       "Closed Jobs",
       "Invoiced",
       "Order",
-      "Quote"
+      "Quote",
+      "Cancelled"
     ];
     normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
     DONE_STATES = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    isCancelledStatus = (s) => String(s || "").toLowerCase() === "cancelled";
     RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
     MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
     NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
@@ -22055,6 +22179,29 @@ function concertoOrder(subject, t) {
     }
   };
 }
+function concertoCancel(subject, t) {
+  const incident = line(/Cancell?l?ed Job:\s*(\d{5,12})/i, subject) || line(/The job you logged\s*(\d{5,12})\b/i, t);
+  const reference = line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t) || line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, subject);
+  const title = line(/The job you logged\s*\d+\s*:\s*([^\n]*)/i, t);
+  let reason = line(/Comments?\s*:\s*([\s\S]*?)(?:\n\s*For further information|$)/i, t);
+  reason = reason.replace(/\s+/g, " ").trim().replace(/^\.$/, "");
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  return { kind: "cancel", missing, cancel: { kind: "job", incident, reference, title, reason, by: "Southern Co-op (Concerto)" } };
+}
+function concertoQuoteCancel(subject, t) {
+  const reference = line(/order number\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t);
+  const quoteRef = line(/Quote reference\s*:\s*(\S+)/i, t) || line(/^Quote\s*:\s*(\d+)/i, subject);
+  const by = line(/Cancel request by\s+([^\n]+?)\s*$/i, subject);
+  let reason = line(/has been updated\.?\s*\n+\s*([^\n]*)/i, t);
+  if (/^Quote reference/i.test(reason)) reason = "";
+  reason = reason.replace(/\.{3,}/g, " \u2014 ").replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]*)/im, t);
+  const siteCode = line(/^\s*(\d{3,5})\b/, siteLine);
+  const missing = [];
+  if (!reference) missing.push("job reference (order number)");
+  return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " \u2014 " + by : "") + ")" } };
+}
 var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
   const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
@@ -22113,6 +22260,20 @@ var TEMPLATES = [
     domains: ["concerto.co.uk"],
     test: (s, t) => /^Order number\s/i.test(s) || /attached order sheet for order number/i.test(t),
     read: concertoOrder
+  },
+  {
+    id: "concerto-cancel",
+    label: "Concerto \u2014 job cancelled by the client",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Cancell?l?ed Job\b/i.test(s) || /The job you logged\s*\d+[\s\S]{0,300}Has been Cancelled/i.test(t),
+    read: concertoCancel
+  },
+  {
+    id: "concerto-quote-cancel",
+    label: "Concerto \u2014 quote request cancelled by the client",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Quote\s*:/i.test(s) && /Cancel request/i.test(s) || /Quote status\s*:\s*Cancelled/i.test(t),
+    read: concertoQuoteCancel
   },
   {
     id: "concerto-notice",
@@ -22434,6 +22595,46 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
+async function cancelJob(env, ctx, fetchSelf, c, msg) {
+  const body = {
+    action: "cancel",
+    kind: c.kind || "job",
+    reference: c.reference || void 0,
+    incident: c.incident || void 0,
+    reason: c.reason || "",
+    by: c.by || "client",
+    at: msg.receivedAt || void 0
+  };
+  const req = new Request("https://mostlane-api.internal/sla/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
+    body: JSON.stringify(body)
+  });
+  const what = c.kind === "quote" ? "Quote request withdrawn by the client" : "Job cancelled by the client";
+  const label2 = c.reference || c.incident || "";
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {};
+    try {
+      out = await resp.clone().json();
+    } catch {
+    }
+    if (resp.status === 404 || out && out.notFound) return { outcome: "review", reason: what + " (" + label2 + ") but there's NO job for that incident on the board \u2014 check whether we hold it under another reference, then dismiss", reference: label2, payload: body };
+    if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: label2, payload: body };
+    if (out.noted) return { outcome: "cancelled", reason: what + " \u2014 job " + (out.reference || label2) + " was already " + out.status + ", so nothing changed; the cancellation is noted on the job card", status: resp.status, reference: out.reference || label2, jobId: out.id || "", payload: body };
+    const done = Array.isArray(out.cancelled) ? out.cancelled : [];
+    const heldList = Array.isArray(out.held) ? out.held : [];
+    if (!done.length && heldList.length) {
+      const h = heldList[0];
+      return { outcome: "review", reason: what + " but job " + h.reference + " is " + h.status + (h.engineers && h.engineers.length ? " with " + h.engineers.join(", ") : "") + " \u2014 decide whether to cancel it (open the job) or leave it, then dismiss this", status: resp.status, reference: h.reference, jobId: h.id, payload: body };
+    }
+    const d = done[0] || {};
+    const who = d.engineers && d.engineers.length ? " \u2014 " + d.engineers.join(", ") + " told" : "";
+    return { outcome: "cancelled", reason: what + " \u2014 job " + (d.reference || label2) + " marked Cancelled (was " + (d.previousStatus || "?") + ")" + who + (c.reason ? ' \xB7 "' + c.reason.slice(0, 120) + '"' : "") + (heldList.length ? " \xB7 " + heldList.length + " other visit(s) left as they are" : ""), status: resp.status, reference: d.reference || label2, jobId: d.id || "", payload: body };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: label2, payload: body };
+  }
+}
 async function fileOrder(env, ctx, fetchSelf, order, msg) {
   const tok = env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "";
   const body = { ...order, externalId: msg.messageId || void 0, notifiedAt: msg.receivedAt || void 0, link: void 0 };
@@ -22469,7 +22670,7 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
   if (!opts.dryRun && !opts.force && msg.messageId) {
     try {
-      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order') LIMIT 1`).bind(tid, msg.messageId).first();
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order','cancelled') LIMIT 1`).bind(tid, msg.messageId).first();
       if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
     } catch {
     }
@@ -22477,6 +22678,12 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "cancel") {
+      const c = { ...r.cancel || {}, action: "cancel", isJob: false };
+      if (r.missing && r.missing.length) return { ...out2, fields: c, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out2, fields: c, outcome: "dryrun", reason: "Would mark job " + (c.reference || c.incident) + " as Cancelled" + (c.kind === "quote" ? " (quote request withdrawn \u2014 only if the job is still waiting)" : "") + (c.reason ? ' \u2014 "' + c.reason.slice(0, 100) + '"' : ""), reference: c.reference || c.incident || "" };
+      return { ...out2, fields: c, ...await cancelJob(env, ctx, fetchSelf, c, msg) };
+    }
     if (r.kind === "order") {
       if (r.missing && r.missing.length) return { ...out2, fields: r.order, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
       if (opts.dryRun) return { ...out2, fields: r.order, outcome: "dryrun", reason: "Would file client order " + r.order.orderNumber + " for store " + r.order.storeCode + " (client orders, not the job board)", reference: r.order.orderNumber };
