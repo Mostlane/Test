@@ -3872,6 +3872,15 @@ function buildFirestopPdf(record, meta = {}) {
     doc.line(M + 60, y + 8, M + 220, y + 8, { stroke: LINE });
     y += 20;
   }
+  const signedBits = [
+    record.installer ? "Name: " + record.installer : "",
+    record.dateOfIssue ? "Date: " + record.dateOfIssue : ""
+  ].filter(Boolean);
+  if (signedBits.length) {
+    ensure7(16);
+    doc.text(M, y + 8, signedBits.join("       "), { size: 9, color: GREY });
+    y += 14;
+  }
   y += 8;
   ensure7(20);
   doc.text(M, y + 10, "Information of the installed fire stopping products", { size: 10, bold: true, color: BLUE });
@@ -39939,6 +39948,11 @@ var PUBLIC_ROUTES = [
   ["GET", "/fleet/maintenance-doc"],
   // Employee-record documents (certs/scans) — signed URL, verified in-handler.
   ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],

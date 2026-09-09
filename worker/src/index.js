@@ -450,6 +450,11 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/maintenance-doc"],
   // Employee-record documents (certs/scans) — signed URL, verified in-handler.
   ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)

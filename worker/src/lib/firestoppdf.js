@@ -97,6 +97,12 @@ export function buildFirestopPdf(record, meta = {}) {
     try { const d = jpegInfo(record.signature); const h = 34; doc.image(record.signature, M, y + 12, Math.min(150, h * (d.w / d.h)), h); y += 50; }
     catch { y += 20; }
   } else { doc.line(M + 60, y + 8, M + 220, y + 8, { stroke: LINE }); y += 20; }
+  // Signed-by name + date under the signature — both are known from the record.
+  const signedBits = [
+    record.installer ? "Name: " + record.installer : "",
+    record.dateOfIssue ? "Date: " + record.dateOfIssue : "",
+  ].filter(Boolean);
+  if (signedBits.length) { ensure(16); doc.text(M, y + 8, signedBits.join("       "), { size: 9, color: GREY }); y += 14; }
 
   // ── Seals ───────────────────────────────────────────────────────────────────
   y += 8; ensure(20);
