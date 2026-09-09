@@ -67,7 +67,9 @@ has an email handler. Two dashboard steps, then test on the portal page:
    → Enable**. Under *Custom addresses* add `jobs@<that domain>` with the action
    **Send to a Worker → mostlane-api**. (Cloudflare adds the MX/SPF records itself.)
 2. **Outlook on the web → Settings → Mail → Rules → Add rule**: condition
-   *From* `noreply@concerto.co.uk` (add any other job senders) → action
+   *From* `noreply@concerto.co.uk` **and** *From* `chapplins.co.uk` (the two
+   layouts the portal reads on its own; add other job senders later once a
+   template exists for them) → action
    **Forward to** `jobs@<that domain>`. Choose *forward*, not *redirect*: a forward
    is sent from your own mostlane.com address, so it passes the spam checks.
    If Outlook refuses to forward outside the company, an admin allows it once in
@@ -78,6 +80,13 @@ has an email handler. Two dashboard steps, then test on the portal page:
    log; *Create the job* really logs it. Send a test through the rule and watch
    **Recent emails**. Run alongside the Zapier zap for a few days — the same job is
    never duplicated (the portal matches by reference) — then switch the zap off.
+4. **What creates a job automatically:** only the layouts listed on the page
+   under *Layouts the portal reads on its own* (Concerto "New Job Alert", Chapplins
+   "new job has been raised"). Concerto order sheets go to **Client orders** on the
+   certificates page. Anything else — a new client, or a known layout the portal
+   couldn't fully read — is held under **📨 Needs a look** with a phone push; you
+   check the fields and press *Create the job* or *Dismiss*. To add a client, send
+   a few of their job emails and a template gets built and tested for them.
 
 ## Normal workflow
 1. Edit `worker/src/…` and/or the root `.html` pages.
