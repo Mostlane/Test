@@ -17,17 +17,19 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { PdfDoc, jpegInfo } from "../lib/pdf.js";
+import { onceMigration } from "../lib/once.js";
 
 const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC", cpp: "CPP" };
 
 // Self-migrating extra columns on hs_documents: file attachments (appended to
 // the PDF) and remote sign-off requests (sent to a portal user to view+sign).
 // Both are kept OUT of the form's `data` blob so a form re-save never wipes them.
-async function ensureHsCols(db) {
+async function ensureHsCols__raw(db) {
   for (const col of ["attachments TEXT", "sign_requests TEXT"]) {
     try { await db.prepare(`ALTER TABLE hs_documents ADD COLUMN ${col}`).run(); } catch {}
   }
 }
+const ensureHsCols = onceMigration(ensureHsCols__raw); // once per isolate — see lib/once.js
 const parseArr = s => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 // Sign a stored attachment so the browser <img>/link can fetch it without a token.
 async function attachmentUrl(env, origin, key) {

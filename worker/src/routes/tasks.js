@@ -22,6 +22,7 @@ import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
+import { onceMigration } from "../lib/once.js";
 
 // Areas a task can be linked to = a permission the assignee needs, plus the
 // audit path fragment that means "they did the job" (for auto-completion).
@@ -47,7 +48,7 @@ const AREA_BY_KEY = {}; for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 
 const RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -65,6 +66,7 @@ async function ensureTables(env) {
     try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 // ── London-time helpers (deadlines are UK wall-clock) ────────────────────────
 function lonYMD(d) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }

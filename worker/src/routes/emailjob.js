@@ -25,12 +25,13 @@ import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
+import { onceMigration } from "../lib/once.js";
 
 /* ── Intake log + config ──────────────────────────────────────────────────────
    Every email the worker receives is logged (what came in, what we made of it,
    what happened) so the office can SEE the intake working — and re-run one.  */
 const T = "inbound_emails";
-async function ensureTable(env) {
+async function ensureTable__raw(env) {
   try {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS ${T} (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, message_id TEXT, received_at TEXT,
@@ -39,6 +40,7 @@ async function ensureTable(env) {
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS ${T}_mid ON ${T}(tenant_id, message_id)`).run();
   } catch {}
 }
+const ensureTable = onceMigration(ensureTable__raw); // once per isolate — see lib/once.js
 const DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {

@@ -36,6 +36,7 @@ import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
 import { decodePngToRgb } from "../lib/pngdecode.js";
 import { shrinkRgb, deflate } from "./pump.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
+import { onceMigration } from "../lib/once.js";
 
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
@@ -107,7 +108,7 @@ const DEFAULT_CONFIG = {
   supplierCc: "",        // optional CC on the battery enquiry email (remembered)
 };
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
     job_id TEXT, site_code TEXT, cert_number TEXT,
@@ -172,6 +173,7 @@ async function ensureTables(env) {
     try { await env.DB.prepare("ALTER TABLE client_orders ADD COLUMN " + col).run(); } catch (e) {}
   }
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 // The board/list columns — never the email copy itself (up to 12 KB a row).
 const ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
 // Pipeline v2: to_quote (blocking pop-up until "Quote sent") → quoted (waiting for

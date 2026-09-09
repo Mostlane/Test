@@ -22,12 +22,13 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToPermission } from "./push.js";
+import { onceMigration } from "../lib/once.js";
 
 export const KINDS = ["qualification", "insurance", "licence", "licence_check"];
 const EXPIRING_DAYS = 30;                     // "expiring soon" window
 const safeName = s => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
 
-async function ensureTable(db) {
+async function ensureTable__raw(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
     tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
     title TEXT, number TEXT, issuer TEXT, issued TEXT, expires TEXT,
@@ -36,16 +37,18 @@ async function ensureTable(db) {
   )`).run();
   try { await db.prepare("CREATE INDEX IF NOT EXISTS idx_staffrec_user ON staff_records(tenant_id, username)").run(); } catch {}
 }
+const ensureTable = onceMigration(ensureTable__raw); // once per isolate — see lib/once.js
 // Subcontractors — people/companies who aren't portal users but whose records
 // (insurances, qualifications…) we still track. Keyed by a normalised name so it
 // lines up 1:1 with the PO system's `subcontractors` table (also name-unique).
-async function ensureSubTable(db) {
+async function ensureSubTable__raw(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_subcontractors (
     tenant_id INTEGER, name_key TEXT, name TEXT, trade TEXT, contact TEXT, phone TEXT, email TEXT,
     active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT,
     PRIMARY KEY (tenant_id, name_key)
   )`).run();
 }
+const ensureSubTable = onceMigration(ensureSubTable__raw); // once per isolate — see lib/once.js
 const nameKeyOf = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 const SUB_PREFIX = "sub:";                       // staff_records.username for a subcontractor
 const isSubUser = u => String(u || "").startsWith(SUB_PREFIX);

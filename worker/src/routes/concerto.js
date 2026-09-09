@@ -37,8 +37,9 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { listJobs } from "./sla.js";
+import { onceMigration } from "../lib/once.js";
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_ppm (
     id TEXT NOT NULL, tenant_id TEXT NOT NULL, kind TEXT, order_date TEXT, order_value REAL,
     description TEXT, ppm_type TEXT, period TEXT, asset_ref TEXT, sr_ref TEXT,
@@ -61,6 +62,7 @@ async function ensureTables(env) {
     kind TEXT, source TEXT, updated_at TEXT,
     PRIMARY KEY (tenant_id, ref))`).run();
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 /* ── Parsing helpers (pure — exported for the test harness + seeding) ─────── */
 export const FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
