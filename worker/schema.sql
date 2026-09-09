@@ -858,7 +858,17 @@ CREATE TABLE IF NOT EXISTS concerto_ppm (
   store_code TEXT, site_name TEXT, supplier TEXT, target_response TEXT, actual_response TEXT,
   planned_date TEXT, last_date TEXT, status TEXT, note TEXT, source_file TEXT,
   first_seen_at TEXT, last_seen_at TEXT, gone_at TEXT, updated_at TEXT,
+  -- schedule-export columns (self-migrating ALTERs): next due date, the client's
+  -- RELEASED order (Order nr. PPMnnnn + value + when we first saw it), Concerto
+  -- status, the chart's month marker (ORD01/AM01/01), discipline, frequency, block
+  next_date TEXT, order_nr TEXT, ordered_value REAL, released_at TEXT,
+  concerto_status TEXT, month_marker TEXT, discipline TEXT, frequency_months INTEGER, block TEXT,
   PRIMARY KEY (tenant_id, id)
+);
+-- Append-only event log per schedule row (imported / released / next_date_changed /
+-- gone) — the raw material for release-lead-time stats.
+CREATE TABLE IF NOT EXISTS concerto_log (
+  tenant_id TEXT NOT NULL, ppm_id TEXT NOT NULL, event TEXT, detail TEXT, at TEXT
 );
 CREATE TABLE IF NOT EXISTS concerto_refs (
   tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,

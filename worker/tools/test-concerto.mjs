@@ -23,7 +23,9 @@ function makeEnv() {
     CREATE TABLE compliance_stores (tenant_id INTEGER, scheme TEXT, code TEXT, category TEXT, name TEXT, postcode TEXT, due TEXT, active INTEGER DEFAULT 1, meta TEXT, updated_at TEXT);
     CREATE TABLE sites (tenant_id INTEGER, client TEXT, site_number TEXT, site_name TEXT, postcode TEXT, active INTEGER, job_number TEXT, data TEXT, updated_at TEXT);
     CREATE TABLE sla_jobs (tenant_id, id TEXT, data TEXT, status TEXT, helpdesk_ref TEXT, site_code TEXT);
-    CREATE TABLE app_config (tenant_id, key, value);`);
+    CREATE TABLE app_config (tenant_id, key, value);
+    CREATE TABLE sla_jobs_archive (tenant_id INTEGER, id TEXT PRIMARY KEY, ref TEXT, status TEXT, assigned_to TEXT, site_name TEXT, postcode TEXT, created_at TEXT, completed_at TEXT, search TEXT, data TEXT, site_code TEXT);
+    CREATE TABLE compliance_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, code TEXT, type TEXT, year TEXT, r2_key TEXT, filename TEXT, size INTEGER, doc_date TEXT, source TEXT, uploaded_at TEXT, label TEXT, pinned INTEGER, scheme TEXT);`);
   const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
   ins("user_permissions", ["tenant_id","username","permission","value"], [[1,"Jamie Line","FullAccess",1],[1,"Tanya","Compliance",1],[1,"Ryan Diggens","SLAAdmin",1],[1,"Nobody","SLA",1]]);
   ins("users", ["tenant_id","username","profile"], [[1,"Jamie Line",'{"staffType":"office"}'],[1,"Tanya",'{"staffType":"office"}'],[1,"Ryan Diggens",'{"staffType":"field"}'],[1,"Nobody",'{}']]);
@@ -37,7 +39,10 @@ function makeEnv() {
     [1,"coop","0999","Retail",null,'{"em":"2026-01-10","pat":"2026-12-01","fiveYear":"2026-03-01"}',1],   // overdue EM + 5-year on chart, not on Concerto → chartMissing
   ]);
   ins("sites", ["tenant_id","client","site_number","site_name"], [[1,"retail","0305","Portchester, White Hart Lane"],[1,"els","622","The Co-operative Funeralcare - Frome"],[1,"retail","0032","Fareham, Gudge Heath Lane"],[1,"retail","0037","Titchfield, The Square"],[1,"retail","0999","Test Store"]]);
-  ins("sla_jobs", ["tenant_id","id","data","status"], [[1,"J1",JSON.stringify({ id:"J1", siteCode:"0622", emTest:true, pat:true, status:"Scheduled", scheduledAt:"2026-09-14T09:00:00.000Z", assignedEngineers:["Ryan Diggens"], helpdeskRef:"Frome" }),"Scheduled"]]);
+  ins("sla_jobs", ["tenant_id","id","data","status"], [[1,"J1",JSON.stringify({ id:"J1", siteCode:"0622", emTest:true, pat:true, status:"Scheduled", scheduledAt:"2026-09-14T09:00:00.000Z", assignedEngineers:["Ryan Diggens"], helpdeskRef:"Frome" }),"Scheduled"],
+    [1,"J5",JSON.stringify({ id:"J5", siteCode:"0305", description:"5 Year Electrical Test - certificate number 0990", status:"Complete", scheduledAt:"2026-03-02T08:00:00.000Z", statusHistory:[{status:"In Progress",at:"2026-03-02T08:10:00Z"},{status:"Complete",at:"2026-03-02T15:40:00Z"}], assignedEngineers:["Connor"] }),"Complete"]]);
+  ins("sla_jobs_archive", ["tenant_id","id","ref","status","completed_at","created_at","search","data","site_code"], [[1,"MOS9800","MOS9800","Closed Jobs","2021-06-14T10:00:00Z","2021-06-01T10:00:00Z","starbucks winchester eicr carry out eicr", JSON.stringify({ id:"MOS9800", jobName:"Co-op Frome EICR", description:"Carry out EICR" }), "622"]]);
+  ins("compliance_files", ["tenant_id","scheme","code","type","doc_date","filename","r2_key"], [[1,"coop","0037","fiveYear","2024-11-12","0037 EICR.pdf","k1"],[1,"coop","0037","fiveYear","2019-11-01","old.pdf","k0"]]);
   return { env: { DB: d1(db), OWNER_USERNAME: "Jamie Line" }, db };
 }
 const sessFor = (who) => ({ user: { username: who, tenant_id: 1 }, tenantId: 1, session: { token: "T" } });
@@ -141,19 +146,51 @@ const ROWS = [
   const im4 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "orders", rows: ROWS, fileName: "back.xlsx" });
   const l5 = await call(env, "Jamie Line", "GET", "/concerto/list");
   ok("reappearing row re-opens", l5.body.rows.find(r => r.id === "PPM0297").status === "open" && im4.body.gone === 0);
-  // Schedule layout: learns SR→store from the Site column, upserts by UPRN+type+planned
+  // Schedule layout (short June export): learns SR→store from the Site column, one row per site+type
   const sch = [{ uprn: "SR00314", site: "0109 - Romsey, Winchester Hill (PFS)", block: "B01", ref: "EL-5Y", type: "5 year fixed wire", supplier: "Mostlane", lastDate: "", plannedDate: 46203, estimate: 960 },
                { uprn: "SR00373", site: "0622 - The Co-operative Funeralcare - Frome", ref: "EL-EM", type: "Emergency light", plannedDate: "2026-11-05" }];
   const is1 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: sch, fileName: "ppm_schedule.xlsx" });
   const is2 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: sch, fileName: "ppm_schedule.xlsx" });
   const refs = await call(env, "Jamie Line", "GET", "/concerto/refs");
-  const l6 = await call(env, "Jamie Line", "GET", "/concerto/list");
-  const s1 = l6.body.rows.find(r => r.id.startsWith("SCH:SR00314"));
+  const l6 = await call(env, "Jamie Line", "GET", "/concerto/list?kind=schedule");
+  const s1 = l6.body.rows.find(r => r.id === "SCH:SR00314:fiveYear");
   ok("schedule import adds 2, re-import updates 2", is1.body.added === 2 && is2.body.added === 0 && is2.body.updated === 2, JSON.stringify(is1.body) + " " + JSON.stringify(is2.body));
-  ok("schedule row resolved from its Site column + planned serial date", s1 && s1.storeCode === "0109" && s1.plannedDate === "2026-06-30" && s1.type === "fiveYear" && s1.flag === "not_on_chart", JSON.stringify(s1));
+  ok("schedule row resolved from its Site column + planned serial date", s1 && s1.storeCode === "0109" && s1.nextDate === "2026-06-30" && s1.type === "fiveYear" && s1.flag === "not_on_chart", JSON.stringify(s1));
   ok("schedule import taught SR00314 → 0109", refs.body.refs.some(r => r.ref === "SR00314" && r.storeCode === "0109"));
-  const s2 = l6.body.rows.find(r => r.id.startsWith("SCH:SR00373"));
+  const s2 = l6.body.rows.find(r => r.id === "SCH:SR00373:em");
   ok("schedule EM row for Frome: chart 2026-07-15 earlier than planned Nov → mismatch", s2 && s2.flag === "mismatch", s2 && s2.flagText);
+  const lo = await call(env, "Jamie Line", "GET", "/concerto/list");
+  ok("orders list excludes schedule rows", lo.body.rows.every(r => r.kind === "order"));
+  // Full 5-year schedule layout: next date, release (Order nr.), log + history cross-reference
+  const full = [
+    { uprn: "SR00364", site: "0305 - Portchester, White Hart Lane", block: "B01", ref: "EL-5Y", type: "5 year fixed wire", discipline: "Electrical", frequency: "60 Months", supplier: "Mostlane", lastDate: "", nextDate: "2026-11-30", monthMarker: "Nov: ORD01", ordered: 960, status: "Live", orderNr: "PPM11642" },
+    { uprn: "SR00161", site: "0622 - The Co-operative Funeralcare - Frome", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2031-05-31", lastDate: "2026-05-31", status: "Live", orderNr: "" },
+    { uprn: "SR00283", site: "0037 - Titchfield, The Square", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2029-11-12", status: "Live", orderNr: "" },
+  ];
+  const if1 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: full, fileName: "ppm_schedule_5.xlsx" });
+  ok("full layout: 3 rows (1 existing SR00314 5-year row now gone — not in this full 5-year list), 1 released", if1.body.added === 3 && if1.body.released === 1 && if1.body.gone === 1, JSON.stringify(if1.body));
+  const sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear");
+  const by5 = Object.fromEntries((sc.body.rows || []).map(r => [r.storeCode, r]));
+  ok("schedule endpoint: 3 live 5-year rows, stats", sc.status === 200 && sc.body.total === 3 && sc.body.stats.released === 1 && sc.body.stats.notReleased === 2 && sc.body.stats.releasesLogged === 1, JSON.stringify(sc.body.stats));
+  ok("released row carries PPM number + value + releasedAt", by5["0305"].released && by5["0305"].orderNr === "PPM11642" && by5["0305"].orderedValue === 960 && by5["0305"].releasedAt, JSON.stringify(by5["0305"]));
+  ok("history: 0305 last done = the completed live 5-year job (2026-03-02)", by5["0305"].lastDone && by5["0305"].lastDone.source === "job" && by5["0305"].lastDone.date === "2026-03-02" && by5["0305"].lastDone.id === "J5", JSON.stringify(by5["0305"].lastDone));
+  ok("history: 0622 last done = archive EICR job (site_code '622' numeric match)", by5["0622"].lastDone && by5["0622"].lastDone.source === "archive" && by5["0622"].lastDone.id === "MOS9800" && by5["0622"].lastDone.date === "2021-06-14", JSON.stringify(by5["0622"].lastDone));
+  ok("history: 0037 last done = newest certificate on file (2024-11-12)", by5["0037"].lastDone && by5["0037"].lastDone.source === "cert" && by5["0037"].lastDone.date === "2024-11-12" && by5["0037"].history.length === 2, JSON.stringify(by5["0037"].lastDone));
+  ok("5-year reconcile: 0037 has no 5-year chart date → no_chart_date (never a false done/due)", by5["0037"].flag === "no_chart_date", by5["0037"].flagText);
+  const scR = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear&released=yes");
+  const scN = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear&released=no&from=2029-01-01&to=2029-12-31");
+  ok("released + timeline filters", scR.body.rows.length === 1 && scR.body.rows[0].storeCode === "0305" && scN.body.rows.length === 1 && scN.body.rows[0].storeCode === "0037" && scR.body.total === 3);
+  // Re-import with a new release + a moved next date → logged once each, never duplicated
+  const full2 = full.map(r => r.uprn === "SR00161" ? { ...r, orderNr: "PPM12000", ordered: 960 } : r.uprn === "SR00283" ? { ...r, nextDate: "2029-12-01" } : r);
+  const if2 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: full2, fileName: "ppm_schedule_5b.xlsx" });
+  const if3 = await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: full2, fileName: "ppm_schedule_5b.xlsx" });
+  const lg = await call(env, "Jamie Line", "GET", "/concerto/log");
+  const rel = lg.body.events.filter(e => e.event === "released"), mv = lg.body.events.filter(e => e.event === "next_date_changed");
+  ok("second release logged once; next-date change logged once; third import logs nothing new", if2.body.released === 1 && if3.body.released === 0 && rel.length === 2 && mv.length === 1 && mv[0].from === "2029-11-12" && mv[0].to === "2029-12-01", JSON.stringify({ rel: rel.length, mv }));
+  const sc2 = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear");
+  ok("released_at kept from first sight, PPM number stored", sc2.body.rows.find(r => r.storeCode === "0622").orderNr === "PPM12000" && sc2.body.stats.released === 2);
+  const scF = await call(env, "Ryan Diggens", "GET", "/concerto/schedule?type=fiveYear");
+  ok("field user: schedule shows no ordered values", scF.body.rows.every(r => r.orderedValue === undefined));
   const st = await call(env, "Jamie Line", "GET", "/concerto/stores");
   ok("stores picker lists chart stores with names + closed flag", st.body.stores.length === 6 && st.body.stores.find(s => s.code === "0238").closed === true && st.body.stores.find(s => s.code === "0622").name.includes("Frome"));
 }
