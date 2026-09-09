@@ -517,7 +517,7 @@ async function renderCompliance(){
         row.innerHTML = `
           <span class="ic">${fileIcon(f.filename || "")}</span>
           <div class="nm">${esc(f.label || f.filename || "document")}<div class="meta">${badge}${f.date ? " · " + esc(fmt(f.date)) : ""}</div></div>
-          <a class="btn small" href="${f.url}" target="_blank" rel="noopener">Open</a>`;
+          <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener">Open</a>`;
         list.appendChild(row);
       });
       c.appendChild(list);

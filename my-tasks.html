@@ -66,6 +66,7 @@
     const tok = () => localStorage.getItem("mostlaneToken");
     function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
     function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     const g = id => document.getElementById(id);
 
     // Show the admin "Manage tasks" button for Full-Access users (cached perms).
@@ -163,7 +164,7 @@
       const catPill='<span class="pill cat">'+esc(catOf(t))+'</span> ';
       const canTick=!s.auto;   // auto-completed tasks aren't manually toggled
       const tick=canTick
-        ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle(\''+t.id+'\','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
+        ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle('+esc(JSON.stringify(String(t.id)))+','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
         : '<div class="tickbtn on" title="Completed automatically">✓</div>';
       // A task linked to a portal section opens straight there. The whole title
       // becomes the link, plus an explicit "Go to" button.
@@ -181,7 +182,7 @@
       const rawDetail=String(t.detail||"");
       const emailUrl=t.link || (rawDetail.match(/https?:\/\/\S+/)||[])[0] || "";
       const cleanDet=rawDetail.replace(/https?:\/\/\S+/g,"").replace(/\n{2,}/g,"\n").trim();
-      const emailLink=emailUrl ? '<a class="mailink" href="'+esc(emailUrl)+'" target="_blank" rel="noopener">📧 Open email ↗</a>' : "";
+      const emailLink=emailUrl ? '<a class="mailink" href="'+esc(safeUrl(emailUrl))+'" target="_blank" rel="noopener">📧 Open email ↗</a>' : "";
       return '<div class="card'+(over7?" warn7":"")+'"><div class="task">'+tick+
         '<div class="body">'+title+
         '<div class="meta">'+esc(meta)+'</div>'+catPill+pill+

@@ -824,6 +824,8 @@
 </div>
 
 <script>
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
   // Auth gate
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
@@ -1010,12 +1012,12 @@
         const handoverUrl = row.handoverURL || row.handoverUrl || "";
         let handoverCell = "–";
         if (handoverUrl){
-          handoverCell = `<a class="inline-link" href="${handoverUrl}" target="_blank">View</a>`;
+          handoverCell = `<a class="inline-link" href="${esc(safeUrl(handoverUrl))}" target="_blank">View</a>`;
         }
         tr.innerHTML = `
-          <td>${driverNice || "Unknown"}</td>
-          <td>${from}</td>
-          <td>${to}</td>
+          <td>${esc(driverNice || "Unknown")}</td>
+          <td>${esc(from)}</td>
+          <td>${esc(to)}</td>
           <td>${handoverCell}</td>
         `;
         driverHistoryBody.appendChild(tr);
@@ -1035,13 +1037,13 @@
           const tr = document.createElement("tr");
           const invUrl = w.invoiceURL || w.invoiceUrl || "";
           const invCell = invUrl
-            ? `<a class="inline-link" href="${invUrl}" target="_blank">View</a>`
+            ? `<a class="inline-link" href="${esc(safeUrl(invUrl))}" target="_blank">View</a>`
             : "–";
           tr.innerHTML = `
-            <td>${w.type || "-"}</td>
-            <td>${formatDate(w.date)}</td>
-            <td>${w.description || "-"}</td>
-            <td>${formatMoney(w.cost)}</td>
+            <td>${esc(w.type || "-")}</td>
+            <td>${esc(formatDate(w.date))}</td>
+            <td>${esc(w.description || "-")}</td>
+            <td>${esc(formatMoney(w.cost))}</td>
             <td>${invCell}</td>
           `;
           workerHistoryBody.appendChild(tr);
@@ -1071,13 +1073,13 @@
         const status = c.status || "OK";
         const issues = c.issueCount != null ? c.issueCount : "-";
         const link = c.reportUrl
-          ? `<a class="inline-link" href="${c.reportUrl}" target="_blank">View</a>`
+          ? `<a class="inline-link" href="${esc(safeUrl(c.reportUrl))}" target="_blank">View</a>`
           : "–";
         tr.innerHTML = `
-          <td>${formatDate(c.date)}</td>
+          <td>${esc(formatDate(c.date))}</td>
           <td>${c.mileage != null ? c.mileage.toLocaleString()+" mi":"–"}</td>
-          <td>${status}</td>
-          <td>${issues}</td>
+          <td>${esc(status)}</td>
+          <td>${esc(issues)}</td>
           <td>${link}</td>
         `;
         tbody.appendChild(tr);
@@ -1097,9 +1099,9 @@
       const last = info?.last ? formatDate(info.last) : "–";
       parts.push(
         `<div style="margin:2px 0;">
-          <span class="field-label" style="text-transform:capitalize;">${cat}</span> –
+          <span class="field-label" style="text-transform:capitalize;">${esc(cat)}</span> –
           <span class="field-value">${count} photos</span>
-          <span class="pill-small" style="margin-left:4px;">Last: ${last}</span>
+          <span class="pill-small" style="margin-left:4px;">Last: ${esc(last)}</span>
         </div>`
       );
     }
@@ -1242,13 +1244,13 @@
       const odo = e.odo != null ? Number(e.odo).toLocaleString()+" mi" : "–";
       const mpg = formatMPG(e.mpg);
       const receiptCell = e.receiptUrl
-        ? `<a class="inline-link" href="${e.receiptUrl}" target="_blank">View</a>`
+        ? `<a class="inline-link" href="${esc(safeUrl(e.receiptUrl))}" target="_blank">View</a>`
         : "–";
 
       tr.innerHTML = `
-        <td>${formatDate(e.date)}</td>
+        <td>${esc(formatDate(e.date))}</td>
         <td>${litres}</td>
-        <td>${cost}</td>
+        <td>${esc(cost)}</td>
         <td>${odo}</td>
         <td>${mpg}</td>
         <td>${receiptCell}</td>

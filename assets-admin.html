@@ -228,7 +228,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -301,8 +301,8 @@
           const rows = by[holder].map(it => {
             const acts = it.status === "flagged"
               ? `<span style="white-space:nowrap;display:flex;gap:6px;">
-                   <button class="btn small" style="padding:4px 9px;font-size:12px;" onclick="reassignFromFlag('${escA(it.id)}')">Reassign</button>
-                   <button class="btn grey small" style="padding:4px 9px;font-size:12px;" onclick="clearFlag('${escA(it.id)}')">Still held</button>
+                   <button class="btn small" style="padding:4px 9px;font-size:12px;" onclick="reassignFromFlag(${escA(JSON.stringify(String(it.id)))})">Reassign</button>
+                   <button class="btn grey small" style="padding:4px 9px;font-size:12px;" onclick="clearFlag(${escA(JSON.stringify(String(it.id)))})">Still held</button>
                  </span>` : "";
             return `<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:5px 0;font-size:13px;border-top:1px solid #eee;">
                <span style="flex:1;min-width:150px;">${escA(it.name)}${it.serial ? ' <span class="muted">· '+escA(it.serial)+'</span>' : ''}${it.note ? ' <span class="muted">— “'+escA(it.note)+'”</span>' : ''}</span>

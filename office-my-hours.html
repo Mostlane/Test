@@ -66,6 +66,7 @@
   </div>
 
   <script>
+    function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
     const API = window.MOSTLANE_API;
     const token = localStorage.getItem("mostlaneToken");
     const g = id => document.getElementById(id);
@@ -84,7 +85,7 @@
     // A session line. Admin edits show the auto time struck through with the new
     // time beside it; voided sessions are struck and excluded from the total.
     function segHtml(s) {
-      const note = s.note ? `<span class="editnote">Adjusted: ${String(s.note).replace(/[<>&]/g,"")}</span>` : "";
+      const note = s.note ? `<span class="editnote">Adjusted: ${esc(s.note)}</span>` : "";
       if (s.voided)
         return `<div class="seg voided"><span class="times"><s>${clock(s.originalIn)} → ${clock(s.originalOut)}</s>${note}</span><span class="pill void">removed</span></div>`;
       if (s.open)
@@ -112,7 +113,7 @@
       const half = (h.half === "AM" || h.half === "PM") ? ` (${h.half} half)` : "";
       // Don't tack "— unpaid" onto a type that already says it.
       const unpaid = h.paid === false && !/unpaid/i.test(String(h.type || ""));
-      return `🌴 ${holName(h.type)}${half}${unpaid ? " — unpaid" : ""}`;
+      return `🌴 ${esc(holName(h.type))}${half}${unpaid ? " — unpaid" : ""}`;
     }
 
     function render(data) {

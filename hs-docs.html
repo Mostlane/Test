@@ -415,7 +415,8 @@
 <script>
   const API = window.MOSTLANE_API;
   const g = id => document.getElementById(id);
-  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+  function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
   function authFetch(path, opts = {}) {
     opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
     return fetch(API + path, opts);
@@ -543,15 +544,15 @@
       g("listRows").innerHTML = docs.map(x => {
         const isHw = x.doc_type === "hotworks", closed = x.status === "closed";
         const status = isHw ? `<br><span style="font-size:12px; font-weight:700; color:${closed?'#0a7d33':'#b00020'};">● ${closed?'Closed':'Open'}</span>` : "";
-        const closeBtn = (isHw && !closed) ? `<button class="btn small" style="background:#0a7d33;" onclick="closeOutPermit('${x.id}')">Close out</button> ` : "";
+        const closeBtn = (isHw && !closed) ? `<button class="btn small" style="background:#0a7d33;" onclick="closeOutPermit(${esc(JSON.stringify(String(x.id)))})">Close out</button> ` : "";
         return `
         <tr>
           <td><b>${esc(x.ref || "—")}</b>${status}<br><span class="muted">${esc(x.site || "")}</span></td>
           <td class="muted">${esc(fmtDate(x.created_at))}<br>${esc(x.created_by || "")}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${closeBtn}<button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
-            <button class="btn grey small" onclick="editDoc('${x.id}')">Edit</button>
-            <button class="btn red small" onclick="delDoc('${x.id}')">✕</button>
+            ${closeBtn}<button class="btn ghost small" onclick="openDoc(${esc(JSON.stringify(String(x.id)))})">Open</button>
+            <button class="btn grey small" onclick="editDoc(${esc(JSON.stringify(String(x.id)))})">Edit</button>
+            <button class="btn red small" onclick="delDoc(${esc(JSON.stringify(String(x.id)))})">✕</button>
           </td>
         </tr>`; }).join("");
     } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
@@ -1343,7 +1344,7 @@
     g("attList").innerHTML = atts.length ? atts.map(a =>
       `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;">
         <a href="${esc(a.url)}" target="_blank" rel="noopener" style="font-size:13px;">${/^image\//.test(a.type||"")?"🖼️":"📄"} ${esc(a.name||"file")}</a>
-        <button class="btn red small" type="button" onclick="deleteAttachment('${esc(a.key)}')">✕</button>
+        <button class="btn red small" type="button" onclick="deleteAttachment(${esc(JSON.stringify(String(a.key)))})">✕</button>
       </div>`).join("") : '<span class="muted">None yet.</span>';
     const reqs = doc.signRequests || [];
     g("signList").innerHTML = reqs.length ? reqs.map(s => {
@@ -1351,11 +1352,11 @@
       // browser dropped the step) — offer a one-tap re-file from here.
       const filed = s.status==="signed"
         ? (s.docKey ? ' <span class="muted" style="font-size:11.5px;">· 📄 in their My Documents</span>'
-                    : ` <button class="btn small" type="button" style="background:#d97706;color:#fff;" onclick="refileSigned('${esc(s.username)}')">📄 File copy to their My Documents</button>`)
+                    : ` <button class="btn small" type="button" style="background:#d97706;color:#fff;" onclick="refileSigned(${esc(JSON.stringify(String(s.username)))})">📄 File copy to their My Documents</button>`)
         : "";
       return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;flex-wrap:wrap;">
         <span style="font-size:13px;">${esc(s.name || s.username)} — ${s.status==="signed"?`<b style="color:#0a7d33;">✓ signed ${esc(s.signedAt?new Date(s.signedAt).toLocaleDateString("en-GB"):"")}</b>`:'<span style="color:#b26b00;">⏳ awaiting</span>'}${filed}</span>
-        <button class="btn grey small" type="button" title="Remove" onclick="cancelSign('${esc(s.username)}')">✕</button>
+        <button class="btn grey small" type="button" title="Remove" onclick="cancelSign(${esc(JSON.stringify(String(s.username)))})">✕</button>
       </div>`;
     }).join("") : '<span class="muted">No one sent yet.</span>';
   }
@@ -1411,7 +1412,7 @@
     try { const r = await authFetch("/hs/doc/sign-cancel", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, username }) }).then(r => r.json());
       if (r.ok) await openDoc(DOC_CUR.id); } catch (e) {}
   }
-  const sigImg = s => s ? `<img src="${s}" alt="signature">` : `<span class="muted">(not signed)</span>`;
+  const sigImg = s => s ? `<img src="${esc(safeUrl(s))}" alt="signature">` : `<span class="muted">(not signed)</span>`;
   function renderInduction(doc) {
     const x = doc.data || {};
     const contractors = (x.contractors || []).map((c,i) => `

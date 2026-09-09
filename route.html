@@ -260,7 +260,7 @@
     var heroInner;
     if(proj&&proj.totalDays){
       var pct=Math.max(6,Math.round((proj.day||1)/proj.totalDays*100));
-      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+(proj.day||1)+' of ~'+proj.totalDays+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
+      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+esc(proj.day||1)+' of ~'+esc(proj.totalDays)+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
         +'<h2>'+esc(proj.name||jobName(job))+'</h2><div class="sub">'+esc(job.siteName||job.address||"")+'</div>'
         +'<div class="prog"><i style="width:'+pct+'%"></i></div>';
     } else {
