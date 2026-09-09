@@ -4401,8 +4401,18 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     (never the email text) + `has_email`. Backfilled 9 Sep: the 30 orders from
     27 Aug–8 Sep loaded straight to D1 (with email copies) and R29051 hand-linked to
     Frome's works job. NB "replaced on site" R/REM orders (R28878, REM0150/0151,
-    R29052) have no case/job to link — they are billing only. Tests: cases 6–11 in
-    `test-client-orders.mjs` (31 cases).
+    R29052) have no case/job to link — they are billing only. **Order text →
+    job description is PRICE-STRIPPED** (`sla.js stripPricing`, used by
+    `orderText`): Concerto orders end in "Labour - 150.00 / Materials: £622.50 /
+    Materials / Specialist Equipment – £143.00 / Total: 2 fittings - £100" and
+    per-fitting " - £50" tails — every line that starts with a cost word AND
+    carries an amount is dropped, trailing " - £N" is cut, stray £ amounts removed
+    (a "Materials to be supplied by the client" line with no amount is kept); the
+    "(£439.00)" that used to head the description is gone too, and the "Client
+    order … linked to this job" timeline note carries no £ — the value lives ONLY
+    on `job.orderValue` (hidden from the field by `stripMoney`). The board keeps
+    the full priced text for the office. Tests: cases 6–12 in
+    `test-client-orders.mjs` (35 cases).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
