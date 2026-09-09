@@ -1655,7 +1655,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       else {
         finish = lTime(new Date(o.e).toISOString());
         let mins = sh && sh.home_drive_mins != null ? Number(sh.home_drive_mins) : null;
-        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc);
+        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc, { cached: true });
         if (mins == null && o.lastPc && homePc) {
           try {
             const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]);
@@ -2293,11 +2293,24 @@ function haversineMiles(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R2 * Math.asin(Math.sqrt(h));
 }
-async function driveMinutesGoogle(env, fromPc, toPc) {
+async function driveMinutesGoogle(env, fromPc, toPc, opts = {}) {
   const key = env && env.GOOGLE_MAPS_KEY;
   if (!key) return null;
   const f = normPc(fromPc), t = normPc(toPc);
   if (!f || !t) return null;
+  const mk = f + "|" + t;
+  if (opts.cached) {
+    const hit = DRIVE_MEMO.get(mk);
+    if (hit && Date.now() - hit.at < DRIVE_MEMO_TTL) return hit.mins;
+  }
+  const mins = await driveMinutesGoogleLive(key, f, t);
+  if (opts.cached && mins != null) {
+    if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear();
+    DRIVE_MEMO.set(mk, { mins, at: Date.now() });
+  }
+  return mins;
+}
+async function driveMinutesGoogleLive(key, f, t) {
   try {
     const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
     if (!a || !b) return null;
@@ -3553,8 +3566,7 @@ async function handle5(request, env, ctx, url, sess) {
       const invBy = {};
       for (const r of invs || []) invBy[r.username] = r;
       const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);
-      const out = [];
-      for (const u of users || []) {
+      const out = await Promise.all((users || []).map(async (u) => {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
         try {
@@ -3575,7 +3587,7 @@ async function handle5(request, env, ctx, url, sess) {
         const perDay = {};
         for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
         const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
-        out.push({
+        return {
           username: u.username,
           name: displayName(u),
           employment: u.employment_type || "Employed",
@@ -3598,8 +3610,8 @@ async function handle5(request, env, ctx, url, sess) {
             at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
           } : null
-        });
-      }
+        };
+      }));
       const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
       return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
@@ -3704,7 +3716,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR;
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL;
 var init_timesheets = __esm({
   "src/routes/timesheets.js"() {
     init_http();
@@ -3748,6 +3760,8 @@ var init_timesheets = __esm({
     PO_MAP_AT = 0;
     PO_PROBE = null;
     ROAD_FACTOR = 1.25;
+    DRIVE_MEMO = /* @__PURE__ */ new Map();
+    DRIVE_MEMO_TTL = 12 * 3600 * 1e3;
   }
 });
 
