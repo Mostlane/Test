@@ -4260,6 +4260,31 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
   **Adding a client = add one template + fixtures** in emailtemplates.js /
   test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
+- **The SAME INCIDENT arriving again → a linked VISIT, never a duplicate or an
+  overwrite (9 Sep 2026, Jamie: "sometimes I get a duplicate job").** Two real
+  Concerto patterns: (a) we attend "00028541/1", make safe + quote; the client
+  orders the works and RE-ASSIGNS the same incident as **"00028541/2"** (new suffix)
+  — the old intake keyed jobs by reference so this became an unrelated second job;
+  (b) an old incident is RE-OPENED with the EXACT same reference — dedupe-by-
+  reference silently REWROTE the finished job's description and left it Complete.
+  Now **`/sla/inbound`** (sla.js — so the zap path and the email path both get it)
+  calls **`matchSameIncident(env,tid,ref)`**: same reference + a job still OPEN →
+  update it (a genuine re-send); same reference but every job with it is
+  **finished** (DONE_STATES or a custom `done` category — `jobFinishedFor`) →
+  `kind:"reopened"`; no exact match but a **sibling suffix of the same incident**
+  (`^\d{5,12}/\d{1,3}$`, `helpdesk_ref LIKE '<incident>/%'`) → `kind:"reassigned"`.
+  For either kind the intake creates a **NEW job (fresh uuid id, the new reference)
+  linked as a re-visit** — `revisitOf` = the newest earlier job, `visitGroupId` =
+  its root — with a "↩ Same incident sent again…" / "↩ Re-assigned incident —
+  follows our earlier visit 00028541/1 (Complete, date); usually the ordered works
+  after a quote" line appended to the description, then **`stampVisitGroup`** sets
+  the root's visitGroupId + every member's `visitCount` (the board/scheduler ×N
+  badge; job-view "🔁 Visits" lists them). Evidence is NOT copied (a fresh
+  attendance — unlike the office 🔁 Re-visit button); auto-assign applies as for
+  any new job. The response carries `linkedVisit, visitKind, previousRef,
+  previousId, previousStatus, visitGroupId`, and the email-intake log reason
+  says which happened. A different incident with a similar prefix ("000285411/1")
+  is never linked. **Test:** `node worker/tools/test-inbound-incident.mjs` (7 cases).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

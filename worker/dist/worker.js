@@ -13572,8 +13572,27 @@ async function handle11(request, env, ctx, url, sess) {
       durationMinutes: b.durationMinutes || void 0,
       changedBy: "zapier"
     };
+    let before = null, sameIncident = null;
+    try {
+      sameIncident = await matchSameIncident(env, tenantId, payload.reference);
+    } catch {
+    }
+    if (sameIncident && sameIncident.open) {
+      payload.id = sameIncident.open.id;
+      before = sameIncident.open;
+    } else if (sameIncident && sameIncident.prev) {
+      const prev = sameIncident.prev;
+      payload.id = crypto.randomUUID();
+      delete payload.dedupeByRef;
+      payload.revisitOf = prev.id;
+      payload.visitGroupId = prev.visitGroupId || prev.id;
+      const when = String(prev.closedAt || prev.updatedAt || prev.createdAt || "").slice(0, 10);
+      const why = sameIncident.kind === "reopened" ? `\u21A9 Same incident sent again by the client \u2014 previous visit ${prev.helpdeskRef || prev.id} was ${prev.status}${when ? " (" + when + ")" : ""}.` : `\u21A9 Re-assigned incident \u2014 follows our earlier visit ${prev.helpdeskRef || prev.id} (${prev.status}${when ? ", " + when : ""}); usually the ordered works after a quote.`;
+      payload.description = [payload.description || "", why].filter(Boolean).join("\n\n");
+    } else if (!sameIncident) {
+      before = payload.reference ? await d1Retry(() => getJob3(env, tenantId, payload.reference)) : null;
+    }
     const beforeId = payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob3(env, tenantId, beforeId)) : null;
     if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
       const ia = await getInboundAssign(env, tenantId);
       const eng = inboundEngineerFor(ia, priority);
@@ -13589,9 +13608,26 @@ async function handle11(request, env, ctx, url, sess) {
       }
     }
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    if (payload.visitGroupId) {
+      try {
+        await stampVisitGroup(env, tenantId, payload.visitGroupId);
+      } catch (e) {
+        console.error("stampVisitGroup:", e && e.message);
+      }
+    }
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
-    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+    const linked = sameIncident && sameIncident.prev && !sameIncident.open ? sameIncident : null;
+    return jsonResponse({
+      ok: true,
+      created: !before,
+      id: job.id,
+      reference: job.helpdeskRef,
+      status: job.status,
+      priority: job.priority,
+      targetAt: job.targetAt,
+      ...linked ? { linkedVisit: true, visitKind: linked.kind, previousRef: linked.prev.helpdeskRef || "", previousId: linked.prev.id, previousStatus: linked.prev.status, visitGroupId: payload.visitGroupId } : {}
+    }, headers, before ? 200 : 201);
   }
   if (subpath === "/inbound-assign" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -16185,6 +16221,80 @@ async function getJob3(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+async function jobFinishedFor(env, tenantId) {
+  let done = /* @__PURE__ */ new Set();
+  try {
+    done = new Set((await getCategories(env, tenantId)).filter((c) => c && c.done).map((c) => String(c.name || "").toLowerCase()));
+  } catch {
+  }
+  return (j) => {
+    const st = String(j && j.status || "").toLowerCase();
+    return DONE_STATES.has(st) || done.has(st);
+  };
+}
+async function matchSameIncident(env, tenantId, reference) {
+  const ref = String(reference || "").trim();
+  if (!ref) return null;
+  const db = tenantDB(env, tenantId);
+  const finished = await jobFinishedFor(env, tenantId);
+  const parse2 = (rows) => (rows || []).map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate);
+  const newest = (list) => list.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  let same = [];
+  try {
+    same = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results);
+  } catch {
+  }
+  if (!same.length) {
+    try {
+      const j = await getJob3(env, tenantId, ref);
+      if (j && !j.fallbackTemplate) same = [j];
+    } catch {
+    }
+  }
+  if (same.length) {
+    const open = newest(same.filter((j) => !finished(j)));
+    if (open) return { open };
+    return { prev: newest(same), kind: "reopened" };
+  }
+  const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
+  if (!m) return null;
+  let sibs = [];
+  try {
+    sibs = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? AND helpdesk_ref<>?").bind(tenantId, m[1] + "/%", ref).all()).results);
+  } catch {
+  }
+  sibs = sibs.filter((j) => new RegExp("^" + m[1] + "/\\d{1,3}$").test(String(j.helpdeskRef || "")));
+  if (!sibs.length) return null;
+  return { prev: newest(sibs), kind: "reassigned" };
+}
+async function stampVisitGroup(env, tenantId, groupId) {
+  if (!groupId) return;
+  try {
+    const root = await getJob3(env, tenantId, groupId);
+    if (root && !root.visitGroupId) {
+      root.visitGroupId = groupId;
+      root.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, root);
+    }
+  } catch {
+  }
+  const all = await listJobs(env, tenantId, { includeDormant: true });
+  const members = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+  const cnt = members.length;
+  for (const m of members) {
+    if (m.visitCount !== cnt) {
+      m.visitCount = cnt;
+      m.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, m);
+    }
+  }
 }
 async function purgeUnverifiedCertsForJob(env, tenantId, jobId) {
   if (!jobId) return;
@@ -22318,7 +22428,8 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     } catch {
     }
     if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "", payload };
-    return { outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
+    const reason = out.linkedVisit ? out.visitKind === "reassigned" ? "Re-assigned incident \u2014 new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : "Same incident sent again \u2014 new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : out.created ? "New job on the board" : "Existing job updated (same reference, still open)";
+    return { outcome: out.created ? "created" : "updated", reason, status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }

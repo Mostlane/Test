@@ -243,7 +243,12 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     const resp = await fetchSelf(req, env, ctx);
     let out = {}; try { out = await resp.clone().json(); } catch {}
     if (!resp.ok) return { outcome: "failed", reason: (out && out.error) || ("HTTP " + resp.status), status: resp.status, reference: fields.reference || "", payload };
-    return { outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
+    const reason = out.linkedVisit
+      ? (out.visitKind === "reassigned"
+        ? "Re-assigned incident — new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")"
+        : "Same incident sent again — new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")")
+      : (out.created ? "New job on the board" : "Existing job updated (same reference, still open)");
+    return { outcome: out.created ? "created" : "updated", reason, status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
