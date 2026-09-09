@@ -34,7 +34,7 @@ function makeEnv() {
     [1,"coop","0032","Retail",null,'{"em":"2026-02-01","pat":"2026-02-01"}',1],   // overdue on chart vs Concerto Aug 2025 → done? lastDone 2025-02-01 < Jul 2025 → mismatch(earlier)
     [1,"coop","0037","Retail",null,'{"em":"12/11/2026","pat":"12/11/2026"}',1],   // legacy date; Concerto Aug 2025 → lastDone 2025-11-12 ≥ 2025-06-16 → done
     [1,"coop","0238","Retail","Bedminster STORE CLOSED",'{"em":"STORE CLOSED"}',0],
-    [1,"coop","0999","Retail",null,'{"em":"2026-01-10","pat":"2026-12-01"}',1],   // overdue EM on chart, not on Concerto → chartMissing
+    [1,"coop","0999","Retail",null,'{"em":"2026-01-10","pat":"2026-12-01","fiveYear":"2026-03-01"}',1],   // overdue EM + 5-year on chart, not on Concerto → chartMissing
   ]);
   ins("sites", ["tenant_id","client","site_number","site_name"], [[1,"retail","0305","Portchester, White Hart Lane"],[1,"els","622","The Co-operative Funeralcare - Frome"],[1,"retail","0032","Fareham, Gudge Heath Lane"],[1,"retail","0037","Titchfield, The Square"],[1,"retail","0999","Test Store"]]);
   ins("sla_jobs", ["tenant_id","id","data","status"], [[1,"J1",JSON.stringify({ id:"J1", siteCode:"0622", emTest:true, pat:true, status:"Scheduled", scheduledAt:"2026-09-14T09:00:00.000Z", assignedEngineers:["Ryan Diggens"], helpdeskRef:"Frome" }),"Scheduled"]]);
@@ -116,7 +116,7 @@ const ROWS = [
   ok("PPM9999 → closed store", by.PPM9999.flag === "store_closed");
   ok("Full Access sees order value", by.PPM0297.orderValue === 161.09);
   const cm = l.body.chartMissing;
-  ok("chartMissing: 0999 EM overdue on chart with no Concerto row; PAT rows Concerto never listed also flagged; covered EM rows not", cm.some(x => x.storeCode === "0999" && x.type === "em" && x.overdue) && cm.some(x => x.storeCode === "0305" && x.type === "pat") && !cm.some(x => x.type === "em" && ["0305","0622","0032","0037"].includes(x.storeCode)) && !cm.some(x => x.storeCode === "0238"), JSON.stringify(cm.map(x => x.storeCode + ":" + x.type)));
+  ok("chartMissing: 0999 EM overdue on chart with no Concerto row; PAT rows Concerto never listed also flagged; covered EM rows not", cm.some(x => x.storeCode === "0999" && x.type === "em" && x.overdue) && cm.some(x => x.storeCode === "0999" && x.type === "fiveYear" && x.overdue) && cm.some(x => x.storeCode === "0305" && x.type === "pat") && !cm.some(x => x.type === "em" && ["0305","0622","0032","0037"].includes(x.storeCode)) && !cm.some(x => x.storeCode === "0238"), JSON.stringify(cm.map(x => x.storeCode + ":" + x.type)));
   // Teach the unmapped reference → the row resolves
   const t = await call(env, "Jamie Line", "POST", "/concerto/ref", { ref: "ar003825", storeCode: "382", siteName: "Binfield" });
   const l2 = await call(env, "Jamie Line", "GET", "/concerto/list");

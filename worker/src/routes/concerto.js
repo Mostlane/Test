@@ -284,13 +284,14 @@ async function buildList(env, tid, opts) {
       flag: rec.flag, flagText: rec.text, chartDue: rec.chartDue || (store && store.due[r.ppm_type]) || null, lastDone: rec.lastDone || null, category: store ? store.category : "", job: job || null };
   });
   // Reverse check: stores overdue (or due within 30 days) on the chart for the
-  // PPM types Concerto orders, with NO open Concerto row for that store+type.
+  // PPM types Concerto schedules (5-year, EM, PAT, pump, PV, EV), with NO open
+  // Concerto row for that store+type.
   const covered = new Set(rows.filter(r => r.status === "open" && r.storeCode).map(r => r.storeCode + "|" + r.type));
   const chartMissing = [];
   const soon = addDays(today, 30);
   for (const s of stores.values()) {
     if (s.closed) continue;
-    for (const type of ["em", "pat", "pump", "pv", "ev"]) {
+    for (const type of ["fiveYear", "em", "pat", "pump", "pv", "ev"]) {
       const d = s.due[type]; if (!d || covered.has(s.code + "|" + type)) continue;
       if (d <= soon) chartMissing.push({ storeCode: s.code, siteName: s.name, category: s.category, type, typeLabel: TYPE_LABEL[type], chartDue: d, overdue: d < today, job: booked.get(s.code + "|" + type) || null });
     }
