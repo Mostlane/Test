@@ -2121,8 +2121,8 @@ async function poSiteRows(env, term, limit) {
   if (!m) return [];
   const cap2 = Math.max(1, Math.min(30, limit));
   const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
-  const T2 = String(term || "").toLowerCase();
-  const matches = (s) => !T2 || s.name.toLowerCase().includes(T2) || s.pc.toLowerCase().includes(T2) || (s.job || "").toLowerCase().includes(T2);
+  const T3 = String(term || "").toLowerCase();
+  const matches = (s) => !T3 || s.name.toLowerCase().includes(T3) || s.pc.toLowerCase().includes(T3) || (s.job || "").toLowerCase().includes(T3);
   try {
     const safe = m.table.replace(/"/g, "");
     if (m.mode === "cols") {
@@ -2989,10 +2989,10 @@ async function handle5(request, env, ctx, url, sess) {
       if (sites.length >= 25) break;
     }
     try {
-      const T2 = term.toLowerCase();
+      const T3 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
         if (sites.length >= 25) break;
-        if (T2 && !n.toLowerCase().includes(T2)) continue;
+        if (T3 && !n.toLowerCase().includes(T3)) continue;
         if (seen.has(n.trim().toLowerCase())) continue;
         seen.add(n.trim().toLowerCase());
         sites.push({ name: n, code: "", postcode: "", source: "po-order" });
@@ -3145,10 +3145,10 @@ async function handle5(request, env, ctx, url, sess) {
       if (jobs.length >= 10) break;
       jobs.push(j);
     }
-    const T2 = term.toLowerCase();
+    const T3 = term.toLowerCase();
     jobs.sort((a, b) => {
-      const pa = String(a.ref).toLowerCase().startsWith(T2) ? 0 : 1;
-      const pb = String(b.ref).toLowerCase().startsWith(T2) ? 0 : 1;
+      const pa = String(a.ref).toLowerCase().startsWith(T3) ? 0 : 1;
+      const pb = String(b.ref).toLowerCase().startsWith(T3) ? 0 : 1;
       return pa - pb;
     });
     const out = jobs.slice(0, 10);
@@ -21847,6 +21847,65 @@ async function signBridgeToken(secret, payload) {
 init_sitelog_api();
 
 // src/routes/emailjob.js
+init_http();
+init_auth();
+init_tenantdb();
+var T2 = "inbound_emails";
+async function ensureTable2(env) {
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS ${T2} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, message_id TEXT, received_at TEXT,
+      from_addr TEXT, orig_from TEXT, subject TEXT, outcome TEXT, reason TEXT, reference TEXT,
+      job_id TEXT, status_code INTEGER, fields TEXT, text TEXT)`).run();
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS ${T2}_mid ON ${T2}(tenant_id, message_id)`).run();
+  } catch {
+  }
+}
+var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "mostlane.com"] };
+async function getIntakeConfig(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return { ...DEFAULT_CFG, ...v, allowFrom: Array.isArray(v.allowFrom) && v.allowFrom.length ? v.allowFrom : DEFAULT_CFG.allowFrom };
+  } catch {
+    return { ...DEFAULT_CFG };
+  }
+}
+async function saveIntakeConfig(env, tid, cfg) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "email:intake", JSON.stringify(cfg)).run();
+}
+function senderAllowed(cfg, ...addrs) {
+  const list = (cfg.allowFrom || []).map((x) => String(x || "").toLowerCase().trim()).filter(Boolean);
+  if (!list.length) return true;
+  return addrs.some((a) => {
+    const x = String(a || "").toLowerCase().trim();
+    if (!x) return false;
+    const dom = x.split("@").pop();
+    return list.some((l) => l === x || l === dom || l.startsWith("@") && l.slice(1) === dom);
+  });
+}
+async function logIntake(env, tid, rec) {
+  try {
+    await env.DB.prepare(`INSERT INTO ${T2} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      tid,
+      rec.messageId || "",
+      rec.receivedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      rec.from || "",
+      rec.origFrom || "",
+      (rec.subject || "").slice(0, 300),
+      rec.outcome || "",
+      (rec.reason || "").slice(0, 300),
+      rec.reference || "",
+      rec.jobId || "",
+      rec.status || null,
+      JSON.stringify(rec.fields || null),
+      (rec.text || "").slice(0, 12e3)
+    ).run();
+  } catch (e) {
+    console.error("email intake log:", e && e.message);
+  }
+}
 async function readRaw(message) {
   try {
     return await new Response(message.raw).text();
@@ -21897,6 +21956,11 @@ function walkMime(section, depth) {
     return out;
   }
   const type = (ct.split(";")[0] || "").trim().toLowerCase();
+  if (type === "message/rfc822") {
+    const inner = cte === "base64" ? decodeB64(body) : body;
+    const innerFrom = (splitSection(inner).headers["from"] || "").trim();
+    return walkMime(inner, depth + 1).map((p) => ({ ...p, text: (innerFrom ? "From: " + innerFrom + "\n" : "") + p.text }));
+  }
   if (!/^text\//.test(type)) return [];
   let text = body;
   if (cte === "quoted-printable") text = decodeQP(text);
@@ -21911,6 +21975,34 @@ function extractText(raw) {
   if (html) return stripHtml2(html.text);
   return parts.map((p) => p.text).join("\n");
 }
+function unwrapForward(subject, text) {
+  const subj = String(subject || "").replace(/^\s*(?:fwd?|fw)\s*:\s*/i, "").trim();
+  let origFrom = "";
+  const m = /^\s*(?:>?\s*)?From:\s*(.+)$/im.exec(String(text || "").slice(0, 3e3));
+  if (m) {
+    const e = /<([^>]+)>/.exec(m[1]) || /([^\s"']+@[^\s"']+)/.exec(m[1]);
+    origFrom = (e ? e[1] : "").toLowerCase().trim();
+  }
+  return { subject: subj, origFrom };
+}
+var MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function londonToIso(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", timeZoneName: "shortOffset" }).formatToParts(new Date(guess));
+    const tz = (parts.find((p) => p.type === "timeZoneName") || {}).value || "GMT";
+    const off = /GMT([+-]\d{1,2})/.exec(tz);
+    const hours = off ? Number(off[1]) : 0;
+    return new Date(guess - hours * 36e5).toISOString();
+  } catch {
+    return new Date(guess).toISOString();
+  }
+}
+function concertoDate(s) {
+  const m = /(\d{1,2})\/([A-Za-z]{3})\/(\d{4})\s+(\d{1,2}):(\d{2})/.exec(String(s || ""));
+  if (!m || MON[m[2].toLowerCase()] === void 0) return "";
+  return londonToIso(+m[3], MON[m[2].toLowerCase()], +m[1], +m[4], +m[5]);
+}
 function concertoRegex(subject, text) {
   const t = String(text || "");
   if (!/New Job Alert|You have been assigned a new job/i.test(subject + " " + t)) return null;
@@ -21921,8 +22013,12 @@ function concertoRegex(subject, text) {
   const postcode = (/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i.exec(siteLine) || [])[1] || "";
   const fault = (/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i.exec(t) || [])[1] || "";
   const phone = (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(fault) || [])[1] || "";
+  const respondBy = concertoDate((/target Response Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
+  const completeBy = concertoDate((/target Completion Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
   if (!ref && !fault) return null;
   return {
+    respondBy,
+    completeBy,
     isJob: true,
     reference: ref,
     priority: pr ? "Priority " + pr : "",
@@ -21951,7 +22047,9 @@ async function aiExtract(env, { from, subject, text }) {
       postcode: { type: "string", description: "UK postcode of the site if present, else ''." },
       telephone: { type: "string", description: "A site contact phone number if present, else ''." },
       description: { type: "string", description: "The fault / work description, including any access times or contact notes. Plain text." },
-      raisedAt: { type: "string", description: "ISO 8601 date-time the job was logged/raised IF clearly stated, else ''." }
+      raisedAt: { type: "string", description: "ISO 8601 date-time the job was logged/raised IF clearly stated, else ''." },
+      respondBy: { type: "string", description: "ISO 8601 target RESPONSE date-time if stated (treat stated times as Europe/London), else ''." },
+      completeBy: { type: "string", description: "ISO 8601 target COMPLETION date-time if stated (Europe/London), else ''." }
     },
     required: ["isJob"]
   };
@@ -21988,25 +22086,30 @@ ${text}`;
   const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "extract_job") : null;
   return block && block.input ? block.input : null;
 }
-async function handleInboundEmail(message, env, ctx, fetchSelf) {
-  const from = String(message.from || "").toLowerCase();
-  let subject = "";
-  try {
-    subject = message.headers.get("subject") || "";
-  } catch {
+async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
+  const tid = msg.tid || "1";
+  const cfg = opts.cfg || await getIntakeConfig(env, tid);
+  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
+  const from = String(msg.from || "").toLowerCase();
+  const text = String(msg.text || "").slice(0, 12e3);
+  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject };
+  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
+  if (!opts.force && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + (origFrom || from) + ")" };
+  if (!opts.dryRun && !opts.force && msg.messageId) {
+    try {
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated') LIMIT 1`).bind(tid, msg.messageId).first();
+      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
+    } catch {
+    }
   }
-  const raw = await readRaw(message);
-  const text = (extractText(raw) || "").slice(0, 12e3);
-  let fields = await aiExtract(env, { from, subject, text });
-  if (!fields) fields = concertoRegex(subject, text);
-  if (!fields || !fields.isJob) {
-    console.log("email: not a job \u2014", subject);
-    return;
+  let fields = null, source = "ai";
+  if (!opts.noAi) fields = await aiExtract(env, { from: origFrom || from, subject, text });
+  if (!fields) {
+    fields = concertoRegex(subject, text);
+    source = "template";
   }
-  if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) {
-    console.log("email: job but no reference/description \u2014", subject);
-    return;
-  }
+  if (!fields || !fields.isJob) return { ...base, fields, source, outcome: "dropped", reason: fields ? "Not a new job (reply / order / quote / status update)" : "Didn't look like a job email" };
+  if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return { ...base, fields, source, outcome: "dropped", reason: "Looked like a job but had no reference or description" };
   const payload = {
     reference: fields.reference || void 0,
     description: fields.description || void 0,
@@ -22018,9 +22121,10 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
     telephone: fields.telephone || void 0,
     raisedAt: fields.raisedAt || void 0,
     originator: "email",
-    originatorEmail: from || void 0,
+    originatorEmail: origFrom || from || void 0,
     changedBy: "email"
   };
+  if (opts.dryRun) return { ...base, fields, source, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job"), reference: fields.reference || "", payload };
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
@@ -22033,10 +22137,102 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
       out = await resp.clone().json();
     } catch {
     }
-    console.log("email\u2192job", resp.status, out && out.reference, "\u2014", subject);
+    if (!resp.ok) return { ...base, fields, source, outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "" };
+    return { ...base, fields, source, outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "" };
   } catch (e) {
-    console.error("email\u2192job failed:", e && e.message, "\u2014", subject);
+    return { ...base, fields, source, outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "" };
   }
+}
+async function handleInboundEmail(message, env, ctx, fetchSelf) {
+  const from = String(message.from || "").toLowerCase();
+  let subject = "", messageId = "";
+  try {
+    subject = message.headers.get("subject") || "";
+  } catch {
+  }
+  try {
+    messageId = (message.headers.get("message-id") || "").trim();
+  } catch {
+  }
+  const raw = await readRaw(message);
+  const text = (extractText(raw) || "").slice(0, 12e3);
+  const tid = "1";
+  await ensureTable2(env);
+  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId });
+  await logIntake(env, tid, { messageId, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  console.log("email intake:", res.outcome, "\u2014", subject, "\u2014", res.reason);
+}
+async function handleApi(request, env, ctx, url, sess, fetchSelf) {
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/email-intake(?=\/|$)/, "") || "/";
+  if (!sess || !sess.user) return error("Login required", 401, env, request);
+  const tid = await resolveTenantId(env, request);
+  const me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  if (!(perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes")) return error("SLA admin access required", 403, env, request);
+  await ensureTable2(env);
+  if (sub === "/status" && method === "GET") {
+    const cfg = await getIntakeConfig(env, tid);
+    let last = null, counts = {};
+    const since = new Date(Date.now() - 7 * 864e5).toISOString();
+    try {
+      last = await env.DB.prepare(`SELECT id, received_at, subject, outcome, reference FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT 1`).bind(tid).first();
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(`SELECT outcome, COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND received_at>=? GROUP BY outcome`).bind(tid, since).all();
+      for (const r of results || []) counts[r.outcome] = r.n;
+    } catch {
+    }
+    return json({ ok: true, config: cfg, last, counts7d: counts, aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
+  }
+  if (sub === "/log" && method === "GET") {
+    const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 60));
+    let rows = [];
+    try {
+      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all();
+      rows = results || [];
+    } catch {
+    }
+    return json({ ok: true, rows: rows.map((r) => ({ ...r, fields: (() => {
+      try {
+        return JSON.parse(r.fields || "null");
+      } catch {
+        return null;
+      }
+    })() })) }, {}, env, request);
+  }
+  if (sub === "/test" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const subject = String(b.subject || "").slice(0, 300), body = String(b.body || "").slice(0, 2e4);
+    if (!subject && !body) return error("Paste the email's subject and body", 400, env, request);
+    const text = /<[a-z][\s\S]*>/i.test(body) ? stripHtml2(body) : body;
+    const commit = b.commit === true;
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: String(b.from || me + "@test").toLowerCase(), subject, text, messageId: "" }, { dryRun: !commit, force: true });
+    if (commit) await logIntake(env, tid, { messageId: "", from: "test:" + me, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+    return json({ ok: true, ...res, text: text.slice(0, 4e3) }, {}, env, request);
+  }
+  if (sub === "/rerun" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    if (!row) return error("Log entry not found", 404, env, request);
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "" }, { force: true });
+    await logIntake(env, tid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
+    return json({ ok: true, ...res }, {}, env, request);
+  }
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const cur = await getIntakeConfig(env, tid);
+      const next = { ...cur };
+      if (b.enabled !== void 0) next.enabled = !!b.enabled;
+      if (Array.isArray(b.allowFrom)) next.allowFrom = b.allowFrom.map((x) => String(x || "").toLowerCase().trim()).filter(Boolean).slice(0, 50);
+      await saveIntakeConfig(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  return error("Not found", 404, env, request);
 }
 
 // src/routes/office.js
@@ -24211,7 +24407,7 @@ async function handle21(request, env, ctx, url, sess) {
   const iso30 = new Date(now - 30 * 864e5).toISOString();
   const naive7 = iso7.replace("T", " ").slice(0, 19);
   const year = (/* @__PURE__ */ new Date()).getFullYear();
-  const T2 = db.tenantId;
+  const T3 = db.tenantId;
   const first = (sql, ...b) => db.prepare(sql).bind(...b).first();
   const all = (sql, ...b) => db.prepare(sql).bind(...b).all().then((r) => r.results || []);
   const [
@@ -24237,27 +24433,27 @@ async function handle21(request, env, ctx, url, sess) {
     auditTotal,
     rowCounts
   ] = await Promise.all([
-    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T2),
-    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T2),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T2, isoMonthStart),
-    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T2),
-    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T2),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T2, naive7),
-    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T2),
-    all("SELECT data FROM assets WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T2),
-    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T2, year),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso7),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T2, iso7),
-    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T2, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T2),
-    tableRowCounts(db, T2)
+    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T3),
+    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T3),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T3, isoMonthStart),
+    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T3),
+    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T3),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T3, naive7),
+    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T3),
+    all("SELECT data FROM assets WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T3),
+    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T3, year),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T3, iso7),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T3, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T3, iso7),
+    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T3, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T3),
+    tableRowCounts(db, T3)
   ]);
   let assetValue = 0;
   for (const r of assetRows) {
@@ -24305,7 +24501,7 @@ async function handle21(request, env, ctx, url, sess) {
     database: rowCounts
   }, 200, env, request);
 }
-async function tableRowCounts(db, T2) {
+async function tableRowCounts(db, T3) {
   const tables = [
     "users",
     "sla_jobs",
@@ -24324,7 +24520,7 @@ async function tableRowCounts(db, T2) {
   const out = [];
   let total = 0;
   for (const t of tables) {
-    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T2).first();
+    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T3).first();
     const n = row && row.n || 0;
     total += n;
     out.push({ table: t, rows: n });
@@ -24541,7 +24737,7 @@ init_push();
 var KINDS = ["qualification", "insurance", "licence", "licence_check"];
 var EXPIRING_DAYS = 30;
 var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
-async function ensureTable2(db) {
+async function ensureTable3(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
     tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
     title TEXT, number TEXT, issuer TEXT, issued TEXT, expires TEXT,
@@ -24746,7 +24942,7 @@ async function handle23(request, env, ctx, url, sess) {
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const isAdmin = perms.FullAccess === "Yes" || perms.StaffRecords === "Yes";
   const db = tenantDB(env, sess.tenantId);
-  await ensureTable2(db);
+  await ensureTable3(db);
   const me = sess.user.username;
   if (path === "/hr/records" && method === "GET") {
     let user = q.get("user") || me;
@@ -25048,7 +25244,7 @@ async function sweepStaffRecordReminders(env) {
   if (londonHour < 8) return;
   const db = tenantDB(env, tid);
   try {
-    await ensureTable2(db);
+    await ensureTable3(db);
   } catch {
     return;
   }
@@ -36984,7 +37180,7 @@ var SLOW_MS = 2500;
 var PROBE_SLOW_MS = 1500;
 var RETAIN_DAYS = 30;
 var TABLE_READY = false;
-async function ensureTable3(env) {
+async function ensureTable4(env) {
   if (TABLE_READY) return;
   try {
     await env.DB.prepare(
@@ -37007,7 +37203,7 @@ async function ensureTable3(env) {
 }
 async function recordEvent(env, tenantId, { kind, endpoint, message, status, ms }) {
   try {
-    await ensureTable3(env);
+    await ensureTable4(env);
     const res = await env.DB.prepare(
       "INSERT INTO health_events (tenant_id, kind, endpoint, message, status, ms, at) VALUES (?,?,?,?,?,?,?)"
     ).bind(
@@ -37065,7 +37261,7 @@ function probeList(env) {
 }
 async function runHealthChecks(env, tenantId) {
   const tid = tenantId || 1;
-  await ensureTable3(env);
+  await ensureTable4(env);
   const checks = [];
   for (const [name, desc, fn] of probeList(env)) {
     const t0 = Date.now();
@@ -37308,7 +37504,7 @@ async function handle38(request, env, ctx, url, sess) {
   const perms = new Set((permRows.results || []).map((r) => r.permission));
   if (!perms.has("FullAccess")) return json3({ error: "Full access only" }, 403, env, request);
   const tid = sess.tenantId;
-  await ensureTable3(env);
+  await ensureTable4(env);
   const method = request.method.toUpperCase();
   if (url.pathname === "/health/run" && method === "POST") {
     const [snap, integrity] = await Promise.all([runHealthChecks(env, tid), runIntegrityChecks(env, tid)]);
@@ -38526,6 +38722,8 @@ var ROUTES = [
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/cctv", handle33],
   // CCTV Wall: DVR site config + snapshot proxy
+  ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
+  // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks", handle34],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs", handle10],

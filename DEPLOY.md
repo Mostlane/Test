@@ -57,6 +57,28 @@ mostlane-api.
 
 ---
 
+## 4. Jobs straight from Outlook (no Zapier) — one-off set-up
+
+The portal can read job emails itself. Nothing to install: the API worker already
+has an email handler. Two dashboard steps, then test on the portal page:
+
+1. **Cloudflare → pick a domain whose DNS is on Cloudflare** (site-log.co.uk is;
+   mostlane.com only if its nameservers are Cloudflare's) → **Email → Email Routing
+   → Enable**. Under *Custom addresses* add `jobs@<that domain>` with the action
+   **Send to a Worker → mostlane-api**. (Cloudflare adds the MX/SPF records itself.)
+2. **Outlook on the web → Settings → Mail → Rules → Add rule**: condition
+   *From* `noreply@concerto.co.uk` (add any other job senders) → action
+   **Forward to** `jobs@<that domain>`. Choose *forward*, not *redirect*: a forward
+   is sent from your own mostlane.com address, so it passes the spam checks.
+   If Outlook refuses to forward outside the company, an admin allows it once in
+   Microsoft 365 Defender → Email & collaboration → Policies → Anti-spam →
+   Outbound → Automatic forwarding: *On – Forwarding is enabled*.
+3. Open **SLA board → ⚙️ Settings → 📨 Email intake** (`email-intake.html`).
+   Paste a real job email into the test box → *Check* shows what the portal would
+   log; *Create the job* really logs it. Send a test through the rule and watch
+   **Recent emails**. Run alongside the Zapier zap for a few days — the same job is
+   never duplicated (the portal matches by reference) — then switch the zap off.
+
 ## Normal workflow
 1. Edit `worker/src/…` and/or the root `.html` pages.
 2. Rebuild the committed bundle (kept in sync as a fallback):
