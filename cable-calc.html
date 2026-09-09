@@ -381,7 +381,7 @@
     var g=$("figs"); g.innerHTML="";
     figs.forEach(function(f){ var d=document.createElement("div"); d.className="fig"; d.innerHTML='<span>'+esc(f[0])+'</span><b>'+(f[1]==null?"—":esc(f[1]+(f[2]?" "+f[2]:"")))+'</b>'; g.appendChild(d); });
   }
-  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];}); }
 
   function meta(){
     return { company:CFG.company||"Mostlane", client:$("client").value, site:$("site").value,

@@ -453,6 +453,8 @@ Fob – Main Gate
   </div>
 
   <script>
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
   const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
   const GOOGLE_MAPS_KEY = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM"; // key usage still stubbed
   const HQ_POSTCODE = "PO15 5RQ";
@@ -803,15 +805,15 @@ tr.innerHTML = `
  <td>${s.imageURL
    ? `<img class="thumb" src="${escX(s.imageURL)}" loading="lazy" alt="" data-action="photo">`
    : `<span class="thumb thumb-empty" title="No photo yet">📍</span>`}</td>
- <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
+ <td>${escX(s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-"))}</td>
  <td>
    <a class="linklike" data-action="details">
      ${escX(s.siteName || "-")} ${hasFerryFlag(s) ? "🚢" : ""}
    </a>
  </td>
- <td><span class="badge">${ucClient(s.client)}</span></td>
- <td>${cleanPostcode(s) || "-"}</td>
- <td>${telOf(s) || "-"}</td>
+ <td><span class="badge">${escX(ucClient(s.client))}</span></td>
+ <td>${escX(cleanPostcode(s) || "-")}</td>
+ <td>${escX(telOf(s) || "-")}</td>
  <td>
 
           <label style="display:inline-flex;align-items:center;gap:6px;">
@@ -819,7 +821,7 @@ tr.innerHTML = `
             <span>${s.active!==false?'Active':'Inactive'}</span>
           </label>
         </td>
-        <td>${mileageTxt} mi <span class="muted">(round trip ${rt} mi${tt!==""?`, ${tt} min`:``})</span></td>
+        <td>${escX(mileageTxt)} mi <span class="muted">(round trip ${escX(rt)} mi${tt!==""?`, ${escX(tt)} min`:``})</span></td>
         <td><button class="btn outline" data-action="edit">Edit</button></td>
       `;
       tr.querySelector('[data-action="details"]').onclick = ()=>openDetails(s);
@@ -841,16 +843,16 @@ card.innerHTML = `
       </span>
       <span class="card-num">
         ${s.client==="projects"
-          ? `Job ${s.jobNumber || "(pending)"}`
-          : `#${s.siteNumber || "-"}`
+          ? `Job ${escX(s.jobNumber || "(pending)")}`
+          : `#${escX(s.siteNumber || "-")}`
         }
       </span>
     </div>
-    <span class="badge">${ucClient(s.client)}</span>
+    <span class="badge">${escX(ucClient(s.client))}</span>
   </div>
   <div class="card-row">
-    <span><span class="label">Postcode:</span> ${cleanPostcode(s) || "-"}</span>
-    <span><span class="label">Phone:</span> ${telOf(s) || "-"}</span>
+    <span><span class="label">Postcode:</span> ${escX(cleanPostcode(s) || "-")}</span>
+    <span><span class="label">Phone:</span> ${escX(telOf(s) || "-")}</span>
   </div>
   <div class="card-row">
     <span class="card-toggle">
@@ -860,8 +862,8 @@ card.innerHTML = `
   </div>
   <div class="card-footer">
     <div class="card-footer-left">
-      <span>${mileageTxt} mi</span>
-      <span class="muted">(RT ${rt} mi${tt!==""?` • ${tt} min`:``})</span>
+      <span>${escX(mileageTxt)} mi</span>
+      <span class="muted">(RT ${escX(rt)} mi${tt!==""?` • ${escX(tt)} min`:``})</span>
     </div>
     <div class="card-footer-right">
       <button class="btn outline btn-small" data-action="edit">Edit</button>
@@ -909,7 +911,7 @@ detailsTitle.textContent =
     // SharePoint
     if (site.sharepointURL) {
       detailsSharepoint.style.display = "inline-block";
-      detailsSharepoint.href = site.sharepointURL;
+      detailsSharepoint.href = safeUrl(site.sharepointURL);
     } else {
       detailsSharepoint.style.display = "none";
     }
@@ -961,7 +963,7 @@ fbcWhat3Words: "What3Words Location",
     const pushRow = (k,v)=>{
       if (v===undefined || v===null || v==="") return;
       seen.add(k);
-      rows.push(`<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`);
+      rows.push(`<div class="row"><div class="k">${esc(niceLabel(k))}</div><div class="v">${esc((k==="client")?ucClient(v):v)}</div></div>`);
     };
 preferredOrder.forEach(k => {
   let v = site[k];
@@ -1314,7 +1316,7 @@ btnRecalc.onclick = async () => {
   var TIDY_ADMIN = TIDY_PERMS.FullAccess==="Yes"||TIDY_PERMS.SLAAdmin==="Yes"||TIDY_PERMS.TimesheetAdmin==="Yes";
   var TIDY_API=(window.MOSTLANE_API||"").replace(/\/$/,"");
   function apiFetch(p,init){ init=init||{}; var h=new Headers(init.headers||{}); var t=localStorage.getItem("mostlaneToken"); if(t)h.set("Authorization","Bearer "+t); if(init.body&&!h.has("Content-Type"))h.set("Content-Type","application/json"); init.headers=h; return fetch(TIDY_API+p,init); }
-  function tesc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function tesc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
 
   var tidyModalEl=document.getElementById("tidyModal");
   var mergePickEl=document.getElementById("mergePickModal");

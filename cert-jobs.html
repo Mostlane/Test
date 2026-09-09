@@ -117,7 +117,7 @@
   var $=function(id){return document.getElementById(id);};
   function token(){ try{return localStorage.getItem("mostlaneToken")||"";}catch(e){return"";} }
   function af(p,o){ o=o||{}; o.headers=Object.assign({Authorization:"Bearer "+token()},o.headers||{}); return fetch(API+p,o); }
-  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];}); }
   var COOP=["retail","els","els_private","cobra"];
   var ALL=[];
 

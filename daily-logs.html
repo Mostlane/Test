@@ -55,6 +55,7 @@
 
 <script>
 const API = window.MOSTLANE_API;
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const $ = id => document.getElementById(id);
 function authFetch(url, init = {}){
   init.headers = new Headers(init.headers || {});
@@ -75,12 +76,12 @@ async function load(){
     $("engineer").innerHTML = users.map(u => {
       const name = `${u.FirstName || ""} ${u.LastName || ""}`.trim() || u.Username;
       const sel = u.Username === me() ? " selected" : "";
-      return `<option value="${u.Username}"${sel}>${name}</option>`;
+      return `<option value="${esc(u.Username)}"${sel}>${esc(name)}</option>`;
     }).join("");
     const active = (Array.isArray(sites) ? sites : []).filter(s => s.active !== false)
       .sort((a,b) => String(a.siteName||"").localeCompare(String(b.siteName||"")));
     $("site").innerHTML = '<option value="">Select site…</option>' +
-      active.map(s => `<option value="${String(s.siteName||"").replace(/"/g,"&quot;")}">${s.siteName || s.siteNumber}</option>`).join("");
+      active.map(s => `<option value="${esc(String(s.siteName||""))}">${esc(s.siteName || s.siteNumber)}</option>`).join("");
   }catch(e){ $("msg").className = "msg err"; $("msg").textContent = "Couldn't load lists — check connection."; }
 }
 

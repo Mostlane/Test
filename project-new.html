@@ -186,7 +186,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch((path.startsWith("http") ? path : API + path), opts);
@@ -223,7 +223,7 @@
       if (!marker) { marker = L.marker([lat, lon], { draggable: true }).addTo(map); marker.on("dragend", () => { const p = marker.getLatLng(); setPin(p.lat, p.lng); }); }
       else marker.setLatLng([lat, lon]);
       if (recentre) map.setView([lat, lon], 16);
-      g("coordLine").innerHTML = `📍 <b>${state.lat}, ${state.lon}</b>`;
+      g("coordLine").innerHTML = `📍 <b>${esc(state.lat)}, ${esc(state.lon)}</b>`;
       calcMileage();
       validateStep1();
     }
@@ -256,7 +256,7 @@
       const straight = haversine(HQ_LL, { lat: state.lat, lon: state.lon });
       state.mileOneWay = Math.round(straight * 1.25 * 10) / 10;
       state.mileRound = Math.round(straight * 1.25 * 2 * 10) / 10;
-      g("mileLine").innerHTML = `🚗 Mileage from HQ (${HQ}): <b>${state.mileRound} mi round trip</b> <span class="muted">(${state.mileOneWay} mi each way, estimated)</span>`;
+      g("mileLine").innerHTML = `🚗 Mileage from HQ (${HQ}): <b>${esc(state.mileRound)} mi round trip</b> <span class="muted">(${esc(state.mileOneWay)} mi each way, estimated)</span>`;
     }
 
     // ── Step 1: site choice ───────────────────────────────────────────────────
@@ -408,7 +408,7 @@
       g("review").innerHTML = `
         <div class="kv"><b>Project:</b> ${esc(d.name)} (${esc(d.number)})</div>
         <div class="kv"><b>Site:</b> ${d.linkExisting ? "on existing site <b>" + esc(d.siteName) + "</b> (" + esc(d.siteNumber) + ")" : "new site <b>" + esc(d.siteName || d.name) + "</b>"} · project ${esc(d.number)}</div>
-        <div class="kv"><b>Postcode:</b> ${esc(d.postcode) || "—"} · <b>Location:</b> ${d.lat}, ${d.lon}</div>
+        <div class="kv"><b>Postcode:</b> ${esc(d.postcode) || "—"} · <b>Location:</b> ${esc(d.lat)}, ${esc(d.lon)}</div>
         <div class="kv"><b>Mileage:</b> ${d.mileageRoundTrip != null ? d.mileageRoundTrip + " mi round trip" : "—"}</div>
         <div class="kv"><b>To build:</b> ${esc(reqList)}</div>
         ${d.contractValue ? `<div class="kv"><b>Contract value:</b> £${Number(d.contractValue).toLocaleString()}</div>` : ""}

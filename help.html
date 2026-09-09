@@ -534,7 +534,7 @@
         text:"In <b>Users Admin</b> you add staff and tick exactly what each person can see and do.", page:"users-admin.html" },
     ];
 
-    function esc(s){ return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+    function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;" }[c])); }
     function gsArr(){ try { const v = JSON.parse(localStorage.getItem("mlGsDone") || "[]"); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
     let GS_DONE = gsArr();
     let GS_HIDDEN = localStorage.getItem("mlGsHidden") === "1";

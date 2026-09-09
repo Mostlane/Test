@@ -84,6 +84,7 @@
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
     const money = n => (n == null || !isFinite(Number(n))) ? "" : "£" + Number(n).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
     const fmtD = iso => { if(!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("en-GB",{ day:"2-digit", month:"short", year:"numeric" }); };
@@ -166,7 +167,7 @@
       if(j) acts += ' <a class="btn ghost" href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">Open job →</a>'
         + ' <button class="btn ghost" data-unlink="' + esc(o.id) + '" title="This order is not for that job">✂ Unlink</button>';
       if(o.hasEmail) acts += ' <button class="btn ghost" data-email="' + esc(o.id) + '">📧 View email</button>';
-      else if(o.link) acts += ' <a class="btn ghost" href="' + esc(o.link) + '" target="_blank" rel="noopener">📧 Email</a>';
+      else if(o.link) acts += ' <a class="btn ghost" href="' + esc(safeUrl(o.link)) + '" target="_blank" rel="noopener">📧 Email</a>';
       return '<div class="ocard ' + esc(o.stage) + '" id="o' + esc(o.id) + '">'
         + '<div class="top"><span class="ref">' + esc(o.orderNumber || "(no number)") + '</span>'
         + (o.client ? '<span class="pill p-client">' + esc(o.client) + '</span>' : '')

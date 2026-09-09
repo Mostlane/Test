@@ -216,7 +216,7 @@
       let access="";
       if(t.area && !p.hasAccess){
         access='<span class="pill noaccess">⚠ no '+esc(t.areaLabel||t.area)+' access</span>'+
-          '<button class="btn green small" onclick="grant(\''+esc(p.username)+'\',\''+esc(t.area)+'\')">Grant access</button>';
+          '<button class="btn green small" onclick="grant('+esc(JSON.stringify(String(p.username)))+','+esc(JSON.stringify(String(t.area)))+')">Grant access</button>';
       }
       return '<div class="person"><b>'+esc(p.username)+'</b>'+pill+access+'</div>';
     }
@@ -224,7 +224,7 @@
       const area=t.area?'<span class="muted"> · 🔗 '+esc(t.areaLabel||t.area)+(t.autoMatch?' (auto-tick)':'')+'</span>':"";
       return '<div class="card"><div class="task-head"><div><h3>'+esc(t.title)+(t.active?"":' <span class="pill">Paused</span>')+'</h3>'+
         '<div class="muted">'+esc(schedule(t))+area+'</div></div>'+
-        '<button class="btn ghost small" onclick=\'openEditId("'+t.id+'")\'>Edit</button></div>'+
+        '<button class="btn ghost small" onclick="openEditId('+esc(JSON.stringify(String(t.id)))+')">Edit</button></div>'+
         (t.detail?'<div class="muted" style="margin:6px 0 2px;">'+esc(t.detail)+'</div>':"")+
         (t.people||[]).map(p=>personRow(t,p)).join("")+'</div>';
     }

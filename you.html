@@ -166,7 +166,7 @@
       }).catch(function(){});
   })();
 
-  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];}); }
 
   // ---- Jobs scheduled to me (own jobs, live) ----
   // /jobs/for-engineer with no date returns ALL of this engineer's visible jobs

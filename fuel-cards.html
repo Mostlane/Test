@@ -263,7 +263,7 @@
     $("entryList").innerHTML=rows.map(e=>`<div class="entry">
       <span class="d">${fmtDMY(e.date)}</span>
       <span class="m">${litres(e.litres)} · ${money(e.cost)}${e.ppl?` · ${money(e.ppl)}/L`:""}${showName?` · ${esc(e.name)}`:""}${e.note?` · ${esc(e.note)}`:""}</span>
-      <button class="btn ghost small" onclick='editEntry(${JSON.stringify(e).replace(/'/g,"&#39;")})'>Edit</button>
+      <button class="btn ghost small" onclick="editEntry(${esc(JSON.stringify(e))})">Edit</button>
       <button class="btn danger small" onclick="delEntry(${e.id})">✕</button>
     </div>`).join("");
   }

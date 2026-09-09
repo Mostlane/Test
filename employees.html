@@ -194,7 +194,7 @@
 <script>
   const API = (window.MOSTLANE_API || "").replace(/\/+$/,"");
   function authFetch(path, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+(localStorage.getItem("mostlaneToken")||"") }, opts.headers||{}); return fetch(API+path, opts); }
-  const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const g = id => document.getElementById(id);
   const fmtDate = s => { if(!s) return ""; const d=new Date(String(s).slice(0,10)+"T00:00:00"); return isNaN(d)?s:d.toLocaleDateString("en-GB"); };
 
@@ -314,7 +314,7 @@
     // Word the date by record type so a monthly check's "next due" is never
     // mistaken for the photocard licence's expiry.
     const noun = x.kind==="licence_check" ? "Next check" : (x.kind==="licence" ? "Licence" : "");
-    const exp = fmtDate(x.expires);
+    const exp = esc(fmtDate(x.expires));
     if(x.status==="expired"){ return x.kind==="licence_check" ? `<span class="chip red">Check overdue (${exp})</span>` : `<span class="chip red">${noun?noun+" expired":"Expired"} ${exp}</span>`; }
     if(x.status==="expiring"){ return x.kind==="licence_check" ? `<span class="chip amber">Next check ${exp} · ${x.daysLeft}d</span>` : `<span class="chip amber">${noun?noun+" expires":"Expires"} ${exp} · ${x.daysLeft}d</span>`; }
     if(x.status==="valid"){ return x.kind==="licence_check" ? `<span class="chip green">Next check ${exp}</span>` : `<span class="chip green">${noun?noun+" valid to":"Valid to"} ${exp}</span>`; }
@@ -330,7 +330,7 @@
     if(d.cover) bits.push("£"+esc(d.cover));
     if(d.result) bits.push("Result: "+esc(d.result));
     if(d.checkedBy) bits.push("by "+esc(d.checkedBy));
-    if(x.issued) bits.push((x.kind==="licence_check"?"Checked ":"Issued ")+fmtDate(x.issued));
+    if(x.issued) bits.push((x.kind==="licence_check"?"Checked ":"Issued ")+esc(fmtDate(x.issued)));
     return `<div class="rec">
       <div class="top"><span class="t">${esc(x.title||kindDef(x.kind).one)}</span>${badge(x)}</div>
       ${bits.length?`<div class="meta">${bits.join(" · ")}</div>`:""}
@@ -399,13 +399,13 @@
     const licPill = d => {
       if(!d.licenceExpiry) return `<span class="chip grey" title="No driving licence on file">🚗 Licence: not on file</span>`;
       const cls = d.licenceStatus==="expired" ? "red" : (d.licenceStatus==="expiring" ? "amber" : "green");
-      return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${fmtDate(d.licenceExpiry)}</span>`;
+      return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${esc(fmtDate(d.licenceExpiry))}</span>`;
     };
     g("driverList").innerHTML = DRIVERS.map(d=>`
       <div class="emp">
         <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
         <span class="row" style="gap:6px">
-          ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${fmtDate(d.lastChecked)}</span>`}
+          ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${esc(fmtDate(d.lastChecked))}</span>`}
           ${licPill(d)}
           <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
           <button class="btn ghost small" data-open="${esc(d.username)}" data-n="${esc(d.name)}">History</button>
@@ -434,8 +434,8 @@
       const cells=m.competencies.map(c=>{
         const cell=row.cells[c];
         const st = cell ? cell.status : "none";
-        const label = !cell ? "＋" : (cell.status==="none" ? "✓" : (cell.expires?fmtDate(cell.expires):"✓"));
-        return `<td class="cell st-${st}" data-u="${esc(row.username)}" data-n="${esc(row.name)}" data-c="${esc(c)}" title="${esc(c)} — ${cell?cell.status:"not held"} (drop a file or tap)">${label}</td>`;
+        const label = !cell ? "＋" : (cell.status==="none" ? "✓" : (cell.expires?esc(fmtDate(cell.expires)):"✓"));
+        return `<td class="cell st-${esc(st)}" data-u="${esc(row.username)}" data-n="${esc(row.name)}" data-c="${esc(c)}" title="${esc(c)} — ${cell?cell.status:"not held"} (drop a file or tap)">${label}</td>`;
       }).join("");
       return `<tr><td class="nm" data-u="${esc(row.username)}" data-n="${esc(row.name)}" title="Open ${esc(row.name)}">${esc(row.name)}</td>${cells}</tr>`;
     }).join("");
@@ -496,7 +496,7 @@
     const m=MATRIX; if(!m) return;
     const w=window.open("","_blank"); if(!w) return;
     const legend='<div style="margin:8px 0;font-size:12px">■ <span style="color:#2b7a4b">Valid</span> &nbsp; ■ <span style="color:#8a6100">Expiring</span> &nbsp; ■ <span style="color:#c0392b">Expired</span> &nbsp; — Not held</div>';
-    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Training matrix</title><style>body{font:12px Arial;padding:16px}h1{font-size:16px}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;text-align:center}td:first-child,th:first-child{text-align:left}.e{background:#fdecea}.w{background:#fef7e6}.v{background:#e8f5ec}</style></head><body><h1>Training matrix — '+esc(g("mxKind").options[g("mxKind").selectedIndex].text)+'</h1><div>'+new Date().toLocaleDateString("en-GB")+'</div>'+legend+'<table><thead><tr><th>Engineer</th>'+m.competencies.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+m.rows.map(row=>'<tr><td>'+esc(row.name)+'</td>'+m.competencies.map(c=>{const cell=row.cells[c];const cl=cell?(cell.status==="expired"?"e":cell.status==="expiring"?"w":"v"):"";return '<td class="'+cl+'">'+(cell?(cell.expires?fmtDate(cell.expires):"✓"):"—")+'</td>';}).join("")+'</tr>').join("")+'</tbody></table></body></html>');
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Training matrix</title><style>body{font:12px Arial;padding:16px}h1{font-size:16px}table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;text-align:center}td:first-child,th:first-child{text-align:left}.e{background:#fdecea}.w{background:#fef7e6}.v{background:#e8f5ec}</style></head><body><h1>Training matrix — '+esc(g("mxKind").options[g("mxKind").selectedIndex].text)+'</h1><div>'+new Date().toLocaleDateString("en-GB")+'</div>'+legend+'<table><thead><tr><th>Engineer</th>'+m.competencies.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+m.rows.map(row=>'<tr><td>'+esc(row.name)+'</td>'+m.competencies.map(c=>{const cell=row.cells[c];const cl=cell?(cell.status==="expired"?"e":cell.status==="expiring"?"w":"v"):"";return '<td class="'+cl+'">'+(cell?(cell.expires?esc(fmtDate(cell.expires)):"✓"):"—")+'</td>';}).join("")+'</tr>').join("")+'</tbody></table></body></html>');
     w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
   };
 

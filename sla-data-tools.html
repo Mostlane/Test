@@ -163,7 +163,7 @@ function cachedPerms(){
 
 /* ================= SECTION 1: live jobs ================= */
 let LIVE = [];
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 function engineersOf(j){
   if (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) return j.assignedEngineers.join(", ");
   return j.assignedTo || "";

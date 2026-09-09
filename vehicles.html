@@ -468,15 +468,15 @@
     FLEET.filter(on).forEach(v=>{
       [["mot",v.motDue,v.motPending,"MOT"],["tax",v.taxDue,v.taxPending,"tax"]].forEach(([type,date,p,lbl])=>{
         const d=daysTo(date); if(d==null||d>30) return;   // not due
-        if(p){ pend.push(`<a class="fb-seg pending" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📌 <b>${esc(v.reg||"?")}</b> — ${lbl} booked</a>`); }
-        else{ const txt=d<0?`${lbl} overdue`:(d===0?`${lbl} due today`:`${lbl} due in ${d} day${d===1?"":"s"}`); open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📋 <b>${esc(v.reg||"?")}</b> — ${txt}</a>`); }
+        if(p){ pend.push(`<a class="fb-seg pending" onclick="openRenewalModal(${esc(JSON.stringify(String(v.reg||"")))},'${type}')">📌 <b>${esc(v.reg||"?")}</b> — ${lbl} booked</a>`); }
+        else{ const txt=d<0?`${lbl} overdue`:(d===0?`${lbl} due today`:`${lbl} due in ${d} day${d===1?"":"s"}`); open.push(`<a class="fb-seg" onclick="openRenewalModal(${esc(JSON.stringify(String(v.reg||"")))},'${type}')">📋 <b>${esc(v.reg||"?")}</b> — ${txt}</a>`); }
       });
     });
     // Holiday clash — the driver is booked off on their van's MOT/service day.
     FLEET.filter(on).forEach(v=>{
       [["mot",v.motClash,"MOT"],["service",v.serviceClash,"Service"]].forEach(([type,clash,lbl])=>{
         if(!clash) return;
-        open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">🚫 <b>${esc(v.reg||"?")}</b> — ${lbl} ${fmtDMY(clash.date)}, driver OFF</a>`);
+        open.push(`<a class="fb-seg" onclick="openRenewalModal(${esc(JSON.stringify(String(v.reg||"")))},'${type}')">🚫 <b>${esc(v.reg||"?")}</b> — ${lbl} ${fmtDMY(clash.date)}, driver OFF</a>`);
       });
     });
     // Handover pending (kept as an amber "in hand" item — it's awaiting the driver).
@@ -499,9 +499,9 @@
     const r=v.reg||"";
     const open=v.defectNotSafe?"tap to manage":(v.defectSince?"since "+fmtDMY(v.defectSince):"tap to manage");
     let out="";
-    if(v.defectNotSafe) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">🚫 Not safe to drive<em>tap to manage</em></span>`;
-    if(v.defectOpen>0) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""}<em>${esc(open)}</em></span>`;
-    if(v.defectPending>0) out+=`<span class="tag warn defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⏳ ${v.defectPending} pending<em>booked in / awaiting</em></span>`;
+    if(v.defectNotSafe) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal(${esc(JSON.stringify(String(r)))})">🚫 Not safe to drive<em>tap to manage</em></span>`;
+    if(v.defectOpen>0) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal(${esc(JSON.stringify(String(r)))})">⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""}<em>${esc(open)}</em></span>`;
+    if(v.defectPending>0) out+=`<span class="tag warn defect-chip" onclick="event.stopPropagation();openDefectsModal(${esc(JSON.stringify(String(r)))})">⏳ ${v.defectPending} pending<em>booked in / awaiting</em></span>`;
     return out;
   }
   // Mark ALL of a van's reported defects resolved (bulk — used inside the panel).
@@ -680,7 +680,7 @@
       ${fields}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
         <button class="btn ghost small" onclick="pClose()">Cancel</button>
-        <button class="btn primary small" onclick="completeRenewal('${esc(reg)}','${type}')">✅ Save &amp; complete</button>
+        <button class="btn primary small" onclick="completeRenewal(${esc(JSON.stringify(String(reg)))},'${type}')">✅ Save &amp; complete</button>
       </div>`);
     setTimeout(()=>{const el=document.getElementById("rcDate"); if(el) el.focus();},50);
   };
@@ -780,7 +780,7 @@
   // A tag that, when the item is due (or booked), becomes tappable to mark it
   // booked / in hand. reg+type drive the click → openRenewalModal.
   function tagWrap(cls,clickable,reg,type,inner){
-    const oc=clickable?` onclick="openRenewalModal('${esc(reg)}','${type}')"`:"";
+    const oc=clickable?` onclick="openRenewalModal(${esc(JSON.stringify(String(reg)))},'${type}')"`:"";
     return `<span class="tag ${clickable?cls+" renew-chip":cls}"${oc}>${inner}</span>`;
   }
   // MOT / Tax date tag (v+type make it renewal-aware: amber "booked" when pending,
@@ -829,8 +829,8 @@
     const rows = GARAGES.length ? GARAGES.map(g=>`
       <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eef2f7">
         <div style="flex:1"><b>${esc(g.name)}</b><div class="hint">${g.collectsFromHQ?("🚚 Collects from HQ ("+esc(GARAGES_HQ.postcode)+")"):(g.postcode?esc(g.postcode):"<i>no postcode</i>")}</div></div>
-        <button class="btn ghost small" onclick="editGarage('${esc(g.id)}')">Edit</button>
-        <button class="btn ghost small" style="color:#b91c1c" onclick="deleteGarage('${esc(g.id)}')">Delete</button>
+        <button class="btn ghost small" onclick="editGarage(${esc(JSON.stringify(String(g.id)))})">Edit</button>
+        <button class="btn ghost small" style="color:#b91c1c" onclick="deleteGarage(${esc(JSON.stringify(String(g.id)))})">Delete</button>
       </div>`).join("") : '<div class="hint" style="padding:10px 0">No garages yet — add your first below.</div>';
     pModal(`
       <h3 style="margin:0 0 4px">🔧 Garages</h3>
@@ -884,10 +884,10 @@
         <label class="hint" style="display:block;margin-bottom:4px">Note (optional)</label>
         <input id="renewNote" value="${esc(curNote)}" placeholder="renewed / awaiting" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
-          <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','tax')">✅ Completed…</button>
-          ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','tax','open')">↩ Not booked</button>`:""}
+          <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete(${esc(JSON.stringify(String(reg)))},'tax')">✅ Completed…</button>
+          ${pend?`<button class="btn ghost small" onclick="setRenewal(${esc(JSON.stringify(String(reg)))},'tax','open')">↩ Not booked</button>`:""}
           <button class="btn ghost small" onclick="pClose()">Cancel</button>
-          <button class="btn primary small" onclick="setRenewal('${esc(reg)}','tax','pending')">📌 Mark booked</button>
+          <button class="btn primary small" onclick="setRenewal(${esc(JSON.stringify(String(reg)))},'tax','pending')">📌 Mark booked</button>
         </div>`);
       setTimeout(()=>{const el=$("renewNote"); if(el) el.focus();},50);
       return;
@@ -914,10 +914,10 @@
       <label class="hint" style="display:block;margin:2px 0 3px">Note (optional)</label>
       <input id="renewNote" value="${esc(curNote)}" placeholder="e.g. drop off 8am" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
-        <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','${type}')">✅ Completed…</button>
-        ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','${type}','open')">↩ Cancel booking</button>`:""}
+        <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete(${esc(JSON.stringify(String(reg)))},'${type}')">✅ Completed…</button>
+        ${pend?`<button class="btn ghost small" onclick="setRenewal(${esc(JSON.stringify(String(reg)))},'${type}','open')">↩ Cancel booking</button>`:""}
         <button class="btn ghost small" onclick="pClose()">Close</button>
-        <button class="btn primary small" onclick="bookRenewal('${esc(reg)}','${type}')">📌 Book it</button>
+        <button class="btn primary small" onclick="bookRenewal(${esc(JSON.stringify(String(reg)))},'${type}')">📌 Book it</button>
       </div>`);
   };
   // Simple pending/open toggle (tax) or cancel-booking (mot/service).
@@ -971,8 +971,8 @@
     const reg=esc(v.reg||"");
     const when=vc.at?(" — last "+esc(fmtDMY(vc.at))):"";
     if(vc.state==="ok") return `<div class="vcbar ok" title="Weekly van check up to date${when}">✓ Van check up to date</div>`;
-    if(vc.state==="ack") return `<div class="vcbar ack" title="Missed van check acknowledged${vc.ackBy?(' by '+esc(vc.ackBy)):''}${when}">⚠ Van check missed — OK’d${vc.ackBy?(" by "+esc(vc.ackBy)):""}<button class="vcbtn" onclick="event.stopPropagation();unackVanCheck('${reg}')">Undo</button></div>`;
-    return `<div class="vcbar due" title="No van check in the last 7 days${when}">⚠ Van check overdue<button class="vcbtn" onclick="event.stopPropagation();ackVanCheck('${reg}')">Skip / OK</button></div>`;
+    if(vc.state==="ack") return `<div class="vcbar ack" title="Missed van check acknowledged${vc.ackBy?(' by '+esc(vc.ackBy)):''}${when}">⚠ Van check missed — OK’d${vc.ackBy?(" by "+esc(vc.ackBy)):""}<button class="vcbtn" onclick="event.stopPropagation();unackVanCheck(${esc(JSON.stringify(String(v.reg||"")))})">Undo</button></div>`;
+    return `<div class="vcbar due" title="No van check in the last 7 days${when}">⚠ Van check overdue<button class="vcbtn" onclick="event.stopPropagation();ackVanCheck(${esc(JSON.stringify(String(v.reg||"")))})">Skip / OK</button></div>`;
   }
 
   // Acknowledge (skip) a missed van check — waves the red bar for ~7 days.
@@ -1012,8 +1012,8 @@
         : `<span class="odo"><small>🛣 mileage will show once a reading is recorded</small></span>`;
       const card=document.createElement("div"); card.className="card"; card.dataset.reg=reg;
       const photo = v.photoUrl
-        ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="openVehicle('${esc(reg)}')">`
-        : `<div class="vphoto-empty" onclick="openPhotoModal('${esc(reg)}')">📷 Add a photo</div>`;
+        ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="openVehicle(${esc(JSON.stringify(String(reg)))})">`
+        : `<div class="vphoto-empty" onclick="openPhotoModal(${esc(JSON.stringify(String(reg)))})">📷 Add a photo</div>`;
       card.innerHTML=`
         ${vanCheckBar(v)}
         ${photo}
@@ -1032,17 +1032,17 @@
         <div>${odo}${v.currentMpg!=null?`<span class="odo" style="margin-left:14px">⛽ ${Number(v.currentMpg).toFixed(1)} <small>Current MPG</small></span>`:""}</div>
         <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
-          ${hasDefect(v)?`<button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button>`:""}
-          <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
-          <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
-          <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
+          ${hasDefect(v)?`<button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal(${esc(JSON.stringify(String(reg)))})">🔧 Manage defects</button>`:""}
+          <button class="btn small" onclick="openAssign(${esc(JSON.stringify(String(reg)))})">👤 Driver</button>
+          <button class="btn ghost small" onclick="openHistory(${esc(JSON.stringify(String(reg)))})">History</button>
+          <button class="btn ghost small" onclick="openPhotoModal(${esc(JSON.stringify(String(reg)))})">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
           <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
           ${v.vanCheckRequested
             ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when it's completed">✓ Check requested</button>`
-            :`<button class="btn ghost small" onclick="requestVanCheck('${esc(reg)}')" title="${v.driver?('Ask '+esc(pName(v.driver))+' to do a van check'):'Request a van check (pick an engineer)'}">🧷 Request check</button>`}
+            :`<button class="btn ghost small" onclick="requestVanCheck(${esc(JSON.stringify(String(reg)))})" title="${v.driver?('Ask '+esc(pName(v.driver))+' to do a van check'):'Request a van check (pick an engineer)'}">🧷 Request check</button>`}
           ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
           <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
-          <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
+          <button class="btn small" onclick="openEditModal(${esc(JSON.stringify(String(reg)))})">Edit</button>
         </div>`;
       // Tap anywhere on the card (except the action buttons, drag handle or a
       // link) to open the vehicle deep-dive.
@@ -1090,8 +1090,8 @@
       ? `${fmtMiles(v.currentMiles)} mi <small style="color:var(--muted);font-weight:400">(as of ${v.milesAt?fmtDMY(v.milesAt):"—"})</small>`
       : `<small style="color:var(--muted);font-weight:400">Not recorded yet</small>`;
     const photo = v.photoUrl
-      ? `<img src="${esc(v.photoUrl)}" alt="${esc(reg)}" style="width:100%;max-height:240px;object-fit:contain;background:#eef2f7;border-radius:12px;display:block;margin-bottom:12px;cursor:zoom-in" onclick="enlarge('${esc(v.photoUrl)}')">`
-      : `<div class="vphoto-empty" style="margin-bottom:12px" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Add a photo</div>`;
+      ? `<img src="${esc(v.photoUrl)}" alt="${esc(reg)}" style="width:100%;max-height:240px;object-fit:contain;background:#eef2f7;border-radius:12px;display:block;margin-bottom:12px;cursor:zoom-in" onclick="enlarge(${esc(JSON.stringify(String(v.photoUrl)))})">`
+      : `<div class="vphoto-empty" style="margin-bottom:12px" onclick="pClose();openPhotoModal(${esc(JSON.stringify(String(reg)))})">📷 Add a photo</div>`;
     const svc = serviceTag(v) || "";
     const svcReason = v.serviceReason ? `<div class="hint" style="margin:2px 0 10px">${esc(v.serviceReason)}</div>` : "";
     const html = `
@@ -1101,7 +1101,7 @@
       </div>
       ${photo}
       <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${svc}</div>
-      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid ${hasOpenDefect(v)?"#dc2626":"#d97706"};background:${hasOpenDefect(v)?"#fef2f2":"#fffbeb"}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:${hasOpenDefect(v)?"#991b1b":"#92400e"};font-weight:650">${v.defectOpen>0?`⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""} to sort`:""}${v.defectOpen>0&&v.defectPending>0?" · ":""}${v.defectPending>0?`⏳ ${v.defectPending} pending`:""}${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button></div></div></div>`:""}
+      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid ${hasOpenDefect(v)?"#dc2626":"#d97706"};background:${hasOpenDefect(v)?"#fef2f2":"#fffbeb"}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:${hasOpenDefect(v)?"#991b1b":"#92400e"};font-weight:650">${v.defectOpen>0?`⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""} to sort`:""}${v.defectOpen>0&&v.defectPending>0?" · ":""}${v.defectPending>0?`⏳ ${v.defectPending} pending`:""}${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal(${esc(JSON.stringify(String(reg)))})">🔧 Manage defects</button></div></div></div>`:""}
       ${svcReason}
       <div>
         ${detailRow("Status", v.active===false?"Inactive":"Active")}
@@ -1120,17 +1120,17 @@
       ${runningCostBlock(v)}
       <div id="vpoBlock" class="grp" style="margin-top:12px;display:none"></div>
       <div class="card-actions" style="border-top:0;padding-top:4px">
-        <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
-        <button class="btn ghost small" onclick="pClose();openMileage('${esc(reg)}')">📏 Mileage</button>
-        <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
-        <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
+        <button class="btn small" onclick="pClose();openAssign(${esc(JSON.stringify(String(reg)))})">👤 Driver</button>
+        <button class="btn ghost small" onclick="pClose();openMileage(${esc(JSON.stringify(String(reg)))})">📏 Mileage</button>
+        <button class="btn ghost small" onclick="pClose();openHistory(${esc(JSON.stringify(String(reg)))})">History</button>
+        <button class="btn ghost small" onclick="pClose();openPhotoModal(${esc(JSON.stringify(String(reg)))})">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
         <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
         ${v.vanCheckRequested
           ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when it's completed">✓ Check requested</button>`
-          :`<button class="btn ghost small" onclick="pClose();requestVanCheck('${esc(reg)}')">🧷 Request check</button>`}
+          :`<button class="btn ghost small" onclick="pClose();requestVanCheck(${esc(JSON.stringify(String(reg)))})">🧷 Request check</button>`}
         ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
         <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
-        <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>
+        <button class="btn small" onclick="pClose();openEditModal(${esc(JSON.stringify(String(reg)))})">✏️ Edit</button>
       </div>`;
     pModal(html);
     loadVehiclePOs(reg);
@@ -1225,7 +1225,7 @@
     pModal(`<h3>Driver for ${esc(reg)}</h3><p class="hint" style="margin:0 0 10px">Set who drives this vehicle from a date. The previous driver stays in the history.</p>
       <div class="mrow"><label>Driver</label><select id="asgUser">${opts}</select></div>
       <div class="mrow"><label>From date</label><input id="asgDate" type="date" value="${today}"></div>
-      <div class="mfoot"><span></span><div style="display:flex;gap:10px"><button class="btn small" onclick="pClose()">Cancel</button><button class="btn primary small" onclick="saveAssign('${esc(reg)}')">Save</button></div></div>`);
+      <div class="mfoot"><span></span><div style="display:flex;gap:10px"><button class="btn small" onclick="pClose()">Cancel</button><button class="btn primary small" onclick="saveAssign(${esc(JSON.stringify(String(reg)))})">Save</button></div></div>`);
   }
   async function saveAssign(reg){
     const username=$("asgUser").value, fromDate=$("asgDate").value;
@@ -1457,11 +1457,11 @@
       return `<div class="pcell">
         ${p.cover?'<span class="cvr">COVER</span>':''}
         ${p.source==="vancheck"?'<span class="vtag">VAN CHECK</span>':''}
-        <img src="${esc(p.url)}" alt="photo" loading="lazy" onclick="enlarge('${esc(p.url)}')">
+        <img src="${esc(p.url)}" alt="photo" loading="lazy" onclick="enlarge(${esc(JSON.stringify(String(p.url)))})">
         <div class="pcap"><b>${meta}</b><span>${esc(when)}</span></div>
         <div class="pacts">
-          ${p.cover?'<span class="hint" style="align-self:center">✓ cover</span>':`<button class="btn ghost small" onclick="setCover('${esc(p.key)}')">Make cover</button>`}
-          ${p.canDelete?`<button class="btn danger small" onclick="deletePhoto('${esc(p.key)}')">Delete</button>`:''}
+          ${p.cover?'<span class="hint" style="align-self:center">✓ cover</span>':`<button class="btn ghost small" onclick="setCover(${esc(JSON.stringify(String(p.key)))})">Make cover</button>`}
+          ${p.canDelete?`<button class="btn danger small" onclick="deletePhoto(${esc(JSON.stringify(String(p.key)))})">Delete</button>`:''}
         </div></div>`;
     }).join("")+'</div>';
   }

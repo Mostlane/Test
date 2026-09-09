@@ -61,6 +61,7 @@
 
 <script>
 const API = window.MOSTLANE_API;
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const $ = id => document.getElementById(id);
 function authFetch(url, init = {}){
   init.headers = new Headers(init.headers || {});
@@ -113,15 +114,15 @@ async function load(){
       if(s.clock_on_at && s.clock_off_at) totalMs += Math.max(0, new Date(s.clock_off_at)-new Date(s.clock_on_at));
       const off = s.clock_off_at ? fmtTime(s.clock_off_at) : '<span class="open">on shift</span>';
       return `<tr>
-        <td>${fmtDate(s.date)}</td>
-        <td>${s.username||""}</td>
+        <td>${esc(fmtDate(s.date))}</td>
+        <td>${esc(s.username||"")}</td>
         <td>${s.clock_on_at?fmtTime(s.clock_on_at):"—"}</td>
         <td>${off}</td>
         <td>${hoursBetween(s.clock_on_at, s.clock_off_at) || "—"}</td>
-        <td class="num">${s.start_mileage??"—"}</td>
-        <td class="num">${s.end_mileage??"—"}</td>
-        <td class="num">${miles!=null?miles:"—"}</td>
-        <td>${s.fuel?String(s.fuel):'<span class="muted">—</span>'}</td>
+        <td class="num">${esc(s.start_mileage??"—")}</td>
+        <td class="num">${esc(s.end_mileage??"—")}</td>
+        <td class="num">${esc(miles!=null?miles:"—")}</td>
+        <td>${s.fuel?esc(String(s.fuel)):'<span class="muted">—</span>'}</td>
         <td>${mapLink(s.clock_on_gps)}</td>
       </tr>`;
     }).join("");

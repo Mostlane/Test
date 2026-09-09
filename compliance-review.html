@@ -107,7 +107,7 @@
       var t = mlToken(); if (t) h["Authorization"] = "Bearer " + t;
       return fetch((window.MOSTLANE_API || "") + path, Object.assign({}, opts, { headers: h }));
     }
-    function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     var TYPE_LABEL = { fiveYear: "5-Year", pat: "PAT", em: "EM", pv: "PV", ev: "EV", forecourt: "Forecourt", pump: "Pump", other: "Other" };
 
     // Load the verifier engine with a per-load cache-buster so a stale service-worker

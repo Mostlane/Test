@@ -231,7 +231,7 @@ function perms(){ try{return JSON.parse(localStorage.getItem("mostlanePermission
 const isFull = String(perms().FullAccess||"").toLowerCase()==="yes";
 
 const $ = id => document.getElementById(id);
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 function whenTxt(iso){ try{ const d=new Date(iso); return d.toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch{ return iso||""; } }
 
 /* ---- state + open ---- */
@@ -373,7 +373,7 @@ async function loadCfg(){
       const opts=['<option value="">— none —</option>'];
       (cj.sites||[]).forEach(s=>(s.cameras||[]).forEach(cam=>{
         const val=s.id+"|"+cam.id, sel=(c.cameraSiteId===s.id && c.cameraId===cam.id)?" selected":"";
-        opts.push(`<option value="${val}"${sel}>${(s.name||"DVR")} — ${(cam.name||"Camera")}</option>`);
+        opts.push(`<option value="${esc(val)}"${sel}>${esc(s.name||"DVR")} — ${esc(cam.name||"Camera")}</option>`);
       }));
       $("cCamera").innerHTML=opts.join("");
       if(!(cj.sites||[]).some(s=>(s.cameras||[]).length)) $("cCamHint").innerHTML='No DVR cameras yet — add the gate’s DVR in the <b>CCTV Wall</b> first, then it appears here.';

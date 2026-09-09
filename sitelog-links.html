@@ -56,7 +56,7 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:
   "use strict";
   var API=(window.MOSTLANE_API||"").replace(/\/$/,"");
   var $=function(id){return document.getElementById(id)};
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function tok(){return localStorage.getItem("mostlaneToken");}
   function aFetch(p){var h=new Headers();var t=tok();if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{headers:h,cache:"no-store"});}
   function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=tok();if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}

@@ -334,8 +334,8 @@ function renderReadOnly(){
 
     box.innerHTML += `
       <div class="setting-row">
-        <div class="setting-label">${key.replace("Priority","P")}</div>
-        <div class="setting-value">${hours} hours ${days}</div>
+        <div class="setting-label">${wkEsc(key.replace("Priority","P"))}</div>
+        <div class="setting-value">${wkEsc(hours)} hours ${days}</div>
       </div>
     `;
   }
@@ -356,8 +356,8 @@ function renderEditMode(){
 
     box.innerHTML += `
       <div class="setting-row">
-        <div class="setting-label">${key.replace("Priority","P")}</div>
-        <input type="number" min="1" step="1" id="${key}" value="${hours}">
+        <div class="setting-label">${wkEsc(key.replace("Priority","P"))}</div>
+        <input type="number" min="1" step="1" id="${wkEsc(key)}" value="${wkEsc(hours)}">
       </div>
     `;
   }
@@ -416,7 +416,7 @@ loadConfig();
 const PAPI = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
 function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
 function pFetch(p, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+pTok() }, opts.headers||{}); if(opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"]="application/json"; return fetch(PAPI+p, opts); }
-const wkEsc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const wkEsc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const PORTAL_STATUSES = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Closed Jobs","Invoiced","Cancelled","FRA Works"];
 let WK_MAP = {};
 
@@ -689,7 +689,7 @@ wkLoadConfig();
     });
   }catch(e){}
 
-  function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
   function winRow(w){
     w=w||{days:[1,2,3,4,5],from:"08:00",to:"17:00",engineer:""};
     const row=document.createElement("div");

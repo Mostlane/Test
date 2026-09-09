@@ -126,7 +126,7 @@
     const API = window.MOSTLANE_API;
     const token = localStorage.getItem("mostlaneToken");
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     if (!token) location.href = "login.html";
     function authFetch(path, init = {}) {
       init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});

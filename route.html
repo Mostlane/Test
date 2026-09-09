@@ -138,7 +138,7 @@
   var MOSTLANE_API = window.MOSTLANE_API || "";
   var $=function(id){return document.getElementById(id)};
   function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function getEngineer(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }

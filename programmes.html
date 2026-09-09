@@ -122,7 +122,7 @@
             </div>
             <div style="display:flex;gap:8px;">
               <a class="btn ghost" href="programme-edit.html?id=${encodeURIComponent(p.id)}">Open</a>
-              <button class="btn danger" onclick="delProg('${esc(p.id)}','${esc((p.title||"").replace(/'/g,""))}')">🗑</button>
+              <button class="btn danger" onclick="delProg(${esc(JSON.stringify(String(p.id)))},${esc(JSON.stringify(String(p.title||"")))})">🗑</button>
             </div>
           </div>
         </div>`).join("");

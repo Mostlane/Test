@@ -115,7 +115,7 @@ const P = perms();
 const CAN_VIEW   = P.FullAccess==='Yes' || P.Chapplins==='Yes';   // the Chapplins area is its own permission toggle
 const CAN_MANAGE = P.FullAccess==='Yes' || P.Chapplins==='Yes';
 
-const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TYPE_LABEL = { fiveYear:'EICR', gas:'Gas Safety', epc:'EPC', alarms:'Smoke/CO', fire:'Fire/EM Lighting', legionella:'Legionella' };
 function daysUntil(d){ if(!d) return null; const t=new Date(d); if(isNaN(t)) return null; return Math.ceil((t-new Date())/86400000); }
 
@@ -176,7 +176,7 @@ function cardHtml(s){
     : `<div class="cur muted">No current tenant (vacant / communal)</div>`;
   const prev = s.tenantCount>1 ? `<span class="badge">${s.tenantCount-1} previous</span>` : '';
   return `<div class="card" data-n="${esc(s.siteNumber)}">
-    <div class="chead" onclick="toggle('${esc(s.siteNumber)}')">
+    <div class="chead" onclick="toggle(${esc(JSON.stringify(String(s.siteNumber)))})">
       <span class="num">${esc(s.siteNumber)}</span>
       <div class="cbody">
         <div class="cname">${esc(s.siteName)}</div>
@@ -217,9 +217,9 @@ function detailHtml(j){
     ].filter(Boolean).join(' ');
     const dates = (t.firstSeen||t.lastSeen) ? `Seen ${esc(t.firstSeen||'?')} → ${esc(t.lastSeen||'?')}` : '';
     const acts = CAN_MANAGE ? `<div class="row-actions">
-        ${t.current?'':`<button class="btn sm" onclick="makeCurrent('${esc(t.id)}','${esc(site.siteNumber)}')">Make current</button>`}
-        <button class="btn sm" onclick='editTenant(${JSON.stringify(t).replace(/'/g,"&#39;")})'>Edit</button>
-        <button class="btn sm" onclick="delTenant('${esc(t.id)}','${esc(site.siteNumber)}')">Delete</button>
+        ${t.current?'':`<button class="btn sm" onclick="makeCurrent(${esc(JSON.stringify(String(t.id)))},${esc(JSON.stringify(String(site.siteNumber)))})">Make current</button>`}
+        <button class="btn sm" onclick="editTenant(${esc(JSON.stringify(t))})">Edit</button>
+        <button class="btn sm" onclick="delTenant(${esc(JSON.stringify(String(t.id)))},${esc(JSON.stringify(String(site.siteNumber)))})">Delete</button>
       </div>` : '';
     return `<div class="ten ${t.current?'curr':''}">
       <div><span class="pill ${t.current?'c':'p'}">${t.current?'CURRENT':'previous'}</span> <span class="tn">${esc(t.name||t.ref||'—')}</span> ${t.ref?`<span class="tref">[${esc(t.ref)}]</span>`:''}</div>
@@ -233,7 +233,7 @@ function detailHtml(j){
     `<div class="j"><span class="jr">${esc(job.ref||job.id)}</span>${job.priority?` · ${esc(job.priority)}`:''} <span class="jd">${esc((job.date||'').slice(0,10))}</span><br>${esc(job.description||'')}</div>`
   ).join('')+`</div>` : '<div class="muted">No jobs on record yet.</div>';
 
-  const addBtn = CAN_MANAGE ? `<button class="btn sm primary" onclick="addTenant('${esc(site.siteNumber)}')">＋ Add tenant</button>` : '';
+  const addBtn = CAN_MANAGE ? `<button class="btn sm primary" onclick="addTenant(${esc(JSON.stringify(String(site.siteNumber)))})">＋ Add tenant</button>` : '';
   return `
     <div class="sec"><h4>Tenants ${addBtn}</h4>${tHtml}</div>
     <div class="sec"><h4>Jobs (${jobs.length})</h4>${jHtml}</div>

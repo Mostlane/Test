@@ -69,7 +69,7 @@
     + ".mlp .uploading{font-size:12px;color:#64748b}";
 
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;",'\'':"&#39;" }[c]; }); }
   function ans(a) { var s = String(a || "").toLowerCase(); if (/^y/.test(s)) return "yes"; if (/^n\/?a/.test(s) || s === "na") return "na"; if (/^n/.test(s)) return "no"; return ""; }
 
   function mount(host, opt) {

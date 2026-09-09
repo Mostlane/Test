@@ -70,7 +70,7 @@
 <script>
 const API = window.MOSTLANE_API;
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
 // Direct calls to the new worker need the session token attached explicitly
 // (the portal-config bridge only does this for the legacy worker hostnames).

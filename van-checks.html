@@ -315,7 +315,7 @@
 <script>
   const API = window.MOSTLANE_API;
   const g = id => document.getElementById(id);
-  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
   function authFetch(path, opts = {}) {
     opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
     return fetch(API + path, opts);
@@ -827,9 +827,9 @@
       <div class="itemrow" style="justify-content:space-between;align-items:center;">
         <b style="flex:1;">${esc(t.name)}</b>
         <span class="muted" style="font-size:12px;">${(t.checklist || []).length}c · ${(t.equipment || []).length}e · ${(t.photoSlots || []).length}📷</span>
-        <button class="btn small" onclick="customSend('${esc(t.id)}')">Send</button>
-        <button class="btn grey small" onclick="customEdit('${esc(t.id)}')">Edit</button>
-        <button class="btn red small" onclick="customDelete('${esc(t.id)}')">🗑</button>
+        <button class="btn small" onclick="customSend(${esc(JSON.stringify(String(t.id)))})">Send</button>
+        <button class="btn grey small" onclick="customEdit(${esc(JSON.stringify(String(t.id)))})">Edit</button>
+        <button class="btn red small" onclick="customDelete(${esc(JSON.stringify(String(t.id)))})">🗑</button>
       </div>`).join("") : '<span class="muted">No custom templates yet — make one with “＋ New template”.</span>';
     loadCustomStatus();
   }
@@ -873,7 +873,7 @@
         <div class="itemrow" style="justify-content:space-between;align-items:center;">
           <span style="flex:1;font-size:13px;">${esc(x.name)} → <b>${esc(x.name_of)}</b></span>
           <span style="font-size:12px;">${x.status === "done" ? '<b style="color:#16a34a;">✓ done</b>' : '<span style="color:#b26b00;">⏳ pending</span>'}</span>
-          ${x.status === "pending" ? `<button class="btn grey small" title="Cancel" onclick="customCancel('${esc(x.id)}')">✕</button>` : ""}
+          ${x.status === "pending" ? `<button class="btn grey small" title="Cancel" onclick="customCancel(${esc(JSON.stringify(String(x.id)))})">✕</button>` : ""}
         </div>`).join("") : '<span class="muted">Nothing sent yet.</span>';
     } catch (e) {}
   }

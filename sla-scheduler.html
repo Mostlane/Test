@@ -1485,7 +1485,7 @@ function renderEngDay(list){
     else window.open("job-view.html?id=" + encodeURIComponent(id), "_blank");
   }));
 }
-function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;",'\'':"&#39;" }[c])); }
 function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
 document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });

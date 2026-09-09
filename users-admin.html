@@ -603,7 +603,7 @@
       if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
       return fetch(API + path, opts);
     }
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const g = id => document.getElementById(id);
     // Show the client-org picker only when the account type is "client".
     function syncClientOrg(){ const w = g("clientOrgWrap"); if (w) w.style.display = (g("f_staff") && g("f_staff").value === "client") ? "" : "none"; }

@@ -669,8 +669,8 @@
     }
     var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
     function esc(s) {
-      return String(s).replace(/[&<>"]/g, function (c) {
-        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c];
       });
     }
     function markup(label, big) {
@@ -1150,7 +1150,7 @@
         if ((item.href || "").toLowerCase() === page) return true;
         return !!(item.match && item.match.indexOf(page) !== -1);
       }
-      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
 
       function navInner() {
         var out = '<div class="pn-grp"><a class="pn-item pn-search" href="#" title="Quick search (Ctrl+K)">'
@@ -2240,7 +2240,7 @@
         if (init.body) init.headers["Content-Type"] = "application/json";
         return nativeFetch(API + path, init);
       }
-      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
       function ago(iso) {
         try {
           var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);

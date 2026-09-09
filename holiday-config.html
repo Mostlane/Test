@@ -96,6 +96,7 @@
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
 const username = sessionStorage.getItem("mostlaneUser");
 const role = sessionStorage.getItem("mostlaneRole");
@@ -148,8 +149,8 @@ let config = {
 
 function render(){
   allowance.value = config.allowance;
-  bankList.innerHTML = config.bankHolidays.map(d=>`<li>${d}</li>`).join("");
-  shutdownList.innerHTML = config.shutdownDays.map(d=>`<li>${d}</li>`).join("");
+  bankList.innerHTML = config.bankHolidays.map(d=>`<li>${esc(d)}</li>`).join("");
+  shutdownList.innerHTML = config.shutdownDays.map(d=>`<li>${esc(d)}</li>`).join("");
 }
 
 // ----------------------------
