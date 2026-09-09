@@ -368,6 +368,20 @@ export async function handle(request, env, ctx, url, sess) {
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
+        // Re-sign every photo URL from its stored key — the URL saved on the
+        // record at UPLOAD time is only valid 24h, so a record opened later
+        // (office review, PDF, next day) showed broken thumbnails. Always hand
+        // back fresh signed URLs.
+        try {
+          const fresh = async (arr) => Promise.all((arr || []).map(async p => (
+            (p && p.key) ? { ...p, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", p.key, 86400) } : p
+          )));
+          for (const s of (rec.seals || [])) {
+            if (!s) continue;
+            s.beforePhotos = await fresh(s.beforePhotos);
+            s.afterPhotos = await fresh(s.afterPhotos);
+          }
+        } catch {}
         // Sensible header defaults the engineer can override.
         const installer = rec.installer || (job.assignedTo || (sess.user && sess.user.username) || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
@@ -424,8 +438,8 @@ export async function handle(request, env, ctx, url, sess) {
       const seals = await Promise.all((rec.seals || []).map(async s => ({
         sealRef: s.sealRef || rec.ref, date: s.date, by: s.by, location: s.location, aperture: s.aperture,
         frp: s.frp, manufacturer: s.manufacturer, componentName: s.componentName, comments: s.comments,
-        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
-        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean),
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map(p => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map(p => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
       })));
       const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
       let logo = null; try { logo = logoBytes(); } catch {}

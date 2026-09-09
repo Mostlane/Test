@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -13517,6 +13522,15 @@ async function handle11(request, env, ctx, url, sess) {
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
+        try {
+          const fresh = async (arr) => Promise.all((arr || []).map(async (p) => p && p.key ? { ...p, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", p.key, 86400) } : p));
+          for (const s of rec.seals || []) {
+            if (!s) continue;
+            s.beforePhotos = await fresh(s.beforePhotos);
+            s.afterPhotos = await fresh(s.afterPhotos);
+          }
+        } catch {
+        }
         const installer = rec.installer || (job.assignedTo || sess.user && sess.user.username || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
         const now = /* @__PURE__ */ new Date();
@@ -13584,8 +13598,8 @@ async function handle11(request, env, ctx, url, sess) {
         manufacturer: s.manufacturer,
         componentName: s.componentName,
         comments: s.comments,
-        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
-        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean)
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean)
       })));
       const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
       let logo = null;
@@ -34046,9 +34060,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
