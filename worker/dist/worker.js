@@ -28936,7 +28936,8 @@ async function handle26(request, env, ctx, url, sess) {
     return jr4({ ok: true, scores }, headers);
   }
   if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
-  if (!await canFleet(env, tid, sess)) return jr4({ error: "Forbidden" }, headers, 403);
+  const DRIVER_HANDOVER = sub === "/handover/mine" || sub === "/handover/attention" || sub === "/handover/submit";
+  if (!DRIVER_HANDOVER && !await canFleet(env, tid, sess)) return jr4({ error: "Forbidden" }, headers, 403);
   if (sub === "/drivers" && method === "GET") {
     let map = {};
     try {
