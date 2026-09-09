@@ -302,8 +302,8 @@ async function init() {
 }
 async function loadStatus() {
   const s = await authFetch('/po/api/status').then(r => r.json());
-  let txt = '<strong>Current mode:</strong> ' + s.mode;
-  if (s.message) txt += '<br><span class="muted">' + s.message + '</span>';
+  let txt = '<strong>Current mode:</strong> ' + escapeHtml(s.mode);
+  if (s.message) txt += '<br><span class="muted">' + escapeHtml(s.message) + '</span>';
   if (s.forced) txt += ' <em>(force-open enabled)</em>';
   document.getElementById('current-status').innerHTML = txt;
 }
@@ -336,14 +336,14 @@ async function loadEngineers() {
     const susp = Number(e.suspended) === 1;
     const badge = susp ? '<span class="badge danger-badge" title="' + escapeAttr(e.suspend_reason || 'No reason given') + '">Suspended</span>' : '';
     const suspBtn = susp
-      ? '<button class="ghost small" onclick="reinstateEngineer(\'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">Reinstate</button>'
-      : '<button class="ghost small" title="Block access, keep the link" onclick="suspendEngineer(\'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">Suspend</button>';
+      ? '<button class="ghost small" onclick="reinstateEngineer(' + escapeHtml(JSON.stringify(String(e.slug))) + ', ' + escapeHtml(JSON.stringify(String(e.name))) + ')">Reinstate</button>'
+      : '<button class="ghost small" title="Block access, keep the link" onclick="suspendEngineer(' + escapeHtml(JSON.stringify(String(e.slug))) + ', ' + escapeHtml(JSON.stringify(String(e.name))) + ')">Suspend</button>';
     return '<tr' + (susp ? ' style="background:#fdf3f2"' : '') + '>' +
       '<td><strong>' + escapeHtml(e.name) + '</strong> ' + badge + '</td>' +
-      '<td><a href="/e/' + e.token + '" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">' + base + '/e/' + e.token + '</a></td>' +
-      '<td><div class="row"><button class="ghost small" onclick="copyLink(\'' + base + '/e/' + e.token + '\')">Copy</button>' + suspBtn +
-      '<button class="ghost small" title="Invalidate the current link and issue a new one" onclick="rotateLink(\'engineers\', \'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">♻ New link</button>' +
-      '<button class="danger small" onclick="removeEngineer(\'' + e.slug + '\')">Remove</button></div></td></tr>';
+      '<td><a href="/e/' + escapeHtml(e.token) + '" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">' + escapeHtml(base + '/e/' + e.token) + '</a></td>' +
+      '<td><div class="row"><button class="ghost small" onclick="copyLink(' + escapeHtml(JSON.stringify(String(base + '/e/' + e.token))) + ')">Copy</button>' + suspBtn +
+      '<button class="ghost small" title="Invalidate the current link and issue a new one" onclick="rotateLink(\'engineers\', ' + escapeHtml(JSON.stringify(String(e.slug))) + ', ' + escapeHtml(JSON.stringify(String(e.name))) + ')">♻ New link</button>' +
+      '<button class="danger small" onclick="removeEngineer(' + escapeHtml(JSON.stringify(String(e.slug))) + ')">Remove</button></div></td></tr>';
   }).join('');
 }
 function escapeJs(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
@@ -387,8 +387,8 @@ async function loadOfficeUsers() {
   document.getElementById('ou-tbody').innerHTML = active.map(u => `
     <tr>
       <td><strong>${escapeHtml(u.name)}</strong></td>
-      <td><a href="/o/${u.token}" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">${base}/o/${u.token}</a></td>
-      <td><div class="row"><button class="ghost small" onclick='copyLink("${base}/o/${u.token}")'>Copy</button><button class="ghost small" title="Invalidate the current link and issue a new one" onclick='rotateLink("office-users", "${u.slug}", "${escapeAttr(u.name)}")'>♻ New link</button><button class="danger small" onclick='removeOfficeUser("${u.slug}")'>Remove</button></div></td>
+      <td><a href="/o/${escapeHtml(u.token)}" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">${escapeHtml(base + "/o/" + u.token)}</a></td>
+      <td><div class="row"><button class="ghost small" onclick="copyLink(${escapeHtml(JSON.stringify(String(base + "/o/" + u.token)))})">Copy</button><button class="ghost small" title="Invalidate the current link and issue a new one" onclick="rotateLink('office-users', ${escapeHtml(JSON.stringify(String(u.slug)))}, ${escapeHtml(JSON.stringify(String(u.name)))})">♻ New link</button><button class="danger small" onclick="removeOfficeUser(${escapeHtml(JSON.stringify(String(u.slug)))})">Remove</button></div></td>
     </tr>`).join('');
 }
 async function addOfficeUser() {
@@ -500,7 +500,7 @@ function escapeAttr(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;'
 async function loadClosures() {
   const cls = await authFetch('/po/api/closures').then(r => r.json());
   if (!cls.length) { document.getElementById('clo-tbody').innerHTML = '<tr><td colspan="3"><div class="empty">No closures added</div></td></tr>'; return; }
-  document.getElementById('clo-tbody').innerHTML = cls.map(c => `<tr><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.reason || '')}</td><td><button class="danger small" onclick='removeClosure("${c.date}")'>Remove</button></td></tr>`).join('');
+  document.getElementById('clo-tbody').innerHTML = cls.map(c => `<tr><td>${escapeHtml(fmtDate(c.date))}</td><td>${escapeHtml(c.reason || '')}</td><td><button class="danger small" onclick="removeClosure(${escapeHtml(JSON.stringify(String(c.date)))})">Remove</button></td></tr>`).join('');
 }
 async function addClosure() {
   const date = document.getElementById('new-clo-date').value;
@@ -517,7 +517,7 @@ async function rotateLink(kind, slug, name) {
   if (kind === 'engineers') loadEngineers(); else loadOfficeUsers();
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+function escapeAttr(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(s) {
   s = String(s || '');
   if (s.length === 10 && s.charAt(4) === '-') return s.slice(8,10) + '-' + s.slice(5,7) + '-' + s.slice(2,4);
