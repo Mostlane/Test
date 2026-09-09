@@ -8,15 +8,23 @@
 // through the SAME /sla/inbound path the zap used (via an in-process self
 // request, so nothing else in sla.js changes).
 //
-// Extraction is AI-first (env.ANTHROPIC_API_KEY, a forced tool) so it copes with
-// any format and survives template tweaks; a deterministic Concerto regex is the
-// no-key / AI-error fallback. Nothing is sent to the AI except the email's text
-// body (attachments are dropped during MIME parsing), capped in size.
+// Extraction is TEMPLATE-FIRST (routes/emailtemplates.js — one deterministic
+// reader per known layout: Concerto job / order / notice, Chapplins job, Metro
+// Rod paperwork, our own outbound). A job is only ever created automatically
+// from a layout we've seen and tested. Anything else — an unknown layout, or a
+// known layout with a field the template couldn't read — is HELD FOR A HUMAN
+// ("review": logged, the office is pushed, one tap to create or dismiss on
+// email-intake.html). The AI (env.ANTHROPIC_API_KEY) only PROPOSES fields for
+// unknown layouts to save the office retyping; it never creates a job unless
+// the office switches `aiAutoCreate` on. Nothing is sent to the AI except the
+// email's text body (attachments are dropped during MIME parsing), capped.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
+import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
+import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 
 /* ── Intake log + config ──────────────────────────────────────────────────────
    Every email the worker receives is logged (what came in, what we made of it,
@@ -31,7 +39,7 @@ async function ensureTable(env) {
     await env.DB.prepare(`CREATE INDEX IF NOT EXISTS ${T}_mid ON ${T}(tenant_id, message_id)`).run();
   } catch {}
 }
-const DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "mostlane.com"] };
+const DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
@@ -51,12 +59,22 @@ function senderAllowed(cfg, ...addrs) {
 }
 async function logIntake(env, tid, rec) {
   try {
-    await env.DB.prepare(`INSERT INTO ${T} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
+    const r = await env.DB.prepare(`INSERT INTO ${T} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(tid, rec.messageId || "", rec.receivedAt || new Date().toISOString(), rec.from || "", rec.origFrom || "", (rec.subject || "").slice(0, 300),
         rec.outcome || "", (rec.reason || "").slice(0, 300), rec.reference || "", rec.jobId || "", rec.status || null,
         JSON.stringify(rec.fields || null), (rec.text || "").slice(0, 12000)).run();
-  } catch (e) { console.error("email intake log:", e && e.message); }
+    return (r && r.meta && r.meta.last_row_id) || null;
+  } catch (e) { console.error("email intake log:", e && e.message); return null; }
+}
+/* Ask the office to look at a held email (actionable — stays until created/dismissed). */
+async function pushReview(env, tid, id, subject, reason) {
+  if (!id) return;
+  try {
+    await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "📨 Email needs a look", body: (subject || "(no subject)").slice(0, 120) + " — " + (reason || "").slice(0, 160),
+      url: "/email-intake.html?review=" + id, tag: "email-review:" + id, actionable: true });
+  } catch {}
 }
 
 /* Read the raw RFC822 message to a string. */
@@ -150,54 +168,6 @@ function unwrapForward(subject, text) {
   if (m) { const e = /<([^>]+)>/.exec(m[1]) || /([^\s"']+@[^\s"']+)/.exec(m[1]); origFrom = (e ? e[1] : "").toLowerCase().trim(); }
   return { subject: subj, origFrom };
 }
-/* "09/Sep/2026 15:44" (Concerto, Europe/London wall clock) → ISO UTC. */
-const MON = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
-function londonToIso(y, mo, d, h, mi) {
-  const guess = Date.UTC(y, mo, d, h, mi);
-  try {
-    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", timeZoneName: "shortOffset" }).formatToParts(new Date(guess));
-    const tz = (parts.find(p => p.type === "timeZoneName") || {}).value || "GMT";
-    const off = /GMT([+-]\d{1,2})/.exec(tz); const hours = off ? Number(off[1]) : 0;
-    return new Date(guess - hours * 3600e3).toISOString();
-  } catch { return new Date(guess).toISOString(); }
-}
-function concertoDate(s) {
-  const m = /(\d{1,2})\/([A-Za-z]{3})\/(\d{4})\s+(\d{1,2}):(\d{2})/.exec(String(s || ""));
-  if (!m || MON[m[2].toLowerCase()] === undefined) return "";
-  return londonToIso(+m[3], MON[m[2].toLowerCase()], +m[1], +m[4], +m[5]);
-}
-
-/* Deterministic fallback for the Concerto "New Job Alert" template (used when the
-   AI key is missing or the AI call fails). Returns null if it doesn't look like
-   a Concerto job. */
-function concertoRegex(subject, text) {
-  const t = String(text || "");
-  if (!/New Job Alert|You have been assigned a new job/i.test(subject + " " + t)) return null;
-  const ref = (/assigned a new job:\s*([^\s<]+)/i.exec(t) || /New Job Alert:\s*([^\s-]+)/i.exec(subject) || [])[1] || "";
-  const pr = (/Priority\s*([1-4])/i.exec(subject) || /SLA of Priority\s*([1-4])/i.exec(t) || [])[1] || "";
-  const siteLine = (/^\s*Site:\s*(.+)$/im.exec(t) || [])[1] || "";
-  const code = (/^\s*(\d{3,5})\b/.exec(siteLine) || [])[1] || "";
-  const postcode = (/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i.exec(siteLine) || [])[1] || "";
-  const fault = (/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i.exec(t) || [])[1] || "";
-  const phone = (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(fault) || [])[1] || "";
-  const respondBy = concertoDate((/target Response Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
-  const completeBy = concertoDate((/target Completion Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
-  if (!ref && !fault) return null;
-  return {
-    respondBy, completeBy,
-    isJob: true,
-    reference: ref,
-    priority: pr ? "Priority " + pr : "",
-    siteCode: code,
-    siteName: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").split(",").slice(0, 2).join(",").trim(),
-    address: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").trim(),
-    postcode,
-    telephone: phone,
-    description: fault.trim(),
-    raisedAt: ""
-  };
-}
-
 /* AI extraction (forced tool). Returns the fields object, or null on any error. */
 async function aiExtract(env, { from, subject, text }) {
   const key = env.ANTHROPIC_API_KEY;
@@ -242,34 +212,9 @@ async function aiExtract(env, { from, subject, text }) {
   return block && block.input ? block.input : null;
 }
 
-/* ── The pipeline (shared by the live email handler, the test box and re-run) ──
-   Returns {outcome, reason, fields, reference, jobId, status}. outcome ∈
-   created | updated | dropped (not a job) | ignored (sender not allowed / intake
-   off) | duplicate (this message-id already made a job) | failed | dryrun.   */
-export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
-  const tid = msg.tid || "1";
-  const cfg = opts.cfg || await getIntakeConfig(env, tid);
-  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
-  const from = String(msg.from || "").toLowerCase();
-  const text = String(msg.text || "").slice(0, 12000);
-  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject };
-
-  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
-  if (!opts.force && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + (origFrom || from) + ")" };
-  if (!opts.dryRun && !opts.force && msg.messageId) {
-    try {
-      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated') LIMIT 1`).bind(tid, msg.messageId).first();
-      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
-    } catch {}
-  }
-
-  let fields = null, source = "ai";
-  if (!opts.noAi) fields = await aiExtract(env, { from: origFrom || from, subject, text });
-  if (!fields) { fields = concertoRegex(subject, text); source = "template"; }
-  if (!fields || !fields.isJob) return { ...base, fields, source, outcome: "dropped", reason: fields ? "Not a new job (reply / order / quote / status update)" : "Didn't look like a job email" };
-  if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return { ...base, fields, source, outcome: "dropped", reason: "Looked like a job but had no reference or description" };
-
-  const payload = {
+/* Build the /sla/inbound payload from a fields object (template or AI). */
+function jobPayload(fields, sender) {
+  return {
     reference: fields.reference || undefined,
     description: fields.description || undefined,
     priority: fields.priority || undefined,
@@ -278,15 +223,17 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     address: fields.address || undefined,
     postcode: fields.postcode || undefined,
     telephone: fields.telephone || undefined,
+    storeType: fields.storeType || undefined,
     raisedAt: fields.raisedAt || undefined,
     originator: "email",
-    originatorEmail: origFrom || from || undefined,
+    originatorEmail: sender || undefined,
     changedBy: "email"
   };
-  if (opts.dryRun) return { ...base, fields, source, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job"), reference: fields.reference || "", payload };
-
-  // Reuse /sla/inbound exactly, in-process (no network) — same dedupe-by-
-  // reference, priority/date parsing and assignment push as the old zap.
+}
+/* Create/update the job through /sla/inbound IN-PROCESS (no network) — the same
+   dedupe-by-reference, priority/date parsing and assignment push as the old zap. */
+async function createJob(env, ctx, fetchSelf, fields, sender) {
+  const payload = jobPayload(fields, sender);
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
@@ -295,11 +242,88 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   try {
     const resp = await fetchSelf(req, env, ctx);
     let out = {}; try { out = await resp.clone().json(); } catch {}
-    if (!resp.ok) return { ...base, fields, source, outcome: "failed", reason: (out && out.error) || ("HTTP " + resp.status), status: resp.status, reference: fields.reference || "" };
-    return { ...base, fields, source, outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "" };
+    if (!resp.ok) return { outcome: "failed", reason: (out && out.error) || ("HTTP " + resp.status), status: resp.status, reference: fields.reference || "", payload };
+    return { outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
-    return { ...base, fields, source, outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "" };
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
+}
+/* File a Concerto order sheet into the client-orders intake (certs.js) — the
+   office then matches/approves it against a remedial. Same in-process trick. */
+async function fileOrder(env, ctx, fetchSelf, order, msg) {
+  const tok = (env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "");
+  const body = { ...order, externalId: msg.messageId || undefined, notifiedAt: msg.receivedAt || undefined, link: undefined };
+  const req = new Request("https://mostlane-api.internal/certs/remedials/order-inbound", {
+    method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer " + tok }, body: JSON.stringify(body) });
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {}; try { out = await resp.clone().json(); } catch {}
+    if (!resp.ok) return { outcome: "failed", reason: "Client-orders intake refused it: " + ((out && out.error) || ("HTTP " + resp.status)), status: resp.status, reference: order.orderNumber || "" };
+    return { outcome: "order", reason: "Client order " + (order.orderNumber || "") + " filed for store " + (order.storeCode || "?") + (out.matched ? " — matches a remedial awaiting approval" : ""), status: resp.status, reference: order.orderNumber || "" };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach the client-orders intake: " + String(e && e.message || e).slice(0, 120), reference: order.orderNumber || "" };
+  }
+}
+
+/* ── The pipeline (shared by the live email handler, the test box and re-run) ──
+   Returns {outcome, reason, fields, reference, jobId, status, template, source}.
+   outcome ∈ created | updated | order (client order filed) | review (held for a
+   human) | dropped (not a job) | ignored (sender not allowed / intake off) |
+   duplicate (this message-id already made a job) | failed | dryrun.            */
+export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
+  const tid = msg.tid || "1";
+  const cfg = opts.cfg || await getIntakeConfig(env, tid);
+  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
+  const from = String(msg.from || "").toLowerCase();
+  const sender = origFrom || from;
+  const text = String(msg.text || "").slice(0, 12000);
+  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject, template: "", source: "" };
+
+  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
+  // A REPLY in a thread is never a new job (a quoted original would re-read as one).
+  if (/^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread — not a new job", source: "template" };
+  // Known layouts come from trusted senders by definition; everything else must be on the allow-list.
+  const tm = matchTemplate(sender, subject, text);
+  if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
+  if (!opts.dryRun && !opts.force && msg.messageId) {
+    try {
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order') LIMIT 1`).bind(tid, msg.messageId).first();
+      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
+    } catch {}
+  }
+
+  if (tm) {
+    const r = tm.result, out = { ...base, template: tm.tpl.id, source: "template" };
+    if (r.kind === "notice") return { ...out, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "order") {
+      if (r.missing && r.missing.length) return { ...out, fields: r.order, outcome: "review", reason: tm.tpl.label + " — couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out, fields: r.order, outcome: "dryrun", reason: "Would file client order " + r.order.orderNumber + " for store " + r.order.storeCode + " (client orders, not the job board)", reference: r.order.orderNumber };
+      return { ...out, fields: r.order, ...(await fileOrder(env, ctx, fetchSelf, r.order, msg)) };
+    }
+    const fields = r.fields || {};
+    if (r.missing && r.missing.length) return { ...out, fields, outcome: "review", reason: tm.tpl.label + " — couldn't read: " + r.missing.join(", ") };
+    if (r.siteLookup) {
+      const hit = await lookupSite(env, tid, r.siteLookup);
+      if (hit) { fields.siteCode = hit.siteCode; fields.siteName = hit.siteName; fields.siteMatched = true; }
+      else fields.siteMatched = false;
+    }
+    if (opts.dryRun) return { ...out, fields, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job") + (r.siteLookup ? (fields.siteMatched ? " at site " + fields.siteCode : " (property not matched to a site — the office links it)") : ""), reference: fields.reference || "", payload: jobPayload(fields, sender) };
+    return { ...out, fields, ...(await createJob(env, ctx, fetchSelf, fields, sender)) };
+  }
+
+  // No template for this layout → HOLD for a human. The AI only proposes fields.
+  let fields = null;
+  if (!opts.noAi) fields = await aiExtract(env, { from: sender, subject, text });
+  const out = { ...base, fields, source: fields ? "ai" : "none" };
+  if (fields && fields.isJob === false) return { ...out, outcome: "dropped", reason: "No template for this layout; the AI read it as not a job (reply / order / quote / status update)" };
+  const usable = fields && (String(fields.reference || "").trim() || String(fields.description || "").trim());
+  if (cfg.aiAutoCreate === true && usable) {
+    if (opts.dryRun) return { ...out, outcome: "dryrun", reason: "No template — AI auto-create is ON, would create job " + (fields.reference || "(no reference)"), reference: fields.reference || "", payload: jobPayload(fields, sender) };
+    return { ...out, ...(await createJob(env, ctx, fetchSelf, fields, sender)) };
+  }
+  const why = usable ? "No template for this layout — the AI's reading is attached for you to check before it becomes a job"
+    : (!env.ANTHROPIC_API_KEY || opts.noAi ? "No template for this layout (and no AI key to read it) — needs a look" : "No template for this layout and the AI couldn't read it — needs a look");
+  return { ...out, outcome: "review", reason: (opts.dryRun ? "Would hold for a check: " : "") + why, reference: (fields && fields.reference) || "" };
 }
 
 /* Entry point wired from index.js's email() handler. fetchSelf is the worker's
@@ -313,8 +337,10 @@ export async function handleInboundEmail(message, env, ctx, fetchSelf) {
   const text = (extractText(raw) || "").slice(0, 12000);
   const tid = "1";
   await ensureTable(env);
-  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId });
-  await logIntake(env, tid, { messageId, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  const receivedAt = new Date().toISOString();
+  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId, receivedAt });
+  const id = await logIntake(env, tid, { messageId, receivedAt, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  if (res.outcome === "review" || res.outcome === "failed") await pushReview(env, tid, id, subject, res.reason);
   console.log("email intake:", res.outcome, "—", subject, "—", res.reason);
 }
 
@@ -339,12 +365,13 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     let last = null, counts = {}; const since = new Date(Date.now() - 7 * 86400e3).toISOString();
     try { last = await env.DB.prepare(`SELECT id, received_at, subject, outcome, reference FROM ${T} WHERE tenant_id=? ORDER BY id DESC LIMIT 1`).bind(tid).first(); } catch {}
     try { const { results } = await env.DB.prepare(`SELECT outcome, COUNT(*) AS n FROM ${T} WHERE tenant_id=? AND received_at>=? GROUP BY outcome`).bind(tid, since).all(); for (const r of (results || [])) counts[r.outcome] = r.n; } catch {}
-    return json({ ok: true, config: cfg, last, counts7d: counts, aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
+    let review = 0; try { const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${T} WHERE tenant_id=? AND outcome='review'`).bind(tid).first(); review = (r && r.n) || 0; } catch {}
+    return json({ ok: true, config: cfg, last, counts7d: counts, reviewOpen: review, templates: TEMPLATES.map(t => ({ id: t.id, label: t.label, domains: t.domains })), aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
   }
   if (sub === "/log" && method === "GET") {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 60));
     let rows = [];
-    try { const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields FROM ${T} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all(); rows = results || []; } catch {}
+    try { const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, substr(text,1,4000) AS text FROM ${T} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all(); rows = results || []; } catch {}
     return json({ ok: true, rows: rows.map(r => ({ ...r, fields: (() => { try { return JSON.parse(r.fields || "null"); } catch { return null; } })() })) }, {}, env, request);
   }
   if (sub === "/test" && method === "POST") {
@@ -361,9 +388,32 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     const b = await request.json().catch(() => ({}));
     const row = await env.DB.prepare(`SELECT * FROM ${T} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
     if (!row) return error("Log entry not found", 404, env, request);
-    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "" }, { force: true });
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "", receivedAt: row.received_at || "" }, { force: true });
     await logIntake(env, tid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
     return json({ ok: true, ...res }, {}, env, request);
+  }
+  if (sub === "/templates" && method === "GET") {
+    return json({ ok: true, templates: TEMPLATES.map(t => ({ id: t.id, label: t.label, domains: t.domains })) }, {}, env, request);
+  }
+  // Held email → the office creates the job (with any corrections) or dismisses it.
+  if ((sub === "/approve" || sub === "/dismiss") && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare(`SELECT * FROM ${T} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    if (!row) return error("Log entry not found", 404, env, request);
+    if (sub === "/dismiss") {
+      await env.DB.prepare(`UPDATE ${T} SET outcome='dismissed', reason=? WHERE tenant_id=? AND id=?`).bind(("Dismissed by " + me + (b.note ? ": " + String(b.note).slice(0, 200) : "")).slice(0, 300), tid, row.id).run();
+      ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "📨 Email dismissed", body: (row.subject || "").slice(0, 120) + " — dismissed by " + me }).catch(() => {}));
+      return json({ ok: true, outcome: "dismissed" }, {}, env, request);
+    }
+    let stored = {}; try { stored = JSON.parse(row.fields || "{}") || {}; } catch {}
+    const fields = { ...stored, ...(b.fields && typeof b.fields === "object" ? b.fields : {}) };
+    if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return error("A reference or a description is needed to create the job", 400, env, request);
+    const res = await createJob(env, ctx, fetchSelf, fields, row.orig_from || row.from_addr || "");
+    if (res.outcome === "failed") return json({ ok: false, error: res.reason, ...res }, { status: 502 }, env, request);
+    await env.DB.prepare(`UPDATE ${T} SET outcome=?, reason=?, reference=?, job_id=?, status_code=?, fields=? WHERE tenant_id=? AND id=?`)
+      .bind(res.outcome, ("Approved by " + me + " — " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), tid, row.id).run();
+    ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "📨 Email → job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " — created by " + me }).catch(() => {}));
+    return json({ ok: true, ...res, fields }, {}, env, request);
   }
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);
@@ -373,6 +423,7 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
       const next = { ...cur };
       if (b.enabled !== undefined) next.enabled = !!b.enabled;
       if (Array.isArray(b.allowFrom)) next.allowFrom = b.allowFrom.map(x => String(x || "").toLowerCase().trim()).filter(Boolean).slice(0, 50);
+      if (b.aiAutoCreate !== undefined) next.aiAutoCreate = b.aiAutoCreate === true;
       await saveIntakeConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }

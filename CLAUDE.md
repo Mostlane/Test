@@ -4221,6 +4221,45 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `node worker/tools/test-email-intake.mjs` (synthetic Concerto-shaped emails only).
   **Cutover plan:** run alongside the zap (dedupe-by-reference makes both paths
   upsert the same job), watch the log, then disable the zap.
+- **TEMPLATE-FIRST, "100% reliable" intake (9 Sep 2026 — Jamie: "jobs all look
+  different… set templates… this needs to be 100% reliable"):** extraction is no
+  longer AI-first. **`routes/emailtemplates.js`** holds ONE deterministic reader
+  per known layout, matched by SENDER DOMAIN + fixed markers, each returning
+  `{kind: job|order|notice, missing:[…], fields|order}`. Layouts (surveyed from
+  Jamie's mailbox; synthetic fixtures in the test): **concerto-job** ("New Job
+  Alert: <ref> - Priority N [(CON)]" — ref/priority/target dates/Site line →
+  code+postcode/Fault-Issue/phone), **concerto-order** ("Order number <n> from
+  Southern Coop" order sheet → orderNumber/priority/£ value/description/"For :"
+  store + SR ref → **filed IN-PROCESS to `/certs/remedials/order-inbound`** (the
+  client-orders intake, outcome `order`) — no Grok/bot needed for orders any more),
+  **concerto-notice** ("Helpdesk action - …", "Quote :" → dropped), **chapplins-job**
+  (ashley@/support@/kerry@chapplins.co.uk "A new job has been raised…": Tenant/Name/
+  Property/Home/Mobile/E-mail/Job Number/Date Job Entered/Job Description up to the
+  signature; subject variants "P1 - <address>", "Urgent Estimate required - <addr>"
+  (kept as a description prefix), "New job raised: Job Number N -- P1"; reference
+  **`CHAP-<jobNumber>`** (matches the archive ids), `storeType:"chapplins"`, tenant
+  + contacts appended to the description; **`lookupSite()` matches the Property to
+  the 4001–4127 Chapplins site register** — postcode first, then the normalised
+  unit+street (exact, else a unique leading-words match; ambiguous → no site code,
+  the job still lands with the address as its site name)), **metrorod-report** (job
+  cards/quotes → dropped), **mostlane-outbound** (our own "Send N to MetroRod" /
+  "Mostlane - Emergency - Order" → dropped). A subject starting RE:/AW: is dropped
+  as a thread reply before anything else. **Known-layout senders are trusted
+  implicitly** (no allow-list entry needed); everyone else still needs the list
+  (defaults now include chapplins.co.uk). **Held for a human = outcome `review`:**
+  a known layout with a required field the template couldn't read (e.g. no job
+  number), or ANY unknown layout (the AI, if keyed, only ATTACHES its proposed
+  fields; it creates nothing unless config `aiAutoCreate:true`, off by default and
+  labelled "not recommended"). `handleInboundEmail` pushes FullAccess|SLAAdmin an
+  actionable `email-review:<logId>` notification → **email-intake.html?review=<id>**
+  scrolls to a "📨 Needs a look" card with every field editable + **＋ Create the
+  job** (POST `/email-intake/approve {id, fields}` → /sla/inbound, log row updated,
+  notification resolved) / **✕ Dismiss** (POST `/dismiss`). Also GET `/templates`,
+  `/status` carries `reviewOpen` + `templates`, the test box takes a From address
+  (the template depends on the sender) and names which template read it. Outcomes
+  now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
+  **Adding a client = add one template + fixtures** in emailtemplates.js /
+  test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

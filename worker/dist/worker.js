@@ -3748,15 +3748,15 @@ function wrap(str, size, maxW) {
       out.push("");
       continue;
     }
-    let line = w[0];
+    let line2 = w[0];
     for (let i = 1; i < w.length; i++) {
-      if (textWidth(line + " " + w[i], size) <= maxW) line += " " + w[i];
+      if (textWidth(line2 + " " + w[i], size) <= maxW) line2 += " " + w[i];
       else {
-        out.push(line);
-        line = w[i];
+        out.push(line2);
+        line2 = w[i];
       }
     }
-    out.push(line);
+    out.push(line2);
   }
   return out;
 }
@@ -3931,15 +3931,15 @@ function wrap2(str, size, maxW) {
       out.push("");
       continue;
     }
-    let line = w[0];
+    let line2 = w[0];
     for (let i = 1; i < w.length; i++) {
-      if (textWidth(line + " " + w[i], size) <= maxW) line += " " + w[i];
+      if (textWidth(line2 + " " + w[i], size) <= maxW) line2 += " " + w[i];
       else {
-        out.push(line);
-        line = w[i];
+        out.push(line2);
+        line2 = w[i];
       }
     }
-    out.push(line);
+    out.push(line2);
   }
   return out;
 }
@@ -4694,7 +4694,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const intro = fill(tpl.intro, v);
   const base = appBase(env);
   const logo = `${base}/mostlane-logo.jpg`;
-  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line = "#e5e7eb";
+  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line2 = "#e5e7eb";
   const rows = [];
   const addRow = (k, val2) => {
     if (val2) rows.push(`<tr><td style="padding:6px 0;color:${grey};font-size:13px;width:38%;vertical-align:top">${esc2(k)}</td><td style="padding:6px 0;color:${ink};font-size:14px;font-weight:600">${esc2(val2)}</td></tr>`);
@@ -4721,7 +4721,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
     <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line2}">
         <tr><td align="center" style="background:${navy};padding:30px 28px">
           <img src="${esc2(logo)}" alt="Mostlane" height="72" style="height:72px;display:block;border:0;margin:0 auto" />
         </td></tr>
@@ -4730,7 +4730,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
           <div style="font-size:15px;color:${ink};line-height:1.5">${esc2(intro)}</div>
         </td></tr>
         <tr><td style="padding:8px 28px 0">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line2};border-bottom:1px solid ${line2};margin:12px 0">${rows.join("")}</table>
         </td></tr>
         ${descBlock}
         ${noticeBlock}
@@ -12486,13 +12486,13 @@ PAT: Import certificate number ${num2}-${yr}`;
         const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
         const ref = String(f.r.comments || "").trim();
         const what = isB ? "Replace batteries" + (rem.batterySpec ? " \u2014 " + rem.batterySpec : "") + (rem.batteryQty ? " \xD7" + rem.batteryQty : "") : "Replace light fitting" + (rem.lightSpec ? " \u2014 " + rem.lightSpec : "");
-        const line = `Fitting ${no}${ref && !/^light \d+$/i.test(ref) ? " (" + ref + ")" : ""} \u2014 ${what}${rem.note ? " \xB7 " + rem.note : ""}`;
+        const line2 = `Fitting ${no}${ref && !/^light \d+$/i.test(ref) ? " (" + ref + ")" : ""} \u2014 ${what}${rem.note ? " \xB7 " + rem.note : ""}`;
         let hit = false;
         job.auditItems = (Array.isArray(job.auditItems) ? job.auditItems : []).map((it) => {
           const t = String(it && it.text || "");
           if (it && new RegExp("^Fitting " + no + "\\b").test(t)) {
             hit = true;
-            return { ...it, text: line };
+            return { ...it, text: line2 };
           }
           return it;
         });
@@ -12907,8 +12907,8 @@ ${con.tradingTitle || "Mostlane"}`;
     if (Array.isArray(b.entries)) {
       entries = b.entries.map((e) => ({ number: parseInt(e.number, 10), job: String(e.job || "").slice(0, 300) })).filter((e) => Number.isFinite(e.number));
     } else if (typeof b.text === "string") {
-      for (const line of b.text.split(/\r?\n/)) {
-        const m = line.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
+      for (const line2 of b.text.split(/\r?\n/)) {
+        const m = line2.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
         if (!m) continue;
         entries.push({ number: parseInt(m[1], 10), job: String(m[2] || "").trim().slice(0, 300) });
       }
@@ -21850,6 +21850,237 @@ init_sitelog_api();
 init_http();
 init_auth();
 init_tenantdb();
+
+// src/routes/emailtemplates.js
+var MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function londonToIso(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", timeZoneName: "shortOffset" }).formatToParts(new Date(guess));
+    const tz = (parts.find((p) => p.type === "timeZoneName") || {}).value || "GMT";
+    const off = /GMT([+-]\d{1,2})/.exec(tz);
+    const hours = off ? Number(off[1]) : 0;
+    return new Date(guess - hours * 36e5).toISOString();
+  } catch {
+    return new Date(guess).toISOString();
+  }
+}
+function concertoDate(s) {
+  const m = /(\d{1,2})\/([A-Za-z]{3})\/(\d{4})\s+(\d{1,2}):(\d{2})/.exec(String(s || ""));
+  if (!m || MON[m[2].toLowerCase()] === void 0) return "";
+  return londonToIso(+m[3], MON[m[2].toLowerCase()], +m[1], +m[4], +m[5]);
+}
+function ukDate(s) {
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(s || ""));
+  if (!m) return "";
+  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], 9, 0));
+  return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+}
+var PC_RE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+var domainOf = (a) => String(a || "").toLowerCase().trim().split("@").pop();
+var line = (re, t) => {
+  const m = re.exec(t);
+  return m ? String(m[1] || "").trim() : "";
+};
+var phoneIn = (s) => (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(String(s || "")) || [])[1] || "";
+function concertoJob(subject, t) {
+  const ref = line(/assigned a new job:\s*([^\s<]+)/i, t) || line(/New Job Alert:\s*([^\s-]+)/i, subject);
+  const pr = line(/Priority\s*([1-4])/i, subject) || line(/SLA of Priority\s*([1-4])/i, t);
+  const siteLine = line(/^\s*Site:\s*(.+)$/im, t);
+  const code = line(/^\s*(\d{3,5})\b/, siteLine);
+  const postcode = (PC_RE.exec(siteLine) || [])[1] || "";
+  const fault = line(/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i, t);
+  const respondBy = concertoDate(line(/target Response Date\s*&\s*Time:\s*([^\n]+)/i, t));
+  const completeBy = concertoDate(line(/target Completion Date\s*&\s*Time:\s*([^\n]+)/i, t));
+  const site = siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const missing = [];
+  if (!ref) missing.push("job reference");
+  if (!fault) missing.push("fault/issue");
+  if (!code) missing.push("store number");
+  return {
+    kind: "job",
+    missing,
+    fields: {
+      isJob: true,
+      reference: ref,
+      priority: pr ? "Priority " + pr : "",
+      siteCode: code,
+      siteName: site.split(",").slice(0, 2).join(",").trim(),
+      address: site,
+      postcode,
+      telephone: phoneIn(fault),
+      description: fault.trim(),
+      raisedAt: "",
+      respondBy,
+      completeBy
+    }
+  };
+}
+function concertoOrder(subject, t) {
+  const orderNumber = line(/Order number\s+([A-Z0-9\/-]+)/i, subject) || line(/order number\s+([A-Z0-9\/-]+)/i, t);
+  const pr = line(/Priority\s*:\s*Priority\s*([1-4])/i, t);
+  const value = line(/Order value\s*:\s*£?\s*([\d,]+(?:\.\d{1,2})?)/i, t);
+  const forLine = line(/^\s*For\s*:\s*\n?\s*(.+)$/im, t);
+  const code = line(/^\s*(\d{3,5})\b/, forLine);
+  const sr = line(/\b(SR\d{4,6})\b/i, forLine);
+  const siteName = forLine.replace(/^\s*\d{3,5}\s*-\s*/, "").replace(/\bSR\d{4,6}\b/i, "").trim();
+  const desc = line(/Order value\s*:[^\n]*\n([\s\S]*?)(?:\n\s*For\s*:|$)/i, t);
+  const missing = [];
+  if (!orderNumber) missing.push("order number");
+  if (!code) missing.push("store number");
+  return {
+    kind: "order",
+    missing,
+    order: {
+      orderNumber,
+      priority: pr ? Number(pr) : null,
+      orderValue: value ? Number(value.replace(/,/g, "")) : null,
+      storeCode: code,
+      siteName,
+      srRef: sr,
+      siteRaw: forLine,
+      description: desc.trim(),
+      client: "Southern Co-op",
+      source: "email"
+    }
+  };
+}
+var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
+function chapplinsJob(subject, t) {
+  const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
+  const property = line(/^[ \t]*Property:[ \t]*([^\n]*)$/im, t);
+  const tenantRef = line(/^[ \t]*Tenant:[ \t]*([^\n]*)$/im, t);
+  const name = line(/^[ \t]*Name:[ \t]*([^\n]*)$/im, t);
+  const home = line(/^[ \t]*Home Telephone:[ \t]*([^\n]*)$/im, t);
+  const mobile = line(/^[ \t]*Mobile:[ \t]*([^\n]*)$/im, t);
+  const email = line(/^[ \t]*E-?mail:[ \t]*([^\n]*)$/im, t);
+  const entered = line(/Date Job Entered:\s*([\d\/]+)/i, t);
+  let desc = line(/Job Description:\s*([\s\S]*)$/i, t);
+  const cut = CHAP_SIG.exec(desc);
+  if (cut) desc = desc.slice(0, cut.index);
+  desc = desc.replace(/^\s*(?:Hi(?: All)?|Hello[^\n]*|Dear[^\n]*)\s*,?\s*\n/i, "").trim();
+  const pr = line(/\bP\s*([1-4])\b/i, subject);
+  const subjHead = subject.replace(/\bP\s*[1-4]\b\s*-?\s*/i, "").split(/\s+-\s+/)[0].trim();
+  const prefix2 = /estimate|quote/i.test(subjHead) && !/^new job raised/i.test(subjHead) ? subjHead + " \u2014 " : "";
+  const postcode = (PC_RE.exec(property) || PC_RE.exec(subject) || [])[1] || "";
+  const contact = [name && "Tenant: " + name + (tenantRef ? " (" + tenantRef + ")" : ""), mobile && "Mobile: " + mobile, home && "Home: " + home, email && "Email: " + email].filter(Boolean).join(" \xB7 ");
+  const missing = [];
+  if (!jobNo) missing.push("job number");
+  if (!property) missing.push("property address");
+  if (!desc) missing.push("job description");
+  return {
+    kind: "job",
+    missing,
+    siteLookup: { client: "chapplins", address: property, postcode },
+    fields: {
+      isJob: true,
+      reference: jobNo ? "CHAP-" + jobNo : "",
+      priority: pr ? "Priority " + pr : "",
+      siteCode: "",
+      siteName: property.replace(/\s*,\s*,+/g, ",").replace(/,\s*$/, "").trim(),
+      address: property,
+      postcode,
+      telephone: phoneIn(mobile) || phoneIn(home),
+      description: (prefix2 + desc + (contact ? "\n\n" + contact : "")).trim(),
+      raisedAt: ukDate(entered),
+      respondBy: "",
+      completeBy: "",
+      storeType: "chapplins"
+    }
+  };
+}
+var TEMPLATES = [
+  {
+    id: "concerto-job",
+    label: "Concerto \u2014 New Job Alert (Southern Co-op)",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /New Job Alert/i.test(s) || /You have been assigned a new job/i.test(t),
+    read: concertoJob
+  },
+  {
+    id: "concerto-order",
+    label: "Concerto \u2014 order sheet (client purchase order)",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Order number\s/i.test(s) || /attached order sheet for order number/i.test(t),
+    read: concertoOrder
+  },
+  {
+    id: "concerto-notice",
+    label: "Concerto \u2014 helpdesk action / quote notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s),
+    read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice \u2014 the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" })
+  },
+  {
+    id: "chapplins-job",
+    label: "Chapplins Lettings \u2014 new job raised",
+    domains: ["chapplins.co.uk"],
+    test: (s, t) => /A new job has been raised/i.test(t),
+    read: chapplinsJob
+  },
+  {
+    id: "metrorod-report",
+    label: "Metro Rod \u2014 job card / quote (supplier paperwork)",
+    domains: ["metrorod.co.uk"],
+    test: () => true,
+    read: (s) => ({ kind: "notice", reason: /quote/i.test(s) ? "Metro Rod quotation \u2014 supplier paperwork, not a job" : "Metro Rod job card / report \u2014 supplier paperwork, not a job" })
+  },
+  {
+    id: "mostlane-outbound",
+    label: "Mostlane \u2014 our own drainage/zap emails",
+    domains: ["mostlane.com"],
+    test: (s, t) => /^Send\s+\S+\s+to MetroRod|^Mostlane - Emergency - Order/i.test(s) || /Possible MetroRod job received/i.test(t),
+    read: () => ({ kind: "notice", reason: "Our own outbound drainage email, not a job" })
+  }
+];
+function matchTemplate(sender, subject, text) {
+  const dom = domainOf(sender);
+  const s = String(subject || ""), t = String(text || "");
+  for (const tpl of TEMPLATES) {
+    if (!tpl.domains.some((d) => dom === d || dom.endsWith("." + d))) continue;
+    let hit = false;
+    try {
+      hit = !!tpl.test(s, t);
+    } catch {
+    }
+    if (!hit) continue;
+    let result;
+    try {
+      result = tpl.read(s, t);
+    } catch (e) {
+      result = { kind: "job", missing: ["template error: " + String(e && e.message || e).slice(0, 80)], fields: null };
+    }
+    return { tpl, result };
+  }
+  return null;
+}
+function templateDomain(sender) {
+  const dom = domainOf(sender);
+  return TEMPLATES.some((tpl) => tpl.domains.some((d) => dom === d || dom.endsWith("." + d)));
+}
+var normAddr = (s) => String(s || "").toLowerCase().replace(PC_RE, " ").replace(/\(.*?\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(flat|apartment|apt)\b/g, "flat").replace(/\s+/g, " ").trim();
+async function lookupSite(env, tid, { client, address, postcode }) {
+  if (!env || !env.DB || !address) return null;
+  const pc = String(postcode || "").toUpperCase().replace(/\s+/g, "");
+  let rows = [];
+  try {
+    const q = pc ? env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1 AND REPLACE(UPPER(COALESCE(postcode,'')),' ','')=?").bind(tid, client, pc) : env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client);
+    rows = (await q.all()).results || [];
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+  const want = normAddr(address);
+  const exact = rows.filter((r) => normAddr(r.site_name) === want);
+  if (exact.length === 1) return { siteCode: exact[0].site_number, siteName: exact[0].site_name };
+  const head = want.split(" ").slice(0, 3).join(" ");
+  const lead = head ? rows.filter((r) => normAddr(r.site_name).startsWith(head + " ") || normAddr(r.site_name) === head) : [];
+  if (lead.length === 1) return { siteCode: lead[0].site_number, siteName: lead[0].site_name };
+  return null;
+}
+
+// src/routes/emailjob.js
+init_push();
 var T2 = "inbound_emails";
 async function ensureTable2(env) {
   try {
@@ -21861,7 +22092,7 @@ async function ensureTable2(env) {
   } catch {
   }
 }
-var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "mostlane.com"] };
+var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
@@ -21886,7 +22117,7 @@ function senderAllowed(cfg, ...addrs) {
 }
 async function logIntake(env, tid, rec) {
   try {
-    await env.DB.prepare(`INSERT INTO ${T2} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
+    const r = await env.DB.prepare(`INSERT INTO ${T2} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
       tid,
       rec.messageId || "",
@@ -21902,8 +22133,23 @@ async function logIntake(env, tid, rec) {
       JSON.stringify(rec.fields || null),
       (rec.text || "").slice(0, 12e3)
     ).run();
+    return r && r.meta && r.meta.last_row_id || null;
   } catch (e) {
     console.error("email intake log:", e && e.message);
+    return null;
+  }
+}
+async function pushReview(env, tid, id, subject, reason) {
+  if (!id) return;
+  try {
+    await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "\u{1F4E8} Email needs a look",
+      body: (subject || "(no subject)").slice(0, 120) + " \u2014 " + (reason || "").slice(0, 160),
+      url: "/email-intake.html?review=" + id,
+      tag: "email-review:" + id,
+      actionable: true
+    });
+  } catch {
   }
 }
 async function readRaw(message) {
@@ -21933,9 +22179,9 @@ function splitSection(section) {
   const headStr = idx < 0 ? section : section.slice(0, idx);
   let body = idx < 0 ? "" : section.slice(idx).replace(/^\r?\n\r?\n/, "");
   const headers = {};
-  headStr.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/).forEach((line) => {
-    const c = line.indexOf(":");
-    if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+  headStr.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/).forEach((line2) => {
+    const c = line2.indexOf(":");
+    if (c > 0) headers[line2.slice(0, c).trim().toLowerCase()] = line2.slice(c + 1).trim();
   });
   return { headers, body };
 }
@@ -21984,52 +22230,6 @@ function unwrapForward(subject, text) {
     origFrom = (e ? e[1] : "").toLowerCase().trim();
   }
   return { subject: subj, origFrom };
-}
-var MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
-function londonToIso(y, mo, d, h, mi) {
-  const guess = Date.UTC(y, mo, d, h, mi);
-  try {
-    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", timeZoneName: "shortOffset" }).formatToParts(new Date(guess));
-    const tz = (parts.find((p) => p.type === "timeZoneName") || {}).value || "GMT";
-    const off = /GMT([+-]\d{1,2})/.exec(tz);
-    const hours = off ? Number(off[1]) : 0;
-    return new Date(guess - hours * 36e5).toISOString();
-  } catch {
-    return new Date(guess).toISOString();
-  }
-}
-function concertoDate(s) {
-  const m = /(\d{1,2})\/([A-Za-z]{3})\/(\d{4})\s+(\d{1,2}):(\d{2})/.exec(String(s || ""));
-  if (!m || MON[m[2].toLowerCase()] === void 0) return "";
-  return londonToIso(+m[3], MON[m[2].toLowerCase()], +m[1], +m[4], +m[5]);
-}
-function concertoRegex(subject, text) {
-  const t = String(text || "");
-  if (!/New Job Alert|You have been assigned a new job/i.test(subject + " " + t)) return null;
-  const ref = (/assigned a new job:\s*([^\s<]+)/i.exec(t) || /New Job Alert:\s*([^\s-]+)/i.exec(subject) || [])[1] || "";
-  const pr = (/Priority\s*([1-4])/i.exec(subject) || /SLA of Priority\s*([1-4])/i.exec(t) || [])[1] || "";
-  const siteLine = (/^\s*Site:\s*(.+)$/im.exec(t) || [])[1] || "";
-  const code = (/^\s*(\d{3,5})\b/.exec(siteLine) || [])[1] || "";
-  const postcode = (/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i.exec(siteLine) || [])[1] || "";
-  const fault = (/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i.exec(t) || [])[1] || "";
-  const phone = (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(fault) || [])[1] || "";
-  const respondBy = concertoDate((/target Response Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
-  const completeBy = concertoDate((/target Completion Date\s*&\s*Time:\s*([^\n]+)/i.exec(t) || [])[1]);
-  if (!ref && !fault) return null;
-  return {
-    respondBy,
-    completeBy,
-    isJob: true,
-    reference: ref,
-    priority: pr ? "Priority " + pr : "",
-    siteCode: code,
-    siteName: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").split(",").slice(0, 2).join(",").trim(),
-    address: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").trim(),
-    postcode,
-    telephone: phone,
-    description: fault.trim(),
-    raisedAt: ""
-  };
 }
 async function aiExtract(env, { from, subject, text }) {
   const key = env.ANTHROPIC_API_KEY;
@@ -22086,31 +22286,8 @@ ${text}`;
   const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "extract_job") : null;
   return block && block.input ? block.input : null;
 }
-async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
-  const tid = msg.tid || "1";
-  const cfg = opts.cfg || await getIntakeConfig(env, tid);
-  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
-  const from = String(msg.from || "").toLowerCase();
-  const text = String(msg.text || "").slice(0, 12e3);
-  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject };
-  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
-  if (!opts.force && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + (origFrom || from) + ")" };
-  if (!opts.dryRun && !opts.force && msg.messageId) {
-    try {
-      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated') LIMIT 1`).bind(tid, msg.messageId).first();
-      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
-    } catch {
-    }
-  }
-  let fields = null, source = "ai";
-  if (!opts.noAi) fields = await aiExtract(env, { from: origFrom || from, subject, text });
-  if (!fields) {
-    fields = concertoRegex(subject, text);
-    source = "template";
-  }
-  if (!fields || !fields.isJob) return { ...base, fields, source, outcome: "dropped", reason: fields ? "Not a new job (reply / order / quote / status update)" : "Didn't look like a job email" };
-  if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return { ...base, fields, source, outcome: "dropped", reason: "Looked like a job but had no reference or description" };
-  const payload = {
+function jobPayload(fields, sender) {
+  return {
     reference: fields.reference || void 0,
     description: fields.description || void 0,
     priority: fields.priority || void 0,
@@ -22119,12 +22296,15 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     address: fields.address || void 0,
     postcode: fields.postcode || void 0,
     telephone: fields.telephone || void 0,
+    storeType: fields.storeType || void 0,
     raisedAt: fields.raisedAt || void 0,
     originator: "email",
-    originatorEmail: origFrom || from || void 0,
+    originatorEmail: sender || void 0,
     changedBy: "email"
   };
-  if (opts.dryRun) return { ...base, fields, source, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job"), reference: fields.reference || "", payload };
+}
+async function createJob(env, ctx, fetchSelf, fields, sender) {
+  const payload = jobPayload(fields, sender);
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
@@ -22137,11 +22317,84 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       out = await resp.clone().json();
     } catch {
     }
-    if (!resp.ok) return { ...base, fields, source, outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "" };
-    return { ...base, fields, source, outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "" };
+    if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "", payload };
+    return { outcome: out.created ? "created" : "updated", reason: out.created ? "New job on the board" : "Existing job updated (same reference)", status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
-    return { ...base, fields, source, outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "" };
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
+}
+async function fileOrder(env, ctx, fetchSelf, order, msg) {
+  const tok = env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "";
+  const body = { ...order, externalId: msg.messageId || void 0, notifiedAt: msg.receivedAt || void 0, link: void 0 };
+  const req = new Request("https://mostlane-api.internal/certs/remedials/order-inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + tok },
+    body: JSON.stringify(body)
+  });
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {};
+    try {
+      out = await resp.clone().json();
+    } catch {
+    }
+    if (!resp.ok) return { outcome: "failed", reason: "Client-orders intake refused it: " + (out && out.error || "HTTP " + resp.status), status: resp.status, reference: order.orderNumber || "" };
+    return { outcome: "order", reason: "Client order " + (order.orderNumber || "") + " filed for store " + (order.storeCode || "?") + (out.matched ? " \u2014 matches a remedial awaiting approval" : ""), status: resp.status, reference: order.orderNumber || "" };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach the client-orders intake: " + String(e && e.message || e).slice(0, 120), reference: order.orderNumber || "" };
+  }
+}
+async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
+  const tid = msg.tid || "1";
+  const cfg = opts.cfg || await getIntakeConfig(env, tid);
+  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
+  const from = String(msg.from || "").toLowerCase();
+  const sender = origFrom || from;
+  const text = String(msg.text || "").slice(0, 12e3);
+  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject, template: "", source: "" };
+  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
+  if (/^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread \u2014 not a new job", source: "template" };
+  const tm = matchTemplate(sender, subject, text);
+  if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
+  if (!opts.dryRun && !opts.force && msg.messageId) {
+    try {
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order') LIMIT 1`).bind(tid, msg.messageId).first();
+      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
+    } catch {
+    }
+  }
+  if (tm) {
+    const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
+    if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "order") {
+      if (r.missing && r.missing.length) return { ...out2, fields: r.order, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out2, fields: r.order, outcome: "dryrun", reason: "Would file client order " + r.order.orderNumber + " for store " + r.order.storeCode + " (client orders, not the job board)", reference: r.order.orderNumber };
+      return { ...out2, fields: r.order, ...await fileOrder(env, ctx, fetchSelf, r.order, msg) };
+    }
+    const fields2 = r.fields || {};
+    if (r.missing && r.missing.length) return { ...out2, fields: fields2, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+    if (r.siteLookup) {
+      const hit = await lookupSite(env, tid, r.siteLookup);
+      if (hit) {
+        fields2.siteCode = hit.siteCode;
+        fields2.siteName = hit.siteName;
+        fields2.siteMatched = true;
+      } else fields2.siteMatched = false;
+    }
+    if (opts.dryRun) return { ...out2, fields: fields2, outcome: "dryrun", reason: "Would " + (fields2.reference ? "create/update job " + fields2.reference : "create a job") + (r.siteLookup ? fields2.siteMatched ? " at site " + fields2.siteCode : " (property not matched to a site \u2014 the office links it)" : ""), reference: fields2.reference || "", payload: jobPayload(fields2, sender) };
+    return { ...out2, fields: fields2, ...await createJob(env, ctx, fetchSelf, fields2, sender) };
+  }
+  let fields = null;
+  if (!opts.noAi) fields = await aiExtract(env, { from: sender, subject, text });
+  const out = { ...base, fields, source: fields ? "ai" : "none" };
+  if (fields && fields.isJob === false) return { ...out, outcome: "dropped", reason: "No template for this layout; the AI read it as not a job (reply / order / quote / status update)" };
+  const usable = fields && (String(fields.reference || "").trim() || String(fields.description || "").trim());
+  if (cfg.aiAutoCreate === true && usable) {
+    if (opts.dryRun) return { ...out, outcome: "dryrun", reason: "No template \u2014 AI auto-create is ON, would create job " + (fields.reference || "(no reference)"), reference: fields.reference || "", payload: jobPayload(fields, sender) };
+    return { ...out, ...await createJob(env, ctx, fetchSelf, fields, sender) };
+  }
+  const why = usable ? "No template for this layout \u2014 the AI's reading is attached for you to check before it becomes a job" : !env.ANTHROPIC_API_KEY || opts.noAi ? "No template for this layout (and no AI key to read it) \u2014 needs a look" : "No template for this layout and the AI couldn't read it \u2014 needs a look";
+  return { ...out, outcome: "review", reason: (opts.dryRun ? "Would hold for a check: " : "") + why, reference: fields && fields.reference || "" };
 }
 async function handleInboundEmail(message, env, ctx, fetchSelf) {
   const from = String(message.from || "").toLowerCase();
@@ -22158,8 +22411,10 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
   const text = (extractText(raw) || "").slice(0, 12e3);
   const tid = "1";
   await ensureTable2(env);
-  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId });
-  await logIntake(env, tid, { messageId, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  const receivedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId, receivedAt });
+  const id = await logIntake(env, tid, { messageId, receivedAt, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  if (res.outcome === "review" || res.outcome === "failed") await pushReview(env, tid, id, subject, res.reason);
   console.log("email intake:", res.outcome, "\u2014", subject, "\u2014", res.reason);
 }
 async function handleApi(request, env, ctx, url, sess, fetchSelf) {
@@ -22184,13 +22439,19 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
       for (const r of results || []) counts[r.outcome] = r.n;
     } catch {
     }
-    return json({ ok: true, config: cfg, last, counts7d: counts, aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
+    let review = 0;
+    try {
+      const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND outcome='review'`).bind(tid).first();
+      review = r && r.n || 0;
+    } catch {
+    }
+    return json({ ok: true, config: cfg, last, counts7d: counts, reviewOpen: review, templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, domains: t.domains })), aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
   }
   if (sub === "/log" && method === "GET") {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 60));
     let rows = [];
     try {
-      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all();
+      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, substr(text,1,4000) AS text FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all();
       rows = results || [];
     } catch {
     }
@@ -22216,9 +22477,36 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     const b = await request.json().catch(() => ({}));
     const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
     if (!row) return error("Log entry not found", 404, env, request);
-    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "" }, { force: true });
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "", receivedAt: row.received_at || "" }, { force: true });
     await logIntake(env, tid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
     return json({ ok: true, ...res }, {}, env, request);
+  }
+  if (sub === "/templates" && method === "GET") {
+    return json({ ok: true, templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, domains: t.domains })) }, {}, env, request);
+  }
+  if ((sub === "/approve" || sub === "/dismiss") && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    if (!row) return error("Log entry not found", 404, env, request);
+    if (sub === "/dismiss") {
+      await env.DB.prepare(`UPDATE ${T2} SET outcome='dismissed', reason=? WHERE tenant_id=? AND id=?`).bind(("Dismissed by " + me + (b.note ? ": " + String(b.note).slice(0, 200) : "")).slice(0, 300), tid, row.id).run();
+      ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email dismissed", body: (row.subject || "").slice(0, 120) + " \u2014 dismissed by " + me }).catch(() => {
+      }));
+      return json({ ok: true, outcome: "dismissed" }, {}, env, request);
+    }
+    let stored = {};
+    try {
+      stored = JSON.parse(row.fields || "{}") || {};
+    } catch {
+    }
+    const fields = { ...stored, ...b.fields && typeof b.fields === "object" ? b.fields : {} };
+    if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return error("A reference or a description is needed to create the job", 400, env, request);
+    const res = await createJob(env, ctx, fetchSelf, fields, row.orig_from || row.from_addr || "");
+    if (res.outcome === "failed") return json({ ok: false, error: res.reason, ...res }, { status: 502 }, env, request);
+    await env.DB.prepare(`UPDATE ${T2} SET outcome=?, reason=?, reference=?, job_id=?, status_code=?, fields=? WHERE tenant_id=? AND id=?`).bind(res.outcome, ("Approved by " + me + " \u2014 " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), tid, row.id).run();
+    ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email \u2192 job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " \u2014 created by " + me }).catch(() => {
+    }));
+    return json({ ok: true, ...res, fields }, {}, env, request);
   }
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);
@@ -22228,6 +22516,7 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
       const next = { ...cur };
       if (b.enabled !== void 0) next.enabled = !!b.enabled;
       if (Array.isArray(b.allowFrom)) next.allowFrom = b.allowFrom.map((x) => String(x || "").toLowerCase().trim()).filter(Boolean).slice(0, 50);
+      if (b.aiAutoCreate !== void 0) next.aiAutoCreate = b.aiAutoCreate === true;
       await saveIntakeConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }
@@ -31116,19 +31405,19 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   };
   const lines = String(docObj.body || "").split(/\r?\n/);
   for (const raw of lines) {
-    const line = raw.replace(/\s+$/, "");
-    if (!line.trim()) {
+    const line2 = raw.replace(/\s+$/, "");
+    if (!line2.trim()) {
       y += 8;
       continue;
     }
-    if (/^---+$/.test(line.trim())) {
+    if (/^---+$/.test(line2.trim())) {
       need(16);
       doc.hr(L, y, R, { grey: true });
       y += 14;
       continue;
     }
-    if (/^#\s+/.test(line)) {
-      const t = line.replace(/^#\s+/, "");
+    if (/^#\s+/.test(line2)) {
+      const t = line2.replace(/^#\s+/, "");
       need(24);
       y += 6;
       for (const ln of wrap6(t, 15, W5)) {
@@ -31138,8 +31427,8 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y += 2;
       continue;
     }
-    if (/^##\s+/.test(line)) {
-      const t = line.replace(/^##\s+/, "");
+    if (/^##\s+/.test(line2)) {
+      const t = line2.replace(/^##\s+/, "");
       need(20);
       y += 4;
       for (const ln of wrap6(t, 12, W5)) {
@@ -31148,8 +31437,8 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       }
       continue;
     }
-    if (/^[-•]\s+/.test(line)) {
-      const t = line.replace(/^[-•]\s+/, "");
+    if (/^[-•]\s+/.test(line2)) {
+      const t = line2.replace(/^[-•]\s+/, "");
       const parts2 = wrap6(t, 10.5, W5 - 16);
       need(parts2.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
@@ -31160,7 +31449,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y += 2;
       continue;
     }
-    const parts = wrap6(line, 10.5, W5);
+    const parts = wrap6(line2, 10.5, W5);
     need(parts.length * 15);
     for (const ln of parts) {
       doc.text(L, y, ln, { size: 10.5 });
@@ -35146,26 +35435,26 @@ function fitText(str, w, size) {
 function wrapLines2(str, w, size, maxLines) {
   const words = String(str || "").split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
+  let line2 = "";
   for (let word of words) {
     while (textWidth(word, size) > w && word.length > 1) {
-      if (line) {
-        lines.push(line);
-        line = "";
+      if (line2) {
+        lines.push(line2);
+        line2 = "";
       }
       let k = word.length;
       while (k > 1 && textWidth(word.slice(0, k), size) > w) k--;
       lines.push(word.slice(0, k));
       word = word.slice(k);
     }
-    const test = line ? line + " " + word : word;
-    if (textWidth(test, size) <= w) line = test;
+    const test = line2 ? line2 + " " + word : word;
+    if (textWidth(test, size) <= w) line2 = test;
     else {
-      if (line) lines.push(line);
-      line = word;
+      if (line2) lines.push(line2);
+      line2 = word;
     }
   }
-  if (line) lines.push(line);
+  if (line2) lines.push(line2);
   if (!lines.length) lines.push("");
   if (maxLines && lines.length > maxLines) {
     const kept = lines.slice(0, maxLines);
@@ -35276,39 +35565,39 @@ function buildProgrammePdf(data, meta = {}) {
       if (rangeLbl) doc.text(PW - M7, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
       const legendRightL1 = PW - M7 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M7, line = 0, dropped = 0;
+      let lx = M7, line2 = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M7;
+        const right = line2 === 0 ? legendRightL1 : PW - M7;
         if (lx + w > right) {
-          if (line === 0) {
-            line = 1;
+          if (line2 === 0) {
+            line2 = 1;
             lx = M7;
           } else {
             dropped++;
             continue;
           }
         }
-        const ly = y + line * LEG_LINE_H;
+        const ly = y + line2 * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: hex2rgb(c.colour) });
         doc.text(lx + 11, ly, c.name, { size: 8.5 });
         lx += w;
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M7;
-        if (lx + w > right && line === 0) {
-          line = 1;
+        const right = line2 === 0 ? legendRightL1 : PW - M7;
+        if (lx + w > right && line2 === 0) {
+          line2 = 1;
           lx = M7;
         }
-        const ly = y + line * LEG_LINE_H;
+        const ly = y + line2 * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
         doc.rect(lx - 0.4, ly - 7.4, 8.8, 8.8, { stroke: EXTRA_COL, lw: 1.1 });
         doc.text(lx + 11, ly, "Extra works", { size: 8.5, color: [0.55, 0.28, 0.05] });
         lx += w;
       }
-      if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
+      if (dropped) doc.text(lx, y + line2 * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M7 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
