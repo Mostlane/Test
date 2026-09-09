@@ -3567,10 +3567,34 @@ async function stampOrderOnJob(env, tenantId, job, o) {
   await saveJob(env, tenantId, job);
   return job;
 }
-async function markOrderLinked(env, tenantId, orderId, jobId) {
-  try { await env.DB.prepare("UPDATE client_orders SET matched_kind='job', matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(jobId, new Date().toISOString(), tenantId, orderId).run(); } catch {}
+async function markOrderLinked(env, tenantId, orderId, jobId, kind) {
+  const k = kind === "em" || kind === "elec" ? kind : "job";
+  try { await env.DB.prepare("UPDATE client_orders SET matched_kind=?, matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(k, jobId, new Date().toISOString(), tenantId, orderId).run(); } catch {}
 }
-const shapeOrderRow = r => r ? ({ id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new" }) : null;
+const shapeOrderRow = r => r ? ({ id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new", unlinkedJobId: r.unlinked_job_id || "" }) : null;
+/* The office pressed Unlink on an order: the job forgets the order (number, value,
+   link — an event notes who did it), and the order goes back to "new" with the
+   job remembered as `unlinked_job_id` so no automatic path re-attaches the pair
+   (a re-sent email, the job arriving again, Make the job). */
+export async function unlinkOrderFromJob(env, tenantId, o, by) {
+  if (!o || !o.id) return null;
+  const jobId = String(o.matchedJobId || "").trim();
+  let job = null;
+  if (jobId) {
+    job = await getJob(env, tenantId, jobId);
+    if (job && (job.clientOrderId === o.id || (o.orderNumber && job.orderNumber === o.orderNumber))) {
+      delete job.orderNumber; delete job.orderValue; delete job.clientOrderId;
+      (job.events ||= []).push({ at: new Date().toISOString(), by: by || "office", type: "note", note: "Client order " + (o.orderNumber || "") + " unlinked from this job" + (by ? " by " + by : "") });
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+    }
+  }
+  try {
+    await env.DB.prepare("UPDATE client_orders SET matched_job_id=NULL, matched_kind=NULL, matched_cert_id=NULL, match_note=NULL, unlinked_job_id=?, status='new', actioned_at=NULL, actioned_by=NULL, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(jobId || null, new Date().toISOString(), tenantId, o.id).run();
+  } catch {}
+  return job;
+}
 /* A job was created/updated with reference X — is there an unlinked client order
    for X? Stamp it on. Best-effort (the orders table may not exist yet). */
 export async function applyOrderToJob(env, tenantId, job) {
@@ -3580,6 +3604,7 @@ export async function applyOrderToJob(env, tenantId, job) {
   try { row = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND order_number=? AND status<>'dismissed' ORDER BY created_at DESC LIMIT 1").bind(tenantId, ref).first(); } catch { return null; }
   if (!row) return null;
   const o = shapeOrderRow(row);
+  if (o.unlinkedJobId && o.unlinkedJobId === job.id) return null;
   await stampOrderOnJob(env, tenantId, job, o);
   await markOrderLinked(env, tenantId, o.id, job.id);
   return o;
@@ -3589,7 +3614,10 @@ export async function applyOrderToJob(env, tenantId, job) {
 export async function linkOrderToExistingJob(env, tenantId, o) {
   const ref = String((o && o.orderNumber) || "").trim();
   if (!ref) return null;
-  const jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter(j => String(j.helpdeskRef || "") === ref || j.id === ref);
+  const skip = String((o && o.unlinkedJobId) || "");
+  let jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter(j => String(j.helpdeskRef || "") === ref || j.id === ref);
+  if (!jobs.length) jobs = await jobsWithRefContaining(env, tenantId, ref);
+  jobs = jobs.filter(j => j.id !== skip);
   if (!jobs.length) return null;
   const finished = await jobFinishedFor(env, tenantId);
   const open = jobs.filter(j => !finished(j));
@@ -3598,13 +3626,25 @@ export async function linkOrderToExistingJob(env, tenantId, o) {
   await markOrderLinked(env, tenantId, o.id, pick.id);
   return pick;
 }
-/* Office hand-link: order → a specific job id. */
-export async function linkOrderToJobById(env, tenantId, o, jobId, by) {
+/* Jobs whose reference CONTAINS the order number as a whole token — the office
+   often types it into a hand-made job's reference ("R29051- EM remedial — 0622").
+   Word-bounded so R2905 never claims R29051. Open jobs first, newest first. */
+async function jobsWithRefContaining(env, tenantId, ref) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try { rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? LIMIT 50").bind(tenantId, "%" + ref + "%").all()).results || []; } catch { return []; }
+  const re = new RegExp("(^|[^A-Za-z0-9])" + ref.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&") + "([^A-Za-z0-9]|$)");
+  return rows.map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate && re.test(String(j.helpdeskRef || "")));
+}
+/* Office hand-link (or a certificate match): order → a specific job id.
+   opts.kind keeps "em"/"elec" on the order so the remedials tracker still knows
+   which certificate it belongs to; default "job". */
+export async function linkOrderToJobById(env, tenantId, o, jobId, by, opts = {}) {
   const job = await getJob(env, tenantId, jobId);
   if (!job) return null;
   await stampOrderOnJob(env, tenantId, job, o);
   if (by) { try { const j2 = await getJob(env, tenantId, jobId); if (j2) { (j2.events ||= []).push({ at: new Date().toISOString(), by, type: "note", note: "Order linked by " + by }); await saveJob(env, tenantId, j2); } } catch {} }
-  await markOrderLinked(env, tenantId, o.id, jobId);
+  await markOrderLinked(env, tenantId, o.id, jobId, opts.kind);
   return job;
 }
 /* The office pressed "Make the job" on an order. Returns {job, how, from}:

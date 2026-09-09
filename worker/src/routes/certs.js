@@ -27,7 +27,7 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
-import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById, unlinkOrderFromJob } from "./sla.js";
 import { canSeeMoney } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
@@ -164,7 +164,15 @@ async function ensureTables(env) {
   // from a certificate PDF during the compliance-check pass) so the register can
   // badge auto-added rows for the office to verify. Self-migrating.
   try { await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run(); } catch (e) {}
+  // client_orders: a COPY of the order email (subject/from/text) so any office user
+  // can read it from the board without Outlook access, plus the job the office
+  // UNLINKED (so nothing automatic re-attaches that pair). Self-migrating.
+  for (const col of ["email_subject TEXT", "email_from TEXT", "email_text TEXT", "unlinked_job_id TEXT"]) {
+    try { await env.DB.prepare("ALTER TABLE client_orders ADD COLUMN " + col).run(); } catch (e) {}
+  }
 }
+// The board/list columns — never the email copy itself (up to 12 KB a row).
+const ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
 // Pipeline v2: to_quote (blocking pop-up until "Quote sent") → quoted (waiting for
 // the client's PO) → PO received → in_works (audit job raised; may be
 // awaiting_batteries) | done (all fittings replaced on site → clean cert auto-filed)
@@ -468,6 +476,19 @@ async function poReceived(env, tid, certId, me, ctx) {
   const jobId = await createRemedialWorksJob(env, tid, certId, { awaitingBatteries: awaiting });
   await env.DB.prepare("UPDATE em_remedial_acks SET stage='in_works', job_id=COALESCE(?,job_id), awaiting_batteries=? WHERE tenant_id=? AND cert_id=?")
     .bind(jobId, awaiting ? 1 : 0, tid, certId).run();
+  // The client's order for this case already came in (matched, waiting for the
+  // office)? It belongs to the works job just raised — link it + stamp its value.
+  if (jobId) {
+    try {
+      const { results } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND matched_cert_id=? AND status IN ('new','matched') ORDER BY created_at DESC LIMIT 5").bind(tid, certId).all();
+      for (const r of (results || [])) {
+        const o = shapeOrder(r);
+        if (o.unlinkedJobId && o.unlinkedJobId === jobId) continue;
+        await linkOrderToJobById(env, tid, o, jobId, me, { kind: "em" });
+        await env.DB.prepare("UPDATE client_orders SET status='actioned', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, r.id).run();
+      }
+    } catch {}
+  }
   return { stage: "in_works", jobId, awaitingBatteries: awaiting };
 }
 
@@ -559,15 +580,24 @@ const numOf = v => { const d = String(v ?? "").replace(/\D/g, ""); return d ? St
 async function matchOrderToRemedial(env, tid, o) {
   const code = padCode(o.storeCode), num = numOf(o.storeCode);
   if (!code && !num) return null;
-  // 1) EM remedial case awaiting approval at this store.
+  // 1) EM remedial case at this store: awaiting approval (to_quote/quoted — the
+  //    office approves from the order), OR already approved / in works because the
+  //    office pressed "PO received" by hand before the order email landed — a LATE
+  //    order, which links straight to the works job it already has (`jobId`).
+  //    Waiting cases first, then the newest.
   try {
     const { results } = await env.DB.prepare(
-      "SELECT cert_id, site_code, site_name, cert_number, stage FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted') ORDER BY created_at DESC LIMIT 200"
+      "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
-    const cands = (results || []).filter(r => numOf(r.site_code) && numOf(r.site_code) === num);
+    const skip = String(o.unlinkedJobId || "");
+    const waiting = r => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
+    const cands = (results || []).filter(r => numOf(r.site_code) && numOf(r.site_code) === num && !(r.job_id && r.job_id === skip))
+      .sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
-      return { kind: "em", certId: r.cert_id, note: `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})` + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
+      const late = !waiting(r) && r.job_id;
+      return { kind: "em", certId: r.cert_id, jobId: late ? r.job_id : null, stage: r.stage || "to_quote",
+        note: (late ? `Late order — EM cert ${r.cert_number || ""} at ${r.site_name || code} already has its works job (stage ${r.stage})` : `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})`) + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
     }
   } catch {}
   // 2) Electrical-test job with remedials not yet raised as a works job.
@@ -588,6 +618,8 @@ function shapeOrder(r) {
     notifiedAt: r.notified_at || "", link: r.link || "", source: r.source || "", status: r.status || "new",
     matchedKind: r.matched_kind || "", matchedCertId: r.matched_cert_id || "", matchedJobId: r.matched_job_id || "",
     matchNote: r.match_note || "", createdAt: r.created_at || "",
+    unlinkedJobId: r.unlinked_job_id || "", hasEmail: r.has_email != null ? !!Number(r.has_email) : !!r.email_text,
+    emailSubject: r.email_subject || "", emailFrom: r.email_from || "",
   };
 }
 async function handleOrderInbound(env, tid, b, ctx, request) {
@@ -604,11 +636,19 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   if (extId) { const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND external_id=? LIMIT 1").bind(tid, extId).first().catch(() => null); if (ex) { id = ex.id; created = false; } }
   if (!id && orderNumber) { const ex = await env.DB.prepare("SELECT id FROM client_orders WHERE tenant_id=? AND order_number=? LIMIT 1").bind(tid, orderNumber).first().catch(() => null); if (ex) { id = ex.id; created = false; } }
   if (!id) id = "ord-" + crypto.randomUUID();
-  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber });
+  // A re-sent email must not re-attach a pair the office unlinked.
+  let unlinkedJobId = "";
+  if (!created) { try { const ex = await env.DB.prepare("SELECT unlinked_job_id FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, id).first(); unlinkedJobId = (ex && ex.unlinked_job_id) || ""; } catch {} }
+  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber, unlinkedJobId });
   const status = m ? "matched" : "new";
+  // A copy of the email (subject / from / text) travels with the order so any office
+  // user can read it from the board — the mailbox itself is one person's Outlook.
+  const emailSubject = String(b.emailSubject || "").slice(0, 300) || null;
+  const emailFrom = String(b.emailFrom || "").slice(0, 200) || null;
+  const emailText = String(b.emailText || "").slice(0, 12000) || null;
   await env.DB.prepare(`INSERT INTO client_orders
-    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,email_subject,email_from,email_text)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET order_number=excluded.order_number, client=excluded.client, priority=excluded.priority,
       order_value=excluded.order_value, currency=excluded.currency, title=excluded.title, detail=excluded.detail,
       description=excluded.description, job_category=excluded.job_category, observation_codes=excluded.observation_codes,
@@ -616,27 +656,34 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       site_raw=excluded.site_raw, notified_at=excluded.notified_at, link=excluded.link,
       status=CASE WHEN client_orders.status IN ('actioned','dismissed') THEN client_orders.status ELSE excluded.status END,
       matched_kind=excluded.matched_kind, matched_cert_id=excluded.matched_cert_id, matched_job_id=excluded.matched_job_id,
-      match_note=excluded.match_note, updated_at=excluded.updated_at`)
+      match_note=excluded.match_note, updated_at=excluded.updated_at,
+      email_subject=COALESCE(excluded.email_subject, client_orders.email_subject), email_from=COALESCE(excluded.email_from, client_orders.email_from),
+      email_text=COALESCE(excluded.email_text, client_orders.email_text)`)
     .bind(id, tid, extId || null, orderNumber || null, String(b.client || "").slice(0, 80), Number(b.priority) || null,
       (b.orderValue != null ? Number(b.orderValue) : null), String(b.currency || "GBP").slice(0, 8), title, detail,
       String(b.description || "").slice(0, 4000), String(b.jobCategory || "").slice(0, 20),
       JSON.stringify(Array.isArray(b.observationCodes) ? b.observationCodes.slice(0, 40) : []), b.alreadyDoneOnSite ? 1 : 0,
       storeCode || null, siteName || null, srRef || null, String(b.siteRaw || "").slice(0, 200),
       String(b.notifiedAt || now).slice(0, 40), String(b.link || "").slice(0, 800) || null, String(b.source || "concerto").slice(0, 40),
-      status, m ? m.kind : null, m ? (m.certId || null) : null, m ? (m.jobId || null) : null, m ? m.note : null, now, now).run();
-  // A job with exactly this reference already on the board (the "New Job Alert"
-  // came first)? Stamp the order's value on it and mark the order linked.
+      status, m ? m.kind : null, m ? (m.certId || null) : null, m ? (m.jobId || null) : null, m ? m.note : null, now, now,
+      emailSubject, emailFrom, emailText).run();
+  const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
+  // A job with this reference already on the board (the "New Job Alert" came first,
+  // or the office typed the order number into a hand-made job's reference)? Stamp
+  // the order's value on it and mark the order linked. A LATE order for an EM case
+  // whose works job already exists links to that works job the same way.
   let linkedJob = null;
-  if (!m) { try { linkedJob = await linkOrderToExistingJob(env, tid, { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null }); } catch {} }
+  if (!m) { try { linkedJob = await linkOrderToExistingJob(env, tid, oShape); } catch {} }
+  else if (m.jobId) { try { linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" }); } catch {} }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = m
-      ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
-      : (linkedJob
-        ? `Client order ${orderNumber || ""} for ${site} — linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).`
+    const body = linkedJob
+      ? `Client order ${orderNumber || ""} for ${site} — linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).`
+      : (m
+        ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
         : `Client order ${orderNumber || ""} for ${site} — open the Client orders board to make the job.`);
     ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m ? "Client order — approve remedial" : "Client order received", body, url: m ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
+      { title: (m && !linkedJob) ? "Client order — approve remedial" : "Client order received", body, url: (m && !linkedJob) ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : (linkedJob ? "job" : null), status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
@@ -1765,15 +1812,14 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/orders" && method === "GET") {
     if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const client = String(q.get("client") || "").trim().toLowerCase();
-    const { results } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600").bind(tid).all();
+    const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600`).bind(tid).all();
     const rows = (results || []).map(shapeOrder);
     const all = await listJobs(env, tid);
     const byId = new Map(all.map(j => [j.id, j]));
-    const byRef = new Map(); for (const j of all) { const r = String(j.helpdeskRef || "").trim(); if (r && !byRef.has(r)) byRef.set(r, j); }
     let doneNames = new Set(); try { const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); (JSON.parse((c && c.value) || "[]") || []).forEach(x => { if (x && x.done) doneNames.add(String(x.name || "").toLowerCase()); }); } catch {}
     const finished = j => { const st = String((j && j.status) || "").toLowerCase(); return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st); };
     const shaped = rows.map(o => {
-      const j = (o.matchedKind === "job" && o.matchedJobId && byId.get(o.matchedJobId)) || (o.orderNumber && byRef.get(o.orderNumber)) || null;
+      const j = (o.matchedJobId && byId.get(o.matchedJobId)) || null;
       const incident = (/^(\d{5,12})\/\d{1,3}$/.exec(o.orderNumber || "") || [])[1] || "";
       const earlier = incident ? all.filter(x => new RegExp("^" + incident + "/\\d{1,3}$").test(String(x.helpdeskRef || "")) && (!j || x.id !== j.id)).map(x => ({ id: x.id, ref: x.helpdeskRef || x.id, status: x.status || "" })) : [];
       const stage = o.status === "dismissed" ? "dismissed" : (!j ? "needs_job" : (finished(j) ? "done" : "live"));
@@ -1794,6 +1840,27 @@ export async function handle(request, env, ctx, url, sess) {
     const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes: Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : undefined, assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [] });
     return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null }, {}, env, request);
   }
+  // POST /certs/orders/unlink {id} — the office decides this order is NOT for the job
+  // it was attached to: the job forgets the order (number/value), the order goes
+  // back to "new", and that job is remembered so nothing automatic re-links them.
+  if (sub === "/orders/unlink" && method === "POST") {
+    if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (!ord.matched_job_id) return error("This order isn't linked to a job", 400, env, request);
+    const jobId = String(ord.matched_job_id);
+    const job = await unlinkOrderFromJob(env, tid, shapeOrder(ord), me);
+    return json({ ok: true, jobId, ref: job ? (job.helpdeskRef || job.id) : jobId }, {}, env, request);
+  }
+  // GET /certs/orders/email?id= — the stored copy of the order email (any office
+  // user; the mailbox itself is one person's Outlook).
+  if (sub === "/orders/email" && method === "GET") {
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
+    const ord = await env.DB.prepare("SELECT id, order_number, notified_at, link, email_subject, email_from, email_text FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(q.get("id") || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    return json({ ok: true, id: ord.id, orderNumber: ord.order_number || "", at: ord.notified_at || "", link: ord.link || "", subject: ord.email_subject || "", from: ord.email_from || "", text: ord.email_text || "" }, {}, env, request);
+  }
   if (sub === "/orders/link" && method === "POST") {
     if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
@@ -1811,7 +1878,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
     const all = q.get("all") === "1";
     const { results } = await env.DB.prepare(
-      `SELECT * FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
+      `SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
     ).bind(tid).all();
     return json({ ok: true, orders: (results || []).map(shapeOrder) }, {}, env, request);
   }
@@ -1843,6 +1910,7 @@ export async function handle(request, env, ctx, url, sess) {
         // Client order landed → same as pressing "PO Received" on the case.
         const res = await poReceived(env, tid, ord.matched_cert_id, me, ctx);
         jobId = res.jobId || null;
+        if (jobId) { try { await linkOrderToJobById(env, tid, shapeOrder(ord), jobId, me, { kind: "em" }); } catch {} }
         note = res.stage === "done" ? "All fittings were replaced on site — updated certificate filed to compliance." : (res.awaitingBatteries ? "Works job raised (awaiting batteries)." : "Works job raised.");
       } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
         jobId = ord.matched_job_id;

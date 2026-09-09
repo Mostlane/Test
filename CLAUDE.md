@@ -4373,6 +4373,36 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   stripping per role, costing 403, visits, dismissed). NB `client_orders.tenant_id`
   is TEXT and certs.js binds the session's numeric tenant id — sla.js binds the
   same number (never `String(tenantId)`) or the rows are invisible (the '1.0' quirk).
+  - **EM remedial orders ↔ the works job, unlink, email copy (9 Sep 2026 — Jamie:
+    "why do the REM orders not link to the REM job… I must be able to unlink… a copy
+    of the email").** Found live: the Frome R29051 order sat "new" while its works
+    job (`emrem:<certId>`) was already scheduled — the office had pressed PO received
+    by hand minutes after the email, the matcher only looked at cases at
+    to_quote/quoted, and even a matched order never put its value on the works job.
+    Now: (a) `matchOrderToRemedial` also matches cases at **approved/in_works** —
+    a LATE order links straight to the existing works job (`m.jobId`) with the value
+    stamped, status `linked`, `matched_kind` stays `em`; (b) **approve** from the
+    orders list AND **PO received on the tracker** (`poReceived`) both link any
+    waiting matched order to the works job they raise and stamp `orderNumber/
+    orderValue` on it; (c) `linkOrderToExistingJob` falls back to a job whose
+    reference CONTAINS the order number as a whole token (`jobsWithRefContaining`,
+    "R29051- EM remedial — 0622"; R2905 never claims R29051); (d) **POST
+    /certs/orders/unlink {id}** (`sla.js unlinkOrderFromJob`): the job forgets
+    number/value/link (+ an event naming who), the order goes back to `new` and the
+    job is remembered in **`client_orders.unlinked_job_id`** — a re-sent email, the
+    job arriving again (`applyOrderToJob`), the matcher and Make the job all skip
+    that pair; a deliberate hand-link (/orders/link) still works; (e) a **COPY of the
+    order email** rides with the order (`email_subject/email_from/email_text`,
+    ≤12 KB, sent by emailjob `fileOrder`; COALESCEd on re-send so a copy is never
+    lost) → **GET /certs/orders/email?id=** (money-gated) + a "📧 View email" modal on
+    client-orders.html, because the mailbox is one person's Outlook. The board's job
+    link is now the EXPLICIT `matched_job_id` only (no by-reference guess, so an
+    unlinked order never re-attaches visually); list queries use `ORDER_COLS`
+    (never the email text) + `has_email`. Backfilled 9 Sep: the 30 orders from
+    27 Aug–8 Sep loaded straight to D1 (with email copies) and R29051 hand-linked to
+    Frome's works job. NB "replaced on site" R/REM orders (R28878, REM0150/0151,
+    R29052) have no case/job to link — they are billing only. Tests: cases 6–11 in
+    `test-client-orders.mjs` (31 cases).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
