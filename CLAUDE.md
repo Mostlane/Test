@@ -4452,7 +4452,7 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   mostly the Aug-2025 batch Concerto still shows open because completion dates were
   never logged (Greg's Jan-2026 email) — those read "Done our side". **Test:**
   `node --no-warnings worker/tools/test-concerto.mjs` (real SQLite via node:sqlite
-  behind a D1-shaped shim — 50 cases). SW `mostlane-v121`.
+  behind a D1-shaped shim — 50 cases). SW `mostlane-v122` (portal-config `?v=32` — the sidebar entry needed a bump because phones held the v31 file fetched before the merge).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
