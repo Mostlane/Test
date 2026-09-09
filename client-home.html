@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Mostlane — Client Portal</title>
+  <!-- Standalone + walled: this page does NOT load portal-config (no staff sidebar,
+       tiles, gates or chrome). It talks only to the org-scoped /client/* API plus
+       the read-only compliance endpoints (which grant a client its own scheme). -->
+  <style>
+    :root{ --brand:#003366; --ink:#0f2438; --line:#e2e8f0; --muted:#667085; --ok:#0a7d33; --bad:#b00020; --amber:#b45309; }
+    *{ box-sizing:border-box; }
+    html,body{ margin:0; }
+    body{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:var(--ink); }
+    header.top{ background:var(--brand); color:#fff; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px; display:flex; align-items:center; gap:12px; }
+    header.top .m{ width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--brand);flex:none; }
+    header.top h1{ font-size:16px; margin:0; flex:1; line-height:1.2; }
+    header.top h1 small{ display:block; font-size:12px; opacity:.8; font-weight:400; }
+    header.top button{ background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:8px; padding:8px 11px; font:inherit; font-size:13px; cursor:pointer; }
+    .tabs{ display:flex; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+    .tabs button{ flex:1; border:none; background:none; padding:13px 6px; font:600 13.5px inherit; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; }
+    .tabs button.on{ color:var(--brand); border-bottom-color:var(--brand); }
+    .wrap{ max-width:760px; margin:0 auto; padding:14px 12px 60px; }
+    .card{ background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.05); padding:14px; margin-bottom:12px; }
+    label{ display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input,select,textarea{ width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; background:#fff; color:var(--ink); }
+    textarea{ min-height:90px; resize:vertical; }
+    .btn{ background:var(--brand); color:#fff; border:none; border-radius:10px; padding:12px 16px; font:700 15px inherit; cursor:pointer; }
+    .btn.ghost{ background:#fff; color:var(--brand); border:1px solid #ccd5dd; }
+    .btn:disabled{ opacity:.55; }
+    .muted{ color:var(--muted); }
+    .pill{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; }
+    .pill.pending{ background:#fff6e5; color:var(--amber); }
+    .pill.complete{ background:#e6f6ec; color:var(--ok); }
+    .jobrow{ display:flex; align-items:center; gap:10px; padding:12px 4px; border-top:1px solid #f0f3f7; cursor:pointer; }
+    .jobrow:first-child{ border-top:none; }
+    .jobrow .body{ flex:1; min-width:0; }
+    .jobrow .body .t{ font-weight:700; font-size:14.5px; }
+    .jobrow .body .s{ font-size:12.5px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .seg{ display:flex; gap:8px; }
+    .seg button{ flex:1; border:2px solid #ccd5dd; background:#fff; border-radius:11px; padding:11px; font:700 14px inherit; color:var(--muted); cursor:pointer; }
+    .seg button.on{ border-color:var(--brand); background:#eef4fb; color:var(--brand); }
+    .msg{ font-size:14px; margin:10px 0; } .msg.err{ color:var(--bad); } .msg.ok{ color:var(--ok); }
+    .filters{ display:flex; gap:8px; margin-bottom:10px; }
+    .filters button{ border:1px solid #ccd5dd; background:#fff; border-radius:999px; padding:6px 14px; font:600 13px inherit; color:var(--muted); cursor:pointer; }
+    .filters button.on{ background:var(--brand); color:#fff; border-color:var(--brand); }
+    table.chart{ width:100%; border-collapse:collapse; font-size:13px; }
+    table.chart th,table.chart td{ text-align:left; padding:8px 6px; border-bottom:1px solid #f0f3f7; white-space:nowrap; }
+    table.chart th{ color:var(--muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.02em; position:sticky; top:0; background:#fff; }
+    .due{ font-weight:700; } .due.ok{ color:var(--ok); } .due.amber{ color:var(--amber); } .due.bad{ color:var(--bad); } .due.none{ color:#9aa7b5; font-weight:400; }
+    .cert{ text-decoration:none; margin-left:5px; }
+    .chartwrap{ overflow-x:auto; }
+    .ph{ display:inline-block; width:84px; height:84px; border-radius:9px; border:1px solid var(--line); object-fit:cover; margin:4px 6px 0 0; }
+    .modal{ position:fixed; inset:0; background:rgba(3,12,28,.6); display:flex; align-items:flex-end; justify-content:center; padding:0; z-index:50; }
+    .modal .sheet{ background:#fff; width:100%; max-width:760px; max-height:92vh; overflow:auto; border-radius:16px 16px 0 0; padding:16px; }
+    .modal .sheet h2{ margin:2px 0 2px; font-size:18px; color:var(--brand); }
+    .modal .x{ float:right; background:#eef1f4; border:none; border-radius:8px; padding:7px 11px; font:700 14px inherit; cursor:pointer; }
+    .empty{ text-align:center; color:var(--muted); padding:26px 10px; }
+    .thumbwrap{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .thumbwrap .t{ position:relative; }
+    .thumbwrap .t button{ position:absolute; top:-6px; right:-6px; width:22px;height:22px;border-radius:50%;background:var(--bad);color:#fff;border:none;cursor:pointer;font-size:12px; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="m">M</div>
+    <h1 id="orgTitle">Client Portal<small id="orgSub">Loading…</small></h1>
+    <button id="logoutBtn">Log out</button>
+  </header>
+  <div class="tabs">
+    <button data-tab="jobs" class="on">My jobs</button>
+    <button data-tab="raise">Raise a job</button>
+    <button data-tab="compliance">Compliance</button>
+  </div>
+
+  <div class="wrap">
+    <!-- JOBS -->
+    <section id="tab-jobs">
+      <div class="filters">
+        <button data-f="all" class="on">All</button>
+        <button data-f="pending">Pending</button>
+        <button data-f="complete">Complete</button>
+      </div>
+      <div class="card" id="jobsCard"><div class="empty">Loading your jobs…</div></div>
+    </section>
+
+    <!-- RAISE -->
+    <section id="tab-raise" hidden>
+      <div class="card">
+        <h2 style="margin:2px 0 8px;font-size:17px;color:var(--brand)">Raise a new job</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 6px">Tell us what needs doing and where. The office is notified straight away and you'll get an email confirmation.</p>
+        <label for="rSite">Site</label>
+        <select id="rSite"><option value="">Loading sites…</option></select>
+        <label>Urgency</label>
+        <div class="seg" id="rUrgency">
+          <button type="button" data-u="emergency">Emergency</button>
+          <button type="button" data-u="urgent">Urgent</button>
+          <button type="button" data-u="routine" class="on">Routine</button>
+        </div>
+        <label for="rDesc">What's the problem?</label>
+        <textarea id="rDesc" placeholder="Describe the fault or work needed…"></textarea>
+        <label>Photos <span class="muted" style="font-weight:400">(optional)</span></label>
+        <button type="button" class="btn ghost" id="rAddPhoto" style="width:auto;padding:9px 13px;font-size:14px">📷 Add photo</button>
+        <input type="file" id="rPhotoInput" accept="image/*" multiple hidden>
+        <div class="thumbwrap" id="rThumbs"></div>
+        <p class="msg" id="rMsg"></p>
+        <button class="btn" id="rSubmit" style="width:100%;margin-top:6px">Send job request</button>
+      </div>
+    </section>
+
+    <!-- COMPLIANCE -->
+    <section id="tab-compliance" hidden>
+      <div class="card">
+        <h2 style="margin:2px 0 8px;font-size:17px;color:var(--brand)">Compliance chart</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 4px">Read-only. Tap a 📄 to open or download a certificate.</p>
+        <div class="chartwrap"><div id="chart"><div class="empty">Loading…</div></div></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="modalHost"></div>
+
+<script>
+  window.MOSTLANE_API = "https://mostlane-api.jamie-def.workers.dev";
+  var API = window.MOSTLANE_API;
+  var $ = function(id){ return document.getElementById(id); };
+  function tok(){ return localStorage.getItem("mostlaneToken"); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({ "Authorization":"Bearer "+tok() }, opts.headers||{}); return fetch(API+path, opts); }
+  function toLogin(){ location.replace("login.html"); }
+
+  if(!tok()){ toLogin(); }
+
+  var ME = null, JOBS = [], JOBFILTER = "all", URGENCY = "routine", RAISE_PHOTOS = [];
+
+  // ── Tabs ───────────────────────────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll(".tabs button"), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call(document.querySelectorAll(".tabs button"), function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      var t = b.getAttribute("data-tab");
+      $("tab-jobs").hidden = t!=="jobs";
+      $("tab-raise").hidden = t!=="raise";
+      $("tab-compliance").hidden = t!=="compliance";
+      if(t==="compliance" && !window._chartLoaded) loadChart();
+    };
+  });
+
+  $("logoutBtn").onclick = function(){
+    try{ ["mostlaneToken","mostlaneLoggedIn","mostlaneUser","mostlaneUsername","mostlaneStaffType","mostlaneExpiry","mostlaneBypassUntil","mostlanePermissions"].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){}
+    try{ sessionStorage.clear(); }catch(e){}
+    toLogin();
+  };
+
+  // ── Boot: who am I + my sites ────────────────────────────────────────────────
+  (async function(){
+    var d;
+    try{ d = await authFetch("/client/me").then(function(r){ return r.json(); }); }
+    catch(e){ toLogin(); return; }
+    if(!d || !d.ok){ toLogin(); return; }
+    ME = d;
+    $("orgTitle").childNodes[0].nodeValue = d.orgLabel || "Client Portal";
+    $("orgSub").textContent = d.name || "";
+    // Site picker
+    var sel = $("rSite");
+    sel.innerHTML = '<option value="">Select a site…</option>' +
+      (d.sites||[]).map(function(s){ return '<option value="'+esc(s.code)+'">'+esc(s.name)+(s.postcode?(" · "+esc(s.postcode)):"")+'</option>'; }).join("");
+    loadJobs();
+  })();
+
+  // ── Jobs list ────────────────────────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll(".filters button"), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call(document.querySelectorAll(".filters button"), function(x){ x.classList.remove("on"); });
+      b.classList.add("on"); JOBFILTER = b.getAttribute("data-f"); renderJobs();
+    };
+  });
+  async function loadJobs(){
+    try{
+      var d = await authFetch("/client/jobs").then(function(r){ return r.json(); });
+      JOBS = (d && d.ok && d.jobs) ? d.jobs : [];
+    }catch(e){ JOBS = []; }
+    renderJobs();
+  }
+  function fmtDate(iso){ if(!iso) return ""; var dt=new Date(iso); if(isNaN(dt)) return ""; return dt.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
+  function renderJobs(){
+    var card = $("jobsCard");
+    var list = JOBS.filter(function(j){ return JOBFILTER==="all" || (JOBFILTER==="pending"&&j.status==="Pending") || (JOBFILTER==="complete"&&j.status==="Complete"); });
+    if(!list.length){ card.innerHTML = '<div class="empty">'+(JOBS.length?"No jobs in this filter.":"No jobs yet. Use ‘Raise a job’ to log one.")+'</div>'; return; }
+    card.innerHTML = list.map(function(j){
+      var cls = j.status==="Complete" ? "complete" : "pending";
+      return '<div class="jobrow" data-id="'+esc(j.id)+'">'+
+        '<div class="body"><div class="t">'+esc(j.site||"Site")+'</div>'+
+        '<div class="s">'+esc(j.ref||"")+' · '+esc((j.description||"").slice(0,70))+'</div>'+
+        '<div class="s">'+(j.byClient?"You raised · ":"")+fmtDate(j.raisedAt)+'</div></div>'+
+        '<span class="pill '+cls+'">'+j.status+'</span></div>';
+    }).join("");
+    Array.prototype.forEach.call(card.querySelectorAll(".jobrow"), function(row){
+      row.onclick = function(){ openJob(row.getAttribute("data-id")); };
+    });
+  }
+
+  async function openJob(id){
+    var d;
+    try{ d = await authFetch("/client/job?id="+encodeURIComponent(id)).then(function(r){ return r.json(); }); }
+    catch(e){ return; }
+    if(!d || !d.ok){ return; }
+    var j = d.job;
+    var cls = j.status==="Complete" ? "complete" : "pending";
+    var photos = (j.photos||[]).map(function(p){ return '<img class="ph" src="'+esc(p.url)+'" loading="lazy" onclick="window.open(this.src,\'_blank\')">'; }).join("");
+    var html = '<div class="modal"><div class="sheet">'+
+      '<button class="x" onclick="closeModal()">Close ✕</button>'+
+      '<h2>'+esc(j.site||"Job")+'</h2>'+
+      '<div style="margin:2px 0 10px"><span class="pill '+cls+'">'+j.status+'</span>'+(j.urgency?' <span class="muted" style="font-size:12.5px">· '+esc(j.urgency)+'</span>':'')+'</div>'+
+      '<div class="muted" style="font-size:12.5px">Reference '+esc(j.ref||"")+' · Raised '+fmtDate(j.raisedAt)+(j.completedAt?(' · Completed '+fmtDate(j.completedAt)):"")+'</div>'+
+      '<p style="white-space:pre-wrap;margin:12px 0 4px">'+esc(j.description||"")+'</p>'+
+      (j.completionNote?('<div class="card" style="background:#f6f9f4;border-color:#d7ecdc;margin-top:10px"><b style="color:var(--ok)">Completion note</b><div style="white-space:pre-wrap;margin-top:4px">'+esc(j.completionNote)+'</div></div>'):'')+
+      (photos?('<label>Photos</label><div>'+photos+'</div>'):'')+
+      '</div></div>';
+    $("modalHost").innerHTML = html;
+  }
+  window.closeModal = function(){ $("modalHost").innerHTML = ""; };
+
+  // ── Raise a job ──────────────────────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll("#rUrgency button"), function(b){
+    b.onclick = function(){
+      Array.prototype.forEach.call(document.querySelectorAll("#rUrgency button"), function(x){ x.classList.remove("on"); });
+      b.classList.add("on"); URGENCY = b.getAttribute("data-u");
+    };
+  });
+  // Camera-or-gallery: leaving capture off lets the phone offer both (Take Photo /
+  // Photo Library) natively.
+  $("rAddPhoto").onclick = function(){ $("rPhotoInput").removeAttribute("capture"); $("rPhotoInput").click(); };
+  $("rPhotoInput").onchange = function(){
+    var files = this.files; if(!files) return;
+    for(var i=0;i<files.length;i++){ (function(f){ shrink(f).then(function(blob){ RAISE_PHOTOS.push(blob||f); renderThumbs(); }); })(files[i]); }
+    this.value = "";
+  };
+  function renderThumbs(){
+    var w = $("rThumbs"); w.innerHTML = RAISE_PHOTOS.map(function(b,i){
+      return '<div class="t"><img class="ph" src="'+URL.createObjectURL(b)+'"><button type="button" data-i="'+i+'">✕</button></div>';
+    }).join("");
+    Array.prototype.forEach.call(w.querySelectorAll("button"), function(btn){ btn.onclick=function(){ RAISE_PHOTOS.splice(+btn.getAttribute("data-i"),1); renderThumbs(); }; });
+  }
+  function shrink(file, max){
+    max = max || 1600;
+    return new Promise(function(res){
+      try{
+        var img = new Image(); var url = URL.createObjectURL(file);
+        var to = setTimeout(function(){ res(null); }, 8000);
+        img.onload = function(){ clearTimeout(to);
+          var w=img.width,h=img.height; if(w>max||h>max){ if(w>h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+          var c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").drawImage(img,0,0,w,h);
+          URL.revokeObjectURL(url); c.toBlob(function(b){ res(b); },"image/jpeg",0.82);
+        };
+        img.onerror=function(){ clearTimeout(to); URL.revokeObjectURL(url); res(null); };
+        img.src=url;
+      }catch(e){ res(null); }
+    });
+  }
+  $("rSubmit").onclick = async function(){
+    var siteCode = $("rSite").value, desc = ($("rDesc").value||"").trim();
+    var msg = $("rMsg"); msg.className="msg"; msg.textContent="";
+    if(!siteCode){ msg.className="msg err"; msg.textContent="Please pick a site."; return; }
+    if(desc.length<5){ msg.className="msg err"; msg.textContent="Please describe the problem."; return; }
+    var btn = $("rSubmit"); btn.disabled=true; btn.textContent="Sending…";
+    try{
+      var d = await authFetch("/client/raise", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ siteCode:siteCode, description:desc, urgency:URGENCY }) }).then(function(r){ return r.json(); });
+      if(!d || !d.ok){ throw new Error((d&&d.error)||"Failed"); }
+      // Upload photos (best-effort).
+      for(var i=0;i<RAISE_PHOTOS.length;i++){
+        try{ var fd=new FormData(); fd.append("jobId",d.id); fd.append("file",RAISE_PHOTOS[i],"photo.jpg"); await authFetch("/client/raise-photo",{ method:"POST", body:fd }); }catch(e){}
+      }
+      msg.className="msg ok"; msg.textContent="✅ Job sent — reference "+(d.ref||d.id)+". You'll get an email confirmation.";
+      $("rDesc").value=""; RAISE_PHOTOS=[]; renderThumbs();
+      Array.prototype.forEach.call(document.querySelectorAll("#rUrgency button"), function(x){ x.classList.toggle("on", x.getAttribute("data-u")==="routine"); }); URGENCY="routine";
+      loadJobs();
+    }catch(e){ msg.className="msg err"; msg.textContent="❌ "+(e.message||"Couldn't send — try again."); }
+    finally{ btn.disabled=false; btn.textContent="Send job request"; }
+  };
+
+  // ── Compliance chart (read-only) ─────────────────────────────────────────────
+  var TYPE_LABELS = { fiveYear:"5 Year", emMonthly:"EM Monthly", emYearly:"EM Yearly", pat:"PAT", pv:"PV", em:"Emergency Lighting", ev:"EV", forecourt:"EV", pump:"Pump", gas:"Gas Safety", epc:"EPC", alarms:"Smoke/CO", fire:"Fire/EM", legionella:"Legionella", elec:"Electrical", bldg:"Building Control", asbestos:"Asbestos", other:"Other" };
+  var SCHEME_TYPES = { fareham:["fiveYear","emMonthly","emYearly","pat","pv"], coop:["fiveYear","pat","em","pv","ev","pump"], chapplins:["fiveYear","gas","epc","alarms","fire","legionella"], projects:["elec","gas","bldg"] };
+  function dueClass(iso){
+    if(!iso) return { cls:"none", txt:"—" };
+    var dt=new Date(iso); if(isNaN(dt)) return { cls:"none", txt:esc(iso) };
+    var days=Math.floor((dt-new Date())/86400000);
+    var txt=dt.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+    if(days<0) return { cls:"bad", txt:txt };
+    if(days<=30) return { cls:"amber", txt:txt };
+    return { cls:"ok", txt:txt };
+  }
+  async function loadChart(){
+    window._chartLoaded = true;
+    var scheme = (ME && ME.scheme) || "";
+    var host = $("chart");
+    if(!scheme){ host.innerHTML='<div class="empty">No compliance chart for your account.</div>'; return; }
+    var d;
+    try{ d = await authFetch("/compliance/stores?scheme="+encodeURIComponent(scheme)).then(function(r){ return r.json(); }); }
+    catch(e){ host.innerHTML='<div class="empty">Couldn\'t load the chart.</div>'; return; }
+    if(!d || !d.ok || !d.stores || !d.stores.length){ host.innerHTML='<div class="empty">Nothing on the chart yet.</div>'; return; }
+    var types = SCHEME_TYPES[scheme] || Object.keys((d.stores[0]||{}).due||{});
+    var stores = d.stores.slice().sort(function(a,b){ return String(a.name||a.code).localeCompare(String(b.name||b.code)); });
+    var head = '<tr><th>Site</th>'+types.map(function(t){ return '<th>'+esc(TYPE_LABELS[t]||t)+'</th>'; }).join("")+'</tr>';
+    var body = stores.map(function(s){
+      var cells = types.map(function(t){
+        var dc = dueClass(s.due && s.due[t]);
+        var hasFile = s.files && s.files[t];
+        var cert = hasFile ? '<a class="cert" href="#" data-code="'+esc(s.code)+'" data-type="'+esc(t)+'" title="Open certificate">📄</a>' : '';
+        return '<td><span class="due '+dc.cls+'">'+dc.txt+'</span>'+cert+'</td>';
+      }).join("");
+      return '<tr><td style="white-space:normal"><b>'+esc(s.name||s.code)+'</b>'+(s.postcode?('<div class="muted" style="font-size:11px">'+esc(s.postcode)+'</div>'):'')+'</td>'+cells+'</tr>';
+    }).join("");
+    host.innerHTML = '<table class="chart"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+    Array.prototype.forEach.call(host.querySelectorAll("a.cert"), function(a){
+      a.onclick = async function(e){
+        e.preventDefault();
+        try{
+          var r = await authFetch("/compliance/file-url?scheme="+encodeURIComponent(scheme)+"&code="+encodeURIComponent(a.getAttribute("data-code"))+"&type="+encodeURIComponent(a.getAttribute("data-type"))).then(function(x){ return x.json(); });
+          if(r && r.ok && r.url) window.open(r.url,"_blank"); else alert("Certificate not available.");
+        }catch(err){ alert("Couldn't open the certificate."); }
+      };
+    });
+  }
+</script>
+</body>
+</html>

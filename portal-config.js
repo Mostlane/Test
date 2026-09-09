@@ -281,6 +281,21 @@
   // app. A page's hard-coded back button must never drop them on the office menu
   // — or a page they lack permission for (e.g. van-check's back → vehicles.html).
   // So on every portal page, repoint the standard back button (data-role="home")
+  // ── Client wall ─────────────────────────────────────────────────────────────
+  // An EXTERNAL client login (staffType "client") must never reach a staff page.
+  // client-home.html is standalone (it doesn't load portal-config), so this only
+  // fires if a client lands on a staff page via a bookmark/typed URL — it bounces
+  // them straight back to their portal. Server endpoints are org-walled regardless.
+  (function clientWall() {
+    try {
+      var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      if (st !== "client") return;
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var OK = ["client-home.html", "login.html", "forgot-password.html", "reset-password.html", "change-password.html", "hash.html"];
+      if (OK.indexOf(page) === -1) location.replace("/client-home.html");
+    } catch (e) {}
+  })();
+
   // to you.html. Uses the shared mlIsFieldUser when present, else an inline copy
   // (ml-perms.js isn't loaded on every page; portal-config.js is).
   function mlFieldUserLocal() {

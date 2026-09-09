@@ -58,6 +58,7 @@ import * as programmes from "./routes/programmes.js"; // DONE (job programmes: b
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
+import * as client from "./routes/client.js";      // DONE  (external client portal: walled per-org jobs + raise + compliance)
 import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
 import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
 import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
@@ -138,6 +139,7 @@ const ROUTES = [
   ["*", "/comms",      statuscomms.handle], // customer status-email config + reschedule inbox (admin)
   ["*", "/customer",   statuscomms.handle], // public: customer reschedule flow (token-verified)
   ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
+  ["*", "/client",     client.handle],      // external client portal (walled per-org: jobs, raise, compliance)
   ["*", "/fra",        fra.handle],          // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
