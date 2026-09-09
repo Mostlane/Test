@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -33923,9 +33928,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
@@ -38557,7 +38562,7 @@ async function pulseGate(env, db, cfg) {
 async function logGate(db, entry) {
   const log = await loadKV(db, "tuya:openlog") || [];
   log.unshift(entry);
-  await saveKV2(db, "tuya:openlog", log.slice(0, 100));
+  await saveKV2(db, "tuya:openlog", log.slice(0, 500));
 }
 function londonNow2() {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(/* @__PURE__ */ new Date());
@@ -38813,7 +38818,16 @@ async function handle39(request, env, ctx, url, sess) {
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
     const log = await loadKV(db, "tuya:openlog") || [];
-    return json4({ ok: true, log: log.slice(0, 100) });
+    let rates = {};
+    try {
+      const rm = await ratesMap(env, sess.tenantId);
+      for (const [u, v] of Object.entries(rm)) {
+        const base = Number(v && v.rate);
+        if (isFinite(base) && base > 0) rates[u] = v.rateType === "day" ? base / 8 : base;
+      }
+    } catch {
+    }
+    return json4({ ok: true, log: log.slice(0, 500), rates });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
 }
