@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Concerto PPM list</title>
+  <script src="/portal-config.js?v=30"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="/xlsx-lite.js?v=2"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --amber:#b7791f; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:1180px;margin:14px auto 90px;padding:0 12px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    h2{font-size:15px;margin:0 0 8px;}
+    .sumrow{display:flex;gap:8px;flex-wrap:wrap;}
+    .tile{flex:1;min-width:120px;background:#f7f9fb;border:1px solid #eef2f6;border-radius:12px;padding:10px 12px;text-align:center;cursor:pointer;}
+    .tile .n{font-size:24px;font-weight:800;line-height:1;color:var(--brand);} .tile .l{font-size:12px;color:#6b7a90;margin-top:4px;}
+    .tile.warn .n{color:var(--amber);} .tile.warn{background:#fffaf0;border-color:#f6e0b5;}
+    .tile.bad .n{color:var(--bad);} .tile.bad{background:#fdf2f2;border-color:#f5c6c6;}
+    .tile.ok .n{color:var(--ok);} .tile.ok{background:#f0faf3;border-color:#c9ebd4;}
+    .tile.on{outline:2px solid var(--brand);}
+    .drop{border:2px dashed #b9c4d1;border-radius:14px;padding:18px;text-align:center;color:#4b5b70;background:#f9fbfd;cursor:pointer;}
+    .drop.over{background:#e8f1ff;border-color:var(--brand);}
+    .drop b{color:var(--brand);}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+    .chip{background:#fff;border:1px solid #ccd5dd;color:#334;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer;font-family:inherit;font-size:14px;}
+    .btn.sec{background:#fff;color:var(--brand);border:1px solid #c9d3de;} .btn.sm{padding:5px 9px;font-size:12px;border-radius:8px;}
+    .btn.danger{background:#fff;color:var(--bad);border:1px solid #f0c0c0;}
+    .tblwrap{overflow-x:auto;} table{border-collapse:collapse;width:100%;font-size:13px;}
+    th,td{padding:8px 8px;border-bottom:1px solid #eef2f6;text-align:left;vertical-align:top;white-space:nowrap;}
+    th{font-size:12px;color:#6b7a90;font-weight:700;background:#f7f9fb;position:sticky;top:0;}
+    td.wrap{white-space:normal;min-width:160px;}
+    .badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+    .f-done{background:#d8f0e0;color:#0e7a3b;} .f-due{background:#dbe9ff;color:#1c4e9c;} .f-overdue{background:#fde2e2;color:#9b1c1c;}
+    .f-mismatch{background:#fff3cd;color:#7a5b00;} .f-no_store{background:#ede9fe;color:#5b21b6;} .f-not_on_chart,.f-no_chart_date{background:#eef1f4;color:#5a6b80;}
+    .f-store_closed,.f-gone,.f-dismissed{background:#eef1f4;color:#7a8898;text-decoration:line-through;} .f-dismissed{text-decoration:none;}
+    .sub{font-size:11.5px;color:#6b7a90;white-space:normal;}
+    input[type=search],input[type=text]{width:100%;padding:8px 10px;border:1px solid #c9d3de;border-radius:10px;font-family:inherit;font-size:14px;}
+    .back{position:fixed;inset:0;background:rgba(6,24,54,.5);display:none;align-items:center;justify-content:center;z-index:9999;padding:12px;}
+    .back.on{display:flex;} .box{background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:85vh;overflow:auto;padding:16px;}
+    .pick{padding:8px 6px;border-bottom:1px solid #eef2f6;cursor:pointer;} .pick:hover{background:#f3f7fb;} .pick.closed{color:#9aa6b5;}
+    .rowtools{display:flex;gap:6px;flex-wrap:wrap;}
+    @media(max-width:700px){ .sumrow .tile{min-width:100px;} th,td{padding:7px 6px;} }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/eicr-portal.html">‹ Back</a>
+    <h1>📋 Concerto PPM list</h1>
+    <button class="btn sec sm" id="csvBtn" title="Export the rows shown">⬇ CSV</button>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <div class="drop" id="drop">
+        <div><b>Drop the Concerto export here</b> (or tap to choose) — the <i>Open PPM jobs overdue</i> sheet or a <i>PPM schedule</i> sheet, .xlsx or .csv</div>
+        <div class="muted" style="margin-top:6px">Read in your browser. Rows you've imported before are updated, never duplicated; rows that have dropped off a later full list are marked gone.</div>
+        <input type="file" id="file" accept=".xlsx,.csv" style="display:none">
+      </div>
+      <div id="preview" style="display:none;margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <div class="sumrow" id="summary"></div>
+      <p class="muted" id="greet" style="margin:8px 0 0"></p>
+    </div>
+
+    <div class="card">
+      <h2>Concerto rows</h2>
+      <div class="chips" id="flagChips"></div>
+      <div class="chips" id="typeChips"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px;flex-wrap:wrap">
+        <input type="search" id="q" placeholder="Search order, store, site…" style="flex:1;min-width:200px">
+        <label class="muted" style="white-space:nowrap"><input type="checkbox" id="showAll"> show gone / dismissed</label>
+      </div>
+      <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted">Loading…</td></tr></tbody></table></div>
+    </div>
+
+    <div class="card" id="missingCard">
+      <h2>Overdue on our chart but not on the Concerto list</h2>
+      <p class="muted" style="margin:0 0 8px">Stores the compliance chart says are due (within 30 days) or overdue for EM, PAT, pump, PV or EV, with no open Concerto row — Concerto hasn't raised an order for these.</p>
+      <div class="tblwrap"><table id="tblMissing"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <div class="back" id="mapBack"><div class="box">
+    <h2 id="mapTitle">Map to a store</h2>
+    <p class="muted" id="mapSub"></p>
+    <input type="search" id="mapQ" placeholder="Store number or name…">
+    <div id="mapList" style="max-height:50vh;overflow:auto;margin-top:8px"></div>
+    <div style="text-align:right;margin-top:10px"><button class="btn sec" id="mapClose">Cancel</button></div>
+  </div></div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const fmtD = s => { if(!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m ? `${d}/${m}/${y}` : String(s); };
+    const fmtP = p => { if(!p) return ""; const [y,m] = p.split("-"); const M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return (M[Number(m)-1]||m)+" "+y; };
+    const money = v => (v==null||v==="") ? "" : "£"+Number(v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const FLAGS = { done:"Done our side", overdue:"Overdue", due:"Due", mismatch:"Dates differ", no_store:"Not mapped", not_on_chart:"Not on chart", no_chart_date:"No chart date", store_closed:"Store closed", gone:"Gone from list", dismissed:"Dismissed" };
+    const TYPES = { em:"EM", pat:"PAT", pump:"Pump", pv:"PV", ev:"EV", fiveYear:"5 Year", other:"Other" };
+    let DATA = null, FLAG = "all", TYPE = "all", STORES = null, MONEY = false;
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r=>r.json());
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs Compliance, SLA Admin or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      wireDrop(); load();
+    })();
+
+    async function load() {
+      const all = g("showAll").checked;
+      let d = null;
+      try { d = await authFetch("/concerto/list" + (all ? "?status=all" : "")).then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td class="muted" style="color:#b00020">Couldn\'t load the Concerto list.</td></tr>'; return; }
+      DATA = d; MONEY = !!d.money; render();
+    }
+    g("showAll").onchange = load;
+    g("q").oninput = () => renderRows();
+
+    function render() {
+      const c = DATA.counts || {};
+      const tile = (n, l, cls, flag) => `<div class="tile ${cls} ${FLAG===flag?"on":""}" data-flag="${flag}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+      g("summary").innerHTML =
+        tile(c.open||0, "open on Concerto", "", "all") +
+        tile(c.done||0, "done our side — close on Concerto", c.done?"ok":"", "done") +
+        tile((c.overdue||0), "overdue (both agree)", c.overdue?"bad":"", "overdue") +
+        tile((c.due||0), "due", "", "due") +
+        tile(c.mismatch||0, "dates differ", c.mismatch?"warn":"", "mismatch") +
+        tile(c.no_store||0, "not mapped to a store", c.no_store?"warn":"", "no_store") +
+        tile(c.chartOverdue||0, "overdue on chart, not on Concerto", c.chartOverdue?"bad":"", "__missing");
+      [].forEach.call(g("summary").querySelectorAll(".tile"), t => t.onclick = () => { const f=t.dataset.flag; if (f==="__missing") { g("missingCard").scrollIntoView({behavior:"smooth"}); return; } FLAG=f; render(); });
+      const last = (DATA.rows||[]).map(r=>r.lastSeenAt).filter(Boolean).sort().pop();
+      g("greet").textContent = last ? `Last import ${new Date(last).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})} · ${DATA.rows.length} rows shown` : "Nothing imported yet — drop a Concerto export above.";
+      const flagsPresent = [...new Set((DATA.rows||[]).map(r=>r.flag))];
+      g("flagChips").innerHTML = `<button class="chip ${FLAG==="all"?"on":""}" data-f="all">All</button>` + Object.keys(FLAGS).filter(f=>flagsPresent.includes(f)).map(f=>`<button class="chip ${FLAG===f?"on":""}" data-f="${f}">${FLAGS[f]} <span class="muted">${DATA.rows.filter(r=>r.flag===f).length}</span></button>`).join("");
+      [].forEach.call(g("flagChips").querySelectorAll(".chip"), b => b.onclick = () => { FLAG=b.dataset.f; render(); });
+      const typesPresent = [...new Set((DATA.rows||[]).map(r=>r.type))];
+      g("typeChips").innerHTML = `<button class="chip ${TYPE==="all"?"on":""}" data-t="all">All types</button>` + Object.keys(TYPES).filter(t=>typesPresent.includes(t)).map(t=>`<button class="chip ${TYPE===t?"on":""}" data-t="${t}">${TYPES[t]}</button>`).join("");
+      [].forEach.call(g("typeChips").querySelectorAll(".chip"), b => b.onclick = () => { TYPE=b.dataset.t; render(); });
+      renderRows(); renderMissing();
+    }
+    function visibleRows() {
+      const q = g("q").value.trim().toLowerCase();
+      return (DATA.rows||[]).filter(r => (FLAG==="all"||r.flag===FLAG) && (TYPE==="all"||r.type===TYPE) &&
+        (!q || [r.id, r.storeCode, r.siteName, r.assetRef, r.srRef, r.description].join(" ").toLowerCase().includes(q)));
+    }
+    function jobCell(j) { if (!j) return '<span class="muted">—</span>'; return `<a href="job-view.html?jobId=${encodeURIComponent(j.id)}">${esc(j.status||"Booked")}</a><div class="sub">${j.scheduledAt?fmtD(j.scheduledAt.slice(0,10)):"unscheduled"}${j.engineer?" · "+esc(j.engineer):""}</div>`; }
+    function renderRows() {
+      const rows = visibleRows();
+      const head = ["Order","Type","Concerto month","Store","Chart due","Status","Booked job"].concat(MONEY?["Value"]:[]).concat([""]);
+      g("tbl").querySelector("thead").innerHTML = "<tr>" + head.map(h=>`<th>${h}</th>`).join("") + "</tr>";
+      if (!rows.length) { g("tbl").querySelector("tbody").innerHTML = '<tr><td colspan="9" class="muted">Nothing to show for this filter.</td></tr>'; return; }
+      g("tbl").querySelector("tbody").innerHTML = rows.map(r => {
+        const ref = r.srRef || r.assetRef || "";
+        const store = r.storeCode ? `<b>${esc(r.storeCode)}</b><div class="sub">${esc(r.siteName||"")}</div>` : `<span class="badge f-no_store">Not mapped</span><div class="sub">${esc(ref)}</div>`;
+        const tools = [];
+        if (!r.storeCode && ref) tools.push(`<button class="btn sm sec" data-map="${esc(r.id)}">Map store</button>`);
+        if (r.storeCode) tools.push(`<a class="btn sm sec" href="site-folder.html?site=${encodeURIComponent(r.storeCode)}">Site</a>`);
+        if (r.status === "open") tools.push(`<button class="btn sm danger" data-dismiss="${esc(r.id)}">Dismiss</button>`);
+        else if (r.status !== "gone") tools.push(`<button class="btn sm sec" data-reopen="${esc(r.id)}">Reopen</button>`);
+        return `<tr>
+          <td><b>${esc(r.id)}</b><div class="sub">${r.kind==="schedule"?"planned":"ordered "+fmtD(r.orderDate)} · ${esc(ref)}</div></td>
+          <td>${esc(TYPES[r.type]||r.type)}</td>
+          <td>${r.plannedDate?fmtD(r.plannedDate):fmtP(r.period)}</td>
+          <td>${store}</td>
+          <td>${r.chartDue?fmtD(r.chartDue):'<span class="muted">—</span>'}</td>
+          <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}${r.note?" · "+esc(r.note):""}</div></td>
+          <td>${jobCell(r.job)}</td>
+          ${MONEY?`<td>${money(r.orderValue)}</td>`:""}
+          <td><div class="rowtools">${tools.join("")}</div></td></tr>`;
+      }).join("");
+      [].forEach.call(g("tbl").querySelectorAll("[data-map]"), b => b.onclick = () => openMap(DATA.rows.find(r=>r.id===b.dataset.map)));
+      [].forEach.call(g("tbl").querySelectorAll("[data-dismiss]"), b => b.onclick = () => setStatus(b.dataset.dismiss, "dismissed"));
+      [].forEach.call(g("tbl").querySelectorAll("[data-reopen]"), b => b.onclick = () => setStatus(b.dataset.reopen, "open"));
+    }
+    function renderMissing() {
+      const m = DATA.chartMissing || [];
+      g("tblMissing").querySelector("thead").innerHTML = "<tr><th>Store</th><th>Type</th><th>Chart due</th><th></th><th>Booked job</th></tr>";
+      g("tblMissing").querySelector("tbody").innerHTML = m.length ? m.map(x => `<tr><td><b>${esc(x.storeCode)}</b><div class="sub">${esc(x.siteName||"")}</div></td><td>${esc(TYPES[x.type]||x.type)}</td><td>${fmtD(x.chartDue)}</td><td>${x.overdue?'<span class="badge f-overdue">Overdue</span>':'<span class="badge f-due">Due soon</span>'}</td><td>${jobCell(x.job)}</td></tr>`).join("")
+        : '<tr><td class="muted" colspan="5">✓ Nothing — every store the chart says is due or overdue has a Concerto row.</td></tr>';
+    }
+    async function setStatus(id, status) {
+      let note = "";
+      if (status === "dismissed") { note = prompt("Why? (optional — shows on the row)") ; if (note === null) return; }
+      const r = await authFetch("/concerto/status", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, status, note }) }).then(x=>x.json()).catch(()=>null);
+      if (!r || !r.ok) { alert("Couldn't update that row."); return; }
+      load();
+    }
+
+    /* ── Map a reference to a store ── */
+    let MAPROW = null;
+    async function openMap(row) {
+      MAPROW = row; g("mapTitle").textContent = "Map " + (row.srRef || row.assetRef) + " to a store";
+      g("mapSub").textContent = row.description || "";
+      g("mapBack").classList.add("on"); g("mapQ").value = ""; g("mapList").innerHTML = '<p class="muted">Loading stores…</p>';
+      if (!STORES) { try { STORES = (await authFetch("/concerto/stores").then(r=>r.json())).stores || []; } catch { STORES = []; } }
+      paintMap(); setTimeout(()=>g("mapQ").focus(), 50);
+    }
+    function paintMap() {
+      const q = g("mapQ").value.trim().toLowerCase();
+      const list = STORES.filter(s => !q || (s.code + " " + (s.name||"")).toLowerCase().includes(q)).slice(0, 60);
+      g("mapList").innerHTML = list.map(s => `<div class="pick ${s.closed?"closed":""}" data-code="${esc(s.code)}" data-name="${esc(s.name||"")}"><b>${esc(s.code)}</b> ${esc(s.name||"")} <span class="muted">${esc(s.category||"")}${s.closed?" · closed":""}</span></div>`).join("") || '<p class="muted">No store matches.</p>';
+      [].forEach.call(g("mapList").querySelectorAll(".pick"), p => p.onclick = async () => {
+        const r = await authFetch("/concerto/ref", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ref: MAPROW.srRef || MAPROW.assetRef, storeCode: p.dataset.code, siteName: p.dataset.name }) }).then(x=>x.json()).catch(()=>null);
+        if (!r || !r.ok) { alert("Couldn't save that mapping."); return; }
+        g("mapBack").classList.remove("on"); alert("Mapped " + (MAPROW.srRef || MAPROW.assetRef) + " → " + p.dataset.code + ". Remembered for every future import."); load();
+      });
+    }
+    g("mapQ").oninput = paintMap; g("mapClose").onclick = () => g("mapBack").classList.remove("on");
+    g("mapBack").onclick = e => { if (e.target === g("mapBack")) g("mapBack").classList.remove("on"); };
+
+    /* ── Drop-in import (xlsx-lite in the browser, or CSV) ── */
+    let PENDING = null;
+    function wireDrop() {
+      const dz = g("drop"), fi = g("file");
+      dz.onclick = e => { if (e.target.tagName !== "INPUT") fi.click(); };
+      fi.onchange = () => { if (fi.files[0]) readFile(fi.files[0]); fi.value = ""; };
+      ["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("over"); }));
+      ["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("over"); }));
+      dz.addEventListener("drop", e => { const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) readFile(f); });
+    }
+    function csvRows(text) {
+      const out = []; let row = [], cell = "", q = false;
+      for (let i = 0; i < text.length; i++) { const c = text[i];
+        if (q) { if (c === '"') { if (text[i+1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+        else if (c === '"') q = true; else if (c === ",") { row.push(cell); cell = ""; } else if (c === "\n" || c === "\r") { if (c === "\r" && text[i+1] === "\n") i++; row.push(cell); out.push(row); row = []; cell = ""; } else cell += c; }
+      if (cell !== "" || row.length) { row.push(cell); out.push(row); }
+      return out;
+    }
+    async function readFile(file) {
+      g("preview").style.display = "block"; g("preview").innerHTML = '<p class="muted">Reading ' + esc(file.name) + '…</p>';
+      let grid = [];
+      try {
+        if (/\.csv$/i.test(file.name)) grid = csvRows(await file.text());
+        else { const wb = await XLSXLite.parse(await file.arrayBuffer()); for await (const r of wb.rows()) { const cells = r.cells; const cols = Object.keys(cells).sort((a,b)=>a.length-b.length||a.localeCompare(b)); const arr = []; for (const c of cols) { const idx = colIndex(c); arr[idx] = cells[c]; } grid.push(Array.from(arr, v => v == null ? "" : v)); } }
+      } catch (e) { g("preview").innerHTML = '<p class="muted" style="color:#b00020">Couldn\'t read that file: ' + esc(e.message||e) + '</p>'; return; }
+      const parsed = parseGrid(grid);
+      if (!parsed) { g("preview").innerHTML = '<p class="muted" style="color:#b00020">That doesn\'t look like a Concerto export — no <b>Order number</b> or <b>UPRN</b> header row found.</p>'; return; }
+      PENDING = { ...parsed, fileName: file.name };
+      const knownIds = new Set((DATA && DATA.rows || []).map(r=>r.id));
+      const fresh = parsed.layout === "orders" ? parsed.rows.filter(r => !knownIds.has(String(r.orderNumber||"").toUpperCase())).length : null;
+      g("preview").innerHTML = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div><b>${esc(file.name)}</b> — ${parsed.layout === "orders" ? "Open PPM jobs (orders)" : "PPM schedule (planned)"} · <b>${parsed.rows.length}</b> rows${fresh!=null?` · <b>${fresh}</b> not seen before`:""}</div>
+        <button class="btn" id="doImport">Import ${parsed.rows.length} rows</button><button class="btn sec" id="cancelImport">Cancel</button></div>`;
+      g("doImport").onclick = doImport; g("cancelImport").onclick = () => { PENDING = null; g("preview").style.display = "none"; };
+    }
+    function colIndex(letters) { let n = 0; for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
+    const norm = s => String(s ?? "").trim().toLowerCase();
+    function parseGrid(grid) {
+      for (let i = 0; i < Math.min(grid.length, 15); i++) {
+        const h = (grid[i]||[]).map(norm);
+        const iOrder = h.indexOf("order number"), iU = h.indexOf("uprn");
+        if (iOrder >= 0) {
+          const col = n => h.indexOf(n);
+          const c = { date: col("order date"), value: col("order value"), desc: col("order description"), sup: col("supplier"), tr: col("target response"), ar: col("actual response") };
+          const rows = grid.slice(i+1).map(r => ({ orderNumber: r[iOrder], orderDate: r[c.date], orderValue: r[c.value], description: r[c.desc], supplier: r[c.sup], targetResponse: r[c.tr], actualResponse: r[c.ar] })).filter(r => /^[A-Z]{2,4}\d+/i.test(String(r.orderNumber||"").trim()));
+          return { layout: "orders", rows };
+        }
+        if (iU >= 0) {
+          const col = n => h.indexOf(n);
+          const c = { site: col("site"), block: col("block/occupier"), ref: col("ref"), type: col("type"), sup: col("supplier"), last: col("last date"), plan: col("planned date"), est: col("estimate") };
+          const rows = grid.slice(i+1).map(r => ({ uprn: r[iU], site: r[c.site], block: r[c.block], ref: r[c.ref], type: r[c.type], supplier: r[c.sup], lastDate: r[c.last], plannedDate: r[c.plan], estimate: r[c.est] })).filter(r => String(r.uprn||"").trim());
+          return { layout: "schedule", rows };
+        }
+      }
+      return null;
+    }
+    async function doImport() {
+      if (!PENDING) return;
+      g("doImport").disabled = true; g("doImport").textContent = "Importing…";
+      const r = await authFetch("/concerto/import", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ layout: PENDING.layout, rows: PENDING.rows, fileName: PENDING.fileName }) }).then(x=>x.json()).catch(()=>null);
+      if (!r || !r.ok) { alert("Import failed" + (r && r.error ? ": " + r.error : ".")); g("doImport").disabled = false; g("doImport").textContent = "Import"; return; }
+      g("preview").innerHTML = `<p><b>Imported.</b> ${r.added} new · ${r.updated} already known (updated) · ${r.gone} no longer on the list · ${r.unresolved} not mapped to a store${r.skipped?` · ${r.skipped} skipped`:""}.</p>`;
+      PENDING = null; load();
+    }
+
+    /* ── CSV export of what's shown ── */
+    g("csvBtn").onclick = () => {
+      if (!DATA) return;
+      const rows = visibleRows();
+      const head = ["Order","Type","Concerto month","Reference","Store","Site","Chart due","Status","Detail","Booked job"].concat(MONEY?["Value"]:[]);
+      const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
+      const lines = [head.map(q).join(",")].concat(rows.map(r => [r.id, TYPES[r.type]||r.type, r.plannedDate||r.period, r.srRef||r.assetRef, r.storeCode, r.siteName, r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText, r.job?(r.job.status+" "+(r.job.scheduledAt||"").slice(0,10)):""].concat(MONEY?[r.orderValue??""]:[]).map(q).join(",")));
+      const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-ppm-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
+    };
+  </script>
+</body>
+</html>

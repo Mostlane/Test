@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9447,6 +9442,425 @@ var init_compliance = __esm({
   }
 });
 
+// src/routes/concerto.js
+async function ensureTables2(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_ppm (
+    id TEXT NOT NULL, tenant_id TEXT NOT NULL, kind TEXT, order_date TEXT, order_value REAL,
+    description TEXT, ppm_type TEXT, period TEXT, asset_ref TEXT, sr_ref TEXT,
+    store_code TEXT, site_name TEXT, supplier TEXT, target_response TEXT, actual_response TEXT,
+    planned_date TEXT, last_date TEXT, status TEXT, note TEXT, source_file TEXT,
+    first_seen_at TEXT, last_seen_at TEXT, gone_at TEXT, updated_at TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
+    tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
+    kind TEXT, source TEXT, updated_at TEXT,
+    PRIMARY KEY (tenant_id, ref))`).run();
+}
+function padCode(v) {
+  const d = String(v ?? "").replace(/\D/g, "");
+  return d ? d.padStart(4, "0") : "";
+}
+function normRef(v) {
+  return String(v || "").toUpperCase().replace(/\s+/g, "").trim();
+}
+function srIn(s) {
+  const m = /\b(SR\d{4,6})\b/i.exec(String(s || ""));
+  return m ? m[1].toUpperCase() : "";
+}
+function typeOf(text) {
+  const t = String(text || "").toLowerCase();
+  if (/5\s*-?\s*y|five\s*year|fixed\s*wire|eicr/.test(t)) return "fiveYear";
+  if (/emergency|\bem\b|sc-el|el-em|\bem\s*light/.test(t)) return "em";
+  if (/\bpat\b/.test(t)) return "pat";
+  if (/pump/.test(t)) return "pump";
+  if (/\bpv\b|solar/.test(t)) return "pv";
+  if (/\bev\b|forecourt|charg/.test(t)) return "ev";
+  return "other";
+}
+function periodOf(text) {
+  const m = /([A-Za-z]+)\s+(20\d{2})/.exec(String(text || ""));
+  if (!m) return "";
+  const i = MONTHS.indexOf(m[1].toLowerCase());
+  return i < 0 ? "" : `${m[2]}-${String(i + 1).padStart(2, "0")}`;
+}
+function parseOrderDescription(desc) {
+  const s = String(desc || "").trim();
+  const m = /^(.*?)\s*-\s*([A-Za-z]+\s+20\d{2})\s*:\s*([A-Za-z0-9._\/-]+)\s*$/.exec(s);
+  const typeText = m ? m[1] : s, periodText = m ? m[2] : s, ref = normRef(m ? m[3] : (/\b([A-Z]{2,3}-?[A-Z0-9-]*\d{4,})\b/i.exec(s) || [])[1] || "");
+  return { type: typeOf(typeText), period: periodOf(periodText), ref, srRef: srIn(ref) };
+}
+function splitSite(text) {
+  const s = String(text || "").trim();
+  const m = /^\s*(\d{2,5})\s*-\s*(.+)$/.exec(s);
+  return m ? { code: padCode(m[1]), name: m[2].trim() } : { code: "", name: s };
+}
+function toIsoDate(v) {
+  if (v === null || v === void 0 || v === "") return null;
+  if (typeof v === "number" && isFinite(v)) {
+    if (v < 2e4 || v > 8e4) return null;
+    return new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 864e5).toISOString().slice(0, 10);
+  }
+  const s = String(v).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(s);
+  if (m) return `20${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  if (/^\d{5}(\.\d+)?$/.test(s)) return toIsoDate(Number(s));
+  const d = new Date(s);
+  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+function addMonths2(iso, n) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, last))).toISOString().slice(0, 10);
+}
+async function learnConcertoRef(env, tid, ref, storeCode, siteName, source) {
+  const r = normRef(ref), code = padCode(storeCode);
+  if (!r || !code || !/^(SR|AR)\d{3,}$/.test(r)) return false;
+  try {
+    await ensureTables2(env);
+    await env.DB.prepare(`INSERT INTO concerto_refs (tenant_id, ref, store_code, site_name, kind, source, updated_at)
+      VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id, ref) DO UPDATE SET
+        store_code=excluded.store_code,
+        site_name=CASE WHEN excluded.site_name<>'' THEN excluded.site_name ELSE concerto_refs.site_name END,
+        source=excluded.source, updated_at=excluded.updated_at`).bind(tid, r, code, String(siteName || "").slice(0, 160), r.startsWith("SR") ? "sr" : "ar", String(source || "").slice(0, 40), (/* @__PURE__ */ new Date()).toISOString()).run();
+    await env.DB.prepare("UPDATE concerto_ppm SET store_code=?, site_name=CASE WHEN COALESCE(site_name,'')='' THEN ? ELSE site_name END, updated_at=? WHERE tenant_id=? AND (sr_ref=? OR asset_ref=?) AND COALESCE(store_code,'')=''").bind(code, String(siteName || "").slice(0, 160), (/* @__PURE__ */ new Date()).toISOString(), tid, r, r).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function refMap(env, tid) {
+  const { results } = await env.DB.prepare("SELECT ref, store_code, site_name FROM concerto_refs WHERE tenant_id=?").bind(tid).all();
+  const m = /* @__PURE__ */ new Map();
+  for (const r of results || []) if (r.store_code) m.set(r.ref, { code: r.store_code, name: r.site_name || "" });
+  return m;
+}
+function resolveRef(map, srRef, assetRef) {
+  if (srRef && map.has(srRef)) return map.get(srRef);
+  if (assetRef && map.has(assetRef)) return map.get(assetRef);
+  return null;
+}
+async function importRows(env, tid, layout, rows, fileName) {
+  await ensureTables2(env);
+  const map = await refMap(env, tid);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const out = { added: 0, updated: 0, unresolved: 0, gone: 0, skipped: 0, ids: [] };
+  const seen = /* @__PURE__ */ new Set(), typesSeen = /* @__PURE__ */ new Set();
+  const stmts = [];
+  for (const raw of rows || []) {
+    let rec;
+    if (layout === "schedule") {
+      const sr = srIn(raw.uprn) || normRef(raw.uprn);
+      const site = splitSite(raw.site);
+      const type = typeOf(String(raw.ref || "") + " " + String(raw.type || ""));
+      const planned = toIsoDate(raw.plannedDate);
+      if (!sr && !site.code) {
+        out.skipped++;
+        continue;
+      }
+      const id = `SCH:${sr || site.code}:${type}:${planned || "none"}`;
+      const r = site.code ? { code: site.code, name: site.name } : resolveRef(map, sr, "");
+      if (sr && site.code) await learnConcertoRef(env, tid, sr, site.code, site.name, "schedule-export");
+      rec = {
+        id,
+        kind: "schedule",
+        order_date: null,
+        order_value: null,
+        description: `${raw.type || raw.ref || ""} \u2014 planned ${planned || "?"}`.trim(),
+        ppm_type: type,
+        period: planned ? planned.slice(0, 7) : "",
+        asset_ref: normRef(raw.ref || ""),
+        sr_ref: sr,
+        store_code: r ? r.code : "",
+        site_name: r ? r.name : site.name,
+        supplier: String(raw.supplier || "").slice(0, 80),
+        target_response: null,
+        actual_response: null,
+        planned_date: planned,
+        last_date: toIsoDate(raw.lastDate)
+      };
+    } else {
+      const id = normRef(raw.orderNumber);
+      if (!id) {
+        out.skipped++;
+        continue;
+      }
+      const p = parseOrderDescription(raw.description);
+      const r = resolveRef(map, p.srRef, p.ref);
+      rec = {
+        id,
+        kind: "order",
+        order_date: toIsoDate(raw.orderDate),
+        order_value: raw.orderValue === "" || raw.orderValue == null ? null : Number(raw.orderValue),
+        description: String(raw.description || "").slice(0, 300),
+        ppm_type: p.type,
+        period: p.period,
+        asset_ref: p.ref,
+        sr_ref: p.srRef,
+        store_code: r ? r.code : "",
+        site_name: r ? r.name : "",
+        supplier: String(raw.supplier || "").slice(0, 80),
+        target_response: toIsoDate(raw.targetResponse),
+        actual_response: toIsoDate(raw.actualResponse),
+        planned_date: null,
+        last_date: null
+      };
+    }
+    if (seen.has(rec.id)) continue;
+    seen.add(rec.id);
+    typesSeen.add(rec.ppm_type);
+    out.ids.push(rec.id);
+    if (!rec.store_code) out.unresolved++;
+    const ex = await env.DB.prepare("SELECT id, status FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, rec.id).first();
+    if (ex) out.updated++;
+    else out.added++;
+    stmts.push(env.DB.prepare(`INSERT INTO concerto_ppm (id,tenant_id,kind,order_date,order_value,description,ppm_type,period,asset_ref,sr_ref,store_code,site_name,supplier,target_response,actual_response,planned_date,last_date,status,note,source_file,first_seen_at,last_seen_at,gone_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open','',?,?,?,NULL,?)
+      ON CONFLICT(tenant_id,id) DO UPDATE SET
+        kind=excluded.kind, order_date=COALESCE(excluded.order_date, concerto_ppm.order_date), order_value=COALESCE(excluded.order_value, concerto_ppm.order_value),
+        description=excluded.description, ppm_type=excluded.ppm_type, period=excluded.period, asset_ref=excluded.asset_ref, sr_ref=excluded.sr_ref,
+        store_code=CASE WHEN excluded.store_code<>'' THEN excluded.store_code ELSE concerto_ppm.store_code END,
+        site_name=CASE WHEN excluded.site_name<>'' THEN excluded.site_name ELSE concerto_ppm.site_name END,
+        supplier=excluded.supplier, target_response=excluded.target_response, actual_response=excluded.actual_response,
+        planned_date=COALESCE(excluded.planned_date, concerto_ppm.planned_date), last_date=COALESCE(excluded.last_date, concerto_ppm.last_date),
+        status=CASE WHEN concerto_ppm.status IN ('gone') THEN 'open' ELSE concerto_ppm.status END,
+        source_file=excluded.source_file, last_seen_at=excluded.last_seen_at, gone_at=NULL, updated_at=excluded.updated_at`).bind(
+      rec.id,
+      tid,
+      rec.kind,
+      rec.order_date,
+      rec.order_value,
+      rec.description,
+      rec.ppm_type,
+      rec.period,
+      rec.asset_ref,
+      rec.sr_ref,
+      rec.store_code,
+      rec.site_name,
+      rec.supplier,
+      rec.target_response,
+      rec.actual_response,
+      rec.planned_date,
+      rec.last_date,
+      String(fileName || "").slice(0, 120),
+      now,
+      now,
+      now
+    ));
+  }
+  for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
+  if (seen.size) {
+    const kind = layout === "schedule" ? "schedule" : "order";
+    const { results } = await env.DB.prepare("SELECT id, ppm_type, planned_date FROM concerto_ppm WHERE tenant_id=? AND kind=? AND status='open'").bind(tid, kind).all();
+    const goneIds = (results || []).filter((r) => !seen.has(r.id) && (kind === "order" || typesSeen.has(r.ppm_type) && r.planned_date && r.planned_date >= todayIso())).map((r) => r.id);
+    for (const id of goneIds) await env.DB.prepare("UPDATE concerto_ppm SET status='gone', gone_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, id).run();
+    out.gone = goneIds.length;
+  }
+  return out;
+}
+async function chartStores(env, tid) {
+  const { results } = await env.DB.prepare(`SELECT cs.code, cs.category, cs.due, cs.active, cs.name,
+      (SELECT s.site_name FROM sites s WHERE s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*' AND CAST(s.site_number AS INTEGER)=CAST(cs.code AS INTEGER) ORDER BY LENGTH(s.site_number) LIMIT 1) AS site_name
+    FROM compliance_stores cs WHERE cs.scheme='coop' AND cs.code <> '' AND cs.code NOT GLOB '*[^0-9]*'`).bind().all();
+  const m = /* @__PURE__ */ new Map();
+  for (const r of results || []) {
+    let due = {};
+    try {
+      due = JSON.parse(r.due || "{}") || {};
+    } catch {
+    }
+    const parsed = {};
+    for (const k of Object.keys(due)) {
+      const d = toIsoDate(due[k]);
+      if (d) parsed[k] = d;
+    }
+    const closed = r.active === 0 || /closed/i.test(String(r.name || r.site_name || "")) || Object.values(due).some((v) => /closed/i.test(String(v)));
+    m.set(padCode(r.code), { code: padCode(r.code), category: r.category || "", name: r.site_name || r.name || "", due: parsed, closed });
+  }
+  return m;
+}
+async function bookedJobs(env, tid) {
+  const out = /* @__PURE__ */ new Map();
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  for (const j of jobs) {
+    if (FINISHED.has(String(j.status || "").toLowerCase())) continue;
+    const code = padCode(j.siteCode);
+    if (!code) continue;
+    const types = [];
+    if (j.emTest) types.push("em");
+    if (j.pat) types.push("pat");
+    if (j.pumpMaintenance) types.push("pump");
+    if (j.elecTest) types.push("fiveYear");
+    for (const t of types) {
+      const k = code + "|" + t;
+      const cur = out.get(k);
+      if (!cur || (j.scheduledAt || "") > (cur.scheduledAt || "")) out.set(k, { id: j.id, ref: j.helpdeskRef || j.siteName || "", scheduledAt: j.scheduledAt || null, engineer: Array.isArray(j.assignedEngineers) && j.assignedEngineers[0] || j.assignedTo || "", status: j.status || "" });
+    }
+  }
+  return out;
+}
+function reconcileRow(row, store, today) {
+  today = today || todayIso();
+  if (!row.store_code) return { flag: "no_store", text: "Reference not mapped to a store yet" };
+  if (!store) return { flag: "not_on_chart", text: `Store ${row.store_code} is not on the compliance chart` };
+  if (store.closed) return { flag: "store_closed", text: "Store is closed on the chart" };
+  const type = row.ppm_type, freq = FREQ_MONTHS[type];
+  const chartDue = store.due[type] || null;
+  if (!freq || !chartDue) return { flag: "no_chart_date", text: `The chart has no ${TYPE_LABEL[type] || type} date for this store`, chartDue };
+  const pStart = row.planned_date || (row.period ? row.period + "-01" : null);
+  const pEnd = row.planned_date ? row.planned_date : row.period ? addDays(addMonths2(row.period + "-01", 1), -1) : null;
+  if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${chartDue})` : `Due ${chartDue}`, chartDue };
+  const slack = freq >= 12 ? 45 : 10;
+  const lastDone = addMonths2(chartDue, -freq);
+  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${lastDone} \u2014 Concerto still shows it open`, chartDue, lastDone };
+  if (chartDue >= addDays(pStart, -slack) && chartDue <= addDays(pEnd, slack)) {
+    return chartDue < today ? { flag: "overdue", text: `Overdue \u2014 chart ${chartDue}, Concerto ${row.period || row.planned_date}`, chartDue } : { flag: "due", text: `Due ${chartDue} (Concerto ${row.period || row.planned_date})`, chartDue };
+  }
+  if (chartDue < pStart) return { flag: "mismatch", text: `Chart says due ${chartDue}, earlier than Concerto's ${row.period || row.planned_date}`, chartDue };
+  return { flag: "mismatch", text: `Chart says due ${chartDue}, later than Concerto's ${row.period || row.planned_date}`, chartDue };
+}
+async function buildList(env, tid, opts) {
+  await ensureTables2(env);
+  const status = opts.status === "all" ? null : "open";
+  const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=?" + (status ? " AND status='open'" : "") + " ORDER BY COALESCE(planned_date, period) ASC, id ASC").bind(tid).all();
+  const stores = await chartStores(env, tid);
+  const booked = await bookedJobs(env, tid);
+  const today = todayIso();
+  const rows = (results || []).map((r) => {
+    const store = r.store_code ? stores.get(r.store_code) : null;
+    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.status === "gone" ? "No longer on the Concerto list" + (r.gone_at ? " since " + r.gone_at.slice(0, 10) : "") : r.note || "" };
+    const job = r.store_code ? booked.get(r.store_code + "|" + r.ppm_type) : null;
+    return {
+      id: r.id,
+      kind: r.kind,
+      orderDate: r.order_date,
+      orderValue: opts.money ? r.order_value : void 0,
+      description: r.description,
+      type: r.ppm_type,
+      typeLabel: TYPE_LABEL[r.ppm_type] || r.ppm_type,
+      period: r.period,
+      assetRef: r.asset_ref,
+      srRef: r.sr_ref,
+      storeCode: r.store_code || "",
+      siteName: store && store.name || r.site_name || "",
+      supplier: r.supplier,
+      plannedDate: r.planned_date,
+      lastDate: r.last_date,
+      status: r.status,
+      note: r.note || "",
+      sourceFile: r.source_file,
+      firstSeenAt: r.first_seen_at,
+      lastSeenAt: r.last_seen_at,
+      goneAt: r.gone_at,
+      flag: rec.flag,
+      flagText: rec.text,
+      chartDue: rec.chartDue || store && store.due[r.ppm_type] || null,
+      lastDone: rec.lastDone || null,
+      category: store ? store.category : "",
+      job: job || null
+    };
+  });
+  const covered = new Set(rows.filter((r) => r.status === "open" && r.storeCode).map((r) => r.storeCode + "|" + r.type));
+  const chartMissing = [];
+  const soon = addDays(today, 30);
+  for (const s of stores.values()) {
+    if (s.closed) continue;
+    for (const type of ["em", "pat", "pump", "pv", "ev"]) {
+      const d = s.due[type];
+      if (!d || covered.has(s.code + "|" + type)) continue;
+      if (d <= soon) chartMissing.push({ storeCode: s.code, siteName: s.name, category: s.category, type, typeLabel: TYPE_LABEL[type], chartDue: d, overdue: d < today, job: booked.get(s.code + "|" + type) || null });
+    }
+  }
+  chartMissing.sort((a, b) => a.chartDue.localeCompare(b.chartDue));
+  const counts = {};
+  for (const r of rows) counts[r.flag] = (counts[r.flag] || 0) + 1;
+  counts.open = rows.filter((r) => r.status === "open").length;
+  counts.chartMissing = chartMissing.length;
+  counts.chartOverdue = chartMissing.filter((x) => x.overdue).length;
+  return { rows, chartMissing, counts, today };
+}
+async function handle9(request, env, ctx, url, sess) {
+  if (!sess) return error("Unauthorised", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const office = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  if (!office) return error("Compliance, SLA Admin or Full Access needed", 403, env, request);
+  const money2 = await canSeeMoney(env, tid, me);
+  const path = url.pathname, method = request.method.toUpperCase();
+  const body = async () => {
+    try {
+      return await request.json();
+    } catch {
+      return {};
+    }
+  };
+  if (path === "/concerto/list" && method === "GET") {
+    const out = await buildList(env, tid, { status: url.searchParams.get("status") || "open", money: money2 });
+    return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/import" && method === "POST") {
+    const b = await body();
+    const rows = Array.isArray(b.rows) ? b.rows.slice(0, 5e3) : [];
+    if (!rows.length) return error("No rows to import", 400, env, request);
+    const layout = b.layout === "schedule" ? "schedule" : "orders";
+    const res = await importRows(env, tid, layout, rows, b.fileName || "");
+    return json({ ok: true, layout, ...res }, {}, env, request);
+  }
+  if (path === "/concerto/ref" && method === "POST") {
+    const b = await body();
+    const ok = await learnConcertoRef(env, tid, b.ref, b.storeCode, b.siteName || "", "office:" + me);
+    if (!ok) return error("Need a reference (SRnnnnn or ARnnnnnn) and a store number", 400, env, request);
+    return json({ ok: true, ref: normRef(b.ref), storeCode: padCode(b.storeCode) }, {}, env, request);
+  }
+  if (path === "/concerto/refs" && method === "GET") {
+    await ensureTables2(env);
+    const { results } = await env.DB.prepare("SELECT ref, store_code, site_name, kind, source, updated_at FROM concerto_refs WHERE tenant_id=? ORDER BY ref").bind(tid).all();
+    return json({ ok: true, refs: (results || []).map((r) => ({ ref: r.ref, storeCode: r.store_code, siteName: r.site_name, kind: r.kind, source: r.source, updatedAt: r.updated_at })) }, {}, env, request);
+  }
+  if (path === "/concerto/refs/seed" && method === "POST") {
+    const b = await body();
+    let n = 0;
+    for (const r of Array.isArray(b.refs) ? b.refs.slice(0, 2e3) : []) if (await learnConcertoRef(env, tid, r.ref, r.storeCode, r.siteName || "", r.source || "seed")) n++;
+    return json({ ok: true, learned: n }, {}, env, request);
+  }
+  if (path === "/concerto/status" && method === "POST") {
+    const b = await body();
+    const st = ["open", "dismissed", "done"].includes(b.status) ? b.status : null;
+    if (!b.id || !st) return error("Need id + status (open | dismissed | done)", 400, env, request);
+    await ensureTables2(env);
+    await env.DB.prepare("UPDATE concerto_ppm SET status=?, note=?, updated_at=? WHERE tenant_id=? AND id=?").bind(st, String(b.note || "").slice(0, 300), (/* @__PURE__ */ new Date()).toISOString(), tid, String(b.id)).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/concerto/stores" && method === "GET") {
+    const stores = await chartStores(env, tid);
+    return json({ ok: true, stores: [...stores.values()].map((s) => ({ code: s.code, name: s.name, category: s.category, closed: s.closed })).sort((a, b) => a.code.localeCompare(b.code)) }, {}, env, request);
+  }
+  return error("Not found", 404, env, request);
+}
+var FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED;
+var init_concerto = __esm({
+  "src/routes/concerto.js"() {
+    init_http();
+    init_auth();
+    init_sla();
+    FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
+    TYPE_LABEL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency lighting", pv: "PV", ev: "EV", pump: "Pump", other: "Other" };
+    MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+    todayIso = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    FINISHED = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+  }
+});
+
 // src/lib/batterypdf.js
 function fit2(str, size, maxW) {
   let s = S2(str);
@@ -9952,7 +10366,7 @@ var init_pumppdf = __esm({
 });
 
 // src/routes/pump.js
-async function ensureTables2(env) {
+async function ensureTables3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
     tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
     status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
@@ -10148,7 +10562,7 @@ async function resignMedia(env, origin, rec) {
   }
   return rec;
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (method === "GET" && url.pathname === "/pump/media") {
     const key = url.searchParams.get("key") || "";
@@ -10162,7 +10576,7 @@ async function handle9(request, env, ctx, url, sess) {
   const tid = sess.tenantId, me = sess.user.username;
   const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables2(env);
+  await ensureTables3(env);
   const perms = await permissionsFor(env, tid, me);
   const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
   const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
@@ -10555,7 +10969,7 @@ var init_pump = __esm({
 // src/routes/certs.js
 var certs_exports = {};
 __export(certs_exports, {
-  handle: () => handle10,
+  handle: () => handle11,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob
 });
 function clientForSiteClient(sc) {
@@ -10579,7 +10993,7 @@ async function backfillClient(env, tid, rec) {
   if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
-async function ensureTables3(env) {
+async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
     job_id TEXT, site_code TEXT, cert_number TEXT,
@@ -10796,7 +11210,7 @@ function buildQuoteText(rec, code) {
   });
   if (!lines.length) return null;
   const total = lines.length * REMEDIAL_CHARGE;
-  const text = `Failed EM fittings at store ${padCode(code) || code || ""}:
+  const text = `Failed EM fittings at store ${padCode2(code) || code || ""}:
 ` + lines.join("\n") + `
 Total: ${lines.length} fitting${lines.length === 1 ? "" : "s"} - \xA3${total}`;
   return { text, count: lines.length, total, numbers };
@@ -10874,7 +11288,7 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
   }
 }
 async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate = "", by = "auto" } = {}) {
-  const code = padCode(cert.site_code || rec.siteCode);
+  const code = padCode2(cert.site_code || rec.siteCode);
   if (!code) throw new Error("no store code");
   let emKind = cert.type === "em" ? rec.emKind || "" : "";
   if (cert.type === "em" && !emKind) {
@@ -11083,7 +11497,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
 }
 async function reissueCleanCertForRemedialJob(env, tid, job) {
   try {
-    await ensureTables3(env);
+    await ensureTables4(env);
     const jid = String(job && job.id || "");
     if (!jid.startsWith("emrem:")) return null;
     const certId = jid.slice(6).replace(/:(L|B)$/i, "");
@@ -11097,7 +11511,7 @@ async function reissueCleanCertForRemedialJob(env, tid, job) {
   }
 }
 async function matchOrderToRemedial(env, tid, o) {
-  const code = padCode(o.storeCode), num2 = numOf(o.storeCode);
+  const code = padCode2(o.storeCode), num2 = numOf(o.storeCode);
   if (!code && !num2) return null;
   try {
     const { results } = await env.DB.prepare(
@@ -11168,7 +11582,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const extId = String(b.externalId || b.messageId || "").slice(0, 200);
   const orderNumber = String(b.orderNumber || "").slice(0, 60);
-  const storeCode = padCode(b.storeCode || (b.siteRaw ? (String(b.siteRaw).match(/\d{2,5}/) || [])[0] : ""));
+  const storeCode = padCode2(b.storeCode || (b.siteRaw ? (String(b.siteRaw).match(/\d{2,5}/) || [])[0] : ""));
   const siteName = String(b.siteName || "").slice(0, 160);
   const srRef = String(b.srRef || "").slice(0, 40);
   const detail = String(b.detail || b.description || "").replace(/https?:\/\/\S+/g, "").replace(/\n{2,}/g, "\n").trim().slice(0, 1e3);
@@ -11199,6 +11613,8 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber, unlinkedJobId });
   const status = m ? "matched" : "new";
+  if (srRef && storeCode) ctx?.waitUntil?.(learnConcertoRef(env, tid, srRef, storeCode, siteName, "order-email").catch(() => {
+  }));
   const emailSubject = String(b.emailSubject || "").slice(0, 300) || null;
   const emailFrom = String(b.emailFrom || "").slice(0, 200) || null;
   const emailText = String(b.emailText || "").slice(0, 12e3) || null;
@@ -11318,7 +11734,7 @@ async function getJob2(env, tid, id) {
     return null;
   }
 }
-function padCode(v) {
+function padCode2(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 }
@@ -11471,14 +11887,14 @@ async function latestCertR2Key(env, tid, code, type) {
   try {
     const row = await env.DB.prepare(
       "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
-    ).bind(tid, padCode(code), type).first();
+    ).bind(tid, padCode2(code), type).first();
     return row ? row.r2_key : null;
   } catch {
     return null;
   }
 }
 async function prefillFromPrevious(env, tid, code, type) {
-  const c4 = padCode(code);
+  const c4 = padCode2(code);
   try {
     const prev = await env.DB.prepare(
       "SELECT data FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND status='final' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
@@ -11525,10 +11941,10 @@ async function emSetFor(env, tid, code) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
     const m = row ? JSON.parse(row.value) : {};
-    const c4 = padCode(code);
+    const c4 = padCode2(code);
     return m[c4] || m[String(Number(c4))] || c4;
   } catch {
-    return padCode(code);
+    return padCode2(code);
   }
 }
 async function nextPatNumber(env, tid) {
@@ -11555,7 +11971,7 @@ function monthYY(date) {
   return String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getFullYear()).slice(-2);
 }
 async function prevCertNumberForStore(env, tid, code, type) {
-  const c4 = padCode(code);
+  const c4 = padCode2(code);
   try {
     const row = await env.DB.prepare(
       "SELECT cert_number FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND cert_number IS NOT NULL AND cert_number!='' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
@@ -11611,7 +12027,7 @@ function shapeRow2(cert) {
   };
   return normalizeRemedials(rec);
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -11638,7 +12054,7 @@ async function handle10(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const oTid = await resolveTenantId(env, request);
-      await ensureTables3(env);
+      await ensureTables4(env);
       const ob = await request.json().catch(() => ({}));
       return await handleOrderInbound(env, oTid, ob, ctx, request);
     }
@@ -11648,7 +12064,7 @@ async function handle10(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/certs(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables3(env);
+  await ensureTables4(env);
   const perms = await permissionsFor(env, tid, me);
   const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
   const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
@@ -12034,11 +12450,11 @@ PAT: Import certificate number ${num2}-${yr}`;
       }
       await env.DB.prepare(
         "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode2(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
     } else {
       await env.DB.prepare(
         "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
-      ).bind(type, b.siteCode ? padCode(b.siteCode) : existing.site_code, JSON.stringify(data), now, tid, id).run();
+      ).bind(type, b.siteCode ? padCode2(b.siteCode) : existing.site_code, JSON.stringify(data), now, tid, id).run();
     }
     return json({ ok: true, id }, {}, env, request);
   }
@@ -12180,7 +12596,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     return json({ ok: true, range, counts, items: countOnly ? [] : items }, {}, env, request);
   }
   if (sub === "/list" && method === "GET") {
-    const code = padCode(q.get("code")), type = T(q.get("type"));
+    const code = padCode2(q.get("code")), type = T(q.get("type"));
     const rows = (await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND site_code=? AND type=? ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 100"
     ).bind(tid, code, type).all()).results || [];
@@ -12193,7 +12609,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
-    const code = padCode(cert.site_code || rec.siteCode);
+    const code = padCode2(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
     const docDate = String(b.docDate || rec.contractor && rec.contractor.date || "").trim() || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
@@ -12266,7 +12682,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
-    const code = padCode(cert.site_code || rec.siteCode);
+    const code = padCode2(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code.", 400, env, request);
     const number = String(cert.cert_number || b.certNumber || "").trim();
     if (!number) return error("This certificate hasn't been issued yet \u2014 finalise it first.", 400, env, request);
@@ -12323,7 +12739,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     if (code) {
       where.push("site_code=?");
-      bind.push(padCode(code));
+      bind.push(padCode2(code));
     }
     const { results } = await env.DB.prepare(
       `SELECT * FROM em_remedials WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 500`
@@ -12817,7 +13233,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow2(cert);
     const cfg = await getConfig2(env, tid);
-    const code = padCode(cert.site_code || rec.siteCode) || "";
+    const code = padCode2(cert.site_code || rec.siteCode) || "";
     const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
     const reference = `${code}-EM-${yr}`;
     const hour = Number((/* @__PURE__ */ new Date()).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -12876,7 +13292,7 @@ ${con.tradingTitle || "Mostlane"}`;
     ).bind(tid).all();
     const codes = {};
     (results || []).forEach((r) => {
-      const c = padCode(r.site_code);
+      const c = padCode2(r.site_code);
       if (c) codes[c] = { fittings: r.fittings, charge: r.charge };
     });
     return json({ ok: true, codes }, {}, env, request);
@@ -12941,7 +13357,7 @@ ${con.tradingTitle || "Mostlane"}`;
         items.push({ site: siteName, ref: String(r2.comments || "").trim() || "Fitting", spec: rem.batterySpec || "", qty: rem.batteryQty || 0, note: rem.note || "", photos: await loadImgs(rem.photos) });
       }
     } else if (code) {
-      const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND kind='battery' AND site_code=? ORDER BY created_at DESC LIMIT 300").bind(tid, padCode(code)).all();
+      const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND kind='battery' AND site_code=? ORDER BY created_at DESC LIMIT 300").bind(tid, padCode2(code)).all();
       for (const r2 of results || []) {
         let ph = [];
         try {
@@ -13018,7 +13434,7 @@ ${con.tradingTitle || "Mostlane"}`;
     if (!cert) return error("Certificate not found", 404, env, request);
     const file = form.get("file");
     if (!file || typeof file === "string") return error("file required", 400, env, request);
-    const code = padCode(cert.site_code);
+    const code = padCode2(cert.site_code);
     if (!code) return error("This certificate has no store code.", 400, env, request);
     const number = String(form.get("certNumber") || cert.cert_number || await suggestNumber(env, tid, code, cert.type)).trim();
     const docDate = String(form.get("docDate") || "").trim() || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -13143,6 +13559,7 @@ var init_certs = __esm({
     init_push();
     init_sla();
     init_auth();
+    init_concerto();
     init_filesign();
     init_email();
     init_batterypdf();
@@ -13216,7 +13633,7 @@ __export(sla_exports, {
   bumpAiUsage: () => bumpAiUsage,
   cloneJobAsVisit: () => cloneJobAsVisit,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
-  handle: () => handle11,
+  handle: () => handle12,
   linkOrderToExistingJob: () => linkOrderToExistingJob,
   linkOrderToJobById: () => linkOrderToJobById,
   listFallbackTemplates: () => listFallbackTemplates,
@@ -13259,7 +13676,7 @@ function badScheduleIn(body) {
   }
   return null;
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -19457,7 +19874,7 @@ var holidays_exports = {};
 __export(holidays_exports, {
   approvedLeaveInRange: () => approvedLeaveInRange,
   bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle12,
+  handle: () => handle13,
   jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
   remindPendingHolidays: () => remindPendingHolidays
 });
@@ -19562,7 +19979,7 @@ async function remindPendingHolidays(env, tid = 1) {
   } catch {
   }
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -19932,8 +20349,8 @@ async function handle12(request, env, ctx, url, sess) {
     if (!record) return text("Not found", 404);
     const status = path.endsWith("approve") ? "Approved" : "Rejected";
     if (status === "Approved" && !body.force) {
-      const bookedJobs = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
-      if (bookedJobs.length) return json4({ clash: true, jobs: bookedJobs });
+      const bookedJobs2 = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
+      if (bookedJobs2.length) return json4({ clash: true, jobs: bookedJobs2 });
     }
     const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
     await db.prepare(
@@ -21160,7 +21577,7 @@ function isSuppressed(rules, type, user, key) {
 
 // src/routes/assets.js
 init_push();
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -22086,7 +22503,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -22451,7 +22868,7 @@ init_auth();
 init_sitelog_api();
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -23463,7 +23880,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -23681,7 +24098,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -23802,7 +24219,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -23976,7 +24393,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -24531,7 +24948,7 @@ function mondayOf3(dateStr) {
   d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
   return d.toISOString().slice(0, 10);
 }
-function addDays(dateStr, n) {
+function addDays2(dateStr, n) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
@@ -24723,7 +25140,7 @@ function answerWord(v) {
 function deadlineFor(week, s) {
   const dow = Math.min(7, Math.max(1, Number(s.dueDow) || 5));
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(s.dueTime || "") ? s.dueTime : "17:00";
-  return londonToISO2(addDays(week, dow - 1), hm);
+  return londonToISO2(addDays2(week, dow - 1), hm);
 }
 function shapeCheck(r) {
   if (!r) return null;
@@ -24756,7 +25173,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -25090,12 +25507,12 @@ async function handle20(request, env, ctx, url, sess) {
     const toRaw = url.searchParams.get("to");
     const fromRaw = url.searchParams.get("from");
     const to = mondayOf3(toRaw && /^\d{4}-\d{2}-\d{2}$/.test(toRaw) ? toRaw : curWeek);
-    let from = mondayOf3(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays(to, -7 * 7));
+    let from = mondayOf3(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays2(to, -7 * 7));
     const weeks = [];
     let w = from;
     while (w <= to && weeks.length < 80) {
       weeks.push(w);
-      w = addDays(w, 7);
+      w = addDays2(w, 7);
     }
     if (!weeks.length) weeks.push(to);
     from = weeks[0];
@@ -25452,7 +25869,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -25696,7 +26113,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -25981,7 +26398,7 @@ async function computeDriverChecks(db) {
     };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -26448,7 +26865,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -26560,7 +26977,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -28856,7 +29273,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -31517,7 +31934,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -31909,7 +32326,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -32118,11 +32535,11 @@ var W5 = R - L;
 var NAVY4 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
-var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+var MONTHS2 = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function fmtDate2(iso) {
   try {
     const d = new Date(iso);
-    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return `${d.getUTCDate()} ${MONTHS2[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   } catch {
     return String(iso || "");
   }
@@ -32131,7 +32548,7 @@ function fmtWhen3(iso) {
   try {
     const d = new Date(iso);
     const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
-    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
+    return `${d.getUTCDate()} ${MONTHS2[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
   } catch {
     return String(iso || "");
   }
@@ -32417,7 +32834,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -32643,7 +33060,7 @@ init_auth();
 var CLIENT = "chapplins";
 var SCHEME = "chapplins";
 var _ready = false;
-async function ensureTables4(env, tenantId) {
+async function ensureTables5(env, tenantId) {
   if (_ready) return;
   const db = tenantDB(env, tenantId);
   await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
@@ -32698,14 +33115,14 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
-  await ensureTables4(env, tenantId);
+  await ensureTables5(env, tenantId);
   if (path === "/chapplins/sites" && method === "GET") {
     const { results: siteRows } = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
@@ -32937,7 +33354,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
@@ -33699,7 +34116,7 @@ function jobRow(r) {
     _dormant: !!d.fallbackTemplate
   };
 }
-var FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
+var FINISHED2 = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return [];
@@ -33735,7 +34152,7 @@ async function resolveJobTarget(env, tid, a) {
   const numRun = (ref.match(/\d{3,}/) || [])[0];
   let hits = rows.filter((r) => norm(r.ref).includes(norm(ref)) || numRun && String(r.ref).includes(numRun));
   if (!hits.length) hits = rows;
-  const open = hits.filter((r) => !FINISHED.test(r.status));
+  const open = hits.filter((r) => !FINISHED2.test(r.status));
   const pool = open.length ? open : hits;
   if (pool.length === 1) return { ok: true, job: pool[0] };
   if (pool.length > 1) return { ok: false, ambiguous: pool.slice(0, 6).map((r) => `${r.ref} (${r.siteName || r.siteCode}${r.status ? ", " + r.status : ""})`) };
@@ -34001,7 +34418,7 @@ async function clashCheck(env, tid, dated) {
           d = JSON.parse(r.data || "{}");
         } catch {
         }
-        if (FINISHED.test(d.status || "")) continue;
+        if (FINISHED2.test(d.status || "")) continue;
         const engs = (Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : []).map((x) => String(x).toLowerCase());
         if (!engs.includes(String(eng).toLowerCase())) continue;
         const st = Date.parse(d.scheduledAt || r.scheduled_at);
@@ -34107,9 +34524,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
@@ -34181,7 +34598,7 @@ async function toolPlanEmpat(env, tid, caps2, args) {
     unresolved: bad
   };
 }
-function toIsoDate(v) {
+function toIsoDate2(v) {
   const s = String(v || "").trim();
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
@@ -34198,7 +34615,7 @@ function dueSummary(dueJson) {
   const t0 = Date.parse(londonToday() + "T12:00:00Z");
   const out = [];
   for (const [type, raw] of Object.entries(due || {})) {
-    const date = toIsoDate(raw);
+    const date = toIsoDate2(raw);
     if (!date) continue;
     const days = Math.round((Date.parse(date + "T12:00:00Z") - t0) / 864e5);
     out.push({ type, date, daysUntil: days, state: days < 0 ? "OVERDUE" : days <= 30 ? "due soon" : "ok" });
@@ -34406,7 +34823,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -34610,7 +35027,7 @@ async function handle32(request, env, ctx, url, sess) {
         const warns = [];
         if (job.engineers && job.engineers.length && !job.engineers.map(String).map((s) => s.toLowerCase()).includes(engUser.toLowerCase()))
           warns.push(`currently ${job.engineers.join(", ")}`);
-        if (FINISHED.test(job.status)) warns.push(`this job is ${job.status}`);
+        if (FINISHED2.test(job.status)) warns.push(`this job is ${job.status}`);
         jobs.push({
           action: "assign",
           jobId: job.id,
@@ -34837,7 +35254,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -35218,7 +35635,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables5(env) {
+async function ensureTables6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -35365,7 +35782,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -35385,7 +35802,7 @@ async function handle34(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const tid2 = await resolveTenantId(env, request);
-      await ensureTables5(env);
+      await ensureTables6(env);
       const b = await request.json().catch(() => ({}));
       const action = String(b.action || "").toLowerCase();
       const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -35488,7 +35905,7 @@ async function handle34(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables5(env);
+  await ensureTables6(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -35673,6 +36090,7 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
 }
 
 // src/index.js
+init_concerto();
 init_certs();
 init_pump();
 
@@ -35896,7 +36314,7 @@ function devLabel(inp) {
 init_logo();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables6(env) {
+async function ensureTables7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
@@ -35934,13 +36352,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables6(env);
+  await ensureTables7(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -36171,7 +36589,7 @@ function applyWorksWidth(worksW) {
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
-var MONTHS2 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
 var parse = (s) => {
@@ -36179,7 +36597,7 @@ var parse = (s) => {
   return isNaN(d) ? null : d;
 };
 var ymd = (d) => d.toISOString().slice(0, 10);
-var addDays2 = (d, n) => new Date(d.getTime() + n * DAY);
+var addDays3 = (d, n) => new Date(d.getTime() + n * DAY);
 var isWeekend = (d) => {
   const w = d.getUTCDay();
   return w === 0 || w === 6;
@@ -36197,10 +36615,10 @@ function endOf(t, hs) {
   const s = parse(t.start);
   if (!s) return null;
   const days = Math.min(730, Math.max(1, Number(t.days) || 1));
-  if (t.wknd) return addDays2(s, days - 1);
+  if (t.wknd) return addDays3(s, days - 1);
   let d = s, left = days - 1, guard = 0;
   while (left > 0 && guard++ < 4e3) {
-    d = addDays2(d, 1);
+    d = addDays3(d, 1);
     if (!nonWork(d, hs)) left--;
   }
   return d;
@@ -36271,9 +36689,9 @@ function buildProgrammePdf(data, meta = {}) {
   }
   if (!s0) {
     s0 = anchor;
-    e0 = addDays2(anchor, 29);
+    e0 = addDays3(anchor, 29);
   }
-  const totalDays = Math.min(550, Math.max(14, Math.round((addDays2(e0, 2) - s0) / DAY) + 1));
+  const totalDays = Math.min(550, Math.max(14, Math.round((addDays3(e0, 2) - s0) / DAY) + 1));
   const maxDaysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
   const nWindows = Math.max(1, Math.ceil(totalDays / maxDaysPerPage));
   const daysPerPage = Math.ceil(totalDays / nWindows);
@@ -36316,7 +36734,7 @@ function buildProgrammePdf(data, meta = {}) {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
       const dayW = Math.min(16, GRID_W / win.days);
-      const winStart = addDays2(s0, win.from);
+      const winStart = addDays3(s0, win.from);
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
@@ -36340,7 +36758,7 @@ function buildProgrammePdf(data, meta = {}) {
       }
       doc.text(PW - M7, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
-      const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
+      const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays3(winStart, win.days - 1))})` : "";
       if (rangeLbl) doc.text(PW - M7, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
       const legendRightL1 = PW - M7 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
@@ -36389,15 +36807,15 @@ function buildProgrammePdf(data, meta = {}) {
       const rightEdge = GRID_X + win.days * dayW;
       let lastMonR = -Infinity;
       for (let i = 0; i < win.days; i++) {
-        const d = addDays2(winStart, i);
+        const d = addDays3(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1;
         if (i === 0 || first2) {
-          const full = MONTHS2[d.getUTCMonth()] + " " + d.getUTCFullYear();
-          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS2[d.getUTCMonth()];
+          const full = MONTHS3[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS3[d.getUTCMonth()];
           if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
             doc.text(x + 1, gridTop + 8, lbl, { size: 6, bold: true, color: [0.28, 0.36, 0.46] });
             lastMonR = x + 1 + textWidth(lbl, 6);
@@ -36430,7 +36848,7 @@ function buildProgrammePdf(data, meta = {}) {
         doc.line(M7, ry + rh, M7 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
-          for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
+          for (let d = t._start; d <= t._end; d = addDays3(d, 1)) {
             if (!t.wknd && nonWork(d, hs)) continue;
             const off = Math.round((d - winStart) / DAY);
             if (off >= 0 && off < win.days) marked.push(off);
@@ -36525,7 +36943,7 @@ function buildProgrammePdf(data, meta = {}) {
 
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables7(env) {
+async function ensureTables8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -36675,14 +37093,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle36(request, env, ctx, url) {
+async function handle37(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables7(env);
+  await ensureTables8(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -37279,7 +37697,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables8(env) {
+async function ensureTables9(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -37449,7 +37867,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -37473,7 +37891,7 @@ async function handle37(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables8(env);
+  await ensureTables9(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -38546,7 +38964,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -38798,7 +39216,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -39080,7 +39498,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -39267,7 +39685,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -39586,7 +40004,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -39718,37 +40136,37 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
-  ["*", "/holiday", handle12],
-  ["*", "/asset", handle13],
+  ["*", "/holiday", handle13],
+  ["*", "/asset", handle14],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle13],
+  ["*", "/transfer", handle14],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle13],
-  ["*", "/upload-asset-thumb", handle13],
-  ["*", "/delete-asset-image", handle13],
-  ["*", "/sla/workever", handle41],
+  ["*", "/upload-asset-image", handle14],
+  ["*", "/upload-asset-thumb", handle14],
+  ["*", "/delete-asset-image", handle14],
+  ["*", "/sla/workever", handle42],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle11],
-  ["*", "/stats", handle21],
-  ["*", "/staff", handle22],
+  ["*", "/sla", handle12],
+  ["*", "/stats", handle22],
+  ["*", "/staff", handle23],
   // staff personal + company documents
-  ["*", "/hr/", handle23],
+  ["*", "/hr/", handle24],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle24],
+  ["*", "/privacy", handle25],
   // GDPR data export + erasure
-  ["*", "/fleet", handle26],
+  ["*", "/fleet", handle27],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle27],
+  ["*", "/messages", handle28],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle28],
+  ["*", "/memos", handle29],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle29],
+  ["*", "/documents", handle30],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle32],
+  ["*", "/ai", handle33],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -39760,70 +40178,72 @@ var ROUTES = [
   ["*", "/import-sites", handle7],
   ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle25],
+  ["*", "/sites/register", handle26],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle25],
+  ["*", "/ledger", handle26],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle25],
+  ["*", "/costing", handle26],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle25],
+  ["*", "/exceptions", handle26],
   // needs-a-human-eye list
   ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle30],
+  ["*", "/chapplins", handle31],
   // Chapplins customer: site tenants (current/previous) + directory
-  ["*", "/settings", handle14],
-  ["*", "/oncall", handle14],
-  ["*", "/daily-logs", handle14],
-  ["*", "/notify", handle14],
+  ["*", "/settings", handle15],
+  ["*", "/oncall", handle15],
+  ["*", "/daily-logs", handle15],
+  ["*", "/notify", handle15],
   // notification audit log
-  ["*", "/prefs", handle14],
+  ["*", "/prefs", handle15],
   // per-user cross-device markers
-  ["*", "/menu-config", handle14],
+  ["*", "/menu-config", handle15],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle14],
+  ["*", "/audit", handle15],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle15],
-  ["*", "/sitelog-launch", handle15],
-  ["*", "/office", handle16],
+  ["*", "/sitelog", handle16],
+  ["*", "/sitelog-launch", handle16],
+  ["*", "/office", handle17],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle17],
+  ["*", "/key", handle18],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle18],
+  ["*", "/theme", handle19],
   // per-user colour theme + background
-  ["*", "/hs/", handle19],
+  ["*", "/hs/", handle20],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle20],
+  ["*", "/vancheck", handle21],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle31],
+  ["*", "/po", handle32],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle33],
+  ["*", "/cctv", handle34],
   // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
   // office view of the email→job intake (log, test box, re-run, allow-list)
-  ["*", "/tasks", handle34],
+  ["*", "/tasks", handle35],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/certs", handle10],
+  ["*", "/concerto", handle9],
+  // Concerto PPM list (import the client's export, reconcile against the compliance chart)
+  ["*", "/certs", handle11],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle9],
+  ["*", "/pump", handle10],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle35],
+  ["*", "/cablecalc", handle36],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle36],
+  ["*", "/prog", handle37],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle37],
+  ["*", "/projects", handle38],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle37],
+  ["*", "/project", handle38],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle38],
+  ["*", "/health/", handle39],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle42],
+  ["*", "/comms", handle43],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle42],
+  ["*", "/customer", handle43],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle39],
+  ["*", "/tuya", handle40],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle40]
+  ["*", "/fra", handle41]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.

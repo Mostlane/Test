@@ -4413,6 +4413,46 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     on `job.orderValue` (hidden from the field by `stripMoney`). The board keeps
     the full priced text for the office. Tests: cases 6–12 in
     `test-client-orders.mjs` (35 cases).
+- **CONCERTO PPM LIST — the client's OFFICIAL schedule, imported + reconciled (9 Sep
+  2026, Jamie: "This is the official list i work to… flag any that dont match up or
+  are overdue on my compliance page and not showing on the concerto list… drop in
+  these spreadsheets in the future and auto add sites due but not duplicate").**
+  `routes/concerto.js` (mounted `/concerto`, office = FullAccess|SLAAdmin|Compliance;
+  order values only for `canSeeMoney`) + page **concerto-ppm.html** (sidebar
+  "Concerto PPM list", 🛠 Tools on eicr-portal.html, help guide). Concerto exports
+  TWO layouts and the page's drop-zone reads both IN THE BROWSER (xlsx-lite / CSV):
+  **"Open PPM jobs overdue (completion)"** = one row per open PPM ORDER (PPMnnnn ·
+  order date · value · "Emergency light - August 2025 : AR005758" · supplier) and
+  **"PPM schedule"** (UPRN=SRnnnnn site ref · "0109 - Romsey…" · Ref EL-5Y · Type ·
+  Planned date). **Order rows carry NO store — only an asset reference** (an
+  `SRnnnnn` Concerto site ref inside "SC-EL-SR00373"/"EL-PAT-SR00161", or an older
+  `ARnnnnnn` asset ref for the 2025 batch), so table **`concerto_refs`** maps
+  ref→store: seeded 9 Sep from the 2025 export Jamie annotated with store numbers
+  (45 AR refs), Tanya's ppm_schedule exports + the All Jobs sheet + the job archive
+  + client_orders (~150 SR refs) and the Concerto cancellation emails (AR003825→0356
+  Eastbourne Lindfield, AR003826→0382 Binfield, AR000709→0249 Bradford on Avon); it
+  LEARNS from every Concerto order email (`certs.js handleOrderInbound` →
+  `learnConcertoRef`) and from schedule exports; anything still unmapped shows
+  "Not mapped" + a **Map store** picker (POST `/concerto/ref`, remembered). Table
+  **`concerto_ppm`** (PK tenant+id; id = order number, or `SCH:<UPRN>:<type>:<planned>`
+  for schedule rows): POST `/concerto/import {layout, rows, fileName}` UPSERTS by id
+  (never a duplicate), and a full "open" orders list is authoritative — any open row
+  it no longer lists is marked **`gone`** (closed on Concerto; re-appearing re-opens
+  it); a schedule export only retires future rows of the types it carries.
+  **Reconciliation** (`reconcileRow`, GET `/concerto/list`): per row vs the coop chart
+  due date for that type (legacy dd/mm/yyyy dates parsed too), using `lastDone =
+  chartDue − frequency` (12m; pump 1m; 5-year 60m) → **done** (done our side in/after
+  the Concerto month — Concerto still open: close it / send the completion date),
+  **due** / **overdue** (both agree), **mismatch** (chart date disagrees either way),
+  **no_store**, **not_on_chart**, **no_chart_date**, **store_closed**; each row also
+  shows the booked EM/PAT/pump job for that store. Reverse check **`chartMissing`**:
+  active chart stores due within 30 days / overdue for em·pat·pump·pv·ev with NO
+  open Concerto row. POST `/concerto/status {id, dismissed|open|done, note}`; GET
+  `/concerto/refs`, `/refs/seed`, `/stores`. NB the export Jamie sent (57 rows) is
+  mostly the Aug-2025 batch Concerto still shows open because completion dates were
+  never logged (Greg's Jan-2026 email) — those read "Done our side". **Test:**
+  `node --no-warnings worker/tools/test-concerto.mjs` (real SQLite via node:sqlite
+  behind a D1-shaped shim — 50 cases). SW `mostlane-v121`.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

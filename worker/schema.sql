@@ -847,3 +847,21 @@ CREATE TABLE IF NOT EXISTS health_events (
   at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_health_at ON health_events (tenant_id, at);
+
+-- Concerto PPM list (routes/concerto.js): the client's official planned-maintenance
+-- rows imported from their spreadsheet exports, reconciled against the compliance
+-- chart. concerto_refs maps a Concerto reference (SRnnnnn site ref / ARnnnnnn
+-- asset ref) to a store number. Both self-migrate.
+CREATE TABLE IF NOT EXISTS concerto_ppm (
+  id TEXT NOT NULL, tenant_id TEXT NOT NULL, kind TEXT, order_date TEXT, order_value REAL,
+  description TEXT, ppm_type TEXT, period TEXT, asset_ref TEXT, sr_ref TEXT,
+  store_code TEXT, site_name TEXT, supplier TEXT, target_response TEXT, actual_response TEXT,
+  planned_date TEXT, last_date TEXT, status TEXT, note TEXT, source_file TEXT,
+  first_seen_at TEXT, last_seen_at TEXT, gone_at TEXT, updated_at TEXT,
+  PRIMARY KEY (tenant_id, id)
+);
+CREATE TABLE IF NOT EXISTS concerto_refs (
+  tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
+  kind TEXT, source TEXT, updated_at TEXT,
+  PRIMARY KEY (tenant_id, ref)
+);

@@ -29,6 +29,7 @@ import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
 import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById, unlinkOrderFromJob } from "./sla.js";
 import { canSeeMoney } from "../lib/auth.js";
+import { learnConcertoRef } from "./concerto.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
@@ -641,6 +642,9 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   if (!created) { try { const ex = await env.DB.prepare("SELECT unlinked_job_id FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, id).first(); unlinkedJobId = (ex && ex.unlinked_job_id) || ""; } catch {} }
   const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber, unlinkedJobId });
   const status = m ? "matched" : "new";
+  // Every Concerto order teaches the SRnnnnn site reference → store map that the
+  // Concerto PPM list (concerto.js) resolves its rows with.
+  if (srRef && storeCode) ctx?.waitUntil?.(learnConcertoRef(env, tid, srRef, storeCode, siteName, "order-email").catch(() => {}));
   // A copy of the email (subject / from / text) travels with the order so any office
   // user can read it from the board — the mailbox itself is one person's Outlook.
   const emailSubject = String(b.emailSubject || "").slice(0, 300) || null;

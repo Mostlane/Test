@@ -395,6 +395,12 @@
           ["<b>Compliance</b> holds the client-specific compliance paperwork, grouped by client.", "compliance.png"],
           ["Pick the client, then follow the form for the work you're doing. Use <b>Other</b> for anything that doesn't fit a listed client."],
         ]},
+        { icon: "📋", title: "Concerto PPM list (the client's official schedule)", perms: ["Compliance", "SLAAdmin"], steps: [
+          ["Southern Co-op's Concerto system is the list we work to. Open <b>Concerto PPM list</b> (sidebar, or 🛠 Tools on the Southern Co-op chart) and <b>drop the Concerto export</b> on the page — either the <i>Open PPM jobs overdue</i> sheet or a <i>PPM schedule</i> sheet. It's read in your browser and imported; a row you've imported before is updated, never duplicated, and a row that has dropped off a later full list is marked <b>gone</b> (closed on Concerto)."],
+          ["Concerto rows carry only a reference (SR… site ref or AR… asset ref), so the page maps each one to a store. Most are known already; anything showing <b>Not mapped</b> gets a <b>Map store</b> button — pick the store once and every future export resolves it automatically."],
+          ["Each row is checked against the compliance chart: <b>Done our side</b> (the chart shows the test done but Concerto still lists it open — close it / send the completion date), <b>Due</b> / <b>Overdue</b> (both agree), <b>Dates differ</b> (the chart's due date disagrees with Concerto's month), plus not-on-chart / store closed. A booked EM/PAT job shows against the row."],
+          ["The <b>Overdue on our chart but not on Concerto</b> card is the reverse check — stores the chart says are due or overdue that Concerto hasn't raised an order for. <b>Dismiss</b> a row you've dealt with; <b>Export CSV</b> gives you the list to send back to Concerto."],
+        ]},
         { icon: "⚡", title: "My Day (guided mode)", perms: ["StoryMode"], steps: [
           ["Your whole day runs from <b>My Day</b> — three tabs across the top: <b>1 · Start</b>, <b>2 · Jobs</b>, <b>3 · Finish</b>.", "myday.png"],
           ["<b>Start:</b> on Wednesdays complete the weekly vehicle check (tick each item, note any defects), enter your van's mileage, and tap <b>▶ Start my day</b> — your start time and location are recorded."],
