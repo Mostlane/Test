@@ -70,7 +70,7 @@
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function slug(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
-  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs"];
+  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs", "Cancelled"];
   let STATUSES = BASE_STATUSES.slice();   // built-ins + custom categories (loaded lazily)
   let catsLoaded = false;
   async function loadCats() {
@@ -869,9 +869,18 @@
       });
     }
 
+    // Cancelling from the editor: ask WHY once (optional) — it's stamped on the job
+    // with the time + your name and shown on the board pill / job card.
+    let cancelReason;
+    if ($("mljeStatus").value === "Cancelled" && String(currentJob.status || "") !== "Cancelled") {
+      const why = window.prompt("Cancelling this job — reason? (optional, shown on the job)", "");
+      if (why === null) { $("mljeSave").disabled = false; return; }
+      cancelReason = String(why || "").trim() || undefined;
+    }
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
+      cancelReason,
       release: release,
       engRelease: engRelease,   // per-engineer overrides (full replace; {} clears)
       helpdeskRef: $("mljeRef").value.trim() || undefined,

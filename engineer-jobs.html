@@ -349,7 +349,7 @@ function computeSlaCountdown(targetISO){
 // A finished job — complete/closed/invoiced. Used to grey out + recede the card.
 function isDoneStatus(status){
   const s = (status || "").toLowerCase();
-  return s.includes("complete") || s.includes("closed") || s.includes("invoiced");
+  return s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel");
 }
 // Engineer status pill — plain status only, NO SLA overdue colouring.
 function statusClass(status){
@@ -383,7 +383,7 @@ function isUrgentJob(job){ return /priority\s*1|p1/i.test(String((job && job.pri
 // Left-edge stripe: done greys out; a P1 job shows the red urgency stripe; else neutral.
 function stripClass(status, urgent){
   const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed") || s.includes("invoiced")) return "strip-done";
+  if(s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel")) return "strip-done";
   if(urgent) return "strip-bad";
   return "strip-ok";
 }
@@ -1008,7 +1008,7 @@ async function loadUnscheduled(){
     const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}`, { cache:"no-store" });
     const list = await res.json();
     const open = (Array.isArray(list) ? list : []).filter(j =>
-      !j.scheduledAt && !["Complete","Closed Jobs","Invoiced"].includes(j.status || ""));
+      !j.scheduledAt && !["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status || ""));
     const box = $("unschedBox");
     if(!open.length){ box.style.display = "none"; box.innerHTML = ""; return; }
     box.style.display = "block";

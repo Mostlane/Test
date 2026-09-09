@@ -55,6 +55,16 @@ const rawChapBroken = mail("ashley@chapplins.co.uk", "6 Test Road, Anytown, AB1 
 // Metro Rod job card + our own drainage-zap email
 const rawMetro = mail("dorset.example@metrorod.co.uk", "293999", "test-metro@metrorod", `<div>Please find attached our job card and photos following our visit. Job Number: 1572999 Metro Rod Job Card</div>`);
 const rawZap = mail("office@mostlane.com", "Send 280999 to MetroRod", "test-zap@outlook", `<div>Possible MetroRod job received</div><div>Send the below to MetroRod?</div><div>Site</div><div>Test Store</div>`);
+// Concerto CANCELLED JOB (their "Cancellled" spelling) — with and without an Order No.
+const CANCEL_HTML = (inc, ord, comment, title) => `<table><tr><td><div>Concerto</div><div>Notification sent on</div><div>Tue 08 September 2026 at 4:37 PM</div></td></tr></table>
+<div><p>Dear Manager TestStore/Mostlane,</p><p>The job you logged ${inc}: ${title}</p><p>Order No.: ${ord}</p><p>Has been Cancelled</p><p>Comments: ${comment} </p><p><br /></p><p>For further information please contact the helpdesk for details</p></div>`;
+const rawCancel = mail("noreply@concerto.co.uk", "Cancellled Job: 00099999 Order No.: 00099999/2", "test-cancel1@concerto", CANCEL_HTML("00099999", "00099999/2", "order for glass placed this morning.", "Windows : Cracked/Smashed (R, E)"));
+const rawCancelNoOrder = mail("noreply@concerto.co.uk", "Cancellled Job: 00099998 Order No.:", "test-cancel2@concerto", CANCEL_HTML("00099998", "", "Works quoted and approved on original job.", "Fire Door : Door/Frame Damage (R,E)"));
+const rawCancelUnknown = mail("noreply@concerto.co.uk", "Cancellled Job: 00088888 Order No.:", "test-cancel3@concerto", CANCEL_HTML("00088888", "", ".", "Thing"));
+// Concerto QUOTE REQUEST cancelled ("Quote : N - Q003. Cancel request by …")
+const QCANCEL_HTML = (ref, why) => `<table><tr><td><div>Concerto</div><div>Notification sent on</div><div>Wed 09 September 2026 at 8:24 AM</div></td></tr></table>
+<div><div>The following quote request has been updated.</div><div>${why}</div><div>Quote reference : 001999</div><div>Title : Quotation required for order number : ${ref}</div><div>Quote status : Cancelled</div><div>Site : 0000 - Test Store</div><div>Address : 1 High Street, Anytown, AB1 2CD</div><div>Description : Please investigate lighting issues and quote to resolve</div></div>`;
+const rawQuoteCancel = mail("noreply@concerto.co.uk", "Quote : 001999 - Q003. Cancel request by Test Person", "test-qcancel@concerto", QCANCEL_HTML("00099997/2", "no longer required.........completed under original job"));
 // Unknown layout from an allowed sender
 const rawUnknown = mail("someone@mostlane.com", "Leak at the test site", "test-unknown@outlook", `<div>Hi, can you send someone to Test Store, there's water coming through the ceiling. Thanks</div>`);
 
@@ -78,7 +88,7 @@ function makeEnv(extraEnv = {}) {
       return { meta: {} }; },
     async first() { calls.push(sql.slice(0, 60));
       if (/FROM app_config/.test(sql)) return cfgValue ? { value: cfgValue } : null;
-      if (/FROM inbound_emails WHERE tenant_id=\? AND message_id=\?/.test(sql)) return rows.find(r => r.message_id === binds[1] && /created|updated|order/.test(r.outcome)) || null;
+      if (/FROM inbound_emails WHERE tenant_id=\? AND message_id=\?/.test(sql)) return rows.find(r => r.message_id === binds[1] && /created|updated|order|cancelled/.test(r.outcome)) || null;
       if (/FROM inbound_emails WHERE tenant_id=\? AND id=\?/.test(sql)) return rows.find(r => r.id === binds[1]) || null;
       if (/COUNT\(\*\) AS n FROM inbound_emails/.test(sql)) return { n: rows.filter(r => r.outcome === "review").length };
       if (/ORDER BY id DESC LIMIT 1/.test(sql)) return rows[rows.length - 1] || null;
@@ -91,11 +101,20 @@ function makeEnv(extraEnv = {}) {
       return { results: [] }; },
   }; return st; } };
   const inbound = [], orders = [];
+  const cancels = [];
   const fetchSelf = async (req) => { const body = await req.json(); const u = new URL(req.url);
     if (u.pathname === "/certs/remedials/order-inbound") { orders.push({ auth: req.headers.get("authorization"), body }); return new Response(JSON.stringify({ ok: true, id: "ord-1", matched: false }), { status: 200, headers: { "content-type": "application/json" } }); }
+    if (body.action === "cancel") {   // mocked /sla/inbound cancel: /2 open → cancelled; 00099998 finished → noted; 00099997 quote → held; else 404
+      cancels.push({ auth: req.headers.get("authorization"), body });
+      const J = (o, st) => new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } });
+      if (body.incident === "00099999") return J({ ok: true, kind: body.kind, cancelled: [{ id: "JOB-00099999/2", reference: "00099999/2", previousStatus: "Scheduled", engineers: ["Test Eng"] }] });
+      if (body.incident === "00099998") return J({ ok: true, noted: true, id: "JOB-00099998/1", reference: "00099998/1", status: "Complete" });
+      if (body.incident === "00099997") return J({ ok: true, kind: "quote", cancelled: [], held: [{ id: "JOB-00099997/2", reference: "00099997/2", status: "Scheduled", engineers: ["Test Eng"] }] });
+      return J({ ok: false, notFound: true }, 404);
+    }
     inbound.push({ auth: req.headers.get("authorization"), body });
     return new Response(JSON.stringify({ ok: true, created: inbound.length === 1, id: "JOB-" + body.reference, reference: body.reference }), { status: 200, headers: { "content-type": "application/json" } }); };
-  return { env: { DB: db, JOBS_INBOUND_TOKEN: "tok", ...extraEnv }, rows, inbound, orders, fetchSelf, calls };
+  return { env: { DB: db, JOBS_INBOUND_TOKEN: "tok", ...extraEnv }, rows, inbound, orders, cancels, fetchSelf, calls };
 }
 function msgOf(raw, from) { return { from, headers: { get: k => { const m = new RegExp("^" + k + ":\\s*(.+)$", "im").exec(raw.split(/\r?\n\r?\n/)[0]); return m ? m[1] : null; } }, raw: new Blob([raw]).stream() }; }
 let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL") + "  " + name + (extra ? "  → " + extra : "")); if (!cond) fail++; };
@@ -193,6 +212,27 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   ok("test box (dry run): order sheet says client orders", o.outcome === "dryrun" && /client order/i.test(o.reason), o.reason);
   const k = await call({ subject: "New Job Alert: 00099999/2 - Priority 1", body: HTML, from: "noreply@concerto.co.uk", commit: true });
   ok("test box (commit): job created + logged", k.outcome === "created" && E.inbound.length === 1 && E.rows.length === 1);
+}
+{ // 10. Concerto CANCELLATIONS → the job is marked Cancelled (never created / never un-completed)
+  const E = makeEnv();
+  const a = await run(E, rawCancel, "noreply@concerto.co.uk");
+  const c = E.cancels[0] && E.cancels[0].body;
+  ok("cancelled job (with Order No.) → /sla/inbound action:cancel, outcome cancelled", a.outcome === "cancelled" && E.inbound.length === 0 && E.cancels.length === 1 && E.cancels[0].auth === "Bearer tok" && a.job_id === "JOB-00099999/2" && /marked Cancelled \(was Scheduled\)/.test(a.reason) && /Test Eng told/.test(a.reason), a.outcome + " / " + a.reason);
+  ok("cancel fields read: incident, order ref, reason, by, the email's time", c && c.kind === "job" && c.incident === "00099999" && c.reference === "00099999/2" && c.reason === "order for glass placed this morning." && /Concerto/.test(c.by) && /^\d{4}-\d{2}-\d{2}T/.test(c.at || ""), JSON.stringify(c));
+  const b = await run(E, rawCancelNoOrder, "noreply@concerto.co.uk");
+  ok("cancelled job (no Order No.) on an already-finished job → noted, nothing changed", b.outcome === "cancelled" && /already Complete/.test(b.reason) && E.cancels[1].body.incident === "00099998" && !E.cancels[1].body.reference, b.outcome + " / " + b.reason);
+  const u = await run(E, rawCancelUnknown, "noreply@concerto.co.uk");
+  ok("cancellation for an incident we don't hold → held for a look (fields say action:cancel)", u.outcome === "review" && /NO job for that incident/.test(u.reason) && JSON.parse(u.fields).action === "cancel", u.outcome + " / " + u.reason);
+  const q = await run(E, rawQuoteCancel, "noreply@concerto.co.uk");
+  const qc = E.cancels[3] && E.cancels[3].body;
+  ok("quote request withdrawn → kind quote, reason line + who read", qc && qc.kind === "quote" && qc.reference === "00099997/2" && qc.incident === "00099997" && /no longer required — completed under original job/.test(qc.reason) && /Test Person/.test(qc.by), JSON.stringify(qc));
+  ok("quote withdrawn on a Scheduled job → review (office decides), job named", q.outcome === "review" && /is Scheduled with Test Eng/.test(q.reason) && q.job_id === "JOB-00099997/2", q.outcome + " / " + q.reason);
+  const again = await run(E, rawCancel, "noreply@concerto.co.uk");
+  ok("same cancellation email twice → duplicate", again.outcome === "duplicate" && E.cancels.length === 4, again.reason);
+  const t = await ej.handleApi(new Request("https://x/email-intake/test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: "noreply@concerto.co.uk", subject: "Cancellled Job: 00099999 Order No.: 00099999/2", body: CANCEL_HTML("00099999", "00099999/2", "no longer needed", "Thing") }) }), E.env, {}, new URL("https://x/email-intake/test"), { user: { username: "Jamie Line" } }, E.fetchSelf);
+  const tj = await t.json();
+  ok("test box (dry run): cancellation named, nothing applied", tj.outcome === "dryrun" && /Would mark job 00099999\/2 as Cancelled/.test(tj.reason) && E.cancels.length === 4, tj.reason);
+  ok("a plain 'Quote :' notice that is NOT a cancellation still drops", matchTemplate("noreply@concerto.co.uk", "Quote : 001999 - Q001. New quote request", "The following quote request has been updated.\nQuote reference : 001999\nQuote status : Requested").tpl.id === "concerto-notice");
 }
 { // 9. site lookup edge cases
   const E = makeEnv();

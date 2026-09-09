@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=30"></script>
+  <script src="sla-jobedit.js?v=31"></script>
   <script src="firestop-form.js?v=1"></script>
   <script src="cert-form.js?v=19"></script>
   <script src="pump-form.js?v=2"></script>
@@ -179,6 +179,9 @@
     .chip-slate{border-color:#cbd5e1}   .chip-slate[aria-pressed="true"]{background:#475569}
     .chip-orange{border-color:#fdd0ab}  .chip-orange[aria-pressed="true"]{background:#ea580c}
     .chip-purple{border-color:#ddd0fb}  .chip-purple[aria-pressed="true"]{background:#7c3aed}
+    .chip-red{border-color:#fecaca}     .chip-red[aria-pressed="true"]{background:#b91c1c}
+    .cancel-banner{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#fee2e2;border:1px solid #fca5a5;color:#7f1d1d;font-size:14px;line-height:1.4}
+    .cancel-banner b{font-size:15px} .cancel-banner.soft{background:#ffedd5;border-color:#fdba74;color:#7c2d12}
     /* Custom categories carry their own colour via --cc (border + filled state). */
     .chip-custom[aria-pressed="true"]{background:var(--cc,#64748b)}
     .status-hint{font-weight:400;color:var(--muted);font-size:11px}
@@ -634,6 +637,7 @@
       <option value="Invoiced">Invoiced</option>
       <option value="Order">Order</option>
       <option value="Quote">Quote</option>
+      <option value="Cancelled">Cancelled</option>
     </select>
     <div style="margin-top:12px">
       <div class="field-label">Note / Update <span class="status-hint">(optional)</span></div>
@@ -902,6 +906,7 @@ function renderJob(){
   const name = (window.mlJobName && window.mlJobName(job)) || site;
   $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
+  renderCancelBanner();
   $("jobRef").textContent = shortRef || "—";
   $("jobSite").textContent = name || site || "—";
 
@@ -1582,7 +1587,7 @@ function renderNotes(){
     .filter(n => n.text)
     .sort((a,b) => new Date(b.at) - new Date(a.at));
   if(!notes.length){
-    const done = /^(complete|closed|invoiced)$/i.test(job.status || "");
+    const done = /^(complete|closed|invoiced|cancelled)$/i.test(job.status || "");
     el.innerHTML = done
       ? '<span style="color:#b45309;font-weight:600;">⚠ No completion note was recorded for this job.</span>'
       : "No notes yet.";
@@ -1603,10 +1608,30 @@ function renderNotes(){
   });
 }
 
+/* ---- ❌ Cancelled banner: WHEN, by whom, why (Sep 2026) ---- */
+function renderCancelBanner(){
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  let el = $("cancelBanner");
+  if(!el){ el = document.createElement("div"); el.id = "cancelBanner"; el.className = "cancel-banner"; el.style.display = "none";
+    const head = $("jobTitle") && $("jobTitle").closest("header, .head, .card, .shell, div"); const anchor = document.querySelector(".card");
+    if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor); else document.body.insertBefore(el, document.body.firstChild); }
+  const when = iso => { const d = parseDate(iso); return d ? fmtDateTimeLong(d) : ""; };
+  if(job && job.status === "Cancelled"){
+    el.className = "cancel-banner";
+    el.innerHTML = "<b>❌ Cancelled</b> " + esc(when(job.cancelledAt)) + (job.cancelledBy ? " by " + esc(job.cancelledBy) : "") +
+      (job.cancelReason ? "<br>Reason: " + esc(job.cancelReason) : "") + "<br><span style=\"font-size:12.5px;opacity:.85\">Dropped from the scheduler and every suggestion. Change the status to reinstate it.</span>";
+    el.style.display = "";
+  } else if(job && job.clientCancelled && job.clientCancelled.at){
+    const cc = job.clientCancelled;
+    el.className = "cancel-banner soft";
+    el.innerHTML = "<b>↩ Client cancelled</b> " + esc(when(cc.at)) + (cc.by ? " by " + esc(cc.by) : "") + " — the job was already <b>" + esc(job.status) + "</b>, so nothing was changed." + (cc.reason ? "<br>Their reason: " + esc(cc.reason) : "");
+    el.style.display = "";
+  } else el.style.display = "none";
+}
 /* ---- Activity timeline (statusHistory + events, newest first) ---- */
 function renderTimeline(){
   const entries = [];
-  (job.statusHistory || []).forEach(h => entries.push({ at: h.at, by: h.by, text: "Status → " + h.status }));
+  (job.statusHistory || []).forEach(h => entries.push({ at: h.at, by: h.by, text: "Status → " + h.status + (h.note ? " — " + h.note : "") }));
   (job.events || []).forEach(e => entries.push({ at: e.at, by: e.by, text: e.note || e.type || "" }));
   if(job.signature && job.signature.signedAt)
     entries.push({ at: job.signature.signedAt, by: job.signature.signedBy, text: "Customer signed" });
@@ -1675,7 +1700,8 @@ const STATUS_META = {
   "Closed Jobs":{ e:"🔒", c:"slate"  },
   "Invoiced":   { e:"💷", c:"teal"   },
   "Order":      { e:"📦", c:"orange" },
-  "Quote":      { e:"📝", c:"purple" }
+  "Quote":      { e:"📝", c:"purple" },
+  "Cancelled":  { e:"❌", c:"red"    }
 };
 // Office-defined custom categories (extra statuses). Loaded from the worker and
 // merged into the status chips exactly like a built-in status.

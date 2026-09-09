@@ -17,7 +17,11 @@
 // Layouts covered (synthetic fixtures in worker/tools/test-email-intake.mjs):
 //   concerto-job      Southern Co-op Concerto "New Job Alert: <ref> - Priority N"
 //   concerto-order    Concerto "Order number <n> from Southern Coop" (order sheet)
-//   concerto-notice   Concerto "Helpdesk action - …" / "Quote : …" notifications
+//   concerto-cancel   Concerto "Cancellled Job: <incident> Order No.: <ref>" (the
+//                     client cancelled a job → the job is marked Cancelled)
+//   concerto-quote-cancel  "Quote : N - Q003. Cancel request by …" (the client
+//                     withdrew a quote request → cancels a job still waiting on it)
+//   concerto-notice   Concerto "Helpdesk action - …" / other "Quote : …" notices
 //   chapplins-job     Chapplins Lettings "A new job has been raised…" (ashley@ /
 //                     support@ / kerry@ — subject = address, "P1 - address",
 //                     "Urgent Estimate required - address", "New job raised: Job
@@ -97,6 +101,37 @@ function concertoOrder(subject, t) {
       storeCode: code, siteName, srRef: sr, siteRaw: forLine, description: desc.trim(), client: "Southern Co-op", source: "email" }
   };
 }
+/* Concerto "Cancellled Job" (sic — their spelling) notice: the client cancelled an
+   incident. Body: "The job you logged 00028752: Windows : Cracked/Smashed (R, E)",
+   "Order No.: 00028752/1" (blank when it was never assigned to us as an order),
+   "Has been Cancelled", "Comments: order for glass placed this morning." */
+function concertoCancel(subject, t) {
+  const incident = line(/Cancell?l?ed Job:\s*(\d{5,12})/i, subject) || line(/The job you logged\s*(\d{5,12})\b/i, t);
+  const reference = line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t) || line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, subject);
+  const title = line(/The job you logged\s*\d+\s*:\s*([^\n]*)/i, t);
+  let reason = line(/Comments?\s*:\s*([\s\S]*?)(?:\n\s*For further information|$)/i, t);
+  reason = reason.replace(/\s+/g, " ").trim().replace(/^\.$/, "");
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  return { kind: "cancel", missing, cancel: { kind: "job", incident, reference, title, reason, by: "Southern Co-op (Concerto)" } };
+}
+/* Concerto quote-request cancellation: "Quote : 001663 - Q003. Cancel request by
+   Alex Thompson" — body "The following quote request has been updated." then the
+   reason line, "Quote reference : 001663", "Title : Quotation required for order
+   number : 00014287/2", "Quote status : Cancelled", "Site : 9664 - Name". */
+function concertoQuoteCancel(subject, t) {
+  const reference = line(/order number\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t);
+  const quoteRef = line(/Quote reference\s*:\s*(\S+)/i, t) || line(/^Quote\s*:\s*(\d+)/i, subject);
+  const by = line(/Cancel request by\s+([^\n]+?)\s*$/i, subject);
+  let reason = line(/has been updated\.?\s*\n+\s*([^\n]*)/i, t);
+  if (/^Quote reference/i.test(reason)) reason = "";
+  reason = reason.replace(/\.{3,}/g, " — ").replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]*)/im, t);
+  const siteCode = line(/^\s*(\d{3,5})\b/, siteLine);
+  const missing = [];
+  if (!reference) missing.push("job reference (order number)");
+  return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " — " + by : "") + ")" } };
+}
 /* ── Chapplins Lettings ────────────────────────────────────────────────────── */
 const CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
@@ -142,6 +177,10 @@ export const TEMPLATES = [
     test: (s, t) => /New Job Alert/i.test(s) || /You have been assigned a new job/i.test(t), read: concertoJob },
   { id: "concerto-order", label: "Concerto — order sheet (client purchase order)", domains: ["concerto.co.uk"],
     test: (s, t) => /^Order number\s/i.test(s) || /attached order sheet for order number/i.test(t), read: concertoOrder },
+  { id: "concerto-cancel", label: "Concerto — job cancelled by the client", domains: ["concerto.co.uk"],
+    test: (s, t) => /^Cancell?l?ed Job\b/i.test(s) || /The job you logged\s*\d+[\s\S]{0,300}Has been Cancelled/i.test(t), read: concertoCancel },
+  { id: "concerto-quote-cancel", label: "Concerto — quote request cancelled by the client", domains: ["concerto.co.uk"],
+    test: (s, t) => (/^Quote\s*:/i.test(s) && /Cancel request/i.test(s)) || /Quote status\s*:\s*Cancelled/i.test(t), read: concertoQuoteCancel },
   { id: "concerto-notice", label: "Concerto — helpdesk action / quote notice", domains: ["concerto.co.uk"],
     test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s), read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice — the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" }) },
   { id: "chapplins-job", label: "Chapplins Lettings — new job raised", domains: ["chapplins.co.uk"],

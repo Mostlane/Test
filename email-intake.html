@@ -26,6 +26,7 @@
     .p-created{background:#dcfce7;color:#166534;} .p-updated{background:#e0f2fe;color:#075985;} .p-dropped{background:#f1f5f9;color:#475569;}
     .p-ignored{background:#fef3c7;color:#92400e;} .p-duplicate{background:#ede9fe;color:#5b21b6;} .p-failed{background:#fee2e2;color:#b91c1c;} .p-dryrun{background:#e0f2fe;color:#075985;}
     .p-order{background:#dbeafe;color:#1e40af;} .p-review{background:#fef3c7;color:#92400e;border:1px solid #f59e0b;} .p-dismissed{background:#f1f5f9;color:#64748b;}
+    .p-cancelled{background:#fee2e2;color:#991b1b;}
     .rv{border:1px solid #f5d58a;background:#fffbeb;border-radius:12px;padding:12px;margin:10px 0;} .rv.flash{box-shadow:0 0 0 3px #f59e0b;}
     .rv h3{margin:0 0 4px;font-size:14px;} .rv .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:8px;}
     .rv label{display:block;font-size:11.5px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;} .rv input,.rv textarea,.rv select{width:100%;border:1px solid #ccd5dd;border-radius:8px;padding:7px 9px;font:13.5px inherit;font-family:inherit;background:#fff;}
@@ -80,7 +81,7 @@
 
   <div class="card">
     <h2>Recent emails</h2>
-    <p class="muted">Every email the intake address receives, newest first, with what happened to it. <span class="pill p-created">created</span> / <span class="pill p-updated">updated</span> = a job on the board · <span class="pill p-order">order</span> = a Concerto order sheet filed under Client orders (cert-review) · <span class="pill p-review">review</span> = held for a human (above) · <span class="pill p-dropped">dropped</span> = a reply, notice, quote or supplier paperwork · <span class="pill p-duplicate">duplicate</span> = the same email arrived twice.</p>
+    <p class="muted">Every email the intake address receives, newest first, with what happened to it. <span class="pill p-created">created</span> / <span class="pill p-updated">updated</span> = a job on the board · <span class="pill p-order">order</span> = a Concerto order sheet filed under Client orders (cert-review) · <span class="pill p-cancelled">cancelled</span> = a Concerto cancellation applied to the job (❌ pill + timestamp on the board) · <span class="pill p-review">review</span> = held for a human (above) · <span class="pill p-dropped">dropped</span> = a reply, notice, quote or supplier paperwork · <span class="pill p-duplicate">duplicate</span> = the same email arrived twice.</p>
     <div class="tbl"><table><thead><tr><th>Received</th><th>From</th><th>Subject</th><th>Outcome</th><th>Job</th><th></th></tr></thead><tbody id="logBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody></table></div>
   </div>
 
@@ -169,6 +170,15 @@
       var f = x.fields || {};
       var from = esc(x.orig_from && x.orig_from!==x.from_addr ? x.orig_from+" (via "+x.from_addr+")" : x.from_addr);
       var pri = ["","Priority 1","Priority 2","Priority 3","Priority 4"];
+      if(f.action === "cancel"){
+        // A cancellation the portal couldn't apply on its own (no job for the
+        // incident, or a quote withdrawn on a job already in hand) — no fields to
+        // correct, nothing to create: open the job if there is one, then dismiss.
+        return '<div class="rv" id="rv'+x.id+'" data-id="'+x.id+'"><h3>❌ '+esc(x.subject||"(no subject)")+'</h3><div class="muted">'+fmt(x.received_at)+' · '+from+' · '+esc(x.reason)+'</div>' +
+          '<div style="margin-top:8px;font-size:13.5px">Client cancellation of <b>'+esc(f.reference||f.incident||"?")+'</b>'+(f.reason ? ' — “'+esc(f.reason)+'”' : '')+(f.title ? ' · '+esc(f.title) : '')+'</div>' +
+          '<details><summary class="muted">Show the email</summary><pre>'+esc(x.text||"")+'</pre></details>' +
+          '<div class="row">'+(x.job_id ? '<a class="btn" href="/job-view.html?jobId='+encodeURIComponent(x.job_id)+'">Open the job</a>' : '')+'<button class="btn ghost" data-dismiss="'+x.id+'">✓ Dealt with — dismiss</button><span class="msg" data-msg="'+x.id+'"></span></div></div>';
+      }
       return '<div class="rv" id="rv'+x.id+'" data-id="'+x.id+'"><h3>'+esc(x.subject||"(no subject)")+'</h3><div class="muted">'+fmt(x.received_at)+' · '+from+' · '+esc(x.reason)+'</div>' +
         '<div class="grid">' + FIELDS.map(function(p){ var k=p[0];
           if(k==="priority") return '<div><label>'+p[1]+'</label><select data-f="priority">'+pri.map(function(v){ return '<option value="'+v+'"'+(String(f.priority||"")===v?' selected':'')+'>'+(v||"— none —")+'</option>'; }).join("")+'</select></div>';

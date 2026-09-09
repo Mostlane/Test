@@ -4292,6 +4292,40 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   previousId, previousStatus, visitGroupId`, and the email-intake log reason
   says which happened. A different incident with a similar prefix ("000285411/1")
   is never linked. **Test:** `node worker/tools/test-inbound-incident.mjs` (7 cases).
+- **CANCELLED jobs — a first-class status with a timestamp (9 Sep 2026, Jamie:
+  "we also need a process when a job is cancelled… a cancelled pill and a
+  timestamp… dropped from jobs being suggested").** `normalizeStatus` used to fold
+  "cancelled" into **Closed Jobs**, so a client cancellation was invisible. Now
+  **"Cancelled" is in CANONICAL_STATUSES** and a job moving INTO it is stamped
+  **`cancelledAt` / `cancelledBy` / `cancelReason` / `cancelSource`** (`stampCancelled`
+  in create + both patchJob status branches; moving back OUT clears the stamps —
+  the statusHistory keeps the trail; the editor asks "reason?" when you pick
+  Cancelled → `patch.cancelReason`). **Two Concerto layouts feed it** (emailtemplates
+  `concerto-cancel` = "Cancellled Job: <incident> Order No.: [<ref>]" + "Has been
+  Cancelled" + "Comments: …", and `concerto-quote-cancel` = "Quote : N - Q003. Cancel
+  request by <name>" + "Quote status : Cancelled" + "Title : Quotation required for
+  order number : <ref>") → emailjob `cancelJob()` → **POST /sla/inbound
+  `{action:"cancel", kind:"job"|"quote", reference?, incident?, reason, by, at}`** →
+  sla.js `cancelIncidentJobs`: finds the incident's jobs (`findIncidentJobs`: exact
+  ref, `<incident>/%` suffixes, id); an OPEN job → Cancelled + stamps (cancelledAt =
+  the email's time, cancelledBy = "Southern Co-op (Concerto…)", the Comments line as
+  the reason), its engineers + the SLA admins pushed (tag `job-cancelled:<id>`); a
+  **quote** withdrawal only cancels a job still WAITING (Pending/Quote/On Hold/Order)
+  — a Scheduled/in-hand job is returned `held` and the email goes to **"Needs a look"**
+  for the office to decide; every job for the incident already FINISHED → nothing is
+  un-completed, the newest gets **`clientCancelled {at,by,reason}`** noted (soft ↩
+  pill/banner); no job at all → 404 → the email is held for a look. Intake outcome
+  **`cancelled`** (dedupe includes it). **Where it shows:** sla-main ❌ "Cancelled
+  dd/mm hh:mm" pill (`cancelTag`, hover = who/why; row struck through; Cancelled chip
+  + bulk option; excluded from Open via `isClosed`), job-view `#cancelBanner` (when /
+  by / reason) + a ❌ chip + timeline note, sla-scheduler **drops Cancelled from
+  `jobs` entirely** (so lanes, the Needs-scheduling tray, backfill, fill-ins and
+  auto-day never offer it), engineer-jobs/route/inbox treat it as done. Server-side
+  suggestion paths (nearby, auto-day, engineer-day, fallback pool, live board,
+  release sweep, clock-off) already excluded "cancelled". A cancelled job counts as
+  FINISHED for `matchSameIncident`, so a re-sent incident becomes a linked visit.
+  Tests: `test-inbound-incident.mjs` (7 cancel cases) + `test-email-intake.mjs`
+  (both layouts, dry-run, duplicate). `sla-jobedit.js?v=31`.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
