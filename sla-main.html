@@ -646,11 +646,13 @@ function normClientKey(raw){
 // / the archive often carry only a code, no storeType).
 function clientBucketOf(j){
   if(isProjectJob(j)) return "projects";
-  let raw = (j && (j.storeType || j.client)) || "";
-  if(!raw){
-    const code = String((j && j.siteCode) || "").replace(/^0+/,"");
-    if(code && siteClientByCode[code]) raw = siteClientByCode[code];
-  }
+  // The sites register's client is the authoritative bucket, and it's keyed by
+  // the real store code even when a Concerto job's ref/site name carries a
+  // ticket number. Fall back to a client/storeType on the job only when the
+  // site isn't in the register.
+  const code = String((j && j.siteCode) || "").replace(/^0+/,"");
+  let raw = (code && siteClientByCode[code]) || "";
+  if(!raw) raw = (j && (j.client || j.storeType)) || "";
   return normClientKey(raw) || "other";
 }
 // EM 3-hour drain-down timer chip — mirrors the engineer job-list chip so the
@@ -1052,6 +1054,7 @@ async function ensureSites(){
           lat: s.lat ?? null,
           lon: s.lon ?? null,
           storeType: s.storeType || s.client || "",
+          client: s.client || "",
           sharepointURL: s.sharepointURL || s.sharepoint || ""
         };
       })
@@ -1063,7 +1066,10 @@ async function ensureSites(){
     siteClientByCode = {};
     sitesList.forEach(s => {
       const code = String(s.code||"").replace(/^0+/,"");
-      if(code && s.storeType) siteClientByCode[code] = s.storeType;
+      // Use the site's CLIENT (retail/els/els_private/cobra/fbc/chapplins/…) —
+      // the taxonomy bucket — NOT storeType, which is a physical descriptor
+      // ("coffee", "convenience") that doesn't map to a client.
+      if(code && s.client) siteClientByCode[code] = s.client;
     });
   }catch(e){ sitesList = []; }
 }
