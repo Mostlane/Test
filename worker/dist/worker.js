@@ -16518,7 +16518,7 @@ async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
 }
 function stripPricing(text) {
   const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
-  const money2 = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b)/;
+  const money2 = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*\.\d{2}\b)/;
   const out = [];
   for (let l of String(text || "").split(/\r?\n/)) {
     if (labelled.test(l) && money2.test(l)) continue;

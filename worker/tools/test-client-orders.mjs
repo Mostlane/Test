@@ -263,6 +263,7 @@ const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { 
   ok("the board still shows the priced text to the office", /Labour - 150\.00[\s\S]*Materials \/ Specialist Equipment – £143\.00/.test((await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env })).body.orders[0].detail || ""));
   const rem = "Failed EM fittings at store 0335:\nFitting 16 - Light replacement (replaced on site) - £50\nFitting 22 - Light replacement - £50\nTotal: 2 fittings - £100";
   ok("per-fitting prices + the total line are stripped", sla.stripPricing(rem) === "Failed EM fittings at store 0335:\nFitting 16 - Light replacement (replaced on site)\nFitting 22 - Light replacement", JSON.stringify(sla.stripPricing(rem)));
+  ok("four-figure amounts without a thousands comma are stripped too", sla.stripPricing("Supply the unit.\n\nLabour - 960.00\n\nMaterials - 1151.00\n\nPlease note this is like for like.") === "Supply the unit.\n\nPlease note this is like for like.", JSON.stringify(sla.stripPricing("Supply the unit.\n\nLabour - 960.00\n\nMaterials - 1151.00\n\nPlease note this is like for like.")));
   ok("a line that merely STARTS with a cost word but carries no amount is kept", sla.stripPricing("Materials to be supplied by the client.\nTotal of 3 doors to replace.") === "Materials to be supplied by the client.\nTotal of 3 doors to replace.");
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
