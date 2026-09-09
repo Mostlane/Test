@@ -418,11 +418,12 @@
     // EVERY job type (audit / cert / firestop / elec included), not just standard
     // jobs. Rendering it only inside the photos card left the RA photo button dead
     // (a null-element .click()) on a remedial/audit job, so the RA couldn't finish.
-    // LIVE PHOTOS ONLY: the RA work-area photo AND the job's before/during/after
-    // photos both use #fileInput, and both must be freshly taken — capture forces
-    // the camera on phones (no camera-roll picker). Other photo areas (audit,
-    // remedials, EM remedials, pump) ask the engineer camera-or-gallery instead.
-    h+='<input type="file" id="fileInput" accept="image/*" capture="environment" multiple style="display:none">';
+    // #fileInput is shared by the RA work-area photo AND the job's
+    // before/during/after photos. The RA photo is LIVE ONLY (its button forces the
+    // camera); the before/during/after photos let the engineer choose camera or
+    // camera-roll (the MLPhotoInput chooser sets/removes capture per tap). So no
+    // static capture here — each button sets it as needed.
+    h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none">';
     h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au||cert||elec||pump)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     if(fs){
       // Firestopping jobs complete via the RIA form (per-seal photos + products +
@@ -501,7 +502,7 @@
     host.innerHTML=html;
     var np=pendingPhotos.length;
     $("phcount").textContent=(photos.length+np)+(photos.length+np===1?" photo":" photos")+(np?" · "+np+" uploading":"");
-    $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
+    $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; if(window.MLPhotoInput){ window.MLPhotoInput($("fileInput")); } else { $("fileInput").removeAttribute("capture"); $("fileInput").click(); } };
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
     [].forEach.call(host.querySelectorAll(".ph[data-i] img"),function(im){
       // Reveal (stop the skeleton) as soon as the photo has loaded.
@@ -1176,7 +1177,8 @@
 
   var raPicTaken=false;
   $("raChecks").innerHTML=HAZ.map(function(v){return '<div class="hz" data-hz><span class="hzl">'+v+'</span><span class="hzopt"><button class="hb" data-v="ok">In place</button><button class="hb" data-v="na">N/A</button></span></div>';}).join("");
-  $("raPic").onclick=function(){ raPicPending=true; $("fileInput").click(); };
+  // The RA work-area photo stays LIVE ONLY — force the camera (no camera roll).
+  $("raPic").onclick=function(){ raPicPending=true; $("fileInput").setAttribute("capture","environment"); $("fileInput").click(); };
   $("raChecks").addEventListener("click",function(e){var b=e.target.closest(".hb");if(!b)return;var row=b.closest(".hz");row.classList.remove("err");[].forEach.call(row.querySelectorAll(".hb"),function(x){x.classList.toggle("on",x===b);});row.dataset.ans=b.dataset.v;});
   var decls=function(){return [].slice.call(document.querySelectorAll("#raModal .decl"));};
   var hazRows=function(){return [].slice.call(document.querySelectorAll("#raChecks .hz"));};
