@@ -14,6 +14,7 @@
   header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
   header.page a{color:#fff;text-decoration:none}
   header.page h1{font-size:18px;flex:1}
+  header.page .hdr-btn{font-size:13px;background:rgba(255,255,255,.15);padding:6px 10px;border-radius:9px;white-space:nowrap}
   .wrap{max-width:1150px;margin:14px auto;padding:0 12px}
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font:inherit;cursor:pointer}
@@ -80,7 +81,18 @@
 </style>
 </head>
 <body>
-<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>🧾 Engineer Timesheets</h1></header>
+<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>🧾 Engineer Timesheets</h1>
+  <a class="hdr-btn" id="officeTsLink" href="office-timesheet.html" style="display:none" title="The whole office team's week">💼 Office timesheet</a>
+  <a class="hdr-btn" id="myTsLink" href="engineer-timesheet.html" title="Your own weekly timesheet">⏱️ My timesheet</a>
+</header>
+<script>
+  // The three timesheets live under ONE menu tile — cross-link where permitted.
+  (function(){ try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = function(v){ return String(v||"").toLowerCase() === "yes"; };
+    if (yes(p.FullAccess)) document.getElementById("officeTsLink").style.display = "";
+  }catch(e){} })();
+</script>
 <div class="wrap">
   <div class="bar">
     <button class="btn" id="prevWk">‹ Prev</button>

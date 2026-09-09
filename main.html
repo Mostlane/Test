@@ -339,8 +339,9 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
   <div class="menu-grid" id="menuGrid">
     
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
-    <a class="button" href="engineer-timesheet.html" id="EngTimesheet"><span class="emoji">⏱️</span> My Timesheet</a>
-    <a class="button" href="timesheets-admin.html" id="EngTsAdmin"><span class="emoji">🧾</span> Engineer Timesheets</a>
+    <!-- ONE Timesheets tile (Sep 2026): office/admins land on Engineer Timesheets,
+         an engineer on My Timesheet — setHref routes it per person. -->
+    <a class="button" href="timesheets-admin.html" id="Timesheets"><span class="emoji">⏱️</span> Timesheets</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="van-check.html" id="VanCheck"><span class="emoji">🚐</span> Van Check</a>
     <a class="button" href="cctv.html" id="CCTV"><span class="emoji">📹</span> CCTV Wall</a>
@@ -375,7 +376,6 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
     <a class="button" href="office-my-hours.html" id="MyHours"><span class="emoji">🕒</span> My Hours</a>
-    <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-main.html?reset=1" id="SLA"><span class="emoji">🚨</span> SLA</a>
@@ -467,15 +467,12 @@ const MAP = window.ML_PERM_MAP || {
   // "My Hours" — an office-clock user's OWN clocked hours (office-my-hours.html).
   // Every office user who clocks in/out sees this (Full Access too).
   MyHours: ["OfficeClock", "OfficeTimesheet"],
-  // "Timesheet" — the office-WIDE hours (office-timesheet.html) is FULL ACCESS
-  // ONLY. Office / Vehicles users never see this tile; office users use "My
-  // Hours" instead, and Vehicles users reach the van (door-to-door) timesheet
-  // from a "Van Timesheet" button on the Vehicles page.
-  OfficeTimesheet: ["__fullOnly"],
-  // Engineer weekly timesheet (times + jobs; invoices/mileage if self-employed)
-  EngTimesheet: ["EngTimesheet"],
-  // Office view of the engineer timesheets + invoices + deduction settings
-  EngTsAdmin: ["TimesheetAdmin"]
+  // ONE "Timesheets" tile (Sep 2026, Jamie: "consolidated to one Timesheets
+  // page/button"): Full Access / TimesheetAdmin → Engineer Timesheets (which has
+  // buttons for the Office timesheet + My timesheet); an engineer with
+  // EngTimesheet only → My Timesheet. OfficeTimesheet holders (office staff)
+  // still get "My Hours" for their own clock; the office-WIDE sheet is Full Access.
+  Timesheets: ["TimesheetAdmin", "EngTimesheet"]
   // Settings (was Personalise) is now ALWAYS visible (class "button visible")
   // so every user can set their landing page; the appearance options inside
   // stay permission-gated. It is deliberately NOT in this MAP.
@@ -551,7 +548,7 @@ const MAP = window.ML_PERM_MAP || {
           if (!btn) return;
           for (const [perm, href] of choices) { if (has(perm)) { btn.href = href; return; } }
         };
-        setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"]]);   // Full Access only → office-wide timesheet
+        setHref("Timesheets",     [["FullAccess", "timesheets-admin.html"],     ["TimesheetAdmin", "timesheets-admin.html"], ["EngTimesheet", "engineer-timesheet.html"]]);
         setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
         setHref("Projects",       [["Projects", "projects-live.html"],         ["ProjectsAdmin", "projects-live.html"]]);
 

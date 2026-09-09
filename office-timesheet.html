@@ -70,16 +70,18 @@
   <header>
     <h1>💼 Office Timesheet</h1>
     <div style="display:flex;gap:8px;align-items:center;">
-      <a class="btn grey" id="vanTsLink" href="van-timesheet.html" style="display:none;text-decoration:none;" title="Door-to-door van timesheets">🚚 Van timesheets →</a>
+      <a class="btn grey" id="engTsLink" href="timesheets-admin.html" style="display:none;text-decoration:none;" title="Engineer weekly timesheets + invoices">🧾 Engineer timesheets</a>
+      <a class="btn grey" id="myTsLink" href="engineer-timesheet.html" style="text-decoration:none;" title="Your own weekly timesheet">⏱️ My timesheet</a>
       <a class="ml-back" data-role="home" href="main.html">← Menu</a>
     </div>
   </header>
   <script>
-    // Both timesheets live under one menu tile; cross-link where permitted.
+    // The three timesheets live under ONE menu tile; cross-link where permitted.
+    // (The van door-to-door timesheet is reached from the Vehicles page only.)
     (function(){ try{
       var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
       var yes = v => String(v||"").toLowerCase() === "yes";
-      if (yes(p.FullAccess) || yes(p.Vehicles)) document.getElementById("vanTsLink").style.display = "";
+      if (yes(p.FullAccess) || yes(p.TimesheetAdmin)) document.getElementById("engTsLink").style.display = "";
     }catch(e){} })();
   </script>
 

@@ -1072,9 +1072,7 @@
         ]},
         { title: "Time & HR", items: [
           { label: "Employees", href: "employees.html", icon: "users", perms: ["StaffRecords"], match: ["employees.html"] },
-          { label: "Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["__fullOnly"], match: ["office-timesheet.html"] },
-          { label: "My Timesheet", href: "engineer-timesheet.html", icon: "timesheet", perms: ["EngTimesheet"], match: ["engineer-timesheet.html"] },
-          { label: "Engineer Timesheets", href: "timesheets-admin.html", icon: "timesheet", perms: ["TimesheetAdmin"], match: ["timesheets-admin.html"] },
+          { label: "Timesheets", href: "timesheets-admin.html", icon: "timesheet", perms: ["TimesheetAdmin", "EngTimesheet"], hrefBy: [["TimesheetAdmin", "timesheets-admin.html"], ["EngTimesheet", "engineer-timesheet.html"]], match: ["timesheets-admin.html", "office-timesheet.html", "engineer-timesheet.html"] },
           { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock", "OfficeTimesheet"] },
           { label: "Holiday", href: "holiday.html", icon: "holiday", perms: ["Holiday"] },
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },

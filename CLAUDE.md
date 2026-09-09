@@ -2424,6 +2424,26 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
 
+## ONE "Timesheets" tile (9 Sep 2026)
+Jamie: "three different timesheets… consolidated to one Timesheets page/button. On
+opening it should show engineers timesheets, a button for office timesheets, then a
+button in both pages for My timesheet." The three tiles (My Timesheet / Engineer
+Timesheets / Timesheet) are now ONE **⏱️ Timesheets** tile (main.html id `Timesheets`,
+MAP `["TimesheetAdmin","EngTimesheet"]`) routed per person by `setHref`: Full Access
+or TimesheetAdmin → **timesheets-admin.html**; EngTimesheet-only (an engineer) →
+**engineer-timesheet.html**. Same rule in the portal-config sidebar (`hrefBy`, one
+"Timesheets" entry, `match` covers all three pages). Cross-links in each header:
+timesheets-admin has **💼 Office timesheet** (Full Access only — the office-wide sheet
+stays `__fullOnly`) + **⏱️ My timesheet**; office-timesheet has **🧾 Engineer
+timesheets** (TimesheetAdmin|FullAccess) + **⏱️ My timesheet** (its old 🚚 Van
+timesheets link is GONE — van-timesheet.html is reached from the Vehicles page
+only; Jamie doesn't use it); engineer-timesheet has **💼 Office** (Full Access) +
+**🧾 Engineer timesheets** (TimesheetAdmin|FullAccess). NB that page's links are
+`display:none` in the STYLESHEET, so showing them needs `style.display="inline-block"`
+— the old "⚙ Admin" link set `""` and therefore never appeared. OfficeTimesheet
+holders keep "My Hours" for their own clock (unchanged). portal-config `?v=33`, SW
+`mostlane-v123` (the sidebar entry changed).
+
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
