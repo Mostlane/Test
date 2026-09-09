@@ -22,6 +22,7 @@ import {
 import { tenantDB } from "../lib/tenantdb.js";
 import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { sendEmail, resetEmail, issuePasswordToken, appBase } from "../lib/email.js";
+import { sendToPermission } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
@@ -69,6 +70,24 @@ export async function handle(request, env, ctx, url, sess) {
 
     const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
     const perms = await permissionsFor(env, user.tenant_id, user.username);
+
+    // Client (external) logins are surfaced to Full-Access users — visibility of
+    // when an outside client is in their portal. Their reads are also written to
+    // the Activity log (see index.js audit middleware). Skipped for a break-glass
+    // master login (that's an owner test, not the client themselves).
+    try {
+      const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : (user.profile || {});
+      if (prof && prof.staffType === "client" && !masterOk) {
+        const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+        ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
+          title: "Client signed in",
+          body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
+          url: "/activity-log.html?user=" + encodeURIComponent(user.username),
+          tag: "client-login:" + user.username,
+        }, null, true).catch(() => {}));
+      }
+    } catch { /* notification is best-effort */ }
+
     return json({
       ok: true, token, expires,
       master: masterOk,                 // master-password login → client skips device lock

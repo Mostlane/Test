@@ -768,7 +768,7 @@ async function sendToPermission(env, tenantId, permKeys, payload, excludeUser, o
   }
   return totals;
 }
-async function handle4(request, env, ctx, url, sess) {
+async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/push(?=\/|$)/, "") || "/";
@@ -846,7 +846,7 @@ async function handle4(request, env, ctx, url, sess) {
     let users = [];
     try {
       const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
-      users = (r.results || []).filter((u) => isActiveStatus3(u.status));
+      users = (r.results || []).filter((u) => isActiveStatus(u.status));
     } catch {
       users = [];
     }
@@ -879,7 +879,7 @@ async function handle4(request, env, ctx, url, sess) {
   }
   return jr({ error: "Not found: " + sub }, headers, 404);
 }
-function isActiveStatus3(s) {
+function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
@@ -20283,7 +20283,8 @@ init_auth();
 init_tenantdb();
 init_complianceaccess();
 init_email();
-async function handle(request, env, ctx, url, sess) {
+init_push();
+async function handle2(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/auth/login" && request.method === "POST") {
     const { username, password } = await request.json().catch(() => ({}));
@@ -20293,7 +20294,7 @@ async function handle(request, env, ctx, url, sess) {
       return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
     }
     const user = await findUser(env, username);
-    const active = user && isActiveStatus(user.status);
+    const active = user && isActiveStatus2(user.status);
     const passwordOk = active && await verifyPassword(password, user);
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
     const ok = passwordOk || masterOk;
@@ -20306,6 +20307,20 @@ async function handle(request, env, ctx, url, sess) {
     }
     const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
     const perms = await permissionsFor(env, user.tenant_id, user.username);
+    try {
+      const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : user.profile || {};
+      if (prof && prof.staffType === "client" && !masterOk) {
+        const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+        ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
+          title: "Client signed in",
+          body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
+          url: "/activity-log.html?user=" + encodeURIComponent(user.username),
+          tag: "client-login:" + user.username
+        }, null, true).catch(() => {
+        }));
+      }
+    } catch {
+    }
     return json({
       ok: true,
       token,
@@ -20363,7 +20378,7 @@ async function handle(request, env, ctx, url, sess) {
     const ident = (username || email || "").trim();
     if (!ident) return error("Username or email required", 400, env, request);
     const user = await findUser(env, ident);
-    if (user && isActiveStatus(user.status) && user.email) {
+    if (user && isActiveStatus2(user.status) && user.email) {
       const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
@@ -20411,7 +20426,7 @@ async function findUser(env, ident) {
     LIMIT 1
   `).bind(v).first();
 }
-function isActiveStatus(s) {
+function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
@@ -20520,7 +20535,7 @@ async function requireAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle2(request, env, ctx, url, sess) {
+async function handle3(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -20600,7 +20615,7 @@ async function handle2(request, env, ctx, url, sess) {
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus2(u.status));
+    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus3(u.status));
     const out = [];
     for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
     out.sort(orderUsers);
@@ -20925,7 +20940,7 @@ var PERMISSION_KEYS = [
   "StaffRecords"
   // HR: manage staff qualifications, insurances, licences + licence checks
 ];
-function isActiveStatus2(s) {
+function isActiveStatus3(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
@@ -20976,7 +20991,7 @@ function orderUsers(a, b) {
 init_http();
 init_auth();
 init_tenantdb();
-async function handle3(request, env, ctx, url, sess) {
+async function handle4(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -39266,7 +39281,7 @@ async function handle40(request, env, ctx, url, sess) {
     } catch {
     }
     try {
-      ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess"], {
         title: "New client job \u2014 " + orgLabel,
         body: (URGENCY_LABEL[urgency] || "Routine") + ": " + site.name + " \u2014 " + description.slice(0, 80),
         url: "/job-view.html?jobId=" + encodeURIComponent(job.id),
@@ -39988,15 +40003,15 @@ function safeArr(s) {
 // src/index.js
 init_timesheets();
 var ROUTES = [
-  ["*", "/auth", handle],
+  ["*", "/auth", handle2],
   ["*", "/admin/login-history", loginHistory],
-  ["*", "/user", handle2],
+  ["*", "/user", handle3],
   // /user and /users
-  ["*", "/onboard", handle2],
+  ["*", "/onboard", handle3],
   // public self-registration (Pending)
-  ["*", "/hs-plan-config", handle2],
-  ["*", "/po-config", handle2],
-  ["*", "/device", handle3],
+  ["*", "/hs-plan-config", handle3],
+  ["*", "/po-config", handle3],
+  ["*", "/device", handle4],
   ["*", "/holiday", handle12],
   ["*", "/asset", handle13],
   // /assets, /asset/*, /asset-image, /asset-thumb
@@ -40017,7 +40032,7 @@ var ROUTES = [
   // GDPR data export + erasure
   ["*", "/fleet", handle26],
   // fleet reports + driver mapping
-  ["*", "/push", handle4],
+  ["*", "/push", handle],
   // web push subscriptions + test send
   ["*", "/messages", handle27],
   // office ↔ engineer messages (Inbox)
@@ -40268,13 +40283,37 @@ async function ensureAuditCols(env) {
   }
   AUDIT_MIGRATED = true;
 }
+function isClientSess(sess) {
+  try {
+    const pr = sess && sess.user && sess.user.profile;
+    const p = typeof pr === "string" ? JSON.parse(pr || "{}") : pr || {};
+    return !!p && p.staffType === "client";
+  } catch {
+    return false;
+  }
+}
+var CLIENT_GET_SKIP = [
+  "/auth/me",
+  "/auth/refresh",
+  "/device",
+  "/theme",
+  "/push",
+  "/notify",
+  "/prefs",
+  "/audit",
+  "/batch"
+];
 function auditAction(env, ctx, sess, request, url, status, clone, note) {
   try {
     if (!sess) return;
     const m = request.method.toUpperCase();
-    if (!AUDIT_METHODS.includes(m)) return;
     const p = url.pathname;
-    if (AUDIT_SKIP.some((s) => p === s || p.startsWith(s + "/"))) return;
+    if (AUDIT_METHODS.includes(m)) {
+      if (AUDIT_SKIP.some((s) => p === s || p.startsWith(s + "/"))) return;
+    } else {
+      if (!isClientSess(sess)) return;
+      if (CLIENT_GET_SKIP.some((s) => p === s || p.startsWith(s + "/"))) return;
+    }
     let ref = "";
     try {
       const rf = request.headers.get("Referer") || request.headers.get("Referrer") || "";
