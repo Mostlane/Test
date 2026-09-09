@@ -614,8 +614,35 @@ export async function handle(request, env, ctx, url, sess) {
       durationMinutes: b.durationMinutes || undefined,
       changedBy: "zapier"
     };
+    // ── The SAME INCIDENT again (Concerto re-assigns / re-opens an incident) ──
+    // Jobs from this path are keyed by reference, so a repeat used to either
+    // silently REWRITE a finished job (same reference back again — a re-opened
+    // incident) or create an unrelated second job ("00028541/2" after we attended
+    // "00028541/1", quoted, and the client ordered the works). Now: a repeat of an
+    // OPEN job still updates it; a repeat of a FINISHED job, or a new suffix of an
+    // incident we already hold, becomes a NEW VISIT linked to the earlier job
+    // (revisitOf / visitGroupId — the same chain the office 🔁 Re-visit makes), so
+    // the board shows the ×N badge and the history is in one place.
+    let before = null, sameIncident = null;
+    try { sameIncident = await matchSameIncident(env, tenantId, payload.reference); } catch {}
+    if (sameIncident && sameIncident.open) {
+      payload.id = sameIncident.open.id;                 // genuine re-send → update the open job
+      before = sameIncident.open;
+    } else if (sameIncident && sameIncident.prev) {
+      const prev = sameIncident.prev;
+      payload.id = crypto.randomUUID();                   // a fresh visit, never an overwrite
+      delete payload.dedupeByRef;
+      payload.revisitOf = prev.id;
+      payload.visitGroupId = prev.visitGroupId || prev.id;
+      const when = String(prev.closedAt || prev.updatedAt || prev.createdAt || "").slice(0, 10);
+      const why = sameIncident.kind === "reopened"
+        ? `↩ Same incident sent again by the client — previous visit ${prev.helpdeskRef || prev.id} was ${prev.status}${when ? " (" + when + ")" : ""}.`
+        : `↩ Re-assigned incident — follows our earlier visit ${prev.helpdeskRef || prev.id} (${prev.status}${when ? ", " + when : ""}); usually the ordered works after a quote.`;
+      payload.description = [payload.description || "", why].filter(Boolean).join("\n\n");
+    } else if (!sameIncident) {
+      before = payload.reference ? await d1Retry(() => getJob(env, tenantId, payload.reference)) : null;
+    }
     const beforeId = payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     // Auto-assign a NEW incoming job to the engineer set in SLA Settings, when the
     // sender (Zap) didn't set one — so P1s (or all, per config) land on someone
     // automatically without a Zap step. Only on first intake; a re-sent email
@@ -637,10 +664,13 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
     // reconcileRelease is the single per-engineer push path (it pushes each newly
     // assigned / newly-visible engineer, so notifyNewlyAssigned is no longer needed).
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
-    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+    const linked = sameIncident && sameIncident.prev && !sameIncident.open ? sameIncident : null;
+    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt,
+      ...(linked ? { linkedVisit: true, visitKind: linked.kind, previousRef: linked.prev.helpdeskRef || "", previousId: linked.prev.id, previousStatus: linked.prev.status, visitGroupId: payload.visitGroupId } : {}) }, headers, before ? 200 : 201);
 
     /* fallthrough guard (never reached) */
   }
@@ -3425,6 +3455,51 @@ async function getJob(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+/* Is this job finished (built-in done states or a custom "done" category)? */
+async function jobFinishedFor(env, tenantId) {
+  let done = new Set();
+  try { done = new Set((await getCategories(env, tenantId)).filter(c => c && c.done).map(c => String(c.name || "").toLowerCase())); } catch {}
+  return j => { const st = String((j && j.status) || "").toLowerCase(); return DONE_STATES.has(st) || done.has(st); };
+}
+/* Machine intake: does this reference belong to an incident we already hold?
+   Returns null (brand new), {open} (an OPEN job with the same reference — update
+   it), or {prev, kind:"reopened"|"reassigned"} (a FINISHED job with the same
+   reference, or a sibling suffix of the same Concerto incident "NNNNNNNN/n" —
+   the caller creates a NEW linked visit). Concerto refs are "<incident>/<n>":
+   /1 the first assignment, /2 the re-assignment after our quote is ordered. */
+async function matchSameIncident(env, tenantId, reference) {
+  const ref = String(reference || "").trim();
+  if (!ref) return null;
+  const db = tenantDB(env, tenantId);
+  const finished = await jobFinishedFor(env, tenantId);
+  const parse = rows => (rows || []).map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate);
+  const newest = list => list.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  let same = [];
+  try { same = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results); } catch {}
+  if (!same.length) { try { const j = await getJob(env, tenantId, ref); if (j && !j.fallbackTemplate) same = [j]; } catch {} }
+  if (same.length) {
+    const open = newest(same.filter(j => !finished(j)));
+    if (open) return { open };
+    return { prev: newest(same), kind: "reopened" };
+  }
+  const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
+  if (!m) return null;
+  let sibs = [];
+  try { sibs = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? AND helpdesk_ref<>?").bind(tenantId, m[1] + "/%", ref).all()).results); } catch {}
+  sibs = sibs.filter(j => new RegExp("^" + m[1] + "/\\d{1,3}$").test(String(j.helpdeskRef || "")));
+  if (!sibs.length) return null;
+  return { prev: newest(sibs), kind: "reassigned" };
+}
+/* Stamp the root's visitGroupId + every member's visitCount for a re-visit chain
+   (the board/scheduler ×N badge). Best-effort. */
+async function stampVisitGroup(env, tenantId, groupId) {
+  if (!groupId) return;
+  try { const root = await getJob(env, tenantId, groupId); if (root && !root.visitGroupId) { root.visitGroupId = groupId; root.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, root); } } catch {}
+  const all = await listJobs(env, tenantId, { includeDormant: true });
+  const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+  const cnt = members.length;
+  for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
 }
 // Deleting a job removes the DRAFT / submitted (unverified) certificates it made,
 // but NEVER one the office has finalised (status='final') — those are filed on the
