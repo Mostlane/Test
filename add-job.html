@@ -795,6 +795,21 @@ async function handleSubmit(evt){
     return;
   }
 
+  // Electrical test jobs: engineers reference the store number constantly, so
+  // the job name shows it up front — "<store no> <name>". Uses the typed job
+  // name (else the site name, else "Electrical test") and only prefixes when it
+  // doesn't already start with that store number.
+  let refVal = ($("jobName") && $("jobName").value.trim()) || "";
+  if ($("elecTest") && $("elecTest").checked) {
+    const storeNo = $("siteCode").value.trim();
+    let base = refVal || siteName || "Electrical test";
+    if (storeNo) {
+      const esc = storeNo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (!new RegExp("^\\s*" + esc + "\\b").test(base)) base = storeNo + " " + base;
+    }
+    refVal = base;
+  }
+
   // Site details ride along from the picker (hidden). Priority / status / raised
   // time are left to the worker's defaults — irrelevant for a manual job.
   const payload = {
@@ -813,7 +828,7 @@ async function handleSubmit(evt){
     description,
     // Editable job name (the reference the board + engineer see). Blank = the
     // server auto-names it (site name / number-site).
-    reference: ($("jobName") && $("jobName").value.trim()) || undefined,
+    reference: refVal || undefined,
     // A dormant fallback template is never scheduled or assigned — it just sits
     // in the pool until it's an engineer's fallback and comes into play.
     fallbackTemplate: ($("fallbackTemplate") && $("fallbackTemplate").checked) || undefined,
