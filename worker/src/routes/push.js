@@ -187,8 +187,13 @@ async function pushToUser(env, tenantId, username, payload) {
 
 // Send to every user holding any of the given permissions (value=1), e.g.
 // notify holiday admins. Optionally skip one user (usually the actor).
-export async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
+// `opts.officeOnly` drops FIELD engineers (users.profile.staffType==="field") so
+// an office-review alert never reaches an engineer who happens to hold an admin
+// permission (SLAAdmin/Compliance). A boolean 5th arg is accepted as shorthand
+// for {officeOnly:true} (back-compat: older callers pass nothing here).
+export async function sendToPermission(env, tenantId, permKeys, payload, excludeUser, opts) {
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  const officeOnly = opts === true || (opts && opts.officeOnly);
   const keys = (permKeys || []).filter(Boolean);
   if (!keys.length) return { sent: 0, failed: 0, gone: 0 };
   const ph = keys.map(() => "?").join(",");
@@ -199,6 +204,22 @@ export async function sendToPermission(env, tenantId, permKeys, payload, exclude
     ).bind(tenantId, ...keys).all();
     usernames = (results || []).map(r => r.username);
   } catch { return { sent: 0, failed: 0, gone: 0 }; }
+  if (officeOnly && usernames.length) {
+    // Keep everyone EXCEPT field engineers (blank staffType stays — owners/office
+    // admins often have no type set; only an explicit "field" is an engineer).
+    try {
+      const uph = usernames.map(() => "?").join(",");
+      const { results } = await env.DB.prepare(
+        `SELECT username, profile FROM users WHERE tenant_id=? AND username IN (${uph})`
+      ).bind(tenantId, ...usernames).all();
+      const fieldSet = new Set();
+      for (const r of (results || [])) {
+        let st = ""; try { st = String((JSON.parse(r.profile || "{}").staffType) || "").toLowerCase(); } catch {}
+        if (st === "field") fieldSet.add(String(r.username).toLowerCase());
+      }
+      if (fieldSet.size) usernames = usernames.filter(u => !fieldSet.has(String(u).toLowerCase()));
+    } catch { /* on error, fall through and notify everyone (fail open) */ }
+  }
   const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
   const totals = { sent: 0, failed: 0, gone: 0 };
   for (const u of usernames) {
