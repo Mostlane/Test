@@ -2443,6 +2443,19 @@ only; Jamie doesn't use it); engineer-timesheet has **💼 Office** (Full Access
 — the old "⚙ Admin" link set `""` and therefore never appeared. OfficeTimesheet
 holders keep "My Hours" for their own clock (unchanged). portal-config `?v=33`, SW
 `mostlane-v123` (the sidebar entry changed).
+**Engineer Timesheets "Couldn't load" (9 Sep 2026) = the overview outrunning the
+page's timeout, not permissions.** `GET /ts/admin/overview` builds every engineer's
+week and had crept from ~3s (late Aug) to 6-17s: it walked the 16 users ONE AFTER
+ANOTHER, each user ran `jobTimeAuto` TWICE (directly + inside `applyAutoMileage`),
+and each of those could call the Google Distance Matrix LIVE for the drive home on
+days already gone; the page's `authFetchTO` gave up at 9s. Now: the per-user work
+runs in parallel (`Promise.all` over users, order preserved), `driveMinutesGoogle`
+takes `{cached:true}` for the auto-fill path (a per-isolate 12h memo,
+`DRIVE_MEMO`; the at-completion caller in `trackJobTime` stays live), and the page
+gives the call 30s, shows "Loading everyone's week…", and on failure says WHICH
+(timeout / no connection / server reply) with a ↻ Try again. The health log
+(`health_events` kind='slow') is the place to look when a page "won't load" —
+it records every >2.5s response by endpoint.
 
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP

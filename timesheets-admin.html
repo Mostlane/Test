@@ -14,7 +14,10 @@
   header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
   header.page a{color:#fff;text-decoration:none}
   header.page h1{font-size:18px;flex:1}
+  header.page{flex-wrap:wrap}
+  header.page .hdr-links{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
   header.page .hdr-btn{font-size:13px;background:rgba(255,255,255,.15);padding:6px 10px;border-radius:9px;white-space:nowrap}
+  @media(max-width:600px){ header.page h1{font-size:16px} header.page .hdr-btn{font-size:12px;padding:5px 8px} }
   .wrap{max-width:1150px;margin:14px auto;padding:0 12px}
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font:inherit;cursor:pointer}
@@ -82,8 +85,10 @@
 </head>
 <body>
 <header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>🧾 Engineer Timesheets</h1>
-  <a class="hdr-btn" id="officeTsLink" href="office-timesheet.html" style="display:none" title="The whole office team's week">💼 Office timesheet</a>
-  <a class="hdr-btn" id="myTsLink" href="engineer-timesheet.html" title="Your own weekly timesheet">⏱️ My timesheet</a>
+  <span class="hdr-links">
+    <a class="hdr-btn" id="officeTsLink" href="office-timesheet.html" style="display:none" title="The whole office team's week">💼 Office timesheet</a>
+    <a class="hdr-btn" id="myTsLink" href="engineer-timesheet.html" title="Your own weekly timesheet">⏱️ My timesheet</a>
+  </span>
 </header>
 <script>
   // The three timesheets live under ONE menu tile — cross-link where permitted.
@@ -213,9 +218,13 @@ let WEEK=mondayOf(new Date()), DATA=null, EDIT_U=null;
 let VERIFY=null;
 async function load(){
   g("wkLabel").textContent="Week of "+new Date(WEEK+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-  let r=null;
-  try{r=await authFetchTO("/ts/admin/overview?week="+WEEK).then(x=>x.json());}catch(e){}
-  if(!r||!r.ok){g("body").innerHTML='<tr><td class="empty" colspan="12">'+esc((r&&r.error)||"Couldn't load — check your connection or permissions.")+"</td></tr>";return;}
+  g("body").innerHTML='<tr><td class="empty" colspan="12">Loading everyone\u2019s week…</td></tr>';
+  let r=null, why="";
+  // The overview builds every engineer's week server-side — give it a real
+  // budget (30s) rather than the 9s default, and say WHICH it was on failure.
+  try{const res=await authFetchTO("/ts/admin/overview?week="+WEEK,{},30000);r=await res.json().catch(()=>null);if(!r)why="The server sent an unreadable reply (HTTP "+res.status+").";}
+  catch(e){why=(e&&e.message==="timeout")?"The server took more than 30 seconds — try again in a moment.":"No connection to the server.";}
+  if(!r||!r.ok){g("body").innerHTML='<tr><td class="empty" colspan="12">'+esc((r&&r.error)||("Couldn't load — "+(why||"check your permissions.")))+' <button class="btn" onclick="load()">↻ Try again</button></td></tr>';return;}
   DATA=r;
   try{const vr=await authFetchTO("/ts/verify?week="+WEEK).then(x=>x.json());VERIFY=(vr&&vr.ok&&vr.verify)||null;}catch(e){VERIFY=null;}
   renderTable();

@@ -293,7 +293,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
         // last job completion (shift.home_drive_mins); else compute via Google
         // now; last resort only, a straight-line estimate.
         let mins = (sh && sh.home_drive_mins != null) ? Number(sh.home_drive_mins) : null;
-        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc);
+        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc, { cached: true });
         if (mins == null && o.lastPc && homePc) {
           try { const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]); if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); } catch {}
         }
@@ -876,9 +876,24 @@ const ROAD_FACTOR = 1.25;
 // the moment a job is completed — i.e. when the engineer would set off home — so
 // the traffic reading is real. NOT edge-cached (traffic is live). Falls back to
 // the free-flow duration, then null (caller decides the last-resort estimate).
-async function driveMinutesGoogle(env, fromPc, toPc) {
+// Memo for the AUTO-FILL path (opts.cached): the admin overview re-derives the
+// drive home for days already GONE, for every engineer, twice (jobTimeAuto is
+// called directly and again inside applyAutoMileage) — a live-traffic reading is
+// meaningless there and each call is a slow external round trip. Kept per
+// isolate, 12h TTL, bounded. The at-completion caller (trackJobTime) never
+// passes cached, so its reading stays live.
+const DRIVE_MEMO = new Map();
+const DRIVE_MEMO_TTL = 12 * 3600 * 1000;
+async function driveMinutesGoogle(env, fromPc, toPc, opts = {}) {
   const key = env && env.GOOGLE_MAPS_KEY; if (!key) return null;
   const f = normPc(fromPc), t = normPc(toPc); if (!f || !t) return null;
+  const mk = f + "|" + t;
+  if (opts.cached) { const hit = DRIVE_MEMO.get(mk); if (hit && Date.now() - hit.at < DRIVE_MEMO_TTL) return hit.mins; }
+  const mins = await driveMinutesGoogleLive(key, f, t);
+  if (opts.cached && mins != null) { if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear(); DRIVE_MEMO.set(mk, { mins, at: Date.now() }); }
+  return mins;
+}
+async function driveMinutesGoogleLive(key, f, t) {
   try {
     const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
     if (!a || !b) return null;
@@ -1957,8 +1972,10 @@ export async function handle(request, env, ctx, url, sess) {
       }
       const invBy = {}; for (const r of invs || []) invBy[r.username] = r;
       const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);   // approved holidays this week
-      const out = [];
-      for (const u of users || []) {
+      // Every engineer's week is built IN PARALLEL (order preserved by map): done
+      // one after another this took 6-17s on a 16-person team — over the page's
+      // own timeout, so Engineer Timesheets read "Couldn't load" (9 Sep 2026).
+      const out = await Promise.all((users || []).map(async u => {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
         // Job-status time capture fills gaps the engineer hasn't typed over,
@@ -1982,7 +1999,7 @@ export async function handle(request, env, ctx, url, sess) {
         const perDay = {};
         for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
         const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
-        out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
+        return ({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
           days: d.days, perDay, savedAt: d.at, totals: weekTotals(daysEff, eff), autoMileage: am.auto,
           gapCount: gaps.count, gapMissing: gaps.missing, due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
@@ -1990,7 +2007,7 @@ export async function handle(request, env, ctx, url, sess) {
           holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
-      }
+      }));
       const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
       return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
