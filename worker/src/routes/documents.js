@@ -23,9 +23,10 @@ import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 import { signedFileUrl } from "../lib/filesign.js";
 import { buildSignDocPdf } from "../lib/signdoc-pdf.js";
+import { onceMigration } from "../lib/once.js";
 
 let READY = false;
-async function ensure(env) {
+async function ensure__raw(env) {
   if (READY) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS doc_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,7 @@ async function ensure(env) {
   } catch { /* non-fatal */ }
   READY = true;
 }
+const ensure = onceMigration(ensure__raw); // once per isolate — see lib/once.js
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(r) { try { return await r.json(); } catch { return {}; } }

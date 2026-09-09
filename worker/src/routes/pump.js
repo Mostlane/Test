@@ -34,6 +34,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser, sendToPermission } from "./push.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { decodePngToRgb } from "../lib/pngdecode.js";
+import { onceMigration } from "../lib/once.js";
 
 const GENERAL = [
   "Chamber free of debris or obstructions", "Water level within expected range when idle",
@@ -87,13 +88,14 @@ const DEFAULT_CONFIG = {
 const normEng = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
 const siteKeyOf = s => { const t = String(s || "").trim(); return t ? (/^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "")) : ""; };
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
     tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
     status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
     created_at TEXT, updated_at TEXT, r2_final_key TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 async function getConfig(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
   if (row && row.value) { try { const c = JSON.parse(row.value); if (c && Array.isArray(c.stores)) return c; } catch {} }

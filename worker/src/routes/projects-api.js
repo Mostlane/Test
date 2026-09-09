@@ -30,6 +30,7 @@ import * as sitelogApi from "./sitelog-api.js";
 import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries, badScheduleIn, badScheduleDate } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
 import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
+import { onceMigration } from "../lib/once.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -53,7 +54,7 @@ function normName(s) {
 }
 function bool(v) { return v === true || v === 1 || v === "1" || v === "true"; }
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -72,6 +73,7 @@ async function ensureTables(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 async function cfgGet(db, key) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();

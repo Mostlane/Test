@@ -34,6 +34,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
+import { onceMigration } from "../lib/once.js";
 
 const MAP_KEY = "workever:statusmap";
 const LASTRUN_KEY = "workever:lastrun";
@@ -63,11 +64,12 @@ const DEFAULT_MAP = {
   "fra 2026":                 { portal: "FRA Works",   done: false },
 };
 
-async function ensureLog(db) {
+async function ensureLog__raw(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS workever_sync_log (
     tenant_id TEXT, run_id TEXT, at TEXT, action TEXT, mos TEXT, ref TEXT,
     portal_id TEXT, from_status TEXT, to_status TEXT, note TEXT)`).run();
 }
+const ensureLog = onceMigration(ensureLog__raw); // once per isolate — see lib/once.js
 
 async function loadMap(db) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, MAP_KEY).first();

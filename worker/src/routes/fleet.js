@@ -21,6 +21,7 @@ import { evalAlerts, answerWord } from "./vancheck.js";
 import { loadRegister, resolveSite } from "./costing.js";
 import { createOrUpdateJobFromPayload, reconcileRelease, badScheduleIn } from "./sla.js";
 import { approvedLeaveInRange } from "./holidays.js";
+import { onceMigration } from "../lib/once.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -133,7 +134,7 @@ async function handoverTemplate(env, tid) {
 }
 // Driver van-scores sent to engineers from a fleet report. One row per
 // engineer+week (a re-send updates it). Engineers see their own history.
-async function ensureScoresTable(env) {
+async function ensureScoresTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS driver_scores (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL,
@@ -151,7 +152,8 @@ async function ensureScoresTable(env) {
   try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN rank INTEGER").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN total INTEGER").run(); } catch {}
 }
-async function ensureHandoverTable(env) {
+const ensureScoresTable = onceMigration(ensureScoresTable__raw); // once per isolate — see lib/once.js
+async function ensureHandoverTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, username TEXT NOT NULL, status TEXT DEFAULT 'pending',
@@ -160,6 +162,7 @@ async function ensureHandoverTable(env) {
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_handover_reg ON vehicle_handovers(tenant_id,reg)").run(); } catch {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_handover_user ON vehicle_handovers(tenant_id,username,status)").run(); } catch {}
 }
+const ensureHandoverTable = onceMigration(ensureHandoverTable__raw); // once per isolate — see lib/once.js
 // data:image/... base64 → ASSET_BUCKET key under handover/<user>/<id>/. Returns
 // an already-stored key untouched (idempotent resubmit). 5 MB cap per image.
 async function storeHandoverImg(env, userDir, id, tag, p, nRef) {
@@ -2511,7 +2514,7 @@ async function cfgWriteWrap(env, tid, name, value) {
   ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
 }
 
-async function ensureVehTable(env) {
+async function ensureVehTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (
     tenant_id INTEGER NOT NULL DEFAULT 1, reg TEXT NOT NULL, make TEXT, model TEXT, fuel TEXT,
     active INTEGER DEFAULT 1, mot_due TEXT, tax_due TEXT, next_service TEXT, notes TEXT, at TEXT,
@@ -2527,15 +2530,17 @@ async function ensureVehTable(env) {
   ];
   for (const c of cols) { try { await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run(); } catch {} }
 }
+const ensureVehTable = onceMigration(ensureVehTable__raw); // once per isolate — see lib/once.js
 // Maintenance records: dated, categorised work with cost-split allocations and
 // an optional document per record. Self-migrating (CREATE IF NOT EXISTS).
-async function ensureMaintTable(env) {
+async function ensureMaintTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_maintenance (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, date TEXT, description TEXT, allocs TEXT,
     doc_key TEXT, doc_name TEXT, by TEXT, at TEXT)`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vmaint_reg ON vehicle_maintenance(tenant_id,reg)").run(); } catch {}
 }
+const ensureMaintTable = onceMigration(ensureMaintTable__raw); // once per isolate — see lib/once.js
 // Latest odometer reading per vehicle, pulled from the weekly van checks.
 async function latestMileage(env, tid) {
   const dn = s => String(s || "").replace(/\s+/g, "").toUpperCase();
@@ -2563,7 +2568,7 @@ async function latestMileage(env, tid) {
   } catch {}
   return out;
 }
-async function ensureOdoTable(env) {
+async function ensureOdoTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS odometer_readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT, date TEXT, miles INTEGER, note TEXT, by TEXT, at TEXT)`).run();
@@ -2572,6 +2577,7 @@ async function ensureOdoTable(env) {
   // manual (typed by a person) > vancheck > fuel (auto-pulled off a fuel statement).
   try { await env.DB.prepare("ALTER TABLE odometer_readings ADD COLUMN source TEXT").run(); } catch {}
 }
+const ensureOdoTable = onceMigration(ensureOdoTable__raw); // once per isolate — see lib/once.js
 // Reliability rank — higher wins on a same-date clash. Van-check mileage is the
 // trusted primary; fuel-statement odometers are a secondary gap-filler.
 const ODO_RANK = { manual: 3, vancheck: 2, fuel: 1 };
@@ -2603,7 +2609,7 @@ async function vehiclePoRows(env, { reg, from, to } = {}) {
     return results || [];
   } catch { return []; }
 }
-async function ensureFuelTable(env) {
+async function ensureFuelTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fuel_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     card TEXT, username TEXT, date TEXT, litres REAL, cost REAL, note TEXT, by TEXT, at TEXT)`).run();
@@ -2615,6 +2621,7 @@ async function ensureFuelTable(env) {
   try { await env.DB.prepare("ALTER TABLE fuel_entries ADD COLUMN ref TEXT").run(); } catch {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_ref ON fuel_entries(tenant_id,ref)").run(); } catch {}
 }
+const ensureFuelTable = onceMigration(ensureFuelTable__raw); // once per isolate — see lib/once.js
 // card number → { username, name } from users.profile.fuelCard.
 async function fuelCardMap(env, tid) {
   const byCard = {}, cards = [];
@@ -2881,18 +2888,20 @@ function serviceView(v, cur) {
   }
   return { dueDate, dueMiles, status, reason: reasons.join(" · "), warnDays, warnMiles };
 }
-async function ensureTsTable(env) {
+async function ensureTsTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS van_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
 }
+const ensureTsTable = onceMigration(ensureTsTable__raw); // once per isolate — see lib/once.js
 
-async function ensureAssignTable(env) {
+async function ensureAssignTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_assignments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, username TEXT NOT NULL, start_date TEXT NOT NULL,
     end_date TEXT, assigned_by TEXT, at TEXT)`).run();
 }
+const ensureAssignTable = onceMigration(ensureAssignTable__raw); // once per isolate — see lib/once.js
 // Bootstrap current assignments from the existing users.vehicle_assigned field
 // the first time the registry is used, so history starts from today's reality.
 async function seedAssignments(env, tid) {

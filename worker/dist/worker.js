@@ -546,6 +546,23 @@ var init_webpush = __esm({
   }
 });
 
+// src/lib/once.js
+function onceMigration(fn) {
+  let pending = null;
+  return function onceWrapped(...args) {
+    if (pending) return pending;
+    pending = Promise.resolve().then(() => fn.apply(this, args)).catch((e) => {
+      pending = null;
+      throw e;
+    });
+    return pending;
+  };
+}
+var init_once = __esm({
+  "src/lib/once.js"() {
+  }
+});
+
 // src/routes/push.js
 function jr(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -557,7 +574,7 @@ async function readJson(req) {
     return {};
   }
 }
-async function ensureTable(env) {
+async function ensureTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
     endpoint TEXT PRIMARY KEY,
     tenant_id INTEGER NOT NULL DEFAULT 1,
@@ -900,13 +917,15 @@ function describeDevice(ua) {
   const parts = [os, br].filter(Boolean);
   return parts.length ? parts.join(" \xB7 ") : "Unknown device";
 }
-var FEED_READY;
+var ensureTable, FEED_READY;
 var init_push = __esm({
   "src/routes/push.js"() {
     init_http();
     init_tenantdb();
     init_webpush();
     init_auth();
+    init_once();
+    ensureTable = onceMigration(ensureTable__raw);
     FEED_READY = false;
   }
 });
@@ -4683,7 +4702,7 @@ async function saveStatusEmailConfig(env, tid, cfg) {
   ).bind(tid, CFG_KEY2, JSON.stringify(clean)).run();
   return clean;
 }
-async function ensureReschedTable(env) {
+async function ensureReschedTable__raw(env) {
   await tdb(env).prepare(`CREATE TABLE IF NOT EXISTS job_reschedule_requests (
     id TEXT PRIMARY KEY, tenant_id TEXT, job_id TEXT, job_ref TEXT, site_name TEXT,
     note TEXT, suggestions TEXT, created_at TEXT, status TEXT DEFAULT 'open',
@@ -4867,10 +4886,11 @@ async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
   } catch {
   }
 }
-var CFG_KEY2, STATUS_DEFS;
+var CFG_KEY2, STATUS_DEFS, ensureReschedTable;
 var init_statusemail = __esm({
   "src/lib/statusemail.js"() {
     init_email();
+    init_once();
     CFG_KEY2 = "sla_status_emails";
     STATUS_DEFS = [
       { key: "Scheduled", label: "Scheduled", reschedule: true, defaultOn: true },
@@ -4879,6 +4899,7 @@ var init_statusemail = __esm({
       { key: "Complete", label: "Completed", reschedule: false, defaultOn: false },
       { key: "On Hold", label: "On Hold / Delayed", reschedule: false, defaultOn: false }
     ];
+    ensureReschedTable = onceMigration(ensureReschedTable__raw);
   }
 });
 
@@ -9464,7 +9485,7 @@ var init_compliance = __esm({
 });
 
 // src/routes/concerto.js
-async function ensureTables2(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_ppm (
     id TEXT NOT NULL, tenant_id TEXT NOT NULL, kind TEXT, order_date TEXT, order_value REAL,
     description TEXT, ppm_type TEXT, period TEXT, asset_ref TEXT, sr_ref TEXT,
@@ -10086,12 +10107,14 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
     init_auth();
     init_sla();
+    init_once();
+    ensureTables2 = onceMigration(ensureTables__raw);
     FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
     TYPE_LABEL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency lighting", pv: "PV", ev: "EV", pump: "Pump", other: "Other" };
     MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -10614,7 +10637,7 @@ var init_pumppdf = __esm({
 });
 
 // src/routes/pump.js
-async function ensureTables3(env) {
+async function ensureTables__raw2(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
     tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
     status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
@@ -11135,7 +11158,7 @@ async function handle10(request, env, ctx, url, sess) {
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var GENERAL, BINFIELD_CHECKS, WICKHAM_CHECKS, INSTR, DEFAULT_CONFIG, normEng, isJpeg, isPng, MAX_PDF_PHOTOS;
+var GENERAL, BINFIELD_CHECKS, WICKHAM_CHECKS, INSTR, DEFAULT_CONFIG, normEng, ensureTables3, isJpeg, isPng, MAX_PDF_PHOTOS;
 var init_pump = __esm({
   "src/routes/pump.js"() {
     init_http();
@@ -11146,6 +11169,7 @@ var init_pump = __esm({
     init_push();
     init_compliance();
     init_pngdecode();
+    init_once();
     GENERAL = [
       "Chamber free of debris or obstructions",
       "Water level within expected range when idle",
@@ -11208,6 +11232,7 @@ var init_pump = __esm({
       ]
     };
     normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    ensureTables3 = onceMigration(ensureTables__raw2);
     isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
     isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
     MAX_PDF_PHOTOS = 12;
@@ -11241,7 +11266,7 @@ async function backfillClient(env, tid, rec) {
   if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
-async function ensureTables4(env) {
+async function ensureTables__raw3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
     job_id TEXT, site_code TEXT, cert_number TEXT,
@@ -13795,7 +13820,7 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG2, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var T, DEFAULT_CONFIG2, ensureTables4, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -13814,6 +13839,7 @@ var init_certs = __esm({
     init_pngdecode();
     init_pump();
     init_tenantdb();
+    init_once();
     T = (t) => t === "pat" ? "pat" : "em";
     DEFAULT_CONFIG2 = {
       // Default client used to seed a NEW cert when the previous cert didn't supply one
@@ -13851,6 +13877,7 @@ var init_certs = __esm({
       supplierCc: ""
       // optional CC on the battery enquiry email (remembered)
     };
+    ensureTables4 = onceMigration(ensureTables__raw3);
     ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
     REMEDIAL_CHARGE = 50;
@@ -23504,8 +23531,9 @@ async function lookupSite(env, tid, { client, address, postcode }) {
 
 // src/routes/emailjob.js
 init_push();
+init_once();
 var T2 = "inbound_emails";
-async function ensureTable2(env) {
+async function ensureTable__raw2(env) {
   try {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS ${T2} (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, message_id TEXT, received_at TEXT,
@@ -23515,6 +23543,7 @@ async function ensureTable2(env) {
   } catch {
   }
 }
+var ensureTable2 = onceMigration(ensureTable__raw2);
 var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {
@@ -24581,8 +24610,9 @@ init_tenantdb();
 init_filesign();
 init_push();
 init_pdf();
+init_once();
 var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC", cpp: "CPP" };
-async function ensureHsCols(db) {
+async function ensureHsCols__raw(db) {
   for (const col of ["attachments TEXT", "sign_requests TEXT"]) {
     try {
       await db.prepare(`ALTER TABLE hs_documents ADD COLUMN ${col}`).run();
@@ -24590,6 +24620,7 @@ async function ensureHsCols(db) {
     }
   }
 }
+var ensureHsCols = onceMigration(ensureHsCols__raw);
 var parseArr = (s) => {
   try {
     const v = JSON.parse(s || "[]");
@@ -25173,6 +25204,7 @@ init_http();
 init_auth();
 init_tenantdb();
 init_push();
+init_once();
 var SETTINGS_KEY2 = "vancheck:settings";
 var OPTOUT_KEY = "vancheck:optout";
 async function getOptedOut(env, tid) {
@@ -25333,7 +25365,7 @@ async function getGridStatuses(db) {
 async function saveGridStatuses(db, list) {
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, GRID_STATUS_KEY(db.tenantId), JSON.stringify(normGridStatuses(list))).run();
 }
-async function ensureCustomTable(db) {
+async function ensureCustomTable__raw(db) {
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS custom_van_checks (
       id TEXT PRIMARY KEY, tenant_id TEXT, username TEXT, reg TEXT, tpl_id TEXT, name TEXT,
@@ -25347,6 +25379,7 @@ async function ensureCustomTable(db) {
     }
   }
 }
+var ensureCustomTable = onceMigration(ensureCustomTable__raw);
 async function nameMap(env, tid) {
   const out = {};
   try {
@@ -26501,10 +26534,11 @@ init_auth();
 init_tenantdb();
 init_filesign();
 init_push();
+init_once();
 var KINDS = ["qualification", "insurance", "licence", "licence_check"];
 var EXPIRING_DAYS = 30;
 var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
-async function ensureTable3(db) {
+async function ensureTable__raw3(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
     tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
     title TEXT, number TEXT, issuer TEXT, issued TEXT, expires TEXT,
@@ -26516,13 +26550,15 @@ async function ensureTable3(db) {
   } catch {
   }
 }
-async function ensureSubTable(db) {
+var ensureTable3 = onceMigration(ensureTable__raw3);
+async function ensureSubTable__raw(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_subcontractors (
     tenant_id INTEGER, name_key TEXT, name TEXT, trade TEXT, contact TEXT, phone TEXT, email TEXT,
     active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT,
     PRIMARY KEY (tenant_id, name_key)
   )`).run();
 }
+var ensureSubTable = onceMigration(ensureSubTable__raw);
 var nameKeyOf = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 var SUB_PREFIX = "sub:";
 var isSubUser = (u) => String(u || "").startsWith(SUB_PREFIX);
@@ -27250,6 +27286,7 @@ init_http();
 init_auth();
 init_timesheets();
 init_sitelog_api();
+init_once();
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
@@ -28847,7 +28884,7 @@ async function ratesMap(env, tid) {
   }
   return out;
 }
-async function ensure3(env) {
+async function ensure__raw(env) {
   try {
     await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
   } catch {
@@ -28879,6 +28916,7 @@ async function ensure3(env) {
   } catch {
   }
 }
+var ensure3 = onceMigration(ensure__raw);
 async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
   if (!costingKey) return null;
   const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
@@ -29007,6 +29045,7 @@ function timingSafeEq(a, b) {
 // src/routes/fleet.js
 init_sla();
 init_holidays();
+init_once();
 function jr4(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -29127,7 +29166,7 @@ async function handoverTemplate(env, tid) {
   }
   return DEFAULT_HANDOVER;
 }
-async function ensureScoresTable(env) {
+async function ensureScoresTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS driver_scores (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL,
@@ -29152,7 +29191,8 @@ async function ensureScoresTable(env) {
   } catch {
   }
 }
-async function ensureHandoverTable(env) {
+var ensureScoresTable = onceMigration(ensureScoresTable__raw);
+async function ensureHandoverTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, username TEXT NOT NULL, status TEXT DEFAULT 'pending',
@@ -29167,6 +29207,7 @@ async function ensureHandoverTable(env) {
   } catch {
   }
 }
+var ensureHandoverTable = onceMigration(ensureHandoverTable__raw);
 async function storeHandoverImg(env, userDir, id, tag, p, nRef) {
   if (typeof p === "string" && /^handover\//.test(p)) return p;
   const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
@@ -31630,7 +31671,7 @@ async function cfgWriteWrap(env, tid, name, value) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
 }
-async function ensureVehTable(env) {
+async function ensureVehTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (
     tenant_id INTEGER NOT NULL DEFAULT 1, reg TEXT NOT NULL, make TEXT, model TEXT, fuel TEXT,
     active INTEGER DEFAULT 1, mot_due TEXT, tax_due TEXT, next_service TEXT, notes TEXT, at TEXT,
@@ -31656,7 +31697,8 @@ async function ensureVehTable(env) {
     }
   }
 }
-async function ensureMaintTable(env) {
+var ensureVehTable = onceMigration(ensureVehTable__raw);
+async function ensureMaintTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_maintenance (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, date TEXT, description TEXT, allocs TEXT,
@@ -31666,6 +31708,7 @@ async function ensureMaintTable(env) {
   } catch {
   }
 }
+var ensureMaintTable = onceMigration(ensureMaintTable__raw);
 async function latestMileage(env, tid) {
   const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
   const out = {};
@@ -31697,7 +31740,7 @@ async function latestMileage(env, tid) {
   }
   return out;
 }
-async function ensureOdoTable(env) {
+async function ensureOdoTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS odometer_readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT, date TEXT, miles INTEGER, note TEXT, by TEXT, at TEXT)`).run();
@@ -31710,6 +31753,7 @@ async function ensureOdoTable(env) {
   } catch {
   }
 }
+var ensureOdoTable = onceMigration(ensureOdoTable__raw);
 var ODO_RANK = { manual: 3, vancheck: 2, fuel: 1 };
 var dnReg = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
 async function vehiclePoRows(env, { reg, from, to } = {}) {
@@ -31737,7 +31781,7 @@ async function vehiclePoRows(env, { reg, from, to } = {}) {
     return [];
   }
 }
-async function ensureFuelTable(env) {
+async function ensureFuelTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fuel_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     card TEXT, username TEXT, date TEXT, litres REAL, cost REAL, note TEXT, by TEXT, at TEXT)`).run();
@@ -31758,6 +31802,7 @@ async function ensureFuelTable(env) {
   } catch {
   }
 }
+var ensureFuelTable = onceMigration(ensureFuelTable__raw);
 async function fuelCardMap(env, tid) {
   const byCard = {}, cards = [];
   try {
@@ -32052,17 +32097,19 @@ function serviceView(v, cur) {
   }
   return { dueDate, dueMiles, status, reason: reasons.join(" \xB7 "), warnDays, warnMiles };
 }
-async function ensureTsTable(env) {
+async function ensureTsTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS van_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
 }
-async function ensureAssignTable(env) {
+var ensureTsTable = onceMigration(ensureTsTable__raw);
+async function ensureAssignTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_assignments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     reg TEXT NOT NULL, username TEXT NOT NULL, start_date TEXT NOT NULL,
     end_date TEXT, assigned_by TEXT, at TEXT)`).run();
 }
+var ensureAssignTable = onceMigration(ensureAssignTable__raw);
 async function seedAssignments(env, tid) {
   try {
     const cnt = await env.DB.prepare("SELECT COUNT(*) AS n FROM vehicle_assignments WHERE tenant_id=?").bind(tid).first();
@@ -32088,8 +32135,9 @@ init_tenantdb();
 init_push();
 init_idempotency();
 init_auth();
+init_once();
 var READY3 = false;
-async function ensure4(env) {
+async function ensure__raw2(env) {
   if (READY3) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32137,6 +32185,7 @@ async function ensure4(env) {
   )`).run();
   READY3 = true;
 }
+var ensure4 = onceMigration(ensure__raw2);
 function isOwner(env, me) {
   return lc(me) === lc(env.OWNER_USERNAME || "Jamie Line");
 }
@@ -32429,8 +32478,9 @@ init_push();
 init_pdf();
 init_filesign();
 init_logo();
+init_once();
 var READY4 = false;
-async function ensure5(env) {
+async function ensure__raw3(env) {
   if (READY4) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32459,6 +32509,7 @@ async function ensure5(env) {
   )`).run();
   READY4 = true;
 }
+var ensure5 = onceMigration(ensure__raw3);
 function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -33022,8 +33073,9 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
 }
 
 // src/routes/documents.js
+init_once();
 var READY5 = false;
-async function ensure6(env) {
+async function ensure__raw4(env) {
   if (READY5) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS doc_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33065,6 +33117,7 @@ async function ensure6(env) {
   }
   READY5 = true;
 }
+var ensure6 = onceMigration(ensure__raw4);
 function jr7(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -35908,6 +35961,7 @@ init_http();
 init_auth();
 init_push();
 init_tenantdb();
+init_once();
 var TASK_AREAS = [
   { key: "", label: "\u2014 none (manual only) \u2014", auto: "", page: "" },
   { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit", page: "vehicles.html" },
@@ -35925,7 +35979,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables6(env) {
+async function ensureTables__raw4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -35941,6 +35995,7 @@ async function ensureTables6(env) {
     }
   }
 }
+var ensureTables6 = onceMigration(ensureTables__raw4);
 function lonYMD(d) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -36602,14 +36657,16 @@ function devLabel(inp) {
 
 // src/routes/cablecalc.js
 init_logo();
+init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables7(env) {
+async function ensureTables__raw5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
+var ensureTables7 = onceMigration(ensureTables__raw5);
 async function getConfig5(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
@@ -37232,8 +37289,9 @@ function buildProgrammePdf(data, meta = {}) {
 }
 
 // src/routes/programmes.js
+init_once();
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables8(env) {
+async function ensureTables__raw6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -37262,6 +37320,7 @@ async function ensureTables8(env) {
   } catch {
   }
 }
+var ensureTables8 = onceMigration(ensureTables__raw6);
 async function bankHolidayDates(db) {
   const y = (/* @__PURE__ */ new Date()).getFullYear();
   const years = [y - 1, y, y + 1, y + 2];
@@ -37971,6 +38030,7 @@ init_filesign();
 init_sitelog_api();
 init_sla();
 init_sites();
+init_once();
 var DOC_TYPES = [
   { key: "programme", label: "Programme of works" },
   { key: "rams", label: "Risk Assessment (RAMS)" },
@@ -37987,7 +38047,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables9(env) {
+async function ensureTables__raw7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -38002,6 +38062,7 @@ async function ensureTables9(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
+var ensureTables9 = onceMigration(ensureTables__raw7);
 async function setProjFinValue(env, tid, costingKey, value, name) {
   return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
 }
@@ -40137,6 +40198,7 @@ async function handle42(request, env, ctx, url, sess) {
 init_http();
 init_auth();
 init_tenantdb();
+init_once();
 var MAP_KEY = "workever:statusmap";
 var LASTRUN_KEY = "workever:lastrun";
 var OPEN_PORTAL = /* @__PURE__ */ new Set(["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order"]);
@@ -40155,11 +40217,12 @@ var DEFAULT_MAP = {
   "chaplins": { portal: "Pending", done: false },
   "fra 2026": { portal: "FRA Works", done: false }
 };
-async function ensureLog(db) {
+async function ensureLog__raw(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS workever_sync_log (
     tenant_id TEXT, run_id TEXT, at TEXT, action TEXT, mos TEXT, ref TEXT,
     portal_id TEXT, from_status TEXT, to_status TEXT, note TEXT)`).run();
 }
+var ensureLog = onceMigration(ensureLog__raw);
 async function loadMap2(db) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, MAP_KEY).first();
   let m = null;

@@ -2457,6 +2457,30 @@ gives the call 30s, shows "Loading everyone's week…", and on failure says WHIC
 (`health_events` kind='slow') is the place to look when a page "won't load" —
 it records every >2.5s response by endpoint.
 
+## Why the portal was slow — and the two fixes (9 Sep 2026)
+Jamie: "Why so slow anyway?" Evidence from `health_events` (kind='slow', >2.5 s):
+8/day on 30 Aug → 585/day on 9 Sep across 24 endpoints, with trivial calls like
+`/messages/unread` averaging 3.2 s. Two causes, both measured:
+- **Distance to the database, not the database.** The cron probe's bare `SELECT 1`
+  from inside the Worker took ~200 ms; the same statements from the D1 console in
+  London (the DB's region, WEUR) take ~2 ms. The Worker ran wherever the phone's
+  request landed and every D1 statement paid the hop. **Fix: `[placement]
+  mode = "smart"` in wrangler.toml** — Cloudflare moves the Worker next to D1.
+  Heuristic: it settles over a day or so of traffic, not instantly.
+- **10–25 sequential statements per request before any real work.** The session
+  gate is 4–5 queries, then EVERY module re-ran its self-migration battery
+  (`CREATE TABLE IF NOT EXISTS` + try/catch `ALTER`s) on EVERY request — certs 10,
+  fleet 7 (from 4 call sites), messages 7… Only timesheets.js had a once flag.
+  **Fix: `lib/once.js onceMigration(fn)`** — every `ensure*()` is now wrapped
+  (`async function ensureX__raw(){…}; const ensureX = onceMigration(ensureX__raw);`,
+  27 functions across 19 modules) so a migration runs ONCE PER ISOLATE; concurrent
+  first calls share one run; a failed run is forgotten so the next request retries.
+  **When you add a module: wrap its ensure the same way.** Heavy endpoints
+  (`/certs/remedials/outstanding`, `/fleet/vehicles`, `/certs/status`,
+  `/ts/admin/overview`) still do their own per-row work — next candidates.
+  Check the effect the same way it was found: `SELECT substr(at,1,10), COUNT(*),
+  ROUND(AVG(ms)) FROM health_events WHERE kind='slow' GROUP BY 1`.
+
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the

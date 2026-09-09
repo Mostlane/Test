@@ -19,6 +19,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { getRules, saveRules, isSuppressed } from "../lib/suppress.js";
 import { sendToUser } from "./push.js";
+import { onceMigration } from "../lib/once.js";
 
 const SETTINGS_KEY = "vancheck:settings";
 const OPTOUT_KEY = "vancheck:optout";   // JSON array of usernames taken OUT of the weekly van-check cycle
@@ -180,7 +181,7 @@ async function saveGridStatuses(db, list) {
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(db.tenantId, GRID_STATUS_KEY(db.tenantId), JSON.stringify(normGridStatuses(list))).run();
 }
-async function ensureCustomTable(db) {
+async function ensureCustomTable__raw(db) {
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS custom_van_checks (
       id TEXT PRIMARY KEY, tenant_id TEXT, username TEXT, reg TEXT, tpl_id TEXT, name TEXT,
@@ -191,6 +192,7 @@ async function ensureCustomTable(db) {
     try { await db.prepare(`ALTER TABLE custom_van_checks ADD COLUMN ${c}`).run(); } catch {}
   }
 }
+const ensureCustomTable = onceMigration(ensureCustomTable__raw); // once per isolate — see lib/once.js
 async function nameMap(env, tid) {
   const out = {};
   try {

@@ -12,16 +12,18 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { buildCableCalcPdf } from "../lib/cablecalcpdf.js";
 import { logoBytes } from "../lib/logo.js";
+import { onceMigration } from "../lib/once.js";
 
 const DATA_KEY = tid => `cablecalc:data:${tid}`;
 const CFG_KEY = tid => `cablecalc:config:${tid}`;
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 async function getConfig(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY(tid)).first();

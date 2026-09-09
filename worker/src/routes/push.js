@@ -13,11 +13,12 @@ import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { sendPush } from "../lib/webpush.js";
 import { permissionsFor } from "../lib/auth.js";
+import { onceMigration } from "../lib/once.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
 
-async function ensureTable(env) {
+async function ensureTable__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
     endpoint TEXT PRIMARY KEY,
     tenant_id INTEGER NOT NULL DEFAULT 1,
@@ -28,6 +29,7 @@ async function ensureTable(env) {
     created_at TEXT,
     last_ok TEXT)`).run();
 }
+const ensureTable = onceMigration(ensureTable__raw); // once per isolate — see lib/once.js
 
 // ── Notification feed (the "bell") ──────────────────────────────────────────
 // A durable, per-user history of every notification (the same {title,body,url}

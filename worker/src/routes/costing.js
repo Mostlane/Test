@@ -37,6 +37,7 @@ import { json, error } from "../lib/http.js";
 import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { poOrderSiteNames } from "./timesheets.js";
 import * as sitelogApi from "./sitelog-api.js";
+import { onceMigration } from "../lib/once.js";
 
 // Fetch a SiteLog admin endpoint. When the SiteLog DB is bound into this worker
 // (post-migration) run the ported backend directly — no api.site-log.co.uk
@@ -1519,7 +1520,7 @@ export async function ratesMap(env, tid) {
 
 /* ══ Tables + small helpers ═════════════════════════════════════════════════ */
 
-async function ensure(env) {
+async function ensure__raw(env) {
   // Register flag on sites (created elsewhere; column added here).
   try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
   // Segment table may not exist yet on a fresh DB (normally created by
@@ -1542,6 +1543,7 @@ async function ensure(env) {
       at TEXT NOT NULL, source TEXT)`).run();
   } catch {}
 }
+const ensure = onceMigration(ensure__raw); // once per isolate — see lib/once.js
 
 // Single writer for `proj_fin` — used by both /costing/fin and projects-api.js
 // so contract-value edits on either page share one canonical helper. Pass
