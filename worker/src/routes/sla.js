@@ -747,7 +747,14 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* GET /sla/jobs (with filters) */
   if (subpath === "/jobs" && method === "GET") {
-    let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
+    const allList = await listJobs(env, tenantId);
+    // releaseView.hidden = the engineer can't see it RIGHT NOW (gated time not
+    // reached / queued behind an earlier job / skipped) — the office 🙈 marker.
+    let jobs = allList.map(j => {
+      const d = decorateJobWithLiveSla(j);
+      if (d.releaseView) d.releaseView.hidden = !releaseVisibleNow(j, allList);
+      return d;
+    });
     if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");

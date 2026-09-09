@@ -305,6 +305,8 @@
         { icon: "🚨", title: "The SLA job board (office)", perms: ["SLAAdmin"], steps: [
           ["Tap <b>SLA</b> — the job board opens straight away. This is the <b>SLA Admin</b> area (dashboard, scheduler, add/edit jobs); give a user the <b>SLA Admin</b> permission for it. Engineers with just <b>SLA</b> land on <b>My Jobs</b> and can only see their own work."],
           ["The <b>status chips</b> across the top (Pending, Scheduled, In Progress…) show live counts — tap one to filter. Use the search box for a ref, site or description."],
+          ["The <b>📄 EM/PAT</b> chip at the end of the row is a switch: lit = the EM light test and PAT certificate jobs are on the board with everything else; tap it to hide them during the yearly test run (the count on the chip always shows how many are hidden, and it remembers your choice on that device)."],
+          ["A <b>🙈</b> in a job's status pill means the engineer can't see the job yet — it's drip-fed (hidden until 5pm the evening before, a set time, or after their previous job). Hover for when it's released. The same 🙈 shows on the block in the scheduler."],
           ["<b>👤 Send</b> on a job: tick <b>every engineer attending</b>, roll the smooth <b>start</b> and <b>finish</b> time wheels (finish auto-sets to an hour after start), and send. The job flips to <b>Scheduled</b> automatically and appears on each engineer's list."],
           ["Jobs with nobody on them show <b>Not Allocated</b> in red. Tick several rows and use <b>Mark selected as…</b> for bulk status changes."],
           ["Top buttons: <b>🗓️ Scheduler</b> (drag-and-drop day plan), <b>🗺️ Map</b> (all open jobs as pins — tap a pin for the job summary), <b>＋ Add Job</b>, <b>⚙️ Settings</b>."],
@@ -312,6 +314,7 @@
         { icon: "🗓️", title: "The SLA scheduler & map", perms: ["SLAAdmin"], steps: [
           ["The scheduler shows every engineer's day. <b>Drag a job</b> anywhere — the drop time updates for <b>everyone assigned to that job</b>. A double border means several engineers share it."],
           ["Jobs with no time or no engineer sit in the <b>Needs scheduling</b> tray — drag one onto an engineer's row to book it in."],
+          ["<b>Add Job</b> with an engineer and a date/time picked lands you straight here on that day with the new job flashing on their lane, so you can see it against the rest of their work. A job saved without an engineer or a time stays on the Add Job success panel as before."],
           ["A job's width is its booked duration (finish time). Tap a job to edit details, duration or the engineer list."],
           ["<b>🗺️ Map view</b> shows Pending / Scheduled / In Progress / On Hold jobs as coloured pins. Tap a pin for the summary and an <b>Open job</b> link."],
         ]},
