@@ -937,7 +937,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
@@ -949,7 +949,7 @@ function render(){
         ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
       </td>
       <td class="nowrap small">${sched || "<span class='muted'>—</span>"}</td>
-      <td class="small">${engNames || `<span class="noalloc">Not Allocated</span>`}</td>
+      <td class="small">${engNames ? esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</td>
       <td>
         <div class="rowactions">
           <button class="btn small" data-action="update">✏️ Edit</button>
@@ -970,7 +970,7 @@ function render(){
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
         ${emTimerChip(j)}
       </div>
@@ -1523,7 +1523,7 @@ function openStatusMenu(id, anchor){
   const menu = document.createElement("div");
   menu.className = "status-menu";
   menu.innerHTML = list.map(([s,c]) =>
-    `<button class="sm-item${s===job.status?" cur":""}" data-s="${esc(s)}"><span class="dot" style="background:${c}"></span>${esc(s)}${s===job.status?" ✓":""}</button>`
+    `<button class="sm-item${s===job.status?" cur":""}" data-s="${esc(s)}"><span class="dot" style="background:${esc(c)}"></span>${esc(s)}${s===job.status?" ✓":""}</button>`
   ).join("");
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -1737,7 +1737,7 @@ window.addEventListener("pageshow", e => {
     return out.join("\n");
   }
   function rich(t){ try{ return (window.MLUI&&MLUI.rich)?MLUI.rich(String(t)):esc(t); }catch(e){ return esc(t); } }
-  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
   function scroll(){ log.scrollTop=log.scrollHeight; }
   function bubble(cls,html){ var d=document.createElement("div"); d.className="aibub "+cls; d.innerHTML=html; log.appendChild(d); scroll(); return d; }
   function fmtDate(d){ if(!d) return "no date yet (set on the board)"; try{ return new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }catch(e){ return d; } }

@@ -229,7 +229,7 @@
         '<div class="body"><div class="t">'+esc(j.site||"Site")+'</div>'+
         '<div class="s">'+esc(j.ref||"")+' · '+esc((j.description||"").slice(0,70))+'</div>'+
         '<div class="s">'+(j.byClient?"You raised · ":"")+fmtDate(j.raisedAt)+'</div></div>'+
-        '<span class="pill '+cls+'">'+j.status+'</span></div>';
+        '<span class="pill '+cls+'">'+esc(j.status)+'</span></div>';
     }).join("");
     Array.prototype.forEach.call(card.querySelectorAll(".jobrow"), function(row){
       row.onclick = function(){ openJob(row.getAttribute("data-id")); };
@@ -247,7 +247,7 @@
     var html = '<div class="modal"><div class="sheet">'+
       '<button class="x" onclick="closeModal()">Close ✕</button>'+
       '<h2>'+esc(j.site||"Job")+'</h2>'+
-      '<div style="margin:2px 0 10px"><span class="pill '+cls+'">'+j.status+'</span>'+(j.urgency?' <span class="muted" style="font-size:12.5px">· '+esc(j.urgency)+'</span>':'')+'</div>'+
+      '<div style="margin:2px 0 10px"><span class="pill '+cls+'">'+esc(j.status)+'</span>'+(j.urgency?' <span class="muted" style="font-size:12.5px">· '+esc(j.urgency)+'</span>':'')+'</div>'+
       '<div class="muted" style="font-size:12.5px">Reference '+esc(j.ref||"")+' · Raised '+fmtDate(j.raisedAt)+(j.completedAt?(' · Completed '+fmtDate(j.completedAt)):"")+'</div>'+
       '<p style="white-space:pre-wrap;margin:12px 0 4px">'+esc(j.description||"")+'</p>'+
       (j.completionNote?('<div class="card" style="background:#f6f9f4;border-color:#d7ecdc;margin-top:10px"><b style="color:var(--ok)">Completion note</b><div style="white-space:pre-wrap;margin-top:4px">'+esc(j.completionNote)+'</div></div>'):'')+

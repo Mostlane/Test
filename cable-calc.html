@@ -455,7 +455,7 @@
     h+='</tr>';
     sizeList.forEach(function(sz){
       h+='<tr><td><b>'+esc(sz)+'</b></td>';
-      methods.forEach(function(m){ var row=c.methods[m][sz]||{}; h+='<td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="iz" type="number" step="0.1" value="'+(row.iz==null?"":row.iz)+'"></td><td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="vd" type="number" step="0.1" value="'+(row.vd==null?"":row.vd)+'"></td>'; });
+      methods.forEach(function(m){ var row=c.methods[m][sz]||{}; h+='<td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="iz" type="number" step="0.1" value="'+(row.iz==null?"":esc(row.iz))+'"></td><td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="vd" type="number" step="0.1" value="'+(row.vd==null?"":esc(row.vd))+'"></td>'; });
       h+='</tr>';
     });
     h+='</table><div class="hint" style="margin-top:6px">Method letters follow BS 7671 (A enclosed in insulated wall, B in conduit/trunking, C clipped direct, D buried, E free air/tray, 100 above a ceiling…). Leave a cell blank if the datasheet has no value.</div>';

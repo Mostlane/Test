@@ -918,6 +918,7 @@ const MAP = window.ML_PERM_MAP || {
       var token = localStorage.getItem("mostlaneToken");
       if (!token) return;
       var H = { headers: { "Authorization": "Bearer " + token } };
+      function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
       var dotTotals = {};
       function dot(id, n) {
         var btn = document.getElementById(id);
@@ -1219,9 +1220,9 @@ const MAP = window.ML_PERM_MAP || {
         }
 
         var rows = items.map(function (i) {
-          return '<a class="mln-item" href="' + i.href + '">' +
-            '<span class="mln-ico">' + i.icon + '</span>' +
-            '<span class="mln-txt"><b>' + i.title + '</b><span>' + i.text + '</span></span>' +
+          return '<a class="mln-item" href="' + esc(i.href) + '">' +
+            '<span class="mln-ico">' + esc(i.icon) + '</span>' +
+            '<span class="mln-txt"><b>' + esc(i.title) + '</b><span>' + esc(i.text) + '</span></span>' +
             '<span class="mln-go">›</span></a>';
         }).join("");
 

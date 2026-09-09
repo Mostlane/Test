@@ -126,7 +126,8 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
     const fmt = t => { try { return new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return t||""; } };
 
@@ -300,7 +301,7 @@
       // Details modal after "Yes, download" — shows site, cert number & completed
       // time, with a Download button.
       function certDownloadModal(info){
-        const esc2 = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+        const esc2 = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
         const ov = document.createElement("div");
         ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
         const row = (k,v) => '<div style="display:flex;gap:10px;justify-content:space-between;padding:6px 0;border-top:1px solid #eef1f5;"><span style="color:#64748b;">'+k+'</span><b style="text-align:right;">'+esc2(v)+'</b></div>';
@@ -533,7 +534,7 @@
       } else if (o.matchedJobId) {
         acts += '<a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(o.matchedJobId)+'" style="text-decoration:none">Open job →</a>';
       }
-      if (o.link) acts += ' <a class="btn ghost sm" href="'+esc(o.link)+'" target="_blank" rel="noopener" style="text-decoration:none">📧 Email</a>';
+      if (o.link) acts += ' <a class="btn ghost sm" href="'+esc(safeUrl(o.link))+'" target="_blank" rel="noopener" style="text-decoration:none">📧 Email</a>';
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
           + '<b style="font-size:14.5px">'+esc(site)+'</b> <span class="muted">'+esc(o.orderNumber||"")+val+'</span>'
@@ -591,7 +592,7 @@
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
           + '<b style="font-size:14.5px">'+esc(c.siteName||c.siteCode||"Site")+'</b> <span class="muted">Cert '+esc(c.certNumber||"")+'</span>'
-          + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||c.stage)+'</span></div>'
+          + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||esc(c.stage))+'</span></div>'
         + '<div style="margin:4px 0 4px;font-weight:700;color:'+statusCol+'">'+esc(status)+(c.awaitingBatteries?' <span class="badge" style="background:#fff4e6;color:#b45309">⏳ awaiting batteries</span>':'')+'</div>'
         + '<div class="muted" style="margin:0 0 6px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
         + (fitLines ? '<div style="margin:0 0 8px;padding:6px 8px;background:#f8fafc;border-radius:8px">'+fitLines+'</div>' : '')
