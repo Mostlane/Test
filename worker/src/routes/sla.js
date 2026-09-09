@@ -3574,7 +3574,7 @@ const orderRefIncident = ref => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").
    `job.orderValue`, which stripMoney hides from the field. */
 export function stripPricing(text) {
   const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
-  const money = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b)/;
+  const money = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*\.\d{2}\b)/;   // "1151.00" (no thousands comma) counts too
   const out = [];
   for (let l of String(text || "").split(/\r?\n/)) {
     if (labelled.test(l) && money.test(l)) continue;
