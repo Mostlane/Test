@@ -108,6 +108,15 @@
 
     // Friendly names for the common endpoints; anything unmapped shows its raw path.
     const FRIENDLY = [
+      // ── Client (external) portal — actions AND reads are logged ──────────────
+      [/^POST \/client\/raise-photo/,     "📷 Client added a job photo"],
+      [/^POST \/client\/raise/,           "🆕 Client raised a job"],
+      [/^GET \/client\/me/,               "🏢 Client opened their portal"],
+      [/^GET \/client\/jobs/,             "📋 Client viewed their jobs list"],
+      [/^GET \/client\/job\b/,            "🔍 Client opened a job"],
+      [/^GET \/compliance\/stores/,       "📊 Client viewed a compliance chart"],
+      [/^GET \/compliance\/file-url/,     "📄 Client opened a compliance certificate"],
+      [/^GET \/compliance\/files/,        "🗂 Client viewed store documents"],
       [/^POST \/ts\/my/,                  "⏱️ Saved their weekly timesheet"],
       [/^POST \/ts\/me/,                  "⏱️ Updated their timesheet details"],
       [/^POST \/ts\/invoice\/next/,       "🔢 Set their next invoice number"],

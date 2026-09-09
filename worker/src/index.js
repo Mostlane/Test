@@ -371,13 +371,35 @@ async function ensureAuditCols(env) {
   AUDIT_MIGRATED = true;
 }
 
+// A CLIENT (external) session has its READS logged too — so the Activity log
+// holds a full trail of everything an outside client does (opened their portal,
+// viewed jobs, opened a compliance chart / cert), not just their write actions.
+function isClientSess(sess) {
+  try {
+    const pr = sess && sess.user && sess.user.profile;
+    const p = typeof pr === "string" ? JSON.parse(pr || "{}") : (pr || {});
+    return !!p && p.staffType === "client";
+  } catch { return false; }
+}
+// Chatty housekeeping/auth churn NOT worth logging even for a client — everything
+// else they GET (their jobs, a job, compliance charts + cert links) is recorded.
+const CLIENT_GET_SKIP = [
+  "/auth/me", "/auth/refresh", "/device", "/theme", "/push",
+  "/notify", "/prefs", "/audit", "/batch",
+];
+
 function auditAction(env, ctx, sess, request, url, status, clone, note) {
   try {
     if (!sess) return;
     const m = request.method.toUpperCase();
-    if (!AUDIT_METHODS.includes(m)) return;
     const p = url.pathname;
-    if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    if (AUDIT_METHODS.includes(m)) {
+      if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    } else {
+      // Reads are logged ONLY for client sessions (full external-activity trail).
+      if (!isClientSess(sess)) return;
+      if (CLIENT_GET_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    }
     // Which portal page the action was fired from (so the log can say "on
     // Vehicles"). Taken from the Referer; falls back to blank for API-only calls.
     let ref = "";

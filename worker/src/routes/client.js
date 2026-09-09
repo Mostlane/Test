@@ -198,7 +198,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Notify the office (actionable) + fire any release logic (none — it's now).
     try { ctx?.waitUntil(reconcileRelease(env, tid, job).catch(() => {})); } catch {}
     try {
-      ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess"], {
         title: "New client job — " + orgLabel,
         body: (URGENCY_LABEL[urgency] || "Routine") + ": " + site.name + " — " + description.slice(0, 80),
         url: "/job-view.html?jobId=" + encodeURIComponent(job.id),
