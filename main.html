@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=31"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -379,6 +379,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-main.html?reset=1" id="SLA"><span class="emoji">🚨</span> SLA</a>
+    <a class="button" href="client-orders.html" id="ClientOrders"><span class="emoji">📥</span> Client Orders</a>
     <a class="button" href="stats.html" id="Stats"><span class="emoji">📊</span> Stats</a>
     <a class="button" href="health.html" id="Health"><span class="emoji">🩺</span> Health</a>
     <a class="button" href="notification-centre.html" id="Notifications"><span class="emoji">🔕</span> Notification Centre</a>
@@ -450,6 +451,9 @@ const MAP = window.ML_PERM_MAP || {
 ],
   LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
   SLA: ["SLA", "SLAAdmin", "slaMenu", "slaAccess"],
+  // Client orders board — carries order VALUES, so office roles only (the page +
+  // API also require Full Access or office staff; a field engineer is refused).
+  ClientOrders: ["SLAAdmin", "Compliance", "PurchaseOrders"],
   Stats: ["__fullOnly"],
   Health: ["__fullOnly"],
   Notifications: ["__fullOnly"],
@@ -1125,20 +1129,15 @@ const MAP = window.ML_PERM_MAP || {
           });
         }).catch(function () {}));
 
-      // Van handover: a newly-assigned driver must complete a full handover
-      // check before using the van. Blocking + required, but only ONE 4-hour
-      // snooze (maxSnooze:1) — stricter than the weekly check. Clears on submit.
+      // Van handover: a newly-assigned driver must complete a full handover check
+      // before using the van. This is now enforced portal-wide by the NON-SNOOZABLE
+      // handover gate in portal-config.js (an unavoidable overlay on every page
+      // until it's submitted), so it's no longer a snoozeable attention-gate note
+      // here — the badge on the Vehicles tile still flags it.
       jobs.push(fetch(window.MOSTLANE_API + "/fleet/handover/attention", H)
         .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d || !d.ok || !d.mineDue) return;
-          dot("Vehicles", 1);
-          notes.push({
-            n: 1, icon: "🤝", href: "van-handover.html", maxSnooze: 1,
-            title: "Van handover to complete",
-            text: "Complete the handover check for " + (d.reg || "your new van") + " before you use it."
-          });
-        }).catch(function () {}));
+        .then(function (d) { if (d && d.ok && d.mineDue) dot("Vehicles", 1); })
+        .catch(function () {}));
 
       var ORDER = { "van-handover.html": -1, "van-check.html": 0, "engineer-timesheet.html": 0.5, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state

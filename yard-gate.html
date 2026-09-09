@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=31"></script>
   <title>Mostlane • Yard Gate</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -67,6 +67,27 @@
         <button id="markOpen" class="btn small">Mark open</button>
         <button id="markClosed" class="btn small">Mark closed</button>
       </div>
+    </div>
+
+    <!-- GATE STATS (Full-Access only) -->
+    <div class="card" id="statsCard" style="display:none">
+      <h2>📊 Gate stats</h2>
+      <p class="sub">A <b>visit</b> = the gate opened then closed; its duration is the time between. Keypad/fob opens aren't logged. Based on the most recent gate activity held. Filter applies to the stats and the activity log below.</p>
+      <style>
+        #periodChips .pchip{background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:6px 12px;font:600 13px 'Segoe UI',system-ui;color:#334155;cursor:pointer}
+        #periodChips .pchip.on{background:#003468;border-color:#003468;color:#fff}
+      </style>
+      <div style="margin:2px 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label for="logFilter" style="font-size:13px;font-weight:600;color:#334155">Show:</label>
+        <select id="logFilter" style="padding:7px 9px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;background:#fff;min-width:160px"><option value="">Everyone</option></select>
+        <span id="periodChips" style="display:inline-flex;gap:4px;margin-left:auto;flex-wrap:wrap">
+          <button type="button" class="pchip" data-p="week">Week</button>
+          <button type="button" class="pchip" data-p="month">Month</button>
+          <button type="button" class="pchip" data-p="year">Year</button>
+          <button type="button" class="pchip on" data-p="all">All time</button>
+        </span>
+      </div>
+      <div id="statsBody" class="muted">Loading…</div>
     </div>
 
     <!-- RECENT OPERATIONS (Full-Access only) -->
@@ -394,18 +415,147 @@ $("dumpBtn") && $("dumpBtn").addEventListener("click", async ()=>{
   }catch(e){ out.textContent="Network error"; }
 });
 
+let GATE_LOG=[], GATE_RATES={}, GATE_FILTER="", GATE_PERIOD="all";
+const gMondayOf = ms => { const d=new Date(ms); d.setHours(0,0,0,0); const dow=d.getDay()||7; if(dow!==1) d.setDate(d.getDate()-(dow-1)); return d; };
+const gWcLabel  = mon => mon ? "Week commencing Mon "+mon.toLocaleDateString("en-GB",{day:"numeric",month:"short"}) : "Earlier";
+const gShortWc  = m => "w/c "+m.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+const gFmtDur   = min => (min==null) ? "—" : (min<60 ? min+" min" : Math.floor(min/60)+"h "+(min%60)+"m");
+const gFmtMoney = n => "£"+(Number(n)||0).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+function gPeriodStart(p){
+  const d=new Date(); d.setHours(0,0,0,0);
+  if(p==="week"){ const dow=d.getDay()||7; if(dow!==1) d.setDate(d.getDate()-(dow-1)); return d.getTime(); }
+  if(p==="month"){ d.setDate(1); return d.getTime(); }
+  if(p==="year"){ d.setMonth(0,1); return d.getTime(); }
+  return 0; // all time
+}
+// A VISIT = the gate opened then closed. Walk chronologically, pair each open
+// with the next close; attribute the visit (and its duration) to the OPENER.
+// mark-open/mark-closed are admin drift corrections, not visits — ignored.
+function gComputeVisits(log){
+  const chrono=(log||[]).slice().sort((a,b)=>(Date.parse(a.at)||0)-(Date.parse(b.at)||0));
+  const out=[]; let pend=null;
+  const mk=(o,c)=>{ const start=Date.parse(o.at), end=c?Date.parse(c.at):null;
+    const durMin=(end&&end>start)?Math.round((end-start)/60000):null;
+    return { user:o.user||"—", start, end, durMin, leftOpen:(durMin==null||durMin>720), closedBy:c?(c.user||"—"):null }; };
+  for(const e of chrono){
+    if(e.action==="open"){ if(pend) out.push(mk(pend,null)); pend=e; }
+    else if(e.action==="close"){ if(pend){ out.push(mk(pend,e)); pend=null; } }
+  }
+  if(pend) out.push(mk(pend,null));
+  return out;
+}
+
 async function loadLog(){
   if(!isFull) return;
   $("logCard").style.display="";
   try{
     const r=await aFetch("/tuya/gate/log"); const j=await r.json();
-    const list=$("logList");
-    if(!j.ok || !(j.log||[]).length){ list.innerHTML='<span class="muted">No activity logged yet.</span>'; return; }
-    const actTxt = a => a==="close"?"🔒 Closed":a==="mark-open"?"✎ Marked open":a==="mark-closed"?"✎ Marked closed":"🚪 Opened";
-    list.innerHTML=j.log.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7">
-      <span>${actTxt(e.action)} by <b>${esc(e.user)}</b>${e.device?`<br><span class="muted" style="font-size:11px">device ${esc(e.device)}</span>`:""}</span>
-      <span class="muted" style="white-space:nowrap">${esc(whenTxt(e.at))}</span></div>`).join("");
+    if(!j.ok){ $("logList").innerHTML='<span class="muted">Couldn’t load the log.</span>'; return; }
+    GATE_LOG=(j.log||[]).slice().sort((a,b)=>(Date.parse(b.at)||0)-(Date.parse(a.at)||0));
+    GATE_RATES=j.rates||{};
+    // Engineer filter — distinct users seen in the log.
+    const sel=$("logFilter");
+    if(sel){
+      const users=Array.from(new Set(GATE_LOG.map(e=>e.user).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+      sel.innerHTML='<option value="">Everyone</option>'+users.map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join("");
+      sel.value=GATE_FILTER;
+      sel.onchange=()=>{ GATE_FILTER=sel.value; renderLog(); renderStats(); };
+    }
+    // Period chips (week / month / year / all).
+    document.querySelectorAll("#periodChips .pchip").forEach(b=>{
+      b.classList.toggle("on", b.dataset.p===GATE_PERIOD);
+      b.onclick=()=>{ GATE_PERIOD=b.dataset.p;
+        document.querySelectorAll("#periodChips .pchip").forEach(x=>x.classList.toggle("on",x.dataset.p===GATE_PERIOD));
+        renderStats(); };
+    });
+    renderLog(); renderStats();
   }catch{ $("logList").innerHTML='<span class="muted">Couldn’t load the log.</span>'; }
+}
+
+function renderLog(){
+  const list=$("logList"); if(!list) return;
+  const actTxt = a => a==="close"?"🔒 Closed":a==="mark-open"?"✎ Marked open":a==="mark-closed"?"✎ Marked closed":"🚪 Opened";
+  const rowHtml = e => `<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7">
+      <span>${actTxt(e.action)} by <b>${esc(e.user)}</b>${e.device?`<br><span class="muted" style="font-size:11px">device ${esc(e.device)}</span>`:""}</span>
+      <span class="muted" style="white-space:nowrap">${esc(whenTxt(e.at))}</span></div>`;
+  const log = GATE_FILTER ? GATE_LOG.filter(e=>e.user===GATE_FILTER) : GATE_LOG;
+  if(!log.length){ list.innerHTML='<span class="muted">No activity for this filter.</span>'; return; }
+  const groups=[], byKey={};
+  log.forEach(e=>{ const t=Date.parse(e.at); const mon=isNaN(t)?null:gMondayOf(t);
+    const key=mon?mon.getTime():"unknown";
+    if(!byKey[key]){ byKey[key]={mon,items:[]}; groups.push(byKey[key]); } byKey[key].items.push(e); });
+  list.innerHTML = groups.map((g,i)=>`<details ${i===0?"open":""} style="border-bottom:1px solid #eef2f7">
+      <summary style="cursor:pointer;padding:9px 2px;font-weight:700;color:#003468;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span>${esc(gWcLabel(g.mon))}</span>
+        <span class="muted" style="font-weight:600;font-size:12px">${g.items.length} event${g.items.length===1?"":"s"}</span>
+      </summary>
+      <div style="padding-left:2px">${g.items.map(rowHtml).join("")}</div>
+    </details>`).join("");
+}
+
+function renderStats(){
+  const card=$("statsCard"), body=$("statsBody"); if(!card||!body) return;
+  card.style.display="";
+  const pStart=gPeriodStart(GATE_PERIOD);
+  const inPeriod=gComputeVisits(GATE_LOG).filter(v=>!isNaN(v.start) && v.start>=pStart);
+  const visits = GATE_FILTER ? inPeriod.filter(v=>v.user===GATE_FILTER) : inPeriod;
+  const periodLbl = GATE_PERIOD==="week"?"this week":GATE_PERIOD==="month"?"this month":GATE_PERIOD==="year"?"this year":"all time";
+  if(!visits.length){ body.innerHTML='<span class="muted">No visits for this filter ('+periodLbl+').</span>'; return; }
+  // cost of one visit = duration(h) × hourly rate (day rate ÷8 done server-side)
+  const hourly = u => { const n=Number(GATE_RATES[u]); return isFinite(n)&&n>0?n:null; };
+  const costOf = v => (!v.leftOpen && v.durMin!=null && hourly(v.user)!=null) ? (v.durMin/60)*hourly(v.user) : 0;
+  const durs=visits.filter(v=>!v.leftOpen&&v.durMin!=null).map(v=>v.durMin);
+  const avg=durs.length?Math.round(durs.reduce((a,b)=>a+b,0)/durs.length):null;
+  const totalMins=durs.reduce((a,b)=>a+b,0);
+  const totalCost=visits.reduce((a,v)=>a+costOf(v),0);
+  const noRate=new Set(visits.filter(v=>!v.leftOpen&&v.durMin!=null&&hourly(v.user)==null).map(v=>v.user));
+  // per week
+  const wk={}; visits.forEach(v=>{ const m=gMondayOf(v.start); const k=m.getTime(); (wk[k]=wk[k]||{mon:m,n:0}).n++; });
+  const weeks=Object.values(wk).sort((a,b)=>b.mon-a.mon).slice(0,8); const maxWk=Math.max(1,...weeks.map(w=>w.n));
+  // per person (within the period) — count, total time, cost
+  const pu={}; inPeriod.forEach(v=>{ const u=v.user; (pu[u]=pu[u]||{n:0,mins:0,cost:0}); pu[u].n++; if(!v.leftOpen&&v.durMin!=null){ pu[u].mins+=v.durMin; pu[u].cost+=costOf(v); } });
+  const people=Object.entries(pu).sort((a,b)=>b[1].n-a[1].n);
+  const busiest=people[0], maxN=Math.max(1,...people.map(p=>p[1].n));
+
+  const bar=(label,frac,colour,right)=>`<div style="display:flex;align-items:center;gap:8px;margin:5px 0">
+    <span style="flex:0 0 118px;font-size:13px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(label)}</span>
+    <span style="flex:1;background:#eef2f7;border-radius:6px;height:16px;overflow:hidden"><span style="display:block;height:100%;width:${Math.round(frac*100)}%;background:${colour}"></span></span>
+    <span style="flex:0 0 70px;text-align:right;font-weight:700;font-size:13px;color:#0f2438">${right}</span></div>`;
+  const tile=(big,small)=>`<div style="flex:1;min-width:108px;background:#f8fafc;border:1px solid #e6eaf0;border-radius:10px;padding:10px 12px">
+    <div style="font-size:21px;font-weight:800;color:#003468;line-height:1.1">${big}</div>
+    <div class="muted" style="font-size:12px;margin-top:2px">${small}</div></div>`;
+  const head=t=>`<div style="font-weight:700;margin:14px 0 4px;color:#003468;font-size:14px">${t}</div>`;
+
+  let html=`<div style="display:flex;flex-wrap:wrap;gap:10px">`
+    + tile(visits.length, "visits ("+periodLbl+")")
+    + tile(gFmtDur(avg), "average on site")
+    + tile(gFmtDur(totalMins), "total time on site")
+    + tile(gFmtMoney(totalCost), "est. wage cost")
+    + (GATE_FILTER?"":tile(esc((busiest&&busiest[0])||"—"), "visits most ("+((busiest&&busiest[1].n)||0)+")"))
+    + `</div>`;
+  if(noRate.size) html+=`<p class="muted" style="margin:8px 0 0;font-size:12px">⚠ No pay rate set for: ${esc(Array.from(noRate).join(", "))} — their time isn't in the wage cost. Set rates in Engineer Timesheets → Settings.</p>`;
+
+  html+=head("Visits per week")+weeks.map(w=>bar(gShortWc(w.mon), w.n/maxWk, "#1e66ff", w.n)).join("");
+  if(!GATE_FILTER){
+    html+=head("Who visits most")+people.slice(0,8).map(p=>bar(p[0], p[1].n/maxN, "#0e7a3b", p[1].n)).join("");
+    const maxMins=Math.max(1,...people.map(p=>p[1].mins));
+    html+=head("Time on site")+people.slice().sort((a,b)=>b[1].mins-a[1].mins).slice(0,8).map(p=>bar(p[0], p[1].mins/maxMins, "#7c3aed", gFmtDur(p[1].mins))).join("");
+    const withCost=people.filter(p=>p[1].cost>0).sort((a,b)=>b[1].cost-a[1].cost);
+    if(withCost.length){ const maxCost=Math.max(1,...withCost.map(p=>p[1].cost));
+      html+=head("Yard-time wage cost ("+periodLbl+")")+withCost.slice(0,8).map(p=>bar(p[0], p[1].cost/maxCost, "#b45309", gFmtMoney(p[1].cost))).join("")
+        +`<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 2px 0;border-top:1px solid #e6eaf0;margin-top:6px;font-weight:800;color:#003468"><span>Total</span><span>${gFmtMoney(totalCost)}</span></div>`;
+    }
+  }
+  // recent visits (respects both filters)
+  const recent=visits.slice().sort((a,b)=>b.start-a.start).slice(0,12);
+  html+=head("Recent visits")+recent.map(v=>{
+    const when=new Date(v.start).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})+" "+new Date(v.start).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    const dur=v.end==null?'<span style="color:#b45309">still open</span>':v.leftOpen?'<span style="color:#b45309">left open</span>':gFmtDur(v.durMin);
+    const c=costOf(v); const cost=c>0?` · ${gFmtMoney(c)}`:"";
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #eef2f7;font-size:13px">
+      <span><b>${esc(v.user)}</b> · <span class="muted">${esc(when)}</span></span><span style="white-space:nowrap">${dur}${cost}</span></div>`;
+  }).join("");
+  body.innerHTML=html;
 }
 /* ---- access hours (Full-Access) ---- */
 let ACC=[]; // [{days:[0..6], from:"HH:MM", to:"HH:MM"}]

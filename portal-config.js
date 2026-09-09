@@ -487,7 +487,12 @@
       raf = 0;
       var els = document.querySelectorAll(SEL); if (!els.length) return;
       var off = vv.offsetTop || 0;
-      var drift = Math.abs(off) > 1 || Math.abs(window.innerHeight - vv.height) > 1;
+      // Pin ONLY when the layout viewport is genuinely shifted (offsetTop) — the
+      // keyboard-left-it-scrolled case. The old test also tripped on
+      // innerHeight != vv.height, which differs on ordinary iOS scrolls (dynamic
+      // toolbar / rubber-band), so the bars were re-pinned every scroll frame and
+      // floated mid-screen (the purple View-As bar Jamie saw drifting).
+      var drift = Math.abs(off) > 1;
       var pin = drift && !typing();
       var stack = 0;   // bottom bars stack upward: View-As bar first, tab bar above it
       // Process bottom bars in stacking order (mlVaBar before .tabbar).
@@ -511,8 +516,11 @@
       });
     }
     function queue() { if (!raf) raf = requestAnimationFrame(apply); }
-    vv.addEventListener("resize", queue); vv.addEventListener("scroll", queue);
-    window.addEventListener("scroll", queue, { passive: true });
+    // Re-evaluate on the moments that actually shift the viewport (keyboard =
+    // vv resize, rotation, restore) — NOT on scroll. A position:fixed bar stays
+    // put on scroll on its own; re-pinning per scroll frame was what made the
+    // bars drift/jitter mid-screen during momentum scrolling.
+    vv.addEventListener("resize", queue);
     window.addEventListener("orientationchange", function () { setTimeout(queue, 250); });
     window.addEventListener("pageshow", function () { setTimeout(queue, 50); });
     // Keyboard dismissed: WebKit may leave the layout viewport where the keyboard
@@ -1806,16 +1814,18 @@
         closeGate();
         if (!list.length) return;
         var rows = list.map(function (m) {
-          var q = m.batteries > 0 ? "Priced the batteries with the supplier &amp; quoted the client?" : "Has the client been quoted for these works?";
+          var status = m.statusLabel === "works" ? "Works required" : m.statusLabel === "batteries" ? "Batteries required" : "Replaced on site";
+          var quote = m.quoteText || "";
           return '<div class="mlrem-item" data-cert="' + esc(m.certId) + '" style="border:1px solid #f0d9a6;background:#fffaf0;border-radius:12px;padding:12px;margin-top:10px;">'
             + '<div style="font-weight:700;color:#8a4b0a;">' + esc(m.siteName || m.siteCode || "Site") + ' · Cert ' + esc(m.certNumber || "") + '</div>'
-            + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed'
-            + (m.charge > 0 ? ' · <b>' + money(m.charge) + '</b> to charge' : '') + (m.batteries ? ' · <b>' + m.batteries + ' need batteries</b> (supplier quote)' : '')
-            + (m.onsite ? ' · ' + m.onsite + ' on site' : '') + '</div>'
-            + '<div style="font-size:13px;color:#8a4b0a;margin-top:6px;font-weight:600;">' + q + '</div>'
-            + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-            + '<button data-act="done" style="flex:1;min-width:130px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Quote sent</button>'
-            + '<button data-act="later" style="flex:1;min-width:100px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
+            + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed · <b>' + esc(status) + '</b>'
+            + (m.charge > 0 ? ' · <b>' + money(m.charge) + '</b> to quote' : '') + '</div>'
+            + '<div style="font-size:12.5px;color:#8a4b0a;margin-top:8px;font-weight:600;">Quote text for the client — copy and paste:</div>'
+            + '<textarea readonly data-quote style="width:100%;box-sizing:border-box;margin-top:4px;font:13px/1.45 Menlo,Consolas,monospace;border:1px solid #e6c98a;border-radius:8px;padding:8px;min-height:' + Math.min(200, 44 + 18 * (quote.split("\n").length)) + 'px;background:#fff;color:#1f2937;resize:vertical;">' + esc(quote) + '</textarea>'
+            + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+            + '<button data-act="copy" style="flex:1;min-width:120px;background:#003366;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#128203; Copy quote text</button>'
+            + '<button data-act="done" style="flex:1;min-width:120px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Quote sent</button>'
+            + '<button data-act="later" style="flex:1;min-width:90px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
             + '</div></div>';
         }).join("");
         var ov = document.createElement("div");
@@ -1824,12 +1834,19 @@
         ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:470px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">'
           + '<div style="background:linear-gradient(180deg,#b45309,#8a4b0a);color:#fff;padding:18px 20px;"><div style="font-size:30px;">&#9888;</div>'
           + '<h2 style="margin:6px 0 0;font-size:18px;color:#fff;">EM remedials &mdash; quote check</h2>'
-          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Quote the client for these works, then track them on the EM remedials list so nothing is missed.</p></div>'
+          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Copy the quote text to the client. Once sent, the case moves to the EM remedials list to wait for their PO.</p></div>'
           + '<div style="padding:14px 18px 18px;max-height:70vh;overflow:auto;">' + rows
           + '<p style="margin:12px 0 0;text-align:center;font-size:12px;color:#8a97a6;">&ldquo;Do later&rdquo; reminds you again in 4 hours.</p></div></div>';
         ov.addEventListener("click", function (e) {
           var b = e.target && e.target.closest ? e.target.closest("button[data-act]") : null; if (!b) return;
           var item = b.closest(".mlrem-item"); var certId = item.getAttribute("data-cert");
+          if (b.getAttribute("data-act") === "copy") {
+            var ta = item.querySelector("textarea[data-quote]"); var txt = ta ? ta.value : "";
+            var done = function () { b.textContent = "\u2713 Copied"; setTimeout(function () { b.innerHTML = "&#128203; Copy quote text"; }, 1800); };
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { if (ta) { ta.focus(); ta.select(); } });
+            else if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); done(); } catch (err) {} }
+            return;
+          }
           b.disabled = true;
           ack(certId, b.getAttribute("data-act"), function () { item.remove(); if (!ov.querySelector(".mlrem-item")) closeGate(); });
         });
@@ -1887,6 +1904,55 @@
           (document.body || document.documentElement).appendChild(ov);
           try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
         }).catch(function () {});
+    } catch (e) {}
+  })();
+
+  // ── Van handover gate ───────────────────────────────────────────────────────
+  // A newly-assigned driver MUST complete the van handover check (condition,
+  // damage, equipment + photos, signature) before they use the vehicle — so the
+  // portal is LOCKED behind an UNAVOIDABLE, non-dismissible, NON-SNOOZABLE overlay
+  // on every page (except the handover form + auth pages) until it's submitted.
+  // Same pattern as the memo / risk-assessment sign gates. The completed handover
+  // is saved against the vehicle (vehicle_handovers, keyed by reg).
+  (function handoverGate() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "memo-sign.html",
+        "hs-sign.html", "programme-view.html", "van-handover.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      function check() {
+        if (document.getElementById("mlHandoverGate")) return;   // already up
+        nativeFetch(API + "/fleet/handover/attention", { headers: { Authorization: "Bearer " + token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok || !d.mineDue) return;
+            if (document.getElementById("mlHandoverGate")) return;
+            if (document.getElementById("mlMemoGate")) return;   // memo goes first
+            if (document.getElementById("mlSignGate")) return;   // then RA sign
+            var ov = document.createElement("div");
+            ov.id = "mlHandoverGate";
+            ov.style.cssText = "position:fixed;inset:0;z-index:100050;background:rgba(3,12,28,.82);display:flex;align-items:center;justify-content:center;padding:22px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;";
+            ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">' +
+              '<div style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:20px;"><div style="font-size:34px;">🤝</div>' +
+              '<h2 style="margin:8px 0 0;font-size:19px;color:#fff;">Van handover required</h2>' +
+              '<p style="margin:6px 0 0;font-size:13.5px;color:#cfe0f5;">You\'ve been given ' + (d.reg ? '<b>' + esc(d.reg) + '</b>' : "a vehicle") + '. Complete the handover check before you use it or carry on.</p></div>' +
+              '<div style="padding:18px 20px 20px;">' +
+              '<div style="color:#667085;font-size:13px;">Condition, damage, equipment, photos &amp; your signature — it\'s saved against the vehicle.</div>' +
+              '<a href="/van-handover.html" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Complete the handover now</a>' +
+              '<p style="margin:10px 0 0;text-align:center;font-size:12px;color:#8a97a6;">This can\'t be dismissed or snoozed — it must be completed.</p>' +
+              '</div></div>';
+            (document.body || document.documentElement).appendChild(ov);
+            try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
+          }).catch(function () {});
+      }
+      check();
+      // Re-assert if a memo/sign gate above it clears, or a handover is assigned
+      // while the tab is open.
+      setInterval(check, 60 * 1000);
     } catch (e) {}
   })();
 

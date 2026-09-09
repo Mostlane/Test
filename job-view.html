@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=31"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=29"></script>
+  <script src="sla-jobedit.js?v=31"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=19"></script>
-  <script src="pump-form.js?v=2"></script>
-  <script src="remedials-form.js?v=2"></script>
+  <script src="cert-form.js?v=21"></script>
+  <script src="pump-form.js?v=3"></script>
+  <script src="remedials-form.js?v=4"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -179,6 +179,9 @@
     .chip-slate{border-color:#cbd5e1}   .chip-slate[aria-pressed="true"]{background:#475569}
     .chip-orange{border-color:#fdd0ab}  .chip-orange[aria-pressed="true"]{background:#ea580c}
     .chip-purple{border-color:#ddd0fb}  .chip-purple[aria-pressed="true"]{background:#7c3aed}
+    .chip-red{border-color:#fecaca}     .chip-red[aria-pressed="true"]{background:#b91c1c}
+    .cancel-banner{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#fee2e2;border:1px solid #fca5a5;color:#7f1d1d;font-size:14px;line-height:1.4}
+    .cancel-banner b{font-size:15px} .cancel-banner.soft{background:#ffedd5;border-color:#fdba74;color:#7c2d12}
     /* Custom categories carry their own colour via --cc (border + filled state). */
     .chip-custom[aria-pressed="true"]{background:var(--cc,#64748b)}
     .status-hint{font-weight:400;color:var(--muted);font-size:11px}
@@ -280,6 +283,15 @@
       text-align:center;
       padding:20px 0;
     }
+    /* Full-Access photo delete: a small ✕ in the corner of each thumbnail. */
+    .photo-cell{ position:relative; }
+    .photo-del{
+      position:absolute; top:3px; right:3px; width:24px; height:24px;
+      border:none; border-radius:50%; background:rgba(185,28,28,.92); color:#fff;
+      font-size:14px; line-height:24px; text-align:center; cursor:pointer;
+      padding:0; box-shadow:0 1px 3px rgba(0,0,0,.35); z-index:2;
+    }
+    .photo-del:hover{ background:#b91c1c; }
 /* --- Mobile photo upload (Step 2) --- */
 .photo-upload-mobile{
   display:flex;
@@ -576,6 +588,12 @@
     <div id="pumpViewHost"></div>
   </div>
 
+  <!-- CLIENT ORDER — the client's order this job is the works for (value = money, office only) -->
+  <div class="card" id="orderCard" style="display:none;">
+    <h2 class="section-title">🧾 Client order</h2>
+    <div id="orderBody"></div>
+  </div>
+
   <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
   <div class="card" id="jobCostCard" style="display:none;">
     <h2 class="section-title">💷 Total cost to us</h2>
@@ -634,6 +652,7 @@
       <option value="Invoiced">Invoiced</option>
       <option value="Order">Order</option>
       <option value="Quote">Quote</option>
+      <option value="Cancelled">Cancelled</option>
     </select>
     <div style="margin-top:12px">
       <div class="field-label">Note / Update <span class="status-hint">(optional)</span></div>
@@ -692,6 +711,18 @@
     <h2 class="section-title">📝 Engineer's notes</h2>
     <p class="section-sub">What the engineer wrote on the job — newest first.</p>
     <div id="engNotes" class="panel-light">No notes yet.</div>
+    <!-- Full-Access only: add a note and attribute it to another portal user. -->
+    <div id="addNoteBox" style="display:none;margin-top:14px;border-top:1px dashed #d7dee6;padding-top:12px;">
+      <div class="field-label">➕ Add a note</div>
+      <textarea id="adminNoteText" placeholder="Type the note to add to this job…" style="width:100%;box-sizing:border-box;min-height:64px;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+        <label style="font-size:12px;color:#64748b;">Added by
+          <select id="adminNoteUser" style="margin-left:6px;padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></select>
+        </label>
+        <button type="button" id="adminNoteAdd" class="btn">Add note</button>
+        <span id="adminNoteStatus" style="font-size:12px;color:#64748b;"></span>
+      </div>
+    </div>
   </div>
 
   <!-- PHOTOS -->
@@ -716,6 +747,7 @@
   <div id="photoModal" class="photo-modal hidden">
     <div class="photo-modal-inner">
       <button type="button" class="photo-modal-close" id="photoModalClose">Close ✕</button>
+      <button type="button" class="photo-modal-close" id="photoModalDelete" style="right:auto;left:14px;background:rgba(185,28,28,.92);display:none;">🗑 Delete</button>
       <button type="button" class="photo-modal-nav left" id="photoPrevBtn">‹</button>
       <button type="button" class="photo-modal-nav right" id="photoNextBtn">›</button>
       <img id="photoModalImg" src="" alt="Job photo">
@@ -902,6 +934,8 @@ function renderJob(){
   const name = (window.mlJobName && window.mlJobName(job)) || site;
   $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
+  renderCancelBanner();
+  renderOrderCard();
   $("jobRef").textContent = shortRef || "—";
   $("jobSite").textContent = name || site || "—";
 
@@ -1055,7 +1089,7 @@ function renderAuditView(){
   const doneN = items.filter(it => it.done && it.donePhoto).length;
   const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + items.length + " done";
   const cell = (p, cls, label) => p && (p.url || p.thumb)
-    ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt=""><figcaption>'+label+'</figcaption></figure>'
+    ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt="" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}"><figcaption>'+label+'</figcaption></figure>'
     : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
   const rowsHtml = items.map((it, i) => {
     const refs = (it.refPhotoUrls || []);
@@ -1233,28 +1267,30 @@ async function renderVisits(visits){
   const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
   const fmtD = iso => { if(!iso) return "—"; const dt=new Date(iso); return isNaN(dt)?"—":dt.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); };
   $("visitsCount").textContent = "· " + visits.length + " jobs raised against this";
-  const admin = isAdminView();
+  const admin = canMoney();   // costs + order values are money
   const costs = {};
   if(admin){ await Promise.all(visits.map(async v => { try{ const c = await mApi("/costing/job-full-cost?jobId=" + encodeURIComponent(v.id)).then(r=>r.json()); costs[v.id] = (c && c.ok) ? (Number(c.total)||0) : null; }catch(e){ costs[v.id]=null; } })); }
-  let total = 0, anyCost = false;
+  let total = 0, anyCost = false, orderTotal = 0, anyOrder = false;
   const rows = visits.map((v, i) => {
     const here = v.current, cost = costs[v.id];
     if(admin && cost != null){ total += cost; anyCost = true; }
+    if(admin && v.orderValue != null){ orderTotal += Number(v.orderValue) || 0; anyOrder = true; }
     return '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eef1f5;">'
       + '<div>' + (here ? '<strong>' : '') + 'Visit ' + (i+1) + (here ? ' (this job)</strong>' : '')
-      + ' <span class="sub">· ' + esc(v.status||"") + ' · ' + fmtD(v.scheduledAt || v.raisedAt) + '</span>'
+      + ' <span class="sub">· ' + esc(v.status||"") + ' · ' + fmtD(v.scheduledAt || v.raisedAt) + (v.orderNumber ? ' · 🧾 ' + esc(v.orderNumber) + (admin && v.orderValue != null ? ' ' + money(v.orderValue) : '') : '') + '</span>'
       + (here ? '' : ' <a href="job-view.html?jobId=' + encodeURIComponent(v.id) + '" style="font-size:13px;">open →</a>') + '</div>'
       + '<div style="text-align:right;white-space:nowrap;font-weight:600;">' + (admin ? (cost==null ? '<span class="sub">—</span>' : money(cost)) : '') + '</div></div>';
   }).join("");
-  const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined across all visits</div><div>' + money(total) + '</div></div>' : "";
-  $("visitsBody").innerHTML = rows + totalRow;
+  const profit = orderTotal - total;
+  const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined cost across all visits</div><div>' + money(total) + '</div></div>' : "";
+  const orderRow = (admin && anyOrder) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #eef1f5;font-weight:700;"><div>Client order value (ex VAT)</div><div>' + money(orderTotal) + '</div></div>'
+    + (anyCost ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-weight:800;color:' + (profit >= 0 ? '#166534' : '#b91c1c') + ';"><div>' + (profit >= 0 ? 'Profit' : 'Loss') + ' across the incident</div><div>' + (profit >= 0 ? '' : '−') + money(Math.abs(profit)) + '</div></div>' : '') : "";
+  $("visitsBody").innerHTML = rows + totalRow + orderRow;
 }
 async function loadJobCost(){
   const card = $("jobCostCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  let admin = false;
-  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
-  if(!admin){ card.style.display = "none"; return; }
+  if(!canMoney()){ card.style.display = "none"; return; }   // money: Full Access / office only
   const money = n => "£" + (Number(n)||0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const hm = mins => { mins = Math.round(Number(mins)||0); const h = Math.floor(mins/60), m = mins%60; return (h? h+"h ":"") + m + "m"; };
   try{
@@ -1273,9 +1309,17 @@ async function loadJobCost(){
     const plannedNote = d.plannedLabour ? '<div class="sub" style="margin-top:4px;color:#3730a3;">🗓 Labour is costed from the <b>hours scheduled</b> on this job — no status change was logged. If the engineer changes status, their <b>actual</b> time is used instead.</div>' : '';
     const noTimeNote = (!d.hasSegments && !d.plannedLabour) ? '<div class="sub" style="margin-top:4px;">No on-site time captured yet (engineer hasn’t started the job), and no hours were scheduled — so labour &amp; travel are £0 so far.</div>' : '';
     const milesNote = d.milesSource === 'geocoded' ? ' (est. from postcode)' : (d.milesSource === 'register' ? '' : (d.roundTripMiles ? '' : ' — no site mileage'));
+    // Profit against the client's ORDER value (when this job carries one).
+    const profitBlock = (d.orderValue != null)
+      ? '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">'
+        + '<div><div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div><div class="sub">Cost to us' + (d.unpricedPOs ? ' so far' : '') + '</div></div>'
+        + '<div><div style="font-size:20px;font-weight:700;color:#334155;">' + money(d.orderValue) + '</div><div class="sub">Order ' + esc(d.orderNumber || "") + ' (ex VAT)</div></div>'
+        + '<div><div style="font-size:26px;font-weight:800;color:' + (d.profit >= 0 ? '#166534' : '#b91c1c') + ';">' + (d.profit >= 0 ? '' : '−') + money(Math.abs(d.profit)) + '</div><div class="sub">' + (d.profit >= 0 ? 'Profit' : 'Loss') + (d.margin != null ? ' · ' + d.margin + '% margin' : '') + (d.unpricedPOs ? ' · will fall once POs are priced' : '') + '</div></div>'
+        + '</div>'
+      : '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
+        '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>';
     $("jobCostBody").innerHTML =
-      '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
-      '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>' +
+      profitBlock +
       row('Labour — on site', money(lab.onSiteCost), lab.onSiteMinutes ? (hm(lab.onSiteMinutes) + (d.plannedLabour && !d.hasSegments ? ' · scheduled' : '')) : '') +
       row('Labour — travel', money(lab.travelCost), lab.travelMinutes ? hm(lab.travelMinutes) + ' round trips' : '') +
       row('Fuel', money(fuel.cost), (fuel.miles ? fuel.miles + ' mi @ £' + (fuel.perMile||0.5).toFixed(2) + '/mi' + milesNote : milesNote.replace(/^ /,''))) +
@@ -1288,10 +1332,8 @@ async function loadJobCost(){
 async function loadJobPOs(){
   const card = $("poCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  // Money view — office/admin only (FullAccess or SLA admin).
-  let admin = false;
-  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
-  if(!admin){ card.style.display = "none"; return; }
+  // Money view — Full Access / office staff only.
+  if(!canMoney()){ card.style.display = "none"; return; }
   try{
     const t = localStorage.getItem("mostlaneToken");
     const d = await fetch(window.MOSTLANE_API + "/costing/job-pos?jobId=" + encodeURIComponent(job.id), { headers: t ? { "Authorization": "Bearer " + t } : {} }).then(r => r.json());
@@ -1358,7 +1400,8 @@ async function loadExistingPhotos(){
 
     photoGallery = data.files.map(f => ({
       url: f.publicURL,
-      name: f.name
+      name: f.name,
+      key: f.key
     }));
     if(data.signature) sigMeta = data.signature;   // signed/public signature URLs, when provided
     renderSignatureImage();                        // now a URL can be derived from a photo's base
@@ -1582,7 +1625,7 @@ function renderNotes(){
     .filter(n => n.text)
     .sort((a,b) => new Date(b.at) - new Date(a.at));
   if(!notes.length){
-    const done = /^(complete|closed|invoiced)$/i.test(job.status || "");
+    const done = /^(complete|closed|invoiced|cancelled)$/i.test(job.status || "");
     el.innerHTML = done
       ? '<span style="color:#b45309;font-weight:600;">⚠ No completion note was recorded for this job.</span>'
       : "No notes yet.";
@@ -1603,10 +1646,108 @@ function renderNotes(){
   });
 }
 
+/* ---- Full-Access: add a note attributed to another portal user (Sep 2026) ----
+   Office can log something an engineer told them and mark it as that engineer's
+   note. The REAL actor is still recorded in the server audit log. Full-Access
+   only — the box is hidden for everyone else, and only status/note PATCHes with a
+   chosen changedBy reach the note event. */
+let adminNoteReady = false;
+async function setupAdminNote(){
+  const box = $("addNoteBox");
+  if(!box || !isFullAccess()) return;          // hidden for non-FullAccess
+  box.style.display = "block";
+  if(adminNoteReady) return;
+  adminNoteReady = true;
+  const sel = $("adminNoteUser");
+  // Populate the "Added by" dropdown from the portal's active users.
+  try{
+    const res = await mApi("/users");
+    const list = res.ok ? await res.json() : [];
+    const users = Array.isArray(list) ? list : (list.users || []);
+    const me = getUser();
+    const opts = [];
+    // Self first (the honest default), then everyone else in the canonical order.
+    opts.push({ v: me, label: me + " (you)" });
+    const rest = users
+      .map(u => ({ v: u.Username || u.username || "", label: [u.FirstName, u.LastName].filter(Boolean).join(" ") || u.Username || u.username || "" }))
+      .filter(u => u.v && u.v.toLowerCase() !== String(me).toLowerCase())
+      .sort((a,b) => a.label.localeCompare(b.label));
+    opts.push(...rest);
+    sel.innerHTML = opts.map(o => `<option value="${o.v.replace(/"/g,'&quot;')}">${o.label.replace(/</g,'&lt;')}</option>`).join("");
+  }catch(e){
+    // Fall back to a free-typed name if the user list can't load.
+    sel.outerHTML = '<input id="adminNoteUser" type="text" placeholder="Name" style="margin-left:6px;padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;">';
+  }
+  $("adminNoteAdd").addEventListener("click", addAdminNote);
+}
+async function addAdminNote(){
+  if(!isFullAccess() || !job?.id) return;
+  const text = ($("adminNoteText").value || "").trim();
+  const byEl = $("adminNoteUser");
+  const by = (byEl && (byEl.value || "").trim()) || getUser();
+  const st = $("adminNoteStatus");
+  if(!text){ if(st){ st.textContent = "Type a note first."; } return; }
+  const btn = $("adminNoteAdd");
+  if(btn){ btn.disabled = true; }
+  if(st){ st.textContent = "Saving…"; }
+  try{
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(job.id)}`, {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ note: text, changedBy: by })
+    });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    job = await res.json();
+    $("adminNoteText").value = "";
+    renderNotes();
+    if(typeof renderTimeline === "function") renderTimeline();
+    if(st){ st.textContent = "✅ Note added as " + by + "."; setTimeout(() => { if(st) st.textContent = ""; }, 4000); }
+  }catch(err){
+    console.error("add note error", err);
+    if(st){ st.textContent = "❌ Couldn't add the note — try again."; }
+  }finally{
+    if(btn){ btn.disabled = false; }
+  }
+}
+
+/* ---- 🧾 Client order card (Sep 2026): the order this job is the works for.
+   The VALUE is money → Full Access / office only (the server strips it for
+   everyone else, so a field engineer's job JSON never carries it). ---- */
+function renderOrderCard(){
+  const card = $("orderCard"); if(!card || !job) return;
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  if(!job.orderNumber && job.orderValue == null && !job.clientOrderId){ card.style.display = "none"; return; }
+  const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
+  const val = (canMoney() && job.orderValue != null) ? '<div style="font-size:24px;font-weight:800;color:#0f172a;">' + money(job.orderValue) + ' <span class="sub" style="font-size:12px;font-weight:400;">ex VAT · order value</span></div>' : '';
+  $("orderBody").innerHTML = val +
+    '<div style="margin-top:4px;">Order <b>' + esc(job.orderNumber || "—") + '</b></div>' +
+    (canMoney() ? '<div style="margin-top:8px;"><a href="/client-orders.html" style="font-size:13px;">Open the Client orders board →</a></div>' : '');
+  card.style.display = "";
+}
+/* ---- ❌ Cancelled banner: WHEN, by whom, why (Sep 2026) ---- */
+function renderCancelBanner(){
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  let el = $("cancelBanner");
+  if(!el){ el = document.createElement("div"); el.id = "cancelBanner"; el.className = "cancel-banner"; el.style.display = "none";
+    const head = $("jobTitle") && $("jobTitle").closest("header, .head, .card, .shell, div"); const anchor = document.querySelector(".card");
+    if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor); else document.body.insertBefore(el, document.body.firstChild); }
+  const when = iso => { const d = parseDate(iso); return d ? fmtDateTimeLong(d) : ""; };
+  if(job && job.status === "Cancelled"){
+    el.className = "cancel-banner";
+    el.innerHTML = "<b>❌ Cancelled</b> " + esc(when(job.cancelledAt)) + (job.cancelledBy ? " by " + esc(job.cancelledBy) : "") +
+      (job.cancelReason ? "<br>Reason: " + esc(job.cancelReason) : "") + "<br><span style=\"font-size:12.5px;opacity:.85\">Dropped from the scheduler and every suggestion. Change the status to reinstate it.</span>";
+    el.style.display = "";
+  } else if(job && job.clientCancelled && job.clientCancelled.at){
+    const cc = job.clientCancelled;
+    el.className = "cancel-banner soft";
+    el.innerHTML = "<b>↩ Client cancelled</b> " + esc(when(cc.at)) + (cc.by ? " by " + esc(cc.by) : "") + " — the job was already <b>" + esc(job.status) + "</b>, so nothing was changed." + (cc.reason ? "<br>Their reason: " + esc(cc.reason) : "");
+    el.style.display = "";
+  } else el.style.display = "none";
+}
 /* ---- Activity timeline (statusHistory + events, newest first) ---- */
 function renderTimeline(){
   const entries = [];
-  (job.statusHistory || []).forEach(h => entries.push({ at: h.at, by: h.by, text: "Status → " + h.status }));
+  (job.statusHistory || []).forEach(h => entries.push({ at: h.at, by: h.by, text: "Status → " + h.status + (h.note ? " — " + h.note : "") }));
   (job.events || []).forEach(e => entries.push({ at: e.at, by: e.by, text: e.note || e.type || "" }));
   if(job.signature && job.signature.signedAt)
     entries.push({ at: job.signature.signedAt, by: job.signature.signedBy, text: "Customer signed" });
@@ -1675,7 +1816,8 @@ const STATUS_META = {
   "Closed Jobs":{ e:"🔒", c:"slate"  },
   "Invoiced":   { e:"💷", c:"teal"   },
   "Order":      { e:"📦", c:"orange" },
-  "Quote":      { e:"📝", c:"purple" }
+  "Quote":      { e:"📝", c:"purple" },
+  "Cancelled":  { e:"❌", c:"red"    }
 };
 // Office-defined custom categories (extra statuses). Loaded from the worker and
 // merged into the status chips exactly like a built-in status.
@@ -2024,7 +2166,10 @@ function renderPhotoGrid(){
     return;
   }
 
+  const canDelete = isFullAccess();
   photoGallery.forEach((ph, index) => {
+    const cell = document.createElement("div");
+    cell.className = "photo-cell";
     const wrap = document.createElement("div");
     wrap.className = "photo-thumb";
     wrap.dataset.index = index;
@@ -2033,7 +2178,18 @@ function renderPhotoGrid(){
     img.alt = ph.name || "Job photo";
     wrap.appendChild(img);
     wrap.addEventListener("click", () => openPhotoModal(index));
-    grid.appendChild(wrap);
+    cell.appendChild(wrap);
+    // Full-Access only: delete a photo an engineer added.
+    if(canDelete && ph.key){
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "photo-del";
+      del.title = "Delete this photo";
+      del.textContent = "✕";
+      del.addEventListener("click", (e) => { e.stopPropagation(); deleteJobPhoto(index); });
+      cell.appendChild(del);
+    }
+    grid.appendChild(cell);
   });
 
   $("photoUploadStatus").textContent =
@@ -2068,6 +2224,10 @@ function openPhotoModal(index){
     nextBtn.classList.add("hidden");
   }
 
+  // Full-Access only: a delete control in the viewer too.
+  const del = $("photoModalDelete");
+  if(del) del.style.display = (isFullAccess() && item && item.key) ? "block" : "none";
+
   modal.classList.remove("hidden");
 }
 
@@ -2087,6 +2247,30 @@ function showPrevPhoto(){
   openPhotoModal(currentPhotoIndex);
 }
 
+/* Full-Access: delete a photo an engineer added. Removes it from R2 (worker
+   enforces FullAccess + the job's own folder) and refreshes the gallery. */
+async function deleteJobPhoto(index){
+  if(!isFullAccess()) return;
+  const ph = photoGallery[index];
+  if(!ph || !ph.key || !job?.id) return;
+  const ok = window.MLUI ? await MLUI.confirm("Delete this photo? This can't be undone.", { title:"Delete photo", okLabel:"Delete", danger:true }) : confirm("Delete this photo? This can't be undone.");
+  if(!ok) return;
+  try{
+    const res = await fetch(
+      `${SLA_API}/jobs/${encodeURIComponent(job.id)}/files?key=${encodeURIComponent(ph.key)}`,
+      { method:"DELETE" }
+    );
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    photoGallery.splice(index, 1);
+    if($("photoModal")) closePhotoModal();
+    renderPhotoGrid();
+    $("photoUploadStatus").textContent = `${photoGallery.length} photo(s) stored for this job.`;
+  }catch(err){
+    console.error("delete photo error", err);
+    if(window.MLUI) MLUI.toast ? MLUI.toast("❌ Couldn't delete the photo — try again.") : alert("❌ Couldn't delete the photo — try again."); else alert("❌ Couldn't delete the photo — try again.");
+  }
+}
+
 /* ---------------------------
    INIT
 ---------------------------- */
@@ -2095,6 +2279,17 @@ function isOfficeAdmin(){
     const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
     return p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
   }catch{ return false; }
+}
+// MONEY (order values, costs, profit) is for Full Access users and OFFICE staff
+// only — never a field engineer, whatever grants they hold. The server enforces
+// the same rule; this only decides what the page tries to show.
+function canMoney(){
+  try{
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    if(String(p.FullAccess||"").toLowerCase() === "yes") return true;
+    const st = String(sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || p.StaffType || "").toLowerCase();
+    return st === "office";
+  }catch(e){ return false; }
 }
 // A field engineer never gets the office-only "Edit details" editor, even if
 // they hold an SLA-admin grant for scheduling — it's an office control.
@@ -2210,6 +2405,7 @@ $("saveSig").addEventListener("click", saveSignature);
 
   // Photo modal events
   $("photoModalClose").addEventListener("click", closePhotoModal);
+  if($("photoModalDelete")) $("photoModalDelete").addEventListener("click", () => deleteJobPhoto(currentPhotoIndex));
   $("photoPrevBtn").addEventListener("click", showPrevPhoto);
   $("photoNextBtn").addEventListener("click", showNextPhoto);
 
@@ -2235,6 +2431,9 @@ $("saveSig").addEventListener("click", saveSignature);
 
   // Initial gallery (empty this session)
   renderPhotoGrid();
+
+  // Full-Access: reveal the "add a note as another user" box + load the picker.
+  setupAdminNote();
 
   // Load job details
   loadJob();

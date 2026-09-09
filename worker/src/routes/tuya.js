@@ -37,6 +37,7 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { sendToPermission, sendToUser } from "./push.js";
 import { cameraSnapshotUrl } from "./cctv.js";
+import { ratesMap } from "./costing.js";
 
 const CFG_KEY = "tuya:config";
 const TOK_KEY = "tuya:token";
@@ -208,7 +209,7 @@ async function pulseGate(env, db, cfg) {
 async function logGate(db, entry) {
   const log = (await loadKV(db, "tuya:openlog")) || [];
   log.unshift(entry);
-  await saveKV(db, "tuya:openlog", log.slice(0, 100));
+  await saveKV(db, "tuya:openlog", log.slice(0, 500));
 }
 
 /* --------------------------- access-hour windows -------------------------- */
@@ -489,7 +490,17 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
     const log = (await loadKV(db, "tuya:openlog")) || [];
-    return json({ ok: true, log: log.slice(0, 100) });
+    // Hourly pay rates (a day rate ÷8) for the yard-time wage stats — the page is
+    // Full-Access only, so returning pay rates here is fine. Fails soft to {}.
+    let rates = {};
+    try {
+      const rm = await ratesMap(env, sess.tenantId);
+      for (const [u, v] of Object.entries(rm)) {
+        const base = Number(v && v.rate);
+        if (isFinite(base) && base > 0) rates[u] = v.rateType === "day" ? base / 8 : base;
+      }
+    } catch {}
+    return json({ ok: true, log: log.slice(0, 500), rates });
   }
 
   return json({ ok: false, error: "Not found: " + path }, 404);

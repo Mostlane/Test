@@ -108,6 +108,23 @@ export async function destroySession(env, token) {
 // Compose the flat permission object the existing front-end expects from /user.
 // Scoped to the tenant so a username can only ever resolve permissions within
 // its own company.
+/* Who may see MONEY (order values, job costs, profit) — Jamie's rule (Sep 2026):
+   Full Access users, or OFFICE staff (users.profile.staffType === "office").
+   A field engineer never does, even with an SLAAdmin grant. Server-side gate;
+   the pages mirror it for what they render. */
+export async function canSeeMoney(env, tenantId, username) {
+  if (!username) return false;
+  try {
+    const perms = await permissionsFor(env, tenantId, username);
+    if (perms.FullAccess === "Yes") return true;
+  } catch {}
+  try {
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=? LIMIT 1").bind(tenantId, username).first();
+    if (!row) return false;
+    const p = typeof row.profile === "string" ? JSON.parse(row.profile || "{}") : (row.profile || {});
+    return !!p && p.staffType === "office";
+  } catch { return false; }
+}
 export async function permissionsFor(env, tenantId, username) {
   const { results } = await env.DB.prepare(
     "SELECT permission, value FROM user_permissions WHERE tenant_id = ? AND username = ?"

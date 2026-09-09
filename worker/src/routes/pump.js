@@ -126,14 +126,14 @@ async function sigImage(dataUrl) {
   return null;
 }
 // Nearest-neighbour downscale of raw RGB so a 12-MP PNG doesn't become a 36 MB page.
-function shrinkRgb(rgb, w, h, maxEdge) {
+export function shrinkRgb(rgb, w, h, maxEdge) {
   const s = Math.max(w, h) / maxEdge; if (s <= 1) return { rgb, w, h };
   const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
   const out = new Uint8Array(nw * nh * 3);
   for (let y = 0; y < nh; y++) { const sy = Math.min(h - 1, Math.floor(y * s)); for (let x = 0; x < nw; x++) { const sx = Math.min(w - 1, Math.floor(x * s)); const si = (sy * w + sx) * 3, di = (y * nw + x) * 3; out[di] = rgb[si]; out[di + 1] = rgb[si + 1]; out[di + 2] = rgb[si + 2]; } }
   return { rgb: out, w: nw, h: nh };
 }
-async function deflate(bytes) {
+export async function deflate(bytes) {
   try {
     const cs = new CompressionStream("deflate");   // zlib-wrapped = PDF FlateDecode
     const w = cs.writable.getWriter(); w.write(bytes); w.close();
@@ -393,7 +393,7 @@ export async function handle(request, env, ctx, url, sess) {
     try { await maybeCompletePumpJob(env, tid, fresh); } catch {}
     ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
       title: "🚰 Pump maintenance submitted", body: `${shapeRow(rec).storeName || "A store"} — ready for office review`, url: "/cert-review.html?pump=" + encodeURIComponent(id), tag: "pump-review",
-    }, me).catch(() => {}));
+    }, me, { officeOnly: true }).catch(() => {}));
     return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
   }
 

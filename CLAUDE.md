@@ -912,7 +912,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
   clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
 - **Total cost of a job to us** (job-view.html "💷 Total cost to us" card,
-  **office/admin only** — FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
+  **money = Full Access or office staff only** — `canSeeMoney`, Sep 2026; was
+  FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
   (costing.js) sums **labour on-site** (job_time_segments for the job → per-engineer
   minutes × hourly rate from `ratesMap`; a day rate ÷8; 14h runaway clamp) +
   **travel labour** (one round trip HQ→site→HQ per engineer per distinct day worked,
@@ -1169,8 +1170,9 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     result as proof). _headers + SW `mostlane-v115`+.
   - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
     records of one kind (default `qualification`) into a grid — competencies
-    (distinct record TITLES) as columns × active staff as rows; each cell = that
-    person's latest record of that title (furthest-out expiry) + status
+    (distinct record TITLES **that carry an expiry date** — permanent/no-expiry
+    certs are excluded — plus managed columns) as columns × active staff as rows;
+    each cell = that person's latest record of that title (furthest-out expiry) + status
     (valid/expiring/expired/none). employees.html **📊 Training matrix** tab:
     sticky name column, colour-coded cells, kind selector, "field engineers only"
     toggle, **CSV + Print** export. **Interactive (like the compliance chart):**
@@ -1194,7 +1196,18 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     **4a→issued, 4b→expires, 4c/DVLA→issuer, 5→number**; if 4b can't be read the
     client defaults **expires = issued + 10 years** (the UK photocard rule for
     under-70s, flagged "please confirm"), and typing the issue date on a licence
-    record auto-fills the same +10y expiry when blank.
+    record auto-fills the same +10y expiry when blank. **iPhone HEIC/HEIF photos
+    are converted to JPEG in the browser** (lazy-loaded heic2any from jsdelivr)
+    before OCR + upload, so a photographed licence reads AND stores viewable;
+    fails soft to the original file if the converter can't load.
+    **Two distinct driver dates (never conflate):** a `licence` record's `expires`
+    is the **photocard licence expiry (4b, ~10y)** — labelled "Licence expiry
+    (photocard 4b)"; a `licence_check` record's `expires` is the **next monthly
+    DVLA check due (30-day)** — labelled "Next check due (monthly)". Badges are
+    kind-aware ("Licence valid to…" vs "Next check…"), and the drivers tab shows
+    BOTH as separate pills (🔁 monthly check · 🚗 Licence exp). computeDriverChecks
+    returns `licenceExpiry`/`licenceStatus` (latest licence record) alongside the
+    monthly `status`/`nextDue`.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
@@ -2664,6 +2677,38 @@ it straight onto the compliance chart (rolling the next-due date).
   Notify modal (saved via /certs/config). The blocking gate's wording folds in
   batteries ("N need batteries — supplier quote"). portal-config `?v=21`, cert-form
   `?v=10`, SW `mostlane-v85`.
+- **EM remedials v2 (Sep 2026 — Jamie's spec, supersedes the pipeline notes below):**
+  **£50 per failed fitting, light OR batteries, replaced on site or not.** Engineer marks
+  each failed fitting: fault (Replace light → optional `lightSpec`; Batteries → spec +
+  qty), "Done on site?" Yes/No, photos (required). cert-form's list header breaks the
+  failures down ("⚠ 9 failed: 3 lights · 4 batteries · 2 replaced on site"). Case status
+  (`em_remedial_acks.status_label`, worst-first) = **works** (a light not replaced) >
+  **batteries** (batteries not replaced) > **onsite** (all replaced). **Stages:**
+  `to_quote` (the blocking portal-config pop-up — now shows the CLIENT QUOTE TEXT with a
+  📋 Copy button; "✓ Quote sent" → `quoted`) → `quoted` (waits on the tracker for the
+  client's PO) → **📦 PO received** (`POST /certs/remedials/po-received` = `poReceived()`)
+  → either `done` (nothing left to attend: `reissueCleanCert` now **AUTO-FILES** the clean
+  cert — same number, failed rows → Pass + "(Replaced)", `fileCertNow()` to the chart,
+  bump:false — and offers the PDF) or `in_works` (`createRemedialWorksJob`: ONE
+  site-audit job `emrem:<certId>`, one checklist item per pending fitting with the
+  engineer's photos as refPhotos, unassigned, RA on / other gates off; flagged
+  **"⏳ AWAITING BATTERIES"** in its description when any battery fitting is pending →
+  **🔋 Batteries arrived** (`/remedials/batteries-arrived`) strips it + pushes SLA admins)
+  → engineer completes the audit job → `sla.js maybeReissueAfterRemedial` →
+  `reissueCleanCertForRemedialJob` → auto-filed clean cert → `done` → **🧾 Invoiced**.
+  Legacy `approved` reads as `in_works`. **Quote text** (`buildQuoteText`, GET
+  `/remedials/quote-text`): "Failed EM fittings at store 0622:" + one full line per
+  fitting ("Fitting 3 - Light replacement - £50", "(replaced on site)" suffix where so)
+  + "Total: N fittings - £N". **Supplier email:** GET `/remedials/email-draft?certId=`
+  = To/CC (remembered in cert:config `supplierEmail`/`supplierCc`), subject, body
+  ("Good morning/afternoon" by London time, reference `<store>-EM-<YY>`, signed with
+  the user's name); cert-review's 📧 modal edits it, 📋 copies it, 📄 downloads the
+  battery enquiry PDF, 📧 sends it with the PDF attached (POST `/remedials/supplier-email`
+  `{certId,to,cc,subject,body}` — persists To/CC; lib/email.js gained `cc`). The
+  tracker (💷 EM remedials) shows status text + per-fitting lines and the stage's
+  button; the `/remedials/board` + `/outstanding` payloads carry `items[]`,
+  `statusLabel`, `awaitingBatteries`, `quoteText`. Client-order approve
+  (`/remedials/order-action`) = PO received. **Test:** `node worker/tools/test-em-remedials.mjs`.
 - **EM remedial PIPELINE + continuous tracker (Aug 2026):** a finalised EM cert
   with failures opens a **case** (`em_remedial_acks`, `stage` col) that moves
   **to_quote → quoted → approved → invoiced**, so nothing is forgotten. The
@@ -2683,6 +2728,54 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Pre-v2 remedial rows: "Fitting ?" + missing photos (8 Sep 2026).** The two EM
+  cases finalised BEFORE the v2 deploy (Southbourne 0339-26 on 4 Sep, Frome 0622-26
+  at 08:44 on 8 Sep) were logged by the old `processEmRemedials`, before the
+  `fitting_no` column existed, so the tracker printed "Fitting ?". Backfilled in D1
+  by hand (row id `<certId>:<i>` = the i-th failed row of the cert, in order) AND
+  `fittingsFor` now SELF-HEALS: any case with a null fitting_no / empty photos is
+  re-derived from the certificate's own rows and persisted. Photos: Frome's four
+  photos ARE on file (one per fitting, JPEG keys in both the cert and em_remedials);
+  Southbourne has NONE — its engineer's build marked the fittings `failed:false`
+  (caught by `isRealRemedial`), so the photo requirement never fired and no photo
+  was ever taken — nothing to recover. The battery enquiry PDF (`batterypdf.js`
+  `prepPhotos`) now embeds PNGs too (decoded via pngdecode + shrinkRgb/deflate,
+  exported from pump.js) and PRINTS a "N photos on file not embedded: <reason>"
+  line for anything it can't embed (missing file / HEIC / unreadable) instead of
+  silently dropping it. Covered by `test-em-remedials.mjs` ("legacy rows").
+- **Office correction of a logged fitting (8 Sep 2026):** the Frome engineer logged four
+  bulkheads as "Batteries" that actually need NEW LIGHTS — and the office had already
+  pressed PO received, so the works job read "Replace batteries". The tracker's
+  per-fitting lines are now **inline selects** (fault kind: Light replacement /
+  Batteries; and works-or-batteries required / replaced on site) until the case is
+  done/invoiced → **POST /certs/remedials/fitting-update** `{certId, id, kind?,
+  replacedOnSite?}` (office). It rewrites the CERTIFICATE row (with an audit trail in
+  the note: "Office changed to … (engineer had logged batteries: <spec>)"), the
+  `em_remedials` row, re-derives the case counts/`status_label`/£ (stage untouched),
+  and if the works job (`emrem:<certId>`) already exists rewrites that fitting's
+  checklist line + the description summary (and drops AWAITING BATTERIES when no
+  battery fitting is left). Frome (0622-26) was corrected in D1 by hand the same way
+  (cert rows, em_remedials, ack, job items). Refused once done/invoiced (the clean cert
+  is already re-issued). Covered by `test-em-remedials.mjs` ("fitting-update").
+- **Certificate OWNERSHIP = the job's assigned engineer, not the row's creator (8 Sep
+  2026).** Southbourne 0339-26 has no remedial photos because Ryan's NINE photo
+  uploads on 4 Sep were all refused 403 "Not your certificate": Tanya had opened the
+  job-view certificate panel first (office mode autosaves on open) so the row's
+  `engineer` was Tanya, and `/certs/photo` (+ `/pdf`, `/one`, `/delete`) still used
+  the old creator-only check while `/save` + `/submit` had already moved to
+  `canWriteCert` (office, creator, OR anyone on the job's `assignedEngineers`). All
+  four now use `canWriteCert`, and a NEW cert row created by an office user for a
+  job is stamped with the job's first assigned engineer. The photos were never
+  stored (rejected before the R2 put) — nothing to recover; the works visit must
+  photograph them. Covered by `test-em-remedials.mjs` ("Certificate ownership").
+- **Office adds a photo to a fitting after finalise (8 Sep 2026):** tracker fitting
+  lines show "📷 N" + a **＋ photo** button (office) → **POST
+  /certs/remedials/fitting-photo** (multipart `certId,id,file`; client-shrunk JPEG
+  like cert-form). Stores to `certremedial/<tid>/<certId>/…`, appends to the cert
+  row's `remedial.photos`, the `em_remedials.photos` JSON, and — when the works job
+  (`emrem:<certId>`) exists — copies it into `jobs/<jobId>/audit/<itemId>/` as that
+  fitting's reference photo. Built for Southbourne (engineer's uploads had been
+  refused). Covered by `test-em-remedials.mjs` ("fitting-photo").
 - **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
   engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
   status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
@@ -4033,7 +4126,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   age as the freshness signal). Table push_subscriptions
   (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
   tid, username, {title,body,url})` fans out to a user's devices + prunes dead
-  (404/410) — **Phase 2 event hooks will call this**.
+  (404/410) — **Phase 2 event hooks will call this**. **`sendToPermission(env,tid,
+  permKeys,payload,excludeUser,opts)` takes an `opts.officeOnly` (5th arg; a bare
+  `true` also works)** — it drops FIELD engineers (users.profile.staffType==="field")
+  from the recipient set so an office-review alert never reaches an engineer who
+  happens to hold SLAAdmin/Compliance (blank staffType stays — owners/office admins).
+  Used by the engineer→office **submit-for-review** pushes: EM/PAT cert submit
+  (certs.js `/certs/submit`), pump submit (pump.js `/pump/submit`), and the EM
+  remedial alerts (to-quote, reissue-filed, batteries-arrived, client-order approve).
 - **VAPID keys** are worker config (VAPID_PUBLIC var + VAPID_PRIVATE secret;
   optional PUSH_CONTACT). Client fetches the public key from /push/public-key.
 - **sw.js is now the single service worker** (cache + push + notificationclick);
@@ -4102,6 +4202,217 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   dedupe-by-reference, forgiving priority/date parsing and assignment push are all
   identical to the old zap. `originator:"email"`. No change to sla.js.
 - The `email()` handler **never throws** (a thrown email handler bounces the mail).
+- **Production-grade intake (9 Sep 2026 — "take Zapier out of the loop"):** the
+  handler now runs a shared **`processEmail()`** pipeline (used by the live email
+  handler, the office test box and re-run) with: an **allow-list** (app_config
+  `email:intake` = `{enabled, allowFrom:[domains/addresses]}`, defaults
+  concerto.co.uk + mostlane.com — anything else is logged `ignored` and NEVER sent
+  to the AI), **dedupe by Message-ID** (a re-delivered email is `duplicate`, no
+  second job), **forward handling** — Outlook "forward as attachment"
+  (`message/rfc822` parts are walked and the ORIGINAL From surfaced) and inline
+  "FW:" forwards (the `From:` block in the body gives `origFrom`, judged by the
+  allow-list), and the Concerto template regex now also reads the **target
+  Response / Completion date-times** (Europe/London → ISO; `respondBy`/`completeBy`
+  in the logged fields; the AI schema carries them too). **Every email is logged**
+  in table **`inbound_emails`** (self-migrating: message_id, from, orig_from,
+  subject, outcome created|updated|dropped|ignored|duplicate|failed|dryrun, reason,
+  reference, job_id, fields JSON, text). **Office API `/email-intake/*`**
+  (FullAccess|SLAAdmin; index.js passes `worker.fetch` so it reuses /sla/inbound
+  in-process): GET `/status` (config + last email + 7-day counts + aiConfigured /
+  inboundConfigured), GET `/log`, POST `/test` `{subject, body, from?, commit?}`
+  (dry-run unless commit — the test box), POST `/rerun` `{id}` (force past the
+  allow-list/dedupe), GET/POST `/config`. Page **email-intake.html** (SLA Settings →
+  📨 Email intake): status lights, paste-an-email test box, recent-emails table with
+  ↻ Re-run, allow-list editor, and the set-up steps (also in DEPLOY.md §4). Concerto
+  emails land in **jamie@mostlane.com** (enquiries@ is not a REST-enabled mailbox),
+  so the Outlook rule lives on Jamie's mailbox. Test:
+  `node worker/tools/test-email-intake.mjs` (synthetic Concerto-shaped emails only).
+  **Cutover plan:** run alongside the zap (dedupe-by-reference makes both paths
+  upsert the same job), watch the log, then disable the zap.
+- **TEMPLATE-FIRST, "100% reliable" intake (9 Sep 2026 — Jamie: "jobs all look
+  different… set templates… this needs to be 100% reliable"):** extraction is no
+  longer AI-first. **`routes/emailtemplates.js`** holds ONE deterministic reader
+  per known layout, matched by SENDER DOMAIN + fixed markers, each returning
+  `{kind: job|order|notice, missing:[…], fields|order}`. Layouts (surveyed from
+  Jamie's mailbox; synthetic fixtures in the test): **concerto-job** ("New Job
+  Alert: <ref> - Priority N [(CON)]" — ref/priority/target dates/Site line →
+  code+postcode/Fault-Issue/phone), **concerto-order** ("Order number <n> from
+  Southern Coop" order sheet → orderNumber/priority/£ value/description/"For :"
+  store + SR ref → **filed IN-PROCESS to `/certs/remedials/order-inbound`** (the
+  client-orders intake, outcome `order`) — no Grok/bot needed for orders any more),
+  **concerto-notice** ("Helpdesk action - …", "Quote :" → dropped), **chapplins-job**
+  (ashley@/support@/kerry@chapplins.co.uk "A new job has been raised…": Tenant/Name/
+  Property/Home/Mobile/E-mail/Job Number/Date Job Entered/Job Description up to the
+  signature; subject variants "P1 - <address>", "Urgent Estimate required - <addr>"
+  (kept as a description prefix), "New job raised: Job Number N -- P1"; reference
+  **`CHAP-<jobNumber>`** (matches the archive ids), `storeType:"chapplins"`, tenant
+  + contacts appended to the description; **`lookupSite()` matches the Property to
+  the 4001–4127 Chapplins site register** — postcode first, then the normalised
+  unit+street (exact, else a unique leading-words match; ambiguous → no site code,
+  the job still lands with the address as its site name)), **metrorod-report** (job
+  cards/quotes → dropped), **mostlane-outbound** (our own "Send N to MetroRod" /
+  "Mostlane - Emergency - Order" → dropped). A subject starting RE:/AW: is dropped
+  as a thread reply before anything else. **Known-layout senders are trusted
+  implicitly** (no allow-list entry needed); everyone else still needs the list
+  (defaults now include chapplins.co.uk). **Held for a human = outcome `review`:**
+  a known layout with a required field the template couldn't read (e.g. no job
+  number), or ANY unknown layout (the AI, if keyed, only ATTACHES its proposed
+  fields; it creates nothing unless config `aiAutoCreate:true`, off by default and
+  labelled "not recommended"). `handleInboundEmail` pushes FullAccess|SLAAdmin an
+  actionable `email-review:<logId>` notification → **email-intake.html?review=<id>**
+  scrolls to a "📨 Needs a look" card with every field editable + **＋ Create the
+  job** (POST `/email-intake/approve {id, fields}` → /sla/inbound, log row updated,
+  notification resolved) / **✕ Dismiss** (POST `/dismiss`). Also GET `/templates`,
+  `/status` carries `reviewOpen` + `templates`, the test box takes a From address
+  (the template depends on the sender) and names which template read it. Outcomes
+  now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
+  **Adding a client = add one template + fixtures** in emailtemplates.js /
+  test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
+- **The SAME INCIDENT arriving again → a linked VISIT, never a duplicate or an
+  overwrite (9 Sep 2026, Jamie: "sometimes I get a duplicate job").** Two real
+  Concerto patterns: (a) we attend "00028541/1", make safe + quote; the client
+  orders the works and RE-ASSIGNS the same incident as **"00028541/2"** (new suffix)
+  — the old intake keyed jobs by reference so this became an unrelated second job;
+  (b) an old incident is RE-OPENED with the EXACT same reference — dedupe-by-
+  reference silently REWROTE the finished job's description and left it Complete.
+  Now **`/sla/inbound`** (sla.js — so the zap path and the email path both get it)
+  calls **`matchSameIncident(env,tid,ref)`**: same reference + a job still OPEN →
+  update it (a genuine re-send); same reference but every job with it is
+  **finished** (DONE_STATES or a custom `done` category — `jobFinishedFor`) →
+  `kind:"reopened"`; no exact match but a **sibling suffix of the same incident**
+  (`^\d{5,12}/\d{1,3}$`, `helpdesk_ref LIKE '<incident>/%'`) → `kind:"reassigned"`.
+  For either kind the intake creates a **NEW job (fresh uuid id, the new reference)
+  linked as a re-visit** — `revisitOf` = the newest earlier job, `visitGroupId` =
+  its root — with a "↩ Same incident sent again…" / "↩ Re-assigned incident —
+  follows our earlier visit 00028541/1 (Complete, date); usually the ordered works
+  after a quote" line appended to the description, then **`stampVisitGroup`** sets
+  the root's visitGroupId + every member's `visitCount` (the board/scheduler ×N
+  badge; job-view "🔁 Visits" lists them). Evidence is NOT copied (a fresh
+  attendance — unlike the office 🔁 Re-visit button); auto-assign applies as for
+  any new job. The response carries `linkedVisit, visitKind, previousRef,
+  previousId, previousStatus, visitGroupId`, and the email-intake log reason
+  says which happened. A different incident with a similar prefix ("000285411/1")
+  is never linked. **Test:** `node worker/tools/test-inbound-incident.mjs` (7 cases).
+- **CANCELLED jobs — a first-class status with a timestamp (9 Sep 2026, Jamie:
+  "we also need a process when a job is cancelled… a cancelled pill and a
+  timestamp… dropped from jobs being suggested").** `normalizeStatus` used to fold
+  "cancelled" into **Closed Jobs**, so a client cancellation was invisible. Now
+  **"Cancelled" is in CANONICAL_STATUSES** and a job moving INTO it is stamped
+  **`cancelledAt` / `cancelledBy` / `cancelReason` / `cancelSource`** (`stampCancelled`
+  in create + both patchJob status branches; moving back OUT clears the stamps —
+  the statusHistory keeps the trail; the editor asks "reason?" when you pick
+  Cancelled → `patch.cancelReason`). **Two Concerto layouts feed it** (emailtemplates
+  `concerto-cancel` = "Cancellled Job: <incident> Order No.: [<ref>]" + "Has been
+  Cancelled" + "Comments: …", and `concerto-quote-cancel` = "Quote : N - Q003. Cancel
+  request by <name>" + "Quote status : Cancelled" + "Title : Quotation required for
+  order number : <ref>") → emailjob `cancelJob()` → **POST /sla/inbound
+  `{action:"cancel", kind:"job"|"quote", reference?, incident?, reason, by, at}`** →
+  sla.js `cancelIncidentJobs`: finds the incident's jobs (`findIncidentJobs`: exact
+  ref, `<incident>/%` suffixes, id); an OPEN job → Cancelled + stamps (cancelledAt =
+  the email's time, cancelledBy = "Southern Co-op (Concerto…)", the Comments line as
+  the reason), its engineers + the SLA admins pushed (tag `job-cancelled:<id>`); a
+  **quote** withdrawal only cancels a job still WAITING (Pending/Quote/On Hold/Order)
+  — a Scheduled/in-hand job is returned `held` and the email goes to **"Needs a look"**
+  for the office to decide; every job for the incident already FINISHED → nothing is
+  un-completed, the newest gets **`clientCancelled {at,by,reason}`** noted (soft ↩
+  pill/banner); no job at all → 404 → the email is held for a look. Intake outcome
+  **`cancelled`** (dedupe includes it). **Where it shows:** sla-main ❌ "Cancelled
+  dd/mm hh:mm" pill (`cancelTag`, hover = who/why; row struck through; Cancelled chip
+  + bulk option; excluded from Open via `isClosed`), job-view `#cancelBanner` (when /
+  by / reason) + a ❌ chip + timeline note, sla-scheduler **drops Cancelled from
+  `jobs` entirely** (so lanes, the Needs-scheduling tray, backfill, fill-ins and
+  auto-day never offer it), engineer-jobs/route/inbox treat it as done. Server-side
+  suggestion paths (nearby, auto-day, engineer-day, fallback pool, live board,
+  release sweep, clock-off) already excluded "cancelled". A cancelled job counts as
+  FINISHED for `matchSameIncident`, so a re-sent incident becomes a linked visit.
+  Tests: `test-inbound-incident.mjs` (7 cancel cases) + `test-email-intake.mjs`
+  (both layouts, dry-run, duplicate). `sla-jobedit.js?v=31`.
+- **CLIENT ORDERS BOARD + order value → job → profit (9 Sep 2026, Jamie: "orders
+  must have their own category… view all live orders… filter by client… tie to
+  the incident… transfer notes and images… the job will know the value… no
+  financial information visible to anyone apart from Full Access users or office
+  staff").** **Money rule, server-side:** `lib/auth.js canSeeMoney(env,tid,username)`
+  = FullAccess OR `users.profile.staffType==="office"` — a field engineer never
+  sees money whatever grants they hold. Enforced on `/certs/orders*` (403),
+  `/costing/job-full-cost` + `/costing/job-pos` (403 — was FullAccess|SLAAdmin|
+  TimesheetAdmin), and every JOB response (`sla.js stripMoney` drops `orderValue`
+  from GET /sla/jobs, /sla/jobs/{id}, /for-engineer, the PATCH reply; `/visits`
+  only includes it for money users). Pages mirror it with `canMoney()` (job-view
+  cost/PO/visits cards + the order card's value; client-orders.html shows a
+  "financial information" notice). **Job fields** `orderNumber` / `orderValue` (£ ex
+  VAT) / `clientOrderId` (create + patch, preserved). **Page `client-orders.html`**
+  (📥 Client Orders tile `ClientOrders:["SLAAdmin","Compliance","PurchaseOrders"]`,
+  sidebar item, board 📥 link, cert-review orders modal links to it; portal-config
+  `?v=29`): every `client_orders` row with a computed **stage** — `needs_job` (no
+  job yet) · `live` (job open) · `done` (job finished) · `dismissed` — chips Live
+  (= needs_job + live) / Needs a job / Done / Dismissed / All, a **client
+  dropdown**, search, a running £ total, each card showing the linked job (ref ·
+  status · engineer · time), the incident's **earlier visits**, ➕ Make the job /
+  Dismiss / Reopen / Open job / 📧. **API (certs.js):** GET `/certs/orders?client=`
+  → `{orders,clients}`; POST `/certs/orders/make-job {id}` → `sla.js raiseJobForOrder`;
+  POST `/certs/orders/link {id,jobId}` (hand-link). **How an order meets its job
+  (sla.js):** (1) order arrives and a job with EXACTLY that reference exists →
+  `linkOrderToExistingJob` stamps value + number on it (intake reply `status:
+  "linked"`, push says so, not actionable); (2) the job arrives later via
+  `/sla/inbound` → `applyOrderToJob` stamps the waiting order; (3) neither → the
+  office presses Make the job: `raiseJobForOrder` links a same-ref job if one
+  exists, else **clones the incident's newest earlier job as a linked visit via
+  the shared `cloneJobAsVisit`** (the 🔁 Re-visit handler now uses the same helper:
+  R2 `jobs/<old>/` copied to `jobs/<new>/`, events/RA/signature/photo tags/audit
+  items/remedials carried, revisitOf/visitGroupId + ×N stamped) with description
+  "🧾 Client order <n> (£v) — <order text> / ↩ Ordered works following our visit
+  <ref> (<status>) … / — Original job — <old text>", reference = the order number,
+  status Pending, unallocated; else a fresh job at the order's store (site name/
+  postcode from `sites`). Make-job twice → links, never duplicates. **Profit:**
+  `/costing/job-full-cost` returns `orderNumber/orderValue/profit/margin`; job-view's
+  cost card shows Cost · Order value · Profit/Loss (+margin, "will fall once POs are
+  priced"), the 🧾 Client order card shows the value + a board link, and the Visits
+  card sums cost + order value across the incident → "Profit across the incident".
+  `client_orders.status` gains `linked` (matched_kind `job`). Tests:
+  `node worker/tools/test-client-orders.mjs` (25 cases: link/clone/fresh, money
+  stripping per role, costing 403, visits, dismissed). NB `client_orders.tenant_id`
+  is TEXT and certs.js binds the session's numeric tenant id — sla.js binds the
+  same number (never `String(tenantId)`) or the rows are invisible (the '1.0' quirk).
+  - **EM remedial orders ↔ the works job, unlink, email copy (9 Sep 2026 — Jamie:
+    "why do the REM orders not link to the REM job… I must be able to unlink… a copy
+    of the email").** Found live: the Frome R29051 order sat "new" while its works
+    job (`emrem:<certId>`) was already scheduled — the office had pressed PO received
+    by hand minutes after the email, the matcher only looked at cases at
+    to_quote/quoted, and even a matched order never put its value on the works job.
+    Now: (a) `matchOrderToRemedial` also matches cases at **approved/in_works** —
+    a LATE order links straight to the existing works job (`m.jobId`) with the value
+    stamped, status `linked`, `matched_kind` stays `em`; (b) **approve** from the
+    orders list AND **PO received on the tracker** (`poReceived`) both link any
+    waiting matched order to the works job they raise and stamp `orderNumber/
+    orderValue` on it; (c) `linkOrderToExistingJob` falls back to a job whose
+    reference CONTAINS the order number as a whole token (`jobsWithRefContaining`,
+    "R29051- EM remedial — 0622"; R2905 never claims R29051); (d) **POST
+    /certs/orders/unlink {id}** (`sla.js unlinkOrderFromJob`): the job forgets
+    number/value/link (+ an event naming who), the order goes back to `new` and the
+    job is remembered in **`client_orders.unlinked_job_id`** — a re-sent email, the
+    job arriving again (`applyOrderToJob`), the matcher and Make the job all skip
+    that pair; a deliberate hand-link (/orders/link) still works; (e) a **COPY of the
+    order email** rides with the order (`email_subject/email_from/email_text`,
+    ≤12 KB, sent by emailjob `fileOrder`; COALESCEd on re-send so a copy is never
+    lost) → **GET /certs/orders/email?id=** (money-gated) + a "📧 View email" modal on
+    client-orders.html, because the mailbox is one person's Outlook. The board's job
+    link is now the EXPLICIT `matched_job_id` only (no by-reference guess, so an
+    unlinked order never re-attaches visually); list queries use `ORDER_COLS`
+    (never the email text) + `has_email`. Backfilled 9 Sep: the 30 orders from
+    27 Aug–8 Sep loaded straight to D1 (with email copies) and R29051 hand-linked to
+    Frome's works job. NB "replaced on site" R/REM orders (R28878, REM0150/0151,
+    R29052) have no case/job to link — they are billing only. **Order text →
+    job description is PRICE-STRIPPED** (`sla.js stripPricing`, used by
+    `orderText`): Concerto orders end in "Labour - 150.00 / Materials: £622.50 /
+    Materials / Specialist Equipment – £143.00 / Total: 2 fittings - £100" and
+    per-fitting " - £50" tails — every line that starts with a cost word AND
+    carries an amount is dropped, trailing " - £N" is cut, stray £ amounts removed
+    (a "Materials to be supplied by the client" line with no amount is kept); the
+    "(£439.00)" that used to head the description is gone too, and the "Client
+    order … linked to this job" timeline note carries no £ — the value lives ONLY
+    on `job.orderValue` (hidden from the field by `stripMoney`). The board keeps
+    the full priced text for the office. Tests: cases 6–12 in
+    `test-client-orders.mjs` (35 cases).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
@@ -4690,6 +5001,23 @@ files to this public repo.
   scratchpad `backsim.cjs` (reported loop, multi-parent round trip, same-job
   excursion collapse, cold start — all resolve, none loop). portal-config bumped to
   `?v=19` across all pages so the fix reaches phones; SW cache `mostlane-v83`.
+- **Schedule dates are YEAR-CHECKED, client + server (8 Sep 2026).** Daniel
+  Walker's 16 Sep job "wasn't on the scheduler": the editor had saved it with
+  `scheduledAt = 2006-09-16` (a mistyped year in the date box) and every dated
+  view — scheduler, engineer day, live board — correctly showed nothing for a job
+  twenty years in the past. Nothing validated the year anywhere. Now
+  **`badScheduleDate(iso,label)` / `badScheduleIn(body)`** (exported from sla.js)
+  refuse any `scheduledAt`/`scheduledEnd`/`scheduledStart`/`scheduleForEngineer`/
+  `engSchedule` slice whose year is outside **now−1 … now+3** with a 400 that
+  names the year ("Scheduled start has the year 2006 — check the date"). Applied
+  to POST /sla/jobs, PATCH /sla/jobs/{id}, PUT /sla/job/{id}, /project/create-job
+  + /project/create-day-series (each day) and /fleet/renewal-status. Client side
+  the same rule runs BEFORE the save in sla-jobedit.js (`mljeBadDate`, `?v=30`),
+  add-job.html (`badScheduleYear`) and the scheduler quick modal, and the date
+  inputs carry `min`/`max` for the same window; the editor + scheduler now show
+  the worker's own error text instead of "HTTP 400". Covered by
+  `worker/tools/test-auth-gates.mjs` (5 cases). The 2006 row was repaired in D1
+  by hand. If a job "isn't showing", check `scheduled_at` for an absurd year first.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=31"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -147,7 +147,7 @@
   function mondayOfWeek(){ var x=new Date(); var day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
   function getGps(){ return new Promise(function(res){ if(!navigator.geolocation) return res(""); navigator.geolocation.getCurrentPosition(function(p){res(p.coords.latitude.toFixed(5)+","+p.coords.longitude.toFixed(5));},function(){res("");},{timeout:8000}); }); }
 
-  var DONE_STATUS=["Complete","Closed Jobs","Invoiced"];
+  var DONE_STATUS=["Complete","Closed Jobs","Invoiced","Cancelled"];
   var VC_ITEMS=["Lights & indicators","Tyres & wheels","Windscreen, wipers & washers","Mirrors & glass","Bodywork (walk 4 sides)","Fluid levels (oil/coolant/washer)","Brakes & handbrake","Horn","Seatbelts","Load area secure / racking","Number plates","Dashboard warning lights","No leaks underneath","First aid & extinguisher"];
   var STATUS_COL={Pending:"#9f1239",Scheduled:"var(--accent)",Travelling:"var(--accent)","In Progress":"var(--purple)","On Hold":"var(--amber)",Quote:"var(--purple)",Order:"var(--teal)"};
 

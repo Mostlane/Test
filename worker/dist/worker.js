@@ -121,6 +121,22 @@ async function requireSession(env, request) {
 async function destroySession(env, token) {
   await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
 }
+async function canSeeMoney(env, tenantId, username) {
+  if (!username) return false;
+  try {
+    const perms = await permissionsFor(env, tenantId, username);
+    if (perms.FullAccess === "Yes") return true;
+  } catch {
+  }
+  try {
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=? LIMIT 1").bind(tenantId, username).first();
+    if (!row) return false;
+    const p = typeof row.profile === "string" ? JSON.parse(row.profile || "{}") : row.profile || {};
+    return !!p && p.staffType === "office";
+  } catch {
+    return false;
+  }
+}
 async function permissionsFor(env, tenantId, username) {
   const { results } = await env.DB.prepare(
     "SELECT permission, value FROM user_permissions WHERE tenant_id = ? AND username = ?"
@@ -276,7 +292,7 @@ async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   ).bind(token, username, tenantId, expires).run();
   return token;
 }
-async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
+async function sendEmail(env, { to, subject, html, text, replyTo, attachments, cc }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
   if (env.RESEND_API_KEY) {
@@ -284,6 +300,7 @@ async function sendEmail(env, { to, subject, html, text, replyTo, attachments })
     try {
       const payload = { from, to, subject, html, text: body };
       if (replyTo) payload.reply_to = replyTo;
+      if (cc) payload.cc = Array.isArray(cc) ? cc : String(cc).split(/[,;]/).map((s) => s.trim()).filter(Boolean);
       if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -699,8 +716,9 @@ async function pushToUser(env, tenantId, username, payload) {
   }));
   return { sent, failed, gone };
 }
-async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
+async function sendToPermission(env, tenantId, permKeys, payload, excludeUser, opts) {
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  const officeOnly = opts === true || opts && opts.officeOnly;
   const keys = (permKeys || []).filter(Boolean);
   if (!keys.length) return { sent: 0, failed: 0, gone: 0 };
   const ph = keys.map(() => "?").join(",");
@@ -712,6 +730,25 @@ async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
     usernames = (results || []).map((r) => r.username);
   } catch {
     return { sent: 0, failed: 0, gone: 0 };
+  }
+  if (officeOnly && usernames.length) {
+    try {
+      const uph = usernames.map(() => "?").join(",");
+      const { results } = await env.DB.prepare(
+        `SELECT username, profile FROM users WHERE tenant_id=? AND username IN (${uph})`
+      ).bind(tenantId, ...usernames).all();
+      const fieldSet = /* @__PURE__ */ new Set();
+      for (const r of results || []) {
+        let st = "";
+        try {
+          st = String(JSON.parse(r.profile || "{}").staffType || "").toLowerCase();
+        } catch {
+        }
+        if (st === "field") fieldSet.add(String(r.username).toLowerCase());
+      }
+      if (fieldSet.size) usernames = usernames.filter((u) => !fieldSet.has(String(u).toLowerCase()));
+    } catch {
+    }
   }
   const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
   const totals = { sent: 0, failed: 0, gone: 0 };
@@ -2125,8 +2162,8 @@ async function poSiteRows(env, term, limit) {
   if (!m) return [];
   const cap2 = Math.max(1, Math.min(30, limit));
   const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
-  const T2 = String(term || "").toLowerCase();
-  const matches = (s) => !T2 || s.name.toLowerCase().includes(T2) || s.pc.toLowerCase().includes(T2) || (s.job || "").toLowerCase().includes(T2);
+  const T3 = String(term || "").toLowerCase();
+  const matches = (s) => !T3 || s.name.toLowerCase().includes(T3) || s.pc.toLowerCase().includes(T3) || (s.job || "").toLowerCase().includes(T3);
   try {
     const safe = m.table.replace(/"/g, "");
     if (m.mode === "cols") {
@@ -2993,10 +3030,10 @@ async function handle5(request, env, ctx, url, sess) {
       if (sites.length >= 25) break;
     }
     try {
-      const T2 = term.toLowerCase();
+      const T3 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
         if (sites.length >= 25) break;
-        if (T2 && !n.toLowerCase().includes(T2)) continue;
+        if (T3 && !n.toLowerCase().includes(T3)) continue;
         if (seen.has(n.trim().toLowerCase())) continue;
         seen.add(n.trim().toLowerCase());
         sites.push({ name: n, code: "", postcode: "", source: "po-order" });
@@ -3149,10 +3186,10 @@ async function handle5(request, env, ctx, url, sess) {
       if (jobs.length >= 10) break;
       jobs.push(j);
     }
-    const T2 = term.toLowerCase();
+    const T3 = term.toLowerCase();
     jobs.sort((a, b) => {
-      const pa = String(a.ref).toLowerCase().startsWith(T2) ? 0 : 1;
-      const pb = String(b.ref).toLowerCase().startsWith(T2) ? 0 : 1;
+      const pa = String(a.ref).toLowerCase().startsWith(T3) ? 0 : 1;
+      const pb = String(b.ref).toLowerCase().startsWith(T3) ? 0 : 1;
       return pa - pb;
     });
     const out = jobs.slice(0, 10);
@@ -3752,15 +3789,15 @@ function wrap(str, size, maxW) {
       out.push("");
       continue;
     }
-    let line = w[0];
+    let line2 = w[0];
     for (let i = 1; i < w.length; i++) {
-      if (textWidth(line + " " + w[i], size) <= maxW) line += " " + w[i];
+      if (textWidth(line2 + " " + w[i], size) <= maxW) line2 += " " + w[i];
       else {
-        out.push(line);
-        line = w[i];
+        out.push(line2);
+        line2 = w[i];
       }
     }
-    out.push(line);
+    out.push(line2);
   }
   return out;
 }
@@ -3834,6 +3871,15 @@ function buildFirestopPdf(record, meta = {}) {
   } else {
     doc.line(M + 60, y + 8, M + 220, y + 8, { stroke: LINE });
     y += 20;
+  }
+  const signedBits = [
+    record.installer ? "Name: " + record.installer : "",
+    record.dateOfIssue ? "Date: " + record.dateOfIssue : ""
+  ].filter(Boolean);
+  if (signedBits.length) {
+    ensure7(16);
+    doc.text(M, y + 8, signedBits.join("       "), { size: 9, color: GREY });
+    y += 14;
   }
   y += 8;
   ensure7(20);
@@ -3935,15 +3981,15 @@ function wrap2(str, size, maxW) {
       out.push("");
       continue;
     }
-    let line = w[0];
+    let line2 = w[0];
     for (let i = 1; i < w.length; i++) {
-      if (textWidth(line + " " + w[i], size) <= maxW) line += " " + w[i];
+      if (textWidth(line2 + " " + w[i], size) <= maxW) line2 += " " + w[i];
       else {
-        out.push(line);
-        line = w[i];
+        out.push(line2);
+        line2 = w[i];
       }
     }
-    out.push(line);
+    out.push(line2);
   }
   return out;
 }
@@ -4698,7 +4744,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const intro = fill(tpl.intro, v);
   const base = appBase(env);
   const logo = `${base}/mostlane-logo.jpg`;
-  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line = "#e5e7eb";
+  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line2 = "#e5e7eb";
   const rows = [];
   const addRow = (k, val2) => {
     if (val2) rows.push(`<tr><td style="padding:6px 0;color:${grey};font-size:13px;width:38%;vertical-align:top">${esc2(k)}</td><td style="padding:6px 0;color:${ink};font-size:14px;font-weight:600">${esc2(val2)}</td></tr>`);
@@ -4725,7 +4771,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
     <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line2}">
         <tr><td align="center" style="background:${navy};padding:30px 28px">
           <img src="${esc2(logo)}" alt="Mostlane" height="72" style="height:72px;display:block;border:0;margin:0 auto" />
         </td></tr>
@@ -4734,7 +4780,7 @@ function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
           <div style="font-size:15px;color:${ink};line-height:1.5">${esc2(intro)}</div>
         </td></tr>
         <tr><td style="padding:8px 28px 0">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line2};border-bottom:1px solid ${line2};margin:12px 0">${rows.join("")}</table>
         </td></tr>
         ${descBlock}
         ${noticeBlock}
@@ -9444,17 +9490,34 @@ function header(doc, meta) {
   doc.line(M4, y, W3 - M4, y, { stroke: HAIR2, lw: 0.8 });
   return y + 16;
 }
-function itemBlock(doc, it, idx, y) {
-  const photos = (it.photos || []).map((b) => {
-    try {
-      return { b, g: jpegInfo(b) };
-    } catch {
-      return null;
+function prepPhotos(list) {
+  const draw = [], skipped = [];
+  for (const p of list || []) {
+    if (!p) continue;
+    if (p.why) {
+      skipped.push(p.why);
+      continue;
     }
-  }).filter(Boolean);
+    if (p.rgb && p.w && p.h) {
+      draw.push({ rgb: p, w: p.w, h: p.h });
+      continue;
+    }
+    const b = p.jpeg || p;
+    try {
+      const g = jpegInfo(b);
+      draw.push({ b, w: g.w, h: g.h });
+    } catch {
+      skipped.push("photo isn't a readable JPEG/PNG");
+    }
+  }
+  return { draw, skipped };
+}
+function itemBlock(doc, it, idx, y) {
+  const { draw: photos, skipped } = prepPhotos(it.photos);
   const photoH = photos.length ? 96 : 0;
   const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M4 * 2 - 24, 2) : [];
-  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + 14;
+  const skipLine = skipped.length ? skipped.length + " photo" + (skipped.length > 1 ? "s" : "") + " on file not embedded: " + skipped.join("; ") : "";
+  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + (skipLine ? 11 : 0) + 14;
   if (y + blockH > H2 - M4) {
     doc.newPage(W3, H2);
     y = M4 + 6;
@@ -9477,14 +9540,19 @@ function itemBlock(doc, it, idx, y) {
     ty += 4;
     let cx = px;
     for (const p of photos) {
-      const w = Math.min(150, photoH * (p.g.w / p.g.h));
+      const w = Math.min(150, photoH * (p.w / p.h));
       if (cx + w > W3 - M4 - 8) break;
       try {
-        doc.image(p.b, cx, ty, w, photoH);
+        if (p.rgb) doc.imageRGB(p.rgb.rgb, p.rgb.w, p.rgb.h, cx, ty, w, photoH, { deflated: !!p.rgb.deflated });
+        else doc.image(p.b, cx, ty, w, photoH);
       } catch {
       }
       cx += w + 8;
     }
+    ty += photoH + 8;
+  }
+  if (skipLine) {
+    doc.text(px, ty, fit2(skipLine, 8, W3 - M4 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
   }
   return y + blockH + 12;
 }
@@ -9513,10 +9581,981 @@ var init_batterypdf = __esm({
   }
 });
 
+// src/lib/pumppdf.js
+function fit3(str, size, maxW) {
+  str = S3(str);
+  if (textWidth(str, size) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
+  return s + "...";
+}
+function wrap4(str, size, maxW, maxLines) {
+  const words = S3(str).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) <= maxW) {
+      cur = t;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = w;
+    if (maxLines && lines.length >= maxLines) break;
+  }
+  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+function instrLines(str, size, maxW) {
+  const out = [];
+  String(str || "").split(/\r?\n/).forEach((raw) => {
+    const t = raw.trim();
+    if (!t) {
+      out.push("");
+      return;
+    }
+    wrap4(t, size, maxW).forEach((l) => out.push(l));
+  });
+  return out;
+}
+function tracked2(doc, x, y, str, { size = 6.5, color = MUTE3, track = 1.2, alignRight = false, bold = true } = {}) {
+  const chars = [...S3(str).toUpperCase()];
+  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
+  let cx = alignRight ? x - total : x;
+  for (const c of chars) {
+    doc.text(cx, y, c, { size, bold, color });
+    cx += textWidth(c, size) + track;
+  }
+  return total;
+}
+function dot2(doc, cx, cy, r, color, hollow) {
+  if (hollow) {
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+    doc.roundRect(cx - r - 0.6, cy - r - 0.6, r * 2 + 1.2, r * 2 + 1.2, r + 0.6, { fill: BORDER2 });
+    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
+  } else doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
+}
+function pill2(doc, x, yTop, label2, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
+  const w = textWidth(S3(label2), size) + padX * 2;
+  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
+  doc.text(x + padX, yTop + h - 4, S3(label2), { size, bold: true, color: textColor });
+  return w;
+}
+function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
+  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
+  doc.roundRect(x, y, w, h, r, { fill: fill2 });
+}
+function pageBg2(doc) {
+  doc.rect(0, 0, W4, H3, { fill: BG2 });
+}
+function imgSize(img) {
+  if (!img) return null;
+  if (img.jpeg) {
+    try {
+      const g = jpegInfo(img.jpeg);
+      return { w: g.w || 1, h: g.h || 1 };
+    } catch {
+      return null;
+    }
+  }
+  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
+  return null;
+}
+function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
+  const sz = imgSize(img);
+  if (!sz) return null;
+  const s = Math.min(maxW / sz.w, maxH / sz.h);
+  const w = sz.w * s, h = sz.h * s;
+  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
+  try {
+    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
+    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
+  } catch {
+    return null;
+  }
+  return { w, h, x: dx, y: dy };
+}
+function ansOf(a) {
+  const s = String(a || "").toLowerCase();
+  if (/^y/.test(s)) return "yes";
+  if (/^n\/?a/.test(s) || s === "na") return "na";
+  if (/^n/.test(s)) return "no";
+  return "";
+}
+function statusOf2(rec) {
+  const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
+  const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
+  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
+  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
+}
+function header2(doc, rec, meta, slim) {
+  const y = 30, h = slim ? 40 : HEADER_H2;
+  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY3);
+  if (meta.logo) {
+    try {
+      const g = jpegInfo(meta.logo);
+      const hh = slim ? 18 : 24;
+      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
+    } catch {
+    }
+  }
+  if (slim) {
+    tracked2(doc, W4 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
+    doc.text(W4 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+    return y + h;
+  }
+  const st = statusOf2(rec);
+  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
+  tracked2(doc, W4 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
+  doc.text(W4 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  if (rec.date) doc.text(W4 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W4 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  return y + h;
+}
+function footer2(doc, pageNo, pageCount) {
+  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
+  doc.text(W4 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
+}
+function instrH(rec) {
+  return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
+}
+function safetyH(rec) {
+  return CARD_PAD2 + 14 + (rec.safety || []).length * 16 + 4;
+}
+function detailsH2(rec) {
+  if (!String(rec.detailsNo || "").trim()) return 0;
+  return CARD_PAD2 + 14 + wrap4(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).length * 11 + 4;
+}
+function instrCard(doc, y, rec) {
+  const h = instrH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
+    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
+    yy2 += 11;
+  });
+  return h;
+}
+function safetyCard(doc, y, rec) {
+  const h = safetyH(rec);
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  (rec.safety || []).forEach((s) => {
+    const ok = ansOf(s.answer) === "yes";
+    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
+    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
+    pill2(doc, W4 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
+    yy2 += 16;
+  });
+  return h;
+}
+function checksCard(doc, rows, startIndex, y, count) {
+  const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
+  if (count != null) doc.text(W4 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
+  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
+  const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
+  const headY = y + 26 + THEAD_H2 - 8;
+  tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
+  ["Yes", "No", "N/A"].forEach((lab, k) => {
+    const cx = [cYes, cNo, cNa][k];
+    const lw = textWidth(lab, 6);
+    doc.text(cx - lw / 2, headY, lab, { size: 6, color: MUTE3 });
+  });
+  let ry = y + 26 + THEAD_H2;
+  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
+  rows.forEach((r, i) => {
+    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
+    const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
+    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
+    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
+    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
+    dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
+    ry += ROW_H2;
+  });
+  return h;
+}
+function detailsCard2(doc, y, rec) {
+  const h = detailsH2(rec);
+  if (!h) return 0;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  wrap4(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
+    yy2 += 11;
+  });
+  return h;
+}
+function mediaLine(rec, meta) {
+  const media = Array.isArray(rec.media) ? rec.media : [];
+  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
+  const embedded = (meta.photos || []).length;
+  const bits = [];
+  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
+  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
+  return bits.length ? bits.join(" \xB7 ") : "";
+}
+function photoPages(meta) {
+  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
+}
+function photoPage(doc, rec, meta, pageIdx) {
+  const photos = meta.photos || [];
+  const start = pageIdx * PHOTOS_PER_PAGE;
+  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
+  const top = 30 + 40 + GAP2;
+  const gap = 12;
+  const cw = (CW2 - gap) / 2, ch = 292;
+  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
+  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
+  slice.forEach((p, i) => {
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
+    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
+    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
+    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
+    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
+  });
+  const last = pageIdx === photoPages(meta) - 1;
+  if (last) {
+    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
+    let yy2 = top + 30 + 2 * (ch + 10) + 6;
+    extras.slice(0, 6).forEach((t) => {
+      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
+      yy2 += 11;
+    });
+  }
+}
+function signatureCard2(doc, y, rec, meta) {
+  const declLines = wrap4(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
+  const media = mediaLine(rec, meta);
+  const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
+  cardBox2(doc, M5, y, CW2, h);
+  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
+  let yy2 = y + 32;
+  declLines.forEach((l) => {
+    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
+    yy2 += 11;
+  });
+  if (media) {
+    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
+    yy2 += 14;
+  }
+  const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
+  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
+  const bw = 200, y2 = y + h - 54;
+  const blocks = [
+    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
+    { x: W4 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
+  ];
+  blocks.forEach((b) => {
+    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
+    doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
+    doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
+    tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
+  });
+  return h;
+}
+function buildPumpPdf(record, meta = {}) {
+  const rec = record || {};
+  rec.checks = Array.isArray(rec.checks) ? rec.checks : [];
+  const introBottom = 30 + HEADER_H2 + GAP2 + instrH(rec) + GAP2 + safetyH(rec) + GAP2;
+  const bottomLimit = H3 - 40;
+  const cap2 = (top) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H2 + 12)) / ROW_H2));
+  const slimTop = 30 + 40 + GAP2;
+  const page1Cap = cap2(introBottom), laterCap = cap2(slimTop);
+  const pages = [];
+  pages.push({ start: 0, rows: rec.checks.slice(0, page1Cap), intro: true, top: introBottom });
+  let i = page1Cap;
+  while (i < rec.checks.length) {
+    pages.push({ start: i, rows: rec.checks.slice(i, i + laterCap), intro: false, top: slimTop });
+    i += laterCap;
+  }
+  if (!pages.length) pages.push({ start: 0, rows: [], intro: true, top: introBottom });
+  const last = pages[pages.length - 1];
+  const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
+  const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
+  const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
+  const nPhotoPages = photoPages(meta);
+  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
+  const doc = new PdfDoc(W4, H3);
+  pages.forEach((pg, idx) => {
+    if (idx > 0) doc.newPage(W4, H3);
+    pageBg2(doc);
+    if (pg.intro) {
+      header2(doc, rec, meta, false);
+      let yy2 = 30 + HEADER_H2 + GAP2;
+      yy2 += instrCard(doc, yy2, rec) + GAP2;
+      yy2 += safetyCard(doc, yy2, rec) + GAP2;
+      checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
+    } else {
+      header2(doc, rec, meta, true);
+      checksCard(doc, pg.rows, pg.start, pg.top, null);
+    }
+    footer2(doc, idx + 1, totalPages);
+  });
+  let ty;
+  if (trailOwnPage) {
+    doc.newPage(W4, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, totalPages, totalPages);
+    ty = slimTop;
+  } else ty = lastBottom + GAP2;
+  const dh = detailsCard2(doc, ty, rec);
+  if (dh) ty += dh + GAP2;
+  signatureCard2(doc, ty, rec, meta);
+  const before = pages.length + (trailOwnPage ? 1 : 0);
+  for (let p = 0; p < nPhotoPages; p++) {
+    doc.newPage(W4, H3);
+    pageBg2(doc);
+    header2(doc, rec, meta, true);
+    footer2(doc, before + p + 1, totalPages);
+    photoPage(doc, rec, meta, p);
+  }
+  return doc.bytes();
+}
+var W4, H3, M5, CW2, NAVY3, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA2, ACCENT2, GREEN2, RED2, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
+var init_pumppdf = __esm({
+  "src/lib/pumppdf.js"() {
+    init_pdf();
+    W4 = 595;
+    H3 = 842;
+    M5 = 40;
+    CW2 = W4 - M5 * 2;
+    NAVY3 = [0, 0.204, 0.408];
+    INK4 = [0.1, 0.13, 0.18];
+    MUTE3 = [0.46, 0.51, 0.58];
+    FAINT2 = [0.62, 0.66, 0.72];
+    BG2 = [0.953, 0.965, 0.977];
+    CARD3 = [1, 1, 1];
+    BORDER2 = [0.886, 0.906, 0.933];
+    HAIR3 = [0.92, 0.935, 0.955];
+    ZEBRA2 = [0.972, 0.98, 0.99];
+    ACCENT2 = [0.04, 0.42, 0.52];
+    GREEN2 = [0.09, 0.63, 0.29];
+    RED2 = [0.83, 0.16, 0.16];
+    GREY4 = [0.6, 0.64, 0.7];
+    HEADSUB2 = [0.78, 0.85, 0.93];
+    S3 = (v) => toWinAnsi(String(v == null ? "" : v));
+    ROW_H2 = 19;
+    THEAD_H2 = 22;
+    CARD_PAD2 = 14;
+    GAP2 = 14;
+    HEADER_H2 = 84;
+    PHOTOS_PER_PAGE = 4;
+  }
+});
+
+// src/routes/pump.js
+async function ensureTables2(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
+    tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
+    status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
+    created_at TEXT, updated_at TEXT, r2_final_key TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+}
+async function getConfig(env, tid) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
+  if (row && row.value) {
+    try {
+      const c = JSON.parse(row.value);
+      if (c && Array.isArray(c.stores)) return c;
+    } catch {
+    }
+  }
+  await saveConfig(env, tid, DEFAULT_CONFIG);
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+async function saveConfig(env, tid, c) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
+}
+async function getJob(env, tid, id) {
+  try {
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+function storeById(cfg, id) {
+  return (cfg.stores || []).find((s) => s.id === id) || null;
+}
+function dataUrlToBytes(u) {
+  const s = String(u || "");
+  const i = s.indexOf(",");
+  if (!/^data:image\//i.test(s) || i < 0) return null;
+  try {
+    const bin = atob(s.slice(i + 1));
+    const out = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+    return out;
+  } catch {
+    return null;
+  }
+}
+async function sigImage(dataUrl) {
+  const b = dataUrlToBytes(dataUrl);
+  if (!b) return null;
+  if (isJpeg(b)) return { jpeg: b };
+  if (isPng(b)) {
+    const d = await decodePngToRgb(b, { signature: true });
+    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
+  }
+  return null;
+}
+function shrinkRgb(rgb, w, h, maxEdge) {
+  const s = Math.max(w, h) / maxEdge;
+  if (s <= 1) return { rgb, w, h };
+  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
+  const out = new Uint8Array(nw * nh * 3);
+  for (let y = 0; y < nh; y++) {
+    const sy = Math.min(h - 1, Math.floor(y * s));
+    for (let x = 0; x < nw; x++) {
+      const sx = Math.min(w - 1, Math.floor(x * s));
+      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
+      out[di] = rgb[si];
+      out[di + 1] = rgb[si + 1];
+      out[di + 2] = rgb[si + 2];
+    }
+  }
+  return { rgb: out, w: nw, h: nh };
+}
+async function deflate(bytes) {
+  try {
+    const cs = new CompressionStream("deflate");
+    const w = cs.writable.getWriter();
+    w.write(bytes);
+    w.close();
+    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+async function photoImage(env, m) {
+  try {
+    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
+    if (!o) return { why: "file missing" };
+    const b = new Uint8Array(await o.arrayBuffer());
+    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
+    if (isPng(b)) {
+      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
+      if (!d) return { why: "PNG couldn't be decoded" };
+      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
+      const z = await deflate(s.rgb);
+      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
+    }
+    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
+  } catch (e) {
+    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
+  }
+}
+async function pdfMeta(env, d) {
+  const media = Array.isArray(d.media) ? d.media : [];
+  const photos = [], skipped = [], videos = [];
+  for (const m of media) {
+    if (!m || !m.key) continue;
+    if (m.kind === "video") {
+      videos.push(m.name || "video");
+      continue;
+    }
+    if (photos.length >= MAX_PDF_PHOTOS) {
+      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
+      continue;
+    }
+    const r = await photoImage(env, m);
+    if (r.img) photos.push(r.img);
+    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
+  }
+  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
+}
+async function buildPdfFor(env, rec) {
+  const d = shapeRow(rec);
+  return buildPumpPdf(d, await pdfMeta(env, d));
+}
+function shapeRow(r) {
+  let d = {};
+  try {
+    d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d };
+}
+function seedRecord(cfg, store, job) {
+  return {
+    store: store.id,
+    storeName: store.name,
+    siteCode: store.siteCode || "",
+    instructions: store.instructions || "",
+    declaration: cfg.declaration || "",
+    safety: (cfg.safety || []).map((s) => ({ id: s.id, label: s.label, answer: "" })),
+    checks: (store.checks || []).map((c) => ({ label: c, answer: "" })),
+    detailsNo: "",
+    declarationAgreed: "",
+    date: "",
+    engineerName: "",
+    dmName: "",
+    engSig: "",
+    dmSig: "",
+    media: []
+  };
+}
+async function maybeCompletePumpJob(env, tid, rec) {
+  try {
+    if (!rec || !rec.job_id) return false;
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, rec.job_id).first();
+    if (!row) return false;
+    let job;
+    try {
+      job = JSON.parse(row.data);
+    } catch {
+      return false;
+    }
+    if (!job.pumpMaintenance) return false;
+    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
+    if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    job.status = "Complete";
+    job.updatedAt = now;
+    job.closedAt = job.closedAt || now;
+    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
+    if (engs.length) {
+      job.engStatus = job.engStatus || {};
+      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "pump" };
+    }
+    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function resignMedia(env, origin, rec) {
+  if (!rec || !Array.isArray(rec.media)) return rec;
+  for (const m of rec.media) {
+    if (m && m.key) {
+      try {
+        m.url = await signedFileUrl(env, origin, "/pump/media", m.key);
+      } catch {
+      }
+    }
+  }
+  return rec;
+}
+async function handle9(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  if (method === "GET" && url.pathname === "/pump/media") {
+    const key = url.searchParams.get("key") || "";
+    if (!key.startsWith("pump/")) return new Response("Bad key", { status: 400 });
+    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
+    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream", "Cache-Control": "public, max-age=86400" } });
+  }
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  await ensureTables2(env);
+  const perms = await permissionsFor(env, tid, me);
+  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
+  const canWrite = async (rec) => {
+    if (isOffice) return true;
+    if (!rec) return true;
+    if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
+    try {
+      const job = rec.job_id ? await getJob(env, tid, String(rec.job_id)) : null;
+      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
+      return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
+    } catch {
+      return false;
+    }
+  };
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      if (!isOffice) return error("Office access required", 403, env, request);
+      const b = await request.json().catch(() => ({}));
+      const cur = await getConfig(env, tid);
+      const next = { ...cur };
+      if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
+      if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
+      if (Array.isArray(b.safety)) next.safety = b.safety.map((s, i) => ({ id: String(s.id || "s" + i), label: String(s.label || "").slice(0, 300) })).filter((s) => s.label);
+      if (Array.isArray(b.stores)) next.stores = b.stores.map((s) => ({
+        id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
+        name: String(s.name || "").slice(0, 120),
+        siteCode: String(s.siteCode || "").slice(0, 20),
+        client: String(s.client || "").slice(0, 40),
+        address: String(s.address || "").slice(0, 300),
+        postcode: String(s.postcode || "").slice(0, 20),
+        instructions: String(s.instructions || "").slice(0, 4e3),
+        checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
+      })).filter((s) => s.name);
+      await saveConfig(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  if (sub === "/stores" && method === "GET") {
+    const cfg = await getConfig(env, tid);
+    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
+  }
+  if (sub === "/for-job" && method === "GET") {
+    const jobId = q.get("jobId") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const cfg = await getConfig(env, tid);
+    const job = await getJob(env, tid, jobId);
+    let storeId = q.get("store") || job && job.pumpStore || "";
+    const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
+    if (existing) {
+      const rec = shapeRow(existing);
+      await resignMedia(env, url.origin, rec);
+      const store2 = storeById(cfg, rec.store) || null;
+      return json({ ok: true, record: rec, store: store2, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+    }
+    const store = storeById(cfg, storeId) || (cfg.stores || [])[0];
+    if (!store) return error("No pump stores configured", 400, env, request);
+    const seeded = seedRecord(cfg, store, job);
+    seeded.date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    if (job) seeded.engineerName = "";
+    return json({ ok: true, record: { id: null, jobId, status: "draft", ...seeded }, store, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
+  }
+  if (sub === "/save" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "");
+    let rec = null, id = b.id ? String(b.id) : "";
+    if (id) rec = await loadRec(id);
+    if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cfg = await getConfig(env, tid);
+    const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
+    const sanSig = (v) => {
+      const s = String(v || "");
+      return /^data:image\//.test(s) && s.length <= 4e5 ? s : rec ? void 0 : "";
+    };
+    const data = {
+      storeName: store ? store.name : b.storeName || "",
+      instructions: store ? store.instructions : b.instructions || "",
+      declaration: cfg.declaration || "",
+      safety: Array.isArray(b.safety) ? b.safety.map((s) => ({ id: String(s.id || ""), label: String(s.label || ""), answer: String(s.answer || "") })) : [],
+      checks: Array.isArray(b.checks) ? b.checks.map((c) => ({ label: String(c.label || ""), answer: String(c.answer || "") })) : [],
+      detailsNo: String(b.detailsNo || "").slice(0, 4e3),
+      declarationAgreed: b.declarationAgreed === true || String(b.declarationAgreed || "").toLowerCase().startsWith("y") ? "yes" : "",
+      date: String(b.date || "").slice(0, 20),
+      engineerName: String(b.engineerName || "").slice(0, 120),
+      dmName: String(b.dmName || "").slice(0, 120),
+      media: rec ? shapeRow(rec).media || [] : []
+    };
+    const es = sanSig(b.engSig);
+    if (es !== void 0) data.engSig = es;
+    else if (rec) data.engSig = shapeRow(rec).engSig || "";
+    const ds = sanSig(b.dmSig);
+    if (ds !== void 0) data.dmSig = ds;
+    else if (rec) data.dmSig = shapeRow(rec).dmSig || "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (!id) {
+      id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    }
+    const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
+    const storeId = store ? store.id : rec ? rec.store : "";
+    if (rec) {
+      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
+    }
+    const saved = await loadRec(id);
+    const out = shapeRow(saved);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/media" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const id = String(form.get("id") || "");
+    const kind = String(form.get("kind") || "photo") === "video" ? "video" : "photo";
+    const file = form.get("file");
+    if (!id || !file || typeof file.arrayBuffer !== "function") return error("id + file required", 400, env, request);
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (rec.status === "final") return error("Record finalised", 409, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    const cap2 = kind === "video" ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    if (buf.length > cap2) return error(kind === "video" ? "Video too large (max 95 MB \u2014 keep the clip short)" : "Photo too large (max 12 MB)", 413, env, request);
+    const ext = (String(file.name || "").match(/\.([a-z0-9]{2,5})$/i) || [, kind === "video" ? "mp4" : "jpg"])[1].toLowerCase();
+    const key = `pump/${tid}/${id}/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg") } });
+    const d = shapeRow(rec);
+    const media = Array.isArray(d.media) ? d.media : [];
+    media.push({ key, kind, name: String(file.name || kind + "." + ext).slice(0, 160) });
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const urlOut = await signedFileUrl(env, url.origin, "/pump/media", key);
+    return json({ ok: true, key, kind, name: media[media.length - 1].name, url: urlOut }, {}, env, request);
+  }
+  if (sub === "/media-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""), key = String(b.key || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    if (key.startsWith("pump/") && env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.delete(key);
+      } catch {
+      }
+    }
+    const d = shapeRow(rec);
+    const media = (Array.isArray(d.media) ? d.media : []).filter((m) => m.key !== key);
+    const data = { ...d };
+    delete data.id;
+    delete data.jobId;
+    delete data.store;
+    delete data.siteCode;
+    delete data.status;
+    delete data.engineer;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.media = media;
+    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/submit" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rec = await loadRec(id);
+    if (!rec) return error("Record not found", 404, env, request);
+    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const fresh = await loadRec(id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: "\u{1F6B0} Pump maintenance submitted",
+      body: `${shapeRow(rec).storeName || "A store"} \u2014 ready for office review`,
+      url: "/cert-review.html?pump=" + encodeURIComponent(id),
+      tag: "pump-review"
+    }, me, { officeOnly: true }).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
+  }
+  if (sub === "/one" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const out = shapeRow(rec);
+    await resignMedia(env, url.origin, out);
+    return json({ ok: true, record: out }, {}, env, request);
+  }
+  if (sub === "/review" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status IN ('draft','review') ORDER BY updated_at DESC LIMIT 200").bind(tid).all();
+    return json({ ok: true, records: (results || []).map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/list" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const store = q.get("store") || "";
+    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status='final' AND (?='' OR store=?) ORDER BY updated_at DESC LIMIT 200").bind(tid, store, store).all();
+    return json({ ok: true, records: (results || []).map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/pdf" && method === "GET") {
+    const rec = await loadRec(q.get("id") || "");
+    if (!rec) return error("Not found", 404, env, request);
+    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
+    const d = shapeRow(rec);
+    const bytes = await buildPdfFor(env, rec);
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
+  }
+  if (sub === "/finalise" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const d = shapeRow(rec);
+    const bytes = await buildPdfFor(env, rec);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    if (env.JOB_FILES) {
+      try {
+        await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+      } catch {
+      }
+    }
+    let filedToSite = false;
+    const code = rec.site_code || d.siteCode || "";
+    if (code) {
+      try {
+        await fileCertificatePdf(env, tid, {
+          scheme: "coop",
+          code,
+          type: "pump",
+          bytes,
+          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
+          docDate: d.date || now.slice(0, 10),
+          bump: true,
+          source: "pump:" + rec.id,
+          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
+        });
+        filedToSite = true;
+      } catch {
+      }
+    }
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    if (rec.engineer) ctx && ctx.waitUntil && ctx.waitUntil(sendToUser(env, tid, rec.engineer, { title: "\u{1F6B0} Pump record filed", body: `${d.storeName || "Pump"} maintenance record finalised`, url: "/pump-review.html", tag: "pump-final" }).catch(() => {
+    }));
+    return json({ ok: true, record: shapeRow(fresh), filedToSite }, {}, env, request);
+  }
+  if (sub === "/upload" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    if (!form) return error("multipart required", 400, env, request);
+    const rec = await loadRec(String(form.get("id") || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") return error("file required", 400, env, request);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
+    await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, (/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    const fresh = await loadRec(rec.id);
+    try {
+      await maybeCompletePumpJob(env, tid, fresh);
+    } catch {
+    }
+    return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
+  }
+  if (sub === "/reopen" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const rec = await loadRec(String(b.id || ""));
+    if (!rec) return error("Not found", 404, env, request);
+    if (env.JOB_FILES) {
+      try {
+        const l = await env.JOB_FILES.list({ prefix: `pump/${tid}/${rec.id}/` });
+        for (const o of l.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {
+      }
+    }
+    await env.DB.prepare("DELETE FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, rec.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + url.pathname, 404, env, request);
+}
+var GENERAL, BINFIELD_CHECKS, WICKHAM_CHECKS, INSTR, DEFAULT_CONFIG, normEng, isJpeg, isPng, MAX_PDF_PHOTOS;
+var init_pump = __esm({
+  "src/routes/pump.js"() {
+    init_http();
+    init_auth();
+    init_pumppdf();
+    init_logo();
+    init_filesign();
+    init_push();
+    init_compliance();
+    init_pngdecode();
+    GENERAL = [
+      "Chamber free of debris or obstructions",
+      "Water level within expected range when idle",
+      "Pump body free from corrosion or damage",
+      "Electrical cables undamaged and away from water",
+      "Discharge pipe secure and supported",
+      "Float switch activates pump when lifted",
+      "Pump runs smoothly with no unusual noise/vibration",
+      "Water discharges fully through outlet",
+      "Pump switches off automatically after emptying",
+      "Discharge outlet clear of blockages or freezing",
+      "Non-return/check valve prevents backflow (where Fitted)",
+      "Sump chamber inlet screen free of debris",
+      "Inspection details recorded in log"
+    ];
+    BINFIELD_CHECKS = [
+      "Chamber free of debris or obstructions",
+      "Water level within expected range when idle",
+      "Pump body free from corrosion or damage",
+      "Electrical cables undamaged and away from water",
+      "Discharge pipe secure and supported",
+      "Float switch activates pump when lifted",
+      "Pump runs smoothly with no unusual noise/vibration",
+      "Water discharges fully through outlet",
+      "Pump switches off automatically after emptying",
+      "Discharge outlet clear of blockages or freezing",
+      "Non-return/check valve prevents backflow",
+      "Sump chamber inlet screen free of debris",
+      "Control panel or alarm system functioning",
+      "Inspection details recorded in log"
+    ];
+    WICKHAM_CHECKS = BINFIELD_CHECKS.concat([
+      "Water Pumping into ditch",
+      "Ditch inlet & outlet clear from debris",
+      "Ditch generally tidy of debris",
+      "CCTV receiving power"
+    ]);
+    INSTR = {
+      binfield: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nAlarm float switch:\n- Located in the basement, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (warehouse).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      wickham: "The sump pump is in the rear garden of the store, under a manhole in the grass (approx. 5 m deep).\nAccessing the pump: pull it up carefully using the rope, then lower it back down slowly after checks.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 5 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nDitch maintenance:\n- Clear all debris from both ends of the ditch to maintain flow.\n- Remove any debris along the ditch length as well.\n\nAlarm float switch:\n- Located in the manhole, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (just inside the rear doors).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      eastbourne: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      shanklin: "The sump pump is in the basement in the BOH area of the store.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nElectrical Cut Off switch:\n- Located on the wall, above the pump.\n- Tilting it should activate the contactors above the basement and cut all 230v electricity to the lighting and tube heaters.\n- When the float switch is released, the contactor should re-engage and bring the 230v power back on.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      wimbledon: "There are two pumps to test in this store.\n\nFirst pump - located in a hatch in the staff room.\n- Remove the skirting and lift the hatch to access.\n- This area must be shut off while the hatch is open and all staff notified of the risk.\n\nSecond pump - located in the rear area of the store basement (not occupied by Co-op).\n- Key can be acquired via the store manager.\n- Walk inside the unit, turn back on yourself, and you will see the pump.\n\nPriming the pump:\n- Fill buckets from the store's cleaners' sink tap (approx. 2 buckets) and pour into the sump.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
+      newportels: "The sump pump is in the basement below the reception desk printer.\nThe printer will need moving to complete the test.\nStaff must be notified, and the area barriered off.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n\nImportant:\n- Ensure the hatch is fitted back correctly and flush.\n- Always leave both the pump and the alarm float switch in their correct positions after maintenance."
+    };
+    DEFAULT_CONFIG = {
+      declaration: "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.",
+      contractor: { tradingTitle: "Mostlane", address: "Unit A5, Segensworth Business Centre, Titchfield", postcode: "PO15 5RQ" },
+      safety: [
+        { id: "barrier", label: "Area made safe and barriered off correctly to prevent injury (e.g. someone falling into the open hatch/sump)" },
+        { id: "notified", label: "Store staff have been notified that the works are being carried out" }
+      ],
+      stores: [
+        { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
+        { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
+        { id: "eastbourne", name: "Eastbourne", siteCode: "0356", client: "retail", address: "Eastbourne, Lindfield Road", postcode: "BN22 0AU", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
+        { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
+        { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
+        { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
+      ]
+    };
+    normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
+    isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
+    MAX_PDF_PHOTOS = 12;
+  }
+});
+
 // src/routes/certs.js
 var certs_exports = {};
 __export(certs_exports, {
-  handle: () => handle9,
+  handle: () => handle10,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob
 });
 function clientForSiteClient(sc) {
@@ -9540,7 +10579,7 @@ async function backfillClient(env, tid, rec) {
   if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
-async function ensureTables2(env) {
+async function ensureTables3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
     id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
     job_id TEXT, site_code TEXT, cert_number TEXT,
@@ -9552,7 +10591,7 @@ async function ensureTables2(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
-  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT"]) {
+  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT", "light_spec TEXT", "fitting_no INTEGER"]) {
     try {
       await env.DB.prepare(`ALTER TABLE em_remedials ADD COLUMN ${col}`).run();
     } catch {
@@ -9579,7 +10618,15 @@ async function ensureTables2(env) {
     "lights_pending INTEGER",
     "lights_job_id TEXT",
     "reissue_cert_id TEXT",
-    "reissue_at TEXT"
+    "reissue_at TEXT",
+    // the auto-generated clean cert after the works
+    // v2 pipeline (Sep 2026): to_quote → quoted → in_works | done → invoiced
+    "status_label TEXT",
+    "po_received_at TEXT",
+    "po_received_by TEXT",
+    "awaiting_batteries INTEGER",
+    "batteries_arrived_at TEXT",
+    "works_done_at TEXT"
   ]) {
     try {
       await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run();
@@ -9602,6 +10649,18 @@ async function ensureTables2(env) {
     await env.DB.prepare("ALTER TABLE cert_register ADD COLUMN source TEXT").run();
   } catch (e) {
   }
+  for (const col of ["email_subject TEXT", "email_from TEXT", "email_text TEXT", "unlinked_job_id TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE client_orders ADD COLUMN " + col).run();
+    } catch (e) {
+    }
+  }
+}
+function caseStatusLabel(rows) {
+  const pend = rows.filter((r) => !r.replaced);
+  if (pend.some((r) => r.kind !== "battery")) return "works";
+  if (pend.length) return "batteries";
+  return "onsite";
 }
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -9626,8 +10685,10 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     const rem = r.remedial || {};
     const kind = rem.kind === "battery" ? "battery" : "light";
     return {
+      no: r.no != null && r.no !== "" ? Number(r.no) || i + 1 : i + 1,
       ref: String(r.comments || "").trim() || "Light " + (i + 1),
       replaced: rem.replacedOnSite === true,
+      lightSpec: kind === "light" ? String(rem.lightSpec || "") : "",
       note: rem.note || "",
       failed: isRealRemedial(rem),
       kind,
@@ -9657,14 +10718,15 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const lights = fails.filter((f) => !isBatt(f));
   const batteries = fails.filter(isBatt);
   const lightsPending = pending.filter((f) => !isBatt(f)).length;
-  const lightCharge = lights.length * REMEDIAL_CHARGE;
+  const lightCharge = fails.length * REMEDIAL_CHARGE;
+  const statusLabel = caseStatusLabel(fails);
   try {
     await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
   } catch {
   }
   const stmts = fails.map((f, i) => env.DB.prepare(
-    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos,light_spec,fitting_no)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     certRow.id + ":" + i,
     tid,
@@ -9675,7 +10737,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.ref,
     f.note,
     f.replaced ? 1 : 0,
-    isBatt(f) ? 0 : REMEDIAL_CHARGE,
+    REMEDIAL_CHARGE,
     f.replaced ? "done" : "pending",
     null,
     certRow.engineer || "",
@@ -9683,7 +10745,9 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.kind,
     f.batterySpec,
     f.batteryQty,
-    JSON.stringify(f.photos)
+    JSON.stringify(f.photos),
+    f.lightSpec,
+    f.no
   ));
   try {
     for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
@@ -9713,23 +10777,29 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       lightsPending,
       now
     ).run();
+    await env.DB.prepare("UPDATE em_remedial_acks SET status_label=?, po_received_at=NULL, po_received_by=NULL, awaiting_batteries=0, batteries_arrived_at=NULL, works_done_at=NULL WHERE tenant_id=? AND cert_id=?").bind(statusLabel, tid, certRow.id).run();
   } catch {
   }
   return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length };
 }
-function buildLightQuoteText(rec, siteName) {
+function buildQuoteText(rec, code) {
   const rows = Array.isArray(rec.rows) ? rec.rows : [];
-  const nums = [];
+  const lines = [], numbers = [];
   rows.forEach((r, i) => {
     const rem = r.remedial;
-    if (rem && isRealRemedial(rem) && rem.kind !== "battery") nums.push(r.no != null ? r.no : i + 1);
+    if (!rem || !isRealRemedial(rem)) return;
+    const no = r.no != null && r.no !== "" ? r.no : i + 1;
+    const fault = rem.kind === "battery" ? "Batteries" : "Light replacement";
+    const where = rem.replacedOnSite === true ? " (replaced on site)" : "";
+    numbers.push(no);
+    lines.push(`Fitting ${no} - ${fault}${where} - \xA3${REMEDIAL_CHARGE}`);
   });
-  if (!nums.length) return null;
-  const total = nums.length * REMEDIAL_CHARGE;
-  const list = nums.join(", ");
-  const text = `Failed fitting number${nums.length === 1 ? "" : "s"}: ${list}
-Cost of works: \xA3${REMEDIAL_CHARGE} per light${nums.length === 1 ? "" : " = \xA3" + total}`;
-  return { text, count: nums.length, total, numbers: nums };
+  if (!lines.length) return null;
+  const total = lines.length * REMEDIAL_CHARGE;
+  const text = `Failed EM fittings at store ${padCode(code) || code || ""}:
+` + lines.join("\n") + `
+Total: ${lines.length} fitting${lines.length === 1 ? "" : "s"} - \xA3${total}`;
+  return { text, count: lines.length, total, numbers };
 }
 async function createRemedialJobForCert(env, tid, certId, kind) {
   const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending'").bind(tid, certId).all();
@@ -9803,6 +10873,153 @@ async function createRemedialJobForCert(env, tid, certId, kind) {
     return null;
   }
 }
+async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate = "", by = "auto" } = {}) {
+  const code = padCode(cert.site_code || rec.siteCode);
+  if (!code) throw new Error("no store code");
+  let emKind = cert.type === "em" ? rec.emKind || "" : "";
+  if (cert.type === "em" && !emKind) {
+    try {
+      const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+      emKind = jb && jb.emKind || "";
+    } catch {
+    }
+  }
+  rec.certNumber = number;
+  rec.status = "final";
+  const sig = dataUrlToBytes2(rec.signature);
+  let logo = null;
+  try {
+    logo = logoBytes();
+  } catch {
+  }
+  const bytes = buildCertPdf(rec, { logo, signature: sig });
+  let fileScheme = "coop", fileType = cert.type;
+  try {
+    const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+    if (String(srow && srow.client || "").toLowerCase() === "fbc") {
+      fileScheme = "fareham";
+      if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly";
+    }
+  } catch {
+  }
+  const dd = /^\d{4}-\d{2}-\d{2}/.test(String(docDate || "")) ? String(docDate).slice(0, 10) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const filed = await fileCertificatePdf(env, tid, {
+    scheme: fileScheme,
+    code,
+    type: fileType,
+    bytes,
+    filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+    docDate: dd,
+    bump,
+    source: "cert:" + cert.id,
+    label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
+  });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, by, now, tid, cert.id).run();
+  return filed;
+}
+async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = false } = {}) {
+  const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending' ORDER BY fitting_no, id").bind(tid, certId).all();
+  const pend = results || [];
+  if (!pend.length) return null;
+  const jobId = "emrem:" + certId;
+  const existing = await getJob2(env, tid, jobId).catch(() => null);
+  if (existing) return existing.id;
+  const first = pend[0];
+  const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
+  const auditItems = [];
+  let n = 0;
+  for (const r of pend) {
+    const itemId = crypto.randomUUID();
+    const refPhotos = [];
+    let keys = [];
+    try {
+      keys = JSON.parse(r.photos || "[]");
+    } catch {
+    }
+    for (const key of Array.isArray(keys) ? keys : []) {
+      if (!key || typeof key !== "string" || n >= 40 || !env.JOB_FILES) continue;
+      try {
+        const obj = await env.JOB_FILES.get(key);
+        if (!obj) continue;
+        const fn = String(key).split("/").pop();
+        const dstKey = `jobs/${jobId}/audit/${itemId}/${fn}`;
+        const bytes = await obj.arrayBuffer();
+        await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+        try {
+          await env.JOB_FILES.put(dstKey + ".thumb", bytes, { httpMetadata: obj.httpMetadata });
+        } catch {
+        }
+        refPhotos.push(dstKey);
+        n++;
+      } catch {
+      }
+    }
+    const isB = r.kind === "battery";
+    const what = isB ? "Replace batteries" + (r.battery_spec ? " \u2014 " + r.battery_spec : "") + (r.battery_qty ? " \xD7" + r.battery_qty : "") : "Replace light fitting" + (r.light_spec ? " \u2014 " + r.light_spec : "");
+    const no = r.fitting_no != null ? r.fitting_no : "";
+    auditItems.push({ id: itemId, text: `Fitting ${no}${r.light_ref && !/^light \d+$/i.test(r.light_ref) ? " (" + r.light_ref + ")" : ""} \u2014 ${what}${r.note ? " \xB7 " + r.note : ""}`, refPhotos });
+  }
+  const lights = pend.filter((r) => r.kind !== "battery").length, batts = pend.length - lights;
+  const summary = [lights ? `${lights} light fitting${lights === 1 ? "" : "s"} to replace` : "", batts ? `batteries in ${batts} fitting${batts === 1 ? "" : "s"}` : ""].filter(Boolean).join(" + ");
+  const desc = (awaitingBatteries ? "\u23F3 AWAITING BATTERIES \u2014 do not book until the batteries have arrived (the office will clear this).\n\n" : "") + `EM remedial works at ${siteName} (from EM certificate ${first.cert_number}) \u2014 ${summary}. Each fitting is a checklist item below; photograph each one once replaced.`;
+  try {
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      id: jobId,
+      reference: "EM remedial \u2014 " + (siteCode || siteName),
+      status: "Pending",
+      priority: "Priority 4",
+      description: desc,
+      siteName,
+      siteCode,
+      originator: "em-remedial",
+      auditItems,
+      requiresRA: true,
+      requiresSignature: false,
+      requiresPhoto: false,
+      requiresNote: false,
+      assignedEngineers: []
+    });
+    if (job && job.id) {
+      const ids = pend.map((r) => r.id);
+      try {
+        for (let i = 0; i < ids.length; i += 20) await env.DB.batch(ids.slice(i, i + 20).map((rid) => env.DB.prepare("UPDATE em_remedials SET job_id=? WHERE tenant_id=? AND id=?").bind(job.id, tid, rid)));
+      } catch {
+      }
+    }
+    return job && job.id;
+  } catch {
+    return null;
+  }
+}
+async function poReceived(env, tid, certId, me, ctx) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const { results } = await env.DB.prepare("SELECT kind, status FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certId).all();
+  const rows = results || [];
+  const pend = rows.filter((r) => r.status === "pending");
+  await env.DB.prepare("UPDATE em_remedial_acks SET po_received_at=?, po_received_by=?, approved_at=COALESCE(approved_at,?), approved_by=COALESCE(approved_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, now, me, tid, certId).run();
+  if (!pend.length) {
+    const newId4 = await reissueCleanCert(env, tid, certId, ctx);
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='done', works_done_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    return { stage: "done", reissueCertId: newId4 };
+  }
+  const awaiting = pend.some((r) => r.kind === "battery");
+  const jobId = await createRemedialWorksJob(env, tid, certId, { awaitingBatteries: awaiting });
+  await env.DB.prepare("UPDATE em_remedial_acks SET stage='in_works', job_id=COALESCE(?,job_id), awaiting_batteries=? WHERE tenant_id=? AND cert_id=?").bind(jobId, awaiting ? 1 : 0, tid, certId).run();
+  if (jobId) {
+    try {
+      const { results: results2 } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND matched_cert_id=? AND status IN ('new','matched') ORDER BY created_at DESC LIMIT 5").bind(tid, certId).all();
+      for (const r of results2 || []) {
+        const o = shapeOrder(r);
+        if (o.unlinkedJobId && o.unlinkedJobId === jobId) continue;
+        await linkOrderToJobById(env, tid, o, jobId, me, { kind: "em" });
+        await env.DB.prepare("UPDATE client_orders SET status='actioned', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, r.id).run();
+      }
+    } catch {
+    }
+  }
+  return { stage: "in_works", jobId, awaitingBatteries: awaiting };
+}
 async function reissueCleanCert(env, tid, certId, ctx) {
   const orig = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, certId).first();
   if (!orig || orig.type !== "em") return null;
@@ -9833,22 +11050,30 @@ async function reissueCleanCert(env, tid, certId, ctx) {
   });
   if (!changed) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const newData = { ...data, rows: cleanRows, reissueOf: certId };
+  const newData = { ...data, rows: cleanRows, reissueOf: certId, replacedAt: now };
   await env.DB.prepare(
     "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
   ).bind(newId4, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now, now, now).run();
+  let filed = false;
   try {
-    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=? WHERE tenant_id=? AND cert_id=?").bind(newId4, now, tid, certId).run();
+    const nrow = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId4).first();
+    const rec = shapeRow2(nrow);
+    await fileCertNow(env, tid, nrow, rec, orig.cert_number || rec.certNumber || "", { bump: false, docDate: now.slice(0, 10), by: "auto (remedial works)" });
+    filed = true;
+  } catch {
+  }
+  try {
+    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=?, works_done_at=COALESCE(works_done_at,?), stage=CASE WHEN COALESCE(stage,'')='invoiced' THEN stage ELSE 'done' END WHERE tenant_id=? AND cert_id=?").bind(newId4, now, now, tid, certId).run();
   } catch {
   }
   try {
     const site = newData.installation && newData.installation.name || orig.site_code || "";
     const p = sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
-      title: "Updated EM certificate ready",
-      body: `Remedial works complete at ${site} \u2014 a clean EM certificate has been auto-generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass, marked "(Replaced)"). Review and issue it.`,
+      title: filed ? "Updated EM certificate filed" : "Updated EM certificate ready",
+      body: filed ? `${site}: the EM certificate has been re-issued with ${changed} fitting${changed === 1 ? "" : "s"} marked "Replaced" and filed to the compliance chart. Tap to download.` : `${site}: a clean EM certificate was generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass) but couldn't be filed automatically \u2014 review and issue it.`,
       url: "/cert-review.html?open=" + newId4,
       tag: "cert-reissue:" + newId4
-    });
+    }, null, { officeOnly: true });
     ctx?.waitUntil ? ctx.waitUntil(p.catch(() => {
     })) : await p.catch(() => {
     });
@@ -9858,7 +11083,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
 }
 async function reissueCleanCertForRemedialJob(env, tid, job) {
   try {
-    await ensureTables2(env);
+    await ensureTables3(env);
     const jid = String(job && job.id || "");
     if (!jid.startsWith("emrem:")) return null;
     const certId = jid.slice(6).replace(/:(L|B)$/i, "");
@@ -9876,12 +11101,21 @@ async function matchOrderToRemedial(env, tid, o) {
   if (!code && !num2) return null;
   try {
     const { results } = await env.DB.prepare(
-      "SELECT cert_id, site_code, site_name, cert_number, stage FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted') ORDER BY created_at DESC LIMIT 200"
+      "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
-    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2);
+    const skip = String(o.unlinkedJobId || "");
+    const waiting = (r) => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
-      return { kind: "em", certId: r.cert_id, note: `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})` + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
+      const late = !waiting(r) && r.job_id;
+      return {
+        kind: "em",
+        certId: r.cert_id,
+        jobId: late ? r.job_id : null,
+        stage: r.stage || "to_quote",
+        note: (late ? `Late order \u2014 EM cert ${r.cert_number || ""} at ${r.site_name || code} already has its works job (stage ${r.stage})` : `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})`) + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "")
+      };
     }
   } catch {
   }
@@ -9923,7 +11157,11 @@ function shapeOrder(r) {
     matchedCertId: r.matched_cert_id || "",
     matchedJobId: r.matched_job_id || "",
     matchNote: r.match_note || "",
-    createdAt: r.created_at || ""
+    createdAt: r.created_at || "",
+    unlinkedJobId: r.unlinked_job_id || "",
+    hasEmail: r.has_email != null ? !!Number(r.has_email) : !!r.email_text,
+    emailSubject: r.email_subject || "",
+    emailFrom: r.email_from || ""
   };
 }
 async function handleOrderInbound(env, tid, b, ctx, request) {
@@ -9951,11 +11189,22 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     }
   }
   if (!id) id = "ord-" + crypto.randomUUID();
-  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber });
+  let unlinkedJobId = "";
+  if (!created) {
+    try {
+      const ex = await env.DB.prepare("SELECT unlinked_job_id FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      unlinkedJobId = ex && ex.unlinked_job_id || "";
+    } catch {
+    }
+  }
+  const m = await matchOrderToRemedial(env, tid, { storeCode, siteName, srRef, orderNumber, unlinkedJobId });
   const status = m ? "matched" : "new";
+  const emailSubject = String(b.emailSubject || "").slice(0, 300) || null;
+  const emailFrom = String(b.emailFrom || "").slice(0, 200) || null;
+  const emailText = String(b.emailText || "").slice(0, 12e3) || null;
   await env.DB.prepare(`INSERT INTO client_orders
-    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,email_subject,email_from,email_text)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET order_number=excluded.order_number, client=excluded.client, priority=excluded.priority,
       order_value=excluded.order_value, currency=excluded.currency, title=excluded.title, detail=excluded.detail,
       description=excluded.description, job_category=excluded.job_category, observation_codes=excluded.observation_codes,
@@ -9963,7 +11212,9 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       site_raw=excluded.site_raw, notified_at=excluded.notified_at, link=excluded.link,
       status=CASE WHEN client_orders.status IN ('actioned','dismissed') THEN client_orders.status ELSE excluded.status END,
       matched_kind=excluded.matched_kind, matched_cert_id=excluded.matched_cert_id, matched_job_id=excluded.matched_job_id,
-      match_note=excluded.match_note, updated_at=excluded.updated_at`).bind(
+      match_note=excluded.match_note, updated_at=excluded.updated_at,
+      email_subject=COALESCE(excluded.email_subject, client_orders.email_subject), email_from=COALESCE(excluded.email_from, client_orders.email_from),
+      email_text=COALESCE(excluded.email_text, client_orders.email_text)`).bind(
     id,
     tid,
     extId || null,
@@ -9991,44 +11242,62 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     m ? m.jobId || null : null,
     m ? m.note : null,
     now,
-    now
+    now,
+    emailSubject,
+    emailFrom,
+    emailText
   ).run();
+  const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
+  let linkedJob = null;
+  if (!m) {
+    try {
+      linkedJob = await linkOrderToExistingJob(env, tid, oShape);
+    } catch {
+    }
+  } else if (m.jobId) {
+    try {
+      linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" });
+    } catch {
+    }
+  }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 no matching remedial found yet. Review it in the remedials tracker.`;
+    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
     ctx.waitUntil(sendToPermission(
       env,
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m ? "Client order \u2014 approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true },
-      ""
+      { title: m && !linkedJob ? "Client order \u2014 approve remedial" : "Client order received", body, url: m && !linkedJob ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
+      "",
+      { officeOnly: true }
     ).catch(() => {
     }));
   }
-  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
+  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : linkedJob ? "job" : null, status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
-async function getConfig(env, tid) {
+async function getConfig2(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
   let c = null;
   try {
     c = row ? JSON.parse(row.value) : null;
   } catch {
   }
-  if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG2));
   return {
-    client: { ...DEFAULT_CONFIG.client, ...c.client || {} },
-    contractor: { ...DEFAULT_CONFIG.contractor, ...c.contractor || {} },
-    em: { ...DEFAULT_CONFIG.em, ...c.em || {} },
-    pat: { ...DEFAULT_CONFIG.pat, ...c.pat || {} },
+    client: { ...DEFAULT_CONFIG2.client, ...c.client || {} },
+    contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
+    em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
+    pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} },
     reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
     supplierName: typeof c.supplierName === "string" ? c.supplierName : "",
-    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : ""
+    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : "",
+    supplierCc: typeof c.supplierCc === "string" ? c.supplierCc : ""
   };
 }
-async function saveConfig(env, tid, c) {
+async function saveConfig2(env, tid, c) {
   await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:config:" + tid, JSON.stringify(c)).run();
 }
-function dataUrlToBytes(u) {
+function dataUrlToBytes2(u) {
   const s = String(u || "");
   const i = s.indexOf(",");
   if (!/^data:image\//i.test(s) || i < 0) return null;
@@ -10041,7 +11310,7 @@ function dataUrlToBytes(u) {
     return null;
   }
 }
-async function getJob(env, tid, id) {
+async function getJob2(env, tid, id) {
   try {
     const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
     return row ? JSON.parse(row.data) : null;
@@ -10081,7 +11350,7 @@ async function maybeCompleteCertJob(env, tid, cert) {
     const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
     if (engs.length >= 2) {
       job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "cert" };
+      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "cert" };
     } else if (job.engStatus) {
       for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now, by: "cert" };
     }
@@ -10319,7 +11588,7 @@ async function suggestNumber(env, tid, code, type, opts = {}) {
   if (opts.kind === "monthly") return set + "-" + monthYY(opts.date);
   return set + "-" + yy();
 }
-function shapeRow(cert) {
+function shapeRow2(cert) {
   let d = {};
   try {
     d = JSON.parse(cert.data) || {};
@@ -10342,7 +11611,7 @@ function shapeRow(cert) {
   };
   return normalizeRemedials(rec);
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -10369,7 +11638,7 @@ async function handle9(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const oTid = await resolveTenantId(env, request);
-      await ensureTables2(env);
+      await ensureTables3(env);
       const ob = await request.json().catch(() => ({}));
       return await handleOrderInbound(env, oTid, ob, ctx, request);
     }
@@ -10379,7 +11648,7 @@ async function handle9(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/certs(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables2(env);
+  await ensureTables3(env);
   const perms = await permissionsFor(env, tid, me);
   const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
   const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
@@ -10389,7 +11658,7 @@ async function handle9(request, env, ctx, url, sess) {
     const m = String(me || "").toLowerCase().trim();
     if (String(cert.engineer || "").toLowerCase().trim() === m) return true;
     try {
-      const job = cert.job_id ? await getJob(env, tid, String(cert.job_id)) : null;
+      const job = cert.job_id ? await getJob2(env, tid, String(cert.job_id)) : null;
       const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
       return engs.some((e) => String(e || "").toLowerCase().trim() === m);
     } catch {
@@ -10397,11 +11666,11 @@ async function handle9(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig2(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig(env, tid);
+      const cur = await getConfig2(env, tid);
       const next = {
         client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
@@ -10409,9 +11678,10 @@ async function handle9(request, env, ctx, url, sess) {
         pat: { ...cur.pat, ...b.pat || {} },
         reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers,
         supplierName: typeof b.supplierName === "string" ? b.supplierName.slice(0, 120) : cur.supplierName,
-        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail
+        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail,
+        supplierCc: typeof b.supplierCc === "string" ? b.supplierCc.slice(0, 200) : cur.supplierCc
       };
-      await saveConfig(env, tid, next);
+      await saveConfig2(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }
   }
@@ -10468,7 +11738,7 @@ async function handle9(request, env, ctx, url, sess) {
   if (sub === "/jobs/create-next" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const src = await getJob(env, tid, String(b.jobId || ""));
+    const src = await getJob2(env, tid, String(b.jobId || ""));
     if (!src) return error("Job not found", 404, env, request);
     let months = Number(b.months);
     if (!Number.isFinite(months) || months < 1 || months > 60) months = src.emKind === "monthly" ? 1 : 12;
@@ -10637,7 +11907,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!certId || !file || typeof file === "string") return error("Missing certId or file", 400, env, request);
     const cert = await loadCert(certId);
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
     const rand = Math.abs((Date.now() ^ certId.length * 2654435761) % 1e6);
     const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
@@ -10654,7 +11924,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const type = T(q.get("type"));
     let code = q.get("code") || "";
     if (!code && q.get("jobId")) {
-      const job = await getJob(env, tid, String(q.get("jobId")));
+      const job = await getJob2(env, tid, String(q.get("jobId")));
       code = job ? job.siteCode || "" : "";
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
@@ -10664,8 +11934,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
-    const config = await getConfig(env, tid);
-    const job = await getJob(env, tid, jobId);
+    const config = await getConfig2(env, tid);
+    const job = await getJob2(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
     let siteData = {};
@@ -10678,7 +11948,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
     if (existing) {
-      const exRec = shapeRow(existing);
+      const exRec = shapeRow2(existing);
       await backfillClient(env, tid, exRec);
       await resignRemedialPhotos(env, url.origin, exRec);
       return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
@@ -10753,9 +12023,18 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     if (!existing) {
       id = "CERT-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      let owner = me;
+      if (isOffice && b.jobId) {
+        try {
+          const j = await getJob2(env, tid, String(b.jobId));
+          const engs = j ? Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [] : [];
+          if (engs.length && !engs.some((e) => String(e || "").toLowerCase().trim() === String(me || "").toLowerCase().trim())) owner = String(engs[0]);
+        } catch {
+        }
+      }
       await env.DB.prepare(
         "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), me, now, now).run();
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
     } else {
       await env.DB.prepare(
         "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
@@ -10777,13 +12056,13 @@ PAT: Import certificate number ${num2}-${yr}`;
       url: "/cert-review.html",
       tag: "cert-review:" + cert.id
     };
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     const chosen = (cfg.reviewers || []).filter((u) => String(u).toLowerCase() !== String(me).toLowerCase());
     if (chosen.length) {
       ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
       }))));
     } else {
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me, { officeOnly: true }).catch(() => {
       }));
     }
     return json({ ok: true, jobComplete: jobDone }, {}, env, request);
@@ -10791,10 +12070,10 @@ PAT: Import certificate number ${num2}-${yr}`;
   if (sub === "/pdf" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const rec = shapeRow(cert);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -10806,11 +12085,11 @@ PAT: Import certificate number ${num2}-${yr}`;
   if (sub === "/one" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const oneRec = shapeRow(cert);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
+    const oneRec = shapeRow2(cert);
     await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
-    return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
+    return json({ ok: true, record: oneRec, config: await getConfig2(env, tid) }, {}, env, request);
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -10818,7 +12097,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const rows = (await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND status IN " + statuses + " ORDER BY COALESCE(submitted_at,finalised_at,updated_at) DESC LIMIT 300"
     ).bind(tid).all()).results || [];
-    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+    return json({ ok: true, certs: rows.map(shapeRow2) }, {}, env, request);
   }
   if (sub === "/status" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -10905,14 +12184,14 @@ PAT: Import certificate number ${num2}-${yr}`;
     const rows = (await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND site_code=? AND type=? ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 100"
     ).bind(tid, code, type).all()).results || [];
-    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+    return json({ ok: true, certs: rows.map(shapeRow2) }, {}, env, request);
   }
   if (sub === "/finalise" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
@@ -10920,7 +12199,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
@@ -10928,7 +12207,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type, { kind: emKind, date: docDate })).trim();
     rec.certNumber = number;
     rec.status = "final";
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -10975,7 +12254,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (remedial && remedial.count) {
       const site = rec.installation && rec.installation.name || code;
       const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (\xA3${remedial.charge} in lights)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries` : "") + `. Quote the client \u2014 track it on the EM remedials list.`;
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }, null, { officeOnly: true }).catch(() => {
       }));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
@@ -10985,7 +12264,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code.", 400, env, request);
@@ -10995,14 +12274,14 @@ PAT: Import certificate number ${num2}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
     }
     rec.certNumber = number;
     rec.status = "final";
-    const sig = dataUrlToBytes(rec.signature);
+    const sig = dataUrlToBytes2(rec.signature);
     let logo = null;
     try {
       logo = logoBytes();
@@ -11054,7 +12333,11 @@ PAT: Import certificate number ${num2}-${yr}`;
     const pending = rows.filter((r) => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
   }
-  const shapeCase = (r) => ({
+  const stageOf = (r) => {
+    const s = r.stage || "to_quote";
+    return s === "approved" ? "in_works" : s;
+  };
+  const shapeCase = (r, fittings) => ({
     certId: r.cert_id,
     certNumber: r.cert_number,
     siteName: r.site_name || r.site_code,
@@ -11066,21 +12349,96 @@ PAT: Import certificate number ${num2}-${yr}`;
     batteries: r.batteries || 0,
     lightsPending: r.lights_pending || 0,
     lightsJobId: r.lights_job_id || null,
-    stage: r.stage || "to_quote",
-    jobId: r.job_id || null,
+    stage: stageOf(r),
+    jobId: r.job_id || r.lights_job_id || null,
     createdAt: r.created_at,
     quotedAt: r.quoted_at,
     approvedAt: r.approved_at,
     invoicedAt: r.invoiced_at,
-    reissueCertId: r.reissue_cert_id || null
+    poReceivedAt: r.po_received_at || null,
+    worksDoneAt: r.works_done_at || null,
+    awaitingBatteries: !!(r.awaiting_batteries && !r.batteries_arrived_at),
+    batteriesArrivedAt: r.batteries_arrived_at || null,
+    statusLabel: r.status_label || (r.lights_pending ? "works" : r.pending ? "batteries" : "onsite"),
+    reissueCertId: r.reissue_cert_id || null,
+    items: (fittings || []).map((f) => ({
+      id: f.id,
+      no: f.fitting_no,
+      ref: f.light_ref,
+      kind: f.kind === "battery" ? "battery" : "light",
+      photos: (() => {
+        try {
+          const p = JSON.parse(f.photos || "[]");
+          return Array.isArray(p) ? p.length : 0;
+        } catch {
+          return 0;
+        }
+      })(),
+      replacedOnSite: !!f.replaced_on_site,
+      spec: f.kind === "battery" ? f.battery_spec || "" : f.light_spec || "",
+      qty: f.battery_qty || 0,
+      note: f.note || ""
+    }))
   });
+  const fittingsFor = async (certIds) => {
+    const out = {};
+    const ids = (certIds || []).filter(Boolean);
+    for (let i = 0; i < ids.length; i += 60) {
+      const chunk = ids.slice(i, i + 60);
+      const { results } = await env.DB.prepare(`SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY fitting_no, id`).bind(tid, ...chunk).all().catch(() => ({ results: [] }));
+      for (const r of results || []) (out[r.cert_id] = out[r.cert_id] || []).push(r);
+    }
+    for (const certId of Object.keys(out)) {
+      const rows = out[certId];
+      if (!rows.some((r) => r.fitting_no == null || !r.photos || r.photos === "[]")) continue;
+      try {
+        const cert = await loadCert(certId);
+        if (!cert) continue;
+        const rec = shapeRow2(cert);
+        const fails = (Array.isArray(rec.rows) ? rec.rows : []).map((r, i) => ({ r, i })).filter((x) => isRealRemedial(x.r.remedial));
+        const ups = [];
+        for (const row of rows) {
+          const idx = Number(String(row.id).split(":").pop());
+          const f = fails[idx];
+          if (!f) continue;
+          const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
+          const keys = Array.isArray(f.r.remedial && f.r.remedial.photos) ? f.r.remedial.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean) : [];
+          const needNo = row.fitting_no == null, needPh = (!row.photos || row.photos === "[]") && keys.length;
+          if (!needNo && !needPh) continue;
+          if (needNo) row.fitting_no = no;
+          if (needPh) row.photos = JSON.stringify(keys);
+          ups.push(env.DB.prepare("UPDATE em_remedials SET fitting_no=?, photos=? WHERE tenant_id=? AND id=?").bind(row.fitting_no, row.photos || "[]", tid, row.id));
+        }
+        if (ups.length) await env.DB.batch(ups);
+        rows.sort((a, b) => (a.fitting_no ?? 1e9) - (b.fitting_no ?? 1e9) || String(a.id).localeCompare(String(b.id)));
+      } catch {
+      }
+    }
+    return out;
+  };
   if (sub === "/remedials/outstanding" && method === "GET") {
     if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const { results } = await env.DB.prepare(
       "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
     ).bind(tid, now).all();
-    return json({ ok: true, remedials: (results || []).map(shapeCase) }, {}, env, request);
+    const rows = results || [];
+    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    const out = [];
+    for (const r of rows) {
+      const c = shapeCase(r, fit4[r.cert_id]);
+      try {
+        const cert = await loadCert(r.cert_id);
+        if (cert) {
+          const q2 = buildQuoteText(shapeRow2(cert), r.site_code);
+          c.quoteText = q2 ? q2.text : "";
+          c.quoteTotal = q2 ? q2.total : 0;
+        }
+      } catch {
+      }
+      out.push(c);
+    }
+    return json({ ok: true, remedials: out }, {}, env, request);
   }
   if (sub === "/remedials/board" && method === "GET") {
     if (!isOffice) return json({ ok: true, cases: [] }, {}, env, request);
@@ -11088,13 +12446,87 @@ PAT: Import certificate number ${num2}-${yr}`;
     const { results } = await env.DB.prepare(
       `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
     ).bind(tid).all();
-    return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
+    const rows = results || [];
+    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    return json({ ok: true, cases: rows.map((r) => shapeCase(r, fit4[r.cert_id])) }, {}, env, request);
+  }
+  if (sub === "/orders" && method === "GET") {
+    if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
+    const client = String(q.get("client") || "").trim().toLowerCase();
+    const { results } = await env.DB.prepare(`SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600`).bind(tid).all();
+    const rows = (results || []).map(shapeOrder);
+    const all = await listJobs(env, tid);
+    const byId = new Map(all.map((j) => [j.id, j]));
+    let doneNames = /* @__PURE__ */ new Set();
+    try {
+      const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+      (JSON.parse(c && c.value || "[]") || []).forEach((x) => {
+        if (x && x.done) doneNames.add(String(x.name || "").toLowerCase());
+      });
+    } catch {
+    }
+    const finished = (j) => {
+      const st = String(j && j.status || "").toLowerCase();
+      return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st);
+    };
+    const shaped = rows.map((o) => {
+      const j = o.matchedJobId && byId.get(o.matchedJobId) || null;
+      const incident = (/^(\d{5,12})\/\d{1,3}$/.exec(o.orderNumber || "") || [])[1] || "";
+      const earlier = incident ? all.filter((x) => new RegExp("^" + incident + "/\\d{1,3}$").test(String(x.helpdeskRef || "")) && (!j || x.id !== j.id)).map((x) => ({ id: x.id, ref: x.helpdeskRef || x.id, status: x.status || "" })) : [];
+      const stage = o.status === "dismissed" ? "dismissed" : !j ? "needs_job" : finished(j) ? "done" : "live";
+      return {
+        ...o,
+        stage,
+        incident,
+        earlier,
+        job: j ? { id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "", engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [], scheduledAt: j.scheduledAt || null, cancelledAt: j.cancelledAt || null, orderValue: j.orderValue ?? null } : null
+      };
+    }).filter((o) => !client || String(o.client || "").toLowerCase() === client);
+    const clients = [...new Set(rows.map((o) => String(o.client || "").trim()).filter(Boolean))].sort();
+    return json({ ok: true, orders: shaped, clients }, {}, env, request);
+  }
+  if (sub === "/orders/make-job" && method === "POST") {
+    if (!await canSeeMoney(env, tid, me) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (ord.status === "dismissed") return error("This order was dismissed \u2014 reopen it first", 400, env, request);
+    const o = shapeOrder(ord);
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
+    const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes: Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : void 0, assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [] });
+    return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null }, {}, env, request);
+  }
+  if (sub === "/orders/unlink" && method === "POST") {
+    if (!await canSeeMoney(env, tid, me) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (!ord.matched_job_id) return error("This order isn't linked to a job", 400, env, request);
+    const jobId = String(ord.matched_job_id);
+    const job = await unlinkOrderFromJob(env, tid, shapeOrder(ord), me);
+    return json({ ok: true, jobId, ref: job ? job.helpdeskRef || job.id : jobId }, {}, env, request);
+  }
+  if (sub === "/orders/email" && method === "GET") {
+    if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
+    const ord = await env.DB.prepare("SELECT id, order_number, notified_at, link, email_subject, email_from, email_text FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(q.get("id") || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    return json({ ok: true, id: ord.id, orderNumber: ord.order_number || "", at: ord.notified_at || "", link: ord.link || "", subject: ord.email_subject || "", from: ord.email_from || "", text: ord.email_text || "" }, {}, env, request);
+  }
+  if (sub === "/orders/link" && method === "POST") {
+    if (!await canSeeMoney(env, tid, me) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    const jobId = String(b.jobId || "").trim();
+    const job = await linkOrderToJobById(env, tid, shapeOrder(ord), jobId, me);
+    if (!job) return error("Job not found", 404, env, request);
+    return json({ ok: true, jobId, ref: job.helpdeskRef || job.id }, {}, env, request);
   }
   if (sub === "/remedials/orders" && method === "GET") {
     if (!isOffice) return json({ ok: true, orders: [] }, {}, env, request);
     const all = q.get("all") === "1";
     const { results } = await env.DB.prepare(
-      `SELECT * FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
+      `SELECT ${ORDER_COLS} FROM client_orders WHERE tenant_id=?${all ? "" : " AND status IN ('new','matched')"} ORDER BY created_at DESC LIMIT 300`
     ).bind(tid).all();
     return json({ ok: true, orders: (results || []).map(shapeOrder) }, {}, env, request);
   }
@@ -11118,11 +12550,15 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (action === "approve") {
       let jobId = null, note = "";
       if (ord.matched_kind === "em" && ord.matched_cert_id) {
-        const lj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "light").catch(() => null);
-        const bj = await createRemedialJobForCert(env, tid, ord.matched_cert_id, "battery").catch(() => null);
-        jobId = bj || lj;
-        await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id), lights_job_id=COALESCE(?,lights_job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, bj, lj, tid, ord.matched_cert_id).run();
-        note = jobId ? "Works job raised \u2014 case approved." : "Case approved (no pending fittings to raise).";
+        const res = await poReceived(env, tid, ord.matched_cert_id, me, ctx);
+        jobId = res.jobId || null;
+        if (jobId) {
+          try {
+            await linkOrderToJobById(env, tid, shapeOrder(ord), jobId, me, { kind: "em" });
+          } catch {
+          }
+        }
+        note = res.stage === "done" ? "All fittings were replaced on site \u2014 updated certificate filed to compliance." : res.awaitingBatteries ? "Works job raised (awaiting batteries)." : "Works job raised.";
       } else if (ord.matched_kind === "elec" && ord.matched_job_id) {
         jobId = ord.matched_job_id;
         note = "Open the electrical-test job to raise the remedial works job.";
@@ -11156,9 +12592,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!certId || STAGES.indexOf(to) < 0) return error("Missing certId or bad stage", 400, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let jobId = null;
-    if (to === "approved") {
-      jobId = await createRemedialJobForCert(env, tid, certId, "battery");
-      await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, jobId, tid, certId).run();
+    if (to === "approved" || to === "in_works" || to === "done") {
+      const res = await poReceived(env, tid, certId, me, ctx);
+      jobId = res.jobId || null;
     } else if (to === "invoiced") {
       await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
     } else if (to === "to_quote") {
@@ -11169,15 +12605,248 @@ PAT: Import certificate number ${num2}-${yr}`;
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     return json({ ok: true, stage: to, jobId, case: row ? shapeCase(row) : null }, {}, env, request);
   }
+  if (sub === "/remedials/fitting-update" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || "").trim(), rowId = String(b.id || "").trim();
+    const kind = b.kind === void 0 ? void 0 : b.kind === "battery" ? "battery" : "light";
+    const onsite = b.replacedOnSite === void 0 ? void 0 : !!b.replacedOnSite;
+    const spec = b.spec === void 0 ? void 0 : String(b.spec || "").trim().slice(0, 120);
+    const qty = b.qty === void 0 ? void 0 : Math.max(0, Math.min(99, Number(b.qty) || 0));
+    if (!certId || !rowId || kind === void 0 && onsite === void 0 && spec === void 0 && qty === void 0) return error("Missing certId/id or nothing to change", 400, env, request);
+    const ack = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!ack) return error("No remedial case for that certificate", 404, env, request);
+    if (["done", "invoiced"].includes(ack.stage || "")) return error("This case is finished \u2014 the certificate has already been re-issued.", 409, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow2(cert);
+    const rows = Array.isArray(rec.rows) ? rec.rows : [];
+    const fails = rows.map((r, i) => ({ r, i })).filter((x) => isRealRemedial(x.r.remedial));
+    const f = fails[Number(String(rowId).split(":").pop())];
+    if (!f || !f.r.remedial) return error("That fitting isn't on the certificate", 404, env, request);
+    const rem = f.r.remedial;
+    const trail = [];
+    const wasKind = rem.kind === "battery" ? "battery" : "light";
+    if (kind !== void 0 && kind !== wasKind) {
+      trail.push("Office changed to " + (kind === "battery" ? "batteries" : "light replacement") + " (engineer had logged " + (wasKind === "battery" ? "batteries" + (rem.batterySpec ? ": " + rem.batterySpec : "") : "light replacement" + (rem.lightSpec ? ": " + rem.lightSpec : "")) + ")");
+      rem.kind = kind;
+    }
+    if (onsite !== void 0 && onsite !== (rem.replacedOnSite === true)) {
+      trail.push("Office marked " + (onsite ? "replaced on site" : "not replaced on site"));
+      rem.replacedOnSite = onsite;
+    }
+    const nowBatt = rem.kind === "battery";
+    if (spec !== void 0) {
+      if (nowBatt) rem.batterySpec = spec;
+      else rem.lightSpec = spec;
+    }
+    if (qty !== void 0 && nowBatt) rem.batteryQty = qty;
+    if (trail.length) rem.note = [String(rem.note || "").trim(), ...trail].filter(Boolean).join(" \xB7 ");
+    rem.failed = true;
+    rows[f.i].remedial = rem;
+    rec.rows = rows;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const isB = rem.kind === "battery";
+    await env.DB.prepare("UPDATE em_remedials SET kind=?, light_spec=?, battery_spec=?, battery_qty=?, replaced_on_site=?, status=?, note=? WHERE tenant_id=? AND id=?").bind(
+      isB ? "battery" : "light",
+      isB ? "" : String(rem.lightSpec || ""),
+      isB ? String(rem.batterySpec || "") : "",
+      isB ? Number(rem.batteryQty) || 0 : 0,
+      rem.replacedOnSite ? 1 : 0,
+      rem.replacedOnSite ? "done" : "pending",
+      rem.note || "",
+      tid,
+      rowId
+    ).run();
+    const all = fails.map((x) => {
+      const m = x.r.remedial || {};
+      return { kind: m.kind === "battery" ? "battery" : "light", replaced: m.replacedOnSite === true };
+    });
+    const pend = all.filter((x) => !x.replaced);
+    const battPend = pend.filter((x) => x.kind === "battery").length;
+    await env.DB.prepare("UPDATE em_remedial_acks SET fittings=?, charge=?, onsite=?, pending=?, batteries=?, lights_pending=?, status_label=?, awaiting_batteries=CASE WHEN ?=0 THEN 0 ELSE awaiting_batteries END WHERE tenant_id=? AND cert_id=?").bind(all.length, all.length * REMEDIAL_CHARGE, all.length - pend.length, pend.length, all.filter((x) => x.kind === "battery").length, pend.filter((x) => x.kind !== "battery").length, caseStatusLabel(all), battPend, tid, certId).run();
+    let jobFixed = false;
+    try {
+      const jobId = ack.job_id || "emrem:" + certId;
+      const jr8 = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+      if (jr8 && jr8.data) {
+        const job = JSON.parse(jr8.data);
+        const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
+        const ref = String(f.r.comments || "").trim();
+        const what = isB ? "Replace batteries" + (rem.batterySpec ? " \u2014 " + rem.batterySpec : "") + (rem.batteryQty ? " \xD7" + rem.batteryQty : "") : "Replace light fitting" + (rem.lightSpec ? " \u2014 " + rem.lightSpec : "");
+        const line2 = `Fitting ${no}${ref && !/^light \d+$/i.test(ref) ? " (" + ref + ")" : ""} \u2014 ${what}${rem.note ? " \xB7 " + rem.note : ""}`;
+        let hit = false;
+        job.auditItems = (Array.isArray(job.auditItems) ? job.auditItems : []).map((it) => {
+          const t = String(it && it.text || "");
+          if (it && new RegExp("^Fitting " + no + "\\b").test(t)) {
+            hit = true;
+            return { ...it, text: line2 };
+          }
+          return it;
+        });
+        const lightsN = pend.filter((x) => x.kind !== "battery").length;
+        const summary = [lightsN ? `${lightsN} light fitting${lightsN === 1 ? "" : "s"} to replace` : "", battPend ? `batteries in ${battPend} fitting${battPend === 1 ? "" : "s"}` : ""].filter(Boolean).join(" + ");
+        let desc = String(job.description || "");
+        desc = desc.replace(/\) — [^.]*\. Each fitting is a checklist item below/, ") \u2014 " + summary + ". Each fitting is a checklist item below");
+        if (!battPend) desc = desc.replace(/^⏳ AWAITING BATTERIES[^\n]*\n+/u, "");
+        if (desc !== job.description) {
+          job.description = desc;
+          hit = true;
+        }
+        if (hit) {
+          job.updatedAt = nowIso;
+          await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
+          jobFixed = true;
+        }
+      }
+    } catch {
+    }
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    const fit4 = await fittingsFor([certId]);
+    return json({ ok: true, jobFixed, case: row ? shapeCase(row, fit4[certId] || []) : null }, {}, env, request);
+  }
+  if (sub === "/remedials/fitting-photo" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const certId = String(form && form.get("certId") || "").trim();
+    const rowId = String(form && form.get("id") || "").trim();
+    if (!certId || !rowId || !file || typeof file === "string") return error("Missing certId, id or file", 400, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow2(cert);
+    const rows = Array.isArray(rec.rows) ? rec.rows : [];
+    const fails = rows.map((r, i) => ({ r, i })).filter((x) => isRealRemedial(x.r.remedial));
+    const f = fails[Number(String(rowId).split(":").pop())];
+    if (!f || !f.r.remedial) return error("That fitting isn't on the certificate", 404, env, request);
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength > 6 * 1024 * 1024) return error("Photo too large", 413, env, request);
+    const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const rand = Math.abs((Date.now() ^ certId.length * 2654435761) % 1e6);
+    const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const rem = f.r.remedial;
+    rem.photos = Array.isArray(rem.photos) ? rem.photos : [];
+    rem.photos.push({ key });
+    rem.failed = true;
+    rows[f.i].remedial = rem;
+    rec.rows = rows;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(rec), nowIso, tid, certId).run();
+    const keys = rem.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean);
+    await env.DB.prepare("UPDATE em_remedials SET photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(keys), tid, rowId).run();
+    let jobFixed = false;
+    try {
+      const ack = await env.DB.prepare("SELECT job_id FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+      const jobId = ack && ack.job_id || "emrem:" + certId;
+      const jr8 = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+      if (jr8 && jr8.data) {
+        const job = JSON.parse(jr8.data);
+        const no = f.r.no != null && f.r.no !== "" ? Number(f.r.no) || f.i + 1 : f.i + 1;
+        const item = (Array.isArray(job.auditItems) ? job.auditItems : []).find((it) => it && new RegExp("^Fitting " + no + "\\b").test(String(it.text || "")));
+        if (item) {
+          const dstKey = `jobs/${jobId}/audit/${item.id}/${key.split("/").pop()}`;
+          await env.JOB_FILES.put(dstKey, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          try {
+            await env.JOB_FILES.put(dstKey + ".thumb", buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+          } catch {
+          }
+          item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
+          item.refPhotos.push(dstKey);
+          job.updatedAt = nowIso;
+          await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(job), tid, jobId).run();
+          jobFixed = true;
+        }
+      }
+    } catch {
+    }
+    const urlOut = await signedFileUrl(env, url.origin, "/certs/photo", key);
+    return json({ ok: true, key, url: urlOut, photos: keys.length, jobFixed }, {}, env, request);
+  }
   if (sub === "/remedials/quote-text" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const cert = await loadCert(String(q.get("certId") || q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow2(cert);
     const siteName = rec.installation && rec.installation.name || rec.client && rec.client.name || cert.site_code;
-    const quote = buildLightQuoteText(rec, siteName);
-    if (!quote) return json({ ok: true, text: "", count: 0, total: 0, message: "No light-fitting remedials on this certificate." }, {}, env, request);
+    const quote = buildQuoteText(rec, cert.site_code || rec.siteCode);
+    if (!quote) return json({ ok: true, text: "", count: 0, total: 0, message: "No failed fittings on this certificate." }, {}, env, request);
     return json({ ok: true, ...quote, site: siteName, certNumber: rec.certNumber || "" }, {}, env, request);
+  }
+  if (sub === "/remedials/po-received" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const exists = await env.DB.prepare("SELECT cert_id FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!exists) return error("No remedial case for that certificate", 404, env, request);
+    const res = await poReceived(env, tid, certId, me, ctx);
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    return json({ ok: true, ...res, case: row ? shapeCase(row, (await fittingsFor([certId]))[certId]) : null }, {}, env, request);
+  }
+  if (sub === "/remedials/batteries-arrived" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    if (!row) return error("No remedial case for that certificate", 404, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    const jobId = row.job_id || "emrem:" + certId;
+    try {
+      const job = await getJob2(env, tid, jobId);
+      if (job && /AWAITING BATTERIES/.test(String(job.description || ""))) {
+        await createOrUpdateJobFromPayload(env, tid, { id: jobId, description: String(job.description).replace(/^⏳ AWAITING BATTERIES[^\n]*\n\n?/, "") });
+      }
+    } catch {
+    }
+    ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "Batteries arrived \u2014 EM remedial ready to book",
+      body: `${row.site_name || row.site_code}: the batteries for the EM remedial have arrived. The works job can be scheduled now.`,
+      url: "/job-view.html?jobId=" + encodeURIComponent(jobId),
+      tag: "em-batt:" + certId
+    }, me, { officeOnly: true }).catch(() => {
+    }));
+    return json({ ok: true, jobId }, {}, env, request);
+  }
+  if (sub === "/remedials/email-draft" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const cert = await loadCert(String(q.get("certId") || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow2(cert);
+    const cfg = await getConfig2(env, tid);
+    const code = padCode(cert.site_code || rec.siteCode) || "";
+    const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
+    const reference = `${code}-EM-${yr}`;
+    const hour = Number((/* @__PURE__ */ new Date()).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+    const greet = hour < 12 ? "Good morning" : "Good afternoon";
+    let who = me;
+    try {
+      const u = await env.DB.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+      if (u && (u.first_name || u.last_name)) who = [u.first_name, u.last_name].filter(Boolean).join(" ");
+    } catch {
+    }
+    const con = cfg.contractor || {};
+    const body = `${greet},
+
+Please see attached document showing batteries required and quantities. If you could please send us a quotation including delivery times and use reference ${reference}.
+
+Kind regards,
+${who}
+${con.tradingTitle || "Mostlane"}`;
+    const site = rec.installation && rec.installation.name || code;
+    return json({
+      ok: true,
+      to: cfg.supplierEmail || "",
+      cc: cfg.supplierCc || "",
+      supplierName: cfg.supplierName || "",
+      subject: `Battery quotation request \u2014 ${reference}${site ? " (" + site + ")" : ""}`,
+      body,
+      reference,
+      filename: `Battery enquiry ${reference}.pdf`
+    }, {}, env, request);
   }
   if (sub === "/remedials/raise-lights" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -11214,11 +12883,11 @@ PAT: Import certificate number ${num2}-${yr}`;
   }
   if (sub === "/remedials/supplier-pdf" || sub === "/remedials/supplier-email") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    let certId = "", code = "";
+    let certId = "", code = "", postBody = {};
     if (method === "POST") {
-      const b = await request.json().catch(() => ({}));
-      certId = String(b.certId || "").trim();
-      code = String(b.code || "").trim();
+      postBody = await request.json().catch(() => ({}));
+      certId = String(postBody.certId || "").trim();
+      code = String(postBody.code || "").trim();
     } else {
       certId = String(q.get("certId") || "").trim();
       code = String(q.get("code") || "").trim();
@@ -11230,8 +12899,30 @@ PAT: Import certificate number ${num2}-${yr}`;
         if (!key) continue;
         try {
           const o = env.JOB_FILES && await env.JOB_FILES.get(key);
-          if (o) imgs.push(new Uint8Array(await o.arrayBuffer()));
-        } catch {
+          if (!o) {
+            imgs.push({ why: "photo file missing from storage" });
+            continue;
+          }
+          const b = new Uint8Array(await o.arrayBuffer());
+          if (b.length > 2 && b[0] === 255 && b[1] === 216) {
+            imgs.push({ jpeg: b });
+            continue;
+          }
+          if (b.length > 8 && b[0] === 137 && b[1] === 80) {
+            const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 900 });
+            if (!d) {
+              imgs.push({ why: "PNG couldn't be decoded" });
+              continue;
+            }
+            const s = shrinkRgb(d.rgb, d.width, d.height, 900);
+            const z = await deflate(s.rgb);
+            imgs.push(z ? { rgb: z, w: s.w, h: s.h, deflated: true } : { rgb: s.rgb, w: s.w, h: s.h });
+            continue;
+          }
+          const ct = o.httpMetadata && o.httpMetadata.contentType || "";
+          imgs.push({ why: /heic|heif/i.test(ct) ? "HEIC photo \u2014 not embeddable" : "unsupported image format" + (ct ? " (" + ct + ")" : "") });
+        } catch (e) {
+          imgs.push({ why: "photo couldn't be read" });
         }
       }
       return imgs;
@@ -11241,7 +12932,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (certId) {
       const cert = await loadCert(certId);
       if (!cert) return error("Certificate not found", 404, env, request);
-      const rec = shapeRow(cert);
+      const rec = shapeRow2(cert);
       siteName = rec.installation && rec.installation.name || cert.site_code || "";
       certNumber = rec.certNumber || cert.cert_number || "";
       const batt = (rec.rows || []).filter((r2) => r2.remedial && isRealRemedial(r2.remedial) && r2.remedial.kind === "battery");
@@ -11265,7 +12956,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       }
     } else return error("certId or code required", 400, env, request);
     if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     let logo = null;
     try {
       logo = logoBytes();
@@ -11282,7 +12973,17 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (method === "GET") {
       return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${fname}"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
     }
-    if (!cfg.supplierEmail) return error("Set a supplier email first (cert-review \u2192 \u{1F4E7} Supplier).", 400, env, request);
+    const bodyIn = postBody || {};
+    const toAddr = String(bodyIn.to || cfg.supplierEmail || "").trim();
+    const ccAddr = String(bodyIn.cc != null ? bodyIn.cc : cfg.supplierCc || "").trim();
+    if (!toAddr) return error("Enter the supplier's email address.", 400, env, request);
+    if (toAddr !== cfg.supplierEmail || ccAddr !== (cfg.supplierCc || "")) {
+      try {
+        await saveConfig2(env, tid, { ...cfg, supplierEmail: toAddr, supplierCc: ccAddr });
+      } catch {
+      }
+    }
+    cfg.supplierEmail = toAddr;
     let b64 = "";
     try {
       let s = "";
@@ -11293,10 +12994,13 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     const site = siteName || "site";
     const escH = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    const customBody = String(bodyIn.body || "").trim();
     const r = await sendEmail(env, {
       to: cfg.supplierEmail,
-      subject: `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
-      html: `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p><p>Many thanks,<br>${escH(cfg.contractor && cfg.contractor.tradingTitle || "Mostlane")}</p>`,
+      cc: ccAddr || void 0,
+      subject: String(bodyIn.subject || "").trim() || `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
+      html: customBody ? `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escH(customBody)}</div>` : `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p>`,
+      text: customBody || void 0,
       attachments: [{ filename: fname, content: b64 }]
     });
     if (!r || r.ok === false) return error(r && r.error || "Couldn't send the email (check RESEND_API_KEY / supplier email).", 502, env, request);
@@ -11339,7 +13043,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (cert.status === "final") return error("A finalised certificate can't be deleted here.", 409, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
     return json({ ok: true }, {}, env, request);
   }
@@ -11392,8 +13096,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (Array.isArray(b.entries)) {
       entries = b.entries.map((e) => ({ number: parseInt(e.number, 10), job: String(e.job || "").slice(0, 300) })).filter((e) => Number.isFinite(e.number));
     } else if (typeof b.text === "string") {
-      for (const line of b.text.split(/\r?\n/)) {
-        const m = line.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
+      for (const line2 of b.text.split(/\r?\n/)) {
+        const m = line2.match(/^\s*(?:\([^)]*\)\s*)?(\d{1,6})\b[\s.\-:)\t]*(.*)$/);
         if (!m) continue;
         entries.push({ number: parseInt(m[1], 10), job: String(m[2] || "").trim().slice(0, 300) });
       }
@@ -11427,7 +13131,7 @@ PAT: Import certificate number ${num2}-${yr}`;
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var T, DEFAULT_CONFIG2, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -11438,12 +13142,15 @@ var init_certs = __esm({
     init_compliance();
     init_push();
     init_sla();
+    init_auth();
     init_filesign();
     init_email();
     init_batterypdf();
+    init_pngdecode();
+    init_pump();
     init_tenantdb();
     T = (t) => t === "pat" ? "pat" : "em";
-    DEFAULT_CONFIG = {
+    DEFAULT_CONFIG2 = {
       // Default client used to seed a NEW cert when the previous cert didn't supply one
       // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
       // wins over this, and it's never applied over a value the office has typed.
@@ -11475,16 +13182,19 @@ var init_certs = __esm({
       reviewers: [],
       // Battery supplier — where the "please quote these batteries" enquiry PDF is emailed.
       supplierName: "",
-      supplierEmail: ""
+      supplierEmail: "",
+      supplierCc: ""
+      // optional CC on the battery enquiry email (remembered)
     };
-    STAGES = ["to_quote", "quoted", "approved", "invoiced"];
+    ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
+    STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
     REMEDIAL_CHARGE = 50;
     numOf = (v) => {
       const d = String(v ?? "").replace(/\D/g, "");
       return d ? String(Number(d)) : "";
     };
     yy = () => String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
-    normEng = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     cap = (s) => {
       s = String(s || "").trim();
       return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
@@ -11500,19 +13210,56 @@ var init_certs = __esm({
 // src/routes/sla.js
 var sla_exports = {};
 __export(sla_exports, {
+  applyOrderToJob: () => applyOrderToJob,
+  badScheduleDate: () => badScheduleDate,
+  badScheduleIn: () => badScheduleIn,
   bumpAiUsage: () => bumpAiUsage,
+  cloneJobAsVisit: () => cloneJobAsVisit,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
-  handle: () => handle10,
+  handle: () => handle11,
+  linkOrderToExistingJob: () => linkOrderToExistingJob,
+  linkOrderToJobById: () => linkOrderToJobById,
   listFallbackTemplates: () => listFallbackTemplates,
   listJobs: () => listJobs,
   notifyNewlyAssigned: () => notifyNewlyAssigned,
+  raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
   remindPendingHolds: () => remindPendingHolds,
   stopSeries: () => stopSeries,
+  stripMoney: () => stripMoney,
+  stripPricing: () => stripPricing,
   sweepFallbacks: () => sweepFallbacks,
-  sweepJobReleases: () => sweepJobReleases
+  sweepJobReleases: () => sweepJobReleases,
+  unlinkOrderFromJob: () => unlinkOrderFromJob
 });
-async function handle10(request, env, ctx, url, sess) {
+function badScheduleDate(iso, label2 = "Scheduled date") {
+  if (iso === void 0 || iso === null || iso === "") return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return `${label2} isn't a valid date/time.`;
+  const y = new Date(t).getUTCFullYear(), now = (/* @__PURE__ */ new Date()).getUTCFullYear();
+  if (y < now - SCHED_YEARS_BACK || y > now + SCHED_YEARS_FWD)
+    return `${label2} has the year ${y} \u2014 check the date (expected ${now - SCHED_YEARS_BACK}\u2013${now + SCHED_YEARS_FWD}).`;
+  return null;
+}
+function badScheduleIn(body) {
+  if (!body || typeof body !== "object") return null;
+  let e = badScheduleDate(body.scheduledAt, "Scheduled start") || badScheduleDate(body.scheduledStart, "Scheduled start") || badScheduleDate(body.scheduledEnd, "Scheduled finish");
+  if (e) return e;
+  const sfe = body.scheduleForEngineer;
+  if (sfe && typeof sfe === "object") {
+    e = badScheduleDate(sfe.scheduledAt, "Engineer's start") || badScheduleDate(sfe.scheduledEnd, "Engineer's finish");
+    if (e) return e;
+  }
+  if (body.engSchedule && typeof body.engSchedule === "object") {
+    for (const [k, v] of Object.entries(body.engSchedule)) {
+      if (!v || typeof v !== "object") continue;
+      e = badScheduleDate(v.scheduledAt, `${k}'s start`) || badScheduleDate(v.scheduledEnd, `${k}'s finish`);
+      if (e) return e;
+    }
+  }
+  return null;
+}
+async function handle11(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -11520,7 +13267,7 @@ async function handle10(request, env, ctx, url, sess) {
   const subpath = url.pathname.replace(/^\/sla(?=\/|$)/, "") || "/";
   const searchParams = url.searchParams;
   if (subpath === "/config") {
-    if (method === "GET") return jsonResponse(await getConfig2(env, tenantId), headers);
+    if (method === "GET") return jsonResponse(await getConfig3(env, tenantId), headers);
     if (method === "POST") {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
@@ -11781,10 +13528,19 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const jobId = method === "GET" ? searchParams.get("jobId") : null;
       if (method === "GET") {
-        const job = await getJob2(env, tenantId, jobId);
+        const job = await getJob3(env, tenantId, jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
+        try {
+          const fresh = async (arr) => Promise.all((arr || []).map(async (p) => p && p.key ? { ...p, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", p.key, 86400) } : p));
+          for (const s of rec.seals || []) {
+            if (!s) continue;
+            s.beforePhotos = await fresh(s.beforePhotos);
+            s.afterPhotos = await fresh(s.afterPhotos);
+          }
+        } catch {
+        }
         const installer = rec.installer || (job.assignedTo || sess.user && sess.user.username || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
         const now = /* @__PURE__ */ new Date();
@@ -11801,7 +13557,7 @@ async function handle10(request, env, ctx, url, sess) {
       }
       if (method === "POST") {
         const b = await readJson2(request);
-        const job = await getJob2(env, tenantId, b.jobId);
+        const job = await getJob3(env, tenantId, b.jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const rec = b.record && typeof b.record === "object" ? b.record : {};
         if (!String(rec.ref || "").trim()) {
@@ -11852,8 +13608,8 @@ async function handle10(request, env, ctx, url, sess) {
         manufacturer: s.manufacturer,
         componentName: s.componentName,
         comments: s.comments,
-        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
-        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean)
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean)
       })));
       const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
       let logo = null;
@@ -11875,7 +13631,7 @@ async function handle10(request, env, ctx, url, sess) {
     };
     if (subpath === "/firestop/pdf" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob2(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const pdf = await buildJobPdf(job);
       const fn = `RIA form ${job.firestop && job.firestop.ref || job.helpdeskRef || job.id}.pdf`;
@@ -11883,7 +13639,7 @@ async function handle10(request, env, ctx, url, sess) {
     }
     if (subpath === "/firestop/bundle" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob2(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const rec = job.firestop || {};
       const pdf = await buildJobPdf(job);
@@ -11996,6 +13752,10 @@ async function handle10(request, env, ctx, url, sess) {
     for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
     if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
     const b = await readJson2(request);
+    if (b && String(b.action || "").toLowerCase() === "cancel") {
+      const r = await cancelIncidentJobs(env, tenantId, ctx, b);
+      return jsonResponse(r, headers, r.ok ? 200 : r.notFound ? 404 : 400);
+    }
     if (!b || !String(b.reference || "").trim() && !String(b.description || "").trim())
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
     const pm = /^p(?:riority)?\s*[.:-]?\s*([1-4])$/i.exec(String(b.priority || "").trim());
@@ -12024,8 +13784,27 @@ async function handle10(request, env, ctx, url, sess) {
       durationMinutes: b.durationMinutes || void 0,
       changedBy: "zapier"
     };
+    let before = null, sameIncident = null;
+    try {
+      sameIncident = await matchSameIncident(env, tenantId, payload.reference);
+    } catch {
+    }
+    if (sameIncident && sameIncident.open) {
+      payload.id = sameIncident.open.id;
+      before = sameIncident.open;
+    } else if (sameIncident && sameIncident.prev) {
+      const prev = sameIncident.prev;
+      payload.id = crypto.randomUUID();
+      delete payload.dedupeByRef;
+      payload.revisitOf = prev.id;
+      payload.visitGroupId = prev.visitGroupId || prev.id;
+      const when = String(prev.closedAt || prev.updatedAt || prev.createdAt || "").slice(0, 10);
+      const why = sameIncident.kind === "reopened" ? `\u21A9 Same incident sent again by the client \u2014 previous visit ${prev.helpdeskRef || prev.id} was ${prev.status}${when ? " (" + when + ")" : ""}.` : `\u21A9 Re-assigned incident \u2014 follows our earlier visit ${prev.helpdeskRef || prev.id} (${prev.status}${when ? ", " + when : ""}); usually the ordered works after a quote.`;
+      payload.description = [payload.description || "", why].filter(Boolean).join("\n\n");
+    } else if (!sameIncident) {
+      before = payload.reference ? await d1Retry(() => getJob3(env, tenantId, payload.reference)) : null;
+    }
     const beforeId = payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob2(env, tenantId, beforeId)) : null;
     if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
       const ia = await getInboundAssign(env, tenantId);
       const eng = inboundEngineerFor(ia, priority);
@@ -12040,10 +13819,31 @@ async function handle10(request, env, ctx, url, sess) {
         payload.status = "Scheduled";
       }
     }
-    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    if (payload.visitGroupId) {
+      try {
+        await stampVisitGroup(env, tenantId, payload.visitGroupId);
+      } catch (e) {
+        console.error("stampVisitGroup:", e && e.message);
+      }
+    }
+    try {
+      if (await applyOrderToJob(env, tenantId, job)) job = await getJob3(env, tenantId, job.id) || job;
+    } catch {
+    }
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
-    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+    const linked = sameIncident && sameIncident.prev && !sameIncident.open ? sameIncident : null;
+    return jsonResponse({
+      ok: true,
+      created: !before,
+      id: job.id,
+      reference: job.helpdeskRef,
+      status: job.status,
+      priority: job.priority,
+      targetAt: job.targetAt,
+      ...linked ? { linkedVisit: true, visitKind: linked.kind, previousRef: linked.prev.helpdeskRef || "", previousId: linked.prev.id, previousStatus: linked.prev.status, visitGroupId: payload.visitGroupId } : {}
+    }, headers, before ? 200 : 201);
   }
   if (subpath === "/inbound-assign" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -12080,8 +13880,12 @@ async function handle10(request, env, ctx, url, sess) {
   if (subpath === "/jobs" && method === "POST") {
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson2(request);
+    {
+      const bad = badScheduleIn(payload);
+      if (bad) return jsonResponse({ error: bad }, headers, 400);
+    }
     const beforeId = payload.id || payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob2(env, tenantId, beforeId)) : null;
+    const before = beforeId ? await d1Retry(() => getJob3(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
@@ -12089,6 +13893,7 @@ async function handle10(request, env, ctx, url, sess) {
   }
   if (subpath === "/jobs" && method === "GET") {
     let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
+    if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -12449,7 +14254,7 @@ async function handle10(request, env, ctx, url, sess) {
     return jsonResponse(jobs.map((j) => {
       const ms = effStatus(j, engineer);
       const es = effSchedule(j, engineer);
-      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
+      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
   }
   if (subpath === "/live" && method === "GET") {
@@ -12657,7 +14462,7 @@ async function handle10(request, env, ctx, url, sess) {
     for (const id of rec.jobIds) {
       let job = null;
       try {
-        job = await getJob2(env, tenantId, id);
+        job = await getJob3(env, tenantId, id);
       } catch {
       }
       if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) {
@@ -12859,7 +14664,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (perms.FullAccess !== "Yes") return jsonResponse({ error: "Forbidden" }, headers, 403);
     const q = safeDecode(searchParams.get("id") || "");
     const hexOf = (s) => [...String(s)].map((c) => c.codePointAt(0).toString(16).padStart(2, "0")).join(" ");
-    const byId = q ? await getJob2(env, tenantId, q) : null;
+    const byId = q ? await getJob3(env, tenantId, q) : null;
     const needle = q.toLowerCase();
     const near = (await listJobs(env, tenantId)).filter((j) => String(j.id).toLowerCase().includes(needle) || String(j.helpdeskRef || "").toLowerCase().includes(needle)).slice(0, 5).map((j) => ({ id: j.id, idHex: hexOf(j.id), ref: j.helpdeskRef, status: j.status, exactMatch: j.id === q }));
     return jsonResponse({ ok: true, lookedUp: q, lookedUpHex: hexOf(q), foundById: !!byId, similar: near }, headers);
@@ -12868,6 +14673,10 @@ async function handle10(request, env, ctx, url, sess) {
     const id = safeDecode(subpath.split("/").filter(Boolean)[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     const body = await readJson2(request);
+    {
+      const bad = badScheduleIn(body);
+      if (bad) return jsonResponse({ error: bad }, headers, 400);
+    }
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
       scheduledEnd: body.scheduledEnd,
@@ -12876,7 +14685,7 @@ async function handle10(request, env, ctx, url, sess) {
       release: body.release,
       changedBy: body.changedBy || "scheduler"
     };
-    const before = await getJob2(env, tenantId, id);
+    const before = await getJob3(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
@@ -12890,7 +14699,7 @@ async function handle10(request, env, ctx, url, sess) {
     const id = safeDecode(parts[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     if (method === "GET" && parts[2] === "export") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -12904,7 +14713,7 @@ async function handle10(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "export.pdf") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -12921,7 +14730,7 @@ async function handle10(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "sheet.pdf") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const j = decorateJobWithLiveSla(job);
       const copyType = searchParams.get("type") === "client" ? "client" : "mostlane";
@@ -13093,7 +14902,7 @@ async function handle10(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       let overrides = {}, jobSig = null, customerName = "";
       try {
-        const j = await getJob2(env, tenantId, id);
+        const j = await getJob3(env, tenantId, id);
         overrides = j && j.photoStages || {};
         jobSig = j && j.signature;
         if (j) customerName = await resolveCustomerName(env, tenantId, j);
@@ -13124,6 +14933,32 @@ async function handle10(request, env, ctx, url, sess) {
       }
       return jsonResponse(out, headers);
     }
+    if (parts[2] === "files" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Only Full Access can delete photos." }, headers, 403);
+      let key = searchParams.get("key") || "";
+      if (!key) {
+        const fn = searchParams.get("filename");
+        if (fn) key = `jobs/${id}/photos/${fn}`;
+      }
+      if (!key.startsWith(`jobs/${id}/photos/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try {
+        await env.JOB_FILES.delete(key);
+        await env.JOB_FILES.delete(key + ".thumb");
+      } catch {
+      }
+      try {
+        const j = await getJob3(env, tenantId, id);
+        const name = key.split("/").pop();
+        if (j && j.photoStages && name in j.photoStages) {
+          delete j.photoStages[name];
+          j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, j);
+        }
+      } catch {
+      }
+      return jsonResponse({ ok: true, key }, headers);
+    }
     if (parts[2] === "audit-photo" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       let form;
@@ -13137,7 +14972,7 @@ async function handle10(request, env, ctx, url, sess) {
       const stageRaw = String(form.get("stage") || searchParams.get("stage") || "done");
       const stage = stageRaw === "ref" || stageRaw === "extra" ? stageRaw : "done";
       if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === itemId);
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -13180,7 +15015,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "audit-item" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === String(b.itemId || ""));
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -13255,7 +15090,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "create-works-job" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const wbody = await readJson2(request).catch(() => ({}));
       const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
@@ -13263,7 +15098,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
       if (!rem.length) return jsonResponse({ error: "Pick at least one remedial to turn into works." }, headers, 400);
       if (src.remedialsWorksJobId) {
-        const ex = await getJob2(env, tenantId, src.remedialsWorksJobId).catch(() => null);
+        const ex = await getJob3(env, tenantId, src.remedialsWorksJobId).catch(() => null);
         if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
       }
       const newId4 = crypto.randomUUID();
@@ -13277,10 +15112,11 @@ async function handle10(request, env, ctx, url, sess) {
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
             const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+            const bytes = await obj.arrayBuffer();
+            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
             try {
               const t = await env.JOB_FILES.get(srcKey + ".thumb");
-              if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata });
+              await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata });
             } catch {
             }
             refPhotos.push(dstKey);
@@ -13327,7 +15163,7 @@ async function handle10(request, env, ctx, url, sess) {
       src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
       await saveJob(env, tenantId, src);
       try {
-        const nj = await getJob2(env, tenantId, job.id);
+        const nj = await getJob3(env, tenantId, job.id);
         if (nj) {
           nj.fromRemedialsOf = id;
           await saveJob(env, tenantId, nj);
@@ -13339,121 +15175,28 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const rb = await readJson2(request).catch(() => ({}));
       const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : void 0;
       const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : src.durationMinutes || void 0;
       const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean) : Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : [];
-      const groupId = src.visitGroupId || src.id;
       const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4e3);
       const oldDesc = String(src.description || "").trim();
       const description = rvNote ? rvNote + (oldDesc ? "\n\n\u2014 Original job \u2014\n" + oldDesc : "") : oldDesc;
-      const payload = {
-        id: crypto.randomUUID(),
-        reference: src.helpdeskRef || src.siteName || src.siteCode,
-        description,
-        siteCode: src.siteCode,
-        siteName: src.siteName,
-        address: src.address,
-        postcode: src.postcode,
-        telephone: src.telephone,
-        storeType: src.storeType,
-        client: src.client,
-        lat: src.lat,
-        lon: src.lon,
-        priority: src.priority || "",
-        requiresRA: src.requiresRA,
-        requiresSignature: src.requiresSignature,
-        requiresPhoto: src.requiresPhoto,
-        requiresNote: src.requiresNote,
-        firestopping: src.firestopping,
-        emTest: src.emTest,
-        emKind: src.emKind,
-        pat: src.pat,
-        elecTest: src.elecTest,
-        pumpMaintenance: src.pumpMaintenance,
-        pumpStore: src.pumpStore,
-        workArea: src.workArea || void 0,
-        projectId: src.projectId || void 0,
-        assignedEngineers: engineers,
-        scheduledAt,
-        durationMinutes,
-        revisitOf: src.id,
-        visitGroupId: groupId,
-        changedBy: sess.user && sess.user.username || "system"
-      };
-      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-      const repath = (k) => typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k;
-      if (env.JOB_FILES) {
-        try {
-          let cursor;
-          do {
-            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
-            for (const o of listed.objects || []) {
-              try {
-                const obj = await env.JOB_FILES.get(o.key);
-                if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
-              } catch {
-              }
-            }
-            cursor = listed.truncated ? listed.cursor : null;
-          } while (cursor);
-        } catch {
-        }
-      }
-      try {
-        const nj = await getJob2(env, tenantId, job.id);
-        if (nj) {
-          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
-          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
-          if (src.photoStages) nj.photoStages = { ...src.photoStages };
-          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
-            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
-          }
-          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map((it) => ({
-            ...it,
-            refPhotos: (it.refPhotos || []).map(repath),
-            donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto,
-            extraPhotos: (it.extraPhotos || []).map(repath)
-          }));
-          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map((r) => ({ ...r, photos: (r.photos || []).map(repath) }));
-          nj.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-          await saveJob(env, tenantId, nj);
-        }
-      } catch {
-      }
-      if (!src.visitGroupId) {
-        try {
-          src.visitGroupId = groupId;
-          src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-          await saveJob(env, tenantId, src);
-        } catch {
-        }
-      }
-      try {
-        const all = await listJobs(env, tenantId, { includeDormant: true });
-        const members = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
-        const cnt = members.length;
-        for (const m of members) {
-          if (m.visitCount !== cnt) {
-            m.visitCount = cnt;
-            m.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-            await saveJob(env, tenantId, m);
-          }
-        }
-      } catch {
-      }
+      const job = await cloneJobAsVisit(env, tenantId, src, { description, scheduledAt, durationMinutes, assignedEngineers: engineers, changedBy: sess.user && sess.user.username || "system" });
+      const groupId = job.visitGroupId || src.id;
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
       }));
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
     }
     if (parts[2] === "visits" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
+      const money2 = await canSeeMoney(env, tenantId, sess.user.username);
       const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
         id: j.id,
         ref: j.helpdeskRef || j.id,
@@ -13463,13 +15206,15 @@ async function handle10(request, env, ctx, url, sess) {
         closedAt: j.closedAt || null,
         isRoot: j.id === groupId,
         current: j.id === src.id,
+        orderNumber: j.orderNumber || null,
+        ...money2 ? { orderValue: j.orderValue ?? null } : {},
         engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
       })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
       return jsonResponse({ ok: true, groupId, visits }, headers);
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob2(env, tenantId, id);
+      const src = await getJob3(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
       const all = await listJobs(env, tenantId, { includeDormant: true });
@@ -13489,7 +15234,7 @@ async function handle10(request, env, ctx, url, sess) {
       const { filename, stage } = await readJson2(request);
       if (!filename) return jsonResponse({ error: "filename required" }, headers, 400);
       const st = PHOTO_STAGES.includes(stage) ? stage : "";
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       job.photoStages = job.photoStages || {};
       if (st) job.photoStages[filename] = st;
@@ -13502,14 +15247,14 @@ async function handle10(request, env, ctx, url, sess) {
       const { signedBy, signedAt, signatureBase64, opId } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
       if (opId && !await firstTime(env, tenantId, opId, "sig:" + id)) {
-        const cur = await getJob2(env, tenantId, id);
+        const cur = await getJob3(env, tenantId, id);
         return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
       }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
       await env.JOB_FILES.put(key, binary, { httpMetadata: { contentType: "image/png" } });
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (job) {
         job.signature = { signedBy, signedAt, fileKey: key };
         job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -13520,7 +15265,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "hold-approve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -13547,7 +15292,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const body = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -13578,7 +15323,7 @@ async function handle10(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const reason = String(b.reason || "").trim();
       if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       job.raBlock = {
@@ -13605,7 +15350,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (parts[2] === "em-timer" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       if (String(b.action || "start") === "clear") {
@@ -13622,7 +15367,7 @@ async function handle10(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
@@ -13641,12 +15386,13 @@ async function handle10(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (method === "GET") {
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const d = decorateJobWithLiveSla(job);
+      let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
       if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);
       if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) d = stripMoney(d);
       return jsonResponse(d, headers);
     }
     if (method === "DELETE" && !parts[2]) {
@@ -13654,7 +15400,7 @@ async function handle10(request, env, ctx, url, sess) {
       const perms = await permissionsFor(env, tenantId, sess.user.username);
       if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
-      const job = await getJob2(env, tenantId, id);
+      const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const delScope = searchParams.get("scope");
       let targets = [job];
@@ -13683,8 +15429,12 @@ async function handle10(request, env, ctx, url, sess) {
       }, headers);
     }
     if (method === "PATCH") {
-      const before = await getJob2(env, tenantId, id);
+      const before = await getJob3(env, tenantId, id);
       const body = await readJson2(request);
+      {
+        const bad = badScheduleIn(body);
+        if (bad) return jsonResponse({ error: bad }, headers, 400);
+      }
       if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
         if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
         const dR = decorateJobWithLiveSla(before);
@@ -13784,8 +15534,9 @@ async function handle10(request, env, ctx, url, sess) {
         }, updated.hold.approval.requestedBy));
       }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
-      const dOut = decorateJobWithLiveSla(updated);
+      let dOut = decorateJobWithLiveSla(updated);
       if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
   }
@@ -14305,7 +16056,8 @@ function normalizeStatus(status, extra) {
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
-  if (s === "closed" || s === "cancelled") return "Closed Jobs";
+  if (s === "closed") return "Closed Jobs";
+  if (s === "cancelled" || s === "canceled" || s === "cancel") return "Cancelled";
   const all = Array.isArray(extra) && extra.length ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
   return all.find((x) => x.toLowerCase() === s) || "Pending";
 }
@@ -14324,6 +16076,19 @@ function assignedList(job) {
 }
 function isMultiEng(job) {
   return assignedList(job).length >= 2;
+}
+function stampCancelled(job, opts = {}) {
+  const now = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  job.cancelledAt = now;
+  job.cancelledBy = String(opts.by || "").slice(0, 80) || "office";
+  job.cancelReason = String(opts.reason || "").slice(0, 500);
+  job.cancelSource = opts.source || "office";
+}
+function clearCancelled(job) {
+  delete job.cancelledAt;
+  delete job.cancelledBy;
+  delete job.cancelReason;
+  delete job.cancelSource;
 }
 function effStatus(job, engNorm) {
   if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
@@ -14620,10 +16385,451 @@ async function notifyNewlyAssigned(env, tid, before, after) {
     });
   }
 }
-async function getJob2(env, tenantId, id) {
+async function getJob3(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+async function jobFinishedFor(env, tenantId) {
+  let done = /* @__PURE__ */ new Set();
+  try {
+    done = new Set((await getCategories(env, tenantId)).filter((c) => c && c.done).map((c) => String(c.name || "").toLowerCase()));
+  } catch {
+  }
+  return (j) => {
+    const st = String(j && j.status || "").toLowerCase();
+    return DONE_STATES.has(st) || done.has(st);
+  };
+}
+async function matchSameIncident(env, tenantId, reference) {
+  const ref = String(reference || "").trim();
+  if (!ref) return null;
+  const db = tenantDB(env, tenantId);
+  const finished = await jobFinishedFor(env, tenantId);
+  const parse2 = (rows) => (rows || []).map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate);
+  const newest = (list) => list.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  let same = [];
+  try {
+    same = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results);
+  } catch {
+  }
+  if (!same.length) {
+    try {
+      const j = await getJob3(env, tenantId, ref);
+      if (j && !j.fallbackTemplate) same = [j];
+    } catch {
+    }
+  }
+  if (same.length) {
+    const open = newest(same.filter((j) => !finished(j)));
+    if (open) return { open };
+    return { prev: newest(same), kind: "reopened" };
+  }
+  const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
+  if (!m) return null;
+  let sibs = [];
+  try {
+    sibs = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? AND helpdesk_ref<>?").bind(tenantId, m[1] + "/%", ref).all()).results);
+  } catch {
+  }
+  sibs = sibs.filter((j) => new RegExp("^" + m[1] + "/\\d{1,3}$").test(String(j.helpdeskRef || "")));
+  if (!sibs.length) return null;
+  return { prev: newest(sibs), kind: "reassigned" };
+}
+async function stampVisitGroup(env, tenantId, groupId) {
+  if (!groupId) return;
+  try {
+    const root = await getJob3(env, tenantId, groupId);
+    if (root && !root.visitGroupId) {
+      root.visitGroupId = groupId;
+      root.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, root);
+    }
+  } catch {
+  }
+  const all = await listJobs(env, tenantId, { includeDormant: true });
+  const members = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+  const cnt = members.length;
+  for (const m of members) {
+    if (m.visitCount !== cnt) {
+      m.visitCount = cnt;
+      m.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, m);
+    }
+  }
+}
+async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
+  const groupId = src.visitGroupId || src.id;
+  const engineers = Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers.filter(Boolean) : Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : [];
+  const payload = {
+    id: crypto.randomUUID(),
+    reference: src.helpdeskRef || src.siteName || src.siteCode,
+    description: opts.description !== void 0 ? opts.description : String(src.description || "").trim(),
+    siteCode: src.siteCode,
+    siteName: src.siteName,
+    address: src.address,
+    postcode: src.postcode,
+    telephone: src.telephone,
+    storeType: src.storeType,
+    client: src.client,
+    lat: src.lat,
+    lon: src.lon,
+    priority: src.priority || "",
+    requiresRA: src.requiresRA,
+    requiresSignature: src.requiresSignature,
+    requiresPhoto: src.requiresPhoto,
+    requiresNote: src.requiresNote,
+    firestopping: src.firestopping,
+    emTest: src.emTest,
+    emKind: src.emKind,
+    pat: src.pat,
+    elecTest: src.elecTest,
+    pumpMaintenance: src.pumpMaintenance,
+    pumpStore: src.pumpStore,
+    workArea: src.workArea || void 0,
+    projectId: src.projectId || void 0,
+    assignedEngineers: engineers,
+    scheduledAt: opts.scheduledAt,
+    durationMinutes: opts.durationMinutes !== void 0 ? opts.durationMinutes : src.durationMinutes || void 0,
+    revisitOf: src.id,
+    visitGroupId: groupId,
+    changedBy: opts.changedBy || "system",
+    ...opts.extra || {}
+  };
+  const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+  const repath = (k) => typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k;
+  if (opts.copyFiles !== false && env.JOB_FILES) {
+    try {
+      let cursor;
+      do {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+        for (const o of listed.objects || []) {
+          try {
+            const obj = await env.JOB_FILES.get(o.key);
+            if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
+          } catch {
+          }
+        }
+        cursor = listed.truncated ? listed.cursor : null;
+      } while (cursor);
+    } catch {
+    }
+  }
+  try {
+    const nj = await getJob3(env, tenantId, job.id);
+    if (nj) {
+      if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+      if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+      if (src.photoStages) nj.photoStages = { ...src.photoStages };
+      if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+        nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+      }
+      if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map((it) => ({
+        ...it,
+        refPhotos: (it.refPhotos || []).map(repath),
+        donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto,
+        extraPhotos: (it.extraPhotos || []).map(repath)
+      }));
+      if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map((r) => ({ ...r, photos: (r.photos || []).map(repath) }));
+      nj.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, nj);
+    }
+  } catch {
+  }
+  if (!src.visitGroupId) {
+    try {
+      src.visitGroupId = groupId;
+      src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, src);
+    } catch {
+    }
+  }
+  try {
+    await stampVisitGroup(env, tenantId, groupId);
+  } catch {
+  }
+  return await getJob3(env, tenantId, job.id) || job;
+}
+function stripPricing(text) {
+  const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
+  const money2 = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*\.\d{2}\b)/;
+  const out = [];
+  for (let l of String(text || "").split(/\r?\n/)) {
+    if (labelled.test(l) && money2.test(l)) continue;
+    l = l.replace(/\s*[-–—:]\s*£\s?[\d,]+(?:\.\d{1,2})?\s*$/, "");
+    l = l.replace(/£\s?[\d,]+(?:\.\d{1,2})?/g, "").replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/\s+$/, "");
+    out.push(l);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function orderText(o) {
+  const d = String(o.description || o.detail || "").trim();
+  return stripPricing(d || String(o.title || "").trim());
+}
+async function stampOrderOnJob(env, tenantId, job, o) {
+  if (!job || !o) return job;
+  const changed = job.orderNumber !== (o.orderNumber || null) || job.orderValue !== (o.orderValue ?? null) || job.clientOrderId !== (o.id || null);
+  if (!changed) return job;
+  job.orderNumber = o.orderNumber || null;
+  job.orderValue = o.orderValue != null && Number.isFinite(Number(o.orderValue)) ? Number(o.orderValue) : null;
+  job.clientOrderId = o.id || null;
+  (job.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + " linked to this job" });
+  job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  await saveJob(env, tenantId, job);
+  return job;
+}
+async function markOrderLinked(env, tenantId, orderId, jobId, kind) {
+  const k = kind === "em" || kind === "elec" ? kind : "job";
+  try {
+    await env.DB.prepare("UPDATE client_orders SET matched_kind=?, matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(k, jobId, (/* @__PURE__ */ new Date()).toISOString(), tenantId, orderId).run();
+  } catch {
+  }
+}
+async function unlinkOrderFromJob(env, tenantId, o, by) {
+  if (!o || !o.id) return null;
+  const jobId = String(o.matchedJobId || "").trim();
+  let job = null;
+  if (jobId) {
+    job = await getJob3(env, tenantId, jobId);
+    if (job && (job.clientOrderId === o.id || o.orderNumber && job.orderNumber === o.orderNumber)) {
+      delete job.orderNumber;
+      delete job.orderValue;
+      delete job.clientOrderId;
+      (job.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by: by || "office", type: "note", note: "Client order " + (o.orderNumber || "") + " unlinked from this job" + (by ? " by " + by : "") });
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+    }
+  }
+  try {
+    await env.DB.prepare("UPDATE client_orders SET matched_job_id=NULL, matched_kind=NULL, matched_cert_id=NULL, match_note=NULL, unlinked_job_id=?, status='new', actioned_at=NULL, actioned_by=NULL, updated_at=? WHERE tenant_id=? AND id=?").bind(jobId || null, (/* @__PURE__ */ new Date()).toISOString(), tenantId, o.id).run();
+  } catch {
+  }
+  return job;
+}
+async function applyOrderToJob(env, tenantId, job) {
+  const ref = String(job && job.helpdeskRef || "").trim();
+  if (!ref || !job) return null;
+  let row = null;
+  try {
+    row = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND order_number=? AND status<>'dismissed' ORDER BY created_at DESC LIMIT 1").bind(tenantId, ref).first();
+  } catch {
+    return null;
+  }
+  if (!row) return null;
+  const o = shapeOrderRow(row);
+  if (o.unlinkedJobId && o.unlinkedJobId === job.id) return null;
+  await stampOrderOnJob(env, tenantId, job, o);
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return o;
+}
+async function linkOrderToExistingJob(env, tenantId, o) {
+  const ref = String(o && o.orderNumber || "").trim();
+  if (!ref) return null;
+  const skip = String(o && o.unlinkedJobId || "");
+  let jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter((j) => String(j.helpdeskRef || "") === ref || j.id === ref);
+  if (!jobs.length) jobs = await jobsWithRefContaining(env, tenantId, ref);
+  jobs = jobs.filter((j) => j.id !== skip);
+  if (!jobs.length) return null;
+  const finished = await jobFinishedFor(env, tenantId);
+  const open = jobs.filter((j) => !finished(j));
+  const pick = (open.length ? open : jobs).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  await stampOrderOnJob(env, tenantId, pick, o);
+  await markOrderLinked(env, tenantId, o.id, pick.id);
+  return pick;
+}
+async function jobsWithRefContaining(env, tenantId, ref) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? LIMIT 50").bind(tenantId, "%" + ref + "%").all()).results || [];
+  } catch {
+    return [];
+  }
+  const re = new RegExp("(^|[^A-Za-z0-9])" + ref.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&") + "([^A-Za-z0-9]|$)");
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate && re.test(String(j.helpdeskRef || "")));
+}
+async function linkOrderToJobById(env, tenantId, o, jobId, by, opts = {}) {
+  const job = await getJob3(env, tenantId, jobId);
+  if (!job) return null;
+  await stampOrderOnJob(env, tenantId, job, o);
+  if (by) {
+    try {
+      const j2 = await getJob3(env, tenantId, jobId);
+      if (j2) {
+        (j2.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by, type: "note", note: "Order linked by " + by });
+        await saveJob(env, tenantId, j2);
+      }
+    } catch {
+    }
+  }
+  await markOrderLinked(env, tenantId, o.id, jobId, opts.kind);
+  return job;
+}
+async function raiseJobForOrder(env, tenantId, o, opts = {}) {
+  const ref = String(o && o.orderNumber || "").trim();
+  const by = opts.changedBy || "office";
+  const pr = Number(o.priority) >= 1 && Number(o.priority) <= 4 ? "Priority " + Number(o.priority) : void 0;
+  const linked = await linkOrderToExistingJob(env, tenantId, o);
+  if (linked) return { job: linked, how: "linked" };
+  const inc = orderRefIncident(ref);
+  const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
+  const text = orderText(o);
+  if (sibs.length) {
+    const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    const oldDesc = String(src.description || "").trim();
+    const description = [
+      "\u{1F9FE} Client order " + ref + (text ? " \u2014 " + text : ""),
+      "\u21A9 Ordered works following our visit " + (src.helpdeskRef || src.id) + " (" + (src.status || "") + ") \u2014 that visit's notes and photos are carried onto this job.",
+      oldDesc ? "\u2014 Original job \u2014\n" + oldDesc : ""
+    ].filter(Boolean).join("\n\n");
+    const job2 = await cloneJobAsVisit(env, tenantId, src, {
+      description,
+      scheduledAt: opts.scheduledAt,
+      durationMinutes: opts.durationMinutes,
+      assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [],
+      changedBy: by,
+      extra: { reference: ref || void 0, priority: pr || src.priority || "", status: "Pending", orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order" }
+    });
+    await markOrderLinked(env, tenantId, o.id, job2.id);
+    return { job: job2, how: "cloned", from: { id: src.id, ref: src.helpdeskRef || src.id, status: src.status || "" } };
+  }
+  let siteName = o.siteName || "", postcode = "", address = "";
+  const code = String(o.storeCode || "").trim();
+  if (code) {
+    try {
+      const row = await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND (site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) ORDER BY LENGTH(site_number) LIMIT 1").bind(tenantId, code, code).first();
+      if (row) {
+        siteName = row.site_name || siteName;
+        postcode = row.postcode || "";
+        try {
+          address = (JSON.parse(row.data || "{}") || {}).address || "";
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  const payload = {
+    id: crypto.randomUUID(),
+    reference: ref || void 0,
+    description: ("\u{1F9FE} Client order " + ref + (text ? " \u2014 " + text : "")).trim(),
+    priority: pr,
+    siteCode: code || void 0,
+    siteName: siteName || void 0,
+    postcode: postcode || void 0,
+    address: address || void 0,
+    assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [],
+    scheduledAt: opts.scheduledAt,
+    durationMinutes: opts.durationMinutes,
+    orderNumber: ref || null,
+    orderValue: o.orderValue ?? null,
+    clientOrderId: o.id || null,
+    originator: "client-order",
+    changedBy: by
+  };
+  const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return { job, how: "created" };
+}
+async function findIncidentJobs(env, tenantId, { reference, incident }) {
+  const db = tenantDB(env, tenantId);
+  const ref = String(reference || "").trim();
+  const inc = String(incident || "").trim() || ((/^(\d{5,12})\/\d{1,3}$/.exec(ref) || [])[1] || "");
+  const parse2 = (rows) => (rows || []).map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate);
+  const seen = /* @__PURE__ */ new Map();
+  const add = (list) => {
+    for (const j of list) if (j && !seen.has(j.id)) seen.set(j.id, j);
+  };
+  if (ref) {
+    try {
+      add(parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results));
+    } catch {
+    }
+    try {
+      const j = await getJob3(env, tenantId, ref);
+      if (j && !j.fallbackTemplate) add([j]);
+    } catch {
+    }
+  }
+  if (inc) {
+    let sibs = [];
+    try {
+      sibs = parse2((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, inc + "/%").all()).results);
+    } catch {
+    }
+    add(sibs.filter((j) => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
+    try {
+      const j = await getJob3(env, tenantId, inc);
+      if (j && !j.fallbackTemplate) add([j]);
+    } catch {
+    }
+  }
+  return [...seen.values()];
+}
+async function cancelIncidentJobs(env, tenantId, ctx, b) {
+  const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const reason = String(b.reason || "").trim().slice(0, 500);
+  const by = String(b.by || "client").trim().slice(0, 80);
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  const open = jobs.filter((j) => !finished(j));
+  const newest = (list) => list.slice().sort((a, b2) => String(b2.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  if (!open.length) {
+    const j = newest(jobs);
+    j.clientCancelled = { at, by, reason, reference: String(b.reference || b.incident || ""), kind };
+    (j.events ||= []).push({ at, by, type: "note", note: "Client cancelled " + (kind === "quote" ? "the quote request" : "this job") + " after it was " + j.status + (reason ? " \u2014 " + reason : "") });
+    j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, j);
+    return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status, kind };
+  }
+  const WAITING = /* @__PURE__ */ new Set(["pending", "quote", "on hold", "order"]);
+  const held = kind === "quote" ? open.filter((j) => !WAITING.has(String(j.status || "").toLowerCase())) : [];
+  const targets = open.filter((j) => !held.includes(j));
+  const cancelled = [];
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const j of targets) {
+    const prevStatus = j.status;
+    j.status = "Cancelled";
+    (j.statusHistory ||= []).push({ status: "Cancelled", at: now, by, note: reason || void 0 });
+    stampCancelled(j, { by, reason, source: "client", at });
+    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now, by };
+    (j.events ||= []).push({ at: now, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " \u2014 " + reason : "") });
+    j.updatedAt = now;
+    await saveJob(env, tenantId, j);
+    const engs = assignedList(j);
+    cancelled.push({ id: j.id, reference: j.helpdeskRef || j.id, previousStatus: prevStatus, engineers: engs, scheduledAt: j.scheduledAt || null });
+    const title = "\u274C Job cancelled \u2014 " + (j.helpdeskRef || j.id);
+    const body = (j.siteName || j.siteCode || "") + (reason ? " \xB7 " + reason : "") + (prevStatus ? " \xB7 was " + prevStatus : "");
+    for (const e of engs) ctx?.waitUntil?.(sendToUser(env, tenantId, e, { title, body: body.slice(0, 180), url: "/engineer-job.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {
+    }));
+    ctx?.waitUntil?.(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], { title, body: (body + (engs.length ? " \xB7 " + engs.join(", ") : " \xB7 unassigned")).slice(0, 180), url: "/job-view.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {
+    }));
+    try {
+      await resolveNotificationsByTag(env, tenantId, "hold-approve:" + j.id, { title: "Job cancelled", body: (j.helpdeskRef || j.id) + " \u2014 cancelled by the client" });
+    } catch {
+    }
+  }
+  return { ok: true, kind, cancelled, ...held.length ? { held: held.map((j) => ({ id: j.id, reference: j.helpdeskRef || j.id, status: j.status, engineers: assignedList(j) })) } : {} };
 }
 async function purgeUnverifiedCertsForJob(env, tenantId, jobId) {
   if (!jobId) return;
@@ -14718,9 +16924,9 @@ async function saveJob(env, tenantId, job) {
   ).run();
 }
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
-  const cfg = await getConfig2(env, tenantId);
+  const cfg = await getConfig3(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
-  const existing = await getJob2(env, tenantId, id);
+  const existing = await getJob3(env, tenantId, id);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
@@ -14829,6 +17035,13 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
+    // Client ORDER link (Sep 2026): the client's order number + its VALUE (£, ex VAT)
+    // + the client_orders row it came from — so job costing can show profit. The
+    // value is MONEY: stripped from every job response for anyone who isn't Full
+    // Access / office staff (stripMoney). Preserved across re-saves.
+    orderNumber: body.orderNumber !== void 0 ? String(body.orderNumber || "") || null : existing?.orderNumber || null,
+    orderValue: body.orderValue !== void 0 ? body.orderValue === null || body.orderValue === "" ? null : Number.isFinite(Number(body.orderValue)) ? Number(body.orderValue) : existing?.orderValue ?? null : existing?.orderValue ?? null,
+    clientOrderId: body.clientOrderId !== void 0 ? String(body.clientOrderId || "") || null : existing?.clientOrderId || null,
     // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
     // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
     // the chain, so all visits against one job are easy to find + cost together.
@@ -14873,6 +17086,13 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Cancellation stamps survive a re-save (set/cleared below on the transition).
+    cancelledAt: existing?.cancelledAt,
+    cancelledBy: existing?.cancelledBy,
+    cancelReason: existing?.cancelReason,
+    cancelSource: existing?.cancelSource,
+    // A client's cancellation that arrived AFTER we finished the job (noted, no status change).
+    clientCancelled: existing?.clientCancelled,
     // Engineer-captured packs survive an office re-save.
     quote: existing?.quote,
     riskAssessment: existing?.riskAssessment,
@@ -14891,13 +17111,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now });
+  else if (!isCancelledStatus(status) && isCancelledStatus(existing?.status)) clearCancelled(job);
   seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
   pruneEngSchedule(job);
   await saveJob(env, tenantId, job);
   return job;
 }
 async function patchJob(env, tenantId, id, patch, ctx) {
-  const job = await getJob2(env, tenantId, id);
+  const job = await getJob3(env, tenantId, id);
   if (!job) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
@@ -14996,6 +17218,9 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== void 0) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.orderNumber !== void 0) job.orderNumber = String(patch.orderNumber || "") || null;
+  if (patch.orderValue !== void 0) job.orderValue = patch.orderValue === null || patch.orderValue === "" ? null : Number.isFinite(Number(patch.orderValue)) ? Number(patch.orderValue) : job.orderValue ?? null;
+  if (patch.clientOrderId !== void 0) job.clientOrderId = String(patch.clientOrderId || "") || null;
   if (patch.visitGroupId !== void 0) job.visitGroupId = String(patch.visitGroupId || "") || null;
   if (patch.visitCount !== void 0) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
@@ -15026,7 +17251,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
-    const cfg = await getConfig2(env, tenantId);
+    const cfg = await getConfig3(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
   }
   if (jobIsProject(job)) {
@@ -15049,8 +17274,11 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
     }
+    const wasCancelled = isCancelledStatus(job.status);
     job.status = rollupStatus(job);
     if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now });
+    else if (!isCancelledStatus(job.status) && wasCancelled) clearCancelled(job);
   } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
     const s = normalizeStatus(patch.status, catNames);
@@ -15060,6 +17288,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now });
+      else if (job.cancelledAt) clearCancelled(job);
+    } else if (isCancelledStatus(s) && patch.cancelReason !== void 0 && !job.cancelReason) {
+      job.cancelReason = String(patch.cancelReason || "").slice(0, 500);
     }
     if (isMultiEng(job) && job.engStatus) {
       for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
@@ -15211,7 +17443,7 @@ async function jobCoordServer(env, job) {
   return null;
 }
 async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
-  const target = await getJob2(env, tenantId, jobId);
+  const target = await getJob3(env, tenantId, jobId);
   if (!target) return { ok: false, error: "job not found" };
   const eng = normId(engineer || "");
   const tKey = siteKeyOf(target.siteCode);
@@ -16277,9 +18509,14 @@ function computeSlaTarget(raisedAt, priority, cfg) {
   const hrs = cfg.priorities[priority]?.hours || 168;
   return new Date(new Date(raisedAt).getTime() + hrs * 36e5).toISOString();
 }
+function stripMoney(job) {
+  if (!job || typeof job !== "object") return job;
+  const { orderValue, ...rest } = job;
+  return rest;
+}
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
-  const state = job.status === "Closed Jobs" || job.status === "Complete" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
+  const state = job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
   let releaseView;
   if (job.seriesSkipped) {
     releaseView = { mode: "skipped", at: null, label: "Skipped \u2014 engineer had another job that day", series: true };
@@ -16316,13 +18553,13 @@ function inboundEngineerFor(cfg, priority) {
   }
   return "";
 }
-async function getConfig2(env, tenantId) {
+async function getConfig3(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_config'").bind(tenantId).first();
-  return row ? JSON.parse(row.value) : DEFAULT_CONFIG2;
+  return row ? JSON.parse(row.value) : DEFAULT_CONFIG3;
 }
 async function setConfig(env, tenantId, body) {
-  const merged = { ...DEFAULT_CONFIG2, ...body };
+  const merged = { ...DEFAULT_CONFIG3, ...body };
   const db = tenantDB(env, tenantId);
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
@@ -16626,7 +18863,7 @@ async function sweepFallbacks(env, tid = 1) {
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
-      const src = await getJob2(env, tid, fb.jobId);
+      const src = await getJob3(env, tid, fb.jobId);
       if (!src) continue;
       let payload = null;
       if (src.fallbackTemplate) {
@@ -17116,7 +19353,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, RELEASE_DONE, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG2, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -17133,6 +19370,8 @@ var init_sla = __esm({
     init_logo();
     init_pdftext();
     init_statusemail();
+    SCHED_YEARS_BACK = 1;
+    SCHED_YEARS_FWD = 3;
     PHOTO_STAGES = ["Before", "During", "After"];
     MIN_COMPLETE_NOTE = 15;
     CANONICAL_STATUSES = [
@@ -17145,12 +19384,16 @@ var init_sla = __esm({
       "Closed Jobs",
       "Invoiced",
       "Order",
-      "Quote"
+      "Quote",
+      "Cancelled"
     ];
     normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
     DONE_STATES = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    isCancelledStatus = (s) => String(s || "").toLowerCase() === "cancelled";
     RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    orderRefIncident = (ref) => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").trim()) || [])[1] || "";
+    shapeOrderRow = (r) => r ? { id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new", unlinkedJobId: r.unlinked_job_id || "" } : null;
     MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
     NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
     isOpenJobStatus = (s) => !NEARBY_FINISHED.has(String(s || ""));
@@ -17161,7 +19404,7 @@ var init_sla = __esm({
     _archiveReady = false;
     _archiveFilesReady = false;
     _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
-    DEFAULT_CONFIG2 = {
+    DEFAULT_CONFIG3 = {
       priorities: {
         "Priority 1": { hours: 4 },
         "Priority 2": { hours: 24 },
@@ -17214,7 +19457,7 @@ var holidays_exports = {};
 __export(holidays_exports, {
   approvedLeaveInRange: () => approvedLeaveInRange,
   bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle11,
+  handle: () => handle12,
   jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
   remindPendingHolidays: () => remindPendingHolidays
 });
@@ -17319,7 +19562,7 @@ async function remindPendingHolidays(env, tid = 1) {
   } catch {
   }
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -18917,7 +21160,7 @@ function isSuppressed(rules, type, user, key) {
 
 // src/routes/assets.js
 init_push();
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -19843,7 +22086,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -20208,7 +22451,7 @@ init_auth();
 init_sitelog_api();
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -20284,6 +22527,348 @@ async function signBridgeToken(secret, payload) {
 init_sitelog_api();
 
 // src/routes/emailjob.js
+init_http();
+init_auth();
+init_tenantdb();
+
+// src/routes/emailtemplates.js
+var MON = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function londonToIso(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", timeZoneName: "shortOffset" }).formatToParts(new Date(guess));
+    const tz = (parts.find((p) => p.type === "timeZoneName") || {}).value || "GMT";
+    const off = /GMT([+-]\d{1,2})/.exec(tz);
+    const hours = off ? Number(off[1]) : 0;
+    return new Date(guess - hours * 36e5).toISOString();
+  } catch {
+    return new Date(guess).toISOString();
+  }
+}
+function concertoDate(s) {
+  const m = /(\d{1,2})\/([A-Za-z]{3})\/(\d{4})\s+(\d{1,2}):(\d{2})/.exec(String(s || ""));
+  if (!m || MON[m[2].toLowerCase()] === void 0) return "";
+  return londonToIso(+m[3], MON[m[2].toLowerCase()], +m[1], +m[4], +m[5]);
+}
+function ukDate(s) {
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(s || ""));
+  if (!m) return "";
+  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], 9, 0));
+  return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+}
+var PC_RE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+var domainOf = (a) => String(a || "").toLowerCase().trim().split("@").pop();
+var line = (re, t) => {
+  const m = re.exec(t);
+  return m ? String(m[1] || "").trim() : "";
+};
+var phoneIn = (s) => (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(String(s || "")) || [])[1] || "";
+function concertoJob(subject, t) {
+  const ref = line(/assigned a new job:\s*([^\s<]+)/i, t) || line(/New Job Alert:\s*([^\s-]+)/i, subject);
+  const pr = line(/Priority\s*([1-4])/i, subject) || line(/SLA of Priority\s*([1-4])/i, t);
+  const siteLine = line(/^\s*Site:\s*(.+)$/im, t);
+  const code = line(/^\s*(\d{3,5})\b/, siteLine);
+  const postcode = (PC_RE.exec(siteLine) || [])[1] || "";
+  const fault = line(/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i, t);
+  const respondBy = concertoDate(line(/target Response Date\s*&\s*Time:\s*([^\n]+)/i, t));
+  const completeBy = concertoDate(line(/target Completion Date\s*&\s*Time:\s*([^\n]+)/i, t));
+  const site = siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const missing = [];
+  if (!ref) missing.push("job reference");
+  if (!fault) missing.push("fault/issue");
+  if (!code) missing.push("store number");
+  return {
+    kind: "job",
+    missing,
+    fields: {
+      isJob: true,
+      reference: ref,
+      priority: pr ? "Priority " + pr : "",
+      siteCode: code,
+      siteName: site.split(",").slice(0, 2).join(",").trim(),
+      address: site,
+      postcode,
+      telephone: phoneIn(fault),
+      description: fault.trim(),
+      raisedAt: "",
+      respondBy,
+      completeBy
+    }
+  };
+}
+function concertoOrder(subject, t) {
+  const orderNumber = line(/Order number\s+([A-Z0-9\/-]+)/i, subject) || line(/order number\s+([A-Z0-9\/-]+)/i, t);
+  const pr = line(/Priority\s*:\s*Priority\s*([1-4])/i, t);
+  const value = line(/Order value\s*:\s*£?\s*([\d,]+(?:\.\d{1,2})?)/i, t);
+  const forLine = line(/^\s*For\s*:\s*\n?\s*(.+)$/im, t);
+  const code = line(/^\s*(\d{3,5})\b/, forLine);
+  const sr = line(/\b(SR\d{4,6})\b/i, forLine);
+  const siteName = forLine.replace(/^\s*\d{3,5}\s*-\s*/, "").replace(/\bSR\d{4,6}\b/i, "").trim();
+  const desc = line(/Order value\s*:[^\n]*\n([\s\S]*?)(?:\n\s*For\s*:|$)/i, t);
+  const missing = [];
+  if (!orderNumber) missing.push("order number");
+  if (!code) missing.push("store number");
+  return {
+    kind: "order",
+    missing,
+    order: {
+      orderNumber,
+      priority: pr ? Number(pr) : null,
+      orderValue: value ? Number(value.replace(/,/g, "")) : null,
+      storeCode: code,
+      siteName,
+      srRef: sr,
+      siteRaw: forLine,
+      description: desc.trim(),
+      client: "Southern Co-op",
+      source: "email"
+    }
+  };
+}
+function concertoCancel(subject, t) {
+  const incident = line(/Cancell?l?ed Job:\s*(\d{5,12})/i, subject) || line(/The job you logged\s*(\d{5,12})\b/i, t);
+  const reference = line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t) || line(/Order No\.?\s*:\s*([0-9A-Z]+\/\d{1,3})/i, subject);
+  const title = line(/The job you logged\s*\d+\s*:\s*([^\n]*)/i, t);
+  let reason = line(/Comments?\s*:\s*([\s\S]*?)(?:\n\s*For further information|$)/i, t);
+  reason = reason.replace(/\s+/g, " ").trim().replace(/^\.$/, "");
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  return { kind: "cancel", missing, cancel: { kind: "job", incident, reference, title, reason, by: "Southern Co-op (Concerto)" } };
+}
+function concertoQuoteCancel(subject, t) {
+  const reference = line(/order number\s*:\s*([0-9A-Z]+\/\d{1,3})/i, t);
+  const quoteRef = line(/Quote reference\s*:\s*(\S+)/i, t) || line(/^Quote\s*:\s*(\d+)/i, subject);
+  const by = line(/Cancel request by\s+([^\n]+?)\s*$/i, subject);
+  let reason = line(/has been updated\.?\s*\n+\s*([^\n]*)/i, t);
+  if (/^Quote reference/i.test(reason)) reason = "";
+  reason = reason.replace(/\.{3,}/g, " \u2014 ").replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]*)/im, t);
+  const siteCode = line(/^\s*(\d{3,5})\b/, siteLine);
+  const missing = [];
+  if (!reference) missing.push("job reference (order number)");
+  return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " \u2014 " + by : "") + ")" } };
+}
+var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
+function chapplinsJob(subject, t) {
+  const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
+  const property = line(/^[ \t]*Property:[ \t]*([^\n]*)$/im, t);
+  const tenantRef = line(/^[ \t]*Tenant:[ \t]*([^\n]*)$/im, t);
+  const name = line(/^[ \t]*Name:[ \t]*([^\n]*)$/im, t);
+  const home = line(/^[ \t]*Home Telephone:[ \t]*([^\n]*)$/im, t);
+  const mobile = line(/^[ \t]*Mobile:[ \t]*([^\n]*)$/im, t);
+  const email = line(/^[ \t]*E-?mail:[ \t]*([^\n]*)$/im, t);
+  const entered = line(/Date Job Entered:\s*([\d\/]+)/i, t);
+  let desc = line(/Job Description:\s*([\s\S]*)$/i, t);
+  const cut = CHAP_SIG.exec(desc);
+  if (cut) desc = desc.slice(0, cut.index);
+  desc = desc.replace(/^\s*(?:Hi(?: All)?|Hello[^\n]*|Dear[^\n]*)\s*,?\s*\n/i, "").trim();
+  const pr = line(/\bP\s*([1-4])\b/i, subject);
+  const subjHead = subject.replace(/\bP\s*[1-4]\b\s*-?\s*/i, "").split(/\s+-\s+/)[0].trim();
+  const prefix2 = /estimate|quote/i.test(subjHead) && !/^new job raised/i.test(subjHead) ? subjHead + " \u2014 " : "";
+  const postcode = (PC_RE.exec(property) || PC_RE.exec(subject) || [])[1] || "";
+  const contact = [name && "Tenant: " + name + (tenantRef ? " (" + tenantRef + ")" : ""), mobile && "Mobile: " + mobile, home && "Home: " + home, email && "Email: " + email].filter(Boolean).join(" \xB7 ");
+  const missing = [];
+  if (!jobNo) missing.push("job number");
+  if (!property) missing.push("property address");
+  if (!desc) missing.push("job description");
+  return {
+    kind: "job",
+    missing,
+    siteLookup: { client: "chapplins", address: property, postcode },
+    fields: {
+      isJob: true,
+      reference: jobNo ? "CHAP-" + jobNo : "",
+      priority: pr ? "Priority " + pr : "",
+      siteCode: "",
+      siteName: property.replace(/\s*,\s*,+/g, ",").replace(/,\s*$/, "").trim(),
+      address: property,
+      postcode,
+      telephone: phoneIn(mobile) || phoneIn(home),
+      description: (prefix2 + desc + (contact ? "\n\n" + contact : "")).trim(),
+      raisedAt: ukDate(entered),
+      respondBy: "",
+      completeBy: "",
+      storeType: "chapplins"
+    }
+  };
+}
+var TEMPLATES = [
+  {
+    id: "concerto-job",
+    label: "Concerto \u2014 New Job Alert (Southern Co-op)",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /New Job Alert/i.test(s) || /You have been assigned a new job/i.test(t),
+    read: concertoJob
+  },
+  {
+    id: "concerto-order",
+    label: "Concerto \u2014 order sheet (client purchase order)",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Order number\s/i.test(s) || /attached order sheet for order number/i.test(t),
+    read: concertoOrder
+  },
+  {
+    id: "concerto-cancel",
+    label: "Concerto \u2014 job cancelled by the client",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Cancell?l?ed Job\b/i.test(s) || /The job you logged\s*\d+[\s\S]{0,300}Has been Cancelled/i.test(t),
+    read: concertoCancel
+  },
+  {
+    id: "concerto-quote-cancel",
+    label: "Concerto \u2014 quote request cancelled by the client",
+    domains: ["concerto.co.uk"],
+    test: (s, t) => /^Quote\s*:/i.test(s) && /Cancel request/i.test(s) || /Quote status\s*:\s*Cancelled/i.test(t),
+    read: concertoQuoteCancel
+  },
+  {
+    id: "concerto-notice",
+    label: "Concerto \u2014 helpdesk action / quote notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s),
+    read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice \u2014 the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" })
+  },
+  {
+    id: "chapplins-job",
+    label: "Chapplins Lettings \u2014 new job raised",
+    domains: ["chapplins.co.uk"],
+    test: (s, t) => /A new job has been raised/i.test(t),
+    read: chapplinsJob
+  },
+  {
+    id: "metrorod-report",
+    label: "Metro Rod \u2014 job card / quote (supplier paperwork)",
+    domains: ["metrorod.co.uk"],
+    test: () => true,
+    read: (s) => ({ kind: "notice", reason: /quote/i.test(s) ? "Metro Rod quotation \u2014 supplier paperwork, not a job" : "Metro Rod job card / report \u2014 supplier paperwork, not a job" })
+  },
+  {
+    id: "mostlane-outbound",
+    label: "Mostlane \u2014 our own drainage/zap emails",
+    domains: ["mostlane.com"],
+    test: (s, t) => /^Send\s+\S+\s+to MetroRod|^Mostlane - Emergency - Order/i.test(s) || /Possible MetroRod job received/i.test(t),
+    read: () => ({ kind: "notice", reason: "Our own outbound drainage email, not a job" })
+  }
+];
+function matchTemplate(sender, subject, text) {
+  const dom = domainOf(sender);
+  const s = String(subject || ""), t = String(text || "");
+  for (const tpl of TEMPLATES) {
+    if (!tpl.domains.some((d) => dom === d || dom.endsWith("." + d))) continue;
+    let hit = false;
+    try {
+      hit = !!tpl.test(s, t);
+    } catch {
+    }
+    if (!hit) continue;
+    let result;
+    try {
+      result = tpl.read(s, t);
+    } catch (e) {
+      result = { kind: "job", missing: ["template error: " + String(e && e.message || e).slice(0, 80)], fields: null };
+    }
+    return { tpl, result };
+  }
+  return null;
+}
+function templateDomain(sender) {
+  const dom = domainOf(sender);
+  return TEMPLATES.some((tpl) => tpl.domains.some((d) => dom === d || dom.endsWith("." + d)));
+}
+var normAddr = (s) => String(s || "").toLowerCase().replace(PC_RE, " ").replace(/\(.*?\)/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(flat|apartment|apt)\b/g, "flat").replace(/\s+/g, " ").trim();
+async function lookupSite(env, tid, { client, address, postcode }) {
+  if (!env || !env.DB || !address) return null;
+  const pc = String(postcode || "").toUpperCase().replace(/\s+/g, "");
+  let rows = [];
+  try {
+    const q = pc ? env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1 AND REPLACE(UPPER(COALESCE(postcode,'')),' ','')=?").bind(tid, client, pc) : env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client);
+    rows = (await q.all()).results || [];
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+  const want = normAddr(address);
+  const exact = rows.filter((r) => normAddr(r.site_name) === want);
+  if (exact.length === 1) return { siteCode: exact[0].site_number, siteName: exact[0].site_name };
+  const head = want.split(" ").slice(0, 3).join(" ");
+  const lead = head ? rows.filter((r) => normAddr(r.site_name).startsWith(head + " ") || normAddr(r.site_name) === head) : [];
+  if (lead.length === 1) return { siteCode: lead[0].site_number, siteName: lead[0].site_name };
+  return null;
+}
+
+// src/routes/emailjob.js
+init_push();
+var T2 = "inbound_emails";
+async function ensureTable2(env) {
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS ${T2} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, message_id TEXT, received_at TEXT,
+      from_addr TEXT, orig_from TEXT, subject TEXT, outcome TEXT, reason TEXT, reference TEXT,
+      job_id TEXT, status_code INTEGER, fields TEXT, text TEXT)`).run();
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS ${T2}_mid ON ${T2}(tenant_id, message_id)`).run();
+  } catch {
+  }
+}
+var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
+async function getIntakeConfig(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return { ...DEFAULT_CFG, ...v, allowFrom: Array.isArray(v.allowFrom) && v.allowFrom.length ? v.allowFrom : DEFAULT_CFG.allowFrom };
+  } catch {
+    return { ...DEFAULT_CFG };
+  }
+}
+async function saveIntakeConfig(env, tid, cfg) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "email:intake", JSON.stringify(cfg)).run();
+}
+function senderAllowed(cfg, ...addrs) {
+  const list = (cfg.allowFrom || []).map((x) => String(x || "").toLowerCase().trim()).filter(Boolean);
+  if (!list.length) return true;
+  return addrs.some((a) => {
+    const x = String(a || "").toLowerCase().trim();
+    if (!x) return false;
+    const dom = x.split("@").pop();
+    return list.some((l) => l === x || l === dom || l.startsWith("@") && l.slice(1) === dom);
+  });
+}
+async function logIntake(env, tid, rec) {
+  try {
+    const r = await env.DB.prepare(`INSERT INTO ${T2} (tenant_id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, text)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      tid,
+      rec.messageId || "",
+      rec.receivedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      rec.from || "",
+      rec.origFrom || "",
+      (rec.subject || "").slice(0, 300),
+      rec.outcome || "",
+      (rec.reason || "").slice(0, 300),
+      rec.reference || "",
+      rec.jobId || "",
+      rec.status || null,
+      JSON.stringify(rec.fields || null),
+      (rec.text || "").slice(0, 12e3)
+    ).run();
+    return r && r.meta && r.meta.last_row_id || null;
+  } catch (e) {
+    console.error("email intake log:", e && e.message);
+    return null;
+  }
+}
+async function pushReview(env, tid, id, subject, reason) {
+  if (!id) return;
+  try {
+    await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "\u{1F4E8} Email needs a look",
+      body: (subject || "(no subject)").slice(0, 120) + " \u2014 " + (reason || "").slice(0, 160),
+      url: "/email-intake.html?review=" + id,
+      tag: "email-review:" + id,
+      actionable: true
+    });
+  } catch {
+  }
+}
 async function readRaw(message) {
   try {
     return await new Response(message.raw).text();
@@ -20311,9 +22896,9 @@ function splitSection(section) {
   const headStr = idx < 0 ? section : section.slice(0, idx);
   let body = idx < 0 ? "" : section.slice(idx).replace(/^\r?\n\r?\n/, "");
   const headers = {};
-  headStr.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/).forEach((line) => {
-    const c = line.indexOf(":");
-    if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+  headStr.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/).forEach((line2) => {
+    const c = line2.indexOf(":");
+    if (c > 0) headers[line2.slice(0, c).trim().toLowerCase()] = line2.slice(c + 1).trim();
   });
   return { headers, body };
 }
@@ -20334,6 +22919,11 @@ function walkMime(section, depth) {
     return out;
   }
   const type = (ct.split(";")[0] || "").trim().toLowerCase();
+  if (type === "message/rfc822") {
+    const inner = cte === "base64" ? decodeB64(body) : body;
+    const innerFrom = (splitSection(inner).headers["from"] || "").trim();
+    return walkMime(inner, depth + 1).map((p) => ({ ...p, text: (innerFrom ? "From: " + innerFrom + "\n" : "") + p.text }));
+  }
   if (!/^text\//.test(type)) return [];
   let text = body;
   if (cte === "quoted-printable") text = decodeQP(text);
@@ -20348,29 +22938,15 @@ function extractText(raw) {
   if (html) return stripHtml2(html.text);
   return parts.map((p) => p.text).join("\n");
 }
-function concertoRegex(subject, text) {
-  const t = String(text || "");
-  if (!/New Job Alert|You have been assigned a new job/i.test(subject + " " + t)) return null;
-  const ref = (/assigned a new job:\s*([^\s<]+)/i.exec(t) || /New Job Alert:\s*([^\s-]+)/i.exec(subject) || [])[1] || "";
-  const pr = (/Priority\s*([1-4])/i.exec(subject) || /SLA of Priority\s*([1-4])/i.exec(t) || [])[1] || "";
-  const siteLine = (/^\s*Site:\s*(.+)$/im.exec(t) || [])[1] || "";
-  const code = (/^\s*(\d{3,5})\b/.exec(siteLine) || [])[1] || "";
-  const postcode = (/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i.exec(siteLine) || [])[1] || "";
-  const fault = (/Fault\/Issue:\s*([\s\S]+?)(?:\n\s*(?:Click here to login|Please log|$))/i.exec(t) || [])[1] || "";
-  const phone = (/\b(0\d{9,10}|0\d{2,4}\s?\d{3,4}\s?\d{3,4})\b/.exec(fault) || [])[1] || "";
-  if (!ref && !fault) return null;
-  return {
-    isJob: true,
-    reference: ref,
-    priority: pr ? "Priority " + pr : "",
-    siteCode: code,
-    siteName: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").split(",").slice(0, 2).join(",").trim(),
-    address: siteLine.replace(/^\s*\d{3,5}\s*-\s*/, "").trim(),
-    postcode,
-    telephone: phone,
-    description: fault.trim(),
-    raisedAt: ""
-  };
+function unwrapForward(subject, text) {
+  const subj = String(subject || "").replace(/^\s*(?:fwd?|fw)\s*:\s*/i, "").trim();
+  let origFrom = "";
+  const m = /^\s*(?:>?\s*)?From:\s*(.+)$/im.exec(String(text || "").slice(0, 3e3));
+  if (m) {
+    const e = /<([^>]+)>/.exec(m[1]) || /([^\s"']+@[^\s"']+)/.exec(m[1]);
+    origFrom = (e ? e[1] : "").toLowerCase().trim();
+  }
+  return { subject: subj, origFrom };
 }
 async function aiExtract(env, { from, subject, text }) {
   const key = env.ANTHROPIC_API_KEY;
@@ -20388,7 +22964,9 @@ async function aiExtract(env, { from, subject, text }) {
       postcode: { type: "string", description: "UK postcode of the site if present, else ''." },
       telephone: { type: "string", description: "A site contact phone number if present, else ''." },
       description: { type: "string", description: "The fault / work description, including any access times or contact notes. Plain text." },
-      raisedAt: { type: "string", description: "ISO 8601 date-time the job was logged/raised IF clearly stated, else ''." }
+      raisedAt: { type: "string", description: "ISO 8601 date-time the job was logged/raised IF clearly stated, else ''." },
+      respondBy: { type: "string", description: "ISO 8601 target RESPONSE date-time if stated (treat stated times as Europe/London), else ''." },
+      completeBy: { type: "string", description: "ISO 8601 target COMPLETION date-time if stated (Europe/London), else ''." }
     },
     required: ["isJob"]
   };
@@ -20425,26 +23003,8 @@ ${text}`;
   const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "extract_job") : null;
   return block && block.input ? block.input : null;
 }
-async function handleInboundEmail(message, env, ctx, fetchSelf) {
-  const from = String(message.from || "").toLowerCase();
-  let subject = "";
-  try {
-    subject = message.headers.get("subject") || "";
-  } catch {
-  }
-  const raw = await readRaw(message);
-  const text = (extractText(raw) || "").slice(0, 12e3);
-  let fields = await aiExtract(env, { from, subject, text });
-  if (!fields) fields = concertoRegex(subject, text);
-  if (!fields || !fields.isJob) {
-    console.log("email: not a job \u2014", subject);
-    return;
-  }
-  if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) {
-    console.log("email: job but no reference/description \u2014", subject);
-    return;
-  }
-  const payload = {
+function jobPayload(fields, sender) {
+  return {
     reference: fields.reference || void 0,
     description: fields.description || void 0,
     priority: fields.priority || void 0,
@@ -20453,11 +23013,15 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
     address: fields.address || void 0,
     postcode: fields.postcode || void 0,
     telephone: fields.telephone || void 0,
+    storeType: fields.storeType || void 0,
     raisedAt: fields.raisedAt || void 0,
     originator: "email",
-    originatorEmail: from || void 0,
+    originatorEmail: sender || void 0,
     changedBy: "email"
   };
+}
+async function createJob(env, ctx, fetchSelf, fields, sender) {
+  const payload = jobPayload(fields, sender);
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
@@ -20470,10 +23034,266 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
       out = await resp.clone().json();
     } catch {
     }
-    console.log("email\u2192job", resp.status, out && out.reference, "\u2014", subject);
+    if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "", payload };
+    const reason = out.linkedVisit ? out.visitKind === "reassigned" ? "Re-assigned incident \u2014 new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : "Same incident sent again \u2014 new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : out.created ? "New job on the board" : "Existing job updated (same reference, still open)";
+    return { outcome: out.created ? "created" : "updated", reason, status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
-    console.error("email\u2192job failed:", e && e.message, "\u2014", subject);
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
+}
+async function cancelJob(env, ctx, fetchSelf, c, msg) {
+  const body = {
+    action: "cancel",
+    kind: c.kind || "job",
+    reference: c.reference || void 0,
+    incident: c.incident || void 0,
+    reason: c.reason || "",
+    by: c.by || "client",
+    at: msg.receivedAt || void 0
+  };
+  const req = new Request("https://mostlane-api.internal/sla/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
+    body: JSON.stringify(body)
+  });
+  const what = c.kind === "quote" ? "Quote request withdrawn by the client" : "Job cancelled by the client";
+  const label2 = c.reference || c.incident || "";
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {};
+    try {
+      out = await resp.clone().json();
+    } catch {
+    }
+    if (resp.status === 404 || out && out.notFound) return { outcome: "review", reason: what + " (" + label2 + ") but there's NO job for that incident on the board \u2014 check whether we hold it under another reference, then dismiss", reference: label2, payload: body };
+    if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: label2, payload: body };
+    if (out.noted) return { outcome: "cancelled", reason: what + " \u2014 job " + (out.reference || label2) + " was already " + out.status + ", so nothing changed; the cancellation is noted on the job card", status: resp.status, reference: out.reference || label2, jobId: out.id || "", payload: body };
+    const done = Array.isArray(out.cancelled) ? out.cancelled : [];
+    const heldList = Array.isArray(out.held) ? out.held : [];
+    if (!done.length && heldList.length) {
+      const h = heldList[0];
+      return { outcome: "review", reason: what + " but job " + h.reference + " is " + h.status + (h.engineers && h.engineers.length ? " with " + h.engineers.join(", ") : "") + " \u2014 decide whether to cancel it (open the job) or leave it, then dismiss this", status: resp.status, reference: h.reference, jobId: h.id, payload: body };
+    }
+    const d = done[0] || {};
+    const who = d.engineers && d.engineers.length ? " \u2014 " + d.engineers.join(", ") + " told" : "";
+    return { outcome: "cancelled", reason: what + " \u2014 job " + (d.reference || label2) + " marked Cancelled (was " + (d.previousStatus || "?") + ")" + who + (c.reason ? ' \xB7 "' + c.reason.slice(0, 120) + '"' : "") + (heldList.length ? " \xB7 " + heldList.length + " other visit(s) left as they are" : ""), status: resp.status, reference: d.reference || label2, jobId: d.id || "", payload: body };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: label2, payload: body };
+  }
+}
+async function fileOrder(env, ctx, fetchSelf, order, msg) {
+  const tok = env.ORDERS_INBOUND_TOKEN || env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "";
+  const body = {
+    ...order,
+    externalId: msg.messageId || void 0,
+    notifiedAt: msg.receivedAt || void 0,
+    link: void 0,
+    emailSubject: String(msg.subject || "").slice(0, 300) || void 0,
+    emailFrom: String(msg.from || "").slice(0, 200) || void 0,
+    emailText: String(msg.text || "").slice(0, 12e3) || void 0
+  };
+  const req = new Request("https://mostlane-api.internal/certs/remedials/order-inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + tok },
+    body: JSON.stringify(body)
+  });
+  try {
+    const resp = await fetchSelf(req, env, ctx);
+    let out = {};
+    try {
+      out = await resp.clone().json();
+    } catch {
+    }
+    if (!resp.ok) return { outcome: "failed", reason: "Client-orders intake refused it: " + (out && out.error || "HTTP " + resp.status), status: resp.status, reference: order.orderNumber || "" };
+    return { outcome: "order", reason: "Client order " + (order.orderNumber || "") + " filed for store " + (order.storeCode || "?") + (out.matched ? " \u2014 matches a remedial awaiting approval" : ""), status: resp.status, reference: order.orderNumber || "" };
+  } catch (e) {
+    return { outcome: "failed", reason: "Couldn't reach the client-orders intake: " + String(e && e.message || e).slice(0, 120), reference: order.orderNumber || "" };
+  }
+}
+async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
+  const tid = msg.tid || "1";
+  const cfg = opts.cfg || await getIntakeConfig(env, tid);
+  const { subject, origFrom } = unwrapForward(msg.subject, msg.text);
+  const from = String(msg.from || "").toLowerCase();
+  const sender = origFrom || from;
+  const text = String(msg.text || "").slice(0, 12e3);
+  const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject, template: "", source: "" };
+  if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
+  if (/^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread \u2014 not a new job", source: "template" };
+  const tm = matchTemplate(sender, subject, text);
+  if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
+  if (!opts.dryRun && !opts.force && msg.messageId) {
+    try {
+      const dup = await env.DB.prepare(`SELECT id, job_id, reference FROM ${T2} WHERE tenant_id=? AND message_id=? AND outcome IN ('created','updated','order','cancelled') LIMIT 1`).bind(tid, msg.messageId).first();
+      if (dup) return { ...base, outcome: "duplicate", reason: "This email was already processed (log #" + dup.id + ")", reference: dup.reference || "", jobId: dup.job_id || "" };
+    } catch {
+    }
+  }
+  if (tm) {
+    const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
+    if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "cancel") {
+      const c = { ...r.cancel || {}, action: "cancel", isJob: false };
+      if (r.missing && r.missing.length) return { ...out2, fields: c, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out2, fields: c, outcome: "dryrun", reason: "Would mark job " + (c.reference || c.incident) + " as Cancelled" + (c.kind === "quote" ? " (quote request withdrawn \u2014 only if the job is still waiting)" : "") + (c.reason ? ' \u2014 "' + c.reason.slice(0, 100) + '"' : ""), reference: c.reference || c.incident || "" };
+      return { ...out2, fields: c, ...await cancelJob(env, ctx, fetchSelf, c, msg) };
+    }
+    if (r.kind === "order") {
+      if (r.missing && r.missing.length) return { ...out2, fields: r.order, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+      if (opts.dryRun) return { ...out2, fields: r.order, outcome: "dryrun", reason: "Would file client order " + r.order.orderNumber + " for store " + r.order.storeCode + " (client orders, not the job board)", reference: r.order.orderNumber };
+      return { ...out2, fields: r.order, ...await fileOrder(env, ctx, fetchSelf, r.order, msg) };
+    }
+    const fields2 = r.fields || {};
+    if (r.missing && r.missing.length) return { ...out2, fields: fields2, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
+    if (r.siteLookup) {
+      const hit = await lookupSite(env, tid, r.siteLookup);
+      if (hit) {
+        fields2.siteCode = hit.siteCode;
+        fields2.siteName = hit.siteName;
+        fields2.siteMatched = true;
+      } else fields2.siteMatched = false;
+    }
+    if (opts.dryRun) return { ...out2, fields: fields2, outcome: "dryrun", reason: "Would " + (fields2.reference ? "create/update job " + fields2.reference : "create a job") + (r.siteLookup ? fields2.siteMatched ? " at site " + fields2.siteCode : " (property not matched to a site \u2014 the office links it)" : ""), reference: fields2.reference || "", payload: jobPayload(fields2, sender) };
+    return { ...out2, fields: fields2, ...await createJob(env, ctx, fetchSelf, fields2, sender) };
+  }
+  let fields = null;
+  if (!opts.noAi) fields = await aiExtract(env, { from: sender, subject, text });
+  const out = { ...base, fields, source: fields ? "ai" : "none" };
+  if (fields && fields.isJob === false) return { ...out, outcome: "dropped", reason: "No template for this layout; the AI read it as not a job (reply / order / quote / status update)" };
+  const usable = fields && (String(fields.reference || "").trim() || String(fields.description || "").trim());
+  if (cfg.aiAutoCreate === true && usable) {
+    if (opts.dryRun) return { ...out, outcome: "dryrun", reason: "No template \u2014 AI auto-create is ON, would create job " + (fields.reference || "(no reference)"), reference: fields.reference || "", payload: jobPayload(fields, sender) };
+    return { ...out, ...await createJob(env, ctx, fetchSelf, fields, sender) };
+  }
+  const why = usable ? "No template for this layout \u2014 the AI's reading is attached for you to check before it becomes a job" : !env.ANTHROPIC_API_KEY || opts.noAi ? "No template for this layout (and no AI key to read it) \u2014 needs a look" : "No template for this layout and the AI couldn't read it \u2014 needs a look";
+  return { ...out, outcome: "review", reason: (opts.dryRun ? "Would hold for a check: " : "") + why, reference: fields && fields.reference || "" };
+}
+async function handleInboundEmail(message, env, ctx, fetchSelf) {
+  const from = String(message.from || "").toLowerCase();
+  let subject = "", messageId = "";
+  try {
+    subject = message.headers.get("subject") || "";
+  } catch {
+  }
+  try {
+    messageId = (message.headers.get("message-id") || "").trim();
+  } catch {
+  }
+  const raw = await readRaw(message);
+  const text = (extractText(raw) || "").slice(0, 12e3);
+  const tid = "1";
+  await ensureTable2(env);
+  const receivedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await processEmail(env, ctx, fetchSelf, { tid, from, subject, text, messageId, receivedAt });
+  const id = await logIntake(env, tid, { messageId, receivedAt, from, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+  if (res.outcome === "review" || res.outcome === "failed") await pushReview(env, tid, id, subject, res.reason);
+  console.log("email intake:", res.outcome, "\u2014", subject, "\u2014", res.reason);
+}
+async function handleApi(request, env, ctx, url, sess, fetchSelf) {
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/email-intake(?=\/|$)/, "") || "/";
+  if (!sess || !sess.user) return error("Login required", 401, env, request);
+  const tid = await resolveTenantId(env, request);
+  const me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  if (!(perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes")) return error("SLA admin access required", 403, env, request);
+  await ensureTable2(env);
+  if (sub === "/status" && method === "GET") {
+    const cfg = await getIntakeConfig(env, tid);
+    let last = null, counts = {};
+    const since = new Date(Date.now() - 7 * 864e5).toISOString();
+    try {
+      last = await env.DB.prepare(`SELECT id, received_at, subject, outcome, reference FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT 1`).bind(tid).first();
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(`SELECT outcome, COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND received_at>=? GROUP BY outcome`).bind(tid, since).all();
+      for (const r of results || []) counts[r.outcome] = r.n;
+    } catch {
+    }
+    let review = 0;
+    try {
+      const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND outcome='review'`).bind(tid).first();
+      review = r && r.n || 0;
+    } catch {
+    }
+    return json({ ok: true, config: cfg, last, counts7d: counts, reviewOpen: review, templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, domains: t.domains })), aiConfigured: !!env.ANTHROPIC_API_KEY, inboundConfigured: !!(env.JOBS_INBOUND_TOKEN || "").trim() }, {}, env, request);
+  }
+  if (sub === "/log" && method === "GET") {
+    const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 60));
+    let rows = [];
+    try {
+      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, substr(text,1,4000) AS text FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all();
+      rows = results || [];
+    } catch {
+    }
+    return json({ ok: true, rows: rows.map((r) => ({ ...r, fields: (() => {
+      try {
+        return JSON.parse(r.fields || "null");
+      } catch {
+        return null;
+      }
+    })() })) }, {}, env, request);
+  }
+  if (sub === "/test" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const subject = String(b.subject || "").slice(0, 300), body = String(b.body || "").slice(0, 2e4);
+    if (!subject && !body) return error("Paste the email's subject and body", 400, env, request);
+    const text = /<[a-z][\s\S]*>/i.test(body) ? stripHtml2(body) : body;
+    const commit = b.commit === true;
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: String(b.from || me + "@test").toLowerCase(), subject, text, messageId: "" }, { dryRun: !commit, force: true });
+    if (commit) await logIntake(env, tid, { messageId: "", from: "test:" + me, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+    return json({ ok: true, ...res, text: text.slice(0, 4e3) }, {}, env, request);
+  }
+  if (sub === "/rerun" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    if (!row) return error("Log entry not found", 404, env, request);
+    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "", receivedAt: row.received_at || "" }, { force: true });
+    await logIntake(env, tid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
+    return json({ ok: true, ...res }, {}, env, request);
+  }
+  if (sub === "/templates" && method === "GET") {
+    return json({ ok: true, templates: TEMPLATES.map((t) => ({ id: t.id, label: t.label, domains: t.domains })) }, {}, env, request);
+  }
+  if ((sub === "/approve" || sub === "/dismiss") && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    if (!row) return error("Log entry not found", 404, env, request);
+    if (sub === "/dismiss") {
+      await env.DB.prepare(`UPDATE ${T2} SET outcome='dismissed', reason=? WHERE tenant_id=? AND id=?`).bind(("Dismissed by " + me + (b.note ? ": " + String(b.note).slice(0, 200) : "")).slice(0, 300), tid, row.id).run();
+      ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email dismissed", body: (row.subject || "").slice(0, 120) + " \u2014 dismissed by " + me }).catch(() => {
+      }));
+      return json({ ok: true, outcome: "dismissed" }, {}, env, request);
+    }
+    let stored = {};
+    try {
+      stored = JSON.parse(row.fields || "{}") || {};
+    } catch {
+    }
+    const fields = { ...stored, ...b.fields && typeof b.fields === "object" ? b.fields : {} };
+    if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return error("A reference or a description is needed to create the job", 400, env, request);
+    const res = await createJob(env, ctx, fetchSelf, fields, row.orig_from || row.from_addr || "");
+    if (res.outcome === "failed") return json({ ok: false, error: res.reason, ...res }, { status: 502 }, env, request);
+    await env.DB.prepare(`UPDATE ${T2} SET outcome=?, reason=?, reference=?, job_id=?, status_code=?, fields=? WHERE tenant_id=? AND id=?`).bind(res.outcome, ("Approved by " + me + " \u2014 " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), tid, row.id).run();
+    ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email \u2192 job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " \u2014 created by " + me }).catch(() => {
+    }));
+    return json({ ok: true, ...res, fields }, {}, env, request);
+  }
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const cur = await getIntakeConfig(env, tid);
+      const next = { ...cur };
+      if (b.enabled !== void 0) next.enabled = !!b.enabled;
+      if (Array.isArray(b.allowFrom)) next.allowFrom = b.allowFrom.map((x) => String(x || "").toLowerCase().trim()).filter(Boolean).slice(0, 50);
+      if (b.aiAutoCreate !== void 0) next.aiAutoCreate = b.aiAutoCreate === true;
+      await saveIntakeConfig(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  return error("Not found", 404, env, request);
 }
 
 // src/routes/office.js
@@ -20643,7 +23463,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -20861,7 +23681,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -20982,7 +23802,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -21156,7 +23976,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -21936,7 +24756,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -22632,7 +25452,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -22648,7 +25468,7 @@ async function handle20(request, env, ctx, url, sess) {
   const iso30 = new Date(now - 30 * 864e5).toISOString();
   const naive7 = iso7.replace("T", " ").slice(0, 19);
   const year = (/* @__PURE__ */ new Date()).getFullYear();
-  const T2 = db.tenantId;
+  const T3 = db.tenantId;
   const first = (sql, ...b) => db.prepare(sql).bind(...b).first();
   const all = (sql, ...b) => db.prepare(sql).bind(...b).all().then((r) => r.results || []);
   const [
@@ -22674,27 +25494,27 @@ async function handle20(request, env, ctx, url, sess) {
     auditTotal,
     rowCounts
   ] = await Promise.all([
-    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T2),
-    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T2),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T2, isoMonthStart),
-    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T2),
-    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T2),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T2, naive7),
-    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T2),
-    all("SELECT data FROM assets WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T2),
-    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T2),
-    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T2, year),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso7),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T2, iso7),
-    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T2, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T2),
-    tableRowCounts(db, T2)
+    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T3),
+    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T3),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T3, isoMonthStart),
+    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T3),
+    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T3),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T3, naive7),
+    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T3),
+    all("SELECT data FROM assets WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T3),
+    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T3),
+    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T3, year),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T3, iso7),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T3, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T3, iso7),
+    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T3, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T3),
+    tableRowCounts(db, T3)
   ]);
   let assetValue = 0;
   for (const r of assetRows) {
@@ -22742,7 +25562,7 @@ async function handle20(request, env, ctx, url, sess) {
     database: rowCounts
   }, 200, env, request);
 }
-async function tableRowCounts(db, T2) {
+async function tableRowCounts(db, T3) {
   const tables = [
     "users",
     "sla_jobs",
@@ -22761,7 +25581,7 @@ async function tableRowCounts(db, T2) {
   const out = [];
   let total = 0;
   for (const t of tables) {
-    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T2).first();
+    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T3).first();
     const n = row && row.n || 0;
     total += n;
     out.push({ table: t, rows: n });
@@ -22876,7 +25696,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -22978,7 +25798,7 @@ init_push();
 var KINDS = ["qualification", "insurance", "licence", "licence_check"];
 var EXPIRING_DAYS = 30;
 var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 90);
-async function ensureTable2(db) {
+async function ensureTable3(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS staff_records (
     tenant_id INTEGER, id TEXT PRIMARY KEY, username TEXT, kind TEXT,
     title TEXT, number TEXT, issuer TEXT, issued TEXT, expires TEXT,
@@ -23071,7 +25891,7 @@ function daysUntil(dateStr) {
   if (isNaN(d)) return null;
   return Math.round((d - /* @__PURE__ */ new Date(todayISO() + "T00:00:00Z")) / 864e5);
 }
-function statusOf2(expires) {
+function statusOf3(expires) {
   const n = daysUntil(expires);
   if (n === null) return "none";
   if (n < 0) return "expired";
@@ -23101,7 +25921,7 @@ async function shape(env, origin, r) {
     createdBy: r.created_by || "",
     createdAt: r.created_at || "",
     updatedAt: r.updated_at || "",
-    status: statusOf2(r.expires),
+    status: statusOf3(r.expires),
     daysLeft: daysUntil(r.expires)
   };
   if (r.doc_key) rec.docUrl = await signedFileUrl(env, origin, "/hr/record-file", r.doc_key);
@@ -23131,16 +25951,37 @@ async function computeDriverChecks(db) {
     }
   } catch {
   }
+  const lic = {};
+  try {
+    const { results } = await db.prepare(
+      "SELECT username, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
+    ).bind(db.tenantId).all();
+    for (const r of results || []) {
+      const cur = lic[r.username];
+      if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
+    }
+  } catch {
+  }
   const month = todayISO().slice(0, 7);
   return drivers.map((u) => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
     const l = latest[u.username] || null;
     const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
     const nextDue = l ? l.expires || "" : "";
-    return { username: u.username, name, reg: u.vehicle_assigned || "", lastChecked: l ? l.issued : "", nextDue, status: doneThisMonth ? "done" : "due" };
+    const licenceExpiry = lic[u.username] || "";
+    return {
+      username: u.username,
+      name,
+      reg: u.vehicle_assigned || "",
+      lastChecked: l ? l.issued : "",
+      nextDue,
+      status: doneThisMonth ? "done" : "due",
+      licenceExpiry,
+      licenceStatus: statusOf3(licenceExpiry)
+    };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -23162,7 +26003,7 @@ async function handle22(request, env, ctx, url, sess) {
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const isAdmin = perms.FullAccess === "Yes" || perms.StaffRecords === "Yes";
   const db = tenantDB(env, sess.tenantId);
-  await ensureTable2(db);
+  await ensureTable3(db);
   const me = sess.user.username;
   if (path === "/hr/records" && method === "GET") {
     let user = q.get("user") || me;
@@ -23190,7 +26031,7 @@ async function handle22(request, env, ctx, url, sess) {
     for (const r of recs || []) {
       const k = byUser[r.username] = byUser[r.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
       k.total++;
-      k[statusOf2(r.expires)]++;
+      k[statusOf3(r.expires)]++;
     }
     const rows = active.map((u) => {
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
@@ -23218,7 +26059,7 @@ async function handle22(request, env, ctx, url, sess) {
     }
     const items = [];
     for (const r of results || []) {
-      const st = statusOf2(r.expires);
+      const st = statusOf3(r.expires);
       if (st !== "expired" && st !== "expiring") continue;
       items.push({ id: r.id, username: r.username, name: nameById[r.username] || (isSubUser(r.username) ? r.username.slice(SUB_PREFIX.length) : r.username), subcontractor: isSubUser(r.username), kind: r.kind, title: r.title || "", expires: r.expires, status: st, daysLeft: daysUntil(r.expires) });
     }
@@ -23248,7 +26089,7 @@ async function handle22(request, env, ctx, url, sess) {
         const k = r.username.slice(SUB_PREFIX.length);
         if (byKey[k]) {
           byKey[k].counts.total++;
-          byKey[k].counts[statusOf2(r.expires)]++;
+          byKey[k].counts[statusOf3(r.expires)]++;
         }
       }
     } catch {
@@ -23314,15 +26155,17 @@ async function handle22(request, env, ctx, url, sess) {
       "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
     ).bind(db.tenantId, kind).all();
     const titles = /* @__PURE__ */ new Set();
+    const withExpiry = /* @__PURE__ */ new Set();
     const best = {};
     for (const r of recs || []) {
       const t = String(r.title || "").trim();
       if (!t) continue;
-      titles.add(t);
+      if (String(r.expires || "").trim()) withExpiry.add(t);
       const pm = best[r.username] = best[r.username] || {};
       const cur = pm[t];
-      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf2(r.expires) };
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) pm[t] = { expires: r.expires || "", id: r.id, status: statusOf3(r.expires) };
     }
+    for (const t of withExpiry) titles.add(t);
     for (const t of await getMatrixCols(db, kind)) if (String(t || "").trim()) titles.add(String(t).trim());
     const competencies = [...titles].sort((a, b) => a.localeCompare(b));
     const rows = people.map((u) => ({
@@ -23462,7 +26305,7 @@ async function sweepStaffRecordReminders(env) {
   if (londonHour < 8) return;
   const db = tenantDB(env, tid);
   try {
-    await ensureTable2(db);
+    await ensureTable3(db);
   } catch {
     return;
   }
@@ -23478,7 +26321,7 @@ async function sweepStaffRecordReminders(env) {
   ).bind(tid).all().catch(() => ({ results: [] }));
   let expired = 0, expiring = 0;
   for (const r of results || []) {
-    const st = statusOf2(r.expires);
+    const st = statusOf3(r.expires);
     if (st === "expired") expired++;
     else if (st === "expiring") expiring++;
   }
@@ -23605,7 +26448,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -23717,7 +26560,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -23936,7 +26779,7 @@ async function handle24(request, env, ctx, url, sess) {
     return json({ ok: true, prefs }, {}, env, request);
   }
   if (path === "/costing/job-pos" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const rows = await jobPoRows(env, jobId);
@@ -23974,7 +26817,7 @@ async function handle24(request, env, ctx, url, sess) {
     }, {}, env, request);
   }
   if (path === "/costing/job-full-cost" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR2 = 1.25, HQ_PC = "PO15 5RQ";
@@ -24116,6 +26959,9 @@ async function handle24(request, env, ctx, url, sess) {
     }
     const labourCost = onSiteCost + travelCost;
     const total = labourCost + fuelCost + materials;
+    const orderValue = jd.orderValue != null && Number.isFinite(Number(jd.orderValue)) ? Number(jd.orderValue) : null;
+    const profit = orderValue != null ? r2(orderValue - total) : null;
+    const margin = orderValue ? Math.round(profit / orderValue * 1e3) / 10 : null;
     return json({
       ok: true,
       jobId,
@@ -24125,6 +26971,10 @@ async function handle24(request, env, ctx, url, sess) {
       travelSource,
       roundTripMiles: r1(rtMiles),
       roundTripDriveMins: r1(rtDriveMins),
+      orderNumber: jd.orderNumber || null,
+      orderValue,
+      profit,
+      margin,
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows2.length },
@@ -26006,7 +28856,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -27106,6 +29956,10 @@ async function handle25(request, env, ctx, url, sess) {
     const cur = map[rk] || (map[rk] = {});
     const prevJobId = cur[type] && cur[type].jobId;
     if (b.status === "pending") {
+      {
+        const bad = badScheduleIn(b);
+        if (bad) return jr4({ error: bad }, headers, 400);
+      }
       const entry = {
         note: typeof b.note === "string" ? b.note.slice(0, 300) : "",
         by: sess && sess.user && sess.user.username || "",
@@ -28663,7 +31517,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -28952,7 +31806,7 @@ function fmtWhen2(iso) {
     return iso;
   }
 }
-function wrap4(str, size, maxW) {
+function wrap5(str, size, maxW) {
   const words = String(str || "").split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
@@ -28982,7 +31836,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label2, val2) => {
     doc.text(L2, y, label2, { size: 11, bold: true });
-    for (const ln of wrap4(val2 || "", 11, W7 - 70)) {
+    for (const ln of wrap5(val2 || "", 11, W7 - 70)) {
       doc.text(L2 + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -29001,7 +31855,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap4(para, 11, W7)) {
+    for (const ln of wrap5(para, 11, W7)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -29020,7 +31874,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L2, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap4("I confirm that I have read and understood the content of this memo.", 11, W7)) {
+  for (const ln of wrap5("I confirm that I have read and understood the content of this memo.", 11, W7)) {
     doc.text(L2, y, ln, { size: 11 });
     y += 16;
   }
@@ -29055,7 +31909,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -29260,8 +32114,8 @@ init_pdf();
 init_logo();
 var L = 56;
 var R = 539;
-var W4 = R - L;
-var NAVY3 = [0, 0.2, 0.41];
+var W5 = R - L;
+var NAVY4 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
 var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -29282,7 +32136,7 @@ function fmtWhen3(iso) {
     return String(iso || "");
   }
 }
-function wrap5(str, size, maxW) {
+function wrap6(str, size, maxW) {
   const words = String(str == null ? "" : str).split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
@@ -29306,8 +32160,8 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch {
     y = 96;
   }
-  for (const ln of wrap5(String(docObj.title || "Document"), 20, W4)) {
-    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY3 });
+  for (const ln of wrap6(String(docObj.title || "Document"), 20, W5)) {
+    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
     y += 26;
   }
   y += 2;
@@ -29330,41 +32184,41 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   };
   const lines = String(docObj.body || "").split(/\r?\n/);
   for (const raw of lines) {
-    const line = raw.replace(/\s+$/, "");
-    if (!line.trim()) {
+    const line2 = raw.replace(/\s+$/, "");
+    if (!line2.trim()) {
       y += 8;
       continue;
     }
-    if (/^---+$/.test(line.trim())) {
+    if (/^---+$/.test(line2.trim())) {
       need(16);
       doc.hr(L, y, R, { grey: true });
       y += 14;
       continue;
     }
-    if (/^#\s+/.test(line)) {
-      const t = line.replace(/^#\s+/, "");
+    if (/^#\s+/.test(line2)) {
+      const t = line2.replace(/^#\s+/, "");
       need(24);
       y += 6;
-      for (const ln of wrap5(t, 15, W4)) {
-        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY3 });
+      for (const ln of wrap6(t, 15, W5)) {
+        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY4 });
         y += 20;
       }
       y += 2;
       continue;
     }
-    if (/^##\s+/.test(line)) {
-      const t = line.replace(/^##\s+/, "");
+    if (/^##\s+/.test(line2)) {
+      const t = line2.replace(/^##\s+/, "");
       need(20);
       y += 4;
-      for (const ln of wrap5(t, 12, W4)) {
-        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY3 });
+      for (const ln of wrap6(t, 12, W5)) {
+        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY4 });
         y += 16;
       }
       continue;
     }
-    if (/^[-•]\s+/.test(line)) {
-      const t = line.replace(/^[-•]\s+/, "");
-      const parts2 = wrap5(t, 10.5, W4 - 16);
+    if (/^[-•]\s+/.test(line2)) {
+      const t = line2.replace(/^[-•]\s+/, "");
+      const parts2 = wrap6(t, 10.5, W5 - 16);
       need(parts2.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
       for (let i = 0; i < parts2.length; i++) {
@@ -29374,7 +32228,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y += 2;
       continue;
     }
-    const parts = wrap5(line, 10.5, W4);
+    const parts = wrap6(line2, 10.5, W5);
     need(parts.length * 15);
     for (const ln of parts) {
       doc.text(L, y, ln, { size: 10.5 });
@@ -29386,7 +32240,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   need(200);
   doc.hr(L, y, R, { grey: true });
   y += 20;
-  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY3 });
+  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY4 });
   y += 22;
   const block = (label2, name, sigJpeg, whenLine, extra) => {
     need(110);
@@ -29563,7 +32417,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -29789,7 +32643,7 @@ init_auth();
 var CLIENT = "chapplins";
 var SCHEME = "chapplins";
 var _ready = false;
-async function ensureTables3(env, tenantId) {
+async function ensureTables4(env, tenantId) {
   if (_ready) return;
   const db = tenantDB(env, tenantId);
   await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
@@ -29844,14 +32698,14 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
-  await ensureTables3(env, tenantId);
+  await ensureTables4(env, tenantId);
   if (path === "/chapplins/sites" && method === "GET") {
     const { results: siteRows } = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
@@ -30083,7 +32937,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
@@ -30104,7 +32958,7 @@ async function handle30(request, env, ctx, url, sess) {
   };
   try {
     if (path === "/api/status" && method === "GET") return jr8(await getSystemStatus(db));
-    if (path === "/api/config" && method === "GET") return jr8(await getConfig3(db));
+    if (path === "/api/config" && method === "GET") return jr8(await getConfig4(db));
     if (path === "/api/suppliers" && method === "GET") return jr8(await getSuppliers(db));
     if (path === "/api/subcontractors" && method === "GET") return jr8(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr8(await getTrades(db));
@@ -30194,7 +33048,7 @@ async function getConfigMap(db) {
   for (const r of rows.results) map[r.key] = r.value;
   return map;
 }
-async function getConfig3(db) {
+async function getConfig4(db) {
   return await getConfigMap(db);
 }
 async function updateConfig(db, body) {
@@ -31552,7 +34406,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -31983,7 +34837,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -32364,7 +35218,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables4(env) {
+async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -32511,7 +35365,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -32531,7 +35385,7 @@ async function handle33(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const tid2 = await resolveTenantId(env, request);
-      await ensureTables4(env);
+      await ensureTables5(env);
       const b = await request.json().catch(() => ({}));
       const action = String(b.action || "").toLowerCase();
       const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -32634,7 +35488,7 @@ async function handle33(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables4(env);
+  await ensureTables5(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -32820,968 +35674,7 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
 
 // src/index.js
 init_certs();
-
-// src/routes/pump.js
-init_http();
-init_auth();
-
-// src/lib/pumppdf.js
-init_pdf();
-var W5 = 595;
-var H3 = 842;
-var M5 = 40;
-var CW2 = W5 - M5 * 2;
-var NAVY4 = [0, 0.204, 0.408];
-var INK4 = [0.1, 0.13, 0.18];
-var MUTE3 = [0.46, 0.51, 0.58];
-var FAINT2 = [0.62, 0.66, 0.72];
-var BG2 = [0.953, 0.965, 0.977];
-var CARD3 = [1, 1, 1];
-var BORDER2 = [0.886, 0.906, 0.933];
-var HAIR3 = [0.92, 0.935, 0.955];
-var ZEBRA2 = [0.972, 0.98, 0.99];
-var ACCENT2 = [0.04, 0.42, 0.52];
-var GREEN2 = [0.09, 0.63, 0.29];
-var RED2 = [0.83, 0.16, 0.16];
-var GREY4 = [0.6, 0.64, 0.7];
-var HEADSUB2 = [0.78, 0.85, 0.93];
-var S3 = (v) => toWinAnsi(String(v == null ? "" : v));
-var ROW_H2 = 19;
-var THEAD_H2 = 22;
-var CARD_PAD2 = 14;
-var GAP2 = 14;
-var HEADER_H2 = 84;
-function fit3(str, size, maxW) {
-  str = S3(str);
-  if (textWidth(str, size) <= maxW) return str;
-  let s = str;
-  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
-  return s + "...";
-}
-function wrap6(str, size, maxW, maxLines) {
-  const words = S3(str).split(/\s+/).filter(Boolean);
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    const t = cur ? cur + " " + w : w;
-    if (textWidth(t, size) <= maxW) {
-      cur = t;
-      continue;
-    }
-    if (cur) lines.push(cur);
-    cur = w;
-    if (maxLines && lines.length >= maxLines) break;
-  }
-  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
-  return lines.length ? lines : [""];
-}
-function instrLines(str, size, maxW) {
-  const out = [];
-  String(str || "").split(/\r?\n/).forEach((raw) => {
-    const t = raw.trim();
-    if (!t) {
-      out.push("");
-      return;
-    }
-    wrap6(t, size, maxW).forEach((l) => out.push(l));
-  });
-  return out;
-}
-function tracked2(doc, x, y, str, { size = 6.5, color = MUTE3, track = 1.2, alignRight = false, bold = true } = {}) {
-  const chars = [...S3(str).toUpperCase()];
-  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
-  let cx = alignRight ? x - total : x;
-  for (const c of chars) {
-    doc.text(cx, y, c, { size, bold, color });
-    cx += textWidth(c, size) + track;
-  }
-  return total;
-}
-function dot2(doc, cx, cy, r, color, hollow) {
-  if (hollow) {
-    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
-    doc.roundRect(cx - r - 0.6, cy - r - 0.6, r * 2 + 1.2, r * 2 + 1.2, r + 0.6, { fill: BORDER2 });
-    doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: [1, 1, 1] });
-  } else doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
-}
-function pill2(doc, x, yTop, label2, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
-  const w = textWidth(S3(label2), size) + padX * 2;
-  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
-  doc.text(x + padX, yTop + h - 4, S3(label2), { size, bold: true, color: textColor });
-  return w;
-}
-function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
-  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER2 });
-  doc.roundRect(x, y, w, h, r, { fill: fill2 });
-}
-function pageBg2(doc) {
-  doc.rect(0, 0, W5, H3, { fill: BG2 });
-}
-function imgSize(img) {
-  if (!img) return null;
-  if (img.jpeg) {
-    try {
-      const g = jpegInfo(img.jpeg);
-      return { w: g.w || 1, h: g.h || 1 };
-    } catch {
-      return null;
-    }
-  }
-  if (img.rgb && img.w && img.h) return { w: img.w, h: img.h };
-  return null;
-}
-function drawImg(doc, img, x, yTop, maxW, maxH, { align = "left" } = {}) {
-  const sz = imgSize(img);
-  if (!sz) return null;
-  const s = Math.min(maxW / sz.w, maxH / sz.h);
-  const w = sz.w * s, h = sz.h * s;
-  const dx = align === "center" ? x + (maxW - w) / 2 : x, dy = yTop + (maxH - h) / 2;
-  try {
-    if (img.jpeg) doc.image(img.jpeg, dx, dy, w, h);
-    else doc.imageRGB(img.rgb, img.w, img.h, dx, dy, w, h, { deflated: !!img.deflated });
-  } catch {
-    return null;
-  }
-  return { w, h, x: dx, y: dy };
-}
-function ansOf(a) {
-  const s = String(a || "").toLowerCase();
-  if (/^y/.test(s)) return "yes";
-  if (/^n\/?a/.test(s) || s === "na") return "na";
-  if (/^n/.test(s)) return "no";
-  return "";
-}
-function statusOf3(rec) {
-  const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
-  const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
-  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
-  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
-}
-function header2(doc, rec, meta, slim) {
-  const y = 30, h = slim ? 40 : HEADER_H2;
-  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY4);
-  if (meta.logo) {
-    try {
-      const g = jpegInfo(meta.logo);
-      const hh = slim ? 18 : 24;
-      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
-    } catch {
-    }
-  }
-  if (slim) {
-    tracked2(doc, W5 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
-    doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
-    return y + h;
-  }
-  const st = statusOf3(rec);
-  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
-  tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
-  doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
-  if (rec.date) doc.text(W5 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
-  return y + h;
-}
-function footer2(doc, pageNo, pageCount) {
-  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
-  doc.text(W5 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
-}
-function instrH(rec) {
-  return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
-}
-function safetyH(rec) {
-  return CARD_PAD2 + 14 + (rec.safety || []).length * 16 + 4;
-}
-function detailsH2(rec) {
-  if (!String(rec.detailsNo || "").trim()) return 0;
-  return CARD_PAD2 + 14 + wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).length * 11 + 4;
-}
-function instrCard(doc, y, rec) {
-  const h = instrH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
-    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
-    yy2 += 11;
-  });
-  return h;
-}
-function safetyCard(doc, y, rec) {
-  const h = safetyH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  (rec.safety || []).forEach((s) => {
-    const ok = ansOf(s.answer) === "yes";
-    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
-    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
-    pill2(doc, W5 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
-    yy2 += 16;
-  });
-  return h;
-}
-function checksCard(doc, rows, startIndex, y, count) {
-  const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
-  if (count != null) doc.text(W5 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
-  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
-  const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
-  const headY = y + 26 + THEAD_H2 - 8;
-  tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
-  ["Yes", "No", "N/A"].forEach((lab, k) => {
-    const cx = [cYes, cNo, cNa][k];
-    const lw = textWidth(lab, 6);
-    doc.text(cx - lw / 2, headY, lab, { size: 6, color: MUTE3 });
-  });
-  let ry = y + 26 + THEAD_H2;
-  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
-  rows.forEach((r, i) => {
-    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
-    const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
-    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
-    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
-    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
-    dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
-    ry += ROW_H2;
-  });
-  return h;
-}
-function detailsCard2(doc, y, rec) {
-  const h = detailsH2(rec);
-  if (!h) return 0;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  wrap6(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
-    yy2 += 11;
-  });
-  return h;
-}
-function mediaLine(rec, meta) {
-  const media = Array.isArray(rec.media) ? rec.media : [];
-  const np = media.filter((m) => m && m.kind !== "video").length, nv = media.filter((m) => m && m.kind === "video").length;
-  const embedded = (meta.photos || []).length;
-  const bits = [];
-  if (np) bits.push(np + (np === 1 ? " photo" : " photos") + (embedded ? " (see photo page" + (embedded > 4 ? "s" : "") + ")" : ""));
-  if (nv) bits.push(nv + (nv === 1 ? " video" : " videos") + " \u2014 viewable in the portal record");
-  return bits.length ? bits.join(" \xB7 ") : "";
-}
-var PHOTOS_PER_PAGE = 4;
-function photoPages(meta) {
-  return Math.ceil((meta && meta.photos || []).length / PHOTOS_PER_PAGE);
-}
-function photoPage(doc, rec, meta, pageIdx) {
-  const photos = meta.photos || [];
-  const start = pageIdx * PHOTOS_PER_PAGE;
-  const slice = photos.slice(start, start + PHOTOS_PER_PAGE);
-  const top = 30 + 40 + GAP2;
-  const gap = 12;
-  const cw = (CW2 - gap) / 2, ch = 292;
-  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
-  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
-  slice.forEach((p, i) => {
-    const col = i % 2, row = Math.floor(i / 2);
-    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
-    const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
-    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
-    const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
-    if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
-    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
-  });
-  const last = pageIdx === photoPages(meta) - 1;
-  if (last) {
-    const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
-    let yy2 = top + 30 + 2 * (ch + 10) + 6;
-    extras.slice(0, 6).forEach((t) => {
-      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
-      yy2 += 11;
-    });
-  }
-}
-function signatureCard2(doc, y, rec, meta) {
-  const declLines = wrap6(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
-  const media = mediaLine(rec, meta);
-  const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
-  let yy2 = y + 32;
-  declLines.forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
-    yy2 += 11;
-  });
-  if (media) {
-    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
-    yy2 += 14;
-  }
-  const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
-  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
-  const bw = 200, y2 = y + h - 54;
-  const blocks = [
-    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
-    { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
-  ];
-  blocks.forEach((b) => {
-    if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
-    doc.line(b.x, y2 + 30, b.x + bw, y2 + 30, { stroke: BORDER2, lw: 0.7 });
-    doc.text(b.x, y2 + 42, S3(b.name || "\u2014"), { size: 9, bold: true, color: INK4 });
-    tracked2(doc, b.x, y2 + 52, b.label, { size: 6, color: FAINT2 });
-  });
-  return h;
-}
-function buildPumpPdf(record, meta = {}) {
-  const rec = record || {};
-  rec.checks = Array.isArray(rec.checks) ? rec.checks : [];
-  const introBottom = 30 + HEADER_H2 + GAP2 + instrH(rec) + GAP2 + safetyH(rec) + GAP2;
-  const bottomLimit = H3 - 40;
-  const cap2 = (top) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H2 + 12)) / ROW_H2));
-  const slimTop = 30 + 40 + GAP2;
-  const page1Cap = cap2(introBottom), laterCap = cap2(slimTop);
-  const pages = [];
-  pages.push({ start: 0, rows: rec.checks.slice(0, page1Cap), intro: true, top: introBottom });
-  let i = page1Cap;
-  while (i < rec.checks.length) {
-    pages.push({ start: i, rows: rec.checks.slice(i, i + laterCap), intro: false, top: slimTop });
-    i += laterCap;
-  }
-  if (!pages.length) pages.push({ start: 0, rows: [], intro: true, top: introBottom });
-  const last = pages[pages.length - 1];
-  const lastBottom = last.top + 20 + THEAD_H2 + last.rows.length * ROW_H2 + 12;
-  const trailH = (detailsH2(rec) ? detailsH2(rec) + GAP2 : 0) + 150;
-  const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
-  const nPhotoPages = photoPages(meta);
-  const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
-  const doc = new PdfDoc(W5, H3);
-  pages.forEach((pg, idx) => {
-    if (idx > 0) doc.newPage(W5, H3);
-    pageBg2(doc);
-    if (pg.intro) {
-      header2(doc, rec, meta, false);
-      let yy2 = 30 + HEADER_H2 + GAP2;
-      yy2 += instrCard(doc, yy2, rec) + GAP2;
-      yy2 += safetyCard(doc, yy2, rec) + GAP2;
-      checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
-    } else {
-      header2(doc, rec, meta, true);
-      checksCard(doc, pg.rows, pg.start, pg.top, null);
-    }
-    footer2(doc, idx + 1, totalPages);
-  });
-  let ty;
-  if (trailOwnPage) {
-    doc.newPage(W5, H3);
-    pageBg2(doc);
-    header2(doc, rec, meta, true);
-    footer2(doc, totalPages, totalPages);
-    ty = slimTop;
-  } else ty = lastBottom + GAP2;
-  const dh = detailsCard2(doc, ty, rec);
-  if (dh) ty += dh + GAP2;
-  signatureCard2(doc, ty, rec, meta);
-  const before = pages.length + (trailOwnPage ? 1 : 0);
-  for (let p = 0; p < nPhotoPages; p++) {
-    doc.newPage(W5, H3);
-    pageBg2(doc);
-    header2(doc, rec, meta, true);
-    footer2(doc, before + p + 1, totalPages);
-    photoPage(doc, rec, meta, p);
-  }
-  return doc.bytes();
-}
-
-// src/routes/pump.js
-init_logo();
-init_filesign();
-init_push();
-init_compliance();
-init_pngdecode();
-var GENERAL = [
-  "Chamber free of debris or obstructions",
-  "Water level within expected range when idle",
-  "Pump body free from corrosion or damage",
-  "Electrical cables undamaged and away from water",
-  "Discharge pipe secure and supported",
-  "Float switch activates pump when lifted",
-  "Pump runs smoothly with no unusual noise/vibration",
-  "Water discharges fully through outlet",
-  "Pump switches off automatically after emptying",
-  "Discharge outlet clear of blockages or freezing",
-  "Non-return/check valve prevents backflow (where Fitted)",
-  "Sump chamber inlet screen free of debris",
-  "Inspection details recorded in log"
-];
-var BINFIELD_CHECKS = [
-  "Chamber free of debris or obstructions",
-  "Water level within expected range when idle",
-  "Pump body free from corrosion or damage",
-  "Electrical cables undamaged and away from water",
-  "Discharge pipe secure and supported",
-  "Float switch activates pump when lifted",
-  "Pump runs smoothly with no unusual noise/vibration",
-  "Water discharges fully through outlet",
-  "Pump switches off automatically after emptying",
-  "Discharge outlet clear of blockages or freezing",
-  "Non-return/check valve prevents backflow",
-  "Sump chamber inlet screen free of debris",
-  "Control panel or alarm system functioning",
-  "Inspection details recorded in log"
-];
-var WICKHAM_CHECKS = BINFIELD_CHECKS.concat([
-  "Water Pumping into ditch",
-  "Ditch inlet & outlet clear from debris",
-  "Ditch generally tidy of debris",
-  "CCTV receiving power"
-]);
-var INSTR = {
-  binfield: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nAlarm float switch:\n- Located in the basement, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (warehouse).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  wickham: "The sump pump is in the rear garden of the store, under a manhole in the grass (approx. 5 m deep).\nAccessing the pump: pull it up carefully using the rope, then lower it back down slowly after checks.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 5 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nDitch maintenance:\n- Clear all debris from both ends of the ditch to maintain flow.\n- Remove any debris along the ditch length as well.\n\nAlarm float switch:\n- Located in the manhole, above the pump.\n- Tilting it should activate the alarm inside the Co-op building (just inside the rear doors).\n- This switch is set high to act as an early warning if the pump fails and water rises too high.\n- This gives the store time to move stock before flooding occurs.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  eastbourne: "The pump is located in the basement in the BOH area.\nBarriers must be set up around the hatch and all staff notified of the works being carried out.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the waste.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  shanklin: "The sump pump is in the basement in the BOH area of the store.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n- This will prime the pump, which will then discharge through the plastic pipe into the ditch at the top of the land.\n\nElectrical Cut Off switch:\n- Located on the wall, above the pump.\n- Tilting it should activate the contactors above the basement and cut all 230v electricity to the lighting and tube heaters.\n- When the float switch is released, the contactor should re-engage and bring the 230v power back on.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  wimbledon: "There are two pumps to test in this store.\n\nFirst pump - located in a hatch in the staff room.\n- Remove the skirting and lift the hatch to access.\n- This area must be shut off while the hatch is open and all staff notified of the risk.\n\nSecond pump - located in the rear area of the store basement (not occupied by Co-op).\n- Key can be acquired via the store manager.\n- Walk inside the unit, turn back on yourself, and you will see the pump.\n\nPriming the pump:\n- Fill buckets from the store's cleaners' sink tap (approx. 2 buckets) and pour into the sump.\n\nImportant: Always leave both the pump and the alarm float switch in their correct positions after maintenance.",
-  newportels: "The sump pump is in the basement below the reception desk printer.\nThe printer will need moving to complete the test.\nStaff must be notified, and the area barriered off.\n\nPriming the pump:\n- Fill buckets from the store's tap (approx. 2 buckets) and pour into the sump.\n\nImportant:\n- Ensure the hatch is fitted back correctly and flush.\n- Always leave both the pump and the alarm float switch in their correct positions after maintenance."
-};
-var DEFAULT_CONFIG3 = {
-  declaration: "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.",
-  contractor: { tradingTitle: "Mostlane", address: "Unit A5, Segensworth Business Centre, Titchfield", postcode: "PO15 5RQ" },
-  safety: [
-    { id: "barrier", label: "Area made safe and barriered off correctly to prevent injury (e.g. someone falling into the open hatch/sump)" },
-    { id: "notified", label: "Store staff have been notified that the works are being carried out" }
-  ],
-  stores: [
-    { id: "binfield", name: "Binfield", siteCode: "0382", client: "retail", address: "Binfield, Forest Road", postcode: "RG42 4HP", instructions: INSTR.binfield, checks: BINFIELD_CHECKS.slice() },
-    { id: "wickham", name: "Wickham", siteCode: "0066", client: "retail", address: "Wickham, The Square", postcode: "PO17 5JN", instructions: INSTR.wickham, checks: WICKHAM_CHECKS.slice() },
-    { id: "eastbourne", name: "Eastbourne", siteCode: "0356", client: "retail", address: "Eastbourne, Lindfield Road", postcode: "BN22 0AU", instructions: INSTR.eastbourne, checks: GENERAL.slice() },
-    { id: "shanklin", name: "Shanklin", siteCode: "0125", client: "retail", address: "Shanklin, Regent Street", postcode: "PO37 7AA", instructions: INSTR.shanklin, checks: GENERAL.slice() },
-    { id: "wimbledon", name: "Wimbledon", siteCode: "0404", client: "retail", address: "Wimbledon, Ridgway", postcode: "SW19 4ST", instructions: INSTR.wimbledon, checks: GENERAL.slice() },
-    { id: "newportels", name: "Newport ELS", siteCode: "0682", client: "els", address: "The Co-operative Funeralcare - Newport", postcode: "PO30 1LQ", instructions: INSTR.newportels, checks: GENERAL.slice() }
-  ]
-};
-var normEng2 = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
-async function ensureTables5(env) {
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pump_records (
-    tenant_id TEXT, id TEXT, job_id TEXT, store TEXT, site_code TEXT,
-    status TEXT DEFAULT 'draft', data TEXT, engineer TEXT,
-    created_at TEXT, updated_at TEXT, r2_final_key TEXT,
-    PRIMARY KEY (tenant_id, id))`).run();
-}
-async function getConfig4(env, tid) {
-  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
-  if (row && row.value) {
-    try {
-      const c = JSON.parse(row.value);
-      if (c && Array.isArray(c.stores)) return c;
-    } catch {
-    }
-  }
-  await saveConfig2(env, tid, DEFAULT_CONFIG3);
-  return JSON.parse(JSON.stringify(DEFAULT_CONFIG3));
-}
-async function saveConfig2(env, tid, c) {
-  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
-}
-async function getJob3(env, tid, id) {
-  try {
-    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
-    return row ? JSON.parse(row.data) : null;
-  } catch {
-    return null;
-  }
-}
-function storeById(cfg, id) {
-  return (cfg.stores || []).find((s) => s.id === id) || null;
-}
-function dataUrlToBytes2(u) {
-  const s = String(u || "");
-  const i = s.indexOf(",");
-  if (!/^data:image\//i.test(s) || i < 0) return null;
-  try {
-    const bin = atob(s.slice(i + 1));
-    const out = new Uint8Array(bin.length);
-    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
-    return out;
-  } catch {
-    return null;
-  }
-}
-var isJpeg = (b) => b && b.length > 3 && b[0] === 255 && b[1] === 216;
-var isPng = (b) => b && b.length > 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71;
-async function sigImage(dataUrl) {
-  const b = dataUrlToBytes2(dataUrl);
-  if (!b) return null;
-  if (isJpeg(b)) return { jpeg: b };
-  if (isPng(b)) {
-    const d = await decodePngToRgb(b, { signature: true });
-    return d ? { rgb: d.rgb, w: d.width, h: d.height } : null;
-  }
-  return null;
-}
-function shrinkRgb(rgb, w, h, maxEdge) {
-  const s = Math.max(w, h) / maxEdge;
-  if (s <= 1) return { rgb, w, h };
-  const nw = Math.max(1, Math.round(w / s)), nh = Math.max(1, Math.round(h / s));
-  const out = new Uint8Array(nw * nh * 3);
-  for (let y = 0; y < nh; y++) {
-    const sy = Math.min(h - 1, Math.floor(y * s));
-    for (let x = 0; x < nw; x++) {
-      const sx = Math.min(w - 1, Math.floor(x * s));
-      const si = (sy * w + sx) * 3, di = (y * nw + x) * 3;
-      out[di] = rgb[si];
-      out[di + 1] = rgb[si + 1];
-      out[di + 2] = rgb[si + 2];
-    }
-  }
-  return { rgb: out, w: nw, h: nh };
-}
-async function deflate(bytes) {
-  try {
-    const cs = new CompressionStream("deflate");
-    const w = cs.writable.getWriter();
-    w.write(bytes);
-    w.close();
-    return new Uint8Array(await new Response(cs.readable).arrayBuffer());
-  } catch {
-    return null;
-  }
-}
-async function photoImage(env, m) {
-  try {
-    const o = env.JOB_FILES && await env.JOB_FILES.get(m.key);
-    if (!o) return { why: "file missing" };
-    const b = new Uint8Array(await o.arrayBuffer());
-    if (isJpeg(b)) return { img: { jpeg: b, name: m.name || "" } };
-    if (isPng(b)) {
-      const d = await decodePngToRgb(b, { maxPixels: 6e7, maxEdge: 1e3 });
-      if (!d) return { why: "PNG couldn't be decoded" };
-      const s = shrinkRgb(d.rgb, d.width, d.height, 1e3);
-      const z = await deflate(s.rgb);
-      return { img: z ? { rgb: z, w: s.w, h: s.h, deflated: true, name: m.name || "" } : { rgb: s.rgb, w: s.w, h: s.h, name: m.name || "" } };
-    }
-    const ct = o.httpMetadata && o.httpMetadata.contentType || "";
-    return { why: /heic|heif/i.test(ct + " " + (m.name || "")) ? "HEIC not supported \u2014 upload as JPEG" : "unsupported image format" + (ct ? " (" + ct + ")" : "") };
-  } catch (e) {
-    return { why: "decode error: " + String(e && e.message || e).slice(0, 60) };
-  }
-}
-var MAX_PDF_PHOTOS = 12;
-async function pdfMeta(env, d) {
-  const media = Array.isArray(d.media) ? d.media : [];
-  const photos = [], skipped = [], videos = [];
-  for (const m of media) {
-    if (!m || !m.key) continue;
-    if (m.kind === "video") {
-      videos.push(m.name || "video");
-      continue;
-    }
-    if (photos.length >= MAX_PDF_PHOTOS) {
-      skipped.push((m.name || "photo") + " (over the " + MAX_PDF_PHOTOS + "-photo limit)");
-      continue;
-    }
-    const r = await photoImage(env, m);
-    if (r.img) photos.push(r.img);
-    else skipped.push((m.name || "photo") + " \u2014 " + (r.why || "not embedded"));
-  }
-  return { logo: logoBytes(), engSig: await sigImage(d.engSig), dmSig: await sigImage(d.dmSig), photos, videos, skipped };
-}
-async function buildPdfFor(env, rec) {
-  const d = shapeRow2(rec);
-  return buildPumpPdf(d, await pdfMeta(env, d));
-}
-function shapeRow2(r) {
-  let d = {};
-  try {
-    d = JSON.parse(r.data || "{}");
-  } catch {
-  }
-  return { id: r.id, jobId: r.job_id, store: r.store, siteCode: r.site_code, status: r.status, engineer: r.engineer, createdAt: r.created_at, updatedAt: r.updated_at, ...d };
-}
-function seedRecord(cfg, store, job) {
-  return {
-    store: store.id,
-    storeName: store.name,
-    siteCode: store.siteCode || "",
-    instructions: store.instructions || "",
-    declaration: cfg.declaration || "",
-    safety: (cfg.safety || []).map((s) => ({ id: s.id, label: s.label, answer: "" })),
-    checks: (store.checks || []).map((c) => ({ label: c, answer: "" })),
-    detailsNo: "",
-    declarationAgreed: "",
-    date: "",
-    engineerName: "",
-    dmName: "",
-    engSig: "",
-    dmSig: "",
-    media: []
-  };
-}
-async function maybeCompletePumpJob(env, tid, rec) {
-  try {
-    if (!rec || !rec.job_id) return false;
-    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, rec.job_id).first();
-    if (!row) return false;
-    let job;
-    try {
-      job = JSON.parse(row.data);
-    } catch {
-      return false;
-    }
-    if (!job.pumpMaintenance) return false;
-    if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
-    if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    job.status = "Complete";
-    job.updatedAt = now;
-    job.closedAt = job.closedAt || now;
-    const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
-    if (engs.length) {
-      job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "pump" };
-    }
-    job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
-    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function resignMedia(env, origin, rec) {
-  if (!rec || !Array.isArray(rec.media)) return rec;
-  for (const m of rec.media) {
-    if (m && m.key) {
-      try {
-        m.url = await signedFileUrl(env, origin, "/pump/media", m.key);
-      } catch {
-      }
-    }
-  }
-  return rec;
-}
-async function handle34(request, env, ctx, url, sess) {
-  const method = request.method.toUpperCase();
-  if (method === "GET" && url.pathname === "/pump/media") {
-    const key = url.searchParams.get("key") || "";
-    if (!key.startsWith("pump/")) return new Response("Bad key", { status: 400 });
-    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
-    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
-    if (!obj) return new Response("Not found", { status: 404 });
-    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream", "Cache-Control": "public, max-age=86400" } });
-  }
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const tid = sess.tenantId, me = sess.user.username;
-  const sub = url.pathname.replace(/^\/pump(?=\/|$)/, "") || "/";
-  const q = url.searchParams;
-  await ensureTables5(env);
-  const perms = await permissionsFor(env, tid, me);
-  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
-  const loadRec = async (id) => env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, id).first();
-  const canWrite = async (rec) => {
-    if (isOffice) return true;
-    if (!rec) return true;
-    if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
-    try {
-      const job = rec.job_id ? await getJob3(env, tid, String(rec.job_id)) : null;
-      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
-      return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
-    } catch {
-      return false;
-    }
-  };
-  if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig4(env, tid) }, {}, env, request);
-    if (method === "POST") {
-      if (!isOffice) return error("Office access required", 403, env, request);
-      const b = await request.json().catch(() => ({}));
-      const cur = await getConfig4(env, tid);
-      const next = { ...cur };
-      if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
-      if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
-      if (Array.isArray(b.safety)) next.safety = b.safety.map((s, i) => ({ id: String(s.id || "s" + i), label: String(s.label || "").slice(0, 300) })).filter((s) => s.label);
-      if (Array.isArray(b.stores)) next.stores = b.stores.map((s) => ({
-        id: String(s.id || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "store" + Math.random().toString(36).slice(2, 7),
-        name: String(s.name || "").slice(0, 120),
-        siteCode: String(s.siteCode || "").slice(0, 20),
-        client: String(s.client || "").slice(0, 40),
-        address: String(s.address || "").slice(0, 300),
-        postcode: String(s.postcode || "").slice(0, 20),
-        instructions: String(s.instructions || "").slice(0, 4e3),
-        checks: (Array.isArray(s.checks) ? s.checks : []).map((c) => String(c || "").slice(0, 200)).filter(Boolean)
-      })).filter((s) => s.name);
-      await saveConfig2(env, tid, next);
-      return json({ ok: true, config: next }, {}, env, request);
-    }
-  }
-  if (sub === "/stores" && method === "GET") {
-    const cfg = await getConfig4(env, tid);
-    return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
-  }
-  if (sub === "/for-job" && method === "GET") {
-    const jobId = q.get("jobId") || "";
-    if (!jobId) return error("jobId required", 400, env, request);
-    const cfg = await getConfig4(env, tid);
-    const job = await getJob3(env, tid, jobId);
-    let storeId = q.get("store") || job && job.pumpStore || "";
-    const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
-    if (existing) {
-      const rec = shapeRow2(existing);
-      await resignMedia(env, url.origin, rec);
-      const store2 = storeById(cfg, rec.store) || null;
-      return json({ ok: true, record: rec, store: store2, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
-    }
-    const store = storeById(cfg, storeId) || (cfg.stores || [])[0];
-    if (!store) return error("No pump stores configured", 400, env, request);
-    const seeded = seedRecord(cfg, store, job);
-    seeded.date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    if (job) seeded.engineerName = "";
-    return json({ ok: true, record: { id: null, jobId, status: "draft", ...seeded }, store, config: { declaration: cfg.declaration, safety: cfg.safety } }, {}, env, request);
-  }
-  if (sub === "/save" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const jobId = String(b.jobId || "");
-    let rec = null, id = b.id ? String(b.id) : "";
-    if (id) rec = await loadRec(id);
-    if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cfg = await getConfig4(env, tid);
-    const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
-    const sanSig = (v) => {
-      const s = String(v || "");
-      return /^data:image\//.test(s) && s.length <= 4e5 ? s : rec ? void 0 : "";
-    };
-    const data = {
-      storeName: store ? store.name : b.storeName || "",
-      instructions: store ? store.instructions : b.instructions || "",
-      declaration: cfg.declaration || "",
-      safety: Array.isArray(b.safety) ? b.safety.map((s) => ({ id: String(s.id || ""), label: String(s.label || ""), answer: String(s.answer || "") })) : [],
-      checks: Array.isArray(b.checks) ? b.checks.map((c) => ({ label: String(c.label || ""), answer: String(c.answer || "") })) : [],
-      detailsNo: String(b.detailsNo || "").slice(0, 4e3),
-      declarationAgreed: b.declarationAgreed === true || String(b.declarationAgreed || "").toLowerCase().startsWith("y") ? "yes" : "",
-      date: String(b.date || "").slice(0, 20),
-      engineerName: String(b.engineerName || "").slice(0, 120),
-      dmName: String(b.dmName || "").slice(0, 120),
-      media: rec ? shapeRow2(rec).media || [] : []
-    };
-    const es = sanSig(b.engSig);
-    if (es !== void 0) data.engSig = es;
-    else if (rec) data.engSig = shapeRow2(rec).engSig || "";
-    const ds = sanSig(b.dmSig);
-    if (ds !== void 0) data.dmSig = ds;
-    else if (rec) data.dmSig = shapeRow2(rec).dmSig || "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    if (!id) {
-      id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-    }
-    const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
-    const storeId = store ? store.id : rec ? rec.store : "";
-    if (rec) {
-      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
-    } else {
-      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
-    }
-    const saved = await loadRec(id);
-    const out = shapeRow2(saved);
-    await resignMedia(env, url.origin, out);
-    return json({ ok: true, record: out }, {}, env, request);
-  }
-  if (sub === "/media" && method === "POST") {
-    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
-    const form = await request.formData().catch(() => null);
-    if (!form) return error("multipart required", 400, env, request);
-    const id = String(form.get("id") || "");
-    const kind = String(form.get("kind") || "photo") === "video" ? "video" : "photo";
-    const file = form.get("file");
-    if (!id || !file || typeof file.arrayBuffer !== "function") return error("id + file required", 400, env, request);
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (rec.status === "final") return error("Record finalised", 409, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cap2 = kind === "video" ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
-    const buf = new Uint8Array(await file.arrayBuffer());
-    if (buf.length > cap2) return error(kind === "video" ? "Video too large (max 95 MB \u2014 keep the clip short)" : "Photo too large (max 12 MB)", 413, env, request);
-    const ext = (String(file.name || "").match(/\.([a-z0-9]{2,5})$/i) || [, kind === "video" ? "mp4" : "jpg"])[1].toLowerCase();
-    const key = `pump/${tid}/${id}/${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg") } });
-    const d = shapeRow2(rec);
-    const media = Array.isArray(d.media) ? d.media : [];
-    media.push({ key, kind, name: String(file.name || kind + "." + ext).slice(0, 160) });
-    const data = { ...d };
-    delete data.id;
-    delete data.jobId;
-    delete data.store;
-    delete data.siteCode;
-    delete data.status;
-    delete data.engineer;
-    delete data.createdAt;
-    delete data.updatedAt;
-    data.media = media;
-    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    const urlOut = await signedFileUrl(env, url.origin, "/pump/media", key);
-    return json({ ok: true, key, kind, name: media[media.length - 1].name, url: urlOut }, {}, env, request);
-  }
-  if (sub === "/media-delete" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || ""), key = String(b.key || "");
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    if (key.startsWith("pump/") && env.JOB_FILES) {
-      try {
-        await env.JOB_FILES.delete(key);
-      } catch {
-      }
-    }
-    const d = shapeRow2(rec);
-    const media = (Array.isArray(d.media) ? d.media : []).filter((m) => m.key !== key);
-    const data = { ...d };
-    delete data.id;
-    delete data.jobId;
-    delete data.store;
-    delete data.siteCode;
-    delete data.status;
-    delete data.engineer;
-    delete data.createdAt;
-    delete data.updatedAt;
-    data.media = media;
-    await env.DB.prepare("UPDATE pump_records SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (sub === "/submit" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || "");
-    const rec = await loadRec(id);
-    if (!rec) return error("Record not found", 404, env, request);
-    if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
-    const fresh = await loadRec(id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    ctx && ctx.waitUntil && ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
-      title: "\u{1F6B0} Pump maintenance submitted",
-      body: `${shapeRow2(rec).storeName || "A store"} \u2014 ready for office review`,
-      url: "/cert-review.html?pump=" + encodeURIComponent(id),
-      tag: "pump-review"
-    }, me).catch(() => {
-    }));
-    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
-  }
-  if (sub === "/one" && method === "GET") {
-    const rec = await loadRec(q.get("id") || "");
-    if (!rec) return error("Not found", 404, env, request);
-    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
-    const out = shapeRow2(rec);
-    await resignMedia(env, url.origin, out);
-    return json({ ok: true, record: out }, {}, env, request);
-  }
-  if (sub === "/review" && method === "GET") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status IN ('draft','review') ORDER BY updated_at DESC LIMIT 200").bind(tid).all();
-    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
-  }
-  if (sub === "/list" && method === "GET") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const store = q.get("store") || "";
-    const { results } = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND status='final' AND (?='' OR store=?) ORDER BY updated_at DESC LIMIT 200").bind(tid, store, store).all();
-    return json({ ok: true, records: (results || []).map(shapeRow2) }, {}, env, request);
-  }
-  if (sub === "/pdf" && method === "GET") {
-    const rec = await loadRec(q.get("id") || "");
-    if (!rec) return error("Not found", 404, env, request);
-    if (!await canWrite(rec) && !isOffice) return error("Not allowed", 403, env, request);
-    const d = shapeRow2(rec);
-    const bytes = await buildPdfFor(env, rec);
-    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="Pump-${d.storeName || rec.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
-  }
-  if (sub === "/finalise" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    const d = shapeRow2(rec);
-    const bytes = await buildPdfFor(env, rec);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
-    if (env.JOB_FILES) {
-      try {
-        await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
-      } catch {
-      }
-    }
-    let filedToSite = false;
-    const code = rec.site_code || d.siteCode || "";
-    if (code) {
-      try {
-        await fileCertificatePdf(env, tid, {
-          scheme: "coop",
-          code,
-          type: "pump",
-          bytes,
-          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
-          docDate: d.date || now.slice(0, 10),
-          bump: true,
-          source: "pump:" + rec.id,
-          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
-        });
-        filedToSite = true;
-      } catch {
-      }
-    }
-    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
-    const fresh = await loadRec(rec.id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    if (rec.engineer) ctx && ctx.waitUntil && ctx.waitUntil(sendToUser(env, tid, rec.engineer, { title: "\u{1F6B0} Pump record filed", body: `${d.storeName || "Pump"} maintenance record finalised`, url: "/pump-review.html", tag: "pump-final" }).catch(() => {
-    }));
-    return json({ ok: true, record: shapeRow2(fresh), filedToSite }, {}, env, request);
-  }
-  if (sub === "/upload" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
-    const form = await request.formData().catch(() => null);
-    if (!form) return error("multipart required", 400, env, request);
-    const rec = await loadRec(String(form.get("id") || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    const file = form.get("file");
-    if (!file || typeof file.arrayBuffer !== "function") return error("file required", 400, env, request);
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
-    await env.JOB_FILES.put(finalKey, bytes, { httpMetadata: { contentType: "application/pdf" } });
-    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, (/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
-    const fresh = await loadRec(rec.id);
-    try {
-      await maybeCompletePumpJob(env, tid, fresh);
-    } catch {
-    }
-    return json({ ok: true, record: shapeRow2(fresh) }, {}, env, request);
-  }
-  if (sub === "/reopen" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    await env.DB.prepare("UPDATE pump_records SET status='review', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, rec.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (sub === "/delete" && method === "POST") {
-    if (!isOffice) return error("Office access required", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const rec = await loadRec(String(b.id || ""));
-    if (!rec) return error("Not found", 404, env, request);
-    if (env.JOB_FILES) {
-      try {
-        const l = await env.JOB_FILES.list({ prefix: `pump/${tid}/${rec.id}/` });
-        for (const o of l.objects || []) await env.JOB_FILES.delete(o.key);
-      } catch {
-      }
-    }
-    await env.DB.prepare("DELETE FROM pump_records WHERE tenant_id=? AND id=?").bind(tid, rec.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Not found: " + url.pathname, 404, env, request);
-}
+init_pump();
 
 // src/routes/cablecalc.js
 init_http();
@@ -34321,26 +36214,26 @@ function fitText(str, w, size) {
 function wrapLines2(str, w, size, maxLines) {
   const words = String(str || "").split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
+  let line2 = "";
   for (let word of words) {
     while (textWidth(word, size) > w && word.length > 1) {
-      if (line) {
-        lines.push(line);
-        line = "";
+      if (line2) {
+        lines.push(line2);
+        line2 = "";
       }
       let k = word.length;
       while (k > 1 && textWidth(word.slice(0, k), size) > w) k--;
       lines.push(word.slice(0, k));
       word = word.slice(k);
     }
-    const test = line ? line + " " + word : word;
-    if (textWidth(test, size) <= w) line = test;
+    const test = line2 ? line2 + " " + word : word;
+    if (textWidth(test, size) <= w) line2 = test;
     else {
-      if (line) lines.push(line);
-      line = word;
+      if (line2) lines.push(line2);
+      line2 = word;
     }
   }
-  if (line) lines.push(line);
+  if (line2) lines.push(line2);
   if (!lines.length) lines.push("");
   if (maxLines && lines.length > maxLines) {
     const kept = lines.slice(0, maxLines);
@@ -34451,39 +36344,39 @@ function buildProgrammePdf(data, meta = {}) {
       if (rangeLbl) doc.text(PW - M7, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
       const legendRightL1 = PW - M7 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M7, line = 0, dropped = 0;
+      let lx = M7, line2 = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M7;
+        const right = line2 === 0 ? legendRightL1 : PW - M7;
         if (lx + w > right) {
-          if (line === 0) {
-            line = 1;
+          if (line2 === 0) {
+            line2 = 1;
             lx = M7;
           } else {
             dropped++;
             continue;
           }
         }
-        const ly = y + line * LEG_LINE_H;
+        const ly = y + line2 * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: hex2rgb(c.colour) });
         doc.text(lx + 11, ly, c.name, { size: 8.5 });
         lx += w;
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M7;
-        if (lx + w > right && line === 0) {
-          line = 1;
+        const right = line2 === 0 ? legendRightL1 : PW - M7;
+        if (lx + w > right && line2 === 0) {
+          line2 = 1;
           lx = M7;
         }
-        const ly = y + line * LEG_LINE_H;
+        const ly = y + line2 * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
         doc.rect(lx - 0.4, ly - 7.4, 8.8, 8.8, { stroke: EXTRA_COL, lw: 1.1 });
         doc.text(lx + 11, ly, "Extra works", { size: 8.5, color: [0.55, 0.28, 0.05] });
         lx += w;
       }
-      if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
+      if (dropped) doc.text(lx, y + line2 * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M7 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
@@ -35908,6 +37801,10 @@ async function handle37(request, env, ctx, url, sess) {
       if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
     } catch {
     }
+    {
+      const bad = badScheduleIn(b);
+      if (bad) return error(bad, 400, env, request);
+    }
     const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
     const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : void 0;
     const payload = {
@@ -35949,6 +37846,10 @@ async function handle37(request, env, ctx, url, sess) {
     const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
     if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
     let days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    for (const d of days) {
+      const bad = badScheduleDate(d.scheduledAt, "Series day");
+      if (bad) return error(bad, 400, env, request);
+    }
     if (b.includeWeekends !== true) {
       const londonDow = (iso) => {
         const s = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -36347,7 +38248,7 @@ var SLOW_MS = 2500;
 var PROBE_SLOW_MS = 1500;
 var RETAIN_DAYS = 30;
 var TABLE_READY = false;
-async function ensureTable3(env) {
+async function ensureTable4(env) {
   if (TABLE_READY) return;
   try {
     await env.DB.prepare(
@@ -36370,7 +38271,7 @@ async function ensureTable3(env) {
 }
 async function recordEvent(env, tenantId, { kind, endpoint, message, status, ms }) {
   try {
-    await ensureTable3(env);
+    await ensureTable4(env);
     const res = await env.DB.prepare(
       "INSERT INTO health_events (tenant_id, kind, endpoint, message, status, ms, at) VALUES (?,?,?,?,?,?,?)"
     ).bind(
@@ -36428,7 +38329,7 @@ function probeList(env) {
 }
 async function runHealthChecks(env, tenantId) {
   const tid = tenantId || 1;
-  await ensureTable3(env);
+  await ensureTable4(env);
   const checks = [];
   for (const [name, desc, fn] of probeList(env)) {
     const t0 = Date.now();
@@ -36671,7 +38572,7 @@ async function handle38(request, env, ctx, url, sess) {
   const perms = new Set((permRows.results || []).map((r) => r.permission));
   if (!perms.has("FullAccess")) return json3({ error: "Full access only" }, 403, env, request);
   const tid = sess.tenantId;
-  await ensureTable3(env);
+  await ensureTable4(env);
   const method = request.method.toUpperCase();
   if (url.pathname === "/health/run" && method === "POST") {
     const [snap, integrity] = await Promise.all([runHealthChecks(env, tid), runIntegrityChecks(env, tid)]);
@@ -36840,7 +38741,7 @@ async function pulseGate(env, db, cfg) {
 async function logGate(db, entry) {
   const log = await loadKV(db, "tuya:openlog") || [];
   log.unshift(entry);
-  await saveKV2(db, "tuya:openlog", log.slice(0, 100));
+  await saveKV2(db, "tuya:openlog", log.slice(0, 500));
 }
 function londonNow2() {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(/* @__PURE__ */ new Date());
@@ -37096,7 +38997,16 @@ async function handle39(request, env, ctx, url, sess) {
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
     const log = await loadKV(db, "tuya:openlog") || [];
-    return json4({ ok: true, log: log.slice(0, 100) });
+    let rates = {};
+    try {
+      const rm = await ratesMap(env, sess.tenantId);
+      for (const [u, v] of Object.entries(rm)) {
+        const base = Number(v && v.rate);
+        if (isFinite(base) && base > 0) rates[u] = v.rateType === "day" ? base / 8 : base;
+      }
+    } catch {
+    }
+    return json4({ ok: true, log: log.slice(0, 500), rates });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
 }
@@ -37808,37 +39718,37 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
-  ["*", "/holiday", handle11],
-  ["*", "/asset", handle12],
+  ["*", "/holiday", handle12],
+  ["*", "/asset", handle13],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle12],
+  ["*", "/transfer", handle13],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle12],
-  ["*", "/upload-asset-thumb", handle12],
-  ["*", "/delete-asset-image", handle12],
+  ["*", "/upload-asset-image", handle13],
+  ["*", "/upload-asset-thumb", handle13],
+  ["*", "/delete-asset-image", handle13],
   ["*", "/sla/workever", handle41],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle10],
-  ["*", "/stats", handle20],
-  ["*", "/staff", handle21],
+  ["*", "/sla", handle11],
+  ["*", "/stats", handle21],
+  ["*", "/staff", handle22],
   // staff personal + company documents
-  ["*", "/hr/", handle22],
+  ["*", "/hr/", handle23],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle23],
+  ["*", "/privacy", handle24],
   // GDPR data export + erasure
-  ["*", "/fleet", handle25],
+  ["*", "/fleet", handle26],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle26],
+  ["*", "/messages", handle27],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle27],
+  ["*", "/memos", handle28],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle28],
+  ["*", "/documents", handle29],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle31],
+  ["*", "/ai", handle32],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -37850,50 +39760,52 @@ var ROUTES = [
   ["*", "/import-sites", handle7],
   ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle24],
+  ["*", "/sites/register", handle25],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle24],
+  ["*", "/ledger", handle25],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle24],
+  ["*", "/costing", handle25],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle24],
+  ["*", "/exceptions", handle25],
   // needs-a-human-eye list
   ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle29],
+  ["*", "/chapplins", handle30],
   // Chapplins customer: site tenants (current/previous) + directory
-  ["*", "/settings", handle13],
-  ["*", "/oncall", handle13],
-  ["*", "/daily-logs", handle13],
-  ["*", "/notify", handle13],
+  ["*", "/settings", handle14],
+  ["*", "/oncall", handle14],
+  ["*", "/daily-logs", handle14],
+  ["*", "/notify", handle14],
   // notification audit log
-  ["*", "/prefs", handle13],
+  ["*", "/prefs", handle14],
   // per-user cross-device markers
-  ["*", "/menu-config", handle13],
+  ["*", "/menu-config", handle14],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle13],
+  ["*", "/audit", handle14],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle14],
-  ["*", "/sitelog-launch", handle14],
-  ["*", "/office", handle15],
+  ["*", "/sitelog", handle15],
+  ["*", "/sitelog-launch", handle15],
+  ["*", "/office", handle16],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle16],
+  ["*", "/key", handle17],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle17],
+  ["*", "/theme", handle18],
   // per-user colour theme + background
-  ["*", "/hs/", handle18],
+  ["*", "/hs/", handle19],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle19],
+  ["*", "/vancheck", handle20],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle30],
+  ["*", "/po", handle31],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle32],
+  ["*", "/cctv", handle33],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle33],
+  ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
+  // office view of the email→job intake (log, test box, re-run, allow-list)
+  ["*", "/tasks", handle34],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/certs", handle9],
+  ["*", "/certs", handle10],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle34],
+  ["*", "/pump", handle9],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/cablecalc", handle35],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
@@ -38197,6 +40109,11 @@ var PUBLIC_ROUTES = [
   ["GET", "/fleet/maintenance-doc"],
   // Employee-record documents (certs/scans) — signed URL, verified in-handler.
   ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],

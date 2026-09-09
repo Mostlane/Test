@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=31"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=29"></script>
+  <script src="sla-jobedit.js?v=31"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -639,7 +639,7 @@ const MIN_HOUR_WIDTH = 52;
 const STATUS_COLOUR = {
   "Pending":"#9f1239", "Scheduled":"#f59e0b", "Travelling":"#3b82f6",
   "In Progress":"#9333ea", "On Hold":"#6b7280", "Quote":"#dc2626",
-  "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75"
+  "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75", "Cancelled":"#b91c1c"
 };
 const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
 // A finished job that stays on the board (green + locked). Closed/Invoiced are
@@ -798,9 +798,11 @@ async function loadJobs(){
   const data = await res.json();
   // Keep COMPLETE jobs on the board (they render green + locked) so the day
   // still shows what's been done. Closed/Invoiced are downstream accounting
-  // states applied later — those stay off the board.
+  // states applied later — those stay off the board. CANCELLED jobs are dropped
+  // too, so they never appear in a lane, the "Needs scheduling" tray, the
+  // fill-in / backfill suggestions or the auto-day pool.
   jobs = (Array.isArray(data) ? data : []).map(normaliseJob)
-    .filter(j => !["Closed Jobs","Invoiced"].includes(j.status));
+    .filter(j => !["Closed Jobs","Invoiced","Cancelled"].includes(j.status));
 }
 
 // Approved holidays overlaid on the board so you never schedule someone on leave.
@@ -1405,7 +1407,7 @@ let modalJobId = null;
    /sla/jobs/for-engineer which serves THAT engineer's own per-engineer status. */
 // Order statuses sensibly for the summary chips; anything else (custom
 // categories) is appended after these in first-seen order.
-const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs"];
+const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs","Cancelled"];
 function engStatusColour(s){ return STATUS_COLOUR[s] || "#64748b"; }
 let engDayCtx = null;   // remembers who/when the day-summary modal is showing (for the 🗺️ Map button)
 function openEngDay(username, name, date){
@@ -2320,6 +2322,7 @@ function openJobModal(jobId){
   $("jobTitle").value = job.title;
   $("jobSite").value = (job.ref ? job.ref + " · " : "") + (job.site || "");
   $("jobDate").value = formatDateInput(d);
+  { const y = new Date().getFullYear(); $("jobDate").min = (y - 1) + "-01-01"; $("jobDate").max = (y + 3) + "-12-31"; }
   $("jobTime").value = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   $("jobDuration").value = job.durationMinutes/60;
   $("jobPriority").value = job.priority || "";
@@ -2364,6 +2367,10 @@ $("jobForm").addEventListener("submit", async function(e){
   if(!job) return;
 
   const dateVal = $("jobDate").value;
+  { // a mistyped year (2006 for 2026) would park the job outside every view
+    const y = Number(String(dateVal).slice(0, 4)), now = new Date().getFullYear();
+    if(!(y >= now - 1 && y <= now + 3)){ setStatus("⚠️ Date has the year " + (y || "?") + " — check the date.", true); $("jobDate").focus(); return; }
+  }
   const timeVal = $("jobTime").value || "08:00";
   const durHours = parseFloat($("jobDuration").value) || 1;
   const [hh, mm] = timeVal.split(":").map(Number);
@@ -2385,7 +2392,7 @@ $("jobForm").addEventListener("submit", async function(e){
         changedBy: currentUser || "scheduler"
       })
     });
-    if(!res.ok) throw new Error("HTTP " + res.status);
+    if(!res.ok){ let t = ""; try{ t = (await res.json()).error || ""; }catch(e){} throw new Error(t || ("HTTP " + res.status)); }
     const saved = await res.json();
     const idx = jobs.findIndex(j => j.id === job.id);
     if(idx >= 0) jobs[idx] = normaliseJob(saved);

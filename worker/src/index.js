@@ -28,7 +28,7 @@ import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-s
 import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
 import * as sitelog from "./routes/sitelog.js";    // DONE  (portal↔SiteLog bridge: launch token + admin proxy → local module or remote)
 import * as sitelogApi from "./routes/sitelog-api.js"; // DONE  (ported SiteLog backend: scanner API on api.site-log.co.uk + daily auto-close)
-import { handleInboundEmail } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
+import { handleInboundEmail, handleApi as emailIntakeApi } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
@@ -126,6 +126,7 @@ const ROUTES = [
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
+  ["*", "/email-intake", (req, env, ctx, url, sess) => emailIntakeApi(req, env, ctx, url, sess, worker.fetch)], // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
@@ -449,6 +450,11 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/maintenance-doc"],
   // Employee-record documents (certs/scans) — signed URL, verified in-handler.
   ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)

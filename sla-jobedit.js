@@ -70,7 +70,7 @@
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function slug(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
-  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs"];
+  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs", "Cancelled"];
   let STATUSES = BASE_STATUSES.slice();   // built-ins + custom categories (loaded lazily)
   let catsLoaded = false;
   async function loadCats() {
@@ -172,6 +172,18 @@
   .mlje-msg.ok{color:#166534;}
   `;
 
+  // Plausible schedule window (matches the worker's badScheduleDate): a
+  // year outside now−1…now+3 is a typo, never a real booking.
+  const MLJE_YR = new Date().getFullYear();
+  const MLJE_DMIN = (MLJE_YR - 1) + "-01-01", MLJE_DMAX = (MLJE_YR + 3) + "-12-31";
+  function mljeBadDate(iso, label) {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return label + " isn't a valid date.";
+    const y = new Date(t).getFullYear();
+    if (y < MLJE_YR - 1 || y > MLJE_YR + 3) return label + " has the year " + y + " — check the date.";
+    return null;
+  }
   const HTML = `
   <div class="mlje-modal" role="dialog" aria-modal="true">
     <h2 id="mljeTitle">Edit job</h2>
@@ -217,7 +229,7 @@
 
         <label for="mljeSchedDate">Scheduled date &amp; times</label>
         <div class="mlje-3">
-          <input id="mljeSchedDate" type="date" aria-label="Scheduled date">
+          <input id="mljeSchedDate" type="date" aria-label="Scheduled date" min="${MLJE_DMIN}" max="${MLJE_DMAX}">
           <input id="mljeSchedStart" type="time" step="300" aria-label="Start time">
           <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
         </div>
@@ -403,7 +415,7 @@
       else { const o = es[mljeNorm(u)]; if (o && o.scheduledAt) { const a = new Date(o.scheduledAt); if (!isNaN(a)) { d = a.getFullYear() + "-" + p2(a.getMonth() + 1) + "-" + p2(a.getDate()); s = p2(a.getHours()) + ":" + p2(a.getMinutes()); } if (o.scheduledEnd) { const b = new Date(o.scheduledEnd); if (!isNaN(b)) f = p2(b.getHours()) + ":" + p2(b.getMinutes()); } } }
       return '<div class="mlje-es-row" data-user="' + esc(u) + '" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">'
         + '<span style="flex:0 0 120px;font-size:13px;font-weight:600;">' + esc(engNameFor(u)) + '</span>'
-        + '<input class="es-d" type="date" value="' + esc(d) + '" style="flex:1;min-width:130px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + '<input class="es-d" type="date" min="' + MLJE_DMIN + '" max="' + MLJE_DMAX + '" value="' + esc(d) + '" style="flex:1;min-width:130px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '<input class="es-s" type="time" step="300" value="' + esc(s) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '<span style="font-size:12px;color:#64748b;">to</span>'
         + '<input class="es-f" type="time" step="300" value="' + esc(f) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
@@ -822,6 +834,14 @@
       const arr = Object.values(engSchedule).filter(x => x.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt));
       if (arr[0]) { scheduledAt = arr[0].scheduledAt; if (!scheduledEnd) scheduledEnd = arr[0].scheduledEnd; }
     }
+    // A mistyped year (2006 for 2026) once slipped through here and the job
+    // vanished from every dated view. Refuse anything outside a plausible window
+    // — the worker enforces the same rule, this just says so before the save.
+    {
+      const badDate = mljeBadDate(scheduledAt, "Scheduled date") || mljeBadDate(scheduledEnd, "Finish")
+        || Object.entries(engSchedule).map(([k, v]) => mljeBadDate(v.scheduledAt, engNameFor(k) + "'s date") || mljeBadDate(v.scheduledEnd, engNameFor(k) + "'s finish")).find(Boolean);
+      if (badDate) { msg.textContent = "⚠ " + badDate; msg.className = "mlje-msg err"; $("mljeSave").disabled = false; return; }
+    }
 
     // Visibility ("release"): null = visible now, else the chosen mode.
     let release = null;
@@ -849,9 +869,18 @@
       });
     }
 
+    // Cancelling from the editor: ask WHY once (optional) — it's stamped on the job
+    // with the time + your name and shown on the board pill / job card.
+    let cancelReason;
+    if ($("mljeStatus").value === "Cancelled" && String(currentJob.status || "") !== "Cancelled") {
+      const why = window.prompt("Cancelling this job — reason? (optional, shown on the job)", "");
+      if (why === null) { $("mljeSave").disabled = false; return; }
+      cancelReason = String(why || "").trim() || undefined;
+    }
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
+      cancelReason,
       release: release,
       engRelease: engRelease,   // per-engineer overrides (full replace; {} clears)
       helpdeskRef: $("mljeRef").value.trim() || undefined,
@@ -895,7 +924,7 @@
       const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
-      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (!r.ok) { let t = ""; try { t = (await r.json()).error || ""; } catch (e) {} throw new Error(t || ("HTTP " + r.status)); }
       const saved = await r.json();
       msg.textContent = "✅ Saved.";
       msg.className = "mlje-msg ok";

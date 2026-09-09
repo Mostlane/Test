@@ -2,7 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<script src="/portal-config.js?v=28"></script>
+<script src="/portal-config.js?v=31"></script>
 <script src="/auth.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Employees — Mostlane</title>
@@ -128,7 +128,8 @@
     <div id="tab-drivers" class="tabpane hide">
       <div class="card">
         <h2 style="margin:0 0 2px;font-size:16px">🚗 Monthly driver licence checks</h2>
-        <p class="muted" style="font-size:13px;margin:0 0 10px">Every driver with a company vehicle should have a licence check logged each month. Tap <b>Log check</b> to record one (with proof).</p>
+        <p class="muted" style="font-size:13px;margin:0 0 10px">Every driver with a company vehicle should have a licence check logged each month. Tap <b>Log check</b> to record one (with proof).<br>
+          <b>🔁 Check</b> = our monthly DVLA check (30-day). <b>🚗 Licence exp</b> = when their photocard driving licence itself expires (field 4b) — two different dates.</p>
         <div id="driverList"><p class="muted">Loading…</p></div>
       </div>
     </div>
@@ -158,7 +159,7 @@
     <div id="recDrop" class="rec-drop">
       <div>📄 Drag a certificate here, or <button type="button" id="recPick" class="btn ghost small" style="vertical-align:middle">choose a file</button></div>
       <div class="muted" style="font-size:12px;margin-top:4px">We’ll try to read the number, awarding body &amp; expiry for you.</div>
-      <input type="file" id="recFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx" style="display:none">
+      <input type="file" id="recFile" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.doc,.docx,image/*" style="display:none">
     </div>
     <p id="recExtract" class="msg" style="min-height:0"></p>
     <p id="recDocNow" class="muted" style="font-size:13px"></p>
@@ -212,12 +213,12 @@
     { kind:"licence", emoji:"🚗", label:"Driving licences", one:"driving licence",
       titleLabel:"Licence type", titlePh:"Driving Licence", titleDef:"Driving Licence",
       fields:[ {col:"number",label:"Licence number"}, {col:"data.categories",label:"Categories (e.g. B, C1, CE)"},
-               {col:"data.points",label:"Points / endorsements"}, {col:"issued",label:"Issued",type:"date"},
-               {col:"expires",label:"Expires",type:"date"} ] },
+               {col:"data.points",label:"Points / endorsements"}, {col:"issued",label:"Issue date (4a)",type:"date"},
+               {col:"expires",label:"Licence expiry (photocard 4b)",type:"date"} ] },
     { kind:"licence_check", emoji:"✅", label:"Licence checks (DVLA)", one:"licence check",
       titleLabel:"Check", titlePh:"DVLA licence check", titleDef:"DVLA licence check",
       fields:[ {col:"issued",label:"Checked on",type:"date"}, {col:"data.result",label:"Result / points found"},
-               {col:"data.checkedBy",label:"Checked by"}, {col:"expires",label:"Next check due",type:"date"} ] },
+               {col:"data.checkedBy",label:"Checked by"}, {col:"expires",label:"Next check due (monthly)",type:"date"} ] },
   ];
   const kindDef = k => KINDS.find(x=>x.kind===k);
 
@@ -310,10 +311,14 @@
     }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
   }
   function badge(x){
-    if(x.status==="expired") return `<span class="chip red">Expired ${fmtDate(x.expires)}</span>`;
-    if(x.status==="expiring") return `<span class="chip amber">Expires ${fmtDate(x.expires)} · ${x.daysLeft}d</span>`;
-    if(x.status==="valid") return `<span class="chip green">Valid to ${fmtDate(x.expires)}</span>`;
-    return `<span class="chip grey">No expiry</span>`;
+    // Word the date by record type so a monthly check's "next due" is never
+    // mistaken for the photocard licence's expiry.
+    const noun = x.kind==="licence_check" ? "Next check" : (x.kind==="licence" ? "Licence" : "");
+    const exp = fmtDate(x.expires);
+    if(x.status==="expired"){ return x.kind==="licence_check" ? `<span class="chip red">Check overdue (${exp})</span>` : `<span class="chip red">${noun?noun+" expired":"Expired"} ${exp}</span>`; }
+    if(x.status==="expiring"){ return x.kind==="licence_check" ? `<span class="chip amber">Next check ${exp} · ${x.daysLeft}d</span>` : `<span class="chip amber">${noun?noun+" expires":"Expires"} ${exp} · ${x.daysLeft}d</span>`; }
+    if(x.status==="valid"){ return x.kind==="licence_check" ? `<span class="chip green">Next check ${exp}</span>` : `<span class="chip green">${noun?noun+" valid to":"Valid to"} ${exp}</span>`; }
+    return `<span class="chip grey">${x.kind==="licence_check"?"No next check set":"No expiry"}</span>`;
   }
   function recHtml(x,manage){
     const d=x.data||{};
@@ -391,11 +396,17 @@
   }
   function renderDrivers(){
     if(!DRIVERS.length){ g("driverList").innerHTML='<p class="muted">No drivers with a company vehicle assigned.</p>'; return; }
+    const licPill = d => {
+      if(!d.licenceExpiry) return `<span class="chip grey" title="No driving licence on file">🚗 Licence: not on file</span>`;
+      const cls = d.licenceStatus==="expired" ? "red" : (d.licenceStatus==="expiring" ? "amber" : "green");
+      return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${fmtDate(d.licenceExpiry)}</span>`;
+    };
     g("driverList").innerHTML = DRIVERS.map(d=>`
       <div class="emp">
         <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
         <span class="row" style="gap:6px">
-          ${d.status==="due" ? `<span class="chip amber">Due this month</span>` : `<span class="chip green">✓ Checked ${fmtDate(d.lastChecked)}</span>`}
+          ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${fmtDate(d.lastChecked)}</span>`}
+          ${licPill(d)}
           <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
           <button class="btn ghost small" data-open="${esc(d.username)}" data-n="${esc(d.name)}">History</button>
         </span>
@@ -499,6 +510,27 @@
       s.onerror=()=>rej(new Error("pdf load")); document.head.appendChild(s); });
   }
   const readB64=f=>new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(String(fr.result||"").split(",")[1]||""); fr.onerror=()=>r(""); fr.readAsDataURL(f); });
+  // iPhone HEIC/HEIF photos can't be OCR'd or previewed — convert to JPEG in the
+  // browser (lazy-load heic2any) so the licence/cert reads AND stores viewable.
+  let _heic=null;
+  function loadHeic(){
+    if(_heic) return Promise.resolve(_heic);
+    if(window.heic2any){ _heic=window.heic2any; return Promise.resolve(_heic); }
+    return new Promise((res,rej)=>{ const s=document.createElement("script");
+      s.src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+      s.onload=()=>{ _heic=window.heic2any; res(_heic); }; s.onerror=()=>rej(new Error("heic load")); document.head.appendChild(s); });
+  }
+  async function maybeConvertHeic(file){
+    const nm=(file.name||"").toLowerCase();
+    if(!(/\.(heic|heif)$/.test(nm) || /heic|heif/.test(file.type||""))) return file;
+    const st=g("recExtract"); if(st){ st.className="msg"; st.textContent="Converting iPhone photo…"; }
+    try{
+      const h=await loadHeic();
+      const out=await h({ blob:file, toType:"image/jpeg", quality:0.85 });
+      const blob=Array.isArray(out)?out[0]:out;
+      return new File([blob], (file.name||"photo").replace(/\.(heic|heif)$/i,"")+".jpg", { type:"image/jpeg" });
+    }catch(e){ return file; }   // fall back to the original (won't OCR, but never breaks)
+  }
   async function pdfText(f){ try{ const lib=await loadPdfJs(); const buf=await f.arrayBuffer(); const pdf=await lib.getDocument({data:buf}).promise; let out="";
     for(let p=1;p<=Math.min(pdf.numPages,20);p++){ const pg=await pdf.getPage(p); const c=await pg.getTextContent(); out+=c.items.map(it=>it.str).join(" ")+"\n"; } return out; }catch(e){ return ""; } }
   // Local filename heuristic: pull a long digit-run as the cert number, and a
@@ -528,6 +560,11 @@
   async function onCertFile(file){
     if(!file) return;
     const st=g("recExtract"); st.className="msg"; st.textContent="Reading the certificate…";
+    // Convert an iPhone HEIC photo first, and swap it into the file input so the
+    // SAVED document is the viewable JPEG too.
+    file = await maybeConvertHeic(file);
+    try{ const dt=new DataTransfer(); dt.items.add(file); g("recFile").files=dt.files; }catch(_){}
+    g("recDocNow").innerHTML="Attaching: <b>"+esc(file.name)+"</b>"; g("recDocNow").dataset.remove="";
     const kind=editKind||"qualification";
     const h=nameHints(file.name);
     let text="", pdfBase64="", imageBase64="", imageType="";
