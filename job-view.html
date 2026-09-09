@@ -283,6 +283,15 @@
       text-align:center;
       padding:20px 0;
     }
+    /* Full-Access photo delete: a small ✕ in the corner of each thumbnail. */
+    .photo-cell{ position:relative; }
+    .photo-del{
+      position:absolute; top:3px; right:3px; width:24px; height:24px;
+      border:none; border-radius:50%; background:rgba(185,28,28,.92); color:#fff;
+      font-size:14px; line-height:24px; text-align:center; cursor:pointer;
+      padding:0; box-shadow:0 1px 3px rgba(0,0,0,.35); z-index:2;
+    }
+    .photo-del:hover{ background:#b91c1c; }
 /* --- Mobile photo upload (Step 2) --- */
 .photo-upload-mobile{
   display:flex;
@@ -702,6 +711,18 @@
     <h2 class="section-title">📝 Engineer's notes</h2>
     <p class="section-sub">What the engineer wrote on the job — newest first.</p>
     <div id="engNotes" class="panel-light">No notes yet.</div>
+    <!-- Full-Access only: add a note and attribute it to another portal user. -->
+    <div id="addNoteBox" style="display:none;margin-top:14px;border-top:1px dashed #d7dee6;padding-top:12px;">
+      <div class="field-label">➕ Add a note</div>
+      <textarea id="adminNoteText" placeholder="Type the note to add to this job…" style="width:100%;box-sizing:border-box;min-height:64px;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+        <label style="font-size:12px;color:#64748b;">Added by
+          <select id="adminNoteUser" style="margin-left:6px;padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></select>
+        </label>
+        <button type="button" id="adminNoteAdd" class="btn">Add note</button>
+        <span id="adminNoteStatus" style="font-size:12px;color:#64748b;"></span>
+      </div>
+    </div>
   </div>
 
   <!-- PHOTOS -->
@@ -726,6 +747,7 @@
   <div id="photoModal" class="photo-modal hidden">
     <div class="photo-modal-inner">
       <button type="button" class="photo-modal-close" id="photoModalClose">Close ✕</button>
+      <button type="button" class="photo-modal-close" id="photoModalDelete" style="right:auto;left:14px;background:rgba(185,28,28,.92);display:none;">🗑 Delete</button>
       <button type="button" class="photo-modal-nav left" id="photoPrevBtn">‹</button>
       <button type="button" class="photo-modal-nav right" id="photoNextBtn">›</button>
       <img id="photoModalImg" src="" alt="Job photo">
@@ -1378,7 +1400,8 @@ async function loadExistingPhotos(){
 
     photoGallery = data.files.map(f => ({
       url: f.publicURL,
-      name: f.name
+      name: f.name,
+      key: f.key
     }));
     if(data.signature) sigMeta = data.signature;   // signed/public signature URLs, when provided
     renderSignatureImage();                        // now a URL can be derived from a photo's base
@@ -1621,6 +1644,70 @@ function renderNotes(){
     row.append(txt, meta);
     el.appendChild(row);
   });
+}
+
+/* ---- Full-Access: add a note attributed to another portal user (Sep 2026) ----
+   Office can log something an engineer told them and mark it as that engineer's
+   note. The REAL actor is still recorded in the server audit log. Full-Access
+   only — the box is hidden for everyone else, and only status/note PATCHes with a
+   chosen changedBy reach the note event. */
+let adminNoteReady = false;
+async function setupAdminNote(){
+  const box = $("addNoteBox");
+  if(!box || !isFullAccess()) return;          // hidden for non-FullAccess
+  box.style.display = "block";
+  if(adminNoteReady) return;
+  adminNoteReady = true;
+  const sel = $("adminNoteUser");
+  // Populate the "Added by" dropdown from the portal's active users.
+  try{
+    const res = await mApi("/users");
+    const list = res.ok ? await res.json() : [];
+    const users = Array.isArray(list) ? list : (list.users || []);
+    const me = getUser();
+    const opts = [];
+    // Self first (the honest default), then everyone else in the canonical order.
+    opts.push({ v: me, label: me + " (you)" });
+    const rest = users
+      .map(u => ({ v: u.Username || u.username || "", label: [u.FirstName, u.LastName].filter(Boolean).join(" ") || u.Username || u.username || "" }))
+      .filter(u => u.v && u.v.toLowerCase() !== String(me).toLowerCase())
+      .sort((a,b) => a.label.localeCompare(b.label));
+    opts.push(...rest);
+    sel.innerHTML = opts.map(o => `<option value="${o.v.replace(/"/g,'&quot;')}">${o.label.replace(/</g,'&lt;')}</option>`).join("");
+  }catch(e){
+    // Fall back to a free-typed name if the user list can't load.
+    sel.outerHTML = '<input id="adminNoteUser" type="text" placeholder="Name" style="margin-left:6px;padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;">';
+  }
+  $("adminNoteAdd").addEventListener("click", addAdminNote);
+}
+async function addAdminNote(){
+  if(!isFullAccess() || !job?.id) return;
+  const text = ($("adminNoteText").value || "").trim();
+  const byEl = $("adminNoteUser");
+  const by = (byEl && (byEl.value || "").trim()) || getUser();
+  const st = $("adminNoteStatus");
+  if(!text){ if(st){ st.textContent = "Type a note first."; } return; }
+  const btn = $("adminNoteAdd");
+  if(btn){ btn.disabled = true; }
+  if(st){ st.textContent = "Saving…"; }
+  try{
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(job.id)}`, {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ note: text, changedBy: by })
+    });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    job = await res.json();
+    $("adminNoteText").value = "";
+    renderNotes();
+    if(typeof renderTimeline === "function") renderTimeline();
+    if(st){ st.textContent = "✅ Note added as " + by + "."; setTimeout(() => { if(st) st.textContent = ""; }, 4000); }
+  }catch(err){
+    console.error("add note error", err);
+    if(st){ st.textContent = "❌ Couldn't add the note — try again."; }
+  }finally{
+    if(btn){ btn.disabled = false; }
+  }
 }
 
 /* ---- 🧾 Client order card (Sep 2026): the order this job is the works for.
@@ -2079,7 +2166,10 @@ function renderPhotoGrid(){
     return;
   }
 
+  const canDelete = isFullAccess();
   photoGallery.forEach((ph, index) => {
+    const cell = document.createElement("div");
+    cell.className = "photo-cell";
     const wrap = document.createElement("div");
     wrap.className = "photo-thumb";
     wrap.dataset.index = index;
@@ -2088,7 +2178,18 @@ function renderPhotoGrid(){
     img.alt = ph.name || "Job photo";
     wrap.appendChild(img);
     wrap.addEventListener("click", () => openPhotoModal(index));
-    grid.appendChild(wrap);
+    cell.appendChild(wrap);
+    // Full-Access only: delete a photo an engineer added.
+    if(canDelete && ph.key){
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "photo-del";
+      del.title = "Delete this photo";
+      del.textContent = "✕";
+      del.addEventListener("click", (e) => { e.stopPropagation(); deleteJobPhoto(index); });
+      cell.appendChild(del);
+    }
+    grid.appendChild(cell);
   });
 
   $("photoUploadStatus").textContent =
@@ -2123,6 +2224,10 @@ function openPhotoModal(index){
     nextBtn.classList.add("hidden");
   }
 
+  // Full-Access only: a delete control in the viewer too.
+  const del = $("photoModalDelete");
+  if(del) del.style.display = (isFullAccess() && item && item.key) ? "block" : "none";
+
   modal.classList.remove("hidden");
 }
 
@@ -2140,6 +2245,30 @@ function showPrevPhoto(){
   if(photoGallery.length <= 1) return;
   currentPhotoIndex = (currentPhotoIndex - 1 + photoGallery.length) % photoGallery.length;
   openPhotoModal(currentPhotoIndex);
+}
+
+/* Full-Access: delete a photo an engineer added. Removes it from R2 (worker
+   enforces FullAccess + the job's own folder) and refreshes the gallery. */
+async function deleteJobPhoto(index){
+  if(!isFullAccess()) return;
+  const ph = photoGallery[index];
+  if(!ph || !ph.key || !job?.id) return;
+  const ok = window.MLUI ? await MLUI.confirm("Delete this photo? This can't be undone.", { title:"Delete photo", okLabel:"Delete", danger:true }) : confirm("Delete this photo? This can't be undone.");
+  if(!ok) return;
+  try{
+    const res = await fetch(
+      `${SLA_API}/jobs/${encodeURIComponent(job.id)}/files?key=${encodeURIComponent(ph.key)}`,
+      { method:"DELETE" }
+    );
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    photoGallery.splice(index, 1);
+    if($("photoModal")) closePhotoModal();
+    renderPhotoGrid();
+    $("photoUploadStatus").textContent = `${photoGallery.length} photo(s) stored for this job.`;
+  }catch(err){
+    console.error("delete photo error", err);
+    if(window.MLUI) MLUI.toast ? MLUI.toast("❌ Couldn't delete the photo — try again.") : alert("❌ Couldn't delete the photo — try again."); else alert("❌ Couldn't delete the photo — try again.");
+  }
 }
 
 /* ---------------------------
@@ -2276,6 +2405,7 @@ $("saveSig").addEventListener("click", saveSignature);
 
   // Photo modal events
   $("photoModalClose").addEventListener("click", closePhotoModal);
+  if($("photoModalDelete")) $("photoModalDelete").addEventListener("click", () => deleteJobPhoto(currentPhotoIndex));
   $("photoPrevBtn").addEventListener("click", showPrevPhoto);
   $("photoNextBtn").addEventListener("click", showNextPhoto);
 
@@ -2301,6 +2431,9 @@ $("saveSig").addEventListener("click", saveSignature);
 
   // Initial gallery (empty this session)
   renderPhotoGrid();
+
+  // Full-Access: reveal the "add a note as another user" box + load the picker.
+  setupAdminNote();
 
   // Load job details
   loadJob();

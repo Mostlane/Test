@@ -1845,6 +1845,26 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(out, headers);
     }
 
+    // DELETE /sla/jobs/{id}/files?key=  (or ?filename=)  -> remove a job photo.
+    // FULL ACCESS ONLY — office/admins clean up photos an engineer added; the real
+    // actor is recorded in audit_log even though the office can attribute notes to
+    // others. Only ever deletes within THIS job's own photo folder.
+    if (parts[2] === "files" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Only Full Access can delete photos." }, headers, 403);
+      let key = searchParams.get("key") || "";
+      if (!key) { const fn = searchParams.get("filename"); if (fn) key = `jobs/${id}/photos/${fn}`; }
+      if (!key.startsWith(`jobs/${id}/photos/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try { await env.JOB_FILES.delete(key); await env.JOB_FILES.delete(key + ".thumb"); } catch {}
+      // Drop any admin photo-stage override that pointed at the removed file.
+      try {
+        const j = await getJob(env, tenantId, id);
+        const name = key.split("/").pop();
+        if (j && j.photoStages && name in j.photoStages) { delete j.photoStages[name]; j.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, j); }
+      } catch {}
+      return jsonResponse({ ok: true, key }, headers);
+    }
+
     // POST /sla/jobs/{id}/audit-photo  -> attach a photo to a site-audit checklist
     // item. stage=ref (office reference/before) OR stage=done (engineer completion,
     // which marks the item complete). Multipart: file, thumb?, itemId, stage.

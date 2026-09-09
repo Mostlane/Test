@@ -14933,6 +14933,32 @@ async function handle11(request, env, ctx, url, sess) {
       }
       return jsonResponse(out, headers);
     }
+    if (parts[2] === "files" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Only Full Access can delete photos." }, headers, 403);
+      let key = searchParams.get("key") || "";
+      if (!key) {
+        const fn = searchParams.get("filename");
+        if (fn) key = `jobs/${id}/photos/${fn}`;
+      }
+      if (!key.startsWith(`jobs/${id}/photos/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try {
+        await env.JOB_FILES.delete(key);
+        await env.JOB_FILES.delete(key + ".thumb");
+      } catch {
+      }
+      try {
+        const j = await getJob3(env, tenantId, id);
+        const name = key.split("/").pop();
+        if (j && j.photoStages && name in j.photoStages) {
+          delete j.photoStages[name];
+          j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, j);
+        }
+      } catch {
+      }
+      return jsonResponse({ ok: true, key }, headers);
+    }
     if (parts[2] === "audit-photo" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       let form;
