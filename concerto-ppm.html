@@ -58,6 +58,10 @@
     <button class="btn sec sm" id="csvBtn" title="Export the rows shown">⬇ CSV</button>
   </header>
   <div class="wrap">
+    <div class="chips" id="tabs" style="margin:0 0 10px">
+      <button class="chip on" data-tab="orders">📋 Open PPM orders</button>
+      <button class="chip" data-tab="schedule">📅 Schedule (5 Year)</button>
+    </div>
     <div class="card">
       <div class="drop" id="drop">
         <div><b>Drop the Concerto export here</b> (or tap to choose) — the <i>Open PPM jobs overdue</i> sheet or a <i>PPM schedule</i> sheet, .xlsx or .csv</div>
@@ -67,6 +71,7 @@
       <div id="preview" style="display:none;margin-top:10px"></div>
     </div>
 
+    <div class="tab-orders">
     <div class="card">
       <div class="sumrow" id="summary"></div>
       <p class="muted" id="greet" style="margin:8px 0 0"></p>
@@ -87,6 +92,29 @@
       <h2>Overdue on our chart but not on the Concerto list</h2>
       <p class="muted" style="margin:0 0 8px">Stores the compliance chart says are due (within 30 days) or overdue for 5-year, EM, PAT, pump, PV or EV, with no open Concerto row — Concerto hasn't raised an order for these.</p>
       <div class="tblwrap"><table id="tblMissing"><thead></thead><tbody></tbody></table></div>
+    </div>
+    </div><!-- /tab-orders -->
+
+    <div class="tab-schedule" style="display:none">
+      <div class="card">
+        <div class="sumrow" id="schSummary"></div>
+        <p class="muted" id="schGreet" style="margin:8px 0 0"></p>
+        <div id="schYears" class="chips" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h2>Concerto schedule — every site, what we have done and when</h2>
+        <div class="chips" id="schType"></div>
+        <div style="display:flex;gap:8px;align-items:center;margin:6px 0 10px;flex-wrap:wrap">
+          <label class="muted">Next due from <input type="month" id="schFrom" style="width:auto;padding:5px 8px"></label>
+          <label class="muted">to <input type="month" id="schTo" style="width:auto;padding:5px 8px"></label>
+          <div class="chips" id="schRel" style="margin:0">
+            <button class="chip on" data-r="all">All</button><button class="chip" data-r="yes">Released (PPM raised)</button><button class="chip" data-r="no">Not yet released</button>
+          </div>
+          <div class="chips" id="schFlag" style="margin:0"></div>
+          <input type="search" id="schQ" placeholder="Search store, site, PPM…" style="flex:1;min-width:180px">
+        </div>
+        <div class="tblwrap"><table id="tblSch"><thead></thead><tbody><tr><td class="muted">Loading…</td></tr></tbody></table></div>
+      </div>
     </div>
   </div>
 
@@ -268,9 +296,13 @@
           return { layout: "orders", rows };
         }
         if (iU >= 0) {
-          const col = n => h.indexOf(n);
-          const c = { site: col("site"), block: col("block/occupier"), ref: col("ref"), type: col("type"), sup: col("supplier"), last: col("last date"), plan: col("planned date"), est: col("estimate") };
-          const rows = grid.slice(i+1).map(r => ({ uprn: r[iU], site: r[c.site], block: r[c.block], ref: r[c.ref], type: r[c.type], supplier: r[c.sup], lastDate: r[c.last], plannedDate: r[c.plan], estimate: r[c.est] })).filter(r => String(r.uprn||"").trim());
+          const col = n => h.indexOf(n), colLike = n => h.findIndex(x => x.startsWith(n));
+          const c = { site: col("site"), block: col("block/occupier"), ref: col("ref"), type: col("type"), disc: col("discipline"), freq: col("frequency"), sup: colLike("supplier"), last: col("last date"), plan: col("planned date"), next: col("next date"), est: col("estimate"), ordered: col("ordered"), status: col("status"), ordnr: colLike("order nr") };
+          const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].map(m => [m, col(m)]).filter(x => x[1] >= 0);
+          const rows = grid.slice(i+1).map(r => {
+            let mm = ""; for (const [m, ix] of months) { if (String(r[ix]||"").trim()) { mm = m.charAt(0).toUpperCase() + m.slice(1) + ": " + String(r[ix]).trim(); break; } }
+            return { uprn: r[iU], site: r[c.site], block: r[c.block], ref: r[c.ref], type: r[c.type], discipline: r[c.disc], frequency: r[c.freq], supplier: r[c.sup], lastDate: r[c.last], plannedDate: r[c.plan], nextDate: r[c.next], estimate: r[c.est], ordered: r[c.ordered], status: r[c.status], orderNr: r[c.ordnr], monthMarker: mm };
+          }).filter(r => String(r.uprn||"").trim());
           return { layout: "schedule", rows };
         }
       }
@@ -281,12 +313,95 @@
       g("doImport").disabled = true; g("doImport").textContent = "Importing…";
       const r = await authFetch("/concerto/import", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ layout: PENDING.layout, rows: PENDING.rows, fileName: PENDING.fileName }) }).then(x=>x.json()).catch(()=>null);
       if (!r || !r.ok) { alert("Import failed" + (r && r.error ? ": " + r.error : ".")); g("doImport").disabled = false; g("doImport").textContent = "Import"; return; }
-      g("preview").innerHTML = `<p><b>Imported.</b> ${r.added} new · ${r.updated} already known (updated) · ${r.gone} no longer on the list · ${r.unresolved} not mapped to a store${r.skipped?` · ${r.skipped} skipped`:""}.</p>`;
-      PENDING = null; load();
+      g("preview").innerHTML = `<p><b>Imported.</b> ${r.added} new · ${r.updated} already known (updated) · ${r.gone} no longer on the list · ${r.unresolved} not mapped to a store${r.released?` · <b>${r.released} newly released</b> (PPM number seen for the first time)`:""}${r.skipped?` · ${r.skipped} skipped`:""}.</p>`;
+      if (r.layout === "schedule") { setTab("schedule"); } else { setTab("orders"); }
+      PENDING = null; load(); loadSchedule();
+    }
+
+    /* ── Tabs ── */
+    let SCH = null, SCH_TYPE = "fiveYear", SCH_REL = "all", SCH_FLAG = "all", SCH_YEAR = "";
+    let TAB = new URLSearchParams(location.search).get("tab") === "schedule" ? "schedule" : "orders";
+    function setTab(t) {
+      TAB = t;
+      document.querySelector(".tab-orders").style.display = t === "orders" ? "" : "none";
+      document.querySelector(".tab-schedule").style.display = t === "schedule" ? "" : "none";
+      [].forEach.call(g("tabs").querySelectorAll(".chip"), b => b.classList.toggle("on", b.dataset.tab === t));
+      if (t === "schedule" && !SCH) loadSchedule();
+    }
+    [].forEach.call(g("tabs").querySelectorAll(".chip"), b => b.onclick = () => setTab(b.dataset.tab));
+    setTab(TAB);
+
+    /* ── Schedule tab (every site, every year; released vs not; what we have done) ── */
+    const SRC = { cert: "certificate on file", job: "portal job", archive: "archived job" };
+    async function loadSchedule() {
+      const p = new URLSearchParams({ type: SCH_TYPE, released: SCH_REL });
+      if (g("schFrom").value) p.set("from", g("schFrom").value + "-01");
+      if (g("schTo").value) p.set("to", g("schTo").value + "-31");
+      let d = null; try { d = await authFetch("/concerto/schedule?" + p).then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("tblSch").querySelector("tbody").innerHTML = '<tr><td class="muted" style="color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
+      SCH = d; renderSchedule();
+    }
+    g("schFrom").onchange = g("schTo").onchange = () => { SCH_YEAR = ""; loadSchedule(); };
+    g("schQ").oninput = () => renderSchRows();
+    [].forEach.call(g("schRel").querySelectorAll(".chip"), b => b.onclick = () => { SCH_REL = b.dataset.r; [].forEach.call(g("schRel").querySelectorAll(".chip"), x => x.classList.toggle("on", x === b)); loadSchedule(); });
+    function renderSchedule() {
+      const st = SCH.stats || {};
+      const tile = (n, l, cls) => `<div class="tile ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+      g("schSummary").innerHTML = tile(st.sites||0, "sites on the Concerto schedule", "") + tile(st.released||0, "released (PPM raised)", st.released?"ok":"") + tile(st.notReleased||0, "not yet released", "") +
+        tile(st.done||0, "done our side", st.done?"ok":"") + tile(st.overdue||0, "overdue", st.overdue?"bad":"") + tile(st.mismatch||0, "dates differ", st.mismatch?"warn":"") + tile(st.withHistory||0, "with a portal record", "");
+      g("schGreet").textContent = (st.releasesLogged ? `${st.releasesLogged} release${st.releasesLogged===1?"":"s"} logged` + (st.releaseLeadDaysAvg!=null ? ` · released on average ${st.releaseLeadDaysAvg} days before the due date` : "") + " · " : "") + `${SCH.rows.length} of ${SCH.total} rows shown`;
+      const years = Object.keys(st.byYear||{}).sort();
+      g("schYears").innerHTML = `<button class="chip ${SCH_YEAR===""?"on":""}" data-y="">All years</button>` + years.map(y => `<button class="chip ${SCH_YEAR===y?"on":""}" data-y="${y}">${y} <span class="muted">${st.byYear[y].total}${st.byYear[y].released?" · "+st.byYear[y].released+" released":""}</span></button>`).join("");
+      [].forEach.call(g("schYears").querySelectorAll(".chip"), b => b.onclick = () => { SCH_YEAR = b.dataset.y; g("schFrom").value = SCH_YEAR ? SCH_YEAR + "-01" : ""; g("schTo").value = SCH_YEAR ? SCH_YEAR + "-12" : ""; loadSchedule(); });
+      g("schType").innerHTML = Object.keys(TYPES).filter(t => t !== "other").map(t => `<button class="chip ${SCH_TYPE===t?"on":""}" data-t="${t}">${TYPES[t]}</button>`).join("");
+      [].forEach.call(g("schType").querySelectorAll(".chip"), b => b.onclick = () => { SCH_TYPE = b.dataset.t; loadSchedule(); });
+      const flags = [...new Set(SCH.rows.map(r => r.flag))];
+      g("schFlag").innerHTML = `<button class="chip ${SCH_FLAG==="all"?"on":""}" data-f="all">Any status</button>` + Object.keys(FLAGS).filter(f => flags.includes(f)).map(f => `<button class="chip ${SCH_FLAG===f?"on":""}" data-f="${f}">${FLAGS[f]} <span class="muted">${SCH.rows.filter(r=>r.flag===f).length}</span></button>`).join("");
+      [].forEach.call(g("schFlag").querySelectorAll(".chip"), b => b.onclick = () => { SCH_FLAG = b.dataset.f; renderSchedule(); });
+      renderSchRows();
+    }
+    function schVisible() {
+      const q = g("schQ").value.trim().toLowerCase();
+      return SCH.rows.filter(r => (SCH_FLAG==="all"||r.flag===SCH_FLAG) && (!q || [r.storeCode, r.siteName, r.orderNr, r.srRef, r.block].join(" ").toLowerCase().includes(q)));
+    }
+    function histCell(r) {
+      if (!r.lastDone) return '<span class="muted">nothing found</span>';
+      const x = r.lastDone;
+      const link = x.source === "job" ? `<a href="job-view.html?jobId=${encodeURIComponent(x.id)}">${fmtD(x.date)}</a>` : x.source === "archive" ? `<a href="job-archive.html?q=${encodeURIComponent(x.id)}">${fmtD(x.date)}</a>` : `<b>${fmtD(x.date)}</b>`;
+      const more = (r.history||[]).length > 1 ? `<div class="sub">${(r.history||[]).slice(1,4).map(h => `${fmtD(h.date)} ${SRC[h.source]||h.source}`).join(" · ")}</div>` : "";
+      return `${link}<div class="sub">${esc(SRC[x.source]||x.source)}${x.title?" · "+esc(x.title):""}${x.engineer?" · "+esc(x.engineer):""}</div>${more}`;
+    }
+    function renderSchRows() {
+      const rows = schVisible();
+      const head = ["Next due (Concerto)","Store","Released","Last done (portal)","Chart due","Status","Booked job",""];
+      g("tblSch").querySelector("thead").innerHTML = "<tr>" + head.map(h=>`<th>${h}</th>`).join("") + "</tr>";
+      if (!rows.length) { g("tblSch").querySelector("tbody").innerHTML = '<tr><td colspan="8" class="muted">Nothing to show for this filter.</td></tr>'; return; }
+      g("tblSch").querySelector("tbody").innerHTML = rows.map(r => {
+        const rel = r.released ? `<span class="badge f-due">Released</span><div class="sub"><b>${esc(r.orderNr)}</b>${MONEY && r.orderedValue!=null ? " · " + money(r.orderedValue) : ""}${r.releasedAt ? " · seen " + fmtD(r.releasedAt.slice(0,10)) : ""}</div>` : `<span class="badge f-not_on_chart">Not yet released</span>${r.monthMarker?`<div class="sub">${esc(r.monthMarker)}</div>`:""}`;
+        const tools = [];
+        if (r.storeCode) tools.push(`<a class="btn sm sec" href="site-folder.html?site=${encodeURIComponent(r.storeCode)}">Site</a>`);
+        if (r.status === "open") tools.push(`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss</button>`); else tools.push(`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen</button>`);
+        return `<tr><td><b>${fmtD(r.nextDate)}</b>${r.lastDate?`<div class="sub">Concerto last: ${fmtD(r.lastDate)}</div>`:""}</td>
+          <td>${r.storeCode?`<b>${esc(r.storeCode)}</b>`:'<span class="badge f-no_store">Not mapped</span>'}<div class="sub">${esc(r.siteName||"")}${r.category?" · "+esc(r.category):""}</div></td>
+          <td>${rel}</td><td class="wrap">${histCell(r)}</td>
+          <td>${r.chartDue?fmtD(r.chartDue):'<span class="muted">—</span>'}</td>
+          <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}</div></td>
+          <td>${jobCell(r.job)}</td><td><div class="rowtools">${tools.join("")}</div></td></tr>`;
+      }).join("");
+      [].forEach.call(g("tblSch").querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
+      [].forEach.call(g("tblSch").querySelectorAll("[data-sreopen]"), b => b.onclick = async () => { await setStatus(b.dataset.sreopen, "open"); loadSchedule(); });
     }
 
     /* ── CSV export of what's shown ── */
     g("csvBtn").onclick = () => {
+      if (TAB === "schedule") {
+        if (!SCH) return;
+        const rows = schVisible(); const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
+        const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(MONEY?["Ordered value"]:[]);
+        const lines = [head.map(q).join(",")].concat(rows.map(r => [r.nextDate||"", r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, r.releasedAt?r.releasedAt.slice(0,10):"", r.lastDone?r.lastDone.date:"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText].concat(MONEY?[r.orderedValue??""]:[]).map(q).join(",")));
+        const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-schedule-" + SCH_TYPE + "-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
+        return;
+      }
       if (!DATA) return;
       const rows = visibleRows();
       const head = ["Order","Type","Concerto month","Reference","Store","Site","Chart due","Status","Detail","Booked job"].concat(MONEY?["Value"]:[]);

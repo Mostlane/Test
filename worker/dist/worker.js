@@ -9451,6 +9451,14 @@ async function ensureTables2(env) {
     planned_date TEXT, last_date TEXT, status TEXT, note TEXT, source_file TEXT,
     first_seen_at TEXT, last_seen_at TEXT, gone_at TEXT, updated_at TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
+  for (const col of ["next_date TEXT", "order_nr TEXT", "ordered_value REAL", "released_at TEXT", "concerto_status TEXT", "month_marker TEXT", "discipline TEXT", "frequency_months INTEGER", "block TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_ppm ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_log (
+    tenant_id TEXT NOT NULL, ppm_id TEXT NOT NULL, event TEXT, detail TEXT, at TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -9549,31 +9557,34 @@ async function importRows(env, tid, layout, rows, fileName) {
   await ensureTables2(env);
   const map = await refMap(env, tid);
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const out = { added: 0, updated: 0, unresolved: 0, gone: 0, skipped: 0, ids: [] };
+  const out = { added: 0, updated: 0, unresolved: 0, gone: 0, skipped: 0, released: 0, ids: [] };
   const seen = /* @__PURE__ */ new Set(), typesSeen = /* @__PURE__ */ new Set();
-  const stmts = [];
+  const stmts = [], logs = [];
+  const log = (id, event, detail) => logs.push(env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, id, event, JSON.stringify(detail || {}), now));
   for (const raw of rows || []) {
     let rec;
     if (layout === "schedule") {
       const sr = srIn(raw.uprn) || normRef(raw.uprn);
       const site = splitSite(raw.site);
       const type = typeOf(String(raw.ref || "") + " " + String(raw.type || ""));
-      const planned = toIsoDate(raw.plannedDate);
+      const next = toIsoDate(raw.nextDate) || toIsoDate(raw.plannedDate);
       if (!sr && !site.code) {
         out.skipped++;
         continue;
       }
-      const id = `SCH:${sr || site.code}:${type}:${planned || "none"}`;
+      const id = `SCH:${sr || site.code}:${type}`;
       const r = site.code ? { code: site.code, name: site.name } : resolveRef(map, sr, "");
       if (sr && site.code) await learnConcertoRef(env, tid, sr, site.code, site.name, "schedule-export");
+      const orderNr = normRef(raw.orderNr || "");
+      const freq = parseInt(String(raw.frequency || "").replace(/\D/g, ""), 10) || null;
       rec = {
         id,
         kind: "schedule",
         order_date: null,
         order_value: null,
-        description: `${raw.type || raw.ref || ""} \u2014 planned ${planned || "?"}`.trim(),
+        description: `${raw.type || raw.ref || ""} \u2014 next ${next || "?"}`.trim(),
         ppm_type: type,
-        period: planned ? planned.slice(0, 7) : "",
+        period: next ? next.slice(0, 7) : "",
         asset_ref: normRef(raw.ref || ""),
         sr_ref: sr,
         store_code: r ? r.code : "",
@@ -9581,8 +9592,17 @@ async function importRows(env, tid, layout, rows, fileName) {
         supplier: String(raw.supplier || "").slice(0, 80),
         target_response: null,
         actual_response: null,
-        planned_date: planned,
-        last_date: toIsoDate(raw.lastDate)
+        planned_date: next,
+        last_date: toIsoDate(raw.lastDate),
+        next_date: next,
+        order_nr: orderNr,
+        ordered_value: raw.ordered === "" || raw.ordered == null ? null : Number(raw.ordered) || null,
+        released_at: orderNr ? now : null,
+        concerto_status: String(raw.status || "").slice(0, 40),
+        month_marker: String(raw.monthMarker || "").slice(0, 40),
+        discipline: String(raw.discipline || "").slice(0, 40),
+        frequency_months: freq,
+        block: String(raw.block || "").slice(0, 120)
       };
     } else {
       const id = normRef(raw.orderNumber);
@@ -9608,7 +9628,16 @@ async function importRows(env, tid, layout, rows, fileName) {
         target_response: toIsoDate(raw.targetResponse),
         actual_response: toIsoDate(raw.actualResponse),
         planned_date: null,
-        last_date: null
+        last_date: null,
+        next_date: null,
+        order_nr: id,
+        ordered_value: null,
+        released_at: null,
+        concerto_status: "",
+        month_marker: "",
+        discipline: "",
+        frequency_months: null,
+        block: ""
       };
     }
     if (seen.has(rec.id)) continue;
@@ -9616,11 +9645,21 @@ async function importRows(env, tid, layout, rows, fileName) {
     typesSeen.add(rec.ppm_type);
     out.ids.push(rec.id);
     if (!rec.store_code) out.unresolved++;
-    const ex = await env.DB.prepare("SELECT id, status FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, rec.id).first();
+    const ex = await env.DB.prepare("SELECT id, status, order_nr, next_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, rec.id).first();
     if (ex) out.updated++;
-    else out.added++;
-    stmts.push(env.DB.prepare(`INSERT INTO concerto_ppm (id,tenant_id,kind,order_date,order_value,description,ppm_type,period,asset_ref,sr_ref,store_code,site_name,supplier,target_response,actual_response,planned_date,last_date,status,note,source_file,first_seen_at,last_seen_at,gone_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open','',?,?,?,NULL,?)
+    else {
+      out.added++;
+      log(rec.id, "imported", { type: rec.ppm_type, next: rec.next_date, store: rec.store_code });
+    }
+    if (rec.kind === "schedule") {
+      if (rec.order_nr && !(ex && ex.order_nr)) {
+        out.released++;
+        log(rec.id, "released", { orderNr: rec.order_nr, next: rec.next_date, store: rec.store_code, value: rec.ordered_value, daysBeforeDue: rec.next_date ? Math.round((Date.parse(rec.next_date) - Date.parse(now.slice(0, 10))) / 864e5) : null });
+      }
+      if (ex && ex.next_date && rec.next_date && ex.next_date !== rec.next_date) log(rec.id, "next_date_changed", { from: ex.next_date, to: rec.next_date, store: rec.store_code });
+    }
+    stmts.push(env.DB.prepare(`INSERT INTO concerto_ppm (id,tenant_id,kind,order_date,order_value,description,ppm_type,period,asset_ref,sr_ref,store_code,site_name,supplier,target_response,actual_response,planned_date,last_date,status,note,source_file,first_seen_at,last_seen_at,gone_at,updated_at,next_date,order_nr,ordered_value,released_at,concerto_status,month_marker,discipline,frequency_months,block)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open','',?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(tenant_id,id) DO UPDATE SET
         kind=excluded.kind, order_date=COALESCE(excluded.order_date, concerto_ppm.order_date), order_value=COALESCE(excluded.order_value, concerto_ppm.order_value),
         description=excluded.description, ppm_type=excluded.ppm_type, period=excluded.period, asset_ref=excluded.asset_ref, sr_ref=excluded.sr_ref,
@@ -9629,7 +9668,15 @@ async function importRows(env, tid, layout, rows, fileName) {
         supplier=excluded.supplier, target_response=excluded.target_response, actual_response=excluded.actual_response,
         planned_date=COALESCE(excluded.planned_date, concerto_ppm.planned_date), last_date=COALESCE(excluded.last_date, concerto_ppm.last_date),
         status=CASE WHEN concerto_ppm.status IN ('gone') THEN 'open' ELSE concerto_ppm.status END,
-        source_file=excluded.source_file, last_seen_at=excluded.last_seen_at, gone_at=NULL, updated_at=excluded.updated_at`).bind(
+        source_file=excluded.source_file, last_seen_at=excluded.last_seen_at, gone_at=NULL, updated_at=excluded.updated_at,
+        next_date=COALESCE(excluded.next_date, concerto_ppm.next_date),
+        order_nr=CASE WHEN COALESCE(excluded.order_nr,'')<>'' THEN excluded.order_nr ELSE concerto_ppm.order_nr END,
+        ordered_value=COALESCE(excluded.ordered_value, concerto_ppm.ordered_value),
+        released_at=COALESCE(concerto_ppm.released_at, excluded.released_at),
+        concerto_status=CASE WHEN COALESCE(excluded.concerto_status,'')<>'' THEN excluded.concerto_status ELSE concerto_ppm.concerto_status END,
+        month_marker=CASE WHEN COALESCE(excluded.month_marker,'')<>'' THEN excluded.month_marker ELSE concerto_ppm.month_marker END,
+        discipline=COALESCE(NULLIF(excluded.discipline,''), concerto_ppm.discipline), frequency_months=COALESCE(excluded.frequency_months, concerto_ppm.frequency_months),
+        block=COALESCE(NULLIF(excluded.block,''), concerto_ppm.block)`).bind(
       rec.id,
       tid,
       rec.kind,
@@ -9650,16 +9697,31 @@ async function importRows(env, tid, layout, rows, fileName) {
       String(fileName || "").slice(0, 120),
       now,
       now,
-      now
+      now,
+      rec.next_date,
+      rec.order_nr,
+      rec.ordered_value,
+      rec.released_at,
+      rec.concerto_status,
+      rec.month_marker,
+      rec.discipline,
+      rec.frequency_months,
+      rec.block
     ));
   }
   for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
+  for (let i = 0; i < logs.length; i += 20) await env.DB.batch(logs.slice(i, i + 20));
+  const logged = logs.length;
   if (seen.size) {
     const kind = layout === "schedule" ? "schedule" : "order";
-    const { results } = await env.DB.prepare("SELECT id, ppm_type, planned_date FROM concerto_ppm WHERE tenant_id=? AND kind=? AND status='open'").bind(tid, kind).all();
-    const goneIds = (results || []).filter((r) => !seen.has(r.id) && (kind === "order" || typesSeen.has(r.ppm_type) && r.planned_date && r.planned_date >= todayIso())).map((r) => r.id);
-    for (const id of goneIds) await env.DB.prepare("UPDATE concerto_ppm SET status='gone', gone_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, id).run();
+    const { results } = await env.DB.prepare("SELECT id, ppm_type FROM concerto_ppm WHERE tenant_id=? AND kind=? AND status='open'").bind(tid, kind).all();
+    const goneIds = (results || []).filter((r) => !seen.has(r.id) && (kind === "order" || typesSeen.has(r.ppm_type))).map((r) => r.id);
+    for (const id of goneIds) {
+      await env.DB.prepare("UPDATE concerto_ppm SET status='gone', gone_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, id).run();
+      log(id, "gone", {});
+    }
     out.gone = goneIds.length;
+    for (let i = logged; i < logs.length; i += 20) await env.DB.batch(logs.slice(i, i + 20));
   }
   return out;
 }
@@ -9731,7 +9793,9 @@ function reconcileRow(row, store, today) {
 async function buildList(env, tid, opts) {
   await ensureTables2(env);
   const status = opts.status === "all" ? null : "open";
-  const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=?" + (status ? " AND status='open'" : "") + " ORDER BY COALESCE(planned_date, period) ASC, id ASC").bind(tid).all();
+  const kind = opts.kind === "schedule" ? "schedule" : "order";
+  const { results: allOpen } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=?" + (status ? " AND status='open'" : "") + " ORDER BY COALESCE(planned_date, period) ASC, id ASC").bind(tid).all();
+  const results = (allOpen || []).filter((r) => (r.kind || "order") === kind);
   const stores = await chartStores(env, tid);
   const booked = await bookedJobs(env, tid);
   const today = todayIso();
@@ -9766,10 +9830,17 @@ async function buildList(env, tid, opts) {
       chartDue: rec.chartDue || store && store.due[r.ppm_type] || null,
       lastDone: rec.lastDone || null,
       category: store ? store.category : "",
-      job: job || null
+      job: job || null,
+      nextDate: r.next_date || null,
+      orderNr: r.order_nr || "",
+      orderedValue: opts.money ? r.ordered_value : void 0,
+      releasedAt: r.released_at || null,
+      concertoStatus: r.concerto_status || "",
+      monthMarker: r.month_marker || "",
+      block: r.block || ""
     };
   });
-  const covered = new Set(rows.filter((r) => r.status === "open" && r.storeCode).map((r) => r.storeCode + "|" + r.type));
+  const covered = new Set((allOpen || []).filter((r) => r.status === "open" && r.store_code).map((r) => r.store_code + "|" + r.ppm_type));
   const chartMissing = [];
   const soon = addDays(today, 30);
   for (const s of stores.values()) {
@@ -9788,6 +9859,137 @@ async function buildList(env, tid, opts) {
   counts.chartOverdue = chartMissing.filter((x) => x.overdue).length;
   return { rows, chartMissing, counts, today };
 }
+function jobDoneDate(j) {
+  const h = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+  for (let i = h.length - 1; i >= 0; i--) {
+    const st = String(h[i].status || h[i].to || "").toLowerCase();
+    if (st === "complete" || st === "closed jobs" || st === "closed" || st === "invoiced") return String(h[i].at || h[i].time || h[i].ts || "").slice(0, 10) || null;
+  }
+  return null;
+}
+async function historyIndex(env, tid, type) {
+  const kw = TYPE_KEYWORDS[type] || TYPE_KEYWORDS.fiveYear;
+  const byCode = /* @__PURE__ */ new Map();
+  const push = (code, item) => {
+    const k = padCode(code);
+    if (!k) return;
+    if (!byCode.has(k)) byCode.set(k, []);
+    byCode.get(k).push(item);
+  };
+  try {
+    const { results } = await env.DB.prepare("SELECT code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
+    for (const f of results || []) {
+      const d = toIsoDate(f.doc_date) || (f.year ? f.year + "-01-01" : null) || (f.uploaded_at || "").slice(0, 10) || null;
+      if (d) push(f.code, { source: "cert", date: d, title: f.label || f.filename || "Certificate", status: "filed" });
+    }
+  } catch {
+  }
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  for (const j of jobs) {
+    const text = [j.description, j.helpdeskRef, j.title].filter(Boolean).join(" ");
+    const flagged = type === "fiveYear" && j.elecTest || type === "em" && j.emTest || type === "pat" && j.pat || type === "pump" && j.pumpMaintenance;
+    if (!flagged && !kw.test(text)) continue;
+    const st = String(j.status || "");
+    const done = FINISHED.has(st.toLowerCase()) && st.toLowerCase() !== "cancelled";
+    push(j.siteCode, { source: "job", id: j.id, date: (done ? jobDoneDate(j) || (j.scheduledAt || "").slice(0, 10) : (j.scheduledAt || "").slice(0, 10)) || null, status: st, done, title: (j.helpdeskRef || j.description || "").slice(0, 80), engineer: Array.isArray(j.assignedEngineers) && j.assignedEngineers[0] || j.assignedTo || "" });
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, site_code, ref, status, completed_at, created_at, site_name, substr(data,1,400) AS d FROM sla_jobs_archive WHERE site_code<>'' AND (search LIKE '%eicr%' OR search LIKE '%5 year%' OR search LIKE '%fixed wire%' OR search LIKE '%periodic%' OR search LIKE '%emergency light%' OR search LIKE '%pat test%' OR search LIKE '%portable appliance%' OR search LIKE '%pump%')").bind().all();
+    for (const a of results || []) {
+      let name = "";
+      try {
+        const j = JSON.parse(a.d + (a.d.endsWith("}") ? "" : '"}'));
+        name = j.jobName || j.description || "";
+      } catch {
+        const m = /"jobName":"([^"]*)"/.exec(a.d || "");
+        name = m ? m[1] : "";
+      }
+      const text = name + " " + (a.ref || "");
+      if (!kw.test(text) && !kw.test(a.d || "")) continue;
+      const date = (a.completed_at || a.created_at || "").slice(0, 10) || null;
+      push(a.site_code, { source: "archive", id: a.id, date, status: a.status || "", done: true, title: (name || a.ref || a.id).slice(0, 80) });
+    }
+  } catch {
+  }
+  for (const list of byCode.values()) list.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
+  return byCode;
+}
+async function buildSchedule(env, tid, opts) {
+  await ensureTables2(env);
+  const type = opts.type || "fiveYear";
+  const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=? AND kind='schedule' AND ppm_type=?" + (opts.status === "all" ? "" : " AND status='open'") + " ORDER BY next_date ASC, store_code ASC").bind(tid, type).all();
+  const stores = await chartStores(env, tid);
+  const hist = await historyIndex(env, tid, type);
+  const booked = await bookedJobs(env, tid);
+  const today = todayIso();
+  const rows = (results || []).map((r) => {
+    const store = r.store_code ? stores.get(r.store_code) : null;
+    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.note || "" };
+    const h = r.store_code && hist.get(r.store_code) || [];
+    const done = h.filter((x) => x.source === "cert" || x.done);
+    const lastDone = done[0] || null;
+    const job = r.store_code ? booked.get(r.store_code + "|" + type) : null;
+    return {
+      id: r.id,
+      type,
+      typeLabel: TYPE_LABEL[type] || type,
+      srRef: r.sr_ref,
+      storeCode: r.store_code || "",
+      siteName: store && store.name || r.site_name || "",
+      block: r.block || "",
+      category: store ? store.category : "",
+      nextDate: r.next_date || r.planned_date || null,
+      lastDate: r.last_date || null,
+      released: !!r.order_nr,
+      orderNr: r.order_nr || "",
+      orderedValue: opts.money ? r.ordered_value : void 0,
+      releasedAt: r.released_at || null,
+      concertoStatus: r.concerto_status || "",
+      monthMarker: r.month_marker || "",
+      status: r.status,
+      note: r.note || "",
+      lastSeenAt: r.last_seen_at,
+      chartDue: store && store.due[type] || null,
+      flag: rec.flag,
+      flagText: rec.text,
+      lastDone,
+      history: h.slice(0, 6),
+      job: job || null
+    };
+  });
+  const from = opts.from || "", to = opts.to || "";
+  const filtered = rows.filter((r) => (!from || (r.nextDate || "") >= from) && (!to || (r.nextDate || "") <= to) && (opts.released === "yes" ? r.released : opts.released === "no" ? !r.released : true));
+  const byYear = {};
+  for (const r of rows) {
+    const y = (r.nextDate || "").slice(0, 4) || "none";
+    byYear[y] = byYear[y] || { total: 0, released: 0, done: 0 };
+    byYear[y].total++;
+    if (r.released) byYear[y].released++;
+    if (r.flag === "done") byYear[y].done++;
+  }
+  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, byYear };
+  let releaseLog = [];
+  try {
+    const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all();
+    releaseLog = (lg || []).map((x) => {
+      let d = {};
+      try {
+        d = JSON.parse(x.detail || "{}");
+      } catch {
+      }
+      return { id: x.ppm_id, at: x.at, ...d };
+    });
+  } catch {
+  }
+  const lead = releaseLog.map((x) => x.daysBeforeDue).filter((n) => Number.isFinite(n));
+  stats.releaseLeadDaysAvg = lead.length ? Math.round(lead.reduce((a, b) => a + b, 0) / lead.length) : null;
+  stats.releasesLogged = releaseLog.length;
+  return { type, rows: filtered, total: rows.length, stats, today };
+}
 async function handle9(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
@@ -9804,8 +10006,25 @@ async function handle9(request, env, ctx, url, sess) {
     }
   };
   if (path === "/concerto/list" && method === "GET") {
-    const out = await buildList(env, tid, { status: url.searchParams.get("status") || "open", money: money2 });
+    const out = await buildList(env, tid, { status: url.searchParams.get("status") || "open", kind: url.searchParams.get("kind") || "order", money: money2 });
     return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/schedule" && method === "GET") {
+    const q = url.searchParams;
+    const out = await buildSchedule(env, tid, { type: q.get("type") || "fiveYear", from: q.get("from") || "", to: q.get("to") || "", released: q.get("released") || "all", status: q.get("status") || "open", money: money2 });
+    return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/log" && method === "GET") {
+    await ensureTables2(env);
+    const { results } = await env.DB.prepare("SELECT ppm_id, event, detail, at FROM concerto_log WHERE tenant_id=? ORDER BY at DESC LIMIT 1000").bind(tid).all();
+    return json({ ok: true, events: (results || []).map((x) => {
+      let d = {};
+      try {
+        d = JSON.parse(x.detail || "{}");
+      } catch {
+      }
+      return { id: x.ppm_id, event: x.event, at: x.at, ...d };
+    }) }, {}, env, request);
   }
   if (path === "/concerto/import" && method === "POST") {
     const b = await body();
@@ -9846,7 +10065,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED;
+var FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -9858,6 +10077,14 @@ var init_concerto = __esm({
     addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
     todayIso = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     FINISHED = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+    TYPE_KEYWORDS = {
+      fiveYear: /5\s*-?\s*y(ea)?r|five\s*year|eicr|fixed\s*wire|periodic\s*insp|electrical\s*(installation\s*)?condition/i,
+      em: /emergency\s*light|\bem\s*(light|test|drain)|3\s*hr\s*drain|drain\s*-?\s*down/i,
+      pat: /\bpat\b|portable\s*appliance/i,
+      pump: /pump/i,
+      pv: /\bpv\b|solar/i,
+      ev: /\bev\b|charg|forecourt/i
+    };
   }
 });
 

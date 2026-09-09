@@ -4453,6 +4453,44 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   never logged (Greg's Jan-2026 email) — those read "Done our side". **Test:**
   `node --no-warnings worker/tools/test-concerto.mjs` (real SQLite via node:sqlite
   behind a D1-shaped shim — 50 cases). SW `mostlane-v122` (portal-config `?v=32` — the sidebar entry needed a bump because phones held the v31 file fetched before the merge).
+  - **Schedule tab — the FULL 5-year "PPM schedule" export (9 Sep 2026, Jamie: "new tab
+    under Concerto… cross reference jobs in the portal for each site and tell me what we
+    have done and when. Include archive jobs… filter a timeline list… filter by jobs that
+    have been released… mark these as Released and include the PPM number. Log other ones
+    that are not released yet so i can later build stats").** The full layout (Ref ·
+    Type · Discipline · UPRN · Site · Block · Frequency "60 Months" · Last date · Next
+    date · Jan..Dec month markers `ORD01`/`AM01`/`01` · Ordered (960 when released) ·
+    Status · **Order nr. = PPMnnnnn when RELEASED**) is parsed by the page (`colLike("order
+    nr")` etc.) and imported with `layout:"schedule"`. Schedule rows are keyed
+    **`SCH:<SRref>:<type>`** (one row per site+type — a moved next date UPDATES the row and
+    logs `next_date_changed {from,to}`, never a second row); `concerto_ppm` gained
+    `next_date, order_nr, ordered_value, released_at, concerto_status, month_marker,
+    discipline, frequency_months, block` (self-migrating ALTERs — **also run BY HAND on the
+    live D1 on 9 Sep before the seed**, since the ALTERs only fire once the new build
+    serves a request). **Released** = `order_nr` non-empty; `released_at` = when WE first
+    saw the PPM number (COALESCE-kept on re-import), and the first sighting writes a
+    `concerto_log` **`released`** event `{orderNr,next,store,value,daysBeforeDue}` — the
+    stats feed (`stats.releaseLeadDaysAvg`, `releasesLogged`); every new row logs
+    `imported`, a vanished one `gone`. Table **`concerto_log`** (tenant_id, ppm_id, event,
+    detail JSON, at). **GET `/concerto/schedule?type=fiveYear&from=&to=&released=all|yes|no
+    &status=`** → `{rows, stats{sites,released,notReleased,done,overdue,mismatch,noStore,
+    notOnChart,withHistory,byYear,releaseLeadDaysAvg,releasesLogged}}`; each row carries
+    the reconcile flag vs the chart PLUS **`history`** from `historyIndex(env,tid,type)`:
+    the newest coop `compliance_files` cert of that type (doc_date), LIVE `sla_jobs`
+    matched by numeric siteCode + the job's flag (elecTest/emTest/pat/pumpMaintenance) or a
+    `TYPE_KEYWORDS` regex on the description (done date = the Complete entry in
+    statusHistory), and **`sla_jobs_archive`** rows by `site_code` + keyword
+    (completed_at||created_at) — `lastDone` = the newest of those; the page's "Last done"
+    cell links the job (job-view / job-archive) and lists up to 3 more. GET `/concerto/log`.
+    Page: `#tabs` Orders / Schedule chips (`?tab=schedule` deep-link), year chips + from/to
+    month inputs + Released all/yes/no + flag + search, CSV for the tab. **Seeded live 9 Sep**
+    from Jamie's `ppm_schedule_5.xlsx`: 316 rows → **313** (3 duplicate UPRNs collapse to
+    one row each — the same site listed twice), **58 released** (all 2026), 369 refs,
+    0 unresolved (0903 "301 Lakeside" resolves to a store but isn't on the chart — the
+    chart has 1000 Lakeside Head Office). NB the seed's `INSERT…SELECT…ON CONFLICT` needs
+    a `WHERE 1` before `ON CONFLICT` or SQLite parses it as a join. Concerto's own next
+    dates will disagree with the chart on many rows ("Dates differ") — that is the point of
+    the check, not a bug. Test cases "full schedule layout" in test-concerto.mjs.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
