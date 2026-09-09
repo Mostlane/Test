@@ -511,6 +511,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn" id="backBtn">← Back</a>
         <button id="editJobBtn" class="btn" style="display:none;">✏️ Edit details</button>
+        <button id="hideClientBtn" class="btn" style="display:none;" title="Show or hide this job from the client portal">👁 Client</button>
         <button id="revisitBtn" class="btn" style="display:none;" title="Raise a linked re-visit of this job on a new date">🔁 Re-visit</button>
         <a id="headerMapBtn" class="btn" target="_blank" rel="noopener" style="display:none;">🧭 Directions</a>
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
@@ -912,6 +913,7 @@ function renderJob(){
     $("jobSub").textContent = " ";
     return;
   }
+  if(window._paintHideClient) try{ window._paintHideClient(); }catch(e){}
   // A manual job with no typed reference has its helpdeskRef defaulted to the
   // job's UUID id — that's a placeholder, not a real ticket. Treat it as "no
   // reference" so the UUID never leaks into the Reference or Description slots
@@ -2345,6 +2347,27 @@ function init(){
     $("editJobBtn").addEventListener("click", () => {
       if(job && window.MLJobEdit) window.MLJobEdit.open(job, { onSaved: async () => { await loadJob(); } });
     });
+    // Show/hide this job from the client portal (client accounts see their sites'
+    // jobs; the office can hide a sensitive one).
+    const hb = $("hideClientBtn");
+    if(hb){
+      hb.style.display = "inline-flex";
+      const paintHide = () => { hb.textContent = (job && job.hiddenFromClient) ? "🙈 Hidden from client" : "👁 Shown to client"; };
+      window._paintHideClient = paintHide;   // re-painted by renderJob once the job loads
+      paintHide();
+      hb.addEventListener("click", async () => {
+        if(!job) return;
+        const next = !job.hiddenFromClient;
+        hb.disabled = true;
+        try{
+          const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(job.id)}`, { method:"PATCH", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ hiddenFromClient: next, changedBy: getUser() }) });
+          if(!res.ok) throw new Error(res.status);
+          job = await res.json();
+          paintHide();
+        }catch(e){ if(window.MLUI&&MLUI.toast) MLUI.toast("Couldn't update — try again."); else alert("Couldn't update — try again."); }
+        finally{ hb.disabled = false; }
+      });
+    }
   }
         $("openSignatureBtn").addEventListener("click", openSignatureModal);
 $("closeSignatureModal").addEventListener("click", closeSignatureModal);

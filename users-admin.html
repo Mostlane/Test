@@ -304,7 +304,12 @@
           </div>
           <div>
             <label>Staff type</label>
-            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option></select>
+            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option><option value="client">Client (external)</option></select>
+          </div>
+          <div id="clientOrgWrap" style="display:none;">
+            <label>Client organisation</label>
+            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's own jobs + compliance chart. No staff access, no financial info.</div>
           </div>
         </div>
       </div>
@@ -589,6 +594,9 @@
     }
     const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
     const g = id => document.getElementById(id);
+    // Show the client-org picker only when the account type is "client".
+    function syncClientOrg(){ const w = g("clientOrgWrap"); if (w) w.style.display = (g("f_staff") && g("f_staff").value === "client") ? "" : "none"; }
+    try { if (g("f_staff")) g("f_staff").addEventListener("change", syncClientOrg); } catch (e) {}
 
     // ── Areas of responsibility (home dashboard) ───────────────────────────
     // key = the home dashboard's area domain (see main.html widgets).
@@ -1081,6 +1089,9 @@
       g("f_status").value = user?.Status || "Active";
       refreshBlockBtn(user?.Username || "");
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
+      // Client org picker: shown only for a client account.
+      if (g("f_clientOrg")) g("f_clientOrg").value = (user?.ClientOrg || user?.Profile?.clientOrg || "fbc");
+      syncClientOrg();
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
@@ -1189,7 +1200,15 @@
         const el = g("p_" + k); if (!el) return;
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
-      profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      profile.staffType = g("f_staff").value;   // field / office / client — preserves sortOrder from editingProfile
+      // A CLIENT account carries its org (walls it to that client's data) and never
+      // gets staff permissions/areas/compliance-levels (the server derives its
+      // read-only compliance access from the org).
+      if (profile.staffType === "client") {
+        profile.clientOrg = (g("f_clientOrg") && g("f_clientOrg").value) || "fbc";
+      } else {
+        delete profile.clientOrg;
+      }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);

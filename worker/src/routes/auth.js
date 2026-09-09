@@ -244,9 +244,12 @@ function shapeUser(u, perms) {
     Status: u.status,
     SharePointPath: u.sharepoint_path,
     MustChangePassword: !!u.must_change_password,
-    // "office" | "field" (default field) — drives whether the user lands in the
-    // office menu (main.html) or the engineer app (route.html / You).
+    // "office" | "field" | "client" (default field) — drives where the user lands:
+    // office menu (main.html), the engineer app (route.html), or the walled client
+    // portal (client-home.html) for an external customer login.
     StaffType: staffTypeOf(u),
+    // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: clientOrgOf(u),
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
@@ -268,8 +271,14 @@ function areasOf(u) {
 function staffTypeOf(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
-    return p && p.staffType === "office" ? "office" : "field";
+    return p && (p.staffType === "office" || p.staffType === "client") ? p.staffType : "field";
   } catch { return "field"; }
+}
+function clientOrgOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
+    return (p && p.staffType === "client" && p.clientOrg) ? String(p.clientOrg).toLowerCase() : "";
+  } catch { return ""; }
 }
 
 // Brute-force guard. Counts failed logins from one IP in the last 15 minutes.
