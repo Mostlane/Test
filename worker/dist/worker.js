@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -695,8 +700,9 @@ async function pushToUser(env, tenantId, username, payload) {
   }));
   return { sent, failed, gone };
 }
-async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
+async function sendToPermission(env, tenantId, permKeys, payload, excludeUser, opts) {
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  const officeOnly = opts === true || opts && opts.officeOnly;
   const keys = (permKeys || []).filter(Boolean);
   if (!keys.length) return { sent: 0, failed: 0, gone: 0 };
   const ph = keys.map(() => "?").join(",");
@@ -708,6 +714,25 @@ async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
     usernames = (results || []).map((r) => r.username);
   } catch {
     return { sent: 0, failed: 0, gone: 0 };
+  }
+  if (officeOnly && usernames.length) {
+    try {
+      const uph = usernames.map(() => "?").join(",");
+      const { results } = await env.DB.prepare(
+        `SELECT username, profile FROM users WHERE tenant_id=? AND username IN (${uph})`
+      ).bind(tenantId, ...usernames).all();
+      const fieldSet = /* @__PURE__ */ new Set();
+      for (const r of results || []) {
+        let st = "";
+        try {
+          st = String(JSON.parse(r.profile || "{}").staffType || "").toLowerCase();
+        } catch {
+        }
+        if (st === "field") fieldSet.add(String(r.username).toLowerCase());
+      }
+      if (fieldSet.size) usernames = usernames.filter((u) => !fieldSet.has(String(u).toLowerCase()));
+    } catch {
+    }
   }
   const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
   const totals = { sent: 0, failed: 0, gone: 0 };
@@ -10303,7 +10328,7 @@ async function handle9(request, env, ctx, url, sess) {
       body: `${shapeRow(rec).storeName || "A store"} \u2014 ready for office review`,
       url: "/cert-review.html?pump=" + encodeURIComponent(id),
       tag: "pump-review"
-    }, me).catch(() => {
+    }, me, { officeOnly: true }).catch(() => {
     }));
     return json({ ok: true, record: shapeRow(fresh) }, {}, env, request);
   }
@@ -11005,7 +11030,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
       body: filed ? `${site}: the EM certificate has been re-issued with ${changed} fitting${changed === 1 ? "" : "s"} marked "Replaced" and filed to the compliance chart. Tap to download.` : `${site}: a clean EM certificate was generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass) but couldn't be filed automatically \u2014 review and issue it.`,
       url: "/cert-review.html?open=" + newId4,
       tag: "cert-reissue:" + newId4
-    });
+    }, null, { officeOnly: true });
     ctx?.waitUntil ? ctx.waitUntil(p.catch(() => {
     })) : await p.catch(() => {
     });
@@ -11158,7 +11183,8 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
       { title: m ? "Client order \u2014 approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true },
-      ""
+      "",
+      { officeOnly: true }
     ).catch(() => {
     }));
   }
@@ -11951,7 +11977,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
       }))));
     } else {
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me, { officeOnly: true }).catch(() => {
       }));
     }
     return json({ ok: true, jobComplete: jobDone }, {}, env, request);
@@ -12143,7 +12169,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (remedial && remedial.count) {
       const site = rec.installation && rec.installation.name || code;
       const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (\xA3${remedial.charge} in lights)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries` : "") + `. Quote the client \u2014 track it on the EM remedials list.`;
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }, null, { officeOnly: true }).catch(() => {
       }));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
@@ -12618,7 +12644,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       body: `${row.site_name || row.site_code}: the batteries for the EM remedial have arrived. The works job can be scheduled now.`,
       url: "/job-view.html?jobId=" + encodeURIComponent(jobId),
       tag: "em-batt:" + certId
-    }, me).catch(() => {
+    }, me, { officeOnly: true }).catch(() => {
     }));
     return json({ ok: true, jobId }, {}, env, request);
   }
@@ -33439,9 +33465,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
