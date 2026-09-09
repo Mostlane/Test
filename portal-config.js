@@ -1067,6 +1067,7 @@
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
+          { label: "Concerto PPM list", href: "concerto-ppm.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["concerto-ppm.html"] },
           { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
           { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
