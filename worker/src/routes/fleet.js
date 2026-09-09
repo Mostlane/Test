@@ -638,9 +638,17 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, scores }, headers);
   }
 
-  // Everything else needs a fleet-permitted session.
+  // Everything else needs a fleet-permitted session — EXCEPT the assigned
+  // driver's OWN van-handover endpoints. A newly-assigned driver is a field
+  // engineer who does NOT hold the Vehicles permission, but they must be able to
+  // load and submit the handover the office sent them (and the portal-wide
+  // handover gate polls /handover/attention on every page). These three do their
+  // own per-user ownership checks below (mine/attention filter by the caller's
+  // username; submit verifies the row is theirs, else FullAccess), so a non-fleet
+  // session is safe here. Everything else (fleet management) stays gated.
   if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
-  if (!(await canFleet(env, tid, sess))) return jr({ error: "Forbidden" }, headers, 403);
+  const DRIVER_HANDOVER = (sub === "/handover/mine" || sub === "/handover/attention" || sub === "/handover/submit");
+  if (!DRIVER_HANDOVER && !(await canFleet(env, tid, sess))) return jr({ error: "Forbidden" }, headers, 403);
 
   // ── Reg → driver mapping (remembered across sessions/devices) ──────────────
   if (sub === "/drivers" && method === "GET") {

@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -29353,7 +29358,8 @@ async function handle27(request, env, ctx, url, sess) {
     return jr4({ ok: true, scores }, headers);
   }
   if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
-  if (!await canFleet(env, tid, sess)) return jr4({ error: "Forbidden" }, headers, 403);
+  const DRIVER_HANDOVER = sub === "/handover/mine" || sub === "/handover/attention" || sub === "/handover/submit";
+  if (!DRIVER_HANDOVER && !await canFleet(env, tid, sess)) return jr4({ error: "Forbidden" }, headers, 403);
   if (sub === "/drivers" && method === "GET") {
     let map = {};
     try {
@@ -34524,9 +34530,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
