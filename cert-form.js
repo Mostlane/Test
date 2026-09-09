@@ -17,6 +17,28 @@
 (function () {
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
 
+  // Camera-or-gallery chooser (shared across the field photo forms). EM-remedial
+  // photos aren't "live only", so the engineer picks camera or gallery. Guarded so
+  // whichever field script defines it first wins; falls back to the native picker.
+  if (typeof window !== "undefined" && !window.MLPhotoInput) {
+    window.MLPhotoInput = function (input, cb) {
+      function go(mode){ if(!mode) return; if(mode==="camera") input.setAttribute("capture","environment"); else input.removeAttribute("capture"); if(cb) cb(mode); input.click(); }
+      try{
+        var ov=document.createElement("div");
+        ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px";
+        var sh=document.createElement("div");
+        sh.style.cssText="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:14px;box-shadow:0 -6px 28px rgba(0,0,0,.3)";
+        sh.innerHTML='<div style="font-weight:700;color:#003468;font-size:15px;margin:4px 6px 12px">Add a photo</div>';
+        function mk(t,p){ var b=document.createElement("button"); b.type="button"; b.textContent=t; b.style.cssText="display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:14px;border:1px solid #d7dee6;border-radius:12px;background:"+(p?"#f7f9fc":"#fff")+";font:inherit;font-size:15px;font-weight:"+(p?"600":"500")+";color:"+(p?"#0f2438":"#64748b")+";cursor:pointer"; return b; }
+        var cam=mk("📷 Take a photo",1),gal=mk("🖼 Choose from gallery",1),cx=mk("Cancel",0);
+        var done=false; function fin(v){ if(done) return; done=true; try{ov.remove();}catch(e){} go(v); }
+        cam.onclick=function(){fin("camera");}; gal.onclick=function(){fin("gallery");}; cx.onclick=function(){fin(null);};
+        ov.addEventListener("click",function(e){ if(e.target===ov) fin(null); });
+        sh.appendChild(cam); sh.appendChild(gal); sh.appendChild(cx); ov.appendChild(sh); document.body.appendChild(ov);
+      }catch(e){ go("gallery"); }
+    };
+  }
+
   const COLS = {
     em: [
       { key: "comments", label: "Location / description", role: "title" },
@@ -522,7 +544,9 @@
         } catch (e) { alert("Photo upload failed."); }
         finally { if (btn) { btn.disabled = false; btn.textContent = "📷 Add photo"; } }
       };
-      document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+      document.body.appendChild(inp);
+      if (window.MLPhotoInput) window.MLPhotoInput(inp); else inp.click();
+      setTimeout(() => inp.remove(), 60000);
     }
     function wire() {
       container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));

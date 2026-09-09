@@ -9,6 +9,27 @@
    Photos AND videos upload straight to the record. Two signatures (engineer +
    store DM). A required safety pre-check must be Yes before it can be submitted. */
 (function () {
+  // Camera-or-gallery chooser (shared across the field photo forms). Pump photos
+  // aren't "live only", so the engineer picks camera or gallery. Guarded so
+  // whichever field script defines it first wins; falls back to the native picker.
+  if (typeof window !== "undefined" && !window.MLPhotoInput) {
+    window.MLPhotoInput = function (input, cb) {
+      function go(mode){ if(!mode) return; if(mode==="camera") input.setAttribute("capture","environment"); else input.removeAttribute("capture"); if(cb) cb(mode); input.click(); }
+      try{
+        var ov=document.createElement("div");
+        ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px";
+        var sh=document.createElement("div");
+        sh.style.cssText="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:14px;box-shadow:0 -6px 28px rgba(0,0,0,.3)";
+        sh.innerHTML='<div style="font-weight:700;color:#003468;font-size:15px;margin:4px 6px 12px">Add a photo</div>';
+        function mk(t,p){ var b=document.createElement("button"); b.type="button"; b.textContent=t; b.style.cssText="display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:14px;border:1px solid #d7dee6;border-radius:12px;background:"+(p?"#f7f9fc":"#fff")+";font:inherit;font-size:15px;font-weight:"+(p?"600":"500")+";color:"+(p?"#0f2438":"#64748b")+";cursor:pointer"; return b; }
+        var cam=mk("📷 Take a photo",1),gal=mk("🖼 Choose from gallery",1),cx=mk("Cancel",0);
+        var done=false; function fin(v){ if(done) return; done=true; try{ov.remove();}catch(e){} go(v); }
+        cam.onclick=function(){fin("camera");}; gal.onclick=function(){fin("gallery");}; cx.onclick=function(){fin(null);};
+        ov.addEventListener("click",function(e){ if(e.target===ov) fin(null); });
+        sh.appendChild(cam); sh.appendChild(gal); sh.appendChild(cx); ov.appendChild(sh); document.body.appendChild(ov);
+      }catch(e){ go("gallery"); }
+    };
+  }
   var CSS = ""
     + ".mlp{font-family:inherit;color:#14202c}"
     + ".mlp .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:12px}"
@@ -218,7 +239,7 @@
       // media
       var mc = el("div", "card");
       mc.appendChild(el("h4", null, "📷 Photos & video of maintenance"));
-      if (!RO) mc.innerHTML += '<div style="display:flex;gap:8px;flex-wrap:wrap"><label class="btn line" style="cursor:pointer">➕ Add photo<input type="file" accept="image/*" id="mlpPhoto" style="display:none"></label><label class="btn line" style="cursor:pointer">🎬 Add video<input type="file" accept="video/*" id="mlpVideo" style="display:none"></label></div><div class="uploading" style="margin-top:4px;color:#94a3b8">Keep videos short (max 95 MB).</div><div class="uploading" id="mlpUpNote" style="margin-top:2px"></div>';
+      if (!RO) mc.innerHTML += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn line" id="mlpAddPhoto" style="cursor:pointer">➕ Add photo</button><input type="file" accept="image/*" id="mlpPhoto" style="display:none"><label class="btn line" style="cursor:pointer">🎬 Add video<input type="file" accept="video/*" id="mlpVideo" style="display:none"></label></div><div class="uploading" style="margin-top:4px;color:#94a3b8">Keep videos short (max 95 MB).</div><div class="uploading" id="mlpUpNote" style="margin-top:2px"></div>';
       mc.innerHTML += '<div class="media" id="mlpMedia"></div>'; body.appendChild(mc);
       // declaration + signatures
       var dc = el("div", "card");
@@ -259,6 +280,7 @@
       var en = host.querySelector("#mlpEngName"); if (en) en.oninput = function () { REC.engineerName = en.value; queueSave(); };
       var dn = host.querySelector("#mlpDmName"); if (dn) dn.oninput = function () { REC.dmName = dn.value; queueSave(); };
       var ph = host.querySelector("#mlpPhoto"); if (ph) ph.onchange = function () { if (ph.files[0]) uploadMedia(ph.files[0], "photo"); ph.value = ""; };
+      var pab = host.querySelector("#mlpAddPhoto"); if (pab && ph) pab.onclick = function () { if (window.MLPhotoInput) window.MLPhotoInput(ph); else { ph.removeAttribute("capture"); ph.click(); } };
       var vd = host.querySelector("#mlpVideo"); if (vd) vd.onchange = function () { if (vd.files[0]) uploadMedia(vd.files[0], "video"); vd.value = ""; };
       var es = host.querySelector("#mlpEngSig"); if (es) initSig(es, "engSig");
       var ds = host.querySelector("#mlpDmSig"); if (ds) initSig(ds, "dmSig");

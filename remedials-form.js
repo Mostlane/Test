@@ -18,6 +18,29 @@
   var CODES = ["", "C1", "C2", "C3", "FI"];
   var CODE_LABEL = { "": "–", C1: "C1", C2: "C2", C3: "C3", FI: "FI" };
 
+  // Camera-or-gallery chooser, shared across the field photo forms. Remedial
+  // photos are NOT "live only", so the engineer picks camera or gallery. Guarded
+  // so whichever field script defines it first wins; falls back to native picker.
+  if (typeof window !== "undefined" && !window.MLPhotoInput) {
+    window.MLPhotoInput = function (input, cb) {
+      function go(mode){ if(!mode) return; if(mode==="camera") input.setAttribute("capture","environment"); else input.removeAttribute("capture"); if(cb) cb(mode); input.click(); }
+      try{
+        var ov=document.createElement("div");
+        ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px";
+        var sh=document.createElement("div");
+        sh.style.cssText="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:14px;box-shadow:0 -6px 28px rgba(0,0,0,.3)";
+        sh.innerHTML='<div style="font-weight:700;color:#003468;font-size:15px;margin:4px 6px 12px">Add a photo</div>';
+        function mk(t,p){ var b=document.createElement("button"); b.type="button"; b.textContent=t; b.style.cssText="display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:14px;border:1px solid #d7dee6;border-radius:12px;background:"+(p?"#f7f9fc":"#fff")+";font:inherit;font-size:15px;font-weight:"+(p?"600":"500")+";color:"+(p?"#0f2438":"#64748b")+";cursor:pointer"; return b; }
+        var cam=mk("📷 Take a photo",1),gal=mk("🖼 Choose from gallery",1),cx=mk("Cancel",0);
+        var done=false; function fin(v){ if(done) return; done=true; try{ov.remove();}catch(e){} go(v); }
+        cam.onclick=function(){fin("camera");}; gal.onclick=function(){fin("gallery");}; cx.onclick=function(){fin(null);};
+        ov.addEventListener("click",function(e){ if(e.target===ov) fin(null); });
+        sh.appendChild(cam); sh.appendChild(gal); sh.appendChild(cx); ov.appendChild(sh); document.body.appendChild(ov);
+      }catch(e){ go("gallery"); }
+    };
+  }
+  function pickSource(input){ if(window.MLPhotoInput) window.MLPhotoInput(input); else { input.removeAttribute("capture"); input.click(); } }
+
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function fmtDur(min) { min = Math.round(Number(min) || 0); var h = Math.floor(min / 60), m = min % 60; return h ? (h + "h" + (m ? " " + m + "m" : "")) : (m + "m"); }
   function fmtGBP(n) { n = Number(n) || 0; return "£" + n.toFixed(2); }
@@ -109,7 +132,7 @@
         '<label>Duration <input type="number" class="mlr-min" min="0" step="5" value="' + (r.minutes || "") + '"><span>min</span></label>' +
         '<label>Material £ <input type="number" class="mlr-mat" min="0" step="1" value="' + (r.materialCost || "") + '"></label>' +
         '</div>' +
-        '<div class="mlr-photos">' + photos + '<label class="mlr-addph">📷 Photo<input type="file" accept="image/*" hidden></label></div>' +
+        '<div class="mlr-photos">' + photos + '<button type="button" class="mlr-addph">📷 Photo</button><input type="file" accept="image/*" class="mlr-phinput" hidden></div>' +
         '</div>';
     }
     function wireEngineer() {
@@ -125,7 +148,9 @@
             if (!ok) return; items.splice(i, 1); renderEngineer(); queueSave();
           });
         };
-        node.querySelector(".mlr-addph input").onchange = function () { var f = this.files && this.files[0]; if (f) uploadPhoto(r, f); this.value = ""; };
+        var phInput = node.querySelector(".mlr-phinput");
+        phInput.onchange = function () { var f = this.files && this.files[0]; if (f) uploadPhoto(r, f); this.value = ""; };
+        node.querySelector(".mlr-addph").onclick = function () { pickSource(phInput); };
         Array.prototype.forEach.call(node.querySelectorAll("[data-delph]"), function (b) {
           b.onclick = function () {
             var key = b.getAttribute("data-delph");
@@ -252,7 +277,7 @@
       + '.mlr-photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}'
       + '.mlr-ph{position:relative}.mlr-ph img{width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid #d7dee6}'
       + '.mlr-ph-x{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:999px;border:0;background:#dc2626;color:#fff;font-size:11px;cursor:pointer;line-height:1}'
-      + '.mlr-addph{display:inline-flex;align-items:center;justify-content:center;width:60px;height:60px;border:1px dashed #94a3b8;border-radius:8px;color:#475569;font-size:11px;cursor:pointer;text-align:center}'
+      + '.mlr-addph{display:inline-flex;align-items:center;justify-content:center;width:60px;height:60px;border:1px dashed #94a3b8;border-radius:8px;color:#475569;font-size:11px;cursor:pointer;text-align:center;background:#fff;font-family:inherit}'
       + '.mlr-add{width:100%;padding:10px;border:1px dashed #003468;background:#f3f7fc;color:#003468;border-radius:10px;font-weight:600;cursor:pointer}'
       + '.mlr-tot{font-size:12px;color:#475569;margin-top:8px;text-align:right}'
       + '.mlr-tblwrap{overflow-x:auto}.mlr-tbl{width:100%;border-collapse:collapse;font-size:13px}'
