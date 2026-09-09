@@ -52,6 +52,7 @@
     .lvl-field  { background:rgba(0,122,255,.12); color:#0060df; }
     .lvl-office { background:rgba(52,199,89,.16); color:#248a3d; }
     .lvl-admin  { background:rgba(255,149,0,.18); color:#a15c00; }
+    .lvl-client { background:rgba(30,64,175,.12); color:#1e40af; }
     .lvl-full   { background:rgba(175,82,222,.15); color:#8944ab; }
     .muted { color:var(--text2); font-size:13px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
@@ -247,6 +248,11 @@
         <div class="zonehead">Field staff <span class="count" id="cntField"></span></div>
         <div class="ulist" id="listField" data-staff="field"></div>
       </div>
+      <div class="zone" id="zoneClients" style="display:none;">
+        <div class="zonehead">🏢 Client logins <span class="count" id="cntClients"></span></div>
+        <div style="font-size:12px;color:#64748b;margin:0 0 6px;">External customer accounts — walled to their org's own jobs + compliance chart. No staff access, no financial info.</div>
+        <div class="ulist" id="listClients" data-staff="client"></div>
+      </div>
     </div>
   </div>
 
@@ -304,7 +310,12 @@
           </div>
           <div>
             <label>Staff type</label>
-            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option></select>
+            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option><option value="client">Client (external)</option></select>
+          </div>
+          <div id="clientOrgWrap" style="display:none;">
+            <label>Client organisation</label>
+            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's own jobs + compliance chart. No staff access, no financial info.</div>
           </div>
         </div>
       </div>
@@ -589,6 +600,9 @@
     }
     const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
     const g = id => document.getElementById(id);
+    // Show the client-org picker only when the account type is "client".
+    function syncClientOrg(){ const w = g("clientOrgWrap"); if (w) w.style.display = (g("f_staff") && g("f_staff").value === "client") ? "" : "none"; }
+    try { if (g("f_staff")) g("f_staff").addEventListener("change", syncClientOrg); } catch (e) {}
 
     // ── Areas of responsibility (home dashboard) ───────────────────────────
     // key = the home dashboard's area domain (see main.html widgets).
@@ -850,6 +864,7 @@
     }
 
     function accessSummary(u) {
+      if (u.StaffType === "client") { const o = String(u.ClientOrg || u.Profile?.clientOrg || "").toLowerCase(); return o ? (ORG_LABELS[o] || o.toUpperCase()) + " portal" : "Client portal"; }
       if (u.FullAccess === "Yes") return "Full access";
       const n = PERMISSIONS.filter(p => u[p] === "Yes").length;
       return n ? n + " area" + (n === 1 ? "" : "s") : "None";
@@ -858,7 +873,9 @@
     // Permissions that make someone an "Admin" (manage an area for everyone).
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
+    const ORG_LABELS = { fbc: "FBC" };
     function levelOf(u) {
+      if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
       if (ADMIN_PERMS.some(p => u[p] === "Yes")) return { label: "Admin", cls: "lvl-admin" };
       if (u.StaffType === "office") return { label: "Office", cls: "lvl-office" };
@@ -904,9 +921,12 @@
       // allUsers arrives already in canonical order (office first, then field,
       // each by manual drag order) from the server — keep that order per zone.
       const office = allUsers.filter(u => u.StaffType === "office");
-      const field  = allUsers.filter(u => u.StaffType !== "office");
+      const field  = allUsers.filter(u => u.StaffType !== "office" && u.StaffType !== "client");
+      const clients = allUsers.filter(u => u.StaffType === "client");
       g("listOffice").innerHTML = office.map(userRow).join("");
       g("listField").innerHTML  = field.map(userRow).join("");
+      g("listClients").innerHTML = clients.map(userRow).join("");
+      g("zoneClients").style.display = clients.length ? "" : "none";
       const match = u => !q || [u.Username, u.FirstName, u.LastName, u.Email]
         .some(v => String(v || "").toLowerCase().includes(q));
       document.querySelectorAll(".urow").forEach(r => {
@@ -918,8 +938,10 @@
     function refreshCounts() {
       const nO = g("listOffice").querySelectorAll(".urow").length;
       const nF = g("listField").querySelectorAll(".urow").length;
+      const nC = g("listClients").querySelectorAll(".urow").length;
       g("cntOffice").textContent = nO ? `(${nO})` : "";
       g("cntField").textContent  = nF ? `(${nF})` : "";
+      if (g("cntClients")) g("cntClients").textContent = nC ? `(${nC})` : "";
       g("listOffice").classList.toggle("empty", !nO);
       g("listField").classList.toggle("empty", !nF);
     }
@@ -1081,6 +1103,9 @@
       g("f_status").value = user?.Status || "Active";
       refreshBlockBtn(user?.Username || "");
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
+      // Client org picker: shown only for a client account.
+      if (g("f_clientOrg")) g("f_clientOrg").value = (user?.ClientOrg || user?.Profile?.clientOrg || "fbc");
+      syncClientOrg();
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
@@ -1189,7 +1214,15 @@
         const el = g("p_" + k); if (!el) return;
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
-      profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      profile.staffType = g("f_staff").value;   // field / office / client — preserves sortOrder from editingProfile
+      // A CLIENT account carries its org (walls it to that client's data) and never
+      // gets staff permissions/areas/compliance-levels (the server derives its
+      // read-only compliance access from the org).
+      if (profile.staffType === "client") {
+        profile.clientOrg = (g("f_clientOrg") && g("f_clientOrg").value) || "fbc";
+      } else {
+        delete profile.clientOrg;
+      }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);

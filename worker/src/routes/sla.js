@@ -4094,6 +4094,16 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     orderNumber: body.orderNumber !== undefined ? (String(body.orderNumber || "") || null) : (existing?.orderNumber || null),
     orderValue: body.orderValue !== undefined ? (body.orderValue === null || body.orderValue === "" ? null : (Number.isFinite(Number(body.orderValue)) ? Number(body.orderValue) : (existing?.orderValue ?? null))) : (existing?.orderValue ?? null),
     clientOrderId: body.clientOrderId !== undefined ? (String(body.clientOrderId || "") || null) : (existing?.clientOrderId || null),
+    // Where the job came from ("client" = raised by a client portal login, "zapier",
+    // "email", "client-order", …). Preserved across re-saves.
+    originator: body.originator !== undefined ? (String(body.originator || "") || null) : (existing?.originator || null),
+    // Client-portal fields: the client org it belongs to (so the client's job log
+    // finds it even if the site match is fuzzy), whether a client raised it, the
+    // urgency the client flagged, and an office "hide from the client view" flag.
+    clientOrg: body.clientOrg !== undefined ? (String(body.clientOrg || "").toLowerCase() || null) : (existing?.clientOrg || null),
+    raisedByClient: body.raisedByClient !== undefined ? !!body.raisedByClient : (existing?.raisedByClient || false),
+    clientUrgency: body.clientUrgency !== undefined ? (String(body.clientUrgency || "") || null) : (existing?.clientUrgency || null),
+    hiddenFromClient: body.hiddenFromClient !== undefined ? !!body.hiddenFromClient : (existing?.hiddenFromClient || false),
     // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
     // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
     // the chain, so all visits against one job are easy to find + cost together.
@@ -4408,6 +4418,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
   }
+
+  // Office "hide from the client view" toggle (only reaches here from an admin —
+  // it's not in the non-admin field whitelist).
+  if (patch.hiddenFromClient !== undefined) job.hiddenFromClient = !!patch.hiddenFromClient;
 
   job.updatedAt = now;
   await saveJob(env, tenantId, job);

@@ -98,6 +98,12 @@
     // password change always wins.
     function goNext() {
       if (window.__mostlaneMustChange) { window.location.href = "change-password.html?forced=1"; return; }
+      // A CLIENT login goes straight to the walled client portal — never the staff
+      // menu, never a saved landing-page pref (which could point at a staff page).
+      try {
+        var st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        if (st === "client") { window.location.href = "client-home.html"; return; }
+      } catch (e) {}
       // Field users (SLA/jobs, not admin) land in the engineer app; office &
       // admins get the main menu. Reads the permissions just cached at login.
       var fallback = (window.mlIsFieldUser && window.mlIsFieldUser()) ? "route.html" : "main.html";
@@ -115,6 +121,12 @@
     function runDeviceCheckAndContinue(username) {
       // Master-password sign-ins bypass the device lock (break-glass access).
       if (window.__mostlaneMasterLogin) { goNext(); return; }
+      // External CLIENT logins bypass the device lock (they aren't staff devices,
+      // and the device-registration flow would fight the client wall).
+      try {
+        var st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        if (st === "client") { goNext(); return; }
+      } catch (e) {}
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
           DeviceAuth.checkOnLogin(username, function () { goNext(); });
@@ -147,6 +159,8 @@
         var d = await r.json().catch(function () { return {}; });
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
+          // A client login always resumes into the walled client portal.
+          if (d.user && d.user.StaffType === "client") { location.replace("client-home.html"); return; }
           var fb = (window.mlIsFieldUser && window.mlIsFieldUser(d.user)) ? "route.html" : "main.html";
           var lp = null;
           try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}

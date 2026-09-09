@@ -161,7 +161,9 @@ export async function handle(request, env, ctx, url, sess) {
       if (!row) continue;
       let profile = {};
       try { profile = row.profile ? JSON.parse(row.profile) : {}; } catch { profile = {}; }
-      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      // Never let a drag-reorder downgrade a CLIENT login to a staff type.
+      profile.staffType = profile.staffType === "client" ? "client"
+        : (item.StaffType === "office" ? "office" : "field");
       profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
       await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?")
         .bind(JSON.stringify(profile), db.tenantId, item.Username).run();
@@ -489,7 +491,9 @@ function shapeUser(u, perms) {
     SharePointPath: u.sharepoint_path,
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
-    StaffType: profile.staffType === "office" ? "office" : "field",
+    StaffType: (profile.staffType === "office" || profile.staffType === "client") ? profile.staffType : "field",
+    // External client login: which client org it's tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: profile.staffType === "client" && profile.clientOrg ? String(profile.clientOrg).toLowerCase() : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the

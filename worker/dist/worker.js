@@ -247,6 +247,12 @@ function sanitizeComplianceAccess(input) {
 function resolveComplianceAccess(profile, perms) {
   const p = parseProfile(profile);
   const pr = perms || {};
+  if (p.staffType === "client") {
+    const scheme = ORG_SCHEME[String(p.clientOrg || "").toLowerCase()] || null;
+    const out2 = {};
+    for (const s of COMPLIANCE_SCHEMES) out2[s.key] = scheme && s.key === scheme ? "download" : "none";
+    return out2;
+  }
   const stored = p.complianceAccess && typeof p.complianceAccess === "object" ? p.complianceAccess : null;
   const full = yes(pr.FullAccess);
   const office = p.staffType === "office";
@@ -262,7 +268,7 @@ function resolveComplianceAccess(profile, perms) {
   }
   return out;
 }
-var COMPLIANCE_SCHEMES, COMPLIANCE_LEVELS;
+var COMPLIANCE_SCHEMES, COMPLIANCE_LEVELS, ORG_SCHEME;
 var init_complianceaccess = __esm({
   "src/lib/complianceaccess.js"() {
     COMPLIANCE_SCHEMES = [
@@ -272,6 +278,7 @@ var init_complianceaccess = __esm({
       { key: "projects", label: "Projects" }
     ];
     COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
+    ORG_SCHEME = { fbc: "fareham" };
   }
 });
 
@@ -17703,6 +17710,16 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     orderNumber: body.orderNumber !== void 0 ? String(body.orderNumber || "") || null : existing?.orderNumber || null,
     orderValue: body.orderValue !== void 0 ? body.orderValue === null || body.orderValue === "" ? null : Number.isFinite(Number(body.orderValue)) ? Number(body.orderValue) : existing?.orderValue ?? null : existing?.orderValue ?? null,
     clientOrderId: body.clientOrderId !== void 0 ? String(body.clientOrderId || "") || null : existing?.clientOrderId || null,
+    // Where the job came from ("client" = raised by a client portal login, "zapier",
+    // "email", "client-order", …). Preserved across re-saves.
+    originator: body.originator !== void 0 ? String(body.originator || "") || null : existing?.originator || null,
+    // Client-portal fields: the client org it belongs to (so the client's job log
+    // finds it even if the site match is fuzzy), whether a client raised it, the
+    // urgency the client flagged, and an office "hide from the client view" flag.
+    clientOrg: body.clientOrg !== void 0 ? String(body.clientOrg || "").toLowerCase() || null : existing?.clientOrg || null,
+    raisedByClient: body.raisedByClient !== void 0 ? !!body.raisedByClient : existing?.raisedByClient || false,
+    clientUrgency: body.clientUrgency !== void 0 ? String(body.clientUrgency || "") || null : existing?.clientUrgency || null,
+    hiddenFromClient: body.hiddenFromClient !== void 0 ? !!body.hiddenFromClient : existing?.hiddenFromClient || false,
     // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
     // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
     // the chain, so all visits against one job are easy to find + cost together.
@@ -17969,6 +17986,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
   }
+  if (patch.hiddenFromClient !== void 0) job.hiddenFromClient = !!patch.hiddenFromClient;
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
   if (job.status !== prevStatus && ctx && ctx.waitUntil) {
@@ -21083,9 +21101,12 @@ function shapeUser(u, perms) {
     Status: u.status,
     SharePointPath: u.sharepoint_path,
     MustChangePassword: !!u.must_change_password,
-    // "office" | "field" (default field) — drives whether the user lands in the
-    // office menu (main.html) or the engineer app (route.html / You).
+    // "office" | "field" | "client" (default field) — drives where the user lands:
+    // office menu (main.html), the engineer app (route.html), or the walled client
+    // portal (client-home.html) for an external customer login.
     StaffType: staffTypeOf(u),
+    // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: clientOrgOf(u),
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
@@ -21106,9 +21127,17 @@ function areasOf(u) {
 function staffTypeOf(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
-    return p && p.staffType === "office" ? "office" : "field";
+    return p && (p.staffType === "office" || p.staffType === "client") ? p.staffType : "field";
   } catch {
     return "field";
+  }
+}
+function clientOrgOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return p && p.staffType === "client" && p.clientOrg ? String(p.clientOrg).toLowerCase() : "";
+  } catch {
+    return "";
   }
 }
 var LOGIN_FAIL_LIMIT = 20;
@@ -21253,7 +21282,7 @@ async function handle2(request, env, ctx, url, sess) {
       } catch {
         profile = {};
       }
-      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      profile.staffType = profile.staffType === "client" ? "client" : item.StaffType === "office" ? "office" : "field";
       profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
       await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, item.Username).run();
     }
@@ -21580,7 +21609,9 @@ function shapeUser2(u, perms) {
     SharePointPath: u.sharepoint_path,
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
-    StaffType: profile.staffType === "office" ? "office" : "field",
+    StaffType: profile.staffType === "office" || profile.staffType === "client" ? profile.staffType : "field",
+    // External client login: which client org it's tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: profile.staffType === "client" && profile.clientOrg ? String(profile.clientOrg).toLowerCase() : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the
@@ -39724,6 +39755,253 @@ async function checkGateLeftOpen(env, tenantId) {
   }
 }
 
+// src/routes/client.js
+init_http();
+init_tenantdb();
+init_filesign();
+init_complianceaccess();
+init_sla();
+init_push();
+init_email();
+var ORG_LABEL = { fbc: "Fareham Borough Council" };
+var URGENCY_PRIORITY = { emergency: "Priority 1", urgent: "Priority 2", routine: "Priority 3" };
+var URGENCY_LABEL = { emergency: "Emergency", urgent: "Urgent", routine: "Routine" };
+function clientStatus(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "complete" || s === "closed jobs" || s === "invoiced" || s === "closed") return "Complete";
+  return "Pending";
+}
+function isFinishedInternal(status) {
+  return /^(complete|closed jobs|closed|invoiced)$/i.test(String(status || ""));
+}
+function clientOrgOf2(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : sess.user.profile || {};
+    return p && p.staffType === "client" && p.clientOrg ? String(p.clientOrg).toLowerCase() : "";
+  } catch {
+    return "";
+  }
+}
+async function orgSites(env, tid, org) {
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try {
+    const r = await db.prepare("SELECT site_number, site_name, data FROM sites WHERE tenant_id=? AND lower(client)=?").bind(tid, org).all();
+    rows = r.results || [];
+  } catch {
+    rows = [];
+  }
+  const sites = rows.map((r) => {
+    let d = {};
+    try {
+      d = r.data ? JSON.parse(r.data) : {};
+    } catch {
+      d = {};
+    }
+    return {
+      code: String(r.site_number || d.siteNumber || "").trim(),
+      name: String(r.site_name || d.siteName || r.site_number || "").trim(),
+      postcode: String(d.postcode || "").trim()
+    };
+  }).filter((s) => s.code);
+  sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
+  return sites;
+}
+async function handle41(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const org = clientOrgOf2(sess);
+  if (!org) return error("Not a client account", 403, env, request);
+  const tid = sess.tenantId;
+  const orgLabel = ORG_LABEL[org] || org.toUpperCase();
+  const scheme = ORG_SCHEME[org] || "";
+  if (path === "/client/me" && method === "GET") {
+    const sites = await orgSites(env, tid, org);
+    return json({
+      ok: true,
+      org,
+      orgLabel,
+      scheme,
+      name: [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ") || sess.user.username,
+      sites
+    }, {}, env, request);
+  }
+  if (path === "/client/jobs" && method === "GET") {
+    const sites = await orgSites(env, tid, org);
+    const codes = new Set(sites.map((s) => s.code));
+    const nameByCode = {};
+    sites.forEach((s) => {
+      nameByCode[s.code] = s.name;
+    });
+    const all = await listJobs(env, tid);
+    const mine = all.filter((j) => j && !j.hiddenFromClient && !j.fallbackTemplate && (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
+    const jobs = mine.map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      site: j.siteName || nameByCode[String(j.siteCode || "").trim()] || j.siteCode || "",
+      siteCode: j.siteCode || "",
+      description: String(j.description || "").slice(0, 400),
+      status: clientStatus(j.status),
+      urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
+      byClient: !!j.raisedByClient,
+      raisedAt: j.raisedAt || j.createdAt || "",
+      scheduledAt: j.scheduledAt || "",
+      updatedAt: j.updatedAt || ""
+    }));
+    jobs.sort((a, b) => (Date.parse(b.updatedAt || b.raisedAt || 0) || 0) - (Date.parse(a.updatedAt || a.raisedAt || 0) || 0));
+    return json({ ok: true, jobs }, {}, env, request);
+  }
+  if (path === "/client/job" && method === "GET") {
+    const id = String(q.get("id") || "").trim();
+    if (!id) return error("id required", 400, env, request);
+    const sites = await orgSites(env, tid, org);
+    const codes = new Set(sites.map((s) => s.code));
+    const all = await listJobs(env, tid);
+    const j = all.find((x) => x && x.id === id);
+    if (!j || j.hiddenFromClient) return error("Not found", 404, env, request);
+    const ownsIt = String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim());
+    if (!ownsIt) return error("Not found", 404, env, request);
+    let photos = [];
+    try {
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
+      const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
+      photos = await Promise.all(objs.map(async (o) => ({
+        url: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key, 86400)
+      })));
+    } catch {
+      photos = [];
+    }
+    let completionNote = "";
+    const notes = (j.events || []).filter((e) => e && (e.type === "note" || e.note && String(e.note).trim()));
+    if (notes.length) completionNote = String(notes[notes.length - 1].note || "").trim();
+    return json({
+      ok: true,
+      job: {
+        id: j.id,
+        ref: j.helpdeskRef || j.id,
+        site: j.siteName || j.siteCode || "",
+        siteCode: j.siteCode || "",
+        postcode: j.postcode || "",
+        description: String(j.description || ""),
+        status: clientStatus(j.status),
+        urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
+        byClient: !!j.raisedByClient,
+        raisedAt: j.raisedAt || j.createdAt || "",
+        scheduledAt: j.scheduledAt || "",
+        completedAt: isFinishedInternal(j.status) ? j.closedAt || j.updatedAt || "" : "",
+        completionNote: isFinishedInternal(j.status) ? completionNote : "",
+        photos
+      }
+    }, {}, env, request);
+  }
+  if (path === "/client/raise" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const siteCode = String(b.siteCode || "").trim();
+    const description = String(b.description || "").trim();
+    const urgency = String(b.urgency || "routine").toLowerCase();
+    if (!siteCode) return error("Pick a site.", 400, env, request);
+    if (description.length < 5) return error("Please describe the problem.", 400, env, request);
+    const sites = await orgSites(env, tid, org);
+    const site = sites.find((s) => s.code === siteCode);
+    if (!site) return error("That site isn't one of yours.", 403, env, request);
+    const priority = URGENCY_PRIORITY[urgency] || "Priority 3";
+    const raiser = [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ") || sess.user.username;
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      siteCode,
+      siteName: site.name,
+      postcode: site.postcode || void 0,
+      storeType: org,
+      description: description + "\n\n\u2014 Raised by " + raiser + " (" + orgLabel + ") via the client portal.",
+      status: "Pending",
+      priority,
+      originator: "client",
+      clientOrg: org,
+      raisedByClient: true,
+      clientUrgency: urgency === "emergency" || urgency === "urgent" ? urgency : "routine",
+      changedBy: raiser
+    });
+    try {
+      ctx?.waitUntil(reconcileRelease(env, tid, job).catch(() => {
+      }));
+    } catch {
+    }
+    try {
+      ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+        title: "New client job \u2014 " + orgLabel,
+        body: (URGENCY_LABEL[urgency] || "Routine") + ": " + site.name + " \u2014 " + description.slice(0, 80),
+        url: "/job-view.html?jobId=" + encodeURIComponent(job.id),
+        tag: "client-job:" + job.id,
+        actionable: true
+      }, null, true));
+    } catch {
+    }
+    try {
+      const to = sess.user.email;
+      if (to) {
+        const base = appBase(env);
+        const html = `<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937;max-width:520px">
+          <h2 style="color:#003366;margin:0 0 6px">Job request received</h2>
+          <p>Thanks ${escapeHtml2(raiser)} \u2014 we've received your request and the office has been notified.</p>
+          <table style="border-collapse:collapse;font-size:14px;margin:10px 0">
+            <tr><td style="color:#667085;padding:2px 10px 2px 0">Site</td><td><b>${escapeHtml2(site.name)}</b></td></tr>
+            <tr><td style="color:#667085;padding:2px 10px 2px 0">Urgency</td><td>${escapeHtml2(URGENCY_LABEL[urgency] || "Routine")}</td></tr>
+            <tr><td style="color:#667085;padding:2px 10px 2px 0;vertical-align:top">Details</td><td>${escapeHtml2(description).replace(/\n/g, "<br>")}</td></tr>
+            <tr><td style="color:#667085;padding:2px 10px 2px 0">Reference</td><td>${escapeHtml2(job.helpdeskRef || job.id)}</td></tr>
+          </table>
+          <p>You can track it any time in your portal.${base ? ' <a href="' + base + '/client-home.html">Open the portal</a>' : ""}</p>
+          <p style="color:#8a97a6;font-size:12px">Mostlane Construction</p>
+        </div>`;
+        ctx?.waitUntil(sendEmail(env, { to, subject: "Job request received \u2014 " + site.name, html }).catch(() => {
+        }));
+      }
+    } catch {
+    }
+    return json({ ok: true, id: job.id, ref: job.helpdeskRef || job.id }, {}, env, request);
+  }
+  if (path === "/client/raise-photo" && method === "POST") {
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return error("Upload was incomplete \u2014 please retry.", 400, env, request);
+    }
+    const jobId = String(form.get("jobId") || q.get("jobId") || "").trim();
+    const file = form.get("file");
+    if (!jobId || !file) return error("Missing file or jobId", 400, env, request);
+    const sites = await orgSites(env, tid, org);
+    const codes = new Set(sites.map((s) => s.code));
+    const all = await listJobs(env, tid);
+    const j = all.find((x) => x && x.id === jobId);
+    if (!j) return error("Not found", 404, env, request);
+    if (!(String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())))
+      return error("Not your job", 403, env, request);
+    const safe = String(file.name || "photo.jpg").replace(/[^A-Za-z0-9._-]/g, "_").slice(-60);
+    const key = `jobs/${jobId}/photos/client-${Date.now()}-${safe}`;
+    try {
+      await env.JOB_FILES.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type || "image/jpeg" },
+        customMetadata: { stage: "Before" }
+      });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
+    } catch {
+      return error("Couldn't store the photo", 500, env, request);
+    }
+    return json({ ok: true, key }, { status: 201 }, env, request);
+  }
+  return error("Not found: " + path, 404, env, request);
+}
+function escapeHtml2(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
 // src/routes/fra.js
 init_http();
 init_auth();
@@ -39743,7 +40021,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -39930,7 +40208,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -40249,7 +40527,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -40389,7 +40667,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle14],
   ["*", "/upload-asset-thumb", handle14],
   ["*", "/delete-asset-image", handle14],
-  ["*", "/sla/workever", handle42],
+  ["*", "/sla/workever", handle43],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
   ["*", "/stats", handle22],
@@ -40482,13 +40760,15 @@ var ROUTES = [
   // Projects: create/get/update/link/todo/docs
   ["*", "/health/", handle39],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle43],
+  ["*", "/comms", handle44],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle43],
+  ["*", "/customer", handle44],
   // public: customer reschedule flow (token-verified)
   ["*", "/tuya", handle40],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle41]
+  ["*", "/client", handle41],
+  // external client portal (walled per-org: jobs, raise, compliance)
+  ["*", "/fra", handle42]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
