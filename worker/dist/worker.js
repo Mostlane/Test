@@ -13213,6 +13213,7 @@ __export(sla_exports, {
   remindPendingHolds: () => remindPendingHolds,
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
+  stripPricing: () => stripPricing,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
   unlinkOrderFromJob: () => unlinkOrderFromJob
@@ -16506,9 +16507,21 @@ async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
   }
   return await getJob3(env, tenantId, job.id) || job;
 }
+function stripPricing(text) {
+  const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
+  const money2 = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b)/;
+  const out = [];
+  for (let l of String(text || "").split(/\r?\n/)) {
+    if (labelled.test(l) && money2.test(l)) continue;
+    l = l.replace(/\s*[-–—:]\s*£\s?[\d,]+(?:\.\d{1,2})?\s*$/, "");
+    l = l.replace(/£\s?[\d,]+(?:\.\d{1,2})?/g, "").replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/\s+$/, "");
+    out.push(l);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 function orderText(o) {
   const d = String(o.description || o.detail || "").trim();
-  return d || String(o.title || "").trim();
+  return stripPricing(d || String(o.title || "").trim());
 }
 async function stampOrderOnJob(env, tenantId, job, o) {
   if (!job || !o) return job;
@@ -16517,7 +16530,7 @@ async function stampOrderOnJob(env, tenantId, job, o) {
   job.orderNumber = o.orderNumber || null;
   job.orderValue = o.orderValue != null && Number.isFinite(Number(o.orderValue)) ? Number(o.orderValue) : null;
   job.clientOrderId = o.id || null;
-  (job.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + (job.orderValue != null ? " \u2014 \xA3" + job.orderValue.toFixed(2) : "") + " linked to this job" });
+  (job.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + " linked to this job" });
   job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   await saveJob(env, tenantId, job);
   return job;
@@ -16624,12 +16637,11 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const inc = orderRefIncident(ref);
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
   const text = orderText(o);
-  const valueLine = o.orderValue != null && Number.isFinite(Number(o.orderValue)) ? " (\xA3" + Number(o.orderValue).toFixed(2) + ")" : "";
   if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();
     const description = [
-      "\u{1F9FE} Client order " + ref + valueLine + (text ? " \u2014 " + text : ""),
+      "\u{1F9FE} Client order " + ref + (text ? " \u2014 " + text : ""),
       "\u21A9 Ordered works following our visit " + (src.helpdeskRef || src.id) + " (" + (src.status || "") + ") \u2014 that visit's notes and photos are carried onto this job.",
       oldDesc ? "\u2014 Original job \u2014\n" + oldDesc : ""
     ].filter(Boolean).join("\n\n");
@@ -16663,7 +16675,7 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const payload = {
     id: crypto.randomUUID(),
     reference: ref || void 0,
-    description: ("\u{1F9FE} Client order " + ref + valueLine + (text ? " \u2014 " + text : "")).trim(),
+    description: ("\u{1F9FE} Client order " + ref + (text ? " \u2014 " + text : "")).trim(),
     priority: pr,
     siteCode: code || void 0,
     siteName: siteName || void 0,

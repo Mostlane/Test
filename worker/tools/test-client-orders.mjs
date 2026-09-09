@@ -103,7 +103,7 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   const j = E.jobs["00099999/2"], o = Object.values(E.orders)[0];
   ok("order → existing same-ref job stamped with number + value", r.status === 200 && r.body.status === "linked" && r.body.jobId === "00099999/2" && j.orderNumber === "00099999/2" && j.orderValue === 439 && j.clientOrderId === o.id, JSON.stringify(r.body));
   ok("order row linked to the job", o.status === "linked" && o.matched_kind === "job" && o.matched_job_id === "00099999/2");
-  ok("job event notes the link", (j.events || []).some(e => /Client order 00099999\/2 — £439\.00 linked/.test(e.note)));
+  ok("job event notes the link — WITHOUT the £ (timeline is engineer-visible)", (j.events || []).some(e => /Client order 00099999\/2 linked to this job/.test(e.note)) && !(j.events || []).some(e => /£/.test(e.note || "")));
 
   // Money gate on the job JSON
   const f = await J(sla, "/sla/jobs/" + encodeURIComponent("00099999/2"), sessOf("Field Fred"), { env: E.env });
@@ -130,7 +130,7 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   const nj = E.jobs[mk.body && mk.body.jobId];
   ok("make-job → cloned from the earlier visit as a linked visit", mk.status === 200 && mk.body.how === "cloned" && mk.body.from.ref === "00099998/1" && nj && nj.helpdeskRef === "00099998/2" && nj.revisitOf === "00099998/1" && nj.visitGroupId === "00099998/1" && nj.status === "Pending", JSON.stringify(mk.body));
   ok("new job carries the order number + value + priority", nj && nj.orderNumber === "00099998/2" && nj.orderValue === 620.5 && nj.clientOrderId === oid && nj.priority === "Priority 3");
-  ok("description = order text + link line + original job text", nj && /Client order 00099998\/2 \(£620\.50\) — Supply and fit/.test(nj.description) && /following our visit 00099998\/1 \(Complete\)/.test(nj.description) && /Original job —\nDoor hinge broken/.test(nj.description), nj && nj.description);
+  ok("description = order text + link line + original job text, NO value in it", nj && /Client order 00099998\/2 — Supply and fit/.test(nj.description) && !/£/.test(nj.description) && /following our visit 00099998\/1 \(Complete\)/.test(nj.description) && /Original job —\nDoor hinge broken/.test(nj.description), nj && nj.description);
   ok("notes, RA + signature carried across", nj && (nj.events || []).some(e => /Made safe/.test(e.note)) && nj.riskAssessment && nj.riskAssessment.name === "Field Fred" && nj.signature && nj.signature.fileKey === "jobs/" + nj.id + "/signature.png");
   ok("photos copied to the new job's R2 folder", E.files["jobs/" + (nj && nj.id) + "/photo1.jpg"] === "PHOTO" && E.files["jobs/00099998/1/photo1.jpg"] === "PHOTO");
   ok("visit count stamped on both", nj && nj.visitCount === 2 && E.jobs["00099998/1"].visitCount === 2 && E.jobs["00099998/1"].visitGroupId === "00099998/1");
@@ -250,6 +250,20 @@ const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { 
   ok("email copy refused to a field engineer", emF.status === 403);
   await inbound(E, { orderNumber: "00099996/2", client: "Southern Co-op", orderValue: 10, storeCode: "0335", externalId: "<ord-11@concerto>" });
   ok("a re-send without the copy keeps the stored copy", !!E.orders[oid].email_text && /Fix the thing/.test(E.orders[oid].email_text));
+}
+{ // 12. an order's LABOUR / MATERIALS price lines never reach the job description (engineers see it)
+  const E = makeEnv();
+  const desc = "Attend site to replace the door closer.\n\nSupply and install a new LCN 4040XP closer, 1 No. 1250mm x 2050mm 6.4mm panel.\n\nPrice assumes the substrate is sound.\n\nLabour - 150.00\nMaterials 289.00\nMaterials / Specialist Equipment – £143.00\nLabour: £350.00";
+  await inbound(E, { orderNumber: "R29060", client: "Southern Co-op", orderValue: 439, storeCode: "0335", siteName: "Test Store", description: desc, externalId: "<ord-12@concerto>" });
+  const oid = Object.values(E.orders)[0].id;
+  const mk = await J(certs, "/certs/orders/make-job", sessOf("Office Olly"), { env: E.env, method: "POST", body: { id: oid } });
+  const nj = E.jobs[mk.body && mk.body.jobId];
+  const d = (nj && nj.description) || "";
+  ok("labour/materials lines + the value are stripped; the works text is kept", mk.status === 200 && /Client order R29060 — Attend site to replace the door closer/.test(d) && /6\.4mm panel/.test(d) && /Price assumes the substrate is sound/.test(d) && !/Labour|Materials|£|150\.00|289\.00|143\.00/.test(d) && nj.orderValue === 439, JSON.stringify(d));
+  ok("the board still shows the priced text to the office", /Labour - 150\.00[\s\S]*Materials \/ Specialist Equipment – £143\.00/.test((await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env })).body.orders[0].detail || ""));
+  const rem = "Failed EM fittings at store 0335:\nFitting 16 - Light replacement (replaced on site) - £50\nFitting 22 - Light replacement - £50\nTotal: 2 fittings - £100";
+  ok("per-fitting prices + the total line are stripped", sla.stripPricing(rem) === "Failed EM fittings at store 0335:\nFitting 16 - Light replacement (replaced on site)\nFitting 22 - Light replacement", JSON.stringify(sla.stripPricing(rem)));
+  ok("a line that merely STARTS with a cost word but carries no amount is kept", sla.stripPricing("Materials to be supplied by the client.\nTotal of 3 doors to replace.") === "Materials to be supplied by the client.\nTotal of 3 doors to replace.");
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

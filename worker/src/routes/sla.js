@@ -3551,9 +3551,28 @@ export async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
       (notes + photos carried) with the order's text, reference and value.
    `stampOrderOnJob` is the one writer of the job-side fields. */
 const orderRefIncident = ref => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").trim()) || [])[1] || "";
+/* Money never reaches an engineer-visible field (Jamie's rule). Concerto order
+   text ends with a price breakdown — "Labour - 150.00", "Materials: £622.50",
+   "Materials / Specialist Equipment – £143.00", "Total: 2 fittings - £100", and
+   per-fitting "Fitting 16 - Light replacement - £50" — so before an order's text
+   becomes a job description every priced line is dropped, a trailing " - £50" is
+   cut off, and any stray £ amount is removed. The value itself lives ONLY on
+   `job.orderValue`, which stripMoney hides from the field. */
+export function stripPricing(text) {
+  const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
+  const money = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b)/;
+  const out = [];
+  for (let l of String(text || "").split(/\r?\n/)) {
+    if (labelled.test(l) && money.test(l)) continue;
+    l = l.replace(/\s*[-–—:]\s*£\s?[\d,]+(?:\.\d{1,2})?\s*$/, "");
+    l = l.replace(/£\s?[\d,]+(?:\.\d{1,2})?/g, "").replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/\s+$/, "");
+    out.push(l);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 function orderText(o) {
   const d = String(o.description || o.detail || "").trim();
-  return d || String(o.title || "").trim();
+  return stripPricing(d || String(o.title || "").trim());
 }
 async function stampOrderOnJob(env, tenantId, job, o) {
   if (!job || !o) return job;
@@ -3562,7 +3581,8 @@ async function stampOrderOnJob(env, tenantId, job, o) {
   job.orderNumber = o.orderNumber || null;
   job.orderValue = (o.orderValue != null && Number.isFinite(Number(o.orderValue))) ? Number(o.orderValue) : null;
   job.clientOrderId = o.id || null;
-  (job.events ||= []).push({ at: new Date().toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + (job.orderValue != null ? " — £" + job.orderValue.toFixed(2) : "") + " linked to this job" });
+  // No £ in the note — the timeline is engineer-visible; the value sits on orderValue.
+  (job.events ||= []).push({ at: new Date().toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + " linked to this job" });
   job.updatedAt = new Date().toISOString();
   await saveJob(env, tenantId, job);
   return job;
@@ -3659,12 +3679,11 @@ export async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   if (linked) return { job: linked, how: "linked" };
   const inc = orderRefIncident(ref);
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
-  const text = orderText(o);
-  const valueLine = (o.orderValue != null && Number.isFinite(Number(o.orderValue))) ? " (£" + Number(o.orderValue).toFixed(2) + ")" : "";
+  const text = orderText(o);   // priced lines already stripped; the value never goes in the description
   if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();
-    const description = ["🧾 Client order " + ref + valueLine + (text ? " — " + text : ""),
+    const description = ["🧾 Client order " + ref + (text ? " — " + text : ""),
       "↩ Ordered works following our visit " + (src.helpdeskRef || src.id) + " (" + (src.status || "") + ") — that visit's notes and photos are carried onto this job.",
       oldDesc ? "— Original job —\n" + oldDesc : ""].filter(Boolean).join("\n\n");
     const job = await cloneJobAsVisit(env, tenantId, src, {
@@ -3682,7 +3701,7 @@ export async function raiseJobForOrder(env, tenantId, o, opts = {}) {
       if (row) { siteName = row.site_name || siteName; postcode = row.postcode || ""; try { address = (JSON.parse(row.data || "{}") || {}).address || ""; } catch {} }
     } catch {}
   }
-  const payload = { id: crypto.randomUUID(), reference: ref || undefined, description: ("🧾 Client order " + ref + valueLine + (text ? " — " + text : "")).trim(),
+  const payload = { id: crypto.randomUUID(), reference: ref || undefined, description: ("🧾 Client order " + ref + (text ? " — " + text : "")).trim(),
     priority: pr, siteCode: code || undefined, siteName: siteName || undefined, postcode: postcode || undefined, address: address || undefined,
     assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [], scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes,
     orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order", changedBy: by };
