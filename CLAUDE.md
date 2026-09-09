@@ -2424,6 +2424,33 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
 
+## Board ↔ scheduler hand-offs (9 Sep 2026)
+- **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
+  every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
+  reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
+  "wasn't in the SLA list"). Now a **📄 EM/PAT chip** (`.schip.certchip`, teal, after
+  All) toggles them: lit = shown, greyed/dashed = hidden, count = how many. State in
+  localStorage `slaMainCertJobs` ("0" = hidden; default shown). `boardJobs()` is the
+  filtered base for chipCounts / Open+All counts / jobsInStatusScope / filteredJobs;
+  `allJobs` still holds everything (photo flags, bulk ops). cert-jobs.html is
+  unchanged (the dedicated hub).
+- **🙈 = hidden from the engineer.** GET /sla/jobs now sets `releaseView.hidden =
+  !releaseVisibleNow(job, all)` (gated time not reached / afterPrev queued / skipped).
+  sla-main shows 🙈 INSIDE the status pill (`eyeTag`, table row + mobile card; the
+  🕒/⛓ rel-badge with the "when" stays), sla-scheduler prefixes 🙈 on the day block
+  ref + week chip (`hiddenFromEng`; normaliseJob now carries `releaseView` +
+  `visitCount`). Client fallback when `hidden` is absent: afterPrev/skipped, or `at`
+  in the future.
+- **Add Job → scheduler.** After a successful create, if the payload has
+  `assignedEngineers` AND `scheduledAt` (and isn't a standby template), add-job.html
+  `location.replace`s to **`sla-scheduler.html?date=YYYY-MM-DD&job=<id>`** (day from
+  the datetime-local value). The scheduler reads `?date=` (selectedDate) + `?job=`
+  (forces day view; after the first render `focusJobBlock` scrolls to the
+  `.day-job[data-job-id]`, adds `.flash` — an orange pulse ×3 — and strips `job` from
+  the URL). If the block isn't there (engineer is office staff hidden by the toggle /
+  no slot that day) the status line says so instead of a blank board. Unassigned or
+  unscheduled jobs keep the old success panel.
+
 ## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
 A live at-a-glance office view of where every field engineer is right now.
 **GET /sla/live** (FullAccess|SLAAdmin|**WhereEveryone** — its own Users Admin toggle under

@@ -85,6 +85,9 @@
     .schip.active .n{background:rgba(255,255,255,0.25);color:#fff;}
     .schip.allchip{border-color:#ea7a23;}
     .schip.allchip.active{background:#ea7a23;}
+    .schip.certchip{border-color:#0e7490;border-style:dashed;}
+    .schip.certchip.active{border-style:solid;}
+    .statuspick .eye{font-size:13px;margin-right:2px;}
 
     /* ---- Toolbar ---- */
     .toolbar{
@@ -585,6 +588,19 @@ async function loadCategories(){
 function doneCatNames(){ return CUSTOM_CATS.filter(c => c.done).map(c => c.name); }
 
 let allJobs = [];
+// 📄 EM/PAT chip: show/hide the certificate jobs (emTest/pat). Remembered per
+// device — the chip itself shows the state + count, so a hidden set is never silent.
+let showCertJobs = true;
+try{ showCertJobs = localStorage.getItem("slaMainCertJobs") !== "0"; }catch(e){}
+function isCertJob(j){ return !!(j && (j.emTest || j.pat)); }
+function boardJobs(){ return showCertJobs ? allJobs : allJobs.filter(j => !isCertJob(j)); }
+// 🙈 = the engineer can't see this job yet (release gated / queued / skipped).
+function hiddenFromEng(j){
+  const rv = j && j.releaseView; if(!rv) return false;
+  if(rv.hidden !== undefined) return !!rv.hidden;
+  return rv.mode === "afterPrev" || rv.mode === "skipped" || !!(rv.at && Date.parse(rv.at) > Date.now());
+}
+function eyeTag(j){ return hiddenFromEng(j) ? `<span class="eye" title="Hidden from the engineer — ${esc((j.releaseView && j.releaseView.label) || "")}">🙈</span> ` : ""; }
 let archiveMatches = [];        // archived jobs matching the current search
 let archiveSeq = 0;             // guards against out-of-order async archive results
 let cachedUsers = [];
@@ -735,9 +751,10 @@ async function loadJobs(){
   try{
     const res = await authFetch("/sla/jobs?t=" + Date.now());
     const json = await res.json();
-    // EM/PAT jobs live in their own area (cert-jobs.html) so they don't clog the
-    // board — keep them off the main dashboard.
-    allJobs = (Array.isArray(json) ? json : []).filter(j => !(j && (j.emTest || j.pat))).map(j => ({
+    // EM/PAT certificate jobs are ON the board (Sep 2026 — they used to be
+    // dropped here so the yearly test run didn't swamp it, which silently hid
+    // a scheduled job). The 📄 EM/PAT chip toggles them off instead.
+    allJobs = (Array.isArray(json) ? json : []).filter(Boolean).map(j => ({
       ...j,
       status: j.status || "Pending",
       assignedEngineers: (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
@@ -775,7 +792,7 @@ function nameOf(username){
 function chipCounts(){
   const counts = {};
   STATUSES.forEach(([s]) => counts[s] = 0);
-  allJobs.forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
+  boardJobs().forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
   return counts;
 }
 function renderChips(){
@@ -784,7 +801,7 @@ function renderChips(){
   host.innerHTML = "";
   const openChip = document.createElement("button");
   openChip.className = "schip allchip" + (activeStatus === "open" ? " active" : "");
-  openChip.innerHTML = `Open <span class="n">${allJobs.filter(j => !isClosed(j)).length}</span>`;
+  openChip.innerHTML = `Open <span class="n">${boardJobs().filter(j => !isClosed(j)).length}</span>`;
   openChip.onclick = () => { activeStatus = "open"; render(); };
   host.appendChild(openChip);
   STATUSES.forEach(([s, c]) => {
@@ -797,14 +814,23 @@ function renderChips(){
   });
   const all = document.createElement("button");
   all.className = "schip allchip" + (activeStatus === "all" ? " active" : "");
-  all.innerHTML = `All <span class="n">${allJobs.length}</span>`;
+  all.innerHTML = `All <span class="n">${boardJobs().length}</span>`;
   all.onclick = () => { activeStatus = "all"; render(); };
   host.appendChild(all);
+  // 📄 EM/PAT toggle — lit = certificate jobs are on the board; greyed = hidden.
+  const certN = allJobs.filter(isCertJob).length;
+  const cert = document.createElement("button");
+  cert.className = "schip certchip" + (showCertJobs ? " active" : "");
+  cert.style.setProperty("--c", "#0e7490");
+  cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
+  cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
+  cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
+  host.appendChild(cert);
 }
 // Jobs in the currently-active status chip (ignoring priority/client/search) —
 // the scope the client dropdown counts against.
 function jobsInStatusScope(){
-  return allJobs.filter(j => {
+  return boardJobs().filter(j => {
     if(activeStatus === "open") return !isClosed(j);
     if(activeStatus === "all") return true;
     return j.status === activeStatus;
@@ -836,7 +862,7 @@ function populateClientFilter(){
 
 function filteredJobs(){
   const search = $("searchBox").value.trim().toLowerCase();
-  return allJobs.filter(j => {
+  return boardJobs().filter(j => {
     if(activeStatus === "open"){ if(isClosed(j)) return false; }
     else if(activeStatus !== "all" && j.status !== activeStatus) return false;
     if(activePriority !== "all" && (j.priority||"") !== activePriority) return false;
@@ -911,7 +937,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
@@ -944,7 +970,7 @@ function render(){
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
         ${emTimerChip(j)}
       </div>

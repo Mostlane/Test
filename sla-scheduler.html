@@ -107,6 +107,8 @@
       white-space:nowrap;text-overflow:ellipsis;line-height:30px;font-size:11px;
       touch-action:none;user-select:none;
     }
+    .day-job.flash{animation:mlJobFlash 1.4s ease-in-out 3;z-index:5;}
+    @keyframes mlJobFlash{0%,100%{box-shadow:0 0 0 0 rgba(234,122,35,0);}50%{box-shadow:0 0 0 6px rgba(234,122,35,.75);}}
     .day-job-time{display:none;font-weight:700;margin-right:5px;}
     .drag-ghost .day-job-time{display:inline;}
     .day-job-ref{font-weight:700;margin-right:5px;color:#1e3a8a;}
@@ -789,8 +791,17 @@ function normaliseJob(j){
     // Actual worked timestamps (In Progress → Complete) so a finished job can be
     // shown at the time it was really done. The scheduled time above is kept
     // untouched — this is display only.
-    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : []
+    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : [],
+    visitCount: j.visitCount || 0,
+    // Release gating from the worker (engineers never receive hidden jobs; the
+    // office sees 🙈 on the block until it's visible to them).
+    releaseView: j.releaseView || null
   };
+}
+function hiddenFromEng(job){
+  const rv = job && job.releaseView; if(!rv) return false;
+  if(rv.hidden !== undefined) return !!rv.hidden;
+  return rv.mode === "afterPrev" || rv.mode === "skipped" || !!(rv.at && Date.parse(rv.at) > Date.now());
 }
 
 async function loadJobs(){
@@ -1123,7 +1134,8 @@ function renderDayView(container){
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      el.querySelector(".day-job-ref").textContent = (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+      const hid = hiddenFromEng(job);
+      el.querySelector(".day-job-ref").textContent = (hid ? "🙈 " : "") + (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
@@ -1131,7 +1143,8 @@ function renderDayView(container){
                  (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
                  (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "") +
-                 (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "");
+                 (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "") +
+                 (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "");
 
       // Completed jobs are locked (not draggable) — they still open on click.
       if(!done) attachPointerDrag(el, job, false);
@@ -1226,8 +1239,10 @@ function renderWeekView(container){
           chip.className = "week-job-chip" + (done ? " done" : "") + (hol ? " leave-clash" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (hol ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+          const hid = hiddenFromEng(job);
+          chip.textContent = (hid ? "🙈 " : "") + (hol ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
           if(hol) chip.title = "⚠ " + engineer.name + " is on " + (hol.half ? hol.half + " leave" : "holiday") + " this day";
+          else if(hid) chip.title = "🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "");
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
@@ -2675,6 +2690,24 @@ function plotJobs(){
 function escHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 /* ============== INIT ============== */
+// Scroll to a job's day-view block and flash it (the Add Job hand-off). If the
+// block isn't on screen — its engineer is office staff hidden by the toggle, or
+// the job has no slot on this day — say so rather than leaving a blank board.
+function focusJobBlock(jobId){
+  const el = document.querySelector('.day-job[data-job-id="' + CSS.escape(jobId) + '"]');
+  const job = jobs.find(j => j.id === jobId);
+  if(!el){
+    if(job && job.assignedEngineers.length && !showOffice && engineers.some(e => !isFieldEng(e) && job.assignedEngineers.map(a => a.toLowerCase()).includes(String(e.username).toLowerCase())))
+      setStatus("Job saved — its engineer is office staff. Tick “Show office staff” to see it.", true);
+    else if(job) setStatus("Job saved (" + (job.ref || job.id) + ") — it has no slot on this day.", true);
+    return;
+  }
+  el.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 4500);
+  if(job) setStatus("✅ Job saved — " + (job.ref || "") + (job.assignedEngineers.length ? " · " + job.assignedEngineers.join(", ") : ""));
+  try{ const u = new URL(location.href); u.searchParams.delete("job"); history.replaceState(null, "", u.pathname + u.search + u.hash); }catch(e){}
+}
 async function init(){
   const u = sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername");
   if(!u){ window.location.href = "login.html"; return; }
@@ -2695,6 +2728,13 @@ async function init(){
 
   const dp = $("datePicker");
   selectedDate = new Date();
+  // Deep-link: ?date=YYYY-MM-DD opens that day; ?job=<id> scrolls to + flashes
+  // that job's block (Add Job sends you here after saving a scheduled job).
+  const qs = new URLSearchParams(location.search);
+  const qDate = qs.get("date");
+  if(qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate)){ const d = parseDateInput(qDate); if(d && !isNaN(d)) selectedDate = d; }
+  const focusJobId = qs.get("job") || "";
+  if(focusJobId){ viewMode = "day"; [...document.querySelectorAll("#viewToggle button")].forEach(b => b.classList.toggle("active", b.dataset.mode === "day")); }
   dp.value = formatDateInput(selectedDate);
   dp.addEventListener("change", () => { selectedDate = parseDateInput(dp.value); render(); });
   // Skip to next/previous day (±7 in week view), or jump back to today.
@@ -2792,6 +2832,7 @@ async function init(){
     await loadBlocks();
     render();
     setStatus("Scheduler ready");
+    if(focusJobId) focusJobBlock(focusJobId);
     if(location.hash === "#map") openMap();
   }catch(err){
     console.error(err);

@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -14548,7 +14543,12 @@ async function handle12(request, env, ctx, url, sess) {
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
   if (subpath === "/jobs" && method === "GET") {
-    let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
+    const allList = await listJobs(env, tenantId);
+    let jobs = allList.map((j) => {
+      const d = decorateJobWithLiveSla(j);
+      if (d.releaseView) d.releaseView.hidden = !releaseVisibleNow(j, allList);
+      return d;
+    });
     if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
@@ -16833,6 +16833,18 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   const engSet = new Set(engineers.map(normId));
   const myStart = Date.parse(job.scheduledAt);
   return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
+}
+function releaseVisibleNow(job, allJobs) {
+  if (job && job.seriesSkipped) return false;
+  if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
+  const r = job && job.release;
+  if (!r || !r.mode || r.mode === "now") return true;
+  if (r.mode === "at" || r.mode === "dayBefore") {
+    const t = releaseInstant(job);
+    return t == null || t <= Date.now();
+  }
+  if (r.mode === "afterPrev") return !hasEarlierOpenJob(job, assignedList(job), allJobs || []);
+  return true;
 }
 function releaseForEng(job, eng) {
   const m = job && job.engRelease, nid = normId(eng);
@@ -34788,9 +34800,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });

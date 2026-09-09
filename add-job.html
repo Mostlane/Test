@@ -877,6 +877,15 @@ async function handleSubmit(evt){
 
     const ref = data.helpdeskRef || data.id;
     const isFb = $("fallbackTemplate") && $("fallbackTemplate").checked;
+    // Allocated to an engineer AND given a date/time → go straight to that day
+    // on the scheduler with the new job highlighted. Anything else (unassigned,
+    // unscheduled, a standby template) stays on the success panel as before.
+    if(!isFb && payload.scheduledAt && (payload.assignedEngineers || []).length){
+      const day = String($("scheduledAt").value || "").slice(0, 10);
+      statusEl.textContent = `✅ Job created: ${ref}${photoNote} — opening the scheduler…`;
+      location.replace(`sla-scheduler.html?date=${encodeURIComponent(day)}&job=${encodeURIComponent(data.id)}`);
+      return;
+    }
     statusEl.textContent = "";
     successPanel.style.display = "flex";
     if(isFb){
