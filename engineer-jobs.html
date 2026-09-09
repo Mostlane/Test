@@ -106,6 +106,16 @@
     .act.dir{flex:0 0 auto;padding:0 16px;font-size:20px;color:var(--muted)}
     .act.open{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
     .act.open.is-done{background:var(--chip);border-color:var(--line);color:var(--muted);font-weight:650}
+    /* Running order + times + soft "do this next" nudge (nothing hidden) */
+    .job-seq{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 6px;border-radius:999px;background:var(--chip);color:var(--muted);font:800 13px/1 'Segoe UI',system-ui,sans-serif;font-variant-numeric:tabular-nums;flex:0 0 auto}
+    .job-time{display:inline-flex;align-items:center;gap:4px;font:800 15px/1 'Segoe UI',system-ui,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums}
+    .job-time.notime{color:var(--muted);font-weight:650;font-size:12px}
+    .job-card.job-next{border-color:color-mix(in srgb,var(--amber) 55%,var(--line));box-shadow:0 0 0 2px color-mix(in srgb,var(--amber) 30%,transparent)}
+    .job-card.job-next .job-seq{background:var(--amber);color:#3a2a00}
+    .next-tag{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:color-mix(in srgb,var(--amber) 22%,transparent);color:#8a5a00}
+    .job-card.job-now{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 28%,transparent)}
+    .job-card.job-now .job-seq{background:var(--accent);color:#fff}
+    .now-tag{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
     .act.open:active{transform:translateY(1px)}
     .small{font-size:11px}.muted{color:var(--muted)}
     .modal-backdrop{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999}
@@ -418,7 +428,8 @@ function tickEmChips(){
 }
 setInterval(tickEmChips, 1000);
 // Big card markup shared by the day timeline and the "not booked in" box.
-function jobCardInner(job, slaInfo, target){
+function jobCardInner(job, slaInfo, target, opts){
+  opts = opts || {};
   // The store/site line is the title (e.g. "25826 Portsmouth, Copnor Road 331").
   // The fault description is deliberately NOT shown on the dashboard.
   const siteRaw = mlJobName(job) || job.siteName || job.address || ("Job " + (job.helpdeskRef || job.id));
@@ -430,16 +441,30 @@ function jobCardInner(job, slaInfo, target){
   const dir = dirUrl(job);
   const done = isDoneStatus(job.status);
   const statusTxt = escH(job.status || "Open");
+  // Running order + scheduled time so engineers know the sequence at a glance.
+  const seq = opts.seq ? `<span class="job-seq">${opts.seq}</span>` : "";
+  const timeLabel = ("timeLabel" in opts)
+    ? (opts.timeLabel
+        ? `<span class="job-time">🕒 ${escH(opts.timeLabel)}</span>`
+        : `<span class="job-time notime">No set time</span>`)
+    : "";
+  // Soft nudge (today only) — highlight only, nothing is ever hidden.
+  const nudgeTag = opts.nudge === "now" ? `<span class="now-tag">● On this now</span>`
+                 : opts.nudge === "next" ? `<span class="next-tag">▶ Do this next</span>`
+                 : "";
   // Engineer view — deliberately NO SLA information (no countdown, target or
   // P-number). Just the site, address and the plain job status.
   return `
       <div class="job-top">
+        ${seq}
         <span class="ref">${escH(job.helpdeskRef || job.id)}</span>
         <span class="grow"></span>
+        ${timeLabel}
       </div>
       <div class="job-site">${site}</div>
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
       <div class="job-meta">
+        ${nudgeTag}
         ${isUrgentJob(job) ? `<span class="status-pill urgent-pill">Urgent</span>` : ""}
         <span class="${statusClass(job.status)}">${done ? "✓ " : ""}${statusTxt}</span>
         ${emTimerChip(job)}
@@ -485,11 +510,25 @@ function endOfToday(){
 function renderDay(dateStr, jobs, mode){
   const container = $("jobsTimeline");
 
+  // Put the day in scheduled-time order so the running order is obvious;
+  // jobs with no set time sink to the bottom.
+  const schedMs = j => { const t = (j && j.scheduledAt) ? Date.parse(j.scheduledAt) : NaN; return isNaN(t) ? Infinity : t; };
+  jobs = (jobs || []).slice().sort((a, b) => schedMs(a) - schedMs(b));
+
   const group = document.createElement("div");
   group.className = "day-group";
 
   const banner = document.createElement("div");
   const isToday = dateStr === isoDate(new Date());
+
+  // Soft nudge (today only): the job they're ON now (Travelling / In Progress),
+  // else the NEXT one to do (first not-done in order). Nothing is hidden.
+  let nudgeIdx = -1, nudgeKind = "";
+  if(isToday){
+    const activeIdx = jobs.findIndex(j => /travel|progress/i.test(j.status || "") && !isDoneStatus(j.status));
+    if(activeIdx >= 0){ nudgeIdx = activeIdx; nudgeKind = "now"; }
+    else { const nextIdx = jobs.findIndex(j => !isDoneStatus(j.status)); if(nextIdx >= 0){ nudgeIdx = nextIdx; nudgeKind = "next"; } }
+  }
   banner.className = "day-banner" + (isToday ? " today" : "");
   const label = new Date(dateStr).toLocaleDateString("en-GB", {
     weekday:"short", day:"2-digit", month:"short"
@@ -507,16 +546,23 @@ function renderDay(dateStr, jobs, mode){
     group.appendChild(empty);
   }
 
-  for(const job of jobs){
+  jobs.forEach((job, i) => {
     const target = job.targetAt || job.sla?.targetAt;
     const slaInfo = computeSlaCountdown(target);
 
     const card = document.createElement("div");
-    card.className = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
+    let cls = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
+    if(i === nudgeIdx) cls += (nudgeKind === "now" ? " job-now" : " job-next");
+    card.className = cls;
     card.dataset.jobId = job.id;
-    card.innerHTML = jobCardInner(job, slaInfo, target);
+    const timeLabel = job.scheduledAt
+      ? new Date(job.scheduledAt).toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" })
+      : "";
+    card.innerHTML = jobCardInner(job, slaInfo, target, {
+      seq: i + 1, timeLabel, nudge: (i === nudgeIdx ? nudgeKind : "")
+    });
     group.appendChild(card);
-  }
+  });
 
   if(mode === "prepend"){
     container.prepend(group);
