@@ -487,7 +487,12 @@
       raf = 0;
       var els = document.querySelectorAll(SEL); if (!els.length) return;
       var off = vv.offsetTop || 0;
-      var drift = Math.abs(off) > 1 || Math.abs(window.innerHeight - vv.height) > 1;
+      // Pin ONLY when the layout viewport is genuinely shifted (offsetTop) — the
+      // keyboard-left-it-scrolled case. The old test also tripped on
+      // innerHeight != vv.height, which differs on ordinary iOS scrolls (dynamic
+      // toolbar / rubber-band), so the bars were re-pinned every scroll frame and
+      // floated mid-screen (the purple View-As bar Jamie saw drifting).
+      var drift = Math.abs(off) > 1;
       var pin = drift && !typing();
       var stack = 0;   // bottom bars stack upward: View-As bar first, tab bar above it
       // Process bottom bars in stacking order (mlVaBar before .tabbar).
@@ -511,8 +516,11 @@
       });
     }
     function queue() { if (!raf) raf = requestAnimationFrame(apply); }
-    vv.addEventListener("resize", queue); vv.addEventListener("scroll", queue);
-    window.addEventListener("scroll", queue, { passive: true });
+    // Re-evaluate on the moments that actually shift the viewport (keyboard =
+    // vv resize, rotation, restore) — NOT on scroll. A position:fixed bar stays
+    // put on scroll on its own; re-pinning per scroll frame was what made the
+    // bars drift/jitter mid-screen during momentum scrolling.
+    vv.addEventListener("resize", queue);
     window.addEventListener("orientationchange", function () { setTimeout(queue, 250); });
     window.addEventListener("pageshow", function () { setTimeout(queue, 50); });
     // Keyboard dismissed: WebKit may leave the layout viewport where the keyboard
