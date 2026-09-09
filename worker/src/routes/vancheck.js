@@ -650,8 +650,8 @@ export async function handle(request, env, ctx, url, sess) {
     // hub can count them alongside the weekly checks.
     await ensureCustomTable(db);
     const nm = await nameMap(env, db.tenantId);
-    const { results: cpRows } = await db.prepare("SELECT username, reg FROM custom_van_checks WHERE tenant_id=? AND status='pending'").bind(db.tenantId).all();
-    const customPending = (cpRows || []).map(c => ({ username: c.username, name: nm[c.username] || c.username, reg: c.reg || "" }));
+    const { results: cpRows } = await db.prepare("SELECT id, username, reg FROM custom_van_checks WHERE tenant_id=? AND status='pending'").bind(db.tenantId).all();
+    const customPending = (cpRows || []).map(c => ({ id: c.id, username: c.username, name: nm[c.username] || c.username, reg: c.reg || "" }));
     return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused, customPending }, {}, env, request);
   }
 

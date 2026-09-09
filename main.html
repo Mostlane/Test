@@ -1516,7 +1516,7 @@ const MAP = window.ML_PERM_MAP || {
       title: "Van checks",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
       load: function (card) {
-        return jget("/vancheck/week").then(function (d) {
+        function paint(d) {
           if (!d || !d.ok) throw new Error("bad");
           var rows = d.rows || [];
           var required = rows.filter(function (r) { return r.enabled !== false; });
@@ -1535,14 +1535,17 @@ const MAP = window.ML_PERM_MAP || {
             }
           });
           // Pending one-off REQUESTS count too (a pool-van request, or a check
-          // requested for someone whose weekly isn't already outstanding).
+          // requested for someone whose weekly isn't already outstanding). These
+          // carry an id so the office can CANCEL a request straight from the pill
+          // (e.g. a check requested for someone no longer on the portal).
           var custom = (d.customPending || []).filter(function (c) { return !outUsers[String(c.username || "").toLowerCase()]; });
-          custom.forEach(function (c) { outstanding.push(c.name + (c.reg ? " (" + c.reg + ")" : "") + " · requested"); });
-          var N = done + outstanding.length;
+          var requests = custom.map(function (c) { return { id: c.id, label: c.name + (c.reg ? " (" + c.reg + ")" : "") + " · requested" }; });
+          var totalOut = outstanding.length + requests.length;
+          var N = done + totalOut;
           var wk = "";
           try { wk = new Date(d.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" }); } catch (e) {}
           var pct = N ? Math.round(done / N * 100) : 100;
-          var allDone = outstanding.length === 0;
+          var allDone = totalOut === 0;
 
           var html = '<div class="hc-top"><span class="hc-emoji">🚐</span><h3>Van checks</h3>' +
             (wk ? '<span class="hc-when">w/c ' + esc(wk) + '</span>' : '') + '</div>';
@@ -1559,20 +1562,26 @@ const MAP = window.ML_PERM_MAP || {
               return '<div class="hub-alert"><b>' + esc(x.reg || "—") + '</b> · ' + esc(x.name) + ' — ' + bits.join(" · ") + '</div>';
             }).join("");
           }
-          if (outstanding.length) {
-            html += '<div style="font-size:12.5px;color:#5b6b78;font-weight:600;margin:2px 0 4px;">Still to do:</div>' +
-              outstanding.slice(0, 8).map(function (n) { return '<span class="hub-chip">' + esc(n) + '</span>'; }).join("") +
-              (outstanding.length > 8 ? '<span class="hub-chip">+' + (outstanding.length - 8) + ' more</span>' : "");
+          if (totalOut) {
+            var xBtn = 'border:none;background:none;color:#b00020;font-weight:700;cursor:pointer;padding:0 0 0 5px;font-size:14px;line-height:1;';
+            var reqHtml = requests.map(function (r) {
+              return '<span class="hub-chip">' + esc(r.label) +
+                (r.id ? ' <button class="hubVcCancel" data-cancel="' + esc(r.id) + '" title="Cancel this request" aria-label="Cancel request" style="' + xBtn + '">×</button>' : '') +
+                '</span>';
+            }).join("");
+            var wkHtml = outstanding.slice(0, 8).map(function (n) { return '<span class="hub-chip">' + esc(n) + '</span>'; }).join("");
+            var more = outstanding.length > 8 ? '<span class="hub-chip">+' + (outstanding.length - 8) + ' more</span>' : "";
+            html += '<div style="font-size:12.5px;color:#5b6b78;font-weight:600;margin:2px 0 4px;">Still to do:</div>' + reqHtml + wkHtml + more;
           } else if (!defects.length) {
             html += '<div class="hub-ok">✓ All caught up — no outstanding checks or issues.</div>';
           }
 
           html += '<div class="hub-actions">' +
             '<a class="hub-btn ghost" href="van-checks.html">Open van checks</a>' +
-            (outstanding.length ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + outstanding.length + ')</button>' : '') +
+            (totalOut ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + totalOut + ')</button>' : '') +
             '</div>';
           // Clear marker (this widget builds custom HTML, not cardHtml).
-          if (!outstanding.length && !defects.length && !d.globallyPaused) html += '<i data-clear hidden></i>';
+          if (!totalOut && !defects.length && !d.globallyPaused) html += '<i data-clear hidden></i>';
           card.innerHTML = html;
 
           var rb = document.getElementById("hubVcRemind");
@@ -1580,9 +1589,22 @@ const MAP = window.ML_PERM_MAP || {
             rb.disabled = true; rb.textContent = "Sending…";
             jfetch("/vancheck/remind-now", { method: "POST" }, 8000).then(function (r) {
               rb.textContent = r && r.ok ? "✓ Reminded " + (r.reminded || 0) : "Done";
-            }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + outstanding.length + ")"; });
+            }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + totalOut + ")"; });
           });
-        });
+          // ✕ on a requested pill → cancel that one-off request (admin only; the
+          // endpoint deletes only a still-pending request).
+          Array.prototype.forEach.call(card.querySelectorAll(".hubVcCancel"), function (x) {
+            x.addEventListener("click", function () {
+              var id = x.getAttribute("data-cancel"); if (!id) return;
+              x.disabled = true; x.textContent = "…";
+              jfetch("/vancheck/custom-cancel", { method: "POST", body: JSON.stringify({ id: id }) }, 8000)
+                .then(function () { return jfetch("/vancheck/week", null, 8000); })
+                .then(function (fresh) { paint(fresh); })
+                .catch(function () { x.disabled = false; x.textContent = "×"; });
+            });
+          });
+        }
+        return jget("/vancheck/week").then(paint);
       }
     });
 
