@@ -4125,7 +4125,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   age as the freshness signal). Table push_subscriptions
   (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
   tid, username, {title,body,url})` fans out to a user's devices + prunes dead
-  (404/410) — **Phase 2 event hooks will call this**.
+  (404/410) — **Phase 2 event hooks will call this**. **`sendToPermission(env,tid,
+  permKeys,payload,excludeUser,opts)` takes an `opts.officeOnly` (5th arg; a bare
+  `true` also works)** — it drops FIELD engineers (users.profile.staffType==="field")
+  from the recipient set so an office-review alert never reaches an engineer who
+  happens to hold SLAAdmin/Compliance (blank staffType stays — owners/office admins).
+  Used by the engineer→office **submit-for-review** pushes: EM/PAT cert submit
+  (certs.js `/certs/submit`), pump submit (pump.js `/pump/submit`), and the EM
+  remedial alerts (to-quote, reissue-filed, batteries-arrived, client-order approve).
 - **VAPID keys** are worker config (VAPID_PUBLIC var + VAPID_PRIVATE secret;
   optional PUSH_CONTACT). Client fetches the public key from /push/public-key.
 - **sw.js is now the single service worker** (cache + push + notificationclick);

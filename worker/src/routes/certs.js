@@ -525,7 +525,7 @@ async function reissueCleanCert(env, tid, certId, ctx) {
         ? `${site}: the EM certificate has been re-issued with ${changed} fitting${changed === 1 ? "" : "s"} marked "Replaced" and filed to the compliance chart. Tap to download.`
         : `${site}: a clean EM certificate was generated (${changed} fitting${changed === 1 ? "" : "s"} now Pass) but couldn't be filed automatically — review and issue it.`,
       url: "/cert-review.html?open=" + newId, tag: "cert-reissue:" + newId,
-    });
+    }, null, { officeOnly: true });
     ctx?.waitUntil ? ctx.waitUntil(p.catch(() => {})) : await p.catch(() => {});
   } catch {}
   return newId;
@@ -629,7 +629,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
       : `Client order ${orderNumber || ""} for ${site} — no matching remedial found yet. Review it in the remedials tracker.`;
     ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m ? "Client order — approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true }, "").catch(() => {}));
+      { title: m ? "Client order — approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true }, "", { officeOnly: true }).catch(() => {}));
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
 }
@@ -1409,7 +1409,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (chosen.length) {
       ctx?.waitUntil?.(Promise.all(chosen.map(u => sendToUser(env, tid, u, payload).catch(() => {}))));
     } else {
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {}));
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me, { officeOnly: true }).catch(() => {}));
     }
     return json({ ok: true, jobComplete: jobDone }, {}, env, request);
   }
@@ -1600,7 +1600,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (remedial && remedial.count) {
       const site = (rec.installation && rec.installation.name) || code;
       const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (£${remedial.charge} in lights)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries` : "") + `. Quote the client — track it on the EM remedials list.`;
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {}));
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }, null, { officeOnly: true }).catch(() => {}));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
   }
@@ -2035,7 +2035,7 @@ export async function handle(request, env, ctx, url, sess) {
       }
     } catch {}
     ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], { title: "Batteries arrived — EM remedial ready to book",
-      body: `${row.site_name || row.site_code}: the batteries for the EM remedial have arrived. The works job can be scheduled now.`, url: "/job-view.html?jobId=" + encodeURIComponent(jobId), tag: "em-batt:" + certId }, me).catch(() => {}));
+      body: `${row.site_name || row.site_code}: the batteries for the EM remedial have arrived. The works job can be scheduled now.`, url: "/job-view.html?jobId=" + encodeURIComponent(jobId), tag: "em-batt:" + certId }, me, { officeOnly: true }).catch(() => {}));
     return json({ ok: true, jobId }, {}, env, request);
   }
 
