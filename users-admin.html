@@ -112,6 +112,11 @@
       .wrap{ padding:0 10px; }
       .grid2{ grid-template-columns:1fr; }
 
+      /* The ⋯ More button wraps to the left edge on a phone, so a right:0 menu
+         ran off the left of the screen. Anchor it to the left and cap it to the
+         viewport so every item stays readable. */
+      .toolmenu{ left:0; right:auto; max-width:calc(100vw - 24px); }
+
       /* People rows → stacked cards (the 6-col grid doesn't fit a phone) */
       .uhead{ display:none; }
       .ulist{ background:transparent; box-shadow:none; border-radius:0; overflow:visible; min-height:0; }
