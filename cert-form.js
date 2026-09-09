@@ -502,7 +502,7 @@
     }
     function pickRemedialPhoto(i) {
       const inp = document.createElement("input");
-      inp.type = "file"; inp.accept = "image/*"; inp.setAttribute("capture", "environment"); inp.style.display = "none";
+      inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
       inp.onchange = async () => {
         const file = inp.files && inp.files[0]; if (!file) return;
         const btn = container.querySelector('[data-rem="addphoto"][data-i="' + i + '"]');

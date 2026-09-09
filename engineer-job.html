@@ -10,8 +10,8 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=31"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=19"></script>
-  <script src="remedials-form.js?v=2"></script>
+  <script src="cert-form.js?v=20"></script>
+  <script src="remedials-form.js?v=3"></script>
   <script src="pump-form.js?v=2"></script>
   <style>
     :root{
@@ -432,7 +432,7 @@
       h+='<div class="card"><div id="certHost"></div></div>';
     } else if(au){
       // Site-audit job: a checklist — each item needs one completion photo.
-      h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" capture="environment" style="display:none"></div>';
+      h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" style="display:none"></div>';
       h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
     } else if(elec){
       // Electrical test: the engineer records the remedial-works list on the job.

@@ -109,7 +109,7 @@
         '<label>Duration <input type="number" class="mlr-min" min="0" step="5" value="' + (r.minutes || "") + '"><span>min</span></label>' +
         '<label>Material £ <input type="number" class="mlr-mat" min="0" step="1" value="' + (r.materialCost || "") + '"></label>' +
         '</div>' +
-        '<div class="mlr-photos">' + photos + '<label class="mlr-addph">📷 Photo<input type="file" accept="image/*" capture="environment" hidden></label></div>' +
+        '<div class="mlr-photos">' + photos + '<label class="mlr-addph">📷 Photo<input type="file" accept="image/*" hidden></label></div>' +
         '</div>';
     }
     function wireEngineer() {
