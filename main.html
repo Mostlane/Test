@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=29"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -379,6 +379,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-main.html?reset=1" id="SLA"><span class="emoji">🚨</span> SLA</a>
+    <a class="button" href="client-orders.html" id="ClientOrders"><span class="emoji">📥</span> Client Orders</a>
     <a class="button" href="stats.html" id="Stats"><span class="emoji">📊</span> Stats</a>
     <a class="button" href="health.html" id="Health"><span class="emoji">🩺</span> Health</a>
     <a class="button" href="notification-centre.html" id="Notifications"><span class="emoji">🔕</span> Notification Centre</a>
@@ -450,6 +451,9 @@ const MAP = window.ML_PERM_MAP || {
 ],
   LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
   SLA: ["SLA", "SLAAdmin", "slaMenu", "slaAccess"],
+  // Client orders board — carries order VALUES, so office roles only (the page +
+  // API also require Full Access or office staff; a field engineer is refused).
+  ClientOrders: ["SLAAdmin", "Compliance", "PurchaseOrders"],
   Stats: ["__fullOnly"],
   Health: ["__fullOnly"],
   Notifications: ["__fullOnly"],

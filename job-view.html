@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=29"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -579,6 +579,12 @@
     <div id="pumpViewHost"></div>
   </div>
 
+  <!-- CLIENT ORDER — the client's order this job is the works for (value = money, office only) -->
+  <div class="card" id="orderCard" style="display:none;">
+    <h2 class="section-title">🧾 Client order</h2>
+    <div id="orderBody"></div>
+  </div>
+
   <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
   <div class="card" id="jobCostCard" style="display:none;">
     <h2 class="section-title">💷 Total cost to us</h2>
@@ -907,6 +913,7 @@ function renderJob(){
   $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
   renderCancelBanner();
+  renderOrderCard();
   $("jobRef").textContent = shortRef || "—";
   $("jobSite").textContent = name || site || "—";
 
@@ -1238,28 +1245,30 @@ async function renderVisits(visits){
   const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
   const fmtD = iso => { if(!iso) return "—"; const dt=new Date(iso); return isNaN(dt)?"—":dt.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); };
   $("visitsCount").textContent = "· " + visits.length + " jobs raised against this";
-  const admin = isAdminView();
+  const admin = canMoney();   // costs + order values are money
   const costs = {};
   if(admin){ await Promise.all(visits.map(async v => { try{ const c = await mApi("/costing/job-full-cost?jobId=" + encodeURIComponent(v.id)).then(r=>r.json()); costs[v.id] = (c && c.ok) ? (Number(c.total)||0) : null; }catch(e){ costs[v.id]=null; } })); }
-  let total = 0, anyCost = false;
+  let total = 0, anyCost = false, orderTotal = 0, anyOrder = false;
   const rows = visits.map((v, i) => {
     const here = v.current, cost = costs[v.id];
     if(admin && cost != null){ total += cost; anyCost = true; }
+    if(admin && v.orderValue != null){ orderTotal += Number(v.orderValue) || 0; anyOrder = true; }
     return '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eef1f5;">'
       + '<div>' + (here ? '<strong>' : '') + 'Visit ' + (i+1) + (here ? ' (this job)</strong>' : '')
-      + ' <span class="sub">· ' + esc(v.status||"") + ' · ' + fmtD(v.scheduledAt || v.raisedAt) + '</span>'
+      + ' <span class="sub">· ' + esc(v.status||"") + ' · ' + fmtD(v.scheduledAt || v.raisedAt) + (v.orderNumber ? ' · 🧾 ' + esc(v.orderNumber) + (admin && v.orderValue != null ? ' ' + money(v.orderValue) : '') : '') + '</span>'
       + (here ? '' : ' <a href="job-view.html?jobId=' + encodeURIComponent(v.id) + '" style="font-size:13px;">open →</a>') + '</div>'
       + '<div style="text-align:right;white-space:nowrap;font-weight:600;">' + (admin ? (cost==null ? '<span class="sub">—</span>' : money(cost)) : '') + '</div></div>';
   }).join("");
-  const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined across all visits</div><div>' + money(total) + '</div></div>' : "";
-  $("visitsBody").innerHTML = rows + totalRow;
+  const profit = orderTotal - total;
+  const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined cost across all visits</div><div>' + money(total) + '</div></div>' : "";
+  const orderRow = (admin && anyOrder) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #eef1f5;font-weight:700;"><div>Client order value (ex VAT)</div><div>' + money(orderTotal) + '</div></div>'
+    + (anyCost ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-weight:800;color:' + (profit >= 0 ? '#166534' : '#b91c1c') + ';"><div>' + (profit >= 0 ? 'Profit' : 'Loss') + ' across the incident</div><div>' + (profit >= 0 ? '' : '−') + money(Math.abs(profit)) + '</div></div>' : '') : "";
+  $("visitsBody").innerHTML = rows + totalRow + orderRow;
 }
 async function loadJobCost(){
   const card = $("jobCostCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  let admin = false;
-  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
-  if(!admin){ card.style.display = "none"; return; }
+  if(!canMoney()){ card.style.display = "none"; return; }   // money: Full Access / office only
   const money = n => "£" + (Number(n)||0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const hm = mins => { mins = Math.round(Number(mins)||0); const h = Math.floor(mins/60), m = mins%60; return (h? h+"h ":"") + m + "m"; };
   try{
@@ -1278,9 +1287,17 @@ async function loadJobCost(){
     const plannedNote = d.plannedLabour ? '<div class="sub" style="margin-top:4px;color:#3730a3;">🗓 Labour is costed from the <b>hours scheduled</b> on this job — no status change was logged. If the engineer changes status, their <b>actual</b> time is used instead.</div>' : '';
     const noTimeNote = (!d.hasSegments && !d.plannedLabour) ? '<div class="sub" style="margin-top:4px;">No on-site time captured yet (engineer hasn’t started the job), and no hours were scheduled — so labour &amp; travel are £0 so far.</div>' : '';
     const milesNote = d.milesSource === 'geocoded' ? ' (est. from postcode)' : (d.milesSource === 'register' ? '' : (d.roundTripMiles ? '' : ' — no site mileage'));
+    // Profit against the client's ORDER value (when this job carries one).
+    const profitBlock = (d.orderValue != null)
+      ? '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">'
+        + '<div><div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div><div class="sub">Cost to us' + (d.unpricedPOs ? ' so far' : '') + '</div></div>'
+        + '<div><div style="font-size:20px;font-weight:700;color:#334155;">' + money(d.orderValue) + '</div><div class="sub">Order ' + esc(d.orderNumber || "") + ' (ex VAT)</div></div>'
+        + '<div><div style="font-size:26px;font-weight:800;color:' + (d.profit >= 0 ? '#166534' : '#b91c1c') + ';">' + (d.profit >= 0 ? '' : '−') + money(Math.abs(d.profit)) + '</div><div class="sub">' + (d.profit >= 0 ? 'Profit' : 'Loss') + (d.margin != null ? ' · ' + d.margin + '% margin' : '') + (d.unpricedPOs ? ' · will fall once POs are priced' : '') + '</div></div>'
+        + '</div>'
+      : '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
+        '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>';
     $("jobCostBody").innerHTML =
-      '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
-      '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>' +
+      profitBlock +
       row('Labour — on site', money(lab.onSiteCost), lab.onSiteMinutes ? (hm(lab.onSiteMinutes) + (d.plannedLabour && !d.hasSegments ? ' · scheduled' : '')) : '') +
       row('Labour — travel', money(lab.travelCost), lab.travelMinutes ? hm(lab.travelMinutes) + ' round trips' : '') +
       row('Fuel', money(fuel.cost), (fuel.miles ? fuel.miles + ' mi @ £' + (fuel.perMile||0.5).toFixed(2) + '/mi' + milesNote : milesNote.replace(/^ /,''))) +
@@ -1293,10 +1310,8 @@ async function loadJobCost(){
 async function loadJobPOs(){
   const card = $("poCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  // Money view — office/admin only (FullAccess or SLA admin).
-  let admin = false;
-  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
-  if(!admin){ card.style.display = "none"; return; }
+  // Money view — Full Access / office staff only.
+  if(!canMoney()){ card.style.display = "none"; return; }
   try{
     const t = localStorage.getItem("mostlaneToken");
     const d = await fetch(window.MOSTLANE_API + "/costing/job-pos?jobId=" + encodeURIComponent(job.id), { headers: t ? { "Authorization": "Bearer " + t } : {} }).then(r => r.json());
@@ -1608,6 +1623,20 @@ function renderNotes(){
   });
 }
 
+/* ---- 🧾 Client order card (Sep 2026): the order this job is the works for.
+   The VALUE is money → Full Access / office only (the server strips it for
+   everyone else, so a field engineer's job JSON never carries it). ---- */
+function renderOrderCard(){
+  const card = $("orderCard"); if(!card || !job) return;
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  if(!job.orderNumber && job.orderValue == null && !job.clientOrderId){ card.style.display = "none"; return; }
+  const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
+  const val = (canMoney() && job.orderValue != null) ? '<div style="font-size:24px;font-weight:800;color:#0f172a;">' + money(job.orderValue) + ' <span class="sub" style="font-size:12px;font-weight:400;">ex VAT · order value</span></div>' : '';
+  $("orderBody").innerHTML = val +
+    '<div style="margin-top:4px;">Order <b>' + esc(job.orderNumber || "—") + '</b></div>' +
+    (canMoney() ? '<div style="margin-top:8px;"><a href="/client-orders.html" style="font-size:13px;">Open the Client orders board →</a></div>' : '');
+  card.style.display = "";
+}
 /* ---- ❌ Cancelled banner: WHEN, by whom, why (Sep 2026) ---- */
 function renderCancelBanner(){
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -2121,6 +2150,17 @@ function isOfficeAdmin(){
     const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
     return p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
   }catch{ return false; }
+}
+// MONEY (order values, costs, profit) is for Full Access users and OFFICE staff
+// only — never a field engineer, whatever grants they hold. The server enforces
+// the same rule; this only decides what the page tries to show.
+function canMoney(){
+  try{
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    if(String(p.FullAccess||"").toLowerCase() === "yes") return true;
+    const st = String(sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || p.StaffType || "").toLowerCase();
+    return st === "office";
+  }catch(e){ return false; }
 }
 // A field engineer never gets the office-only "Edit details" editor, even if
 // they hold an SLA-admin grant for scheduling — it's an office control.

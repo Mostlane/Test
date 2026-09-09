@@ -27,7 +27,8 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
-import { createOrUpdateJobFromPayload, listJobs } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById } from "./sla.js";
+import { canSeeMoney } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
@@ -623,15 +624,21 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       storeCode || null, siteName || null, srRef || null, String(b.siteRaw || "").slice(0, 200),
       String(b.notifiedAt || now).slice(0, 40), String(b.link || "").slice(0, 800) || null, String(b.source || "concerto").slice(0, 40),
       status, m ? m.kind : null, m ? (m.certId || null) : null, m ? (m.jobId || null) : null, m ? m.note : null, now, now).run();
+  // A job with exactly this reference already on the board (the "New Job Alert"
+  // came first)? Stamp the order's value on it and mark the order linked.
+  let linkedJob = null;
+  if (!m) { try { linkedJob = await linkOrderToExistingJob(env, tid, { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null }); } catch {} }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
     const body = m
       ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
-      : `Client order ${orderNumber || ""} for ${site} — no matching remedial found yet. Review it in the remedials tracker.`;
+      : (linkedJob
+        ? `Client order ${orderNumber || ""} for ${site} — linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).`
+        : `Client order ${orderNumber || ""} for ${site} — open the Client orders board to make the job.`);
     ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m ? "Client order — approve remedial" : "Client order received", body, url: "/cert-review.html?orders=1", tag: "client-order:" + id, actionable: true }, "", { officeOnly: true }).catch(() => {}));
+      { title: m ? "Client order — approve remedial" : "Client order received", body, url: m ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
   }
-  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : null, status }, {}, env, request);
+  return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : (linkedJob ? "job" : null), status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
 
 async function getConfig(env, tid) {
@@ -1744,6 +1751,59 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, cases: rows.map(r => shapeCase(r, fit[r.cert_id])) }, {}, env, request);
   }
 
+  // ── CLIENT ORDERS BOARD (Sep 2026) — every order the client has sent, with its
+  //    job, filterable by client. MONEY: order values are visible only to Full
+  //    Access / office staff (canSeeMoney), so the whole board is gated on that.
+  //    GET /certs/orders?client=&q=  → {orders:[…], clients:[…]} each order carrying
+  //      its linked job (ref/status/engineers/scheduled) + a computed `stage`:
+  //      needs_job (no job yet) · live (job open) · done (job finished) · dismissed.
+  //    POST /certs/orders/make-job {id, scheduledAt?, assignedEngineers?} → raises /
+  //      links the job (sla.js raiseJobForOrder: link an existing same-ref job, else
+  //      clone the incident's newest job as a linked visit carrying notes + photos,
+  //      else a fresh job at the store) → {ok, jobId, how}.
+  //    POST /certs/orders/link {id, jobId} → link an order to a job by hand.
+  if (sub === "/orders" && method === "GET") {
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
+    const client = String(q.get("client") || "").trim().toLowerCase();
+    const { results } = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? ORDER BY COALESCE(notified_at, created_at) DESC LIMIT 600").bind(tid).all();
+    const rows = (results || []).map(shapeOrder);
+    const all = await listJobs(env, tid);
+    const byId = new Map(all.map(j => [j.id, j]));
+    const byRef = new Map(); for (const j of all) { const r = String(j.helpdeskRef || "").trim(); if (r && !byRef.has(r)) byRef.set(r, j); }
+    let doneNames = new Set(); try { const c = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); (JSON.parse((c && c.value) || "[]") || []).forEach(x => { if (x && x.done) doneNames.add(String(x.name || "").toLowerCase()); }); } catch {}
+    const finished = j => { const st = String((j && j.status) || "").toLowerCase(); return ["complete", "closed jobs", "closed", "invoiced", "cancelled"].includes(st) || doneNames.has(st); };
+    const shaped = rows.map(o => {
+      const j = (o.matchedKind === "job" && o.matchedJobId && byId.get(o.matchedJobId)) || (o.orderNumber && byRef.get(o.orderNumber)) || null;
+      const incident = (/^(\d{5,12})\/\d{1,3}$/.exec(o.orderNumber || "") || [])[1] || "";
+      const earlier = incident ? all.filter(x => new RegExp("^" + incident + "/\\d{1,3}$").test(String(x.helpdeskRef || "")) && (!j || x.id !== j.id)).map(x => ({ id: x.id, ref: x.helpdeskRef || x.id, status: x.status || "" })) : [];
+      const stage = o.status === "dismissed" ? "dismissed" : (!j ? "needs_job" : (finished(j) ? "done" : "live"));
+      return { ...o, stage, incident, earlier,
+        job: j ? { id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "", engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [], scheduledAt: j.scheduledAt || null, cancelledAt: j.cancelledAt || null, orderValue: j.orderValue ?? null } : null };
+    }).filter(o => !client || String(o.client || "").toLowerCase() === client);
+    const clients = [...new Set(rows.map(o => String(o.client || "").trim()).filter(Boolean))].sort();
+    return json({ ok: true, orders: shaped, clients }, {}, env, request);
+  }
+  if (sub === "/orders/make-job" && method === "POST") {
+    if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    if (ord.status === "dismissed") return error("This order was dismissed — reopen it first", 400, env, request);
+    const o = shapeOrder(ord);
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : undefined;
+    const res = await raiseJobForOrder(env, tid, o, { changedBy: me, scheduledAt, durationMinutes: Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : undefined, assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : [] });
+    return json({ ok: true, jobId: res.job.id, ref: res.job.helpdeskRef || res.job.id, how: res.how, from: res.from || null }, {}, env, request);
+  }
+  if (sub === "/orders/link" && method === "POST") {
+    if (!(await canSeeMoney(env, tid, me)) || !isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, String(b.id || "")).first();
+    if (!ord) return error("Order not found", 404, env, request);
+    const jobId = String(b.jobId || "").trim();
+    const job = await linkOrderToJobById(env, tid, shapeOrder(ord), jobId, me);
+    if (!job) return error("Job not found", 404, env, request);
+    return json({ ok: true, jobId, ref: job.helpdeskRef || job.id }, {}, env, request);
+  }
   // ── Client orders (office) — incoming approvals fed in by the email bot ────────
   // GET /certs/remedials/orders?all=1 — the review list (default hides
   // actioned/dismissed). Each carries its match to a remedial awaiting approval.

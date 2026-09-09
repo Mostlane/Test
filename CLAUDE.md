@@ -912,7 +912,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
   clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
 - **Total cost of a job to us** (job-view.html "💷 Total cost to us" card,
-  **office/admin only** — FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
+  **money = Full Access or office staff only** — `canSeeMoney`, Sep 2026; was
+  FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
   (costing.js) sums **labour on-site** (job_time_segments for the job → per-engineer
   minutes × hourly rate from `ratesMap`; a day rate ÷8; 14h runaway clamp) +
   **travel labour** (one round trip HQ→site→HQ per engineer per distinct day worked,
@@ -4326,6 +4327,52 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   FINISHED for `matchSameIncident`, so a re-sent incident becomes a linked visit.
   Tests: `test-inbound-incident.mjs` (7 cancel cases) + `test-email-intake.mjs`
   (both layouts, dry-run, duplicate). `sla-jobedit.js?v=31`.
+- **CLIENT ORDERS BOARD + order value → job → profit (9 Sep 2026, Jamie: "orders
+  must have their own category… view all live orders… filter by client… tie to
+  the incident… transfer notes and images… the job will know the value… no
+  financial information visible to anyone apart from Full Access users or office
+  staff").** **Money rule, server-side:** `lib/auth.js canSeeMoney(env,tid,username)`
+  = FullAccess OR `users.profile.staffType==="office"` — a field engineer never
+  sees money whatever grants they hold. Enforced on `/certs/orders*` (403),
+  `/costing/job-full-cost` + `/costing/job-pos` (403 — was FullAccess|SLAAdmin|
+  TimesheetAdmin), and every JOB response (`sla.js stripMoney` drops `orderValue`
+  from GET /sla/jobs, /sla/jobs/{id}, /for-engineer, the PATCH reply; `/visits`
+  only includes it for money users). Pages mirror it with `canMoney()` (job-view
+  cost/PO/visits cards + the order card's value; client-orders.html shows a
+  "financial information" notice). **Job fields** `orderNumber` / `orderValue` (£ ex
+  VAT) / `clientOrderId` (create + patch, preserved). **Page `client-orders.html`**
+  (📥 Client Orders tile `ClientOrders:["SLAAdmin","Compliance","PurchaseOrders"]`,
+  sidebar item, board 📥 link, cert-review orders modal links to it; portal-config
+  `?v=29`): every `client_orders` row with a computed **stage** — `needs_job` (no
+  job yet) · `live` (job open) · `done` (job finished) · `dismissed` — chips Live
+  (= needs_job + live) / Needs a job / Done / Dismissed / All, a **client
+  dropdown**, search, a running £ total, each card showing the linked job (ref ·
+  status · engineer · time), the incident's **earlier visits**, ➕ Make the job /
+  Dismiss / Reopen / Open job / 📧. **API (certs.js):** GET `/certs/orders?client=`
+  → `{orders,clients}`; POST `/certs/orders/make-job {id}` → `sla.js raiseJobForOrder`;
+  POST `/certs/orders/link {id,jobId}` (hand-link). **How an order meets its job
+  (sla.js):** (1) order arrives and a job with EXACTLY that reference exists →
+  `linkOrderToExistingJob` stamps value + number on it (intake reply `status:
+  "linked"`, push says so, not actionable); (2) the job arrives later via
+  `/sla/inbound` → `applyOrderToJob` stamps the waiting order; (3) neither → the
+  office presses Make the job: `raiseJobForOrder` links a same-ref job if one
+  exists, else **clones the incident's newest earlier job as a linked visit via
+  the shared `cloneJobAsVisit`** (the 🔁 Re-visit handler now uses the same helper:
+  R2 `jobs/<old>/` copied to `jobs/<new>/`, events/RA/signature/photo tags/audit
+  items/remedials carried, revisitOf/visitGroupId + ×N stamped) with description
+  "🧾 Client order <n> (£v) — <order text> / ↩ Ordered works following our visit
+  <ref> (<status>) … / — Original job — <old text>", reference = the order number,
+  status Pending, unallocated; else a fresh job at the order's store (site name/
+  postcode from `sites`). Make-job twice → links, never duplicates. **Profit:**
+  `/costing/job-full-cost` returns `orderNumber/orderValue/profit/margin`; job-view's
+  cost card shows Cost · Order value · Profit/Loss (+margin, "will fall once POs are
+  priced"), the 🧾 Client order card shows the value + a board link, and the Visits
+  card sums cost + order value across the incident → "Profit across the incident".
+  `client_orders.status` gains `linked` (matched_kind `job`). Tests:
+  `node worker/tools/test-client-orders.mjs` (25 cases: link/clone/fresh, money
+  stripping per role, costing 403, visits, dismissed). NB `client_orders.tenant_id`
+  is TEXT and certs.js binds the session's numeric tenant id — sla.js binds the
+  same number (never `String(tenantId)`) or the rows are invisible (the '1.0' quirk).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

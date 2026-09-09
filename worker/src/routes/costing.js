@@ -34,7 +34,7 @@
 // existed. Nothing here may ever break a job save or timesheet save.
 
 import { json, error } from "../lib/http.js";
-import { permissionsFor } from "../lib/auth.js";
+import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { poOrderSiteNames } from "./timesheets.js";
 import * as sitelogApi from "./sitelog-api.js";
 
@@ -281,7 +281,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Powers the "Materials (POs)" panel on job-view — true reflection of the job's
   // material spend, updating automatically as each PO is priced. Office/admin only.
   if (path === "/costing/job-pos" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const rows = await jobPoRows(env, jobId);
@@ -314,7 +314,8 @@ export async function handle(request, env, ctx, url, sess) {
   // fixed £0.50/mile + materials (priced POs; unpriced ones are flagged, never
   // counted as £0). Everything is derived — nothing new is stored.
   if (path === "/costing/job-full-cost" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    // Money: Full Access / office staff only (Jamie's rule) — never a field engineer.
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR = 1.25, HQ_PC = "PO15 5RQ";
@@ -425,8 +426,13 @@ export async function handle(request, env, ctx, url, sess) {
 
     const labourCost = onSiteCost + travelCost;
     const total = labourCost + fuelCost + materials;
+    // Revenue side: the client's ORDER value on the job (ex VAT) → profit + margin.
+    const orderValue = (jd.orderValue != null && Number.isFinite(Number(jd.orderValue))) ? Number(jd.orderValue) : null;
+    const profit = orderValue != null ? r2(orderValue - total) : null;
+    const margin = orderValue ? Math.round((profit / orderValue) * 1000) / 10 : null;
     return json({
       ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, travelSource, roundTripMiles: r1(rtMiles), roundTripDriveMins: r1(rtDriveMins),
+      orderNumber: jd.orderNumber || null, orderValue, profit, margin,
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows.length },

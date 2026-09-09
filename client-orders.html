@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Client Orders</title>
+  <script src="/portal-config.js?v=29"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px;}
+    .chip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#334;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .chip .n{opacity:.8;font-weight:700;margin-left:4px;}
+    select,input[type=search]{padding:7px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:13.5px;background:#fff;}
+    .tot{margin-left:auto;font-size:13px;color:#334;}
+    .tot b{color:var(--brand);}
+    .ocard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:10px;border-left:5px solid #cbd5e1;}
+    .ocard.needs_job{border-left-color:#d97706;}
+    .ocard.live{border-left-color:#1c68d6;}
+    .ocard.done{border-left-color:var(--ok);}
+    .ocard.dismissed{border-left-color:#cbd5e1;opacity:.75;}
+    .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
+    .top .ref{font-weight:800;font-size:15.5px;color:var(--brand);}
+    .top .val{font-weight:800;font-size:15.5px;margin-left:auto;white-space:nowrap;}
+    .site{font-weight:600;margin-top:2px;}
+    .desc{font-size:13.5px;color:#334;margin:6px 0;white-space:pre-wrap;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+    .p-needs{background:#fef3c7;color:#92400e;} .p-live{background:#dbeafe;color:#1e40af;} .p-done{background:#dcfce7;color:#166534;} .p-dis{background:#f1f5f9;color:#64748b;}
+    .p-client{background:#eef4fb;color:#003466;border:1px solid #cfe0f3;}
+    .jl{font-size:13px;margin-top:4px;}
+    .jl a{color:var(--brand);font-weight:600;}
+    .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
+    .btn.green{background:var(--ok);}
+    .btn[disabled]{opacity:.55;cursor:default;}
+    .msg{font-size:12.5px;margin-top:6px;} .msg.err{color:var(--bad);} .msg.ok{color:var(--ok);}
+    .earlier{font-size:12.5px;color:#475569;margin-top:3px;}
+    #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html?reset=1" style="text-decoration:none;">‹ Back</a>
+    <h1>📥 Client orders</h1>
+    <button class="btn ghost" id="refresh" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">↻</button>
+  </header>
+
+  <div class="wrap">
+    <div id="forbidden">🚫 Client orders carry financial information, which is visible to Full Access users and office staff only.</div>
+    <div id="board">
+      <div class="bar" id="stageBar"></div>
+      <div class="bar">
+        <select id="clientSel"><option value="">All clients</option></select>
+        <input type="search" id="q" placeholder="Search order no. / site / words…">
+        <span class="tot" id="tot"></span>
+      </div>
+      <div id="list"><p class="muted" style="padding:18px 4px;">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const money = n => (n == null || !isFinite(Number(n))) ? "" : "£" + Number(n).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
+    const fmtD = iso => { if(!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("en-GB",{ day:"2-digit", month:"short", year:"numeric" }); };
+    const fmtDT = iso => { if(!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-GB",{ day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }); };
+
+    // Money is for Full Access / office staff only (the server enforces this too).
+    function canMoney(){
+      try{
+        const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+        if (String(p.FullAccess||"").toLowerCase() === "yes") return true;
+        const st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || p.StaffType || "").toLowerCase();
+        return st === "office";
+      }catch(e){ return false; }
+    }
+
+    const STAGES = [["live","Live"],["needs_job","Needs a job"],["done","Done"],["dismissed","Dismissed"],["all","All"]];
+    let DATA = { orders: [], clients: [] };
+    let stage = "live";
+    try { stage = localStorage.getItem("mlOrdersStage") || "live"; } catch(e){}
+    // "Live" on the board = anything still in play: needs a job OR the job is open.
+    const inStage = o => stage === "all" ? true : (stage === "live" ? (o.stage === "live" || o.stage === "needs_job") : o.stage === stage);
+
+    async function load(){
+      if(!canMoney()){ g("forbidden").style.display = "block"; g("board").style.display = "none"; return; }
+      let d = null;
+      try { d = await authFetch("/certs/orders").then(r => r.json()); } catch(e){}
+      if(!d || !d.ok){
+        if(d && /Full Access/.test(d.error||"")){ g("forbidden").style.display = "block"; g("board").style.display = "none"; return; }
+        g("list").innerHTML = '<p class="msg err" style="padding:12px 4px;">Couldn\'t load the orders' + (d && d.error ? ": " + esc(d.error) : ".") + '</p>'; return;
+      }
+      DATA = d;
+      const sel = g("clientSel"), cur = sel.value;
+      sel.innerHTML = '<option value="">All clients</option>' + (d.clients||[]).map(c => '<option value="'+esc(c)+'">'+esc(c)+'</option>').join("");
+      sel.value = cur;
+      render();
+    }
+
+    function render(){
+      const client = g("clientSel").value, q = g("q").value.trim().toLowerCase();
+      const all = DATA.orders || [];
+      const counts = {}; STAGES.forEach(([k]) => counts[k] = all.filter(o => (k==="all") || (k==="live" ? (o.stage==="live"||o.stage==="needs_job") : o.stage===k)).length);
+      g("stageBar").innerHTML = STAGES.map(([k,l]) => '<button class="chip'+(stage===k?' on':'')+'" data-stage="'+k+'">'+l+'<span class="n">'+counts[k]+'</span></button>').join("");
+      [].forEach.call(g("stageBar").querySelectorAll(".chip"), b => b.onclick = () => { stage = b.dataset.stage; try{ localStorage.setItem("mlOrdersStage", stage); }catch(e){} render(); });
+      const rows = all.filter(o => inStage(o) && (!client || o.client === client) && (!q || [o.orderNumber, o.siteName, o.storeCode, o.title, o.detail, o.description, o.job && o.job.ref].join(" ").toLowerCase().includes(q)));
+      const total = rows.reduce((s,o) => s + (isFinite(Number(o.orderValue)) ? Number(o.orderValue) : 0), 0);
+      g("tot").innerHTML = rows.length + " order" + (rows.length===1?"":"s") + (total ? ' · <b>' + money(total) + '</b> ex VAT' : "");
+      if(!rows.length){ g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">No orders here.</p>'; return; }
+      g("list").innerHTML = rows.map(card).join("");
+      wire();
+    }
+
+    function stagePill(o){
+      if(o.stage === "needs_job") return '<span class="pill p-needs">Needs a job</span>';
+      if(o.stage === "live") return '<span class="pill p-live">Job ' + esc((o.job && o.job.status) || "open") + '</span>';
+      if(o.stage === "done") return '<span class="pill p-done">' + esc((o.job && o.job.status) || "Done") + '</span>';
+      return '<span class="pill p-dis">Dismissed</span>';
+    }
+    function card(o){
+      const j = o.job;
+      const site = [o.storeCode, o.siteName].filter(Boolean).join(" · ") || "—";
+      const text = o.detail || o.description || o.title || "";
+      let jobLine = "";
+      if(j){
+        jobLine = '<div class="jl">🔗 Job <a href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">' + esc(j.ref) + '</a> · ' + esc(j.status || "") +
+          (j.engineers && j.engineers.length ? ' · 👤 ' + esc(j.engineers.join(", ")) : ' · <span class="muted">not allocated</span>') +
+          (j.scheduledAt ? ' · 🗓 ' + esc(fmtDT(j.scheduledAt)) : '') + '</div>';
+      } else if (o.matchedKind === "em" || o.matchedKind === "elec") {
+        jobLine = '<div class="jl">🔧 ' + esc(o.matchNote || "Matched to a remedial") + ' — <a href="/cert-review.html?orders=1">approve on the remedials tracker</a></div>';
+      }
+      const earlier = (o.earlier || []).length
+        ? '<div class="earlier">↩ Earlier visit' + (o.earlier.length>1?'s':'') + ' on this incident: ' + o.earlier.map(e => '<a href="/job-view.html?jobId=' + encodeURIComponent(e.id) + '">' + esc(e.ref) + '</a> (' + esc(e.status) + ')').join(", ") + (j ? '' : ' — making the job carries their notes and photos across') + '</div>'
+        : '';
+      let acts = "";
+      if(o.stage === "needs_job"){
+        if(o.matchedKind !== "em") acts += '<button class="btn green" data-make="' + esc(o.id) + '">➕ Make the job</button> ';
+        acts += '<button class="btn ghost" data-dismiss="' + esc(o.id) + '">Dismiss</button>';
+      } else if (o.stage === "dismissed") {
+        acts += '<button class="btn ghost" data-reopen="' + esc(o.id) + '">↩ Reopen</button>';
+      }
+      if(j) acts += ' <a class="btn ghost" href="/job-view.html?jobId=' + encodeURIComponent(j.id) + '">Open job →</a>';
+      if(o.link) acts += ' <a class="btn ghost" href="' + esc(o.link) + '" target="_blank" rel="noopener">📧 Email</a>';
+      return '<div class="ocard ' + esc(o.stage) + '" id="o' + esc(o.id) + '">'
+        + '<div class="top"><span class="ref">' + esc(o.orderNumber || "(no number)") + '</span>'
+        + (o.client ? '<span class="pill p-client">' + esc(o.client) + '</span>' : '')
+        + stagePill(o)
+        + (o.priority ? '<span class="muted">P' + esc(o.priority) + '</span>' : '')
+        + '<span class="muted">' + esc(fmtD(o.notifiedAt || o.createdAt)) + '</span>'
+        + '<span class="val">' + (o.orderValue != null ? money(o.orderValue) : '<span class="muted" style="font-weight:600">no value</span>') + '</span></div>'
+        + '<div class="site">' + esc(site) + (o.srRef ? ' <span class="muted">' + esc(o.srRef) + '</span>' : '') + '</div>'
+        + (text ? '<div class="desc">' + esc(text) + '</div>' : '')
+        + jobLine + earlier
+        + '<div class="msg" data-msg="' + esc(o.id) + '"></div>'
+        + (acts ? '<div class="acts">' + acts + '</div>' : '')
+        + '</div>';
+    }
+    function setMsg(id, t, err){ const m = document.querySelector('[data-msg="' + CSS.escape(id) + '"]'); if(m){ m.textContent = t; m.className = "msg" + (err ? " err" : " ok"); } }
+    function wire(){
+      [].forEach.call(document.querySelectorAll("[data-make]"), b => b.onclick = async () => {
+        const id = b.dataset.make, o = (DATA.orders||[]).find(x => x.id === id) || {};
+        const q = "Make the job for order " + (o.orderNumber || "") + (o.orderValue != null ? " (" + money(o.orderValue) + ")" : "") + "?" +
+          ((o.earlier||[]).length ? "\n\nIt will be linked to the earlier visit " + o.earlier[0].ref + " and carry that visit's notes and photos across." : "\n\nA fresh job will be raised at the store.") +
+          "\n\nIt lands on the board unallocated — assign an engineer from the job card.";
+        if(!(window.MLUI ? await MLUI.confirm(q, { title:"Make the job", okLabel:"Make the job" }) : confirm(q))) return;
+        b.disabled = true; setMsg(id, "Making the job…");
+        try{
+          const r = await authFetch("/certs/orders/make-job", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) }).then(x => x.json());
+          if(r && r.ok){ setMsg(id, (r.how === "linked" ? "Linked to the existing job " : (r.how === "cloned" ? "Job made from the earlier visit — " : "Job made — ")) + (r.ref||"") + ". Opening it…"); setTimeout(() => { location.href = "/job-view.html?jobId=" + encodeURIComponent(r.jobId); }, 600); }
+          else { setMsg(id, (r && r.error) || "Couldn't make the job.", true); b.disabled = false; }
+        }catch(e){ setMsg(id, "Couldn't make the job.", true); b.disabled = false; }
+      });
+      [].forEach.call(document.querySelectorAll("[data-dismiss]"), b => b.onclick = async () => {
+        const id = b.dataset.dismiss;
+        if(!(window.MLUI ? await MLUI.confirm("Dismiss this order? It stays in the list under Dismissed.", { title:"Dismiss order", okLabel:"Dismiss", danger:true }) : confirm("Dismiss this order?"))) return;
+        b.disabled = true;
+        try{ const r = await authFetch("/certs/remedials/order-action", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id, action:"dismiss" }) }).then(x => x.json());
+          if(r && r.ok) load(); else { setMsg(id, "Couldn't dismiss.", true); b.disabled = false; } }
+        catch(e){ setMsg(id, "Couldn't dismiss.", true); b.disabled = false; }
+      });
+      [].forEach.call(document.querySelectorAll("[data-reopen]"), b => b.onclick = async () => {
+        const id = b.dataset.reopen; b.disabled = true;
+        try{ const r = await authFetch("/certs/remedials/order-action", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id, action:"reopen" }) }).then(x => x.json());
+          if(r && r.ok) load(); else { setMsg(id, "Couldn't reopen.", true); b.disabled = false; } }
+        catch(e){ setMsg(id, "Couldn't reopen.", true); b.disabled = false; }
+      });
+    }
+    g("refresh").onclick = load;
+    g("clientSel").onchange = render;
+    g("q").oninput = render;
+    load();
+  </script>
+</body>
+</html>
