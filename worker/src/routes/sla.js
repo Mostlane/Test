@@ -18,7 +18,7 @@ import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { trackJobTime } from "./timesheets.js";
-import { permissionsFor } from "../lib/auth.js";
+import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermission } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
@@ -671,8 +671,10 @@ export async function handle(request, env, ctx, url, sess) {
         payload.status = "Scheduled";
       }
     }
-    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
+    // A client order for this reference may already be waiting → stamp its value on.
+    try { if (await applyOrderToJob(env, tenantId, job)) job = (await getJob(env, tenantId, job.id)) || job; } catch {}
     // reconcileRelease is the single per-engineer push path (it pushes each newly
     // assigned / newly-visible engineer, so notifyNewlyAssigned is no longer needed).
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
@@ -732,6 +734,7 @@ export async function handle(request, env, ctx, url, sess) {
   /* GET /sla/jobs (with filters) */
   if (subpath === "/jobs" && method === "GET") {
     let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
+    if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -1140,7 +1143,7 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(jobs.map(j => {
       const ms = effStatus(j, engineer);
       const es = effSchedule(j, engineer);
-      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
+      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
   }
 
@@ -2016,7 +2019,6 @@ export async function handle(request, env, ctx, url, sess) {
       const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : (src.durationMinutes || undefined);
       const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean)
         : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
-      const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
       // Optional re-visit note (e.g. the snag): when given it becomes the PRIMARY
       // description, with the original visit's description kept below as secondary.
       const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4000);
@@ -2024,68 +2026,8 @@ export async function handle(request, env, ctx, url, sess) {
       const description = rvNote
         ? (rvNote + (oldDesc ? "\n\n— Original job —\n" + oldDesc : ""))
         : oldDesc;
-      const payload = {
-        id: crypto.randomUUID(),
-        reference: src.helpdeskRef || src.siteName || src.siteCode,
-        description,
-        siteCode: src.siteCode, siteName: src.siteName,
-        address: src.address, postcode: src.postcode, telephone: src.telephone,
-        storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
-        priority: src.priority || "",
-        requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
-        requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
-        firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
-        pumpMaintenance: src.pumpMaintenance, pumpStore: src.pumpStore,
-        workArea: src.workArea || undefined, projectId: src.projectId || undefined,
-        assignedEngineers: engineers,
-        scheduledAt, durationMinutes,
-        revisitOf: src.id, visitGroupId: groupId,
-        changedBy: (sess.user && sess.user.username) || "system",
-      };
-      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-      // Carry the original visit's FILES across (all photos, signatures, audit +
-      // remedial photos) by copying the whole R2 prefix to the new job id.
-      const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
-      if (env.JOB_FILES) {
-        try {
-          let cursor;
-          do {
-            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
-            for (const o of (listed.objects || [])) {
-              try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
-            }
-            cursor = listed.truncated ? listed.cursor : null;
-          } while (cursor);
-        } catch {}
-      }
-      // Carry the evidence FIELDS onto the new job (notes, RA, signature, photo tags,
-      // audit/remedial items) with their file keys re-pathed to the new id.
-      try {
-        const nj = await getJob(env, tenantId, job.id);
-        if (nj) {
-          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
-          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
-          if (src.photoStages) nj.photoStages = { ...src.photoStages };
-          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
-            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
-          }
-          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
-            refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
-          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
-          nj.updatedAt = new Date().toISOString();
-          await saveJob(env, tenantId, nj);
-        }
-      } catch {}
-      // Stamp the ROOT job with the group id too, so the whole chain shares one key.
-      if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
-      // Stamp every job in the group with the current visit count (for the board /
-      // scheduler "×N" badge) — accurate regardless of which are filtered per view.
-      try {
-        const all = await listJobs(env, tenantId, { includeDormant: true });
-        const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
-        const cnt = members.length;
-        for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
-      } catch {}
+      const job = await cloneJobAsVisit(env, tenantId, src, { description, scheduledAt, durationMinutes, assignedEngineers: engineers, changedBy: (sess.user && sess.user.username) || "system" });
+      const groupId = job.visitGroupId || src.id;
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
     }
@@ -2098,10 +2040,12 @@ export async function handle(request, env, ctx, url, sess) {
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
+      const money = await canSeeMoney(env, tenantId, sess.user.username);
       const visits = all.filter(j => j && (((j.visitGroupId || j.id) === groupId) || j.revisitOf === groupId))
         .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "",
           scheduledAt: j.scheduledAt || null, raisedAt: j.raisedAt || null, closedAt: j.closedAt || null,
           isRoot: j.id === groupId, current: j.id === src.id,
+          orderNumber: j.orderNumber || null, ...(money ? { orderValue: j.orderValue ?? null } : {}),
           engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [] }))
         .sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
       return jsonResponse({ ok: true, groupId, visits }, headers);
@@ -2303,10 +2247,11 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const d = decorateJobWithLiveSla(job);
+      let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));   // this viewer's own slice
       if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);   // add viewable photo URLs
       if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);        // electrical-test remedials
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) d = stripMoney(d);
       return jsonResponse(d, headers);
     }
 
@@ -2473,8 +2418,9 @@ export async function handle(request, env, ctx, url, sess) {
         }, updated.hold.approval.requestedBy));
       }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
-      const dOut = decorateJobWithLiveSla(updated);
+      let dOut = decorateJobWithLiveSla(updated);
       if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));   // actor's own slice, for the field app
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
   }
@@ -3529,6 +3475,181 @@ async function stampVisitGroup(env, tenantId, groupId) {
   const cnt = members.length;
   for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
 }
+/* Clone `src` into a NEW linked visit (the office 🔁 Re-visit and "make the job
+   for this order" both use this): fresh id, same site/requirements/job type, the
+   original's FILES copied + re-pathed (photos, signature, audit/remedial photos)
+   and its evidence FIELDS carried (notes/events, RA, signature, photo tags,
+   audit items, remedials), linked by revisitOf/visitGroupId and the ×N count
+   re-stamped across the chain. `opts`: description, scheduledAt, durationMinutes,
+   assignedEngineers, changedBy, copyFiles (default true), extra (payload fields
+   merged last — e.g. reference/priority/orderNumber for an order). */
+export async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
+  const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
+  const engineers = Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers.filter(Boolean)
+    : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
+  const payload = {
+    id: crypto.randomUUID(),
+    reference: src.helpdeskRef || src.siteName || src.siteCode,
+    description: opts.description !== undefined ? opts.description : String(src.description || "").trim(),
+    siteCode: src.siteCode, siteName: src.siteName,
+    address: src.address, postcode: src.postcode, telephone: src.telephone,
+    storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
+    priority: src.priority || "",
+    requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
+    requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
+    firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
+    pumpMaintenance: src.pumpMaintenance, pumpStore: src.pumpStore,
+    workArea: src.workArea || undefined, projectId: src.projectId || undefined,
+    assignedEngineers: engineers,
+    scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes !== undefined ? opts.durationMinutes : (src.durationMinutes || undefined),
+    revisitOf: src.id, visitGroupId: groupId,
+    changedBy: opts.changedBy || "system",
+    ...(opts.extra || {}),
+  };
+  const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+  const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
+  if (opts.copyFiles !== false && env.JOB_FILES) {
+    try {
+      let cursor;
+      do {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+        for (const o of (listed.objects || [])) {
+          try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
+        }
+        cursor = listed.truncated ? listed.cursor : null;
+      } while (cursor);
+    } catch {}
+  }
+  try {
+    const nj = await getJob(env, tenantId, job.id);
+    if (nj) {
+      if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+      if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+      if (src.photoStages) nj.photoStages = { ...src.photoStages };
+      if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+        nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+      }
+      if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
+        refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
+      if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
+      nj.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, nj);
+    }
+  } catch {}
+  if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
+  try { await stampVisitGroup(env, tenantId, groupId); } catch {}
+  return (await getJob(env, tenantId, job.id)) || job;
+}
+/* ── Client orders ↔ jobs (Sep 2026) ──
+   A Concerto order ("Order number 00028541/2", £439) is for an incident we
+   usually already attended ("00028541/1"). Three ways it meets a job:
+   1. the order arrives and a job with EXACTLY that reference already exists (the
+      "New Job Alert: …/2" came first) → the value is stamped on it;
+   2. a job with that reference is created LATER (/sla/inbound) → stamped then;
+   3. neither — the office presses "Make the job" on the orders board →
+      raiseJobForOrder clones the incident's newest job as a linked visit
+      (notes + photos carried) with the order's text, reference and value.
+   `stampOrderOnJob` is the one writer of the job-side fields. */
+const orderRefIncident = ref => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").trim()) || [])[1] || "";
+function orderText(o) {
+  const d = String(o.description || o.detail || "").trim();
+  return d || String(o.title || "").trim();
+}
+async function stampOrderOnJob(env, tenantId, job, o) {
+  if (!job || !o) return job;
+  const changed = job.orderNumber !== (o.orderNumber || null) || job.orderValue !== (o.orderValue ?? null) || job.clientOrderId !== (o.id || null);
+  if (!changed) return job;
+  job.orderNumber = o.orderNumber || null;
+  job.orderValue = (o.orderValue != null && Number.isFinite(Number(o.orderValue))) ? Number(o.orderValue) : null;
+  job.clientOrderId = o.id || null;
+  (job.events ||= []).push({ at: new Date().toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + (job.orderValue != null ? " — £" + job.orderValue.toFixed(2) : "") + " linked to this job" });
+  job.updatedAt = new Date().toISOString();
+  await saveJob(env, tenantId, job);
+  return job;
+}
+async function markOrderLinked(env, tenantId, orderId, jobId) {
+  try { await env.DB.prepare("UPDATE client_orders SET matched_kind='job', matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(jobId, new Date().toISOString(), tenantId, orderId).run(); } catch {}
+}
+const shapeOrderRow = r => r ? ({ id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new" }) : null;
+/* A job was created/updated with reference X — is there an unlinked client order
+   for X? Stamp it on. Best-effort (the orders table may not exist yet). */
+export async function applyOrderToJob(env, tenantId, job) {
+  const ref = String((job && job.helpdeskRef) || "").trim();
+  if (!ref || !job) return null;
+  let row = null;
+  try { row = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND order_number=? AND status<>'dismissed' ORDER BY created_at DESC LIMIT 1").bind(tenantId, ref).first(); } catch { return null; }
+  if (!row) return null;
+  const o = shapeOrderRow(row);
+  await stampOrderOnJob(env, tenantId, job, o);
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return o;
+}
+/* An order arrived — is a job with exactly its reference already on the board?
+   Returns the job it linked to, else null. */
+export async function linkOrderToExistingJob(env, tenantId, o) {
+  const ref = String((o && o.orderNumber) || "").trim();
+  if (!ref) return null;
+  const jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter(j => String(j.helpdeskRef || "") === ref || j.id === ref);
+  if (!jobs.length) return null;
+  const finished = await jobFinishedFor(env, tenantId);
+  const open = jobs.filter(j => !finished(j));
+  const pick = (open.length ? open : jobs).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  await stampOrderOnJob(env, tenantId, pick, o);
+  await markOrderLinked(env, tenantId, o.id, pick.id);
+  return pick;
+}
+/* Office hand-link: order → a specific job id. */
+export async function linkOrderToJobById(env, tenantId, o, jobId, by) {
+  const job = await getJob(env, tenantId, jobId);
+  if (!job) return null;
+  await stampOrderOnJob(env, tenantId, job, o);
+  if (by) { try { const j2 = await getJob(env, tenantId, jobId); if (j2) { (j2.events ||= []).push({ at: new Date().toISOString(), by, type: "note", note: "Order linked by " + by }); await saveJob(env, tenantId, j2); } } catch {} }
+  await markOrderLinked(env, tenantId, o.id, jobId);
+  return job;
+}
+/* The office pressed "Make the job" on an order. Returns {job, how, from}:
+   how = "linked" (a job with that reference already existed), "cloned" (a new
+   visit cloned from the incident's newest job — notes + photos carried) or
+   "created" (no earlier job: a fresh job at the order's store). */
+export async function raiseJobForOrder(env, tenantId, o, opts = {}) {
+  const ref = String((o && o.orderNumber) || "").trim();
+  const by = opts.changedBy || "office";
+  const pr = Number(o.priority) >= 1 && Number(o.priority) <= 4 ? "Priority " + Number(o.priority) : undefined;
+  const linked = await linkOrderToExistingJob(env, tenantId, o);
+  if (linked) return { job: linked, how: "linked" };
+  const inc = orderRefIncident(ref);
+  const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
+  const text = orderText(o);
+  const valueLine = (o.orderValue != null && Number.isFinite(Number(o.orderValue))) ? " (£" + Number(o.orderValue).toFixed(2) + ")" : "";
+  if (sibs.length) {
+    const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    const oldDesc = String(src.description || "").trim();
+    const description = ["🧾 Client order " + ref + valueLine + (text ? " — " + text : ""),
+      "↩ Ordered works following our visit " + (src.helpdeskRef || src.id) + " (" + (src.status || "") + ") — that visit's notes and photos are carried onto this job.",
+      oldDesc ? "— Original job —\n" + oldDesc : ""].filter(Boolean).join("\n\n");
+    const job = await cloneJobAsVisit(env, tenantId, src, {
+      description, scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes, assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [],
+      changedBy: by, extra: { reference: ref || undefined, priority: pr || src.priority || "", status: "Pending", orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order" } });
+    await markOrderLinked(env, tenantId, o.id, job.id);
+    return { job, how: "cloned", from: { id: src.id, ref: src.helpdeskRef || src.id, status: src.status || "" } };
+  }
+  // No earlier job for this incident — a fresh job at the order's store.
+  let siteName = o.siteName || "", postcode = "", address = "";
+  const code = String(o.storeCode || "").trim();
+  if (code) {
+    try {
+      const row = await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND (site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) ORDER BY LENGTH(site_number) LIMIT 1").bind(tenantId, code, code).first();
+      if (row) { siteName = row.site_name || siteName; postcode = row.postcode || ""; try { address = (JSON.parse(row.data || "{}") || {}).address || ""; } catch {} }
+    } catch {}
+  }
+  const payload = { id: crypto.randomUUID(), reference: ref || undefined, description: ("🧾 Client order " + ref + valueLine + (text ? " — " + text : "")).trim(),
+    priority: pr, siteCode: code || undefined, siteName: siteName || undefined, postcode: postcode || undefined, address: address || undefined,
+    assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [], scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes,
+    orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order", changedBy: by };
+  const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return { job, how: "created" };
+}
 /* Every live job belonging to a Concerto incident: by exact reference ("NNNNNNNN/1"),
    by the incident number's suffixes ("NNNNNNNN/%"), or by id. Dormant fallback
    templates are never matched. */
@@ -3866,6 +3987,13 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
+    // Client ORDER link (Sep 2026): the client's order number + its VALUE (£, ex VAT)
+    // + the client_orders row it came from — so job costing can show profit. The
+    // value is MONEY: stripped from every job response for anyone who isn't Full
+    // Access / office staff (stripMoney). Preserved across re-saves.
+    orderNumber: body.orderNumber !== undefined ? (String(body.orderNumber || "") || null) : (existing?.orderNumber || null),
+    orderValue: body.orderValue !== undefined ? (body.orderValue === null || body.orderValue === "" ? null : (Number.isFinite(Number(body.orderValue)) ? Number(body.orderValue) : (existing?.orderValue ?? null))) : (existing?.orderValue ?? null),
+    clientOrderId: body.clientOrderId !== undefined ? (String(body.clientOrderId || "") || null) : (existing?.clientOrderId || null),
     // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
     // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
     // the chain, so all visits against one job are easy to find + cost together.
@@ -4067,6 +4195,9 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== undefined) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.orderNumber !== undefined) job.orderNumber = String(patch.orderNumber || "") || null;
+  if (patch.orderValue !== undefined) job.orderValue = (patch.orderValue === null || patch.orderValue === "") ? null : (Number.isFinite(Number(patch.orderValue)) ? Number(patch.orderValue) : job.orderValue ?? null);
+  if (patch.clientOrderId !== undefined) job.clientOrderId = String(patch.clientOrderId || "") || null;
   if (patch.visitGroupId !== undefined) job.visitGroupId = String(patch.visitGroupId || "") || null;
   if (patch.visitCount !== undefined) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
@@ -5296,6 +5427,14 @@ function computeSlaTarget(raisedAt, priority, cfg) {
   return new Date(new Date(raisedAt).getTime() + hrs * 3600000).toISOString();
 }
 
+/* MONEY fields a non-money viewer must never receive (Jamie's rule: only Full
+   Access / office staff see financials). Applied to every job response for
+   anyone else — the field app never sees an order value. */
+export function stripMoney(job) {
+  if (!job || typeof job !== "object") return job;
+  const { orderValue, ...rest } = job;
+  return rest;
+}
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
   const state = (job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled")

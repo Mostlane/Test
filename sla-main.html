@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=28"></script>
+  <script src="/portal-config.js?v=29"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Jobs</title>
@@ -259,6 +259,7 @@
             <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
+            <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
@@ -287,6 +288,7 @@
         // Certificate review queue — office roles that can issue EM/PAT certs.
         if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance)) {
           var crl = document.getElementById("certReviewLink"); if (crl) crl.style.display = "";
+          var orl = document.getElementById("ordersLink"); if (orl) orl.style.display = "";
           var cjl = document.getElementById("certJobsLink"); if (cjl) cjl.style.display = "";
           var prl = document.getElementById("pumpReviewLink"); if (prl) prl.style.display = "";
         }
