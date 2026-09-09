@@ -739,7 +739,7 @@
     // page renders the description plain (list previews). richBar(textarea)
     // attaches a small format toolbar (B · colours · ⚠🚨🔴 emojis) above it.
     var RICH_COLS = { red: "#c1121f", amber: "#b45309", green: "#1f7a44", blue: "#1e40af" };
-    function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     // Italic: _text_ (underscores; won't touch **bold** which uses asterisks, and
     // only fires at word boundaries so file_names etc. are left alone).
     var ITAL = /(^|[\s(>])_([^_\n][^_\n]*?)_(?=$|[\s.,;:)!?<])/g;
@@ -1433,7 +1433,7 @@
           if (m === "confirm") {
             var pa = (state && state.pendingAutoStop) || {};
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🕘</div><h2>You didn\'t clock out</h2>'
-              + '<p>On <b>' + niceDay(pa.date) + '</b> your timer was still running, so it was automatically stopped at <b>' + (pa.stoppedAtHM || "19:00") + '</b>.</p>'
+              + '<p>On <b>' + esc(niceDay(pa.date)) + '</b> your timer was still running, so it was automatically stopped at <b>' + esc(pa.stoppedAtHM || "19:00") + '</b>.</p>'
               + '<p>What time did you actually finish that day?</p>'
               + '<input type="time" id="ocFinishTime" value="16:30" style="font-size:22px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:10px;text-align:center;margin-bottom:14px;">'
               + '<button class="oc-cta" id="ocConfirmBtn">✔ Confirm finish time</button>'
@@ -1782,7 +1782,7 @@
       if (SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       nativeFetch(API + "/memos/pending", { headers: { Authorization: "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1800,7 +1800,7 @@
             '<div style="padding:18px 20px 20px;">' +
             '<div style="font-weight:700;color:#003366;font-size:15px;">Re: ' + esc(m.re || "Company memo") + '</div>' +
             '<div style="color:#667085;font-size:13px;margin-top:2px;">From ' + esc(m.from || "the office") + '</div>' + extra +
-            '<a href="/memo-sign.html?id=' + m.id + '" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Read &amp; sign now</a>' +
+            '<a href="/memo-sign.html?id=' + esc(m.id) + '" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Read &amp; sign now</a>' +
             '<p style="margin:10px 0 0;text-align:center;font-size:12px;color:#8a97a6;">This can\'t be dismissed — it must be signed.</p>' +
             '</div></div>';
           (document.body || document.documentElement).appendChild(ov);
@@ -1827,7 +1827,7 @@
       var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
       if (!(yes(perms.FullAccess) || yes(perms.SLAAdmin) || yes(perms.Compliance))) return;
       if (typeof mlFieldUserLocal === "function" && mlFieldUserLocal()) return;   // office only
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       var money = function (n) { return "£" + (Number(n) || 0).toFixed(0); };
       function ack(certId, action, cb) {
         nativeFetch(API + "/certs/remedials/ack", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ certId: certId, action: action }) })
@@ -1903,7 +1903,7 @@
       if (SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       nativeFetch(API + "/hs/to-sign", { headers: { Authorization: "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1947,7 +1947,7 @@
       if (SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       function check() {
         if (document.getElementById("mlHandoverGate")) return;   // already up
         nativeFetch(API + "/fleet/handover/attention", { headers: { Authorization: "Bearer " + token } })
@@ -2241,6 +2241,7 @@
         return nativeFetch(API + path, init);
       }
       function esc(x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
+      function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
       function ago(iso) {
         try {
           var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -2310,11 +2311,11 @@
             var outstanding = n.actionable && !n.resolved;
             var bg = outstanding ? "#fff8ec" : (n.read ? "#fff" : "#eef6ff");
             var tw = (outstanding || !n.read) ? "700" : "600";
-            var href = n.url ? esc(n.url) : "";
+            var href = n.url ? esc(safeUrl(n.url)) : "";
             var dotC = outstanding ? "#f59e0b" : "#1e88e5";
             var dot = (outstanding || !n.read) ? '<span class="mlBellDot" style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:' + dotC + ';transform:translateY(-50%);"></span>' : "";
             var pill = outstanding ? '<span style="display:inline-block;margin-top:3px;font-size:10.5px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:6px;padding:1px 6px;">Needs action</span>' : "";
-            return '<a class="mlBellItem" data-id="' + n.id + '" data-out="' + (outstanding ? "1" : "0") + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + (outstanding ? ';box-shadow:inset 3px 0 0 #f59e0b' : '') + ';">' +
+            return '<a class="mlBellItem" data-id="' + esc(n.id) + '" data-out="' + (outstanding ? "1" : "0") + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + (outstanding ? ';box-shadow:inset 3px 0 0 #f59e0b' : '') + ';">' +
               dot +
               '<span style="font-size:20px;line-height:1.2;flex:0 0 auto;">' + iconFor(n) + '</span>' +
               '<span style="flex:1;min-width:0;">' +
