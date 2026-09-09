@@ -13450,6 +13450,15 @@ async function handle11(request, env, ctx, url, sess) {
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
+        try {
+          const fresh = async (arr) => Promise.all((arr || []).map(async (p) => p && p.key ? { ...p, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", p.key, 86400) } : p));
+          for (const s of rec.seals || []) {
+            if (!s) continue;
+            s.beforePhotos = await fresh(s.beforePhotos);
+            s.afterPhotos = await fresh(s.afterPhotos);
+          }
+        } catch {
+        }
         const installer = rec.installer || (job.assignedTo || sess.user && sess.user.username || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
         const now = /* @__PURE__ */ new Date();
@@ -13517,8 +13526,8 @@ async function handle11(request, env, ctx, url, sess) {
         manufacturer: s.manufacturer,
         componentName: s.componentName,
         comments: s.comments,
-        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
-        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean)
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map((p) => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean)
       })));
       const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
       let logo = null;
