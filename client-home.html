@@ -131,6 +131,42 @@
 
   if(!tok()){ toLogin(); }
 
+  // ── Owner "View As" return bar ───────────────────────────────────────────────
+  // This page is standalone (no portal-config), so the portal's purple return bar
+  // can't reach it. When the owner is viewing as a client, show our own bar so he
+  // can get back to his account — it restores the stashed real session.
+  (function viewAsBar(){
+    var stash; try{ stash = JSON.parse(localStorage.getItem("mostlaneViewAsReal") || "null"); }catch(e){ stash = null; }
+    if(!stash || !stash.token) return;
+    var who = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "client";
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);";
+    bar.innerHTML = '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">👁 Viewing as <b>'+esc(who)+'</b></span>';
+    var btn = document.createElement("button");
+    btn.textContent = "Return to my account";
+    btn.style.cssText = "background:#fff;color:#4a1d96;border:none;border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;flex:none;";
+    btn.onclick = function(){
+      var impTok = localStorage.getItem("mostlaneToken");
+      try{ fetch(API + "/auth/logout", { method:"POST", headers:{ "Authorization":"Bearer " + impTok } }); }catch(e){}
+      function setBoth(k,v){ try{ localStorage.setItem(k,v); sessionStorage.setItem(k,v); }catch(e){} }
+      localStorage.setItem("mostlaneToken", stash.token);
+      setBoth("mostlaneUser", stash.user || "");
+      setBoth("mostlaneUsername", stash.user || "");
+      setBoth("mostlanePermissions", stash.perms || "{}");
+      setBoth("mostlaneLoggedIn", "true");
+      var realStaff = stash.staff;
+      if(realStaff === undefined || realStaff === null){ try{ realStaff = (JSON.parse(stash.perms||"{}").StaffType) || "office"; }catch(e){ realStaff = "office"; } }
+      setBoth("mostlaneStaffType", realStaff || "office");
+      if(stash.master) sessionStorage.setItem("mostlaneMasterLogin", stash.master); else sessionStorage.removeItem("mostlaneMasterLogin");
+      localStorage.removeItem("mostlaneViewAsReal");
+      location.href = "/main.html";
+    };
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+    // Keep the page content clear of the fixed bar.
+    document.body.style.paddingBottom = (bar.offsetHeight || 52) + "px";
+  })();
+
   var ME = null, JOBS = [], JOBFILTER = "all", URGENCY = "routine", RAISE_PHOTOS = [];
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
