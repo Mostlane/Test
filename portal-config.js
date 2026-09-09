@@ -854,6 +854,9 @@
         var pj = JSON.stringify(u);
         setBoth("mostlanePermissions", pj);
         setBoth("mostlaneLoggedIn", "true");
+        // Carry the impersonated user's staff type so field/office/CLIENT gating
+        // (the client wall + landing) behaves as that user, not the owner.
+        setBoth("mostlaneStaffType", u.StaffType || "field");
         sessionStorage.setItem("mostlaneFolder", u.SharePointPath || "");
         sessionStorage.setItem("mostlaneVehicle", u.VehicleAssigned || "");
         sessionStorage.setItem("mostlaneEmployment", u.EmploymentType || "");
@@ -916,10 +919,12 @@
               token: token,
               user: localStorage.getItem("mostlaneUser") || OWNER,
               perms: localStorage.getItem("mostlanePermissions") || "{}",
+              staff: localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "",
               master: sessionStorage.getItem("mostlaneMasterLogin") || ""
             }));
             applySession(d);
-            location.href = "/main.html";
+            // A client account lands in its own walled portal; everyone else on main.
+            location.href = ((d.user && d.user.StaffType) === "client") ? "/client-home.html" : "/main.html";
           }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
         };
       };
@@ -952,6 +957,11 @@
             setBoth("mostlaneUsername", stash.user || "");
             setBoth("mostlanePermissions", stash.perms || "{}");
             setBoth("mostlaneLoggedIn", "true");
+            // Restore the owner's own staff type (else the client wall would bounce
+            // him if he'd just been viewing as a client). Fall back to the perms blob.
+            var realStaff = stash.staff;
+            if (realStaff === undefined || realStaff === null) { try { realStaff = (JSON.parse(stash.perms || "{}").StaffType) || "office"; } catch (e) { realStaff = "office"; } }
+            setBoth("mostlaneStaffType", realStaff || "office");
             if (stash.master) sessionStorage.setItem("mostlaneMasterLogin", stash.master);
             else sessionStorage.removeItem("mostlaneMasterLogin");
             localStorage.removeItem("mostlaneViewAsReal");
