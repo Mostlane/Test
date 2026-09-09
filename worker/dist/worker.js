@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -3866,6 +3871,15 @@ function buildFirestopPdf(record, meta = {}) {
   } else {
     doc.line(M + 60, y + 8, M + 220, y + 8, { stroke: LINE });
     y += 20;
+  }
+  const signedBits = [
+    record.installer ? "Name: " + record.installer : "",
+    record.dateOfIssue ? "Date: " + record.dateOfIssue : ""
+  ].filter(Boolean);
+  if (signedBits.length) {
+    ensure7(16);
+    doc.text(M, y + 8, signedBits.join("       "), { size: 9, color: GREY });
+    y += 14;
   }
   y += 8;
   ensure7(20);
@@ -34067,9 +34081,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
@@ -40069,6 +40083,11 @@ var PUBLIC_ROUTES = [
   ["GET", "/fleet/maintenance-doc"],
   // Employee-record documents (certs/scans) — signed URL, verified in-handler.
   ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],
