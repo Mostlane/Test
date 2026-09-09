@@ -336,6 +336,13 @@
         <option value="Priority 3">P3</option>
         <option value="Priority 4">P4</option>
       </select>
+      <!-- Client / site-type filter — narrows WITHIN whichever status chip is
+           active (e.g. Pending → Co-op only). Co-op combines its sub-types
+           (retail/els/els private/cobra) into one option, per Jamie. Options +
+           counts are rebuilt from the loaded jobs on every render. -->
+      <select id="clientFilter" title="Filter by client / site type">
+        <option value="all">All clients</option>
+      </select>
       <div class="spacer"></div>
       <button class="btn small" id="resetBtn">Reset</button>
       <input type="text" id="searchBox" placeholder="Search jobs…">
@@ -582,6 +589,8 @@ let archiveSeq = 0;             // guards against out-of-order async archive res
 let cachedUsers = [];
 let activeStatus = "all";      // default board view (restoreFilters may override); "open" = everything not complete/closed/invoiced
 let activePriority = "all";
+let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
+let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
 let selected = new Set();
 let currentUpdateId = null, currentPdfJobId = null;
 let countdownTimerId = null;
@@ -607,6 +616,43 @@ function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"
 function isP1(j){ return !isProjectJob(j) && /1/.test(String((j&&j.priority)||"")); }
 // Projects carry no priority level and no SLA — blank both on the board.
 function isProjectJob(j){ return /^p\d/i.test(String((j&&j.siteCode)||"")) || /project/i.test(String((j&&(j.storeType||j.client))||"")); }
+
+/* ---- Client / site-type filter (within a status chip) ----
+   Buckets shown in the dropdown, in order. Co-op is ONE option that groups its
+   four sub-types (retail / els / els private / cobra) — that's how Jamie asked
+   for it ("Co-op (Retail,ELS,ELS Private, Cobra)"). "other" catches anything
+   unrecognised so nothing silently disappears from a filtered view. */
+const CLIENT_BUCKETS = [
+  ["coop",      "Co-op"],
+  ["chapplins", "Chapplins"],
+  ["fbc",       "Fareham (FBC)"],
+  ["wenzels",   "Wenzel's"],
+  ["projects",  "Projects"],
+  ["other",     "Other"]
+];
+// Map a raw storeType/client string to a bucket key.
+function normClientKey(raw){
+  const s = String(raw||"").toLowerCase().trim();
+  if(!s) return "";
+  if(/^(retail|els|cobra)\b|els[_ ]?private|co[-_ ]?op|coop|southern/.test(s)) return "coop";
+  if(/chapplin/.test(s)) return "chapplins";
+  if(/\bfbc\b|fareham/.test(s)) return "fbc";
+  if(/wenzel/.test(s)) return "wenzels";
+  if(/project/.test(s)) return "projects";
+  return "other";
+}
+// A job's bucket: project jobs first, then its own storeType/client, then a
+// lookup by site code against the loaded sites register (jobs from email intake
+// / the archive often carry only a code, no storeType).
+function clientBucketOf(j){
+  if(isProjectJob(j)) return "projects";
+  let raw = (j && (j.storeType || j.client)) || "";
+  if(!raw){
+    const code = String((j && j.siteCode) || "").replace(/^0+/,"");
+    if(code && siteClientByCode[code]) raw = siteClientByCode[code];
+  }
+  return normClientKey(raw) || "other";
+}
 // EM 3-hour drain-down timer chip — mirrors the engineer job-list chip so the
 // office can see how long each running emergency-light discharge test has left.
 function fmtHM(ms){ var s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h+":"+String(m).padStart(2,"0"); }
@@ -752,6 +798,38 @@ function renderChips(){
   all.onclick = () => { activeStatus = "all"; render(); };
   host.appendChild(all);
 }
+// Jobs in the currently-active status chip (ignoring priority/client/search) —
+// the scope the client dropdown counts against.
+function jobsInStatusScope(){
+  return allJobs.filter(j => {
+    if(activeStatus === "open") return !isClosed(j);
+    if(activeStatus === "all") return true;
+    return j.status === activeStatus;
+  });
+}
+// Rebuild the client dropdown from the jobs in the active status, with a live
+// count beside each. Empty buckets are hidden (except the one currently picked),
+// and a pick that no longer exists in this status falls back to "All clients".
+function populateClientFilter(){
+  const sel = $("clientFilter");
+  if(!sel) return;
+  const scope = jobsInStatusScope();
+  const counts = {};
+  scope.forEach(j => { const b = clientBucketOf(j); counts[b] = (counts[b]||0)+1; });
+  const keep = activeClient;
+  sel.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "all"; optAll.textContent = `All clients (${scope.length})`;
+  sel.appendChild(optAll);
+  CLIENT_BUCKETS.forEach(([key,label]) => {
+    if(!counts[key] && key !== keep) return;
+    const o = document.createElement("option");
+    o.value = key; o.textContent = `${label} (${counts[key]||0})`;
+    sel.appendChild(o);
+  });
+  if([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  else { activeClient = "all"; sel.value = "all"; }
+}
 
 function filteredJobs(){
   const search = $("searchBox").value.trim().toLowerCase();
@@ -759,6 +837,7 @@ function filteredJobs(){
     if(activeStatus === "open"){ if(isClosed(j)) return false; }
     else if(activeStatus !== "all" && j.status !== activeStatus) return false;
     if(activePriority !== "all" && (j.priority||"") !== activePriority) return false;
+    if(activeClient !== "all" && clientBucketOf(j) !== activeClient) return false;
     if(search){
       const blob = [j.helpdeskRef, j.id, j.description, j.siteName, j.siteCode, j.address,
                     j.status, (j.assignedEngineers||[]).join(" ")].join(" ").toLowerCase();
@@ -771,8 +850,9 @@ function filteredJobs(){
 }
 
 function render(){
-  persistFilters();   // remember search + status + priority so Back restores them
+  persistFilters();   // remember search + status + priority + client so Back restores them
   renderChips();
+  populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
   const list = filteredJobs();
   const tbody = $("jobsTbody");
   const cards = $("jobCards");
@@ -977,6 +1057,14 @@ async function ensureSites(){
       })
       .filter(s => s.name)
       .sort((a,b) => a.name.localeCompare(b.name));
+    // Build a code → storeType/client lookup so the client filter can bucket
+    // jobs that carry only a site code (email-intake / archive jobs). Key is the
+    // code with leading zeros stripped, matching clientBucketOf's normalisation.
+    siteClientByCode = {};
+    sitesList.forEach(s => {
+      const code = String(s.code||"").replace(/^0+/,"");
+      if(code && s.storeType) siteClientByCode[code] = s.storeType;
+    });
   }catch(e){ sitesList = []; }
 }
 function fillSiteSelect(filter){
@@ -1297,7 +1385,7 @@ async function catSaveChanges(){
 // survives leaving the page (into a job) and coming back, and across tabs. It is
 // cleared only when SLA is entered fresh from the menu (?reset=1).
 function persistFilters(){
-  try{ localStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority })); }catch(e){}
+  try{ localStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority, client: activeClient })); }catch(e){}
 }
 function restoreFilters(){
   try{
@@ -1306,6 +1394,7 @@ function restoreFilters(){
     if(typeof s.q === "string") $("searchBox").value = s.q;
     if(s.status) activeStatus = s.status;
     if(s.priority){ activePriority = s.priority; const pf = $("priorityFilter"); if(pf) pf.value = s.priority; }
+    if(s.client) activeClient = s.client;   // clientFilter options are rebuilt each render(), so just set the state
     return true;
   }catch(e){ return false; }
 }
@@ -1322,8 +1411,9 @@ function cameFromBackForward(){
 }
 // Clear search + status + priority back to the defaults and forget the saved set.
 function resetView(){
-  activeStatus = "all"; activePriority = "all";
+  activeStatus = "all"; activePriority = "all"; activeClient = "all";
   const pf = $("priorityFilter"); if(pf) pf.value = "all";
+  const cf = $("clientFilter"); if(cf) cf.value = "all";
   $("searchBox").value = ""; archiveMatches = [];
   resetSavedFilters();
   render();
@@ -1470,6 +1560,7 @@ function init(){
     $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
   });
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
+  $("clientFilter").addEventListener("change", () => { activeClient = $("clientFilter").value; render(); });
   $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", resetView);
   { const jt = $("jobsTitle"); if(jt) jt.addEventListener("click", resetView); }
@@ -1504,6 +1595,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
+    // Load the sites register in the background so the client filter can bucket
+    // jobs that carry only a site code; re-render once the map is ready so the
+    // dropdown counts are accurate. Never blocks the board.
+    ensureSites().then(() => { if(allJobs.length) render(); }).catch(()=>{});
     loadCategories().then(() => {
       populateBulkDropdown(); render();
       // Deep-link from ⚙️ Settings: open the Categories / Sheet-settings modal
