@@ -52,6 +52,7 @@
     .lvl-field  { background:rgba(0,122,255,.12); color:#0060df; }
     .lvl-office { background:rgba(52,199,89,.16); color:#248a3d; }
     .lvl-admin  { background:rgba(255,149,0,.18); color:#a15c00; }
+    .lvl-client { background:rgba(30,64,175,.12); color:#1e40af; }
     .lvl-full   { background:rgba(175,82,222,.15); color:#8944ab; }
     .muted { color:var(--text2); font-size:13px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
@@ -246,6 +247,11 @@
       <div class="zone">
         <div class="zonehead">Field staff <span class="count" id="cntField"></span></div>
         <div class="ulist" id="listField" data-staff="field"></div>
+      </div>
+      <div class="zone" id="zoneClients" style="display:none;">
+        <div class="zonehead">🏢 Client logins <span class="count" id="cntClients"></span></div>
+        <div style="font-size:12px;color:#64748b;margin:0 0 6px;">External customer accounts — walled to their org's own jobs + compliance chart. No staff access, no financial info.</div>
+        <div class="ulist" id="listClients" data-staff="client"></div>
       </div>
     </div>
   </div>
@@ -858,6 +864,7 @@
     }
 
     function accessSummary(u) {
+      if (u.StaffType === "client") { const o = String(u.ClientOrg || u.Profile?.clientOrg || "").toLowerCase(); return o ? (ORG_LABELS[o] || o.toUpperCase()) + " portal" : "Client portal"; }
       if (u.FullAccess === "Yes") return "Full access";
       const n = PERMISSIONS.filter(p => u[p] === "Yes").length;
       return n ? n + " area" + (n === 1 ? "" : "s") : "None";
@@ -866,7 +873,9 @@
     // Permissions that make someone an "Admin" (manage an area for everyone).
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
+    const ORG_LABELS = { fbc: "FBC" };
     function levelOf(u) {
+      if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
       if (ADMIN_PERMS.some(p => u[p] === "Yes")) return { label: "Admin", cls: "lvl-admin" };
       if (u.StaffType === "office") return { label: "Office", cls: "lvl-office" };
@@ -912,9 +921,12 @@
       // allUsers arrives already in canonical order (office first, then field,
       // each by manual drag order) from the server — keep that order per zone.
       const office = allUsers.filter(u => u.StaffType === "office");
-      const field  = allUsers.filter(u => u.StaffType !== "office");
+      const field  = allUsers.filter(u => u.StaffType !== "office" && u.StaffType !== "client");
+      const clients = allUsers.filter(u => u.StaffType === "client");
       g("listOffice").innerHTML = office.map(userRow).join("");
       g("listField").innerHTML  = field.map(userRow).join("");
+      g("listClients").innerHTML = clients.map(userRow).join("");
+      g("zoneClients").style.display = clients.length ? "" : "none";
       const match = u => !q || [u.Username, u.FirstName, u.LastName, u.Email]
         .some(v => String(v || "").toLowerCase().includes(q));
       document.querySelectorAll(".urow").forEach(r => {
@@ -926,8 +938,10 @@
     function refreshCounts() {
       const nO = g("listOffice").querySelectorAll(".urow").length;
       const nF = g("listField").querySelectorAll(".urow").length;
+      const nC = g("listClients").querySelectorAll(".urow").length;
       g("cntOffice").textContent = nO ? `(${nO})` : "";
       g("cntField").textContent  = nF ? `(${nF})` : "";
+      if (g("cntClients")) g("cntClients").textContent = nC ? `(${nC})` : "";
       g("listOffice").classList.toggle("empty", !nO);
       g("listField").classList.toggle("empty", !nF);
     }
