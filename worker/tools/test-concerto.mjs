@@ -88,6 +88,13 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   ok("overdue (agree, past)", reconcileRow({ store_code: "0001", ppm_type: "em", period: "2026-07" }, st({ em: "2026-07-15" }), T).flag === "overdue");
   ok("mismatch chart earlier", reconcileRow({ store_code: "0001", ppm_type: "em", period: "2025-08" }, st({ em: "2026-02-01" }), T).flag === "mismatch");
   ok("mismatch chart later", reconcileRow({ store_code: "0001", ppm_type: "em", period: "2026-08" }, st({ em: "2026-12-01" }), T).flag === "mismatch");
+  // Coverage gap: our cert runs out BEFORE Concerto's planned date → bright red, plain-English note, DD/MM/YY dates
+  const gap1 = reconcileRow({ store_code: "0001", ppm_type: "em", period: "2027-02" }, st({ em: "2026-11-10" }), T);
+  ok("gap (future): chart Nov 26 earlier than Concerto Feb 27 → flag gap + DD/MM/YY note", gap1.flag === "gap" && gap1.gapFrom === "2026-11-10" && gap1.gapTo === "2027-02-01" && /runs out on 10\/11\/26 but Concerto has the next test planned for Feb 27/.test(gap1.text) && /no valid certificate for about 3 months/.test(gap1.text), gap1.text);
+  const gap2 = reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2027-03-31" }, st({ fiveYear: "2026-06-01" }), T);
+  ok("gap (already expired): NO valid certificate right now, DD/MM/YY", gap2.flag === "gap" && /ran out on 01\/06\/26 but Concerto has the next test planned for 31\/03\/27/.test(gap2.text) && /NO valid certificate right now/.test(gap2.text), gap2.text);
+  ok("small difference inside the slack still reads as due (no false gap)", reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2027-01-20" }, st({ fiveYear: "2026-12-15" }), T).flag === "due");
+  ok("other texts carry DD/MM/YY too", /Due 05\/10\/26 \(Concerto Oct 26\)/.test(reconcileRow({ store_code: "0001", ppm_type: "em", period: "2026-10" }, st({ em: "2026-10-05" }), T).text));
   ok("pump monthly done", reconcileRow({ store_code: "0001", ppm_type: "pump", period: "2026-08" }, st({ pump: "2026-09-20" }), T).flag === "done");
   ok("schedule row planned date drives it", reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2026-06-30" }, st({ fiveYear: "2031-06-25" }), T).flag === "done");
 }
@@ -161,7 +168,7 @@ const ROWS = [
   ok("schedule row resolved from its Site column + planned serial date", s1 && s1.storeCode === "0109" && s1.nextDate === "2026-06-30" && s1.type === "fiveYear" && s1.flag === "not_on_chart", JSON.stringify(s1));
   ok("schedule import taught SR00314 → 0109", refs.body.refs.some(r => r.ref === "SR00314" && r.storeCode === "0109"));
   const s2 = l6.body.rows.find(r => r.id === "SCH:SR00373:em");
-  ok("schedule EM row for Frome: chart 2026-07-15 earlier than planned Nov → mismatch", s2 && s2.flag === "mismatch", s2 && s2.flagText);
+  ok("schedule EM row for Frome: chart 2026-07-15 earlier than planned Nov → coverage GAP (red)", s2 && s2.flag === "gap" && /15\/07\/26/.test(s2.flagText), s2 && s2.flagText);
   const lo = await call(env, "Jamie Line", "GET", "/concerto/list");
   ok("orders list excludes schedule rows", lo.body.rows.every(r => r.kind === "order"));
   // Full 5-year schedule layout: next date, release (Order nr.), log + history cross-reference
@@ -282,6 +289,21 @@ const ROWS = [
   const nf = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:NOPE:fiveYear", step: "approved", done: true });
   const fld = await call(env, "Nobody", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "approved", done: true });
   ok("unknown row 404; non-office 403", nf.status === 404 && fld.status === 403);
+  // Coverage gap on a 5-year row → the case is flagged AUTOMATICALLY with the plain-English note,
+  // becomes active even though it is 18 months out, and the flag clears itself when the chart catches up.
+  ins("compliance_stores", ["tenant_id","scheme","code","category","name","due","active"], [[1,"coop","0777","Retail","Gapford",'{"fiveYear":"2027-03-01"}',1]]);
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: [{ uprn: "SR00777", site: "0777 - Gapford", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2028-03-31", lastDate: "2023-03-31", status: "Live", orderNr: "" }], fileName: "ppm_schedule_7.xlsx" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  const g = by["0777"];
+  ok("gap row: red flag, case auto-flagged with the note, active (not 'not due'), counted in flagged + stats.gap", g && g.flag === "gap" && g.case.flagged && g.case.autoFlag && g.case.autoFlag.reason === "gap" && /01\/03\/27.*31\/03\/28/.test(g.case.autoFlag.note) && g.case.active && g.case.stage !== "not_due" && !g.case.flagNote && sc.body.stats.gap === 1 && sc.body.stats.pipeline.flagged >= 1, JSON.stringify(g && { flag: g.flag, c: g.case && { flagged: g.case.flagged, auto: g.case.autoFlag, stage: g.case.stage } }));
+  if (process.env.DUMP_SCHEDULE_GAP) { const fs = await import("node:fs"); fs.writeFileSync(process.env.DUMP_SCHEDULE_GAP, JSON.stringify(sc.body)); }   // fixture for the page smoke test (gap row)
+  const gf = await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00777:fiveYear", flag: "Rang Concerto — date being corrected" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("a manual 🚩 sits alongside the automatic one", gf.status === 200 && by["0777"].case.autoFlag && by["0777"].case.flagNote === "Rang Concerto — date being corrected");
+  await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00777:fiveYear", flag: "" });
+  db.prepare("UPDATE compliance_stores SET due=? WHERE code='0777'").run('{"fiveYear":"2028-03-15"}');   // cert uploaded → chart rolled to agree with Concerto
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("chart catches up → gap gone, automatic flag clears itself, row drops back to not due", by["0777"].flag === "due" && !by["0777"].case.autoFlag && !by["0777"].case.flagged && by["0777"].case.stage === "not_due" && sc.body.stats.gap === 0, JSON.stringify({ flag: by["0777"].flag, stage: by["0777"].case.stage }));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

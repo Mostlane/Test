@@ -80,6 +80,9 @@ export const ensureTables = onceMigration(ensureTables__raw); // once per isolat
 
 /* ── Parsing helpers (pure — exported for the test harness + seeding) ─────── */
 export const FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
+// Dates shown to people are DD/MM/YY (Jamie's rule); a Concerto month period reads "Aug 25".
+export function fmtUk(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || "")); return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : String(iso || ""); }
+function fmtPeriodUk(row) { if (row.planned_date) return fmtUk(row.planned_date); const m = /^(\d{4})-(\d{2})/.exec(String(row.period || "")); if (!m) return String(row.period || ""); const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return (M[Number(m[2]) - 1] || m[2]) + " " + m[1].slice(2); }
 const TYPE_LABEL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency lighting", pv: "PV", ev: "EV", pump: "Pump", other: "Other" };
 const MONTHS = ["january","february","march","april","may","june","july","august","september","october","november","december"];
 
@@ -314,16 +317,26 @@ export function reconcileRow(row, store, today) {
   // Concerto's period = the month the PPM falls due (order rows) or the planned date (schedule rows).
   const pStart = row.planned_date || (row.period ? row.period + "-01" : null);
   const pEnd = row.planned_date ? row.planned_date : (row.period ? addDays(addMonths(row.period + "-01", 1), -1) : null);
-  if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${chartDue})` : `Due ${chartDue}`, chartDue };
+  const cDue = fmtUk(chartDue), cPer = fmtPeriodUk(row);
+  if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${cDue})` : `Due ${cDue}`, chartDue };
   const slack = freq >= 12 ? 45 : 10;
   const lastDone = addMonths(chartDue, -freq);           // when the chart last saw it done
-  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${lastDone} — Concerto still shows it open`, chartDue, lastDone };
+  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${fmtUk(lastDone)} — Concerto still shows it open`, chartDue, lastDone };
   if (chartDue >= addDays(pStart, -slack) && chartDue <= addDays(pEnd, slack)) {
-    return chartDue < today ? { flag: "overdue", text: `Overdue — chart ${chartDue}, Concerto ${row.period || row.planned_date}`, chartDue }
-                            : { flag: "due", text: `Due ${chartDue} (Concerto ${row.period || row.planned_date})`, chartDue };
+    return chartDue < today ? { flag: "overdue", text: `Overdue — chart ${cDue}, Concerto ${cPer}`, chartDue }
+                            : { flag: "due", text: `Due ${cDue} (Concerto ${cPer})`, chartDue };
   }
-  if (chartDue < pStart) return { flag: "mismatch", text: `Chart says due ${chartDue}, earlier than Concerto's ${row.period || row.planned_date}`, chartDue };
-  return { flag: "mismatch", text: `Chart says due ${chartDue}, later than Concerto's ${row.period || row.planned_date}`, chartDue };
+  if (chartDue < pStart) {
+    // COVERAGE GAP: our certificate runs out BEFORE Concerto plans the next test, so if the
+    // site were tested to Concerto's date it would sit with no valid certificate in between.
+    const gapDays = Math.round((Date.parse(pStart + "T00:00:00Z") - Date.parse(chartDue + "T00:00:00Z")) / 864e5);
+    const span = gapDays >= 60 ? `about ${Math.round(gapDays / 30)} months` : `${gapDays} days`;
+    const text = chartDue < today
+      ? `Our certificate ran out on ${cDue} but Concerto has the next test planned for ${cPer}. The site has NO valid certificate right now and will not have one until it is tested — ${span} uncovered if we wait for Concerto's date. Get it tested and get Concerto's date corrected.`
+      : `Our certificate runs out on ${cDue} but Concerto has the next test planned for ${cPer}. If we wait for Concerto's date the site would have no valid certificate for ${span}. Test it by ${cDue} and get Concerto's date corrected.`;
+    return { flag: "gap", text, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
+  }
+  return { flag: "mismatch", text: `Chart says due ${cDue}, later than Concerto's ${cPer} — Concerto is early, the site stays covered`, chartDue };
 }
 async function buildList(env, tid, opts) {
   await ensureTables(env);
@@ -336,7 +349,7 @@ async function buildList(env, tid, opts) {
   const today = todayIso();
   const rows = (results || []).map(r => {
     const store = r.store_code ? stores.get(r.store_code) : null;
-    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.status === "gone" ? ("No longer on the Concerto list" + (r.gone_at ? " since " + r.gone_at.slice(0, 10) : "")) : (r.note || "") };
+    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.status === "gone" ? ("No longer on the Concerto list" + (r.gone_at ? " since " + fmtUk(r.gone_at) : "")) : (r.note || "") };
     const job = r.store_code ? booked.get(r.store_code + "|" + r.ppm_type) : null;
     return { id: r.id, kind: r.kind, orderDate: r.order_date, orderValue: opts.money ? r.order_value : undefined, description: r.description, type: r.ppm_type, typeLabel: TYPE_LABEL[r.ppm_type] || r.ppm_type,
       period: r.period, assetRef: r.asset_ref, srRef: r.sr_ref, storeCode: r.store_code || "", siteName: (store && store.name) || r.site_name || "", supplier: r.supplier,
@@ -487,7 +500,7 @@ async function caseContext(env, tid, type, jobs) {
   return ctx;
 }
 // Exported for the test harness. `r` = the concerto_ppm row; returns the case view.
-export function deriveCase(r, ctx, today, money) {
+export function deriveCase(r, ctx, today, money, rec) {
   today = today || todayIso();
   const code = r.store_code ? padCode(r.store_code) : "";
   const nextDate = r.next_date || r.planned_date || null;
@@ -542,13 +555,18 @@ export function deriveCase(r, ctx, today, money) {
   const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
   const closed = !!(c && c.closed_at);
   const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note));
-  const flagged = !closed && !!(c && c.flag_note);
-  const active = !closed && (!!r.order_nr || (daysToDue != null && daysToDue <= 365) || !!testJob || touched);
+  // Automatic flag: the reconcile found a coverage gap (Concerto's date later than our
+  // certificate's expiry). Derived from the dates, so it clears itself once they agree —
+  // never stored, never clearable by hand. A manual 🚩 can sit alongside it.
+  const autoFlag = !closed && rec && rec.flag === "gap" ? { reason: "gap", note: "⛔ No certificate cover: " + rec.text } : null;
+  const flagged = !closed && (!!(c && c.flag_note) || !!autoFlag);
+  const active = !closed && (!!r.order_nr || (daysToDue != null && daysToDue <= 365) || !!testJob || touched || !!autoFlag);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
   return { id: c ? c.id : caseId(r.id, cycleDue), stored: !!c, cycleDue, active, closed, closedAt: c && c.closed_at || null, closedBy: c && c.closed_by || "",
     held, holdReason: held ? c.hold_reason : "", heldBy: held ? c.held_by || "" : "", heldAt: held ? c.held_at || null : null,
-    flagged, flagNote: flagged ? c.flag_note : "", flaggedBy: flagged ? c.flagged_by || "" : "", flaggedAt: flagged ? c.flagged_at || null : null,
+    flagged, flagNote: !closed && c && c.flag_note ? c.flag_note : "", flaggedBy: !closed && c && c.flag_note ? c.flagged_by || "" : "", flaggedAt: !closed && c && c.flag_note ? c.flagged_at || null : null,
+    autoFlag,
     outcome, outcomeAuto, outcomeSource: c && c.outcome ? "manual" : outcomeAuto ? "review" : "",
     engineer: (c && c.engineer) || (testJob && testJob.engineer) || "", engineerSource: c && c.engineer ? "manual" : testJob && testJob.engineer ? "job" : "",
     stage, next: nextStep ? nextStep.key : null, nextLabel: nextStep ? nextStep.label : (allDone ? "All steps done — close the case" : ""), nextTodo: nextStep ? nextStep.todo : "", allDone, steps, daysToDue,
@@ -581,13 +599,13 @@ async function buildSchedule(env, tid, opts) {
       nextDate: r.next_date || r.planned_date || null, lastDate: r.last_date || null, released: !!r.order_nr, orderNr: r.order_nr || "", orderedValue: opts.money ? r.ordered_value : undefined, releasedAt: r.released_at || null,
       concertoStatus: r.concerto_status || "", monthMarker: r.month_marker || "", status: r.status, note: r.note || "", lastSeenAt: r.last_seen_at,
       chartDue: (store && store.due[type]) || null, flag: rec.flag, flagText: rec.text,
-      lastDone, history: h.slice(0, 6), job: job || null, case: cctx ? deriveCase(r, cctx, today, !!opts.money) : undefined };
+      lastDone, history: h.slice(0, 6), job: job || null, case: cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : undefined };
   });
   const from = opts.from || "", to = opts.to || "";
   const filtered = rows.filter(r => (!from || (r.nextDate || "") >= from) && (!to || (r.nextDate || "") <= to) && (opts.released === "yes" ? r.released : opts.released === "no" ? !r.released : true));
   const byYear = {};
   for (const r of rows) { const y = (r.nextDate || "").slice(0, 4) || "none"; byYear[y] = byYear[y] || { total: 0, released: 0, done: 0 }; byYear[y].total++; if (r.released) byYear[y].released++; if (r.flag === "done") byYear[y].done++; }
-  const stats = { sites: rows.length, released: rows.filter(r => r.released).length, notReleased: rows.filter(r => !r.released).length, done: rows.filter(r => r.flag === "done").length, overdue: rows.filter(r => r.flag === "overdue").length, mismatch: rows.filter(r => r.flag === "mismatch").length, noStore: rows.filter(r => r.flag === "no_store").length, notOnChart: rows.filter(r => r.flag === "not_on_chart").length, withHistory: rows.filter(r => r.lastDone).length, byYear };
+  const stats = { sites: rows.length, released: rows.filter(r => r.released).length, notReleased: rows.filter(r => !r.released).length, done: rows.filter(r => r.flag === "done").length, overdue: rows.filter(r => r.flag === "overdue").length, mismatch: rows.filter(r => r.flag === "mismatch").length, gap: rows.filter(r => r.flag === "gap").length, noStore: rows.filter(r => r.flag === "no_store").length, notOnChart: rows.filter(r => r.flag === "not_on_chart").length, withHistory: rows.filter(r => r.lastDone).length, byYear };
   let releaseLog = [];
   try { const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all(); releaseLog = (lg || []).map(x => { let d = {}; try { d = JSON.parse(x.detail || "{}"); } catch {} return { id: x.ppm_id, at: x.at, ...d }; }); } catch {}
   const lead = releaseLog.map(x => x.daysBeforeDue).filter(n => Number.isFinite(n));

@@ -9522,6 +9522,17 @@ async function ensureTables__raw(env) {
     kind TEXT, source TEXT, updated_at TEXT,
     PRIMARY KEY (tenant_id, ref))`).run();
 }
+function fmtUk(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : String(iso || "");
+}
+function fmtPeriodUk(row) {
+  if (row.planned_date) return fmtUk(row.planned_date);
+  const m = /^(\d{4})-(\d{2})/.exec(String(row.period || ""));
+  if (!m) return String(row.period || "");
+  const M8 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return (M8[Number(m[2]) - 1] || m[2]) + " " + m[1].slice(2);
+}
 function padCode(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
@@ -9844,15 +9855,21 @@ function reconcileRow(row, store, today) {
   if (!freq || !chartDue) return { flag: "no_chart_date", text: `The chart has no ${TYPE_LABEL[type] || type} date for this store`, chartDue };
   const pStart = row.planned_date || (row.period ? row.period + "-01" : null);
   const pEnd = row.planned_date ? row.planned_date : row.period ? addDays(addMonths2(row.period + "-01", 1), -1) : null;
-  if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${chartDue})` : `Due ${chartDue}`, chartDue };
+  const cDue = fmtUk(chartDue), cPer = fmtPeriodUk(row);
+  if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${cDue})` : `Due ${cDue}`, chartDue };
   const slack = freq >= 12 ? 45 : 10;
   const lastDone = addMonths2(chartDue, -freq);
-  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${lastDone} \u2014 Concerto still shows it open`, chartDue, lastDone };
+  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${fmtUk(lastDone)} \u2014 Concerto still shows it open`, chartDue, lastDone };
   if (chartDue >= addDays(pStart, -slack) && chartDue <= addDays(pEnd, slack)) {
-    return chartDue < today ? { flag: "overdue", text: `Overdue \u2014 chart ${chartDue}, Concerto ${row.period || row.planned_date}`, chartDue } : { flag: "due", text: `Due ${chartDue} (Concerto ${row.period || row.planned_date})`, chartDue };
+    return chartDue < today ? { flag: "overdue", text: `Overdue \u2014 chart ${cDue}, Concerto ${cPer}`, chartDue } : { flag: "due", text: `Due ${cDue} (Concerto ${cPer})`, chartDue };
   }
-  if (chartDue < pStart) return { flag: "mismatch", text: `Chart says due ${chartDue}, earlier than Concerto's ${row.period || row.planned_date}`, chartDue };
-  return { flag: "mismatch", text: `Chart says due ${chartDue}, later than Concerto's ${row.period || row.planned_date}`, chartDue };
+  if (chartDue < pStart) {
+    const gapDays = Math.round((Date.parse(pStart + "T00:00:00Z") - Date.parse(chartDue + "T00:00:00Z")) / 864e5);
+    const span = gapDays >= 60 ? `about ${Math.round(gapDays / 30)} months` : `${gapDays} days`;
+    const text = chartDue < today ? `Our certificate ran out on ${cDue} but Concerto has the next test planned for ${cPer}. The site has NO valid certificate right now and will not have one until it is tested \u2014 ${span} uncovered if we wait for Concerto's date. Get it tested and get Concerto's date corrected.` : `Our certificate runs out on ${cDue} but Concerto has the next test planned for ${cPer}. If we wait for Concerto's date the site would have no valid certificate for ${span}. Test it by ${cDue} and get Concerto's date corrected.`;
+    return { flag: "gap", text, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
+  }
+  return { flag: "mismatch", text: `Chart says due ${cDue}, later than Concerto's ${cPer} \u2014 Concerto is early, the site stays covered`, chartDue };
 }
 async function buildList(env, tid, opts) {
   await ensureTables2(env);
@@ -9865,7 +9882,7 @@ async function buildList(env, tid, opts) {
   const today = todayIso();
   const rows = (results || []).map((r) => {
     const store = r.store_code ? stores.get(r.store_code) : null;
-    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.status === "gone" ? "No longer on the Concerto list" + (r.gone_at ? " since " + r.gone_at.slice(0, 10) : "") : r.note || "" };
+    const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.status === "gone" ? "No longer on the Concerto list" + (r.gone_at ? " since " + fmtUk(r.gone_at) : "") : r.note || "" };
     const job = r.store_code ? booked.get(r.store_code + "|" + r.ppm_type) : null;
     return {
       id: r.id,
@@ -10055,7 +10072,7 @@ async function caseContext(env, tid, type, jobs) {
   }
   return ctx;
 }
-function deriveCase(r, ctx, today, money2) {
+function deriveCase(r, ctx, today, money2, rec) {
   today = today || todayIso();
   const code = r.store_code ? padCode(r.store_code) : "";
   const nextDate = r.next_date || r.planned_date || null;
@@ -10125,8 +10142,9 @@ function deriveCase(r, ctx, today, money2) {
   const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
   const closed = !!(c && c.closed_at);
   const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note));
-  const flagged = !closed && !!(c && c.flag_note);
-  const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched);
+  const autoFlag = !closed && rec && rec.flag === "gap" ? { reason: "gap", note: "\u26D4 No certificate cover: " + rec.text } : null;
+  const flagged = !closed && (!!(c && c.flag_note) || !!autoFlag);
+  const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched || !!autoFlag);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
   return {
@@ -10142,9 +10160,10 @@ function deriveCase(r, ctx, today, money2) {
     heldBy: held ? c.held_by || "" : "",
     heldAt: held ? c.held_at || null : null,
     flagged,
-    flagNote: flagged ? c.flag_note : "",
-    flaggedBy: flagged ? c.flagged_by || "" : "",
-    flaggedAt: flagged ? c.flagged_at || null : null,
+    flagNote: !closed && c && c.flag_note ? c.flag_note : "",
+    flaggedBy: !closed && c && c.flag_note ? c.flagged_by || "" : "",
+    flaggedAt: !closed && c && c.flag_note ? c.flagged_at || null : null,
+    autoFlag,
     outcome,
     outcomeAuto,
     outcomeSource: c && c.outcome ? "manual" : outcomeAuto ? "review" : "",
@@ -10214,7 +10233,7 @@ async function buildSchedule(env, tid, opts) {
       lastDone,
       history: h.slice(0, 6),
       job: job || null,
-      case: cctx ? deriveCase(r, cctx, today, !!opts.money) : void 0
+      case: cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : void 0
     };
   });
   const from = opts.from || "", to = opts.to || "";
@@ -10227,7 +10246,7 @@ async function buildSchedule(env, tid, opts) {
     if (r.released) byYear[y].released++;
     if (r.flag === "done") byYear[y].done++;
   }
-  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, byYear };
+  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, gap: rows.filter((r) => r.flag === "gap").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, byYear };
   let releaseLog = [];
   try {
     const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all();

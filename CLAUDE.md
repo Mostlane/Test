@@ -4567,7 +4567,17 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   due date for that type (legacy dd/mm/yyyy dates parsed too), using `lastDone =
   chartDue − frequency` (12m; pump 1m; 5-year 60m) → **done** (done our side in/after
   the Concerto month — Concerto still open: close it / send the completion date),
-  **due** / **overdue** (both agree), **mismatch** (chart date disagrees either way),
+  **due** / **overdue** (both agree), **mismatch** (Concerto EARLIER than the chart — site
+  still covered), **gap** (10 Sep 2026 — Concerto LATER than the chart's due date = our cert
+  runs out before Concerto's planned test, so the site would have no valid certificate in
+  between; bright red pulsing `.f-gap` pill, plain-English `flagText` with both dates + the
+  gap length; `reconcileRow` returns `gapFrom/gapTo/gapDays`; stats carry `gap`. On the
+  5-Year tab `deriveCase(…, rec)` adds **`case.autoFlag {reason:"gap", note}`** — DERIVED,
+  never stored, not clearable by hand (a manual 🚩 `flagNote` sits alongside); it makes the
+  case `flagged` + `active` even 18 months out, and clears itself once the chart rolls to
+  agree. The ≤45-day (12-month types: ≤10-day) slack still reads as "due", so a small
+  Concerto/chart offset is not a gap. **All dates on the page + in every reconcile text
+  are DD/MM/YY** (`fmtUk`/`fmtPeriodUk` worker-side, `ukD`/`fmtD` page-side; CSV too).),
   **no_store**, **not_on_chart**, **no_chart_date**, **store_closed**; each row also
   shows the booked EM/PAT/pump job for that store. Reverse check **`chartMissing`**:
   active chart stores due within 30 days / overdue for fiveYear·em·pat·pump·pv·ev with NO
