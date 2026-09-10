@@ -35,4 +35,24 @@ const J = (id, siteCode, siteName, status, extra = {}) => ({ id, helpdeskRef: id
   ok("sameSiteJob: blank codes + blank names never match", sla.sameSiteJob({ siteCode: "", siteName: "" }, { siteCode: "", siteName: "" }) === false);
   ok("sameSiteJob: project codes compare exactly (P0002 ≠ P0003)", sla.sameSiteJob({ siteCode: "P0002" }, { siteCode: "P0003" }) === false && sla.sameSiteJob({ siteCode: "P0002" }, { siteCode: "p0002" }) === true);
 }
+{ // afterPrev queue: a queued job at the SAME site as the job just shown appears with it
+  const D = "2026-09-14";
+  const Q = (id, siteCode, at, status, rel) => ({ id, helpdeskRef: id, siteCode, siteName: "S" + siteCode, status, assignedEngineers: ["Dave Test"], scheduledAt: D + "T" + at + ":00.000Z", release: rel });
+  const A = Q("A", "0125", "08:00", "Scheduled", { mode: "now" });
+  const B = Q("B", "0125", "09:00", "Scheduled", { mode: "afterPrev" });
+  const C = Q("C", "0125", "10:00", "Scheduled", { mode: "afterPrev" });
+  const Dj = Q("D", "0066", "11:00", "Scheduled", { mode: "afterPrev" });
+  const all = [A, B, C, Dj];
+  ok("A (visible now) is shown", sla.releaseVisibleNow(A, all) === true);
+  ok("B, same site as A, appears WITH A even though A is unfinished", sla.releaseVisibleNow(B, all) === true);
+  ok("C, same site again, appears too (chain)", sla.releaseVisibleNow(C, all) === true);
+  ok("D at a different store stays hidden until the store's jobs are done", sla.releaseVisibleNow(Dj, all) === false);
+  A.status = "Complete"; B.status = "Complete"; C.status = "Complete";
+  ok("D appears once the earlier store's jobs are all finished", sla.releaseVisibleNow(Dj, all) === true);
+  const X = Q("X", "0066", "08:00", "In Progress", { mode: "now" });
+  const Y = Q("Y", "0125", "09:00", "Scheduled", { mode: "afterPrev" });
+  const Z = Q("Z", "0125", "10:00", "Scheduled", { mode: "afterPrev" });
+  ok("Y (queued, different store from the open job) stays hidden", sla.releaseVisibleNow(Y, [X, Y, Z]) === false);
+  ok("Z (same store as hidden Y, but X still open at another store) stays hidden too", sla.releaseVisibleNow(Z, [X, Y, Z]) === false);
+}
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS"); process.exit(fail ? 1 : 0);

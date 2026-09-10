@@ -955,6 +955,21 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   timesheets' `trackJobTime` still keeps ONE open segment per engineer — starting
   the second same-site job closes the first's segment, so on-site time is split
   between the jobs, never double-counted. Test `node worker/tools/test-same-site.mjs`.
+  NB this exemption was reverted and then RESTORED the same afternoon — Jamie's
+  final word: "the same site works to run together is fine". Keep it. The
+  underlying finding stands separately: David was completing jobs
+  retrospectively in a burst rather than as the day goes on, which is a
+  behaviour matter, not a portal one.
+  **Stacked queue + same site (10 Sep 2026, Jamie: "when we use hide-job-until-
+  previous-job-is-complete, if the next job to appear happens to be the same site
+  as the one after too, they should both appear").** `hasEarlierOpenJob` (the
+  `afterPrev` release rule) now IGNORES an earlier open job at the SAME site
+  (`sameSiteJob`), so when the queue reveals a job, every queued job at that store
+  appears with it (chains through consecutive same-site jobs); a queued job at a
+  different store still waits until the earlier store's jobs are all finished, and
+  a same-site job behind a job that is itself still hidden stays hidden.
+  `releaseVisibleNow` is exported for the test (7 afterPrev cases). Editor text
+  `sla-jobedit.js?v=33`; help guide + the 🙈 line updated.
   **Live refresh on sla-scheduler.html + sla-main.html:** neither page ever
   re-fetched on its own (only after an edit/drag), so colours froze at page-open
   for EVERY engineer. Both now re-fetch every 60 s while visible (+ on becoming

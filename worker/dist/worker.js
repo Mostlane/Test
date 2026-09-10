@@ -14345,6 +14345,7 @@ __export(sla_exports, {
   notifyNewlyAssigned: () => notifyNewlyAssigned,
   raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
+  releaseVisibleNow: () => releaseVisibleNow,
   remindPendingHolds: () => remindPendingHolds,
   sameSiteJob: () => sameSiteJob,
   stopSeries: () => stopSeries,
@@ -17315,7 +17316,7 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   if (!job.scheduledAt) return false;
   const engSet = new Set(engineers.map(normId));
   const myStart = Date.parse(job.scheduledAt);
-  return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
+  return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && !sameSiteJob(o, job) && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 function releaseVisibleNow(job, allJobs) {
   if (job && job.seriesSkipped) return false;

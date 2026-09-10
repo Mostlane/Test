@@ -3237,6 +3237,10 @@ function sameSchedDay(a, b) {
   return new Date(a.scheduledAt).toISOString().slice(0, 10) === new Date(b.scheduledAt).toISOString().slice(0, 10);
 }
 // afterPrev: is there an earlier same-day job for any of these engineers still open?
+// An earlier job at the SAME SITE never holds this one back (Jamie, 10 Sep 2026):
+// when the queue reveals a job and the next one is at the same store, both
+// appear together — one visit, several job numbers — and the same-site guard
+// lets them run In Progress together.
 function hasEarlierOpenJob(job, engineers, allJobs) {
   if (!job.scheduledAt) return false;
   const engSet = new Set(engineers.map(normId));
@@ -3245,10 +3249,11 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   // co-worker still working an earlier shared job doesn't hold this one back.
   return allJobs.some(o => o.id !== job.id && sameSchedDay(o, job)
     && Date.parse(o.scheduledAt) < myStart
+    && !sameSiteJob(o, job)
     && assignedList(o).some(a => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 // Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
-function releaseVisibleNow(job, allJobs) {
+export function releaseVisibleNow(job, allJobs) {
   if (job && job.seriesSkipped) return false;   // dropped project day / fallback — never shown
   // A project series day OR a fallback day yields to any other job that day.
   if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
