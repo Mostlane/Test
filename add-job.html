@@ -226,49 +226,40 @@
         <div class="hint">This is the main text the engineer sees on the job.</div>
       </div>
 
-      <!-- Area of work (AI suggests, office confirms) -->
-      <div class="field-group" id="workAreaGroup" style="display:none;">
-        <label for="workArea">Area of work</label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="workArea" disabled style="flex:1;min-width:160px;background:#eef2f7;color:#475569;"><option value="">— auto-detected —</option></select>
-          <a href="javascript:void(0)" id="waEdit" style="white-space:nowrap;font-size:13px;font-weight:600;color:#003468;">✎ Change</a>
-        </div>
-        <div class="hint" id="waHint">Detected automatically from the description — you don't need to set this. Tap “Change” only if it's wrong.</div>
-      </div>
-
       <!-- Allocate: when + who -->
       <div class="row">
-        <div class="col field-group">
-          <label for="schedDate">Allocate for <span class="hint">(date &amp; time)</span></label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input type="date" id="schedDate" style="flex:1 1 150px;min-width:140px;">
-            <select id="schedTime" style="flex:0 0 auto;min-width:118px;"></select>
+        <div class="col">
+          <div class="field-group">
+            <label for="schedDate">Allocate for <span class="hint">(date &amp; time)</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input type="date" id="schedDate" style="flex:1 1 150px;min-width:140px;">
+              <select id="schedTime" style="flex:0 0 auto;min-width:118px;"></select>
+            </div>
+            <input type="hidden" id="scheduledAt" name="scheduledAt">
+            <div class="hint">When the engineer should do it. Pick the time from the list — 5-minute steps.</div>
           </div>
-          <input type="hidden" id="scheduledAt" name="scheduledAt">
-          <div class="hint">When the engineer should do it. Pick the time from the list — 5-minute steps.</div>
+          <!-- Visibility / drip-feed: tucked under Allocate to fill the gap -->
+          <div class="field-group" style="margin-top:12px;">
+            <label for="releaseMode">When the engineer sees this <span class="hint">(drip-feed / hide until a time)</span></label>
+            <select id="releaseMode" name="releaseMode">
+              <option value="now">Straight away</option>
+              <option value="dayBefore">5pm the evening before the scheduled day</option>
+              <option value="at">At a set date &amp; time</option>
+              <option value="afterPrev">After their previous job that day is done</option>
+            </select>
+            <div id="releaseAtWrap" style="display:none;gap:8px;flex-wrap:wrap;margin-top:6px;">
+              <input type="date" id="releaseDate" style="flex:1 1 150px;min-width:140px;">
+              <select id="releaseTime" style="flex:0 0 auto;min-width:118px;"></select>
+            </div>
+            <input type="hidden" id="releaseAt" name="releaseAt">
+            <div class="hint">The office always sees it in the scheduler; the engineer only gets it once it's released.</div>
+          </div>
         </div>
         <div class="col field-group">
           <label>Assign to <span class="hint">(tick one or more — they all see it at the same time)</span></label>
           <div id="assignList" style="max-height:210px;overflow:auto;border:1px solid #cdd6e0;border-radius:10px;padding:4px 8px;background:#fff;">Loading…</div>
           <label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;color:#475569;margin-top:6px;cursor:pointer;"><input type="checkbox" id="showOfficeAssign" style="width:auto;"> Show office / admin staff too</label>
         </div>
-      </div>
-
-      <!-- Visibility / drip-feed: when the engineer first sees this job -->
-      <div class="field-group">
-        <label for="releaseMode">When the engineer sees this <span class="hint">(drip-feed / hide until a time)</span></label>
-        <select id="releaseMode" name="releaseMode">
-          <option value="now">Straight away</option>
-          <option value="dayBefore">5pm the evening before the scheduled day</option>
-          <option value="at">At a set date &amp; time</option>
-          <option value="afterPrev">After their previous job that day is done</option>
-        </select>
-        <div id="releaseAtWrap" style="display:none;gap:8px;flex-wrap:wrap;margin-top:6px;">
-          <input type="date" id="releaseDate" style="flex:1 1 150px;min-width:140px;">
-          <select id="releaseTime" style="flex:0 0 auto;min-width:118px;"></select>
-        </div>
-        <input type="hidden" id="releaseAt" name="releaseAt">
-        <div class="hint">The office always sees it in the scheduler; the engineer (and their assignment alert) only get it once it's released.</div>
       </div>
 
       <!-- Expected duration (drives the scheduler's route/day prediction) -->
@@ -384,6 +375,16 @@
         </div>
         <div id="photoPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
         <div class="hint">These upload to the job once it's created, and show on the job card for the office and the engineer.</div>
+      </div>
+
+      <!-- Area of work (auto-detected; kept at the bottom, out of the way) -->
+      <div class="field-group" id="workAreaGroup" style="display:none;">
+        <label for="workArea">Area of work <span class="hint">(auto-detected)</span></label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="workArea" disabled style="flex:1;min-width:160px;background:#eef2f7;color:#475569;"><option value="">— auto-detected —</option></select>
+          <a href="javascript:void(0)" id="waEdit" style="white-space:nowrap;font-size:13px;font-weight:600;color:#003468;">✎ Change</a>
+        </div>
+        <div class="hint" id="waHint">Detected automatically from the description — you don't need to set this. Tap “Change” only if it's wrong.</div>
       </div>
 
       <!-- Site details captured from the picker (not shown) -->
