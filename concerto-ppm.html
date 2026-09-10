@@ -40,7 +40,7 @@
     td.wrap{white-space:normal;min-width:160px;}
     .badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
     .f-done{background:#d8f0e0;color:#0e7a3b;} .f-due{background:#dbe9ff;color:#1c4e9c;} .f-overdue{background:#fde2e2;color:#9b1c1c;}
-    .f-mismatch{background:#fff3cd;color:#7a5b00;} .f-no_store{background:#ede9fe;color:#5b21b6;} .f-not_on_chart,.f-no_chart_date{background:#eef1f4;color:#5a6b80;}
+    .f-mismatch{background:#fff3cd;color:#7a5b00;} .f-gap{background:#e60000;color:#fff;font-weight:800;box-shadow:0 0 0 2px #ffb3b3;animation:gapPulse 1.6s ease-in-out infinite} @keyframes gapPulse{50%{box-shadow:0 0 0 5px #ffd6d6}} @media(prefers-reduced-motion:reduce){.f-gap{animation:none}} tr.gaprow td{background:#fff0f0} tr.gaprow td:first-child{box-shadow:inset 4px 0 #e60000} .autoflag{background:#fdecec;border:1px solid #f5b5b5;color:#8a0000;border-radius:8px;padding:8px 10px;margin:6px 0;font-weight:600} .f-no_store{background:#ede9fe;color:#5b21b6;} .f-not_on_chart,.f-no_chart_date{background:#eef1f4;color:#5a6b80;}
     .f-store_closed,.f-gone,.f-dismissed{background:#eef1f4;color:#7a8898;text-decoration:line-through;} .f-dismissed{text-decoration:none;}
     .sub{font-size:11.5px;color:#6b7a90;white-space:normal;}
     input[type=search],input[type=text]{width:100%;padding:8px 10px;border:1px solid #c9d3de;border-radius:10px;font-family:inherit;font-size:14px;}
@@ -162,10 +162,11 @@
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    const fmtD = s => { if(!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return esc(d && m ? `${d}/${m}/${y}` : String(s)); };
+    const ukD = s => { if(!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y.slice(2)}` : String(s); };   // DD/MM/YY, raw (CSV)
+    const fmtD = s => esc(ukD(s));   // DD/MM/YY, escaped for HTML
     const fmtP = p => { if(!p) return ""; const [y,m] = p.split("-"); const M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return esc((M[Number(m)-1]||m)+" "+y); };
     const money = v => (v==null||v==="") ? "" : "£"+Number(v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
-    const FLAGS = { done:"Done our side", overdue:"Overdue", due:"Due", mismatch:"Dates differ", no_store:"Not mapped", not_on_chart:"Not on chart", no_chart_date:"No chart date", store_closed:"Store closed", gone:"Gone from list", dismissed:"Dismissed" };
+    const FLAGS = { done:"Done our side", overdue:"Overdue", due:"Due", mismatch:"Dates differ", gap:"⛔ NO COVER — Concerto too late", no_store:"Not mapped", not_on_chart:"Not on chart", no_chart_date:"No chart date", store_closed:"Store closed", gone:"Gone from list", dismissed:"Dismissed" };
     const TYPES = { em:"EM", pat:"PAT", pump:"Pump", pv:"PV", ev:"EV", fiveYear:"5 Year", other:"Other" };
     let DATA = null, FLAG = "all", TYPE = "all", STORES = null, MONEY = false;
 
@@ -195,6 +196,7 @@
         tile(c.done||0, "done our side — close on Concerto", c.done?"ok":"", "done") +
         tile((c.overdue||0), "overdue (both agree)", c.overdue?"bad":"", "overdue") +
         tile((c.due||0), "due", "", "due") +
+        tile(c.gap||0, "⛔ no certificate cover — Concerto too late", c.gap?"bad":"", "gap") +
         tile(c.mismatch||0, "dates differ", c.mismatch?"warn":"", "mismatch") +
         tile(c.no_store||0, "not mapped to a store", c.no_store?"warn":"", "no_store") +
         tile(c.chartOverdue||0, "overdue on chart, not on Concerto", c.chartOverdue?"bad":"", "__missing");
@@ -383,7 +385,7 @@
       const tile = (n, l, cls) => `<div class="tile ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       g("schSummary").innerHTML = tile(st.sites||0, "sites on the Concerto schedule", "") + tile(st.released||0, "released (PPM raised)", st.released?"ok":"") + tile(st.notReleased||0, "not yet released", "") +
         tile(st.dueSoonNotReleased||0, "due within 90 days, not released — chase", st.dueSoonNotReleased?"warn":"") +
-        tile(st.done||0, "done our side", st.done?"ok":"") + tile(st.overdue||0, "overdue", st.overdue?"bad":"") + tile(st.mismatch||0, "dates differ", st.mismatch?"warn":"") + tile(st.withHistory||0, "with a portal record", "");
+        tile(st.done||0, "done our side", st.done?"ok":"") + tile(st.overdue||0, "overdue", st.overdue?"bad":"") + tile(st.gap||0, "⛔ no certificate cover — Concerto too late", st.gap?"bad":"") + tile(st.mismatch||0, "dates differ", st.mismatch?"warn":"") + tile(st.withHistory||0, "with a portal record", "");
       g("schGreet").textContent = (st.releasesLogged ? `${st.releasesLogged} release${st.releasesLogged===1?"":"s"} logged` + (st.releaseLeadDaysAvg!=null ? ` · released on average ${st.releaseLeadDaysAvg} days before the due date` : "") : "No releases logged yet — they are logged from the next schedule export that shows a PPM number.");
       const years = Object.keys(st.byYear||{}).sort();
       g("schYears").innerHTML = `<button class="chip ${SCH_YEAR===""?"on":""}" data-y="">All years</button>` + years.map(y => `<button class="chip ${SCH_YEAR===y?"on":""}" data-y="${esc(y)}">${esc(y)} <span class="muted">${st.byYear[y].total}${st.byYear[y].released?" · "+st.byYear[y].released+" released":""}</span></button>`).join("");
@@ -443,10 +445,11 @@
       if (c.closed) return `<span class="badge f-done">Closed</span><div class="sub">${fmtD(c.closedAt)}${c.closedBy?" · "+esc(c.closedBy):""}</div>`;
       if (!c.active) return `<span class="badge f-not_on_chart">Not due yet</span><div class="sub">${c.daysToDue!=null?"in "+Math.round(c.daysToDue/30)+" months":""}</div>`;
       const shown = c.steps.filter(s => s.applicable);
-      const strip = `<div class="steps">${shown.map(s => `<span class="st ${s.done?"done":(s.key===c.next?"next":"")} ${c.held?"held":""}" title="${esc(s.label)}${s.at?" · "+esc(String(s.at).slice(0,10)):""}${s.by?" · "+esc(s.by):""}">${s.done?"✓ ":""}${esc(s.short)}</span>`).join("")}</div>`;
+      const strip = `<div class="steps">${shown.map(s => `<span class="st ${s.done?"done":(s.key===c.next?"next":"")} ${c.held?"held":""}" title="${esc(s.label)}${s.at?" · "+fmtD(s.at):""}${s.by?" · "+esc(s.by):""}">${s.done?"✓ ":""}${esc(s.short)}</span>`).join("")}</div>`;
       const line = c.held ? `⏸ On hold — ${esc(c.holdReason)}` : c.allDone ? "✓ All steps done — close the case" : "<b>" + esc(c.nextTodo || c.nextLabel) + "</b> · " + esc(c.nextLabel);
-      const flag = c.flagged ? `<div class="sub" style="color:#9b1c1c">🚩 ${esc(c.flagNote)} <span class="muted">— ${esc(c.flaggedBy)}</span></div>` : "";
-      return flag + strip + `<div class="sub">${line}</div>`;
+      const auto = c.autoFlag ? `<div class="sub" style="color:#b00000;font-weight:700">⛔ No certificate cover — Concerto's date is too late (see Chart / status)</div>` : "";
+      const flag = c.flagNote ? `<div class="sub" style="color:#9b1c1c">🚩 ${esc(c.flagNote)} <span class="muted">— ${esc(c.flaggedBy)}</span></div>` : "";
+      return auto + flag + strip + `<div class="sub">${line}</div>`;
     }
     function certCell(c, r) {
       if (!c) return histCell(r);
@@ -482,7 +485,7 @@
             <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}</div></td><td>${jobCell(r.job)}</td>`;
         }
         const detail = pipe && c && EXPANDED.has(r.id) ? `<tr class="detail"><td colspan="8">${detailPanel(r)}</td></tr>` : "";
-        return `<tr class="${pipe && c && c.flagged ? "flagged" : ""}">${first}${mid}<td><div class="rowtools">${tools.join("")}</div></td></tr>${detail}`;
+        return `<tr class="${pipe && c && c.flagged ? "flagged" : ""} ${r.flag==="gap" ? "gaprow" : ""}">${first}${mid}<td><div class="rowtools">${tools.join("")}</div></td></tr>${detail}`;
       }).join("");
       const tb = g("tblSch");
       [].forEach.call(tb.querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
@@ -522,7 +525,8 @@
       const log = (c.log || []).map(l => `<div><span class="muted">${fmtD(l.at)} ${esc(String(l.at||"").slice(11,16))}</span> · ${esc(l.by)} · ${esc(l.text)}</div>`).join("") || '<div class="muted">Nothing logged yet.</div>';
       return `<div class="dgrid" data-ppm="${esc(r.id)}" data-cycle="${esc(c.cycleDue||"")}">
         <div>
-          ${c.flagged ? `<div class="flagnote">🚩 ${esc(c.flagNote)} <span class="muted">(${esc(c.flaggedBy)}, ${fmtD(c.flaggedAt)})</span></div>` : ""}
+          ${c.autoFlag ? `<div class="autoflag">${esc(c.autoFlag.note)}<div class="sub" style="font-weight:400;margin-top:4px">Flagged automatically from the dates — it clears itself once the compliance chart and Concerto agree (upload the new certificate, or get Concerto's date changed).</div></div>` : ""}
+          ${c.flagNote ? `<div class="flagnote">🚩 ${esc(c.flagNote)} <span class="muted">(${esc(c.flaggedBy)}, ${fmtD(c.flaggedAt)})</span></div>` : ""}
           ${c.held ? `<div class="hold">⏸ On hold — ${esc(c.holdReason)} <span class="muted">(${esc(c.heldBy)}, ${fmtD(c.heldAt)})</span></div>` : ""}
           <div class="chk" style="border:0;padding:0 0 6px"><div class="sub">Cycle due ${fmtD(c.cycleDue)}${r.srRef?" · Concerto "+esc(r.srRef):""}${r.orderNr?" · "+esc(r.orderNr):""} · tick in any order — the portal fills what it can see</div></div>
           ${rows}
@@ -530,7 +534,7 @@
         <div class="dside">
           <div class="blk"><h4>Certificate outcome</h4><div class="chips" style="margin:0">${outBtns}</div>${outNote}</div>
           <div class="blk"><h4>Tested by</h4><input list="engList" data-engineer value="${esc(c.engineer)}" placeholder="engineer" style="width:100%"><datalist id="engList"></datalist><div class="sub">${c.engineerSource==="job"?"From the test job's engineer — type to override.":c.engineerSource==="manual"?"Set by hand (clear to go back to the job's engineer).":"No test job yet — type the engineer's name."}</div></div>
-          <div class="blk"><h4>🚩 Flag for attention</h4><div style="display:flex;gap:6px"><input data-flagnote value="${esc(c.flagNote||"")}" placeholder="what needs looking at?" style="flex:1"><button class="btn sm ${c.flagged?"sec":"danger"}" data-flag>${c.flagged?"Update":"🚩 Flag"}</button>${c.flagged?`<button class="btn sm sec" data-unflag>Clear</button>`:""}</div><div class="sub">Flagged sites sit at the top of the list and in the 🚩 Flagged chip until cleared.</div></div>
+          <div class="blk"><h4>🚩 Flag for attention</h4><div style="display:flex;gap:6px"><input data-flagnote value="${esc(c.flagNote||"")}" placeholder="what needs looking at?" style="flex:1"><button class="btn sm ${c.flagNote?"sec":"danger"}" data-flag>${c.flagNote?"Update":"🚩 Flag"}</button>${c.flagged?`<button class="btn sm sec" data-unflag>Clear</button>`:""}</div><div class="sub">Flagged sites sit at the top of the list and in the 🚩 Flagged chip until cleared.</div></div>
           <div class="blk"><h4>Hold</h4>${c.held ? `<button class="btn sm sec" data-resume>▶ Take off hold</button>` : `<div style="display:flex;gap:6px"><input data-holdreason placeholder="why is it held? (waiting on client…)" style="flex:1"><button class="btn sm sec" data-hold>⏸ Hold</button></div>`}</div>
           <div class="blk"><h4>Links</h4><div class="links">${links.join("")}</div></div>
           <div class="blk"><h4>Case</h4>${c.closed ? `<button class="btn sm sec" data-reopen="${esc(c.id)}">↩ Reopen</button>` : `<button class="btn sm ${c.allDone?"":"sec"}" data-close>✓ Close this cycle</button>`} ${r.status==="open"?`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss row</button>`:`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen row</button>`}<div class="sub">Close when everything is invoiced; the row starts a fresh cycle when Concerto moves the date on.</div></div>
@@ -577,8 +581,8 @@
         const pipe = pipelineOn();
         const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(pipe?["Tested by","Outcome","Stage","Next step","Steps done","On hold","Flag"]:[]).concat(MONEY?["Ordered value"]:[]);
         const stageOf = c => !c ? "" : c.closed ? "Closed" : !c.active ? "Not due yet" : c.held ? "On hold" : c.allDone ? "All done" : (c.nextTodo || c.nextLabel);
-        const lines = [head.map(q).join(",")].concat(rows.map(r => [r.nextDate||"", r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, r.releasedAt?r.releasedAt.slice(0,10):"", r.lastDone?r.lastDone.date:"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText]
-          .concat(pipe?[r.case?r.case.engineer:"", r.case?(OUT_LABEL[r.case.outcome]||""):"", stageOf(r.case), r.case&&r.case.nextLabel||"", r.case?r.case.steps.filter(s=>s.applicable&&s.done).map(s=>s.short).join(" / "):"", r.case&&r.case.held?r.case.holdReason:"", r.case&&r.case.flagged?r.case.flagNote:""]:[])
+        const lines = [head.map(q).join(",")].concat(rows.map(r => [ukD(r.nextDate), r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, ukD(r.releasedAt), r.lastDone?ukD(r.lastDone.date):"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", ukD(r.chartDue), FLAGS[r.flag]||r.flag, r.flagText]
+          .concat(pipe?[r.case?r.case.engineer:"", r.case?(OUT_LABEL[r.case.outcome]||""):"", stageOf(r.case), r.case&&r.case.nextLabel||"", r.case?r.case.steps.filter(s=>s.applicable&&s.done).map(s=>s.short).join(" / "):"", r.case&&r.case.held?r.case.holdReason:"", r.case?[r.case.autoFlag&&r.case.autoFlag.note, r.case.flagNote].filter(Boolean).join(" | "):""]:[])
           .concat(MONEY?[r.orderedValue??""]:[]).map(q).join(",")));
         const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-schedule-" + SCH_TYPE + "-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
         return;
@@ -587,7 +591,7 @@
       const rows = visibleRows();
       const head = ["Order","Type","Concerto month","Reference","Store","Site","Chart due","Status","Detail","Booked job"].concat(MONEY?["Value"]:[]);
       const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
-      const lines = [head.map(q).join(",")].concat(rows.map(r => [r.id, TYPES[r.type]||r.type, r.plannedDate||r.period, r.srRef||r.assetRef, r.storeCode, r.siteName, r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText, r.job?(r.job.status+" "+(r.job.scheduledAt||"").slice(0,10)):""].concat(MONEY?[r.orderValue??""]:[]).map(q).join(",")));
+      const lines = [head.map(q).join(",")].concat(rows.map(r => [r.id, TYPES[r.type]||r.type, r.plannedDate?ukD(r.plannedDate):r.period, r.srRef||r.assetRef, r.storeCode, r.siteName, ukD(r.chartDue), FLAGS[r.flag]||r.flag, r.flagText, r.job?(r.job.status+" "+ukD(r.job.scheduledAt)):""].concat(MONEY?[r.orderValue??""]:[]).map(q).join(",")));
       const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-ppm-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
     };
   </script>
