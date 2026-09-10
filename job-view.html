@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=32"></script>
+  <script src="sla-jobedit.js?v=33"></script>
   <script src="firestop-form.js?v=2"></script>
   <script src="cert-form.js?v=22"></script>
   <script src="pump-form.js?v=4"></script>
@@ -1970,12 +1970,25 @@ function jobBlockReason(j){
 }
 // Legacy name kept for any other callers: true if the job needs closing out.
 function jobIsBlocking(j){ return !!jobBlockReason(j); }
-async function findBlockingJob(currentJobId, engineer){
+// Same store (numeric code, else the site name) — jobs there may run together.
+function sameSiteAs(a, b){
+  if(!a || !b) return false;
+  const key = s => { const t = String(s || "").trim(); return t ? (/^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "")) : ""; };
+  const ka = key(a.siteCode), kb = key(b.siteCode);
+  if(ka && kb) return ka === kb;
+  const na = String(a.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nb = String(b.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return !!na && na === nb;
+}
+async function findBlockingJob(currentJobId, engineer, currentJob){
   try{
     const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}`, { cache:"no-store" });
     const list = await res.json();
     for(const j of (Array.isArray(list) ? list : [])){
       if(j.id === currentJobId) continue;
+      // Several jobs at ONE store are one visit — an open job there never blocks
+      // starting/finishing another job at the same store (mirrors the worker).
+      if(currentJob && sameSiteAs(j, currentJob) && (j.status === "In Progress" || j.status === "Travelling")) continue;
       const reason = jobBlockReason(j);
       if(reason) return { job: j, reason };
     }
@@ -2044,7 +2057,7 @@ async function saveUpdate(){
   // previous one is still open or parked without its details. Warn about that
   // job and take the engineer straight into it to finish it off first.
   if(status === "Travelling" || status === "In Progress" || status === "Complete"){
-    const blocking = await findBlockingJob(job.id, user);
+    const blocking = await findBlockingJob(job.id, user, job);
     if(blocking){
       const bj = blocking.job;
       const ref = bj.helpdeskRef || bj.id;

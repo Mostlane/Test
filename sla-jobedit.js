@@ -265,7 +265,7 @@
           <label class="mlje-visopt"><input type="radio" name="mljeVis" value="dayBefore"> <span><b>5pm the day before</b><small>Hidden until 17:00 the evening before the scheduled day.</small></span></label>
           <label class="mlje-visopt"><input type="radio" name="mljeVis" value="at"> <span><b>At a set date &amp; time…</b><small>You choose exactly when it appears.</small></span></label>
           <input type="datetime-local" id="mljeVisAt" style="display:none;margin:4px 0 4px 30px;width:calc(100% - 30px);">
-          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one.</small></span></label>
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one. Queued jobs at the same site as the one just shown appear with it.</small></span></label>
         </div>
 
         <details class="mlje-coll" id="mljeEngRelWrap" style="display:none;margin-top:10px;border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px;background:#fff;">
