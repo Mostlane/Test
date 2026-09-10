@@ -138,14 +138,12 @@ h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
 .intro h2{margin:0 0 20px}
 
 /* ---------- Trust strip ---------- */
-.trust{background:var(--paper-2);border-bottom:1px solid var(--line);padding:60px 0}
-.trust-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:32px}
-@media(max-width:760px){.trust-grid{grid-template-columns:1fr;gap:26px}}
-.trust-item{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-.trust-ico{display:grid;place-items:center;width:52px;height:52px;border-radius:14px;font-size:24px;
-  background:var(--paper);border:1px solid var(--line);margin-bottom:10px}
-.trust-item h3{font-size:18px;margin:0}
-.trust-item p{margin:0;color:var(--muted);font-size:15px}
+.trust{background:var(--paper-2);border-bottom:1px solid var(--line);padding:44px 0}
+.trust-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px 40px}
+@media(max-width:760px){.trust-grid{grid-template-columns:1fr;gap:22px}}
+.trust-item{padding-left:16px;border-left:2px solid var(--accent)}
+.trust-item h3{font-size:16px;margin:0 0 3px}
+.trust-item p{margin:0;color:var(--muted);font-size:14px}
 
 /* ---------- Grid cards ---------- */
 .grid{display:grid;gap:20px}
