@@ -35,10 +35,15 @@ Then edit the wording directly in **`index.html`** — it's plain English, and e
 placeholder (facilities, "who it's for", FAQ) is there to be changed to match your
 actual ground. Search the file for `Coal Park Lane` to find the name in a few headings.
 
-**The single biggest upgrade: real photos.** Drop good photos of the pitch,
-floodlights, changing rooms and clubhouse into `assets/`, then replace the grey
-`<figure class="ph …">` placeholders in the Gallery section and the hero. Nothing
-makes a ground site look impressive like real photography of the ground.
+**The single biggest upgrade: real photos.**
+- **Hero background:** drop a wide landscape photo of the ground in as
+  `assets/hero.jpg` — the hero is already wired to use it automatically (with a
+  dark overlay so the headline stays readable). No file = the plain gradient
+  shows, so nothing ever breaks.
+- **Gallery:** drop photos into `assets/` and replace the grey
+  `<figure class="ph …">` placeholders in the Gallery section.
+
+Nothing makes a venue site look impressive like real photography of the ground.
 
 ---
 

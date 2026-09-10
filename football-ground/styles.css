@@ -87,11 +87,19 @@ a{color:inherit}
 
 /* ---------- Hero (only place green appears) ---------- */
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;justify-content:center;
-  color:var(--text-on-dark);overflow:hidden}
+  color:var(--text-on-dark);overflow:hidden;background:var(--ink-900)}
 .hero-bg{position:absolute;inset:0;z-index:0}
 .hero-grad{position:absolute;inset:0;background:
   radial-gradient(1100px 620px at 70% -10%, rgba(232,176,46,.12), transparent 55%),
   linear-gradient(158deg,#0f1216 0%, #10281b 52%, #0b130e 100%)}
+/* Real ground photo: drop a file at assets/hero.jpg and it appears here.
+   If the file is absent the layer is simply invisible and the gradient above shows. */
+.hero-photo{position:absolute;inset:0;background-image:url("assets/hero.jpg");
+  background-size:cover;background-position:center 42%}
+/* Darkening scrim so the headline stays readable over the photo (and gives the
+   gradient-only hero a touch more depth when there is no photo). */
+.hero-scrim{position:absolute;inset:0;background:
+  linear-gradient(180deg, rgba(15,18,22,.55) 0%, rgba(15,18,22,.35) 42%, rgba(11,14,18,.82) 100%)}
 .hero-pitch{position:absolute;left:50%;bottom:-8%;width:150%;height:62%;transform:translateX(-50%) perspective(760px) rotateX(64deg);
   background:
     repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 9%, transparent 9% 18%),
