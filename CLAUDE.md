@@ -4663,6 +4663,22 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     `.reset()` (tests only) and `ensureTables` is exported so `test-concerto.mjs` can
     re-run the migration per mock DB (NB mock `client_orders.tenant_id` must be
     `"1.0"` — the same D1 numeric-bind quirk as live). 20 pipeline cases in the test.
+  - **Concerto "Last date" is NOT a test date (learned 10 Sep 2026 from
+    `ppm_schedule_6.xlsx`, identical to the seeded 316 rows).** Concerto rolls a
+    site's last/next date forward when the cycle falls due — 19 of its 60 "2026"
+    last dates were still in the FUTURE, and 10 sit a year after the cert we hold
+    (0008/0066/0089/0109/0220/0336/0357/0372/0373/0401: our 2025 EICR is right,
+    Concerto's 2031 next date is a year late). Evidence of a test = the
+    `cert_register` number + the Workever archive job, not Concerto. Reconcile
+    result: 26 sites had their 2026 EICR on the chart; **24 had a 2026 register
+    number (866, 909–970) + a Workever job but NO certificate on the compliance
+    chart** (0028 0079 0127 0178 0202 0330 0340 0376 0377 0389 0391 0392 0396 0426
+    0644 0658 0661 0665 0668 0669 0670 0676 0677 0753) — a `concerto_cases` row was
+    opened for each by hand in D1 (tenant_id `'1.0'`; steps checked/scheduled/
+    tested ticked `by: "Concerto reconcile (10 Sep 2026)"` with the evidence in the
+    note, 🚩 flagged "upload the PDF"; 0079 + 0376 flagged "confirm the test year"
+    because their Workever job is 2025). Uploading the cert to the chart is what
+    clears each one (the chart date rolls, the case auto-detects the cert).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
