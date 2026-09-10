@@ -40,6 +40,7 @@
     .pill-toggle button.active{background:#fff;color:var(--ml-blue);box-shadow:0 1px 3px rgba(0,0,0,0.18);}
     select,input[type="date"]{padding:5px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);background:#fff;}
     .btn{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;background:#f9fafb;display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:#0f172a;}
+    .btn.orange{background:#ea7a23;color:#fff;border-color:#ea7a23;}
     .btn-primary{background:linear-gradient(180deg,#1A4F8F 0%,#003468 100%);color:#fff;border:0;}
     .tag{font-size:11px;padding:3px 7px;border-radius:999px;background:#eef2ff;color:#4338ca;}
 
@@ -289,6 +290,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="undoAutoBtn" style="display:none;background:#fef2f2;border-color:#fecaca;color:#b91c1c;" title="Revert the jobs booked in by the last auto-day">↩ Undo last auto-day</button>
+        <a class="btn orange" id="addJobBtn" href="add-job.html" title="Raise a new job — you'll come back to the scheduler once it's booked in">＋ Add Job</a>
         <div class="toolwrap">
           <button type="button" class="btn" id="toolsBtn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
           <div class="toolmenu" id="toolsMenu" hidden>
