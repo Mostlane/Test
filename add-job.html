@@ -239,9 +239,13 @@
       <!-- Allocate: when + who -->
       <div class="row">
         <div class="col field-group">
-          <label for="scheduledAt">Allocate for <span class="hint">(date &amp; time)</span></label>
-          <input type="datetime-local" id="scheduledAt" name="scheduledAt" step="300">
-          <div class="hint">When the engineer should do it.</div>
+          <label for="schedDate">Allocate for <span class="hint">(date &amp; time)</span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="date" id="schedDate" style="flex:1 1 150px;min-width:140px;">
+            <select id="schedTime" style="flex:0 0 auto;min-width:118px;"></select>
+          </div>
+          <input type="hidden" id="scheduledAt" name="scheduledAt">
+          <div class="hint">When the engineer should do it. Pick the time from the list — 5-minute steps.</div>
         </div>
         <div class="col field-group">
           <label>Assign to <span class="hint">(tick one or more — they all see it at the same time)</span></label>
@@ -259,7 +263,11 @@
           <option value="at">At a set date &amp; time</option>
           <option value="afterPrev">After their previous job that day is done</option>
         </select>
-        <input type="datetime-local" id="releaseAt" name="releaseAt" style="display:none;margin-top:6px;">
+        <div id="releaseAtWrap" style="display:none;gap:8px;flex-wrap:wrap;margin-top:6px;">
+          <input type="date" id="releaseDate" style="flex:1 1 150px;min-width:140px;">
+          <select id="releaseTime" style="flex:0 0 auto;min-width:118px;"></select>
+        </div>
+        <input type="hidden" id="releaseAt" name="releaseAt">
         <div class="hint">The office always sees it in the scheduler; the engineer (and their assignment alert) only get it once it's released.</div>
       </div>
 
@@ -801,7 +809,7 @@ async function handleSubmit(evt){
   const siteName = $("siteName").value.trim();
   {
     const badDate = badScheduleYear($("scheduledAt").value, "Allocated date");
-    if(badDate){ statusEl.textContent = "⚠ " + badDate; statusEl.classList.add("err"); $("scheduledAt").focus(); return; }
+    if(badDate){ statusEl.textContent = "⚠ " + badDate; statusEl.classList.add("err"); $("schedDate").focus(); return; }
   }
   if(!siteName || !description){
     statusEl.textContent = "Please pick a site and enter a description.";
@@ -933,32 +941,37 @@ async function init(){
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
 
   $("jobForm").addEventListener("submit", handleSubmit);
-  { const y = new Date().getFullYear(); const el = $("scheduledAt"); el.min = (y - 1) + "-01-01T00:00"; el.max = (y + 3) + "-12-31T23:59"; }
-  // Mouse-wheel over the date/time pickers: a predictable ONE step per notch —
-  // 5 min (Shift = 1 hour) — instead of the native wheel jumping many numbers
-  // at once so you couldn't land on the hour/min you wanted (step=300 quirk).
-  (function wheelTime(){
+  // Date + a clean 5-minute TIME DROPDOWN instead of the native datetime-local
+  // picker — its popup scrolls minute-by-minute (every number) so you couldn't
+  // land on the exact time you wanted. A <select> is the same on every device.
+  (function schedControls(){
     const pad = n => String(n).padStart(2, "0");
-    function bump(el, mins){
-      let v = el.value;
-      if(!v){ const d0 = new Date(); d0.setSeconds(0,0); d0.setMinutes(Math.round(d0.getMinutes()/5)*5);
-        v = d0.getFullYear()+"-"+pad(d0.getMonth()+1)+"-"+pad(d0.getDate())+"T"+pad(d0.getHours())+":"+pad(d0.getMinutes()); }
-      const d = new Date(v); if(isNaN(d)) return;
-      d.setMinutes(d.getMinutes() + mins);
-      let out = d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
-      if(el.min && out < el.min) out = el.min;
-      if(el.max && out > el.max) out = el.max;
-      el.value = out;
-      el.dispatchEvent(new Event("change", { bubbles:true }));
+    const y = new Date().getFullYear();
+    // Fill a time <select> with 5-minute options (00:00 → 23:55), blank first.
+    function fillTimes(sel){
+      if(!sel) return;
+      let html = '<option value="">--:--</option>';
+      for(let m = 0; m < 24 * 60; m += 5){ const t = pad(Math.floor(m/60)) + ":" + pad(m%60); html += '<option value="' + t + '">' + t + '</option>'; }
+      sel.innerHTML = html;
     }
-    ["scheduledAt","releaseAt"].forEach(function(id){
-      const el = $(id); if(!el) return;
-      el.addEventListener("wheel", function(e){
-        e.preventDefault();
-        const unit = e.shiftKey ? 60 : 5;
-        bump(el, (e.deltaY > 0 || e.deltaX > 0) ? unit : -unit);
-      }, { passive:false });
-    });
+    // Combine a date box + time select into the hidden datetime-local field.
+    function wire(dateId, timeId, hiddenId, defTime){
+      const dEl = $(dateId), tEl = $(timeId), hEl = $(hiddenId);
+      if(!dEl || !tEl || !hEl) return;
+      fillTimes(tEl);
+      dEl.min = (y - 1) + "-01-01"; dEl.max = (y + 3) + "-12-31";
+      function sync(){
+        const d = dEl.value;
+        if(!d){ hEl.value = ""; }
+        else { hEl.value = d + "T" + (tEl.value || defTime || "08:00"); }
+        hEl.dispatchEvent(new Event("change", { bubbles:true }));
+      }
+      // Picking a day with no time yet → default the time so it's never blank.
+      dEl.addEventListener("change", function(){ if(dEl.value && !tEl.value){ tEl.value = defTime || "08:00"; } sync(); });
+      tEl.addEventListener("change", sync);
+    }
+    wire("schedDate", "schedTime", "scheduledAt", "08:00");
+    wire("releaseDate", "releaseTime", "releaseAt", "17:00");
   })();
   initPhotoPicker();
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
@@ -979,7 +992,7 @@ async function init(){
   // don't apply — dim them when firestopping is ticked.
   // Visibility: reveal the datetime picker only for "At a set time".
   (function(){
-    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAt").style.display = rm.value==="at" ? "block" : "none"; }); }
+    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAtWrap").style.display = rm.value==="at" ? "flex" : "none"; }); }
   })();
   // EM/PAT test type: load the cert set-numbers, wire the ticks + refresh.
   (function(){
