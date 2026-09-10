@@ -49,6 +49,27 @@
     .pick{padding:8px 6px;border-bottom:1px solid #eef2f6;cursor:pointer;} .pick:hover{background:#f3f7fb;} .pick.closed{color:#9aa6b5;}
     .rowtools{display:flex;gap:6px;flex-wrap:wrap;}
     @media(max-width:700px){ .sumrow .tile{min-width:100px;} th,td{padding:7px 6px;} }
+    /* 5-year pipeline (Schedule tab) */
+    .pipe{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .months{display:flex;gap:6px;overflow-x:auto;padding:4px 0 6px;margin-top:8px}
+    .mcell{flex:0 0 auto;min-width:78px;border:1px solid #e3e8ee;border-radius:10px;background:#fff;padding:6px 8px;text-align:center;cursor:pointer;font-family:inherit;line-height:1.2}
+    .mcell b{display:block;font-size:18px;color:var(--brand)} .mcell small{display:block;color:#6b7a90;font-size:11px} .mcell.on{outline:2px solid var(--brand)} .mcell.none{opacity:.45}
+    .mcell.rel{background:#f0faf3;border-color:#c9ebd4} .mcell.past{background:#fdf2f2;border-color:#f5c6c6}
+    .steps{display:flex;gap:3px;flex-wrap:wrap} .st{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:6px;background:#eef1f4;color:#7a8898;border:1px solid transparent;white-space:nowrap}
+    .st.done{background:#d8f0e0;color:#0e7a3b} .st.next{background:#fff;color:var(--brand);border-color:var(--brand)} .st.held{background:#fff3cd;color:#7a5b00}
+    .out-satisfactory{background:#d8f0e0;color:#0e7a3b} .out-unsatisfactory{background:#fde2e2;color:#9b1c1c} .out-none{background:#eef1f4;color:#5a6b80}
+    tr.detail td{background:#f7f9fb;padding:12px 14px;white-space:normal}
+    .dgrid{display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(240px,1fr);gap:16px} @media(max-width:820px){.dgrid{grid-template-columns:1fr}}
+    .chk{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed #e3e8ee} .chk:last-child{border-bottom:0}
+    .chk .box{width:26px;height:26px;border-radius:7px;border:2px solid #b9c4d0;background:#fff;cursor:pointer;flex:0 0 auto;font-size:15px;line-height:22px;text-align:center;color:#fff;font-family:inherit;padding:0}
+    .chk .box.on{background:var(--ok);border-color:var(--ok)} .chk .box.next{border-color:var(--brand)} .chk.dim{opacity:.55}
+    .chk .lbl{font-weight:600;font-size:13px} .chk .meta{font-size:11.5px;color:#6b7a90} .chk input.note{width:100%;margin-top:4px;padding:4px 7px;font-size:12px;border:1px solid #dde3ea;border-radius:7px;font-family:inherit}
+    .chk .auto{font-size:10.5px;color:#1c4e9c;background:#dbe9ff;border-radius:999px;padding:1px 7px;margin-left:6px} .chk button.lnk{background:none;border:0;color:var(--brand);cursor:pointer;font-size:11.5px;padding:0;font-family:inherit;text-decoration:underline}
+    .dside h4{margin:0 0 6px;font-size:13px;color:#334} .dside .blk{background:#fff;border:1px solid #e3e8ee;border-radius:10px;padding:10px 12px;margin-bottom:10px}
+    .dside .links a,.dside .links button{margin:0 6px 6px 0}
+    .dlog{font-size:11.5px;color:#4b5a6b;max-height:180px;overflow:auto} .dlog div{padding:3px 0;border-bottom:1px dashed #eef1f4}
+    .hold{background:#fff3cd;color:#7a5b00;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:8px}
+    .engline{font-size:12.5px;color:#4b5a6b;margin-top:8px}
   </style>
 </head>
 <body>
@@ -100,6 +121,13 @@
         <div class="sumrow" id="schSummary"></div>
         <p class="muted" id="schGreet" style="margin:8px 0 0"></p>
         <div id="schYears" class="chips" style="margin-top:8px"></div>
+      </div>
+      <div class="card" id="pipeCard" style="display:none">
+        <h2>5-year EICR pipeline — where every site is</h2>
+        <p class="muted" style="margin:0 0 4px">Tap a stage to see the sites waiting there. The portal ticks what it can see (job, test, certificate, compliance check, client order, works job); the rest you tick in each site's details.</p>
+        <div class="pipe" id="schPipe"></div>
+        <div class="engline" id="schEng"></div>
+        <div class="months" id="schMonths"></div>
       </div>
       <div class="card">
         <h2>Concerto schedule — every site, what we have done and when</h2>
@@ -344,25 +372,59 @@
     g("schFrom").onchange = g("schTo").onchange = () => { SCH_YEAR = ""; loadSchedule(); };
     g("schQ").oninput = () => renderSchRows();
     [].forEach.call(g("schRel").querySelectorAll(".chip"), b => b.onclick = () => { SCH_REL = b.dataset.r; [].forEach.call(g("schRel").querySelectorAll(".chip"), x => x.classList.toggle("on", x === b)); loadSchedule(); });
+    let SCH_STAGE = "active", USERS = null; const EXPANDED = new Set();
+    const OUT_LABEL = { satisfactory: "Satisfactory", unsatisfactory: "Unsatisfactory", "": "Not reviewed" };
+    const pipelineOn = () => SCH_TYPE === "fiveYear" && SCH && SCH.stats && SCH.stats.pipeline;
     function renderSchedule() {
       const st = SCH.stats || {};
       const tile = (n, l, cls) => `<div class="tile ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       g("schSummary").innerHTML = tile(st.sites||0, "sites on the Concerto schedule", "") + tile(st.released||0, "released (PPM raised)", st.released?"ok":"") + tile(st.notReleased||0, "not yet released", "") +
+        tile(st.dueSoonNotReleased||0, "due within 90 days, not released — chase", st.dueSoonNotReleased?"warn":"") +
         tile(st.done||0, "done our side", st.done?"ok":"") + tile(st.overdue||0, "overdue", st.overdue?"bad":"") + tile(st.mismatch||0, "dates differ", st.mismatch?"warn":"") + tile(st.withHistory||0, "with a portal record", "");
-      g("schGreet").textContent = (st.releasesLogged ? `${st.releasesLogged} release${st.releasesLogged===1?"":"s"} logged` + (st.releaseLeadDaysAvg!=null ? ` · released on average ${st.releaseLeadDaysAvg} days before the due date` : "") + " · " : "") + `${SCH.rows.length} of ${SCH.total} rows shown`;
+      g("schGreet").textContent = (st.releasesLogged ? `${st.releasesLogged} release${st.releasesLogged===1?"":"s"} logged` + (st.releaseLeadDaysAvg!=null ? ` · released on average ${st.releaseLeadDaysAvg} days before the due date` : "") : "No releases logged yet — they are logged from the next schedule export that shows a PPM number.");
       const years = Object.keys(st.byYear||{}).sort();
       g("schYears").innerHTML = `<button class="chip ${SCH_YEAR===""?"on":""}" data-y="">All years</button>` + years.map(y => `<button class="chip ${SCH_YEAR===y?"on":""}" data-y="${esc(y)}">${esc(y)} <span class="muted">${st.byYear[y].total}${st.byYear[y].released?" · "+st.byYear[y].released+" released":""}</span></button>`).join("");
       [].forEach.call(g("schYears").querySelectorAll(".chip"), b => b.onclick = () => { SCH_YEAR = b.dataset.y; g("schFrom").value = SCH_YEAR ? SCH_YEAR + "-01" : ""; g("schTo").value = SCH_YEAR ? SCH_YEAR + "-12" : ""; loadSchedule(); });
       g("schType").innerHTML = Object.keys(TYPES).filter(t => t !== "other").map(t => `<button class="chip ${SCH_TYPE===t?"on":""}" data-t="${t}">${TYPES[t]}</button>`).join("");
       [].forEach.call(g("schType").querySelectorAll(".chip"), b => b.onclick = () => { SCH_TYPE = b.dataset.t; loadSchedule(); });
       const flags = [...new Set(SCH.rows.map(r => r.flag))];
-      g("schFlag").innerHTML = `<button class="chip ${SCH_FLAG==="all"?"on":""}" data-f="all">Any status</button>` + Object.keys(FLAGS).filter(f => flags.includes(f)).map(f => `<button class="chip ${SCH_FLAG===f?"on":""}" data-f="${f}">${FLAGS[f]} <span class="muted">${SCH.rows.filter(r=>r.flag===f).length}</span></button>`).join("");
+      g("schFlag").innerHTML = `<button class="chip ${SCH_FLAG==="all"?"on":""}" data-f="all">Any status</button>` + Object.keys(FLAGS).filter(f => flags.includes(f)).map(f => `<button class="chip ${SCH_FLAG===f?"on":""}" data-f="${f}">${FLAGS[f]}</button>`).join("");
       [].forEach.call(g("schFlag").querySelectorAll(".chip"), b => b.onclick = () => { SCH_FLAG = b.dataset.f; renderSchedule(); });
+      renderPipeline();
       renderSchRows();
+    }
+    /* ── pipeline card: stage chips · tests per engineer · month strip ── */
+    function renderPipeline() {
+      const on = pipelineOn();
+      g("pipeCard").style.display = on ? "" : "none";
+      if (!on) return;
+      const P = SCH.stats.pipeline, by = P.byStage || {};
+      const chip = (k, label, n, cls) => `<button class="chip ${SCH_STAGE===k?"on":""} ${cls||""}" data-stage="${esc(k)}">${esc(label)} <span class="muted">${n}</span></button>`;
+      let h = chip("active", "Active", P.active);
+      for (const s of P.steps) if (by[s.key]) h += chip(s.key, "Waiting: " + s.label.replace(/ — .*$/, ""), by[s.key]);
+      if (P.held) h += chip("held", "⏸ On hold", P.held);
+      if (P.complete) h += chip("complete", "✓ All done — close", P.complete);
+      h += chip("not_due", "Not due yet", P.notDue) + chip("closed", "Closed", P.closed) + chip("all", "Everything", SCH.total);
+      g("schPipe").innerHTML = h;
+      [].forEach.call(g("schPipe").querySelectorAll(".chip"), b => b.onclick = () => { SCH_STAGE = b.dataset.stage; renderPipeline(); renderSchRows(); });
+      const eng = Object.entries(SCH.stats.byEngineer || {}).sort((a, b) => (b[1].tested - a[1].tested) || (b[1].scheduled - a[1].scheduled));
+      g("schEng").innerHTML = eng.length ? "🧑‍🔧 Tests by engineer: " + eng.map(([n, e]) => `<b>${esc(n)}</b> ${e.tested} done${e.scheduled ? " · " + e.scheduled + " booked" : ""}`).join(" &nbsp;·&nbsp; ") : "";
+      const bm = SCH.stats.byMonth || {}, keys = Object.keys(bm).sort(), today = (SCH.today || "").slice(0, 7);
+      const show = SCH_YEAR ? keys.filter(k => k.startsWith(SCH_YEAR)) : keys.filter(k => k >= today).slice(0, 18);
+      g("schMonths").innerHTML = show.map(k => { const m = bm[k]; const sel = g("schFrom").value === k && g("schTo").value === k;
+        return `<button class="mcell ${sel?"on":""} ${m.released===m.total?"rel":""} ${k<today?"past":""}" data-m="${esc(k)}"><small>${fmtP(k)}</small><b>${m.total}</b><small>${m.released} released${m.done?" · "+m.done+" done":""}${MONEY&&m.value?" · "+money(m.value):""}</small></button>`; }).join("");
+      [].forEach.call(g("schMonths").querySelectorAll(".mcell"), b => b.onclick = () => { const k = b.dataset.m; const same = g("schFrom").value === k && g("schTo").value === k; g("schFrom").value = same ? (SCH_YEAR ? SCH_YEAR + "-01" : "") : k; g("schTo").value = same ? (SCH_YEAR ? SCH_YEAR + "-12" : "") : k; loadSchedule(); });
     }
     function schVisible() {
       const q = g("schQ").value.trim().toLowerCase();
-      return SCH.rows.filter(r => (SCH_FLAG==="all"||r.flag===SCH_FLAG) && (!q || [r.storeCode, r.siteName, r.orderNr, r.srRef, r.block].join(" ").toLowerCase().includes(q)));
+      return SCH.rows.filter(r => (SCH_FLAG==="all"||r.flag===SCH_FLAG) && stageMatch(r) && (!q || [r.storeCode, r.siteName, r.orderNr, r.srRef, r.block, r.case && r.case.engineer].join(" ").toLowerCase().includes(q)));
+    }
+    function stageMatch(r) {
+      if (!pipelineOn() || !r.case) return true;
+      const c = r.case;
+      if (SCH_STAGE === "all") return true;
+      if (SCH_STAGE === "active") return c.active && !c.closed;
+      return c.stage === SCH_STAGE;
     }
     function histCell(r) {
       if (!r.lastDone) return '<span class="muted">nothing found</span>';
@@ -371,25 +433,128 @@
       const more = (r.history||[]).length > 1 ? `<div class="sub">${(r.history||[]).slice(1,4).map(h => `${fmtD(h.date)} ${esc(SRC[h.source]||h.source)}`).join(" · ")}</div>` : "";
       return `${link}<div class="sub">${esc(SRC[x.source]||x.source)}${x.title?" · "+esc(x.title):""}${x.engineer?" · "+esc(x.engineer):""}</div>${more}`;
     }
+    function stepStrip(c) {
+      if (c.closed) return `<span class="badge f-done">Closed</span><div class="sub">${fmtD(c.closedAt)}${c.closedBy?" · "+esc(c.closedBy):""}</div>`;
+      if (!c.active) return `<span class="badge f-not_on_chart">Not due yet</span><div class="sub">${c.daysToDue!=null?"in "+Math.round(c.daysToDue/30)+" months":""}</div>`;
+      const shown = c.steps.filter(s => s.applicable);
+      const strip = `<div class="steps">${shown.map(s => `<span class="st ${s.done?"done":(s.key===c.next?"next":"")} ${c.held?"held":""}" title="${esc(s.label)}${s.at?" · "+esc(String(s.at).slice(0,10)):""}${s.by?" · "+esc(s.by):""}">${s.done?"✓ ":""}${esc(s.short)}</span>`).join("")}</div>`;
+      const line = c.held ? `⏸ On hold — ${esc(c.holdReason)}` : c.allDone ? "✓ All steps done — close the case" : "Next: " + esc(c.nextLabel);
+      return strip + `<div class="sub">${line}</div>`;
+    }
+    function certCell(c, r) {
+      if (!c) return histCell(r);
+      const out = c.outcome || "";
+      const badge = `<span class="badge out-${out||"none"}">${esc(OUT_LABEL[out])}</span>`;
+      const src = c.outcomeSource === "manual" ? "set by hand" : c.outcomeSource === "review" ? "compliance check" : "";
+      const cert = c.cert ? `<a href="#" data-cert="${esc(r.storeCode)}" title="Open the certificate">${fmtD(c.cert.date)}</a>` : '<span class="muted">no cert filed</span>';
+      const up = c.certUpdated ? `<div class="sub">re-issued ${fmtD(c.certUpdated.date)}</div>` : "";
+      return `${cert} ${badge}<div class="sub">${esc(src)}${c.review && c.review.attention ? " · ⚠ flagged" : ""}</div>${up}`;
+    }
     function renderSchRows() {
-      const rows = schVisible();
-      const head = ["Next due (Concerto)","Store","Released","Last done (portal)","Chart due","Status","Booked job",""];
+      const rows = schVisible(), pipe = pipelineOn();
+      const head = pipe ? ["Next due (Concerto)","Store","Released","Tested by","Progress","Certificate","Chart / status",""] : ["Next due (Concerto)","Store","Released","Last done (portal)","Chart due","Status","Booked job",""];
       g("tblSch").querySelector("thead").innerHTML = "<tr>" + head.map(h=>`<th>${h}</th>`).join("") + "</tr>";
       if (!rows.length) { g("tblSch").querySelector("tbody").innerHTML = '<tr><td colspan="8" class="muted">Nothing to show for this filter.</td></tr>'; return; }
       g("tblSch").querySelector("tbody").innerHTML = rows.map(r => {
-        const rel = r.released ? `<span class="badge f-due">Released</span><div class="sub"><b>${esc(r.orderNr)}</b>${MONEY && r.orderedValue!=null ? " · " + money(r.orderedValue) : ""}${r.releasedAt ? " · seen " + fmtD(r.releasedAt.slice(0,10)) : ""}</div>` : `<span class="badge f-not_on_chart">Not yet released</span>${r.monthMarker?`<div class="sub">${esc(r.monthMarker)}</div>`:""}`;
+        const rel = r.released ? `<span class="badge f-due">Released</span><div class="sub"><b>${esc(r.orderNr)}</b>${MONEY && r.orderedValue!=null ? " · " + money(r.orderedValue) : ""}${r.releasedAt ? " · seen " + fmtD(r.releasedAt) : ""}</div>` : `<span class="badge f-not_on_chart">Not released</span>${r.concertoStatus?`<div class="sub">${esc(r.concertoStatus)}</div>`:""}`;
+        const c = r.case;
         const tools = [];
+        if (pipe && c) tools.push(`<button class="btn sm ${EXPANDED.has(r.id)?"":"sec"}" data-toggle="${esc(r.id)}">${EXPANDED.has(r.id)?"▾ Close":"▸ Details"}</button>`);
         if (r.storeCode) tools.push(`<a class="btn sm sec" href="site-folder.html?site=${encodeURIComponent(r.storeCode)}">Site</a>`);
-        if (r.status === "open") tools.push(`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss</button>`); else tools.push(`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen</button>`);
-        return `<tr><td><b>${fmtD(r.nextDate)}</b>${r.lastDate?`<div class="sub">Concerto last: ${fmtD(r.lastDate)}</div>`:""}</td>
+        if (!pipe) { if (r.status === "open") tools.push(`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss</button>`); else tools.push(`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen</button>`); }
+        const first = `<td><b>${fmtD(r.nextDate)}</b>${r.lastDate?`<div class="sub">Concerto last: ${fmtD(r.lastDate)}</div>`:""}</td>
           <td>${r.storeCode?`<b>${esc(r.storeCode)}</b>`:'<span class="badge f-no_store">Not mapped</span>'}<div class="sub">${esc(r.siteName||"")}${r.category?" · "+esc(r.category):""}</div></td>
-          <td>${rel}</td><td class="wrap">${histCell(r)}</td>
-          <td>${r.chartDue?fmtD(r.chartDue):'<span class="muted">—</span>'}</td>
-          <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}</div></td>
-          <td>${jobCell(r.job)}</td><td><div class="rowtools">${tools.join("")}</div></td></tr>`;
+          <td>${rel}</td>`;
+        let mid;
+        if (pipe && c) {
+          mid = `<td>${c.engineer?`<b>${esc(c.engineer)}</b><div class="sub">${c.engineerSource==="manual"?"set by hand":"from the job"}</div>`:'<span class="muted">—</span>'}</td>
+            <td class="wrap">${stepStrip(c)}</td><td class="wrap">${certCell(c, r)}</td>
+            <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${r.chartDue?"Chart "+fmtD(r.chartDue)+" · ":""}${esc(r.flagText||"")}</div></td>`;
+        } else {
+          mid = `<td class="wrap">${histCell(r)}</td><td>${r.chartDue?fmtD(r.chartDue):'<span class="muted">—</span>'}</td>
+            <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}</div></td><td>${jobCell(r.job)}</td>`;
+        }
+        const detail = pipe && c && EXPANDED.has(r.id) ? `<tr class="detail"><td colspan="8">${detailPanel(r)}</td></tr>` : "";
+        return `<tr>${first}${mid}<td><div class="rowtools">${tools.join("")}</div></td></tr>${detail}`;
       }).join("");
-      [].forEach.call(g("tblSch").querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
-      [].forEach.call(g("tblSch").querySelectorAll("[data-sreopen]"), b => b.onclick = async () => { await setStatus(b.dataset.sreopen, "open"); loadSchedule(); });
+      const tb = g("tblSch");
+      [].forEach.call(tb.querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
+      [].forEach.call(tb.querySelectorAll("[data-sreopen]"), b => b.onclick = async () => { await setStatus(b.dataset.sreopen, "open"); loadSchedule(); });
+      [].forEach.call(tb.querySelectorAll("[data-toggle]"), b => b.onclick = () => { const id = b.dataset.toggle; if (EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderSchRows(); });
+      [].forEach.call(tb.querySelectorAll("[data-cert]"), a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
+      wireDetails(tb);
+    }
+    async function openCert(code) {
+      try { const d = await authFetch("/compliance/file-url?scheme=coop&code=" + encodeURIComponent(code) + "&type=fiveYear").then(r => r.json()); if (d && d.url) window.open(safeUrl(d.url), "_blank"); else alert("No 5-year certificate is filed for " + code); }
+      catch { alert("Couldn't open the certificate"); }
+    }
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
+    /* ── one site's details: the checklist, outcome, engineer, hold, links, log ── */
+    function detailPanel(r) {
+      const c = r.case, unsat = c.outcome === "unsatisfactory";
+      const rows = c.steps.filter(s => s.applicable || (!c.outcome && s.unsat)).map(s => {
+        const dim = s.unsat && !s.applicable;
+        const meta = [s.done && s.at ? fmtD(s.at) : "", s.done && s.by ? "by " + esc(s.by) : "", s.detail ? esc(s.detail) : ""].filter(Boolean).join(" · ");
+        const link = s.jobId ? ` <a href="job-view.html?jobId=${encodeURIComponent(s.jobId)}">open job</a>` : s.orderId ? ` <a href="client-orders.html">open orders</a>` : "";
+        const auto = s.source === "auto" ? `<span class="auto">auto</span>` : s.source === "manual" && s.detail ? ` <button class="lnk" data-reset="${esc(s.key)}" title="Forget the manual tick and use what the portal sees">↺ back to auto</button>` : "";
+        return `<div class="chk ${dim?"dim":""}"><button class="box ${s.done?"on":(s.key===c.next?"next":"")}" data-step="${esc(s.key)}" data-done="${s.done?"1":"0"}" title="${s.done?"Untick":"Tick"}">${s.done?"✓":""}</button>
+          <div style="flex:1"><div class="lbl">${esc(s.label)}${dim?' <span class="muted" style="font-weight:400">(only if unsatisfactory)</span>':""}${auto}</div>
+          <div class="meta">${meta}${link}</div>
+          <input class="note" data-note="${esc(s.key)}" value="${esc(s.note)}" placeholder="note (quote ref, invoice no…)"></div></div>`;
+      }).join("");
+      const outBtns = ["", "satisfactory", "unsatisfactory"].map(o => `<button class="chip ${c.outcome===o?"on":""}" data-outcome="${o}">${o?OUT_LABEL[o]:"Not set"}</button>`).join("");
+      const outNote = c.outcomeAuto ? `<div class="sub">Compliance check read the certificate as <b>${esc(c.outcomeAuto)}</b>${c.review && c.review.summary ? " — " + esc(c.review.summary) : ""}${c.outcomeSource==="manual"?" (overridden by hand)":""}</div>` : `<div class="sub">No compliance-check reading for this cycle yet — set it once you have reviewed the certificate.</div>`;
+      const links = [];
+      if (c.testJob) links.push(`<a class="btn sm sec" href="job-view.html?jobId=${encodeURIComponent(c.testJob.id)}">⚡ Test job (${esc(c.testJob.status)})</a>`);
+      else if (r.storeCode) links.push(`<a class="btn sm" href="add-job.html?site=${encodeURIComponent(r.storeCode)}&elecTest=1&name=${encodeURIComponent(r.storeCode + " 5 Year Electrical Test" + (r.orderNr ? " " + r.orderNr : ""))}&desc=${encodeURIComponent("5 year fixed wire test (EICR)" + (r.orderNr ? " — Concerto " + r.orderNr : "") + (r.nextDate ? " · due " + r.nextDate : ""))}">➕ Raise the test job</a>`);
+      if (c.worksJob) links.push(`<a class="btn sm sec" href="job-view.html?jobId=${encodeURIComponent(c.worksJob.id)}">🔧 Works job (${esc(c.worksJob.status)})</a>`);
+      if (c.cert) links.push(`<button class="btn sm sec" data-cert="${esc(r.storeCode)}">📄 Certificate</button>`);
+      links.push(`<a class="btn sm sec" href="compliance-review.html">🔍 Compliance check</a>`, `<a class="btn sm sec" href="client-orders.html">📥 Client orders</a>`);
+      if (r.storeCode) links.push(`<a class="btn sm sec" href="site-folder.html?site=${encodeURIComponent(r.storeCode)}">🗂 Site folder</a>`);
+      const log = (c.log || []).map(l => `<div><span class="muted">${fmtD(l.at)} ${esc(String(l.at||"").slice(11,16))}</span> · ${esc(l.by)} · ${esc(l.text)}</div>`).join("") || '<div class="muted">Nothing logged yet.</div>';
+      return `<div class="dgrid" data-ppm="${esc(r.id)}" data-cycle="${esc(c.cycleDue||"")}">
+        <div>
+          ${c.held ? `<div class="hold">⏸ On hold — ${esc(c.holdReason)} <span class="muted">(${esc(c.heldBy)}, ${fmtD(c.heldAt)})</span></div>` : ""}
+          <div class="chk" style="border:0;padding:0 0 6px"><div class="sub">Cycle due ${fmtD(c.cycleDue)}${r.srRef?" · Concerto "+esc(r.srRef):""}${r.orderNr?" · "+esc(r.orderNr):""} · tick in any order — the portal fills what it can see</div></div>
+          ${rows}
+        </div>
+        <div class="dside">
+          <div class="blk"><h4>Certificate outcome</h4><div class="chips" style="margin:0">${outBtns}</div>${outNote}</div>
+          <div class="blk"><h4>Tested by</h4><input list="engList" data-engineer value="${esc(c.engineer)}" placeholder="engineer" style="width:100%"><datalist id="engList"></datalist><div class="sub">${c.engineerSource==="job"?"From the test job's engineer — type to override.":c.engineerSource==="manual"?"Set by hand (clear to go back to the job's engineer).":"No test job yet — type the engineer's name."}</div></div>
+          <div class="blk"><h4>Hold</h4>${c.held ? `<button class="btn sm sec" data-resume>▶ Take off hold</button>` : `<div style="display:flex;gap:6px"><input data-holdreason placeholder="why is it held? (waiting on client…)" style="flex:1"><button class="btn sm sec" data-hold>⏸ Hold</button></div>`}</div>
+          <div class="blk"><h4>Links</h4><div class="links">${links.join("")}</div></div>
+          <div class="blk"><h4>Case</h4>${c.closed ? `<button class="btn sm sec" data-reopen="${esc(c.id)}">↩ Reopen</button>` : `<button class="btn sm ${c.allDone?"":"sec"}" data-close>✓ Close this cycle</button>`} ${r.status==="open"?`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss row</button>`:`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen row</button>`}<div class="sub">Close when everything is invoiced; the row starts a fresh cycle when Concerto moves the date on.</div></div>
+          <div class="blk"><h4>Log</h4><div class="dlog">${log}</div></div>
+        </div></div>`;
+    }
+    async function caseAction(ppmId, payload, cycle) {
+      const body = Object.assign({ ppmId, cycleDue: cycle || undefined }, payload);
+      let d = null; try { d = await authFetch("/concerto/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()); } catch {}
+      if (!d || !d.ok) { alert((d && d.error) || "Couldn't save that"); return false; }
+      await loadSchedule(); return true;
+    }
+    async function loadUsers() {
+      if (USERS) return USERS;
+      try { const d = await authFetch("/users").then(r => r.json()); USERS = (d.Users || d.users || []).map(u => u.Username).filter(Boolean); } catch { USERS = []; }
+      return USERS;
+    }
+    function wireDetails(tb) {
+      [].forEach.call(tb.querySelectorAll(".dgrid"), async panel => {
+        const ppm = panel.dataset.ppm, cyc = panel.dataset.cycle;
+        const act = p => caseAction(ppm, p, cyc);
+        [].forEach.call(panel.querySelectorAll("[data-step]"), b => b.onclick = () => act({ step: b.dataset.step, done: b.dataset.done !== "1" }));
+        [].forEach.call(panel.querySelectorAll("[data-reset]"), b => b.onclick = () => act({ step: b.dataset.reset, reset: true }));
+        [].forEach.call(panel.querySelectorAll("[data-note]"), i => { i.onchange = () => act({ step: i.dataset.note, note: i.value }); i.onkeydown = e => { if (e.key === "Enter") i.blur(); }; });
+        [].forEach.call(panel.querySelectorAll("[data-outcome]"), b => b.onclick = () => act({ outcome: b.dataset.outcome }));
+        const eng = panel.querySelector("[data-engineer]"); if (eng) { eng.onchange = () => act({ engineer: eng.value.trim() }); const names = await loadUsers(); const dl = panel.querySelector("#engList"); if (dl) dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join(""); }
+        const hold = panel.querySelector("[data-hold]"); if (hold) hold.onclick = () => { const v = panel.querySelector("[data-holdreason]").value.trim(); if (!v) { alert("Say why it's on hold"); return; } act({ hold: v }); };
+        const res = panel.querySelector("[data-resume]"); if (res) res.onclick = () => act({ hold: "" });
+        const cl = panel.querySelector("[data-close]"); if (cl) cl.onclick = async () => { const ok = window.MLUI ? await MLUI.confirm("Close this 5-year cycle for the site?", { okLabel: "Close it" }) : confirm("Close this cycle?"); if (ok) act({ close: true }); };
+        const ro = panel.querySelector("[data-reopen]"); if (ro) ro.onclick = () => act({ reopen: true, caseId: ro.dataset.reopen });
+        [].forEach.call(panel.querySelectorAll("[data-cert]"), b => b.onclick = e => { e.preventDefault(); openCert(b.dataset.cert); });
+        [].forEach.call(panel.querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
+        [].forEach.call(panel.querySelectorAll("[data-sreopen]"), b => b.onclick = async () => { await setStatus(b.dataset.sreopen, "open"); loadSchedule(); });
+      });
     }
 
     /* ── CSV export of what's shown ── */
@@ -397,8 +562,12 @@
       if (TAB === "schedule") {
         if (!SCH) return;
         const rows = schVisible(); const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
-        const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(MONEY?["Ordered value"]:[]);
-        const lines = [head.map(q).join(",")].concat(rows.map(r => [r.nextDate||"", r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, r.releasedAt?r.releasedAt.slice(0,10):"", r.lastDone?r.lastDone.date:"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText].concat(MONEY?[r.orderedValue??""]:[]).map(q).join(",")));
+        const pipe = pipelineOn();
+        const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(pipe?["Tested by","Outcome","Stage","Next step","Steps done","On hold"]:[]).concat(MONEY?["Ordered value"]:[]);
+        const stageOf = c => !c ? "" : c.closed ? "Closed" : !c.active ? "Not due yet" : c.held ? "On hold" : c.allDone ? "All done" : "Waiting: " + c.nextLabel;
+        const lines = [head.map(q).join(",")].concat(rows.map(r => [r.nextDate||"", r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, r.releasedAt?r.releasedAt.slice(0,10):"", r.lastDone?r.lastDone.date:"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText]
+          .concat(pipe?[r.case?r.case.engineer:"", r.case?(OUT_LABEL[r.case.outcome]||""):"", stageOf(r.case), r.case&&r.case.nextLabel||"", r.case?r.case.steps.filter(s=>s.applicable&&s.done).map(s=>s.short).join(" / "):"", r.case&&r.case.held?r.case.holdReason:""]:[])
+          .concat(MONEY?[r.orderedValue??""]:[]).map(q).join(",")));
         const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-schedule-" + SCH_TYPE + "-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
         return;
       }

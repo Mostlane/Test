@@ -875,3 +875,16 @@ CREATE TABLE IF NOT EXISTS concerto_refs (
   kind TEXT, source TEXT, updated_at TEXT,
   PRIMARY KEY (tenant_id, ref)
 );
+
+-- Concerto 5-year EICR pipeline: one CASE per schedule row per 5-year cycle.
+-- `steps` = JSON of MANUAL ticks {stepKey:{done,at,by,note}}; every step the
+-- portal can see (job, test, cert, compliance check, order, works job) is
+-- derived live in routes/concerto.js deriveCase() and never stored here.
+CREATE TABLE IF NOT EXISTS concerto_cases (
+  tenant_id TEXT NOT NULL, id TEXT NOT NULL,          -- id = <ppm_id>@<cycle_due>
+  ppm_id TEXT NOT NULL, store_code TEXT, ppm_type TEXT,
+  cycle_due TEXT, outcome TEXT, engineer TEXT, steps TEXT,
+  hold_reason TEXT, held_at TEXT, held_by TEXT,
+  opened_at TEXT, closed_at TEXT, closed_by TEXT, updated_at TEXT, updated_by TEXT,
+  PRIMARY KEY (tenant_id, id)
+);
