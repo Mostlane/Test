@@ -230,10 +230,10 @@
       <div class="field-group" id="workAreaGroup" style="display:none;">
         <label for="workArea">Area of work</label>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="workArea" style="flex:1;min-width:160px;"><option value="">— none —</option></select>
-          <button type="button" id="waSuggest" class="btn" style="white-space:nowrap;">🤖 Suggest</button>
+          <select id="workArea" disabled style="flex:1;min-width:160px;background:#eef2f7;color:#475569;"><option value="">— auto-detected —</option></select>
+          <a href="javascript:void(0)" id="waEdit" style="white-space:nowrap;font-size:13px;font-weight:600;color:#003468;">✎ Change</a>
         </div>
-        <div class="hint" id="waHint">Used to match the job to an engineer competent in this work. The AI suggests one from the description — change it if it's wrong.</div>
+        <div class="hint" id="waHint">Detected automatically from the description — you don't need to set this. Tap “Change” only if it's wrong.</div>
       </div>
 
       <!-- Allocate: when + who -->
@@ -1100,7 +1100,7 @@ async function init(){
 
 // ── Area of work: load the managed list; AI suggests one from the description
 // (office confirms). Only shows when areas exist. ───────────────────────────
-var WA_LOADED = false, WA_LAST = "", waSuggesting = false;
+var WA_LOADED = false, WA_LAST = "", waSuggesting = false, WA_MANUAL = false;
 async function initWorkArea(){
   try{
     var d = await fetchJSON(API_BASE + "/work-areas");
@@ -1110,32 +1110,38 @@ async function initWorkArea(){
     areas.forEach(function(a){ var o=document.createElement("option"); o.value=a.id; o.textContent=a.name; sel.appendChild(o); });
     $("workAreaGroup").style.display = "";
     WA_LOADED = true;
-    $("waSuggest").addEventListener("click", function(){ suggestWorkArea(true); });
-    // Auto-suggest once when the description is filled and no area picked yet.
+    // Auto-detect only: the office never needs to set this. "✎ Change" un-greys
+    // the dropdown for the rare manual override.
+    $("waEdit").addEventListener("click", function(){
+      var sel = $("workArea");
+      sel.disabled = false; sel.style.background = "#fff"; sel.style.color = "";
+      WA_MANUAL = true; $("waEdit").style.display = "none";
+      $("waHint").textContent = "Pick the trade this job needs.";
+      sel.focus();
+    });
+    // Auto-detect once the description is filled (and re-detect if it changes,
+    // unless the office has taken manual control).
     $("description").addEventListener("blur", function(){ suggestWorkArea(false); });
   }catch(e){}
 }
 async function suggestWorkArea(force){
-  if(!WA_LOADED || waSuggesting) return;
+  if(!WA_LOADED || waSuggesting || WA_MANUAL) return;  // manual override wins
   var desc = ($("description").value || "").trim();
   if(desc.length < 8) return;
-  if(!force){
-    if($("workArea").value) return;         // office already chose — don't override
-    if(desc === WA_LAST) return;            // already suggested for this text
-  }
+  if(!force && desc === WA_LAST) return;               // already detected for this text
   WA_LAST = desc; waSuggesting = true;
-  var hint = $("waHint"), btn = $("waSuggest");
-  var prev = hint.textContent; hint.textContent = "🤖 Suggesting an area…"; btn.disabled = true;
+  var hint = $("waHint");
+  hint.textContent = "🤖 Detecting the area…";
   try{
     var r = await fetch(API_BASE + "/infer-work-area", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ description: desc }) }).then(function(x){ return x.json(); });
-    if(r && r.capped){ hint.textContent = r.error || "Daily AI limit reached — pick an area manually."; }
+    if(r && r.capped){ hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
     else if(r && r.ok && r.areaId){
-      if(force || !$("workArea").value){ $("workArea").value = r.areaId; }
-      hint.textContent = "🤖 Suggested: " + (r.name || r.areaId) + " — change it if that's not right.";
-    } else if(r && r.ok){ hint.textContent = "AI couldn't match an area — pick one if it needs a trade."; }
-    else { hint.textContent = (r && r.error) || "Couldn't suggest an area — pick one manually."; }
-  }catch(e){ hint.textContent = "Couldn't reach the AI — pick an area manually."; }
-  waSuggesting = false; btn.disabled = false;
+      $("workArea").value = r.areaId;
+      hint.textContent = "Detected: " + (r.name || r.areaId) + ". Tap “Change” only if it's wrong.";
+    } else if(r && r.ok){ hint.textContent = "No trade needed for this one — tap “Change” to set one if it does."; }
+    else { hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
+  }catch(e){ hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
+  waSuggesting = false;
 }
 
 document.addEventListener("DOMContentLoaded", init);
