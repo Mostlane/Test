@@ -233,7 +233,7 @@
           <input id="mljeSchedStart" type="time" step="300" aria-label="Start time">
           <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
         </div>
-        <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (15&nbsp;min / 1&nbsp;day steps). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
+        <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (5&nbsp;min / 1&nbsp;day steps; hold Shift for 1&nbsp;hour). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
 
         <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
         <select id="mljeDuration" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;">
@@ -468,7 +468,7 @@
       e.preventDefault();
       const dir = e.deltaY < 0 ? 1 : -1;
       if (el.type === "time") {
-        el.value = stepTime(el.value, dir * (e.shiftKey ? 60 : 15), 8 * 60);
+        el.value = stepTime(el.value, dir * (e.shiftKey ? 60 : 5), 8 * 60);
       } else if (el.type === "date") {
         const d = el.value ? new Date(el.value + "T12:00:00") : new Date();
         d.setDate(d.getDate() + dir);
@@ -476,7 +476,7 @@
       } else if (el.type === "datetime-local") {
         const d = el.value ? new Date(el.value) : new Date();
         if (!isNaN(d)) {
-          d.setMinutes(d.getMinutes() + dir * (e.shiftKey ? 60 : 15));
+          d.setMinutes(d.getMinutes() + dir * (e.shiftKey ? 60 : 5));
           el.value = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
         }
       } else if (el.type === "number") {
