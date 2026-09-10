@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -554,14 +549,18 @@ var init_webpush = __esm({
 // src/lib/once.js
 function onceMigration(fn) {
   let pending = null;
-  return function onceWrapped(...args) {
+  function onceWrapped(...args) {
     if (pending) return pending;
     pending = Promise.resolve().then(() => fn.apply(this, args)).catch((e) => {
       pending = null;
       throw e;
     });
     return pending;
+  }
+  onceWrapped.reset = () => {
+    pending = null;
   };
+  return onceWrapped;
 }
 var init_once = __esm({
   "src/lib/once.js"() {
@@ -9506,6 +9505,12 @@ async function ensureTables__raw(env) {
   }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_log (
     tenant_id TEXT NOT NULL, ppm_id TEXT NOT NULL, event TEXT, detail TEXT, at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_cases (
+    tenant_id TEXT NOT NULL, id TEXT NOT NULL, ppm_id TEXT NOT NULL, store_code TEXT, ppm_type TEXT,
+    cycle_due TEXT, outcome TEXT, engineer TEXT, steps TEXT,
+    hold_reason TEXT, held_at TEXT, held_by TEXT,
+    opened_at TEXT, closed_at TEXT, closed_by TEXT, updated_at TEXT, updated_by TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -9717,9 +9722,15 @@ async function importRows(env, tid, layout, rows, fileName) {
         status=CASE WHEN concerto_ppm.status IN ('gone') THEN 'open' ELSE concerto_ppm.status END,
         source_file=excluded.source_file, last_seen_at=excluded.last_seen_at, gone_at=NULL, updated_at=excluded.updated_at,
         next_date=COALESCE(excluded.next_date, concerto_ppm.next_date),
-        order_nr=CASE WHEN COALESCE(excluded.order_nr,'')<>'' THEN excluded.order_nr ELSE concerto_ppm.order_nr END,
-        ordered_value=COALESCE(excluded.ordered_value, concerto_ppm.ordered_value),
-        released_at=COALESCE(concerto_ppm.released_at, excluded.released_at),
+        order_nr=CASE WHEN COALESCE(excluded.order_nr,'')<>'' THEN excluded.order_nr
+                      WHEN COALESCE(excluded.next_date,'')<>'' AND excluded.next_date<>COALESCE(concerto_ppm.next_date,'') THEN NULL
+                      ELSE concerto_ppm.order_nr END,
+        ordered_value=CASE WHEN COALESCE(excluded.order_nr,'')<>'' THEN COALESCE(excluded.ordered_value, concerto_ppm.ordered_value)
+                           WHEN COALESCE(excluded.next_date,'')<>'' AND excluded.next_date<>COALESCE(concerto_ppm.next_date,'') THEN NULL
+                           ELSE concerto_ppm.ordered_value END,
+        released_at=CASE WHEN COALESCE(excluded.order_nr,'')<>'' THEN COALESCE(concerto_ppm.released_at, excluded.released_at)
+                         WHEN COALESCE(excluded.next_date,'')<>'' AND excluded.next_date<>COALESCE(concerto_ppm.next_date,'') THEN NULL
+                         ELSE concerto_ppm.released_at END,
         concerto_status=CASE WHEN COALESCE(excluded.concerto_status,'')<>'' THEN excluded.concerto_status ELSE concerto_ppm.concerto_status END,
         month_marker=CASE WHEN COALESCE(excluded.month_marker,'')<>'' THEN excluded.month_marker ELSE concerto_ppm.month_marker END,
         discipline=COALESCE(NULLIF(excluded.discipline,''), concerto_ppm.discipline), frequency_months=COALESCE(excluded.frequency_months, concerto_ppm.frequency_months),
@@ -9914,7 +9925,7 @@ function jobDoneDate(j) {
   }
   return null;
 }
-async function historyIndex(env, tid, type) {
+async function historyIndex(env, tid, type, preloadedJobs) {
   const kw = TYPE_KEYWORDS[type] || TYPE_KEYWORDS.fiveYear;
   const byCode = /* @__PURE__ */ new Map();
   const push = (code, item) => {
@@ -9931,10 +9942,13 @@ async function historyIndex(env, tid, type) {
     }
   } catch {
   }
-  let jobs = [];
-  try {
-    jobs = await listJobs(env, tid);
-  } catch {
+  let jobs = preloadedJobs;
+  if (!jobs) {
+    try {
+      jobs = await listJobs(env, tid);
+    } catch {
+      jobs = [];
+    }
   }
   for (const j of jobs) {
     const text = [j.description, j.helpdeskRef, j.title].filter(Boolean).join(" ");
@@ -9965,14 +9979,194 @@ async function historyIndex(env, tid, type) {
   for (const list of byCode.values()) list.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
   return byCode;
 }
+async function caseContext(env, tid, type, jobs) {
+  const ctx = { testJobs: /* @__PURE__ */ new Map(), jobsById: /* @__PURE__ */ new Map(), certs: /* @__PURE__ */ new Map(), reviews: /* @__PURE__ */ new Map(), orders: /* @__PURE__ */ new Map(), cases: /* @__PURE__ */ new Map(), log: /* @__PURE__ */ new Map() };
+  const push = (m, k, v) => {
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(v);
+  };
+  for (const j of jobs || []) {
+    ctx.jobsById.set(String(j.id), j);
+    const flagged = type === "fiveYear" ? j.elecTest : type === "em" ? j.emTest : type === "pat" ? j.pat : type === "pump" ? j.pumpMaintenance : false;
+    if (!flagged) continue;
+    const code = padCode(j.siteCode);
+    if (!code) continue;
+    const st = String(j.status || "").toLowerCase();
+    if (st === "cancelled") continue;
+    const done = FINISHED.has(st);
+    const doneDate = done ? jobDoneDate(j) || (j.scheduledAt || "").slice(0, 10) || null : null;
+    push(ctx.testJobs, code, {
+      id: j.id,
+      ref: j.helpdeskRef || j.siteName || "",
+      status: j.status || "",
+      done,
+      doneDate,
+      scheduledAt: j.scheduledAt || null,
+      date: doneDate || (j.scheduledAt || "").slice(0, 10) || null,
+      engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
+      worksJobId: j.remedialsWorksJobId || null,
+      remedials: Array.isArray(j.remedials) ? j.remedials.length : 0
+    });
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
+    for (const f of results || []) {
+      const d = toIsoDate(f.doc_date) || (f.year ? f.year + "-01-01" : null) || (f.uploaded_at || "").slice(0, 10) || null;
+      push(ctx.certs, padCode(f.code), { id: f.id, date: d, name: f.label || f.filename || "" });
+    }
+    for (const l of ctx.certs.values()) l.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT code, outcome, attention, summary, file_id, doc_at, checked_at, updated_at, status FROM compliance_review WHERE scheme='coop' AND type=?").bind(type).all();
+    for (const r of results || []) ctx.reviews.set(padCode(r.code), r);
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, order_number, order_value, title, description, detail, store_code, status, matched_kind, matched_job_id, created_at, notified_at FROM client_orders WHERE tenant_id=? AND COALESCE(status,'')<>'dismissed' ORDER BY created_at DESC").bind(tid).all();
+    for (const o of results || []) {
+      const c = padCode(o.store_code);
+      if (c) push(ctx.orders, c, o);
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_type=?").bind(tid, type).all();
+    for (const c of results || []) push(ctx.cases, c.ppm_id, c);
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='case' ORDER BY at DESC LIMIT 3000").bind(tid).all();
+    for (const x of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(x.detail || "{}");
+      } catch {
+      }
+      push(ctx.log, x.ppm_id, { at: x.at, by: d.by || "", text: d.text || d.action || "" });
+    }
+  } catch {
+  }
+  return ctx;
+}
+function deriveCase(r, ctx, today, money2) {
+  today = today || todayIso();
+  const code = r.store_code ? padCode(r.store_code) : "";
+  const nextDate = r.next_date || r.planned_date || null;
+  const stored = (ctx.cases.get(r.id) || []).slice().sort((a, b) => String(b.opened_at || "").localeCompare(String(a.opened_at || "")));
+  let c = stored.find((x) => !x.closed_at) || stored.find((x) => x.closed_at && x.cycle_due === nextDate) || null;
+  const cycleDue = c && c.cycle_due || nextDate;
+  let manual = {};
+  try {
+    manual = JSON.parse(c && c.steps || "{}") || {};
+  } catch {
+  }
+  const wStart = cycleDue ? addMonths2(cycleDue, -18) : "0000-00-00", wEnd = cycleDue ? addMonths2(cycleDue, 24) : "9999-99-99";
+  const inWin = (d) => !!d && d >= wStart && d <= wEnd;
+  const tj = (code ? ctx.testJobs.get(code) || [] : []).filter((j) => inWin(j.date)).sort((a, b) => b.done - a.done || String(b.date || "").localeCompare(String(a.date || "")));
+  const testJob = tj[0] || null;
+  const auto = {};
+  if (testJob) auto.scheduled = { done: true, at: testJob.scheduledAt || testJob.date, detail: (testJob.scheduledAt ? "Booked " + String(testJob.scheduledAt).slice(0, 10) : "On the board") + (testJob.engineer ? " \u2014 " + testJob.engineer : ""), source: "job", jobId: testJob.id };
+  if (testJob && testJob.done) auto.tested = { done: true, at: testJob.doneDate, detail: "Job " + testJob.status + (testJob.engineer ? " \u2014 " + testJob.engineer : ""), source: "job", jobId: testJob.id };
+  const testDate = testJob && testJob.done ? testJob.doneDate : null;
+  const certs = code ? ctx.certs.get(code) || [] : [];
+  const cycleCerts = certs.filter((f) => f.date && (testDate ? f.date >= addDays(testDate, -7) : inWin(f.date)));
+  const cert = cycleCerts.length ? cycleCerts[cycleCerts.length - 1] : null;
+  const rv = code ? ctx.reviews.get(code) : null;
+  let outcomeAuto = "";
+  if (rv && rv.outcome && cert && (rv.file_id === cert.id || String(rv.doc_at || rv.checked_at || "").slice(0, 10) >= cert.date)) {
+    const o = String(rv.outcome);
+    outcomeAuto = /unsat/i.test(o) ? "unsatisfactory" : /remedied/i.test(o) ? "remedied" : /sat/i.test(o) ? "satisfactory" : "";
+  }
+  if (outcomeAuto) auto.reviewed = { done: true, at: rv.checked_at || rv.updated_at || null, detail: "Compliance check read the certificate: " + rv.outcome, source: "review" };
+  const outcome = c && c.outcome || (outcomeAuto === "remedied" ? "unsatisfactory" : outcomeAuto);
+  const ords = (code ? ctx.orders.get(code) || [] : []).filter((o) => o.matched_kind !== "em" && String(o.created_at || "") >= (testDate || wStart) && REMEDIAL_ORDER.test([o.title, o.description, o.detail].join(" ")));
+  const order = ords[0] || null;
+  if (order) auto.ordered = { done: true, at: order.created_at, detail: "Client order " + (order.order_number || "") + (money2 && order.order_value != null ? " (\xA3" + Number(order.order_value).toFixed(2) + ")" : ""), source: "order", orderId: order.id };
+  const wj = testJob && testJob.worksJobId ? ctx.jobsById.get(String(testJob.worksJobId)) : null;
+  if (wj) {
+    const wst = String(wj.status || "").toLowerCase(), wdone = FINISHED.has(wst) && wst !== "cancelled";
+    auto.works_done = { done: wdone, at: wdone ? jobDoneDate(wj) || (wj.scheduledAt || "").slice(0, 10) || null : null, detail: wdone ? "Works job complete" : "Works job raised \u2014 " + (wj.status || "Pending") + (wj.scheduledAt ? ", booked " + String(wj.scheduledAt).slice(0, 10) : ""), source: "job", jobId: wj.id };
+  } else if (outcomeAuto === "remedied") auto.works_done = { done: true, at: null, detail: "Compliance check found a later Minor Works / EIC on file", source: "review" };
+  const worksAt = auto.works_done && auto.works_done.done ? String(auto.works_done.at || "").slice(0, 10) : "";
+  const cert2 = worksAt ? cycleCerts.find((f) => f.date >= worksAt && (!cert || f.id !== cert.id)) || null : null;
+  if (cert2) auto.cert_updated = { done: true, at: cert2.date, detail: cert2.name, source: "cert" };
+  else if (outcomeAuto === "remedied") auto.cert_updated = { done: true, at: null, detail: "Remedial certificate on file", source: "review" };
+  const steps = CASE_STEPS.map((s) => {
+    const m = manual[s.key], a = auto[s.key], forced = m && typeof m.done === "boolean";
+    const done = forced ? m.done : !!(a && a.done);
+    return {
+      key: s.key,
+      label: s.label,
+      short: s.short,
+      unsat: !!s.unsat,
+      done,
+      source: forced ? "manual" : a ? "auto" : "",
+      at: (forced && m.done ? m.at : null) || (a && a.done ? a.at : null) || null,
+      by: forced && m.done ? m.by || "" : "",
+      note: m && m.note || "",
+      detail: a && a.detail || "",
+      jobId: a && a.jobId || null,
+      orderId: a && a.orderId || null,
+      applicable: !s.unsat || outcome === "unsatisfactory" || forced
+    };
+  });
+  const applicable = steps.filter((s) => s.applicable);
+  const nextStep = applicable.find((s) => !s.done) || null;
+  const allDone = applicable.length > 0 && !nextStep;
+  const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
+  const closed = !!(c && c.closed_at);
+  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason));
+  const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched);
+  const held = !closed && !!(c && c.hold_reason);
+  const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
+  return {
+    id: c ? c.id : caseId(r.id, cycleDue),
+    stored: !!c,
+    cycleDue,
+    active,
+    closed,
+    closedAt: c && c.closed_at || null,
+    closedBy: c && c.closed_by || "",
+    held,
+    holdReason: held ? c.hold_reason : "",
+    heldBy: held ? c.held_by || "" : "",
+    heldAt: held ? c.held_at || null : null,
+    outcome,
+    outcomeAuto,
+    outcomeSource: c && c.outcome ? "manual" : outcomeAuto ? "review" : "",
+    engineer: c && c.engineer || testJob && testJob.engineer || "",
+    engineerSource: c && c.engineer ? "manual" : testJob && testJob.engineer ? "job" : "",
+    stage,
+    next: nextStep ? nextStep.key : null,
+    nextLabel: nextStep ? nextStep.label : allDone ? "All steps done \u2014 close the case" : "",
+    allDone,
+    steps,
+    daysToDue,
+    testJob: testJob ? { id: testJob.id, ref: testJob.ref, status: testJob.status, date: testJob.date, engineer: testJob.engineer, remedials: testJob.remedials, worksJobId: testJob.worksJobId } : null,
+    worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
+    cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null,
+    certUpdated: cert2 ? { id: cert2.id, date: cert2.date, name: cert2.name } : null,
+    review: rv && rv.outcome ? { outcome: rv.outcome, attention: !!rv.attention, summary: rv.summary || "", checkedAt: rv.checked_at || null } : null,
+    order: order ? { id: order.id, number: order.number || order.order_number || "", value: money2 ? order.order_value : void 0, at: order.created_at } : null,
+    log: (ctx.log.get(r.id) || []).slice(0, 12)
+  };
+}
 async function buildSchedule(env, tid, opts) {
   await ensureTables2(env);
   const type = opts.type || "fiveYear";
   const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=? AND kind='schedule' AND ppm_type=?" + (opts.status === "all" ? "" : " AND status='open'") + " ORDER BY next_date ASC, store_code ASC").bind(tid, type).all();
   const stores = await chartStores(env, tid);
-  const hist = await historyIndex(env, tid, type);
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  const hist = await historyIndex(env, tid, type, jobs);
   const booked = await bookedJobs(env, tid);
   const today = todayIso();
+  const pipeline = type === "fiveYear";
+  const cctx = pipeline ? await caseContext(env, tid, type, jobs) : null;
   const rows = (results || []).map((r) => {
     const store = r.store_code ? stores.get(r.store_code) : null;
     const rec = r.status === "open" ? reconcileRow(r, store, today) : { flag: r.status, text: r.note || "" };
@@ -10005,7 +10199,8 @@ async function buildSchedule(env, tid, opts) {
       flagText: rec.text,
       lastDone,
       history: h.slice(0, 6),
-      job: job || null
+      job: job || null,
+      case: cctx ? deriveCase(r, cctx, today, !!opts.money) : void 0
     };
   });
   const from = opts.from || "", to = opts.to || "";
@@ -10035,6 +10230,37 @@ async function buildSchedule(env, tid, opts) {
   const lead = releaseLog.map((x) => x.daysBeforeDue).filter((n) => Number.isFinite(n));
   stats.releaseLeadDaysAvg = lead.length ? Math.round(lead.reduce((a, b) => a + b, 0) / lead.length) : null;
   stats.releasesLogged = releaseLog.length;
+  const byMonth = {};
+  for (const r of rows) {
+    const m = (r.nextDate || "").slice(0, 7);
+    if (!m) continue;
+    const b = byMonth[m] = byMonth[m] || { total: 0, released: 0, done: 0, value: 0 };
+    b.total++;
+    if (r.released) b.released++;
+    if (r.flag === "done" || r.case && r.case.steps.some((s) => s.key === "tested" && s.done)) b.done++;
+    if (opts.money && r.orderedValue) b.value += Number(r.orderedValue) || 0;
+  }
+  stats.byMonth = byMonth;
+  stats.dueSoonNotReleased = rows.filter((r) => !r.released && r.nextDate && r.nextDate <= addDays(today, 90) && r.status === "open").length;
+  if (pipeline) {
+    const byStage = {}, byEngineer = {};
+    for (const r of rows) {
+      const c = r.case;
+      if (!c) continue;
+      byStage[c.stage] = (byStage[c.stage] || 0) + 1;
+      const tj = c.testJob;
+      if (tj && tj.engineer) {
+        const e = byEngineer[tj.engineer] = byEngineer[tj.engineer] || { tested: 0, scheduled: 0, byYear: {} };
+        if (tj.done !== false && c.steps.some((s) => s.key === "tested" && s.done)) {
+          e.tested++;
+          const y = String(tj.date || "").slice(0, 4);
+          if (y) e.byYear[y] = (e.byYear[y] || 0) + 1;
+        } else e.scheduled++;
+      }
+    }
+    stats.pipeline = { byStage, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
+    stats.byEngineer = byEngineer;
+  }
   return { type, rows: filtered, total: rows.length, stats, today };
 }
 async function handle9(request, env, ctx, url, sess) {
@@ -10060,6 +10286,95 @@ async function handle9(request, env, ctx, url, sess) {
     const q = url.searchParams;
     const out = await buildSchedule(env, tid, { type: q.get("type") || "fiveYear", from: q.get("from") || "", to: q.get("to") || "", released: q.get("released") || "all", status: q.get("status") || "open", money: money2 });
     return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/case" && method === "POST") {
+    const b = await body();
+    const ppmId = String(b.ppmId || "").trim();
+    if (!ppmId) return error("Need ppmId", 400, env, request);
+    await ensureTables2(env);
+    const row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
+    if (!row) return error("Schedule row not found", 404, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_id=? AND closed_at IS NULL").bind(tid, ppmId).first();
+    const events = [];
+    if (!c) {
+      const cycle = String(b.cycleDue || row.next_date || row.planned_date || "");
+      const id = String(b.caseId || caseId(ppmId, cycle));
+      c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      if (!c) {
+        await env.DB.prepare("INSERT INTO concerto_cases (tenant_id,id,ppm_id,store_code,ppm_type,cycle_due,outcome,engineer,steps,opened_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(tid, id, ppmId, row.store_code || "", row.ppm_type || "fiveYear", cycle, "", "", "{}", now, now, me).run();
+        c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      } else if (c.closed_at && (b.reopen || b.step || b.outcome !== void 0 || b.hold)) {
+        c.closed_at = null;
+        c.closed_by = null;
+        events.push({ action: "reopen", text: "Case reopened" });
+      }
+    }
+    let steps = {};
+    try {
+      steps = JSON.parse(c.steps || "{}") || {};
+    } catch {
+    }
+    if (b.step !== void 0) {
+      const key = String(b.step || "");
+      if (!STEP_KEYS.has(key)) return error("Unknown step", 400, env, request);
+      const label2 = (CASE_STEPS.find((s) => s.key === key) || {}).label || key;
+      if (b.reset) {
+        delete steps[key];
+        events.push({ action: "reset", step: key, text: "Back to automatic: " + label2 });
+      } else {
+        const cur = steps[key] || {};
+        if (typeof b.done === "boolean") {
+          cur.done = b.done;
+          cur.at = b.done ? toIsoDate(b.at) || now : null;
+          cur.by = me;
+          events.push({ action: b.done ? "tick" : "untick", step: key, done: b.done, text: (b.done ? "Ticked: " : "Unticked: ") + label2 + (b.done && b.at ? " (" + toIsoDate(b.at) + ")" : "") });
+        }
+        if (b.note !== void 0) {
+          cur.note = String(b.note || "").slice(0, 300);
+          events.push({ action: "note", step: key, note: cur.note, text: "Note on " + label2 + ": " + cur.note });
+        }
+        steps[key] = cur;
+      }
+    }
+    if (b.outcome !== void 0) {
+      const o = String(b.outcome || "").toLowerCase();
+      if (!["", "satisfactory", "unsatisfactory"].includes(o)) return error("outcome must be satisfactory | unsatisfactory | blank", 400, env, request);
+      c.outcome = o;
+      events.push({ action: "outcome", outcome: o, text: o ? "Outcome set: " + o : "Outcome cleared (back to the compliance check)" });
+    }
+    if (b.engineer !== void 0) {
+      c.engineer = String(b.engineer || "").slice(0, 80);
+      events.push({ action: "engineer", engineer: c.engineer, text: c.engineer ? "Tested by: " + c.engineer : "Engineer cleared (back to the job's engineer)" });
+    }
+    if (b.hold !== void 0) {
+      const reason = String(b.hold || "").slice(0, 200);
+      if (reason) {
+        c.hold_reason = reason;
+        c.held_at = now;
+        c.held_by = me;
+        events.push({ action: "hold", hold: reason, text: "On hold: " + reason });
+      } else {
+        c.hold_reason = null;
+        c.held_at = null;
+        c.held_by = null;
+        events.push({ action: "resume", text: "Taken off hold" });
+      }
+    }
+    if (b.close) {
+      c.closed_at = now;
+      c.closed_by = me;
+      c.hold_reason = null;
+      events.push({ action: "close", text: "Case closed" });
+    }
+    if (b.reopen && c.closed_at) {
+      c.closed_at = null;
+      c.closed_by = null;
+      events.push({ action: "reopen", text: "Case reopened" });
+    }
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
+    return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }
   if (path === "/concerto/log" && method === "GET") {
     await ensureTables2(env);
@@ -10112,7 +10427,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -10134,6 +10449,22 @@ var init_concerto = __esm({
       pv: /\bpv\b|solar/i,
       ev: /\bev\b|charg|forecourt/i
     };
+    CASE_STEPS = [
+      { key: "scheduled", label: "Job scheduled", short: "Sched", auto: true },
+      { key: "tested", label: "Test carried out", short: "Test", auto: true },
+      { key: "reviewed", label: "Certificate reviewed \u2014 outcome set", short: "Review", auto: true },
+      { key: "quoted", label: "Remedials quoted", short: "Quote", unsat: true },
+      { key: "ordered", label: "Remedial order received", short: "Order", unsat: true, auto: true },
+      { key: "works_done", label: "Remedial works completed", short: "Works", unsat: true, auto: true },
+      { key: "cert_updated", label: "Certificate updated after the works", short: "Re-issue", unsat: true, auto: true },
+      { key: "approved", label: "Certificate approved (EasyCert)", short: "Approve" },
+      { key: "uploaded", label: "Certificate uploaded to Concerto", short: "Upload" },
+      { key: "invoiced", label: "Test invoiced on Concerto", short: "Invoice" },
+      { key: "rem_closed", label: "Remedials closed & invoiced on Concerto", short: "Rem. inv.", unsat: true }
+    ];
+    STEP_KEYS = new Set(CASE_STEPS.map((s) => s.key));
+    caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
+    REMEDIAL_ORDER = /eicr|5\s*-?\s*y(ea)?r|five\s*year|fixed\s*wire|electrical|remedial|\bC[123]\b/i;
   }
 });
 
@@ -34887,9 +35218,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });

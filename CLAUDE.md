@@ -4615,6 +4615,52 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     a `WHERE 1` before `ON CONFLICT` or SQLite parses it as a join. Concerto's own next
     dates will disagree with the chart on many rows ("Dates differ") — that is the point of
     the check, not a bug. Test cases "full schedule layout" in test-concerto.mjs.
+  - **5-year EICR PIPELINE — one CASE per site per cycle (10 Sep 2026, Jamie: "a
+    process flow… scheduled → completed → review/approve the certificate → if
+    satisfactory upload to Concerto + invoice; if unsatisfactory quote remedials,
+    get the order, do the works, update the certificate, upload, close + invoice the
+    remedials… held at various points… tick off each stage… who carried out which
+    test").** Table **`concerto_cases`** (self-migrating; id = `<ppm_id>@<cycle_due>`)
+    holds ONLY the manual state: `steps` JSON `{key:{done,at,by,note}}`, `outcome`,
+    `engineer`, `hold_reason/held_at/held_by`, `closed_at/by`. **`CASE_STEPS`**
+    (concerto.js, exported) is the recommended order — scheduled · tested · reviewed ·
+    [unsat: quoted · ordered · works_done · cert_updated] · approved · uploaded ·
+    invoiced · [unsat: rem_closed]; it is a **CHECKLIST, not a state machine**: any
+    step ticks in any order (Jamie quotes before approval), "next" = the first unticked
+    applicable step. **`deriveCase(row, ctx, today, money)`** (exported, tested) reads
+    what the portal can SEE for the cycle window (cycle_due −18 … +24 months): the
+    elec-test job (`scheduled` + `tested` + engineer), the cycle's certificate = the
+    OLDEST 5-year cert filed after the test (a later one = the re-issue →
+    `cert_updated`), `compliance_review` outcome for that cert (file_id match, or
+    doc_at ≥ cert date) → `reviewed` + outcome (REMEDIED reads as unsatisfactory with
+    works_done + cert_updated implied), a `client_orders` row for the store after the
+    test whose text mentions EICR/5 year/electrical/remedial (EM-matched orders
+    excluded) → `ordered`, the test job's `remedialsWorksJobId` → `works_done`. A
+    manual tick/untick ALWAYS beats the automatic reading (`source: manual`; "↺ back
+    to auto" resets it). Unsat steps are `applicable` only when outcome =
+    unsatisfactory or ticked by hand. **Active** = released, due within 365 days, has
+    a test job, or touched by hand — the 2031 rows sit at stage `not_due`. Stages:
+    `not_due | held | complete (all done — close is deliberate) | closed | <stepKey>`.
+    When Concerto rolls the next date on (new cycle) the closed case stays and a
+    fresh virtual case starts; the import now also DROPS a stale release when the
+    next date moves with a blank Order nr. (previously kept forever). **GET
+    /concerto/schedule?type=fiveYear** rows carry `case`, `stats.pipeline`
+    `{byStage, active, held, complete, notDue, closed, steps}`, `stats.byEngineer`
+    `{name:{tested, scheduled, byYear}}`, `stats.byMonth`, `stats.dueSoonNotReleased`.
+    **POST /concerto/case** `{ppmId, cycleDue?, step+done|note|reset, outcome
+    (satisfactory|unsatisfactory|""), engineer, hold (reason|"" = resume), close,
+    reopen+caseId}` — creates the case lazily, every change logged to `concerto_log`
+    event `case` (shown in the row's Log). Page: pipeline card (stage chips = the
+    to-do list, tests per engineer, month strip → from/to), 5-Year table columns
+    Tested by · Progress (step strip) · Certificate (date + outcome badge, opens via
+    /compliance/file-url), **▸ Details** = the checklist + outcome + engineer (datalist
+    from /users) + hold + links (test job / works job / cert / compliance check /
+    client orders / site folder / **➕ Raise the test job** → `add-job.html?site=&
+    elecTest=1&name=&desc=` — add-job's new `applyUrlPrefill`) + close/reopen + log.
+    Other types keep the plain schedule table. `lib/once.js` wrappers now expose
+    `.reset()` (tests only) and `ensureTables` is exported so `test-concerto.mjs` can
+    re-run the migration per mock DB (NB mock `client_orders.tenant_id` must be
+    `"1.0"` — the same D1 numeric-bind quirk as live). 20 pipeline cases in the test.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

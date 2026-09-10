@@ -18,11 +18,13 @@
 // already did.
 export function onceMigration(fn) {
   let pending = null;
-  return function onceWrapped(...args) {
+  function onceWrapped(...args) {
     if (pending) return pending;
     pending = Promise.resolve()
       .then(() => fn.apply(this, args))
       .catch((e) => { pending = null; throw e; });
     return pending;
-  };
+  }
+  onceWrapped.reset = () => { pending = null; };   // tests only: a fresh mock DB needs the migration again
+  return onceWrapped;
 }

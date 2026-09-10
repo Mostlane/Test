@@ -17,6 +17,7 @@ function d1(db) {
   return { prepare: wrap, async batch(s) { return Promise.all(s.map(x => x.run())); } };
 }
 function makeEnv() {
+  if (concerto.ensureTables && concerto.ensureTables.reset) concerto.ensureTables.reset();   // once-per-isolate migration → run again for this fresh DB
   const db = new DatabaseSync(":memory:");
   db.exec(`CREATE TABLE user_permissions (tenant_id, username, permission, value);
     CREATE TABLE users (tenant_id, username, profile);
@@ -25,6 +26,8 @@ function makeEnv() {
     CREATE TABLE sla_jobs (tenant_id, id TEXT, data TEXT, status TEXT, helpdesk_ref TEXT, site_code TEXT);
     CREATE TABLE app_config (tenant_id, key, value);
     CREATE TABLE sla_jobs_archive (tenant_id INTEGER, id TEXT PRIMARY KEY, ref TEXT, status TEXT, assigned_to TEXT, site_name TEXT, postcode TEXT, created_at TEXT, completed_at TEXT, search TEXT, data TEXT, site_code TEXT);
+    CREATE TABLE compliance_review (tenant_id INTEGER, scheme TEXT, code TEXT, type TEXT, status TEXT, outcome TEXT, attention INTEGER, summary TEXT, flags TEXT, file_id INTEGER, doc_at TEXT, checked_at TEXT, notes TEXT, updated_by TEXT, updated_at TEXT);
+    CREATE TABLE client_orders (id TEXT PRIMARY KEY, tenant_id TEXT, order_number TEXT, order_value REAL, title TEXT, description TEXT, detail TEXT, store_code TEXT, status TEXT, matched_kind TEXT, matched_job_id TEXT, created_at TEXT, notified_at TEXT);
     CREATE TABLE compliance_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, code TEXT, type TEXT, year TEXT, r2_key TEXT, filename TEXT, size INTEGER, doc_date TEXT, source TEXT, uploaded_at TEXT, label TEXT, pinned INTEGER, scheme TEXT);`);
   const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
   ins("user_permissions", ["tenant_id","username","permission","value"], [[1,"Jamie Line","FullAccess",1],[1,"Tanya","Compliance",1],[1,"Ryan Diggens","SLAAdmin",1],[1,"Nobody","SLA",1]]);
@@ -193,6 +196,83 @@ const ROWS = [
   ok("field user: schedule shows no ordered values", scF.body.rows.every(r => r.orderedValue === undefined));
   const st = await call(env, "Jamie Line", "GET", "/concerto/stores");
   ok("stores picker lists chart stores with names + closed flag", st.body.stores.length === 6 && st.body.stores.find(s => s.code === "0238").closed === true && st.body.stores.find(s => s.code === "0622").name.includes("Frome"));
+}
+// ── 5-year EICR pipeline (cases) ────────────────────────────────────────────
+{
+  const { env, db } = makeEnv();
+  const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
+  // 0305: elec-test job complete 2026-03-02 by Connor, cert on file 2026-03-05, compliance check read it UNSATISFACTORY, works job raised (open), client order for the remedials
+  ins("sla_jobs", ["tenant_id","id","data","status"], [
+    [1,"E1",JSON.stringify({ id:"E1", siteCode:"0305", elecTest:true, description:"5 year test", status:"Complete", scheduledAt:"2026-03-02T08:00:00.000Z", statusHistory:[{status:"Complete",at:"2026-03-02T15:40:00Z"}], assignedEngineers:["Connor"], remedials:[{id:"r1",code:"C2",description:"x"}], remedialsWorksJobId:"W1" }),"Complete"],
+    [1,"W1",JSON.stringify({ id:"W1", siteCode:"0305", description:"[C2] x", status:"Scheduled", scheduledAt:"2026-10-01T08:00:00.000Z", assignedEngineers:["Ryan Diggens"], fromRemedialsOf:"E1" }),"Scheduled"],
+    // 0037: booked, not done yet
+    [1,"E2",JSON.stringify({ id:"E2", siteCode:"0037", elecTest:true, description:"5 year test", status:"Scheduled", scheduledAt:"2026-10-20T08:00:00.000Z", assignedEngineers:["Daniel Walker"] }),"Scheduled"],
+  ]);
+  ins("compliance_files", ["tenant_id","scheme","code","type","doc_date","filename","r2_key"], [[1,"coop","0305","fiveYear","2026-03-05","0305 EICR.pdf","k5"],[1,"coop","0305","fiveYear","2021-03-01","old.pdf","k4"]]);
+  const certId = db.prepare("SELECT id FROM compliance_files WHERE code='0305' AND doc_date='2026-03-05'").get().id;
+  ins("compliance_review", ["tenant_id","scheme","code","type","status","outcome","attention","file_id","doc_at","checked_at"], [[1,"coop","0305","fiveYear","open","UNSATISFACTORY",1,certId,"2026-03-05T10:00:00Z","2026-03-06T09:00:00Z"]]);
+  ins("client_orders", ["id","tenant_id","order_number","order_value","title","description","store_code","status","created_at"], [["o1","1.0","R30001",480,"Order R30001","EICR remedial works C2 items","0305","new","2026-03-20T10:00:00Z"],["o0","1.0","R29000",50,"Order R29000","EM remedial","0305","new","2026-03-21T10:00:00Z"]]);
+  db.prepare("UPDATE client_orders SET matched_kind='em' WHERE id='o0'").run();
+  const rows = [
+    { uprn: "SR00364", site: "0305 - Portchester, White Hart Lane", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2026-11-30", status: "Live", orderNr: "PPM11642", ordered: 960 },
+    { uprn: "SR00283", site: "0037 - Titchfield, The Square", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2026-11-12", status: "Live", orderNr: "" },
+    { uprn: "SR00161", site: "0622 - The Co-operative Funeralcare - Frome", ref: "EL-5Y", type: "5 year fixed wire", frequency: "60 Months", nextDate: "2031-05-31", lastDate: "2026-05-31", status: "Live", orderNr: "" },
+  ];
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows, fileName: "ppm_schedule_5.xlsx" });
+  let sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear");
+  let by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  const st = (r, k) => r.case.steps.find(s => s.key === k);
+  ok("pipeline: every 5-year row carries a case; stats.pipeline present", sc.body.rows.every(r => r.case) && sc.body.stats.pipeline && Array.isArray(sc.body.stats.pipeline.steps));
+  ok("0305 auto: scheduled + tested (job), reviewed (compliance check UNSATISFACTORY), ordered (client order R30001, the EM order ignored), works not yet done → next = quoted", by["0305"].case.outcome === "unsatisfactory" && by["0305"].case.outcomeSource === "review" && st(by["0305"], "scheduled").done && st(by["0305"], "tested").done && st(by["0305"], "reviewed").done && st(by["0305"], "ordered").done && /R30001/.test(st(by["0305"], "ordered").detail) && !st(by["0305"], "works_done").done && by["0305"].case.next === "quoted", JSON.stringify({ next: by["0305"].case.next, out: by["0305"].case.outcome, steps: by["0305"].case.steps.map(s => s.key + ":" + s.done) }));
+  ok("0305 engineer = the test job's engineer (Connor), cert on file 2026-03-05, works job W1 linked", by["0305"].case.engineer === "Connor" && by["0305"].case.engineerSource === "job" && by["0305"].case.cert && by["0305"].case.cert.date === "2026-03-05" && by["0305"].case.worksJob && by["0305"].case.worksJob.id === "W1", JSON.stringify(by["0305"].case.cert));
+  ok("0305 unsat steps applicable; stage = quoted; field user sees no order value", by["0305"].case.steps.filter(s => s.applicable).length === 11 && by["0305"].case.stage === "quoted" && (await call(env, "Ryan Diggens", "GET", "/concerto/schedule?type=fiveYear")).body.rows.find(r => r.storeCode === "0305").case.order.value === undefined);
+  ok("0037: booked job → scheduled ticked, next = tested, engineer from the job, active (due within a year)", st(by["0037"], "scheduled").done && by["0037"].case.next === "tested" && by["0037"].case.engineer === "Daniel Walker" && by["0037"].case.active && by["0037"].case.stage === "tested");
+  ok("0622: due 2031, nothing booked → not due yet (no pipeline noise)", by["0622"].case.stage === "not_due" && !by["0622"].case.active);
+  ok("stats: byStage + byEngineer (Connor 1 tested, Daniel 1 scheduled)", sc.body.stats.pipeline.byStage.quoted === 1 && sc.body.stats.pipeline.byStage.tested === 1 && sc.body.stats.pipeline.notDue === 1 && sc.body.stats.byEngineer.Connor.tested === 1 && sc.body.stats.byEngineer["Daniel Walker"].scheduled === 1, JSON.stringify(sc.body.stats.pipeline.byStage) + JSON.stringify(sc.body.stats.byEngineer));
+  ok("stats: byMonth workload + due-soon-not-released", sc.body.stats.byMonth["2026-11"].total === 2 && sc.body.stats.byMonth["2026-11"].released === 1 && sc.body.stats.byMonth["2026-11"].done === 1 && sc.body.stats.byMonth["2026-11"].value === 960 && sc.body.stats.dueSoonNotReleased === 1, JSON.stringify(sc.body.stats.byMonth));
+  // Manual ticks: quote sent (dated), then approve — order is free
+  const t1 = await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "quoted", done: true, at: "2026-03-10", note: "Quote Q-77 emailed" });
+  const t2 = await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "approved", done: true });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  if (process.env.DUMP_SCHEDULE) { const fs = await import("node:fs"); fs.writeFileSync(process.env.DUMP_SCHEDULE, JSON.stringify(sc.body)); }   // fixture for the page smoke test
+  ok("manual ticks: quoted (dated 2026-03-10, by Tanya, note kept) + approved; next = works_done; case stored; log has 3 lines", t1.status === 200 && t2.status === 200 && st(by["0305"], "quoted").done && st(by["0305"], "quoted").at === "2026-03-10" && st(by["0305"], "quoted").by === "Tanya" && st(by["0305"], "quoted").note === "Quote Q-77 emailed" && st(by["0305"], "approved").done && by["0305"].case.next === "works_done" && by["0305"].case.stored && by["0305"].case.log.length === 3, JSON.stringify({ next: by["0305"].case.next, log: by["0305"].case.log.map(l => l.text) }));
+  // Untick an AUTO step: manual beats automatic; reset returns it to automatic
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "ordered", done: false });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("manual untick beats the automatic order reading (source manual, next = ordered)", !st(by["0305"], "ordered").done && st(by["0305"], "ordered").source === "manual" && by["0305"].case.next === "ordered");
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "ordered", reset: true });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("reset → automatic again (ordered ticked from the client order)", st(by["0305"], "ordered").done && st(by["0305"], "ordered").source === "auto");
+  // Works job completes + a re-issued cert lands → works_done + cert_updated auto
+  db.prepare("UPDATE sla_jobs SET status='Complete', data=? WHERE id='W1'").run(JSON.stringify({ id:"W1", siteCode:"0305", description:"[C2] x", status:"Complete", scheduledAt:"2026-10-01T08:00:00.000Z", statusHistory:[{status:"Complete",at:"2026-10-01T14:00:00Z"}], assignedEngineers:["Ryan Diggens"] }));
+  ins("compliance_files", ["tenant_id","scheme","code","type","doc_date","filename","r2_key"], [[1,"coop","0305","fiveYear","2026-10-03","0305 EICR reissue.pdf","k6"]]);
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("works job complete → works_done auto; newer cert on file → cert_updated auto; next = uploaded (approved already ticked)", st(by["0305"], "works_done").done && st(by["0305"], "works_done").source === "auto" && st(by["0305"], "cert_updated").done && by["0305"].case.certUpdated && by["0305"].case.certUpdated.date === "2026-10-03" && by["0305"].case.next === "uploaded", JSON.stringify(by["0305"].case.steps.map(s => s.key + ":" + s.done)));
+  // Hold + resume, outcome + engineer overrides, close + reopen
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", hold: "Waiting on Concerto login" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("hold: stage held with the reason + who", by["0305"].case.held && by["0305"].case.stage === "held" && by["0305"].case.holdReason === "Waiting on Concerto login" && by["0305"].case.heldBy === "Jamie Line" && sc.body.stats.pipeline.held === 1);
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", hold: "" , engineer: "Connor + apprentice" });
+  const badO = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", outcome: "maybe" });
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00283:fiveYear", outcome: "satisfactory" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("resume + engineer override (manual wins); bad outcome refused; 0037 outcome set by hand → only the 6 satisfactory steps apply", !by["0305"].case.held && by["0305"].case.engineer === "Connor + apprentice" && by["0305"].case.engineerSource === "manual" && badO.status === 400 && by["0037"].case.outcome === "satisfactory" && by["0037"].case.outcomeSource === "manual" && by["0037"].case.steps.filter(s => s.applicable).length === 6);
+  for (const k of ["uploaded", "invoiced", "rem_closed"]) await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: k, done: true });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("all steps done → stage complete (close is a deliberate step)", by["0305"].case.allDone && by["0305"].case.stage === "complete" && by["0305"].case.next === null);
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", close: true });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("closed: stage closed, keeps the closed case for the same cycle (no fresh virtual case)", by["0305"].case.closed && by["0305"].case.stage === "closed" && by["0305"].case.closedBy === "Jamie Line" && by["0305"].case.stored && sc.body.stats.pipeline.closed === 1);
+  // Concerto moves the next date on 5 years → the closed case stays closed, a fresh (not-due) cycle starts
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: rows.map(r => r.uprn === "SR00364" ? { ...r, nextDate: "2031-11-30", lastDate: "2026-03-02", orderNr: "" } : r), fileName: "ppm_schedule_6.xlsx" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("next cycle after the export moves the date: fresh virtual case, not due yet, 2026 test job outside its window", !by["0305"].case.stored && by["0305"].case.stage === "not_due" && !by["0305"].case.testJob, JSON.stringify({ stage: by["0305"].case.stage, cycle: by["0305"].case.cycleDue, stored: by["0305"].case.stored }));
+  const rp = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", reopen: true, caseId: "SCH:SR00364:fiveYear@2026-11-30" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("reopen the old cycle by caseId → it is the open case again (all steps still ticked)", rp.status === 200 && by["0305"].case.stored && by["0305"].case.cycleDue === "2026-11-30" && !by["0305"].case.closed && by["0305"].case.allDone, JSON.stringify({ stage: by["0305"].case.stage, cycle: by["0305"].case.cycleDue }));
+  const nf = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:NOPE:fiveYear", step: "approved", done: true });
+  const fld = await call(env, "Nobody", "POST", "/concerto/case", { ppmId: "SCH:SR00364:fiveYear", step: "approved", done: true });
+  ok("unknown row 404; non-office 403", nf.status === 404 && fld.status === 403);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

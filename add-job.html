@@ -600,6 +600,18 @@ async function fetchSitesForKey(key){
   }
 }
 
+function applyUrlPrefill(){
+  var q = new URLSearchParams(location.search);
+  var code = (q.get("site")||"").trim(); if(!code) return;
+  var sel = $("siteSelect"), want = Number(code.replace(/\D/g,""));
+  var opt = null;
+  for (var i=0;i<sel.options.length;i++){ var v = sel.options[i].value; if(!v) continue; if(v===code || (/^\d+$/.test(v) && Number(v)===want)){ opt = sel.options[i]; break; } }
+  if(!opt) return;
+  sel.value = opt.value; handleSiteChange();
+  if(q.get("elecTest")==="1" && $("elecTest")){ $("elecTest").checked = true; var det = $("elecTest").closest("details"); if(det) det.open = true; }
+  var nm = (q.get("name")||"").trim(); if(nm && $("jobName")){ $("jobName").value = nm; window.jobNameAuto = nm; }
+  var ds = (q.get("desc")||"").trim(); if(ds && $("description") && !$("description").value.trim()){ $("description").value = ds; $("description").dispatchEvent(new Event("input")); }
+}
 async function populateSites(){
   const siteTypeVal = $("siteType").value.trim().toLowerCase();
   const sel = $("siteSelect");
@@ -1035,8 +1047,9 @@ async function init(){
   })();
   applyReqDefaults();
 
-  // Load sites
-  populateSites();
+  // Load sites — then apply any ?site=&elecTest=1&name=&desc= prefill (the
+  // Concerto 5-year pipeline's "Raise the test job" link lands here).
+  populateSites().then(function(){ try{ applyUrlPrefill(); }catch(e){} });
 
   // Load portal users into AssignedTo dropdown
   populateUsersDropdown();
