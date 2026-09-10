@@ -8,7 +8,11 @@ const CONFIG = {
   siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
   address:   "Coal Park Lane, Swanwick, SO31 7GW",
-  email:     "jamie@mostlane.com",     // where enquiries are sent + shown on the site — change here any time
+  email:     "bookings@coalparklane.co.uk",  // FALLBACK/DELIVERY ONLY — never shown on the site.
+                                             // Used only if the booking backend is unreachable (opens the
+                                             // visitor's email app). A Coal Park Lane address, not a personal one.
+                                             // Real enquiries arrive via the booking backend + its own
+                                             // (invisible, server-side) email notification.
   phone:     "01234 567 890",
   phoneLink: "+440000000000",          // tel: format, no spaces
 
@@ -17,8 +21,8 @@ const CONFIG = {
      "mailto"  – opens the visitor's email app with the
                  enquiry pre-filled (zero setup, works today).
      "endpoint"– POSTs the enquiry to a URL you provide
-                 (e.g. Formspree, or a Cloudflare Worker +
-                 Resend like your Mostlane stack). Set
+                 (e.g. Formspree, or your own Cloudflare Worker +
+                 Resend endpoint). Set
                  formEndpoint below and switch this to "endpoint".
      ------------------------------------------------------- */
   deliveryMode: "mailto",
@@ -40,10 +44,7 @@ const CONFIG = {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   set("heroLocation", CONFIG.location);
   set("cAddress", CONFIG.address);
-  const email = document.getElementById("cEmail");
-  if (email){ email.textContent = CONFIG.email; email.href = "mailto:" + CONFIG.email; }
-  const phone = document.getElementById("cPhone");
-  if (phone){ phone.textContent = CONFIG.phone; phone.href = "tel:" + CONFIG.phoneLink; }
+  // NB: the enquiry email is deliberately NOT rendered anywhere on the page.
   const yr = document.getElementById("year");
   if (yr) yr.textContent = new Date().getFullYear();
 })();
@@ -212,7 +213,7 @@ form.addEventListener("submit", async (e) => {
       note.textContent = "Thanks — your enquiry has been sent. We'll be in touch shortly.";
       note.classList.add("ok");
     }catch(err){
-      note.textContent = "Sorry, something went wrong sending that. Please email us directly at " + CONFIG.email + ".";
+      note.textContent = "Sorry, something went wrong sending that. Please try again in a moment.";
       note.classList.add("bad");
     }finally{
       submitBtn.disabled = false;
@@ -224,6 +225,6 @@ form.addEventListener("submit", async (e) => {
   // ---- Delivery: mailto (default, no backend needed) ----
   const mailto = `mailto:${CONFIG.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = mailto;
-  note.textContent = "Opening your email app to send the enquiry. If nothing happens, email us at " + CONFIG.email + ".";
+  note.textContent = "Opening your email app to send the enquiry.";
   note.classList.add("ok");
 });
