@@ -126,7 +126,8 @@
   var $ = function(id){ return document.getElementById(id); };
   function tok(){ return localStorage.getItem("mostlaneToken"); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
-  function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({ "Authorization":"Bearer "+tok() }, opts.headers||{}); return fetch(API+path, opts); }
+  function devId(){ try{ var id=localStorage.getItem("deviceID"); if(!id){ id="dev-"+crypto.randomUUID().slice(0,7); localStorage.setItem("deviceID",id); } return id; }catch(e){ return ""; } }
+  function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({ "Authorization":"Bearer "+tok(), "X-Device-Id":devId() }, opts.headers||{}); return fetch(API+path, opts); }
   function toLogin(){ location.replace("login.html"); }
 
   if(!tok()){ toLogin(); }
@@ -183,7 +184,10 @@
   });
 
   $("logoutBtn").onclick = function(){
-    try{ ["mostlaneToken","mostlaneLoggedIn","mostlaneUser","mostlaneUsername","mostlaneStaffType","mostlaneExpiry","mostlaneBypassUntil","mostlanePermissions"].forEach(function(k){ localStorage.removeItem(k); }); }catch(e){}
+    // End the session on the server too, then wipe everything but the device id.
+    try{ var t=tok(); if(t) fetch(API+"/auth/logout",{ method:"POST", keepalive:true, headers:{ "Authorization":"Bearer "+t, "X-Device-Id":devId() } }).catch(function(){}); }catch(e){}
+    var keep=null; try{ keep=localStorage.getItem("deviceID"); }catch(e){}
+    try{ localStorage.clear(); if(keep) localStorage.setItem("deviceID",keep); }catch(e){}
     try{ sessionStorage.clear(); }catch(e){}
     toLogin();
   };

@@ -18,6 +18,7 @@
 
 import { preflight, error, json } from "./lib/http.js";
 import { requireSession } from "./lib/auth.js";
+import { verifyFileSig } from "./lib/filesign.js";
 import * as auth from "./routes/auth.js";          // DONE  (login, logout, me, refresh, passwords)
 import * as users from "./routes/users.js";        // DONE  (/user, /users, admin management)
 import * as devices from "./routes/devices.js";    // DONE  (device lock)
@@ -178,7 +179,13 @@ const worker = {
     let sess = null;
     if (!isPublic(request.method, url.pathname)) {
       sess = await requireSession(env, request);
-      if (!sess) return error("Not authenticated", 401, env, request);
+      if (!sess) {
+        // A job-sheet export may be opened as a plain link IF it carries a valid
+        // signature (signedFileUrl(env, pathname)) — otherwise it needs a login.
+        const signedExport = request.method === "GET" && isSignedJobExport(url.pathname)
+          && await verifyFileSig(env, url.pathname, url.searchParams);
+        if (!signedExport) return error("Not authenticated", 401, env, request);
+      }
     }
 
     // ── Batch: many GETs in ONE round trip (home dashboard) ────────────────
@@ -529,9 +536,13 @@ const PUBLIC_ROUTES = [
   ["POST", "/customer/reschedule"],
 ];
 
-function isPublic(method, pathname) {
+export function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
-  // SLA job sheet downloads are opened as plain browser links (no header).
-  if (method === "GET" && /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname)) return true;
+  // NB the job-sheet exports (/sla/jobs/{id}/export[.pdf]) were public here
+  // until Sep 2026 — full job sheets by guessable id, no login. They now need a
+  // session, or a signed link (see the gate: verifyFileSig over the pathname).
   return false;
+}
+export function isSignedJobExport(pathname) {
+  return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }

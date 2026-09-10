@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=34"></script>
+  <script src="/portal-config.js?v=35"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -204,7 +204,9 @@ const res = await fetch(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       username: usernameInput,
-      password: passwordInput
+      password: passwordInput,
+      // Binds the new session to this browser (see worker requireSession).
+      deviceId: (function(){ try { return (typeof getOrCreateDeviceId === "function") ? getOrCreateDeviceId() : (localStorage.getItem("deviceID") || ""); } catch (e) { return ""; } })()
     })
   }
 );

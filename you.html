@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=34"></script>
+  <script src="/portal-config.js?v=35"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -247,10 +247,8 @@
   if($("statHol").style.display==="none" && $("statHrs").style.display==="none"){ var s2=document.querySelector(".stat2"); if(s2) s2.style.display="none"; }
 
   $("signout").onclick=function(){
-    try{
-      ["mostlaneToken","mostlaneLoggedIn","mostlaneExpiry","mostlaneBypassUntil","mostlaneUser","mostlaneUsername","mostlanePermissions","mostlaneMasterLogin"].forEach(function(k){ localStorage.removeItem(k); });
-      sessionStorage.clear();
-    }catch(e){}
+    if(window.mlLogout){ mlLogout(); return; }
+    try{ localStorage.clear(); sessionStorage.clear(); }catch(e){}
     location.href="login.html";
   };
 

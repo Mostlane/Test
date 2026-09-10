@@ -37,6 +37,7 @@ import { decodePngToRgb } from "../lib/pngdecode.js";
 import { shrinkRgb, deflate } from "./pump.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { onceMigration } from "../lib/once.js";
+const STATUS_COUNT_MEMO = new Map();   // /certs/status?count=1 tallies, per isolate, 60 s
 
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
@@ -1520,6 +1521,15 @@ export async function handle(request, env, ctx, url, sess) {
     if (!isOffice) return error("Office access required", 403, env, request);
     const range = String(q.get("range") || "today").toLowerCase();
     const countOnly = q.get("count") === "1";
+    // The home-hub tile asks for the tallies on every page open and this walks
+    // every live EM/PAT/pump job each time (~2.5 s). Remember the count-only
+    // answer per isolate for 60 s — a cert filed a moment ago shows within a
+    // minute, which is fine for a tile.
+    const memoKey = tid + ":" + range;
+    if (countOnly) {
+      const m = STATUS_COUNT_MEMO.get(memoKey);
+      if (m && Date.now() - m.at < 60000) return json({ ok: true, range, counts: m.counts, items: [], cached: true }, {}, env, request);
+    }
     // London calendar-day strings (YYYY-MM-DD) so the window matches the working day.
     const londonDay = (d) => { try { const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return ""; } };
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -1595,6 +1605,7 @@ export async function handle(request, env, ctx, url, sess) {
       toReview: items.filter(i => i.status === "review").length,
       withEngineers: items.filter(i => i.status === "draft" || i.status === "notstarted").length,
     };
+    if (countOnly) STATUS_COUNT_MEMO.set(memoKey, { at: Date.now(), counts });
     return json({ ok: true, range, counts, items: countOnly ? [] : items }, {}, env, request);
   }
 
