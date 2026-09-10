@@ -941,6 +941,27 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   in **BOTH** pages — fix engineer-job.html too, it's the one engineers actually
   use. engineer-job.html's RA is a modal opened by the amber "Open risk
   assessment →" lock banner; the skip is a discreet dashed button at its foot.
+  **Same-site jobs run TOGETHER (10 Sep 2026 — Jamie: "why are David's jobs not
+  changing colour in the scheduler like Connor's").** Diagnosis: no bug in the
+  scheduler — it colours a block from the server status, and David's taps were
+  arriving late: with three/four job numbers at ONE store the cross-job guard let
+  him start only the first, so the others sat amber all visit and were closed as
+  paperwork in a burst at the end (Sandown: 3 jobs "done" 08:58–09:02). Now
+  `findBlockingJob(env,tid,user,exceptId,exceptJob)` (exported) skips an active
+  (Travelling/In Progress) job at the SAME SITE as the one being started —
+  `sameSiteJob(a,b)` = numeric store code (0125 = 125) else the normalised site
+  name; a pending on-hold / safety flag there still blocks. job-view.html's
+  client copy (`findBlockingJob(id,user,job)` + `sameSiteAs`) mirrors it. NB
+  timesheets' `trackJobTime` still keeps ONE open segment per engineer — starting
+  the second same-site job closes the first's segment, so on-site time is split
+  between the jobs, never double-counted. Test `node worker/tools/test-same-site.mjs`.
+  **Live refresh on sla-scheduler.html + sla-main.html:** neither page ever
+  re-fetched on its own (only after an edit/drag), so colours froze at page-open
+  for EVERY engineer. Both now re-fetch every 60 s while visible (+ on becoming
+  visible; `window.mlLiveRefresh()` runs one), skipped while a drag, any
+  `.modal-backdrop`, the shared editor (`#mljeBack.show`), a focused text box or a
+  bulk selection is live so nothing is pulled from under the user. sla-main's
+  `loadJobs(quiet)` keeps the status bar + photo-flag cache on a quiet refresh.
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
