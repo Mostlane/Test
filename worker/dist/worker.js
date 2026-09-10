@@ -9511,6 +9511,12 @@ async function ensureTables__raw(env) {
     hold_reason TEXT, held_at TEXT, held_by TEXT,
     opened_at TEXT, closed_at TEXT, closed_by TEXT, updated_at TEXT, updated_by TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
+  for (const col of ["flag_note TEXT", "flagged_at TEXT", "flagged_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -10066,6 +10072,7 @@ function deriveCase(r, ctx, today, money2) {
   const tj = (code ? ctx.testJobs.get(code) || [] : []).filter((j) => inWin(j.date)).sort((a, b) => b.done - a.done || String(b.date || "").localeCompare(String(a.date || "")));
   const testJob = tj[0] || null;
   const auto = {};
+  if (testJob) auto.checked = { done: true, at: testJob.scheduledAt || testJob.date, detail: "A test job exists", source: "job", jobId: testJob.id };
   if (testJob) auto.scheduled = { done: true, at: testJob.scheduledAt || testJob.date, detail: (testJob.scheduledAt ? "Booked " + String(testJob.scheduledAt).slice(0, 10) : "On the board") + (testJob.engineer ? " \u2014 " + testJob.engineer : ""), source: "job", jobId: testJob.id };
   if (testJob && testJob.done) auto.tested = { done: true, at: testJob.doneDate, detail: "Job " + testJob.status + (testJob.engineer ? " \u2014 " + testJob.engineer : ""), source: "job", jobId: testJob.id };
   const testDate = testJob && testJob.done ? testJob.doneDate : null;
@@ -10099,6 +10106,7 @@ function deriveCase(r, ctx, today, money2) {
       key: s.key,
       label: s.label,
       short: s.short,
+      todo: s.todo || s.label,
       unsat: !!s.unsat,
       done,
       source: forced ? "manual" : a ? "auto" : "",
@@ -10116,7 +10124,8 @@ function deriveCase(r, ctx, today, money2) {
   const allDone = applicable.length > 0 && !nextStep;
   const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
   const closed = !!(c && c.closed_at);
-  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason));
+  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note));
+  const flagged = !closed && !!(c && c.flag_note);
   const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
@@ -10132,6 +10141,10 @@ function deriveCase(r, ctx, today, money2) {
     holdReason: held ? c.hold_reason : "",
     heldBy: held ? c.held_by || "" : "",
     heldAt: held ? c.held_at || null : null,
+    flagged,
+    flagNote: flagged ? c.flag_note : "",
+    flaggedBy: flagged ? c.flagged_by || "" : "",
+    flaggedAt: flagged ? c.flagged_at || null : null,
     outcome,
     outcomeAuto,
     outcomeSource: c && c.outcome ? "manual" : outcomeAuto ? "review" : "",
@@ -10140,6 +10153,7 @@ function deriveCase(r, ctx, today, money2) {
     stage,
     next: nextStep ? nextStep.key : null,
     nextLabel: nextStep ? nextStep.label : allDone ? "All steps done \u2014 close the case" : "",
+    nextTodo: nextStep ? nextStep.todo : "",
     allDone,
     steps,
     daysToDue,
@@ -10258,7 +10272,7 @@ async function buildSchedule(env, tid, opts) {
         } else e.scheduled++;
       }
     }
-    stats.pipeline = { byStage, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
+    stats.pipeline = { byStage, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, flagged: rows.filter((r) => r.case && r.case.flagged).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
     stats.byEngineer = byEngineer;
   }
   return { type, rows: filtered, total: rows.length, stats, today };
@@ -10304,7 +10318,7 @@ async function handle9(request, env, ctx, url, sess) {
       if (!c) {
         await env.DB.prepare("INSERT INTO concerto_cases (tenant_id,id,ppm_id,store_code,ppm_type,cycle_due,outcome,engineer,steps,opened_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(tid, id, ppmId, row.store_code || "", row.ppm_type || "fiveYear", cycle, "", "", "{}", now, now, me).run();
         c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
-      } else if (c.closed_at && (b.reopen || b.step || b.outcome !== void 0 || b.hold)) {
+      } else if (c.closed_at && (b.reopen || b.step || b.outcome !== void 0 || b.hold || b.flag)) {
         c.closed_at = null;
         c.closed_by = null;
         events.push({ action: "reopen", text: "Case reopened" });
@@ -10361,10 +10375,25 @@ async function handle9(request, env, ctx, url, sess) {
         events.push({ action: "resume", text: "Taken off hold" });
       }
     }
+    if (b.flag !== void 0) {
+      const note = String(b.flag || "").slice(0, 300);
+      if (note) {
+        c.flag_note = note;
+        c.flagged_at = now;
+        c.flagged_by = me;
+        events.push({ action: "flag", flag: note, text: "\u{1F6A9} Flagged: " + note });
+      } else {
+        c.flag_note = null;
+        c.flagged_at = null;
+        c.flagged_by = null;
+        events.push({ action: "unflag", text: "Flag cleared" });
+      }
+    }
     if (b.close) {
       c.closed_at = now;
       c.closed_by = me;
       c.hold_reason = null;
+      c.flag_note = null;
       events.push({ action: "close", text: "Case closed" });
     }
     if (b.reopen && c.closed_at) {
@@ -10372,7 +10401,7 @@ async function handle9(request, env, ctx, url, sess) {
       c.closed_by = null;
       events.push({ action: "reopen", text: "Case reopened" });
     }
-    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }
@@ -10450,17 +10479,18 @@ var init_concerto = __esm({
       ev: /\bev\b|charg|forecourt/i
     };
     CASE_STEPS = [
-      { key: "scheduled", label: "Job scheduled", short: "Sched", auto: true },
-      { key: "tested", label: "Test carried out", short: "Test", auto: true },
-      { key: "reviewed", label: "Certificate reviewed \u2014 outcome set", short: "Review", auto: true },
-      { key: "quoted", label: "Remedials quoted", short: "Quote", unsat: true },
-      { key: "ordered", label: "Remedial order received", short: "Order", unsat: true, auto: true },
-      { key: "works_done", label: "Remedial works completed", short: "Works", unsat: true, auto: true },
-      { key: "cert_updated", label: "Certificate updated after the works", short: "Re-issue", unsat: true, auto: true },
-      { key: "approved", label: "Certificate approved (EasyCert)", short: "Approve" },
-      { key: "uploaded", label: "Certificate uploaded to Concerto", short: "Upload" },
-      { key: "invoiced", label: "Test invoiced on Concerto", short: "Invoice" },
-      { key: "rem_closed", label: "Remedials closed & invoiced on Concerto", short: "Rem. inv.", unsat: true }
+      { key: "checked", label: "Checked \u2014 due, to be booked", short: "Checked", todo: "To check" },
+      { key: "scheduled", label: "Job booked", short: "Booked", todo: "To book", auto: true },
+      { key: "tested", label: "Test carried out", short: "Test", todo: "Test due", auto: true },
+      { key: "reviewed", label: "Certificate reviewed \u2014 outcome set", short: "Review", todo: "To review", auto: true },
+      { key: "quoted", label: "Remedials quoted", short: "Quote", todo: "To quote", unsat: true },
+      { key: "ordered", label: "Remedial order received", short: "Order", todo: "Awaiting order", unsat: true, auto: true },
+      { key: "works_done", label: "Remedial works completed", short: "Works", todo: "Works to do", unsat: true, auto: true },
+      { key: "cert_updated", label: "Certificate updated after the works", short: "Re-issue", todo: "Cert to update", unsat: true, auto: true },
+      { key: "approved", label: "Certificate approved (EasyCert)", short: "Approve", todo: "To approve" },
+      { key: "uploaded", label: "Certificate uploaded to Concerto", short: "Upload", todo: "To upload" },
+      { key: "invoiced", label: "Test invoiced on Concerto", short: "Invoice", todo: "To invoice" },
+      { key: "rem_closed", label: "Remedials closed & invoiced on Concerto", short: "Rem. inv.", todo: "Remedials to close", unsat: true }
     ];
     STEP_KEYS = new Set(CASE_STEPS.map((s) => s.key));
     caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
