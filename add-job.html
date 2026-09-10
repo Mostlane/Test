@@ -179,11 +179,6 @@
   <div class="card">
     <a class="ml-back" href="sla-main.html" title="Back">‹ Back</a>
     <h1>Add Job</h1>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 12px;">
-      <span style="font-size:13px;font-weight:700;color:#5b6b78;">Job type</span>
-      <span class="btn" style="background:#003366;color:#fff;border-color:#003366;cursor:default;">📋 Standard</span>
-      <a class="btn" href="site-audit.html" title="Switch to the Site Audit builder — import a Site Audit Pro PDF, per-item photos, one job with an audit checklist" style="text-decoration:none;">🔍 Site audit →</a>
-    </div>
     <p class="sub">
       Manually create a job — just pick the <b>site</b>, describe it, and set <b>when</b> and <b>who</b>.
     </p>
@@ -290,7 +285,7 @@
 
       <!-- Specialist job types — collapsed by default to keep the form clean -->
       <details class="field-group" id="jobTypeExtra" style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc">
-      <summary style="cursor:pointer;font-weight:600;font-size:15px;color:#003468;list-style:none">🧰 Specialist job type <span class="hint" style="font-weight:400">— firestopping, electrical test, pump maintenance, standby, EM/PAT (tap to open)</span></summary>
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;color:#003468;list-style:none">🧰 Specialist job type <span class="hint" style="font-weight:400">— firestopping, electrical test, pump maintenance, standby, EM/PAT, site audit (tap to open)</span></summary>
       <div style="margin-top:10px">
 
       <!-- Firestopping job -->
@@ -340,6 +335,12 @@
           <button type="button" id="emRefresh" class="btn" style="padding:4px 10px;font-size:12px;">🔄 Refresh EM numbers</button>
         </div>
         <div class="hint" id="emHint">Auto-fills the certificate-import text + duration. Yearly EM = 3h (PAT runs in the first 45 min); Monthly EM flick test = 30 min; PAT alone = 45 min. EM cert numbers come from last year's compliance certs.</div>
+      </div>
+
+      <!-- Site audit — its own builder (import a Site Audit Pro PDF, per-item photos + checklist) -->
+      <div class="field-group">
+        <a class="btn" href="site-audit.html" title="Import a Site Audit Pro PDF, per-item photos, one job with an audit checklist" style="text-decoration:none;">🔍 Site audit builder →</a>
+        <div class="hint">A site audit is its own builder — import a Site Audit Pro PDF, add per-item photos, and raise one job with an audit checklist. Opens the Site Audit page.</div>
       </div>
 
       </div>
