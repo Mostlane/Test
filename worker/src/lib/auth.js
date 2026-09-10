@@ -59,9 +59,28 @@ export function validatePassword(pw) {
   return null;
 }
 
-// Short, readable temporary password for admin resets (e.g. "Mostlane-4827").
+// Temporary password for admin resets, e.g. "Mostlane-k7Q4mX2p". Eight
+// characters from an unambiguous alphabet (no 0/O/1/l/I) drawn from the
+// CSPRNG — ~10^13 possibilities, so the login throttle actually bites. Always
+// contains a digit so it passes validatePassword. (Was Math.random() × 9000.)
 export function generateTempPassword() {
-  return "Mostlane-" + Math.floor(1000 + Math.random() * 9000);
+  const ALPHA = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const DIGITS = "23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(9));
+  let out = "";
+  for (let i = 0; i < 7; i++) out += ALPHA[bytes[i] % ALPHA.length];
+  const pos = bytes[7] % 8;
+  out = out.slice(0, pos) + DIGITS[bytes[8] % DIGITS.length] + out.slice(pos);
+  return "Mostlane-" + out;
+}
+
+// Session tokens are stored HASHED (SHA-256) so a database read never yields a
+// usable token. The client keeps the raw token; every lookup hashes it first.
+// Rows written before this change hold the raw token — requireSession still
+// finds them (second lookup) and rewrites the row to the hash, so nobody is
+// logged out by the migration.
+export async function hashToken(token) {
+  return sha256Hex("sess:" + String(token || ""));
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -80,7 +99,7 @@ export async function createSession(env, username, deviceId, tenantId) {
   const expires = new Date(Date.now() + ttlH * 3600 * 1000).toISOString();
   await env.DB.prepare(
     "INSERT INTO sessions (token, username, device_id, tenant_id, expires_at) VALUES (?,?,?,?,?)"
-  ).bind(token, username, deviceId || null, tenantId, expires).run();
+  ).bind(await hashToken(token), username, deviceId || null, tenantId, expires).run();
   return { token, expires };
 }
 
@@ -91,18 +110,49 @@ export async function requireSession(env, request) {
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return null;
-  const row = await env.DB.prepare(
+  const hashed = await hashToken(token);
+  let row = await env.DB.prepare(
     "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')"
-  ).bind(token).first();
-  if (!row) return null;
+  ).bind(hashed).first();
+  if (!row) {
+    // Legacy row written before tokens were hashed: accept it once and
+    // rewrite it to the hash so the raw token no longer sits in the table.
+    row = await env.DB.prepare(
+      "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')"
+    ).bind(token).first();
+    if (!row) return null;
+    try { await env.DB.prepare("UPDATE sessions SET token = ? WHERE token = ?").bind(hashed, token).run(); row.token = hashed; } catch {}
+  }
+  // Device binding (Sep 2026): a session created with a device id only works
+  // from that device — the browser sends its id in X-Device-Id on every call
+  // (portal-config's fetch bridge). A stolen token replayed from anywhere
+  // else is refused. Sessions without a bound device (the owner, and rows
+  // from before this change) are not restricted.
+  if (row.device_id) {
+    const dev = request.headers.get("X-Device-Id") || "";
+    if (dev !== row.device_id) return null;
+  }
   const user = await env.DB.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?")
     .bind(row.tenant_id, row.username).first();
   if (!user) return null;
   return { session: row, user, tenantId: row.tenant_id };
 }
 
+// Accepts the raw token the client holds (deletes the hashed row, and any
+// legacy raw row).
 export async function destroySession(env, token) {
-  await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+  const hashed = await hashToken(token);
+  await env.DB.prepare("DELETE FROM sessions WHERE token = ? OR token = ?").bind(hashed, token).run();
+}
+
+// Revoke every session a user holds, optionally keeping the one that made the
+// request (raw token). Called on password change/reset so a stolen 90-day
+// token dies the moment the owner changes their password.
+export async function revokeUserSessions(env, tenantId, username, keepRawToken) {
+  const keep = keepRawToken ? await hashToken(keepRawToken) : null;
+  await env.DB.prepare(
+    "DELETE FROM sessions WHERE tenant_id = ? AND username = ? AND (? IS NULL OR (token <> ? AND token <> ?))"
+  ).bind(tenantId, username, keep, keep, keepRawToken || "").run();
 }
 
 // Compose the flat permission object the existing front-end expects from /user.

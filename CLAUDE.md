@@ -283,6 +283,59 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   after touching any of the above.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
+- **Session hardening (10 Sep 2026 — from the PWA audit; test
+  `node --no-warnings worker/tools/test-auth-sessions.mjs`, 37 cases on a real
+  SQLite):**
+  - **Tokens are stored HASHED** (`hashToken` = sha256("sess:"+token)) — the
+    client keeps the raw token, `requireSession` hashes and looks up; a legacy
+    raw-token row is still accepted once and rewritten to the hash, so nobody was
+    logged out by the change. `destroySession` deletes by hash or raw.
+  - **Sessions are DEVICE-BOUND.** login.html posts `deviceId` (device-auth.js's
+    `deviceID`, `dev-xxxxxxx`); the row's `device_id` is set (never for the owner)
+    and every request must carry **`X-Device-Id`** equal to it or it is 401.
+    portal-config's fetch bridge adds the header to EVERY call to the API host
+    (bridged legacy hosts AND direct MOSTLANE_API calls); client-home.html and
+    ml-offline.js's replay add it themselves. Rows with a NULL device (the owner,
+    pre-change logins) are not restricted, so old phones keep working until they
+    log in again. **Any new standalone page that calls the API with a Bearer
+    token MUST also send X-Device-Id** or bound sessions get 401 there.
+    Impersonated (View As) sessions bind to the owner's device header.
+  - **Login refuses a device registered to ANOTHER user** (403,
+    login_history outcome `device_mismatch`); an unknown device logs in and the
+    client registers it as before. `/device/check-device` + `/register-device`
+    act ONLY for the session's user (the body username used to be trusted — any
+    caller could claim the exempt owner or register devices against others).
+  - **Password change revokes every OTHER session** (`revokeUserSessions`, the
+    changing device stays in); a forgot-password reset revokes ALL.
+  - **The ONE logout is `window.mlLogout()`** (portal-config): POST /auth/logout
+    (keepalive), then `localStorage.clear()` keeping only `deviceID`/`mlDeviceId`,
+    `sessionStorage.clear()`, delete IndexedDB `mlVanCheck`/`mlHandover`/`mlPhotoQ`,
+    delete every Cache Storage cache, `location.replace("/login.html")`. Warns via
+    MLUI.confirm when `mlOfflineQueue_v1` still holds unsent writes. The main.html
+    tile, the sidebar, the office-clock modal and you.html all call it;
+    client-home.html (no portal-config) has its own equivalent. Before this, no
+    logout called the server (tokens stayed live for 90 days) and the menu logout
+    left the login flags, so the app reopened to the previous person's menu.
+  - `ml-offline.js` no longer stores the `Authorization` header in the queue; the
+    live token + device id are re-attached at replay.
+  - **Temp passwords** are now `Mostlane-` + 8 CSPRNG chars (was 4 digits from
+    Math.random). NB `must_change_password` is STILL only enforced by login.html.
+  - API JSON responses carry `Cache-Control: no-store` + `X-Content-Type-Options`
+    (lib/http.js `json()`); CORS allows `X-Device-Id`.
+- **GET /users + GET /user?u= strip the profile blob for non-admins (10 Sep 2026).**
+  `shapeUser(u, perms, level)`: `full` (FullAccess|Users, or your own record) =
+  everything; `sla` (SLAAdmin) = staffType/sortOrder/areas/clientOrg + the home
+  postcode/lat/lng the scheduler routes with; `min` (everyone else) = staffType/
+  sortOrder/areas/clientOrg. Phone, pay rates, fuel card, home location never
+  reach a field engineer's inbox picker or a client login any more. Flat
+  permission flags are still returned (pickers filter on them).
+- **`/sla/jobs/{id}/export` + `/export.pdf` are NO LONGER public** (they returned
+  full job sheets by guessable id). They need a session, or a signed link:
+  `signedFileUrl(env, origin, pathname, pathname, ttl)` — index.js verifies
+  `verifyFileSig(env, url.pathname, params)` when there is no session. No page
+  currently mints one.
+- `/certs/status?count=1` (the home-hub tile) memoises its tallies per isolate for
+  60 s (`STATUS_COUNT_MEMO`) — it was the last endpoint still brushing 2.5 s.
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
   auto-upgraded on login. NEVER paste plaintext into D1 — it won't work.
 - **Sessions last 90 days** (SESSION_TTL_HOURS default 2160). login.html
@@ -364,7 +417,9 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   endpoints already accept any username — so a Blocked leaver's documents +
   history remain fully accessible (only a permanent-erase loses that).
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
-  /device/reset, owner exempt.
+  /device/reset, owner exempt. **Since 10 Sep 2026 the lock is enforced
+  SERVER-SIDE via device-bound sessions (see Auth & sessions) — device-auth.js's
+  prompt is now just the registration UI, not the gate.**
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.

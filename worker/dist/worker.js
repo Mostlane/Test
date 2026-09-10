@@ -16,7 +16,7 @@ function corsHeaders(env, request) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Device-Id",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
@@ -26,6 +26,10 @@ function json(data, init = {}, env, request) {
     status: init.status || 200,
     headers: {
       "Content-Type": "application/json",
+      // API JSON is per-user and often personal: never let the browser (or a
+      // proxy) keep a copy on disk. The pages fetch live every time anyway.
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
       ...corsHeaders(env, request),
       ...init.headers || {}
     }
@@ -87,7 +91,17 @@ function validatePassword(pw) {
   return null;
 }
 function generateTempPassword() {
-  return "Mostlane-" + Math.floor(1e3 + Math.random() * 9e3);
+  const ALPHA = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const DIGITS = "23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(9));
+  let out = "";
+  for (let i = 0; i < 7; i++) out += ALPHA[bytes[i] % ALPHA.length];
+  const pos = bytes[7] % 8;
+  out = out.slice(0, pos) + DIGITS[bytes[8] % DIGITS.length] + out.slice(pos);
+  return "Mostlane-" + out;
+}
+async function hashToken(token) {
+  return sha256Hex("sess:" + String(token || ""));
 }
 async function createSession(env, username, deviceId, tenantId) {
   if (tenantId === void 0 || tenantId === null) {
@@ -98,23 +112,45 @@ async function createSession(env, username, deviceId, tenantId) {
   const expires = new Date(Date.now() + ttlH * 3600 * 1e3).toISOString();
   await env.DB.prepare(
     "INSERT INTO sessions (token, username, device_id, tenant_id, expires_at) VALUES (?,?,?,?,?)"
-  ).bind(token, username, deviceId || null, tenantId, expires).run();
+  ).bind(await hashToken(token), username, deviceId || null, tenantId, expires).run();
   return { token, expires };
 }
 async function requireSession(env, request) {
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return null;
-  const row = await env.DB.prepare(
+  const hashed = await hashToken(token);
+  let row = await env.DB.prepare(
     "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')"
-  ).bind(token).first();
-  if (!row) return null;
+  ).bind(hashed).first();
+  if (!row) {
+    row = await env.DB.prepare(
+      "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')"
+    ).bind(token).first();
+    if (!row) return null;
+    try {
+      await env.DB.prepare("UPDATE sessions SET token = ? WHERE token = ?").bind(hashed, token).run();
+      row.token = hashed;
+    } catch {
+    }
+  }
+  if (row.device_id) {
+    const dev = request.headers.get("X-Device-Id") || "";
+    if (dev !== row.device_id) return null;
+  }
   const user = await env.DB.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(row.tenant_id, row.username).first();
   if (!user) return null;
   return { session: row, user, tenantId: row.tenant_id };
 }
 async function destroySession(env, token) {
-  await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+  const hashed = await hashToken(token);
+  await env.DB.prepare("DELETE FROM sessions WHERE token = ? OR token = ?").bind(hashed, token).run();
+}
+async function revokeUserSessions(env, tenantId, username, keepRawToken) {
+  const keep = keepRawToken ? await hashToken(keepRawToken) : null;
+  await env.DB.prepare(
+    "DELETE FROM sessions WHERE tenant_id = ? AND username = ? AND (? IS NULL OR (token <> ? AND token <> ?))"
+  ).bind(tenantId, username, keep, keep, keepRawToken || "").run();
 }
 async function canSeeMoney(env, tenantId, username) {
   if (!username) return false;
@@ -144,6 +180,48 @@ var enc;
 var init_auth = __esm({
   "src/lib/auth.js"() {
     enc = new TextEncoder();
+  }
+});
+
+// src/lib/filesign.js
+function fileSecret(env) {
+  return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
+}
+async function hmacHex(secret, msg) {
+  const enc3 = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc3.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
+  const base = `${origin}${streamPath}?key=${encodeURIComponent(key)}`;
+  const secret = fileSecret(env);
+  if (!secret) return base;
+  const exp = Math.floor(Date.now() / 1e3) + ttlSec;
+  const sig = await hmacHex(secret, key + "|" + exp);
+  return `${base}&exp=${exp}&sig=${sig}`;
+}
+async function verifyFileSig(env, key, params) {
+  const secret = fileSecret(env);
+  if (!secret) return true;
+  const exp = parseInt(params.get("exp") || "0", 10);
+  const sig = params.get("sig") || "";
+  if (!exp || !sig) return false;
+  if (Math.floor(Date.now() / 1e3) > exp) return false;
+  const good = await hmacHex(secret, key + "|" + exp);
+  if (good.length !== sig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ sig.charCodeAt(i);
+  return diff === 0;
+}
+var init_filesign = __esm({
+  "src/lib/filesign.js"() {
   }
 });
 
@@ -931,48 +1009,6 @@ var init_push = __esm({
     init_once();
     ensureTable = onceMigration(ensureTable__raw);
     FEED_READY = false;
-  }
-});
-
-// src/lib/filesign.js
-function fileSecret(env) {
-  return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
-}
-async function hmacHex(secret, msg) {
-  const enc3 = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc3.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
-  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
-  const base = `${origin}${streamPath}?key=${encodeURIComponent(key)}`;
-  const secret = fileSecret(env);
-  if (!secret) return base;
-  const exp = Math.floor(Date.now() / 1e3) + ttlSec;
-  const sig = await hmacHex(secret, key + "|" + exp);
-  return `${base}&exp=${exp}&sig=${sig}`;
-}
-async function verifyFileSig(env, key, params) {
-  const secret = fileSecret(env);
-  if (!secret) return true;
-  const exp = parseInt(params.get("exp") || "0", 10);
-  const sig = params.get("sig") || "";
-  if (!exp || !sig) return false;
-  if (Math.floor(Date.now() / 1e3) > exp) return false;
-  const good = await hmacHex(secret, key + "|" + exp);
-  if (good.length !== sig.length) return false;
-  let diff = 0;
-  for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ sig.charCodeAt(i);
-  return diff === 0;
-}
-var init_filesign = __esm({
-  "src/lib/filesign.js"() {
   }
 });
 
@@ -13177,6 +13213,11 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (!isOffice) return error("Office access required", 403, env, request);
     const range = String(q.get("range") || "today").toLowerCase();
     const countOnly = q.get("count") === "1";
+    const memoKey = tid + ":" + range;
+    if (countOnly) {
+      const m = STATUS_COUNT_MEMO.get(memoKey);
+      if (m && Date.now() - m.at < 6e4) return json({ ok: true, range, counts: m.counts, items: [], cached: true }, {}, env, request);
+    }
     const londonDay = (d) => {
       try {
         const x = new Date(d);
@@ -13251,6 +13292,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       toReview: items.filter((i) => i.status === "review").length,
       withEngineers: items.filter((i) => i.status === "draft" || i.status === "notstarted").length
     };
+    if (countOnly) STATUS_COUNT_MEMO.set(memoKey, { at: Date.now(), counts });
     return json({ ok: true, range, counts, items: countOnly ? [] : items }, {}, env, request);
   }
   if (sub === "/list" && method === "GET") {
@@ -14205,7 +14247,7 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var T, DEFAULT_CONFIG2, ensureTables4, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var STATUS_COUNT_MEMO, T, DEFAULT_CONFIG2, ensureTables4, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -14225,6 +14267,7 @@ var init_certs = __esm({
     init_pump();
     init_tenantdb();
     init_once();
+    STATUS_COUNT_MEMO = /* @__PURE__ */ new Map();
     T = (t) => t === "pat" ? "pat" : "em";
     DEFAULT_CONFIG2 = {
       // Default client used to seed a NEW cert when the previous cert didn't supply one
@@ -21363,6 +21406,7 @@ var init_holidays = __esm({
 // src/index.js
 init_http();
 init_auth();
+init_filesign();
 
 // src/routes/auth.js
 init_http();
@@ -21374,8 +21418,9 @@ init_push();
 async function handle2(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/auth/login" && request.method === "POST") {
-    const { username, password } = await request.json().catch(() => ({}));
+    const { username, password, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
+    const deviceId = typeof rawDeviceId === "string" && /^[\w.-]{4,80}$/.test(rawDeviceId) ? rawDeviceId : null;
     const loginIp = request.headers.get("CF-Connecting-IP") || "";
     if (loginIp && await tooManyRecentFails(env, loginIp)) {
       return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
@@ -21392,7 +21437,16 @@ async function handle2(request, env, ctx, url, sess) {
       const newHash = await hashPassword(password);
       await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
     }
-    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
+    const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+    const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+    if (bindDevice) {
+      const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?").bind(user.tenant_id, bindDevice).first().catch(() => null);
+      if (dev && dev.username && dev.username !== user.username) {
+        await logLogin(env, tenantId, request, user.username, "device_mismatch");
+        return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+      }
+    }
+    const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
     const perms = await permissionsFor(env, user.tenant_id, user.username);
     try {
       const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : user.profile || {};
@@ -21429,7 +21483,7 @@ async function handle2(request, env, ctx, url, sess) {
     const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
     if (!user) return error("Unknown user", 404, env, request);
     await logLogin(env, sess.tenantId, request, username, "viewas");
-    const { token, expires } = await createSession(env, username, null, sess.tenantId);
+    const { token, expires } = await createSession(env, username, request.headers.get("X-Device-Id") || null, sess.tenantId);
     const perms = await permissionsFor(env, sess.tenantId, username);
     return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
   }
@@ -21458,6 +21512,8 @@ async function handle2(request, env, ctx, url, sess) {
     const bad = validatePassword(newPassword);
     if (bad) return error(bad, 400, env, request);
     await setPassword(env, sess.tenantId, sess.user.username, newPassword);
+    const auth = request.headers.get("Authorization") || "";
+    await revokeUserSessions(env, sess.tenantId, sess.user.username, auth.startsWith("Bearer ") ? auth.slice(7) : null);
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/auth/forgot-password" && request.method === "POST") {
@@ -21483,6 +21539,7 @@ async function handle2(request, env, ctx, url, sess) {
     ).bind(token).first();
     if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
     await setPassword(env, row.tenant_id, row.username, newPassword);
+    await revokeUserSessions(env, row.tenant_id, row.username, null);
     await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
     return json({ ok: true }, {}, env, request);
   }
@@ -21686,13 +21743,21 @@ async function handle3(request, env, ctx, url, sess) {
       token: env.HS_PLAN_TOKEN || ""
     }, {}, env, request);
   }
+  async function profileLevelFor(targetUsername) {
+    if (!sess) return "min";
+    if (sess.user.username === targetUsername) return "full";
+    const p = await permissionsFor(env, sess.tenantId, sess.user.username);
+    if (p.FullAccess === "Yes" || p.Users === "Yes") return "full";
+    if (p.SLAAdmin === "Yes") return "sla";
+    return "min";
+  }
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
     if (!username) return error("Missing ?u=", 400, env, request);
     const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
     if (!user) return json({ found: false }, {}, env, request);
     const perms = await permissionsFor(env, tenantId, username);
-    return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
+    return json({ found: true, user: shapeUser2(user, perms, await profileLevelFor(username)) }, {}, env, request);
   }
   if (path === "/users" && request.method === "GET") {
     const [{ results }, { results: permRows }] = await Promise.all([
@@ -21704,7 +21769,8 @@ async function handle3(request, env, ctx, url, sess) {
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
     const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus3(u.status));
     const out = [];
-    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
+    const lvl = await profileLevelFor("");
+    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}, sess && u.username === sess.user.username ? "full" : lvl));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }
@@ -22031,12 +22097,18 @@ function isActiveStatus3(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
-function shapeUser2(u, perms) {
+function shapeUser2(u, perms, level = "full") {
   let profile = {};
   try {
     profile = u.profile ? JSON.parse(u.profile) : {};
   } catch {
     profile = {};
+  }
+  if (level !== "full") {
+    const keep = level === "sla" ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng"] : ["staffType", "sortOrder", "areas", "clientOrg"];
+    const slim = {};
+    for (const k of keep) if (profile[k] !== void 0) slim[k] = profile[k];
+    profile = slim;
   }
   return {
     EngineerNumber: u.engineer_number,
@@ -22083,9 +22155,13 @@ async function handle4(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  const me = sess && sess.user ? sess.user.username : null;
   if (path === "/device/check-device" && request.method === "POST") {
-    const { username, deviceId } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    const { username: bodyUser, deviceId } = await request.json().catch(() => ({}));
+    if (!me) return error("Not authenticated", 401, env, request);
+    const username = me;
+    if (bodyUser && bodyUser !== me) return error("You can only check your own device", 403, env, request);
+    if (!deviceId) return error("deviceId required", 400, env, request);
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);
     const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
     if (!dev) {
@@ -22097,8 +22173,11 @@ async function handle4(request, env, ctx, url, sess) {
     return json({ status: "OK" }, {}, env, request);
   }
   if (path === "/device/register-device" && request.method === "POST") {
-    const { username, deviceId, label: label2 } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    const { username: bodyUser, deviceId, label: label2 } = await request.json().catch(() => ({}));
+    if (!me) return error("Not authenticated", 401, env, request);
+    const username = me;
+    if (bodyUser && bodyUser !== me) return error("You can only register your own device", 403, env, request);
+    if (!deviceId) return error("deviceId required", 400, env, request);
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);
     const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
     if (existing && existing.username !== username)
@@ -41263,7 +41342,10 @@ var worker = {
     let sess = null;
     if (!isPublic(request.method, url.pathname)) {
       sess = await requireSession(env, request);
-      if (!sess) return error("Not authenticated", 401, env, request);
+      if (!sess) {
+        const signedExport = request.method === "GET" && isSignedJobExport(url.pathname) && await verifyFileSig(env, url.pathname, url.searchParams);
+        if (!signedExport) return error("Not authenticated", 401, env, request);
+      }
     }
     if (url.pathname === "/batch" && request.method === "POST") {
       if (!sess) return error("Not authenticated", 401, env, request);
@@ -41613,9 +41695,13 @@ var PUBLIC_ROUTES = [
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
-  if (method === "GET" && /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname)) return true;
   return false;
 }
+function isSignedJobExport(pathname) {
+  return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
+}
 export {
-  index_default as default
+  index_default as default,
+  isPublic,
+  isSignedJobExport
 };

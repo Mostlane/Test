@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=34"></script>
+  <script src="/portal-config.js?v=35"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -394,7 +394,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button visible" id="Help" href="help.html"><span class="emoji">❓</span> Help</a>
 
     <!-- FIXED -->
-    <a class="button visible" id="Logout" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
+    <a class="button visible" id="Logout" href="javascript:void(0)" onclick="if(window.mlLogout){mlLogout();}else{localStorage.clear(); sessionStorage.clear(); window.location.href='login.html';}">
       <span class="emoji">🚪</span> Logout
     </a>
 

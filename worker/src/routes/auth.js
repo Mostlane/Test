@@ -17,7 +17,7 @@
 import { json, error } from "../lib/http.js";
 import {
   verifyPassword, hashPassword, validatePassword, createSession, destroySession,
-  requireSession, permissionsFor,
+  requireSession, permissionsFor, revokeUserSessions,
 } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { resolveComplianceAccess } from "../lib/complianceaccess.js";
@@ -28,8 +28,11 @@ export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
 
   if (path === "/auth/login" && request.method === "POST") {
-    const { username, password } = await request.json().catch(() => ({}));
+    const { username, password, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
+    // The browser's own device id (device-auth.js) — the new session is BOUND to
+    // it (see requireSession), so the token only works from this device.
+    const deviceId = typeof rawDeviceId === "string" && /^[\w.-]{4,80}$/.test(rawDeviceId) ? rawDeviceId : null;
 
     // Brute-force throttle: stop an IP that has piled up failed attempts in the
     // last 15 minutes. Keyed on IP, not the account, so nobody can lock a real
@@ -68,7 +71,21 @@ export async function handle(request, env, ctx, url, sess) {
         .bind(newHash, user.tenant_id, user.username).run();
     }
 
-    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
+    // Device lock, server side: a device already registered to SOMEONE ELSE
+    // may not log this user in (the client-side prompt used to be the only
+    // check). Unknown devices are allowed through — the client registers them
+    // (capped per user) via /device/register-device right after login.
+    const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+    const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+    if (bindDevice) {
+      const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?")
+        .bind(user.tenant_id, bindDevice).first().catch(() => null);
+      if (dev && dev.username && dev.username !== user.username) {
+        await logLogin(env, tenantId, request, user.username, "device_mismatch");
+        return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+      }
+    }
+    const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
     const perms = await permissionsFor(env, user.tenant_id, user.username);
 
     // Client (external) logins are surfaced to Full-Access users — visibility of
@@ -113,7 +130,9 @@ export async function handle(request, env, ctx, url, sess) {
       .bind(db.tenantId, username).first();
     if (!user) return error("Unknown user", 404, env, request);
     await logLogin(env, sess.tenantId, request, username, "viewas");
-    const { token, expires } = await createSession(env, username, null, sess.tenantId);
+    // Bound to the OWNER's device (the header the bridge sends) so the
+    // impersonated token is useless anywhere else.
+    const { token, expires } = await createSession(env, username, request.headers.get("X-Device-Id") || null, sess.tenantId);
     const perms = await permissionsFor(env, sess.tenantId, username);
     return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
   }
@@ -149,6 +168,9 @@ export async function handle(request, env, ctx, url, sess) {
     const bad = validatePassword(newPassword);
     if (bad) return error(bad, 400, env, request);
     await setPassword(env, sess.tenantId, sess.user.username, newPassword);
+    // Every OTHER session dies with the old password; this device stays in.
+    const auth = request.headers.get("Authorization") || "";
+    await revokeUserSessions(env, sess.tenantId, sess.user.username, auth.startsWith("Bearer ") ? auth.slice(7) : null);
     return json({ ok: true }, {}, env, request);
   }
 
@@ -184,6 +206,7 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(token).first();
     if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
     await setPassword(env, row.tenant_id, row.username, newPassword);
+    await revokeUserSessions(env, row.tenant_id, row.username, null);   // a reset ends every existing login
     await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
     return json({ ok: true }, {}, env, request);
   }

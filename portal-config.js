@@ -134,7 +134,7 @@
     // user is no longer allowed (permission changes win over stale caches).
     var tok = localStorage.getItem("mostlaneToken");
     if (tok) {
-      fetch(window.MOSTLANE_API + "/theme", { headers: { "Authorization": "Bearer " + tok } })
+      fetch(window.MOSTLANE_API + "/theme", { headers: { "Authorization": "Bearer " + tok, "X-Device-Id": (function () { try { return localStorage.getItem("deviceID") || ""; } catch (e) { return ""; } })() } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d || !d.ok) return;
@@ -146,6 +146,26 @@
         }).catch(function () {});
     }
   })();
+
+  // This browser's device id (device-auth.js creates it at login; same key).
+  // Sent as X-Device-Id on EVERY call to the API: a session created since
+  // Sep 2026 is bound to the device it was issued to and the worker refuses
+  // the token from anywhere else.
+  function deviceId() {
+    try {
+      var id = localStorage.getItem("deviceID");
+      if (!id) { id = "dev-" + crypto.randomUUID().slice(0, 7); localStorage.setItem("deviceID", id); }
+      return id;
+    } catch (e) { return ""; }
+  }
+  function withDeviceHeader(init, input) {
+    init = Object.assign({}, init || {});
+    var headers = new Headers(init.headers || (typeof input !== "string" && input ? input.headers : undefined));
+    var id = deviceId();
+    if (id && !headers.has("X-Device-Id")) headers.set("X-Device-Id", id);
+    init.headers = headers;
+    return init;
+  }
 
   // ── Activity log: page views ──────────────────────────────────────────────
   // One tiny beacon per page open (logged-in users only). Actions themselves
@@ -159,7 +179,7 @@
       if (["login.html", "onboard.html", "forgot-password.html", "reset-password.html", "confirmation.html"].indexOf(page) !== -1) return;
       fetch(window.MOSTLANE_API + "/audit/pageview", {
         method: "POST", keepalive: true,
-        headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json" },
+        headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json", "X-Device-Id": deviceId() },
         body: JSON.stringify({ page: page })
       }).catch(function () {});
     } catch (e) {}
@@ -188,7 +208,46 @@
   }
 
   const TOKEN_KEY = "mostlaneToken";
-  const nativeFetch = window.fetch.bind(window);
+  // portal-config's OWN calls (badges, theme, gates, bell) go through this and
+  // must carry the device header too, so it wraps the true native fetch.
+  const nativeFetch0 = window.fetch.bind(window);
+  const nativeFetch = function (input, init) {
+    try {
+      var u = new URL(typeof input === "string" ? input : (input && input.url), location.href);
+      if (u.host === new URL(API).host) return nativeFetch0(input, withDeviceHeader(init, input));
+    } catch (e) {}
+    return nativeFetch0(input, init);
+  };
+
+  // ── The ONE logout (Sep 2026). Every Log out / Sign out button calls this.
+  // It (1) tells the server to end the session (the token used to stay valid
+  // for its full 90 days), (2) wipes everything the app stored on the device —
+  // login flags, permissions, drafts, signatures, queued photos, the offline
+  // queue — except the device id, and (3) goes to the login page. The old
+  // buttons removed only the token, so the app reopened straight to the
+  // previous person's menu.
+  window.mlLogout = async function (opts) {
+    opts = opts || {};
+    try {
+      var queued = 0;
+      try { queued += (JSON.parse(localStorage.getItem("mlOfflineQueue_v1") || "[]") || []).length; } catch (e) {}
+      if (queued && !opts.force && window.MLUI && MLUI.confirm) {
+        var go = await MLUI.confirm(queued + " change" + (queued === 1 ? "" : "s") + " made offline " + (queued === 1 ? "has" : "have") + " not reached the portal yet and will be lost. Log out anyway?", { title: "Unsent changes", okLabel: "Log out", danger: true });
+        if (!go) return false;
+      }
+    } catch (e) {}
+    var tok = null; try { tok = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+    if (tok) { try { nativeFetch(API + "/auth/logout", { method: "POST", keepalive: true, headers: { "Authorization": "Bearer " + tok, "X-Device-Id": deviceId() } }).catch(function () {}); } catch (e) {} }
+    var keepDevice = null; try { keepDevice = localStorage.getItem("deviceID"); } catch (e) {}
+    var keepDevice2 = null; try { keepDevice2 = localStorage.getItem("mlDeviceId"); } catch (e) {}
+    try { localStorage.clear(); } catch (e) {}
+    try { sessionStorage.clear(); } catch (e) {}
+    try { if (keepDevice) localStorage.setItem("deviceID", keepDevice); if (keepDevice2) localStorage.setItem("mlDeviceId", keepDevice2); } catch (e) {}
+    try { if (window.indexedDB) ["mlVanCheck", "mlHandover", "mlPhotoQ"].forEach(function (n) { try { indexedDB.deleteDatabase(n); } catch (e) {} }); } catch (e) {}
+    try { if (window.caches) { var ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); } } catch (e) {}
+    location.replace("/login.html");
+    return true;
+  };
 
   // Request coalescing: the menu and the sidebar both ask for the same badge /
   // attention data on load. For a short list of idempotent GET endpoints we
@@ -235,10 +294,13 @@
             headers.set("Authorization", "Bearer " + token);
           }
           init.headers = headers;
-          return doFetch(newUrl, init);
+          return doFetch(newUrl, withDeviceHeader(init));
         }
-        // Direct calls to the API host (badges/attention) coalesce too.
-        if (typeof input === "string") return doFetch(input, init);
+        // Direct calls to the API host: add the device header; GETs coalesce too.
+        if (u.host === apiHost) {
+          if (typeof input === "string") return doFetch(input, withDeviceHeader(init, input));
+          return nativeFetch(input, withDeviceHeader(init, input));
+        }
       }
     } catch (e) {
       console.error("[portal-config] fetch bridge error:", e);
@@ -1211,9 +1273,7 @@
           var srch = e.target.closest ? e.target.closest(".pn-search") : null;
           if (srch) { e.preventDefault(); openPalette(); }
         });
-        document.getElementById("pnavLogout").addEventListener("click", function () {
-          localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html";
-        });
+        document.getElementById("pnavLogout").addEventListener("click", function () { window.mlLogout(); });
         document.getElementById("pnavCollapse").addEventListener("click", function () {
           var c = document.documentElement.classList.toggle("pnav-collapsed");
           try { localStorage.setItem("pnavCollapsed", c ? "1" : "0"); } catch (e) {}
@@ -1459,7 +1519,7 @@
           if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
           var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
-          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html"; };
+          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { window.mlLogout(); };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
           var kb = document.getElementById("ocConfirmBtn"); if (kb) kb.onclick = doConfirmFinish;
         }
