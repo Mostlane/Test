@@ -9,9 +9,21 @@ football-ground/
 ├── index.html    ← the whole site (one page, all sections)
 ├── styles.css    ← the look and feel
 ├── script.js     ← behaviour + the ONE place you edit your details
+├── admin.html    ← password-protected bookings admin (see SETUP.md)
 ├── assets/       ← put your photos here
+├── worker/       ← the standalone booking backend (Cloudflare Worker + D1)
+├── SETUP.md      ← one-time setup for the booking system
 └── README.md     ← this file
 ```
+
+## Bookings
+
+Enquiries from the form save into a standalone Cloudflare Worker + D1 database
+(`coalparklane`) and appear in **`admin.html`**, where you manage their status
+and see everything on a calendar. It's deliberately **enquiry + tracking only** —
+no online payment yet (that's Phase 2; the data model is already payment-ready).
+Stand it up once with **`SETUP.md`**. If the backend is ever unreachable, the
+form falls back to `mailto:` so no enquiry is lost.
 
 ---
 

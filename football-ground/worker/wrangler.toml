@@ -1,0 +1,35 @@
+# Coal Park Lane — standalone booking worker
+# Deploys independently of the Mostlane portal (its own service, its own D1).
+#
+# One-time setup in the Cloudflare dashboard (see ../SETUP.md):
+#   1. Create a Worker named "coalparklane-api", connect Workers Builds to this
+#      repo (Mostlane/Test) with root directory: football-ground/worker
+#   2. Bind the D1 database "coalparklane" as DB (already created)
+#   3. Add the secrets ADMIN_PASSWORD (and optionally RESEND_API_KEY)
+#
+# Non-secret vars live here; SECRETS are set in the dashboard and must never be committed.
+
+name = "coalparklane-api"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+[placement]
+mode = "smart"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "coalparklane"
+database_id = "ef6053f3-762d-4997-8c88-e029d4567556"
+
+[vars]
+# The website origin allowed to POST enquiries (CORS). Set to your live domain.
+ALLOWED_ORIGIN = "https://mostlane-portal.com"
+# Where enquiry notifications are emailed (only used if RESEND_API_KEY is set).
+NOTIFY_EMAIL = ""
+# The From address for notification emails (must be a Resend-verified sender).
+EMAIL_FROM = "bookings@coalparklane.co.uk"
+
+# SECRETS (set in the dashboard, NOT here):
+#   ADMIN_PASSWORD   – the password for admin.html
+#   ADMIN_SECRET     – (optional) token-signing key; falls back to ADMIN_PASSWORD
+#   RESEND_API_KEY   – (optional) to email you when an enquiry lands
