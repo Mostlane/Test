@@ -173,8 +173,37 @@ async function ensureTables__raw(env) {
   for (const col of ["email_subject TEXT", "email_from TEXT", "email_text TEXT", "unlinked_job_id TEXT"]) {
     try { await env.DB.prepare("ALTER TABLE client_orders ADD COLUMN " + col).run(); } catch (e) {}
   }
+  // 5-YEAR (fixed-wire / EICR) REMEDIALS register — one row per Concerto service
+  // request (SR). Imported from the office's Concerto remedials export. A row here
+  // is PROOF the EICR test was carried out (you can't quote remedials without
+  // inspecting), so it drives the "tested — cert to file" amber marker on the
+  // 5-year schedule. stage: quoted → ordered → in_works → done. Order fields are
+  // filled by matching client_orders (by store code / SR). `lines` = the JSON
+  // array of individual required-action rows from the export.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS five_year_remedials (
+    id TEXT PRIMARY KEY, tenant_id TEXT, sr TEXT, store_code TEXT, site_name TEXT,
+    element TEXT, quote_date TEXT, budget_cost REAL, priority TEXT, work_status TEXT,
+    stage TEXT, lines TEXT, data TEXT,
+    order_number TEXT, order_value REAL, order_id TEXT,
+    created_at TEXT, updated_at TEXT)`).run();
 }
 const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
+// Fixed-wire remedial pipeline stages.
+const FYR_STAGES = ["quoted", "ordered", "in_works", "done", "invoiced"];
+// Store code → 4-digit padded, ONLY when it's purely numeric (a real store code).
+// Site NAMES and blanks ("-", "Botley Road…") return "" so they never key a store.
+function fyrCode(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (!/^\d{1,4}$/.test(s)) return "";
+  return s.padStart(4, "0");
+}
+// Is this job (live or archive) a 5-year / fixed-wire / EICR test?
+function isFiveYearJob(blob) {
+  const s = String(blob || "").toLowerCase();
+  return /5\s*year/.test(s) || /fixed\s*wire/.test(s) || /\beicr\b/.test(s) || /electrical install\w*\s+condition/.test(s);
+}
+// Isolate-scoped cache for the (heavy) tested-map scan.
+let _fyrTestedCache = { tid: null, at: 0, map: null };
 // The board/list columns — never the email copy itself (up to 12 KB a row).
 const ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
 // Pipeline v2: to_quote (blocking pop-up until "Quote sent") → quoted (waiting for
@@ -1033,6 +1062,87 @@ function shapeRow(cert) {
   // always sees flagged faults (this is what made a submitted cert's remedials
   // invisible on review).
   return normalizeRemedials(rec);
+}
+
+// ── 5-year remedials helpers ─────────────────────────────────────────────────
+// Attach the matching client order (by SR ref first, then store code) to each
+// remedial row. There are only a few dozen orders, so match in memory. Also used
+// to keep a remedial's own order_* columns current on read.
+async function attachRemedialOrders(env, tid, rows) {
+  if (!rows.length) return rows;
+  const { results } = await env.DB.prepare(
+    "SELECT id, order_number, order_value, store_code, sr_ref, status FROM client_orders WHERE tenant_id=?"
+  ).bind(tid).all().catch(() => ({ results: [] }));
+  const bySr = {}, byCode = {};
+  for (const o of (results || [])) {
+    if (o.sr_ref) (bySr[String(o.sr_ref).toUpperCase()] ||= []).push(o);
+    const c = fyrCode(o.store_code); if (c) (byCode[c] ||= []).push(o);
+  }
+  for (const r of rows) {
+    const hit = (bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
+    r.order = hit ? { number: hit.order_number, value: hit.order_value, id: hit.id, status: hit.status } : null;
+  }
+  return rows;
+}
+// Build the per-store "the 5-year test has been done" map used to soften a red
+// "no cover" cell to amber "tested — cert to file". Sources, best signal first:
+//   remedial  — a five_year_remedials record (proof of inspection; carries stage+order)
+//   job       — a completed 5-year job on the live board
+//   archive   — a recently-completed 5-year job in the imported history
+// Cached ~5 min per isolate (the archive scan is heavy).
+async function fiveYearTestedMap(env, tid) {
+  const now = Date.now();
+  if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && (now - _fyrTestedCache.at) < 5 * 60 * 1000)
+    return _fyrTestedCache.map;
+  const map = {};
+  const set = (code, info) => {
+    const c = fyrCode(code); if (!c) return;
+    // Don't let a weaker signal overwrite a remedial (the strongest).
+    if (map[c] && map[c].source === "remedial" && info.source !== "remedial") return;
+    map[c] = info;
+  };
+  // Recent finished jobs are the "test done" window — an EICR completed years ago
+  // is the one that EXPIRED, not evidence the current cycle is covered.
+  const recentCut = new Date(now - 300 * 86400000).toISOString();
+  // 1) Live board jobs.
+  try {
+    const jobs = await listJobs(env, tid);
+    for (const j of (jobs || [])) {
+      if (!j || !isFiveYearJob([j.description, j.helpdeskRef, j.reference].join(" ")) && !j.elecTest) continue;
+      const st = String(j.status || "").toLowerCase();
+      if (!(st.includes("complete") || st.includes("closed") || st.includes("invoiced"))) continue;
+      set(j.siteCode, { source: "job", testedAt: j.updatedAt || j.closedAt || j.scheduledAt || "", jobId: j.id, ref: j.helpdeskRef || j.id });
+    }
+  } catch {}
+  // 2) Archive (recent, finished, numeric code only).
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT site_code, ref, status, completed_at FROM sla_jobs_archive WHERE tenant_id=? " +
+      "AND completed_at >= ? AND (lower(search) LIKE '%5 year%' OR lower(search) LIKE '%fixed wire%' " +
+      "OR lower(search) LIKE '%eicr%' OR lower(search) LIKE '%electrical install% condition%')"
+    ).bind(tid, recentCut).all();
+    for (const r of (results || [])) {
+      const st = String(r.status || "").toLowerCase();
+      if (!(st.includes("complete") || st.includes("closed") || st.includes("invoiced"))) continue;
+      set(r.site_code, { source: "archive", testedAt: r.completed_at || "", ref: r.ref || "" });
+    }
+  } catch {}
+  // 3) Remedials — strongest signal; overrides job/archive and carries stage+order.
+  try {
+    let { results } = await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage, quote_date, budget_cost FROM five_year_remedials WHERE tenant_id=?"
+    ).bind(tid).all();
+    results = await attachRemedialOrders(env, tid, results || []);
+    for (const r of results) {
+      set(r.store_code, {
+        source: "remedial", sr: r.sr, stage: r.stage || "quoted",
+        testedAt: r.quote_date || "", budgetCost: r.budget_cost || 0,
+        orderNumber: r.order ? r.order.number : "", orderValue: r.order ? r.order.value : null,
+      });
+    }
+  } catch {}
+  _fyrTestedCache = { tid, at: now, map };
+  return map;
 }
 
 export async function handle(request, env, ctx, url, sess) {
@@ -2469,6 +2579,98 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
     return json({ ok: true, imported, count: row ? row.n : imported, next: (row && row.mx ? row.mx : 0) + 1 }, {}, env, request);
+  }
+
+  // ── 5-YEAR REMEDIALS ─────────────────────────────────────────────────────────
+  // GET /certs/five-year/tested — per-store-code evidence the 5-year test was done
+  // (remedial on record / completed job / archive), for the schedule's amber marker.
+  if (sub === "/five-year/tested" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    return json({ ok: true, codes: await fiveYearTestedMap(env, tid) }, {}, env, request);
+  }
+  // GET /certs/five-year/board — the remedials register (+ live order match + stage).
+  if (sub === "/five-year/board" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
+    results = await attachRemedialOrders(env, tid, results || []);
+    const rows = results.map(r => ({
+      id: r.id, sr: r.sr, storeCode: r.store_code, siteName: r.site_name,
+      element: r.element, quoteDate: r.quote_date, budgetCost: r.budget_cost,
+      priority: r.priority, workStatus: r.work_status, stage: r.stage || "quoted",
+      lines: (() => { try { return JSON.parse(r.lines || "[]"); } catch { return []; } })(),
+      order: r.order,
+    }));
+    const wantStatus = (q.get("status") || "").trim();
+    const filtered = wantStatus ? rows.filter(r => (r.stage || "quoted") === wantStatus) : rows;
+    return json({ ok: true, rows: filtered, count: rows.length, ordered: rows.filter(r => r.order).length }, {}, env, request);
+  }
+  // POST /certs/five-year/stage {id, stage} — move a remedial along the pipeline.
+  if (sub === "/five-year/stage" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const stage = FYR_STAGES.includes(b.stage) ? b.stage : null;
+    if (!id || !stage) return error("id and a valid stage are required", 400, env, request);
+    await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(stage, new Date().toISOString(), tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, id, stage }, {}, env, request);
+  }
+  // POST /certs/five-year/delete {id}
+  if (sub === "/five-year/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("Missing id", 400, env, request);
+    await env.DB.prepare("DELETE FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true }, {}, env, request);
+  }
+  // POST /certs/five-year/import — bulk load from a Concerto remedials export.
+  // Body {rows:[{sr,storeCode,siteName,element,quoteDate,budgetCost,priority,
+  // workStatus,action}]}. Raw line rows are AGGREGATED by SR into one record per
+  // service request (lines[] = each required action). Re-import updates the
+  // details but PRESERVES the pipeline stage + order link already set.
+  if (sub === "/five-year/import" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const raw = Array.isArray(b.rows) ? b.rows : [];
+    if (!raw.length) return error("Nothing to import.", 400, env, request);
+    // Aggregate by SR (fallback key = store code) so multi-line service requests
+    // become one record.
+    const cases = {};
+    for (const r of raw) {
+      const sr = String(r.sr || "").trim().toUpperCase();
+      const store = fyrCode(r.storeCode) || String(r.storeCode || "").trim();
+      const key = sr || ("STORE-" + store);
+      if (!key || key === "STORE-") continue;
+      const c = cases[key] || (cases[key] = {
+        id: key, sr, store, siteName: String(r.siteName || "").slice(0, 200),
+        element: String(r.element || "").slice(0, 120), quoteDate: r.quoteDate || "",
+        budgetCost: 0, priority: String(r.priority || "").slice(0, 40),
+        workStatus: String(r.workStatus || "").slice(0, 60), lines: [],
+      });
+      const cost = Number(r.budgetCost) || 0; c.budgetCost += cost;
+      if (r.quoteDate && (!c.quoteDate || r.quoteDate < c.quoteDate)) c.quoteDate = r.quoteDate;
+      if (!c.siteName && r.siteName) c.siteName = String(r.siteName).slice(0, 200);
+      if (String(r.action || "").trim()) c.lines.push({ action: String(r.action).slice(0, 2000), date: r.quoteDate || "", workStatus: r.workStatus || "" });
+    }
+    const list = Object.values(cases);
+    if (!list.length) return error("No rows with an SR or store code.", 400, env, request);
+    const now = new Date().toISOString();
+    let imported = 0;
+    for (let i = 0; i < list.length; i += 25) {
+      const chunk = list.slice(i, i + 25);
+      await env.DB.batch(chunk.map(c => env.DB.prepare(
+        "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) " +
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+        "ON CONFLICT(id) DO UPDATE SET site_name=excluded.site_name, element=excluded.element, quote_date=excluded.quote_date, " +
+        "budget_cost=excluded.budget_cost, priority=excluded.priority, work_status=excluded.work_status, lines=excluded.lines, updated_at=excluded.updated_at"
+      ).bind(c.id, tid, c.sr, c.store, c.siteName, c.element, c.quoteDate, c.budgetCost, c.priority, c.workStatus, "quoted", JSON.stringify(c.lines), "{}", now, now)));
+      imported += chunk.length;
+    }
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, imported, cases: list.length }, {}, env, request);
   }
 
   return error("Not found: " + url.pathname, 404, env, request);

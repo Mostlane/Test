@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>5-Year Remedials</title>
+  <script src="/portal-config.js?v=31"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:880px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .infobox{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:12px;font-size:13px;}
+    .sumrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+    .stat{flex:1 1 120px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;}
+    .stat .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1;}
+    .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;margin-top:4px;}
+    .stat.warn .n{color:var(--warn);}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+    .chip{border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;color:#334;cursor:pointer;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .chip .n{background:rgba(0,0,0,.08);border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;}
+    .chip.on .n{background:rgba(255,255,255,.25);}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:10px;}
+    .rhead{display:flex;align-items:flex-start;gap:10px;}
+    .code{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;background:#eef3f9;border-radius:8px;padding:2px 8px;font-size:13px;white-space:nowrap;}
+    .site{font-weight:700;flex:1;min-width:0;}
+    .sub{font-size:12.5px;color:#6b7a90;margin-top:2px;}
+    .badge{border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800;white-space:nowrap;}
+    .b-quoted{background:#fef3c7;color:#92400e;} .b-ordered{background:#dcfce7;color:#166534;}
+    .b-works{background:#dbeafe;color:#1e40af;} .b-done{background:#e2e8f0;color:#475569;}
+    .ordrow{margin-top:8px;font-size:13px;}
+    .ord-yes{color:#166534;font-weight:700;} .ord-no{color:var(--warn);font-weight:700;}
+    .lines{margin-top:8px;}
+    .lines summary{cursor:pointer;font-size:13px;color:var(--brand);font-weight:600;}
+    .lines ul{margin:8px 0 0;padding-left:18px;} .lines li{font-size:13px;margin-bottom:6px;white-space:pre-wrap;}
+    .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #f0f3f7;}
+    .ctl select{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:13px;font-family:inherit;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
+    .btn.link{background:none;color:var(--brand);border:none;text-decoration:underline;padding:6px 4px;}
+    .saved{color:var(--ok);font-size:12px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
+    <h1>🔌 5-Year remedials</h1>
+  </header>
+
+  <div class="wrap">
+    <div class="infobox">
+      A row here means the EICR <b>test was carried out</b> (you can't quote remedials without inspecting), so each of these stores now shows amber <b>“✅ tested — cert to file”</b> on the 5-year schedule instead of red “no cover”. Order status updates itself as client orders arrive.
+    </div>
+    <div class="sumrow" id="sumrow"></div>
+    <div class="chips" id="chips"></div>
+    <div id="list"><div class="muted" style="padding:16px;">Loading…</div></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    let ROWS = [], FILTER = "all";
+    const STAGE_LABELS = { quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
+
+    function fmtDate(s){
+      s = String(s||"").trim(); if(!s) return "";
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(m) return m[3]+"/"+m[2]+"/"+m[1];
+      return s;
+    }
+    // Effective bucket for the filter chips — an order present counts as "ordered"
+    // even if the stage still reads quoted.
+    function bucket(r){
+      const ordered = !!r.order || r.stage==="ordered" || r.stage==="in_works";
+      if(r.stage==="done"||r.stage==="invoiced") return "done";
+      if(ordered) return "ordered";
+      return "needs";
+    }
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r=>r.json());
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      load();
+    })();
+
+    async function load(){
+      let d=null;
+      try { d = await authFetch("/certs/five-year/board").then(r=>r.json()); } catch {}
+      if(!d || !d.ok){ g("list").innerHTML='<div class="muted" style="padding:16px;color:#b00020">Couldn\'t load the remedials.</div>'; return; }
+      ROWS = d.rows || [];
+      renderSummary();
+      renderChips();
+      render();
+    }
+
+    function counts(){
+      const c = { all:ROWS.length, needs:0, ordered:0, done:0 };
+      ROWS.forEach(r => { c[bucket(r)]++; });
+      return c;
+    }
+    function renderSummary(){
+      const c = counts();
+      g("sumrow").innerHTML =
+        '<div class="stat"><div class="n">'+c.all+'</div><div class="l">Tested — cert to file</div></div>'
+        + '<div class="stat warn"><div class="n">'+c.needs+'</div><div class="l">Awaiting order</div></div>'
+        + '<div class="stat"><div class="n">'+c.ordered+'</div><div class="l">Ordered</div></div>';
+    }
+    function renderChips(){
+      const c = counts();
+      const defs = [["all","All",c.all],["needs","Awaiting order",c.needs],["ordered","Ordered",c.ordered],["done","Done",c.done]];
+      g("chips").innerHTML = defs.map(([k,l,n]) =>
+        '<button class="chip'+(FILTER===k?" on":"")+'" data-f="'+k+'">'+l+' <span class="n">'+n+'</span></button>').join("");
+      g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; renderChips(); render(); });
+    }
+
+    function render(){
+      const rows = ROWS.filter(r => FILTER==="all" || bucket(r)===FILTER)
+        .sort((a,b)=> String(b.quoteDate||"").localeCompare(String(a.quoteDate||"")));
+      if(!rows.length){ g("list").innerHTML='<div class="muted" style="padding:16px;">Nothing in this view.</div>'; return; }
+      g("list").innerHTML = rows.map(cardHtml).join("");
+      g("list").querySelectorAll("select[data-stage]").forEach(sel => sel.onchange = () => setStage(sel.dataset.stage, sel.value, sel));
+      g("list").querySelectorAll("button[data-del]").forEach(b => b.onclick = () => del(b.dataset.del));
+    }
+
+    function cardHtml(r){
+      const bk = bucket(r);
+      const badge = bk==="done" ? '<span class="badge b-done">Done</span>'
+        : bk==="ordered" ? '<span class="badge b-ordered">Ordered</span>'
+        : '<span class="badge b-quoted">Quoted</span>';
+      const cost = (r.budgetCost>0) ? (" · £"+Math.round(r.budgetCost)) : "";
+      const ord = r.order
+        ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>'
+        : '<div class="ordrow ord-no">⚠ No order yet — needs review</div>';
+      const lines = (r.lines||[]).filter(l=>String(l.action||"").trim());
+      const linesHtml = lines.length
+        ? '<details class="lines"><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+'</summary><ul>'
+            + lines.map(l=>'<li>'+esc(l.action)+'</li>').join("") + '</ul></details>'
+        : '';
+      const opts = ["quoted","ordered","in_works","done","invoiced"].map(s =>
+        '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
+      return '<div class="card">'
+        + '<div class="rhead"><span class="code">'+esc(r.storeCode||"")+'</span>'
+          + '<div class="site">'+esc(r.siteName||"")+'<div class="sub">'+esc(r.sr||"")+' · Quoted '+esc(fmtDate(r.quoteDate))+cost+'</div></div>'
+          + badge + '</div>'
+        + ord + linesHtml
+        + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(r.id)+'">'+opts+'</select>'
+          + '<span class="saved" id="sv-'+esc(r.id)+'"></span>'
+          + '<span style="flex:1"></span>'
+          + '<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode||"")+'">Open site ↗</a>'
+          + '<button class="btn ghost" data-del="'+esc(r.id)+'">Remove</button></div>'
+        + '</div>';
+    }
+
+    async function setStage(id, stage, sel){
+      sel.disabled = true;
+      try {
+        const res = await authFetch("/certs/five-year/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,stage})}).then(r=>r.json());
+        if(res && res.ok){ const r = ROWS.find(x=>x.id===id); if(r) r.stage=stage; g("sv-"+id).textContent="Saved ✓"; setTimeout(()=>{const e=g("sv-"+id);if(e)e.textContent="";},1500); renderSummary(); renderChips(); }
+      } catch {}
+      sel.disabled = false;
+    }
+    async function del(id){
+      const ok = window.MLUI ? await MLUI.confirm("Remove this remedial from the register?",{title:"Remove",danger:true}) : confirm("Remove this remedial?");
+      if(!ok) return;
+      try { await authFetch("/certs/five-year/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); } catch {}
+      ROWS = ROWS.filter(r=>r.id!==id); renderSummary(); renderChips(); render();
+    }
+  </script>
+</body>
+</html>

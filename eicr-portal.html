@@ -142,6 +142,12 @@
     }
     .cert-link{ text-decoration:none; margin-left:3px; cursor:pointer; font-size:13px; vertical-align:middle; }
     .cert-link:hover{ opacity:.7; }
+    /* "Tested — cert to file": a 5-year store that's overdue on paper but has been
+       inspected (a completed job or a quoted remedial), so the red cell softens to
+       amber with this note. Hover shows the evidence. */
+    .tested-note{ display:inline-block; margin-left:4px; font-size:10px; font-weight:800; color:#7a5b00;
+      background:#fff1c9; border:1px solid #f0d98a; border-radius:999px; padding:0 6px; vertical-align:middle;
+      cursor:default; white-space:nowrap; }
     /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
        is the same height as one without (no wrap → no taller rows). */
     td.dc{ white-space:nowrap; }
@@ -485,6 +491,19 @@ async function loadRemedialFlags(){
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
 }
+// store code → evidence the 5-year test was DONE (a completed job or a quoted
+// remedial) even though the cert isn't filed yet. Softens a red 5-year cell to
+// amber "tested — cert to file". {source,stage,orderNumber,testedAt,ref,…}
+let testedFlags = {};
+async function loadTestedFlags(){
+  try {
+    const r = await authFetch('/certs/five-year/tested');
+    if (!r.ok) return;
+    const j = await r.json();
+    testedFlags = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+  } catch(e){ /* non-critical */ }
+}
 async function loadComplianceIndex(){
   try {
     const r = await authFetch('/compliance/index');
@@ -492,6 +511,7 @@ async function loadComplianceIndex(){
     const j = await r.json();
     complianceIndex = (j && j.map) ? j.map : {};
     loadRemedialFlags();
+    loadTestedFlags();
     // re-render so cells pick up their 📄 links (data may already be shown)
     if (allData.length) applyFilters();
   } catch(e){ /* certs are non-critical — table still works without them */ }
@@ -922,6 +942,28 @@ function dateCell(code, colKey, val){
   return `${esc(fmtDue(val))}${link}${warn}`;
 }
 
+/* The amber "✅ tested — cert to file" note for an overdue 5-year cell whose
+   test has actually been done. Wording + tooltip reflect the evidence. */
+function escAttr(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function testedNote(tf){
+  let label = 'tested', tip;
+  if (tf.source === 'remedial') {
+    const stg = tf.stage || 'quoted';
+    const ordered = tf.orderNumber || stg === 'ordered' || stg === 'in_works' || stg === 'done' || stg === 'invoiced';
+    label = 'tested · remedials ' + (ordered ? 'ordered' : 'quoted');
+    tip = 'EICR test done — remedials ' + stg
+        + (tf.orderNumber ? (' (order ' + tf.orderNumber + (tf.orderValue ? ' £' + Math.round(tf.orderValue) : '') + ')')
+                          : (stg === 'quoted' ? ' — awaiting client order' : ''))
+        + '. Certificate still to file.';
+  } else {
+    tip = 'A 5-year test job has been completed'
+        + (tf.testedAt ? ' (' + fmtDue(tf.testedAt) + ')' : '')
+        + (tf.ref ? ' — ' + tf.ref : '')
+        + '. Certificate still to file.';
+  }
+  return ` <span class="tested-note" title="${escAttr(tip)}">✅ ${escAttr(label)} — cert to file</span>`;
+}
+
 /* ===== Helpers ===== */
 function bust(url){
   const u = new URL(url);
@@ -1010,7 +1052,17 @@ function renderTable(d){
     const closed = (viewMode === 'closed') || e.active === 0;
     const closedBadge = (e.active === 0 && viewMode !== 'closed') ? ' <span class="closed-badge">🗄 Closed</span>' : '';
     const ws = closed ? '' : worstStatus(e);
-    const dtd = (type) => { const s = closed ? '' : typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+    const dtd = (type) => {
+      let s = closed ? '' : typeStatus(e, type);
+      let extra = '';
+      // 5-year store that reads "no cover" (red) but has been TESTED (a completed
+      // job or a quoted remedial) → soften to amber + a "cert to file" note.
+      if (type === 'fiveYear' && s === 'red' && !closed) {
+        const tf = testedFlags[pad4(e.storeCode)];
+        if (tf) { s = 'amber'; extra = testedNote(tf); }
+      }
+      return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
+    };
     if (closed) tr.classList.add('closed-row');
     tr.innerHTML = `
       <td>${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${closedBadge}</td><td>${esc(e.storeType)}</td>

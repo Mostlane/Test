@@ -3063,6 +3063,43 @@ it straight onto the compliance chart (rolling the next-due date).
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
+- **5-YEAR (fixed-wire / EICR) remedials + "tested — cert to file" schedule marker
+  (Sep 2026):** the 5-year compliance schedule (eicr-portal.html) used to flag a
+  store bright-red **"no cover"** whenever its EICR was overdue — even when the test
+  had actually been carried out and only the certificate was still to file. It now
+  **checks back against reality** and softens such a cell to **amber "✅ tested — cert
+  to file"** (never green — the cert is still outstanding). Evidence a test was done,
+  per store code: (a) a **five_year_remedials** record (a quoted remedial is proof the
+  inspection happened — the strongest signal, carries the remedial stage + order), (b)
+  a **completed 5-year electrical job on the live board**, or (c) a **recently-completed
+  5-year job in sla_jobs_archive** (finished-status + numeric code + `completed_at`
+  within ~300 days — an ancient EICR is the one that EXPIRED, not evidence of cover).
+  - **Table `five_year_remedials`** (self-migrating; id=Concerto SR, store_code,
+    site_name, quote_date, budget_cost, work_status, **stage** quoted→ordered→in_works
+    →done→invoiced, `lines` JSON of the individual required actions, order_* columns).
+    One row per service request (SR); multi-line exports are aggregated by SR on import.
+    `tenant_id` is TEXT → bind the numeric tid (stored "1.0", the usual quirk).
+  - **certs.js endpoints** (office = FullAccess|SLAAdmin|Compliance): **GET
+    /certs/five-year/tested** → `{codes:{<pad4>:{source,stage,orderNumber,testedAt,ref…}}}`
+    (the schedule marker map; cached ~5 min per isolate — the archive scan is heavy),
+    **GET /certs/five-year/board?status=** (the register + a live client-order match by
+    SR/store code + stage), **POST /certs/five-year/import** `{rows:[…]}` (aggregate by
+    SR; re-import preserves stage+order), **POST /certs/five-year/stage** `{id,stage}`,
+    **POST /certs/five-year/delete** `{id}`. `attachRemedialOrders` joins each remedial
+    to a `client_orders` row (by SR ref then store code) so "has an order?" self-updates.
+  - **Front-end:** eicr-portal.html loads `testedFlags` (like `remedialFlags`) and, in
+    `dtd`, overrides a red **fiveYear** cell to amber + a `.tested-note` pill (hover =
+    the evidence + order/stage). **five-year-remedials.html** (🔌 5-Year remedials button
+    on cert-review.html) = the review list: Awaiting-order / Ordered / Done chips, each
+    card showing store · SR · quote date · £ · order (or ⚠ needs review) · the remedial
+    items · a stage dropdown · Open-site. `_headers` no-cache.
+  - **Seeded 10 Sep from Jamie's Concerto "Remedials_1" export** (39 SRs, May–Aug 2026,
+    loaded straight to D1 — customer names D1-only, never the repo). Two matched a
+    captured order at seed time (0380 Wimborne PFS R28987, 0658 Waterlooville 00019404/2)
+    → stage `ordered`. **NB the client_orders table only holds orders notified 27 Aug–8
+    Sep 2026** (backfilled), so a remedial ordered before then shows no order until a
+    fresh order arrives. TODO/next: raise the works job from a 5-year remedial (like the
+    EM one-tap); fold into the client-orders auto-match so a new order advances the stage.
 
 ## Sump Pump Monthly Maintenance (routes/pump.js + lib/pumppdf.js + pump-form.js + pump-review.html — Sep 2026)
 A per-store maintenance form ported from Jamie's Jotform ("Sump Pump Monthly

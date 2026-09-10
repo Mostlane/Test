@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -11763,6 +11768,21 @@ async function ensureTables__raw3(env) {
     } catch (e) {
     }
   }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS five_year_remedials (
+    id TEXT PRIMARY KEY, tenant_id TEXT, sr TEXT, store_code TEXT, site_name TEXT,
+    element TEXT, quote_date TEXT, budget_cost REAL, priority TEXT, work_status TEXT,
+    stage TEXT, lines TEXT, data TEXT,
+    order_number TEXT, order_value REAL, order_id TEXT,
+    created_at TEXT, updated_at TEXT)`).run();
+}
+function fyrCode(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (!/^\d{1,4}$/.test(s)) return "";
+  return s.padStart(4, "0");
+}
+function isFiveYearJob(blob) {
+  const s = String(blob || "").toLowerCase();
+  return /5\s*year/.test(s) || /fixed\s*wire/.test(s) || /\beicr\b/.test(s) || /electrical install\w*\s+condition/.test(s);
 }
 function caseStatusLabel(rows) {
   const pend = rows.filter((r) => !r.replaced);
@@ -12720,6 +12740,77 @@ function shapeRow2(cert) {
     ...d
   };
   return normalizeRemedials(rec);
+}
+async function attachRemedialOrders(env, tid, rows) {
+  if (!rows.length) return rows;
+  const { results } = await env.DB.prepare(
+    "SELECT id, order_number, order_value, store_code, sr_ref, status FROM client_orders WHERE tenant_id=?"
+  ).bind(tid).all().catch(() => ({ results: [] }));
+  const bySr = {}, byCode = {};
+  for (const o of results || []) {
+    if (o.sr_ref) (bySr[String(o.sr_ref).toUpperCase()] ||= []).push(o);
+    const c = fyrCode(o.store_code);
+    if (c) (byCode[c] ||= []).push(o);
+  }
+  for (const r of rows) {
+    const hit = (bySr[String(r.sr || "").toUpperCase()] || byCode[fyrCode(r.store_code)] || [])[0];
+    r.order = hit ? { number: hit.order_number, value: hit.order_value, id: hit.id, status: hit.status } : null;
+  }
+  return rows;
+}
+async function fiveYearTestedMap(env, tid) {
+  const now = Date.now();
+  if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now - _fyrTestedCache.at < 5 * 60 * 1e3)
+    return _fyrTestedCache.map;
+  const map = {};
+  const set = (code, info) => {
+    const c = fyrCode(code);
+    if (!c) return;
+    if (map[c] && map[c].source === "remedial" && info.source !== "remedial") return;
+    map[c] = info;
+  };
+  const recentCut = new Date(now - 300 * 864e5).toISOString();
+  try {
+    const jobs = await listJobs(env, tid);
+    for (const j of jobs || []) {
+      if (!j || !isFiveYearJob([j.description, j.helpdeskRef, j.reference].join(" ")) && !j.elecTest) continue;
+      const st = String(j.status || "").toLowerCase();
+      if (!(st.includes("complete") || st.includes("closed") || st.includes("invoiced"))) continue;
+      set(j.siteCode, { source: "job", testedAt: j.updatedAt || j.closedAt || j.scheduledAt || "", jobId: j.id, ref: j.helpdeskRef || j.id });
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT site_code, ref, status, completed_at FROM sla_jobs_archive WHERE tenant_id=? AND completed_at >= ? AND (lower(search) LIKE '%5 year%' OR lower(search) LIKE '%fixed wire%' OR lower(search) LIKE '%eicr%' OR lower(search) LIKE '%electrical install% condition%')"
+    ).bind(tid, recentCut).all();
+    for (const r of results || []) {
+      const st = String(r.status || "").toLowerCase();
+      if (!(st.includes("complete") || st.includes("closed") || st.includes("invoiced"))) continue;
+      set(r.site_code, { source: "archive", testedAt: r.completed_at || "", ref: r.ref || "" });
+    }
+  } catch {
+  }
+  try {
+    let { results } = await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage, quote_date, budget_cost FROM five_year_remedials WHERE tenant_id=?"
+    ).bind(tid).all();
+    results = await attachRemedialOrders(env, tid, results || []);
+    for (const r of results) {
+      set(r.store_code, {
+        source: "remedial",
+        sr: r.sr,
+        stage: r.stage || "quoted",
+        testedAt: r.quote_date || "",
+        budgetCost: r.budget_cost || 0,
+        orderNumber: r.order ? r.order.number : "",
+        orderValue: r.order ? r.order.value : null
+      });
+    }
+  } catch {
+  }
+  _fyrTestedCache = { tid, at: now, map };
+  return map;
 }
 async function handle11(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
@@ -14245,9 +14336,103 @@ ${con.tradingTitle || "Mostlane"}`;
     const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
     return json({ ok: true, imported, count: row ? row.n : imported, next: (row && row.mx ? row.mx : 0) + 1 }, {}, env, request);
   }
+  if (sub === "/five-year/tested" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    return json({ ok: true, codes: await fiveYearTestedMap(env, tid) }, {}, env, request);
+  }
+  if (sub === "/five-year/board" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
+    results = await attachRemedialOrders(env, tid, results || []);
+    const rows = results.map((r) => ({
+      id: r.id,
+      sr: r.sr,
+      storeCode: r.store_code,
+      siteName: r.site_name,
+      element: r.element,
+      quoteDate: r.quote_date,
+      budgetCost: r.budget_cost,
+      priority: r.priority,
+      workStatus: r.work_status,
+      stage: r.stage || "quoted",
+      lines: (() => {
+        try {
+          return JSON.parse(r.lines || "[]");
+        } catch {
+          return [];
+        }
+      })(),
+      order: r.order
+    }));
+    const wantStatus = (q.get("status") || "").trim();
+    const filtered = wantStatus ? rows.filter((r) => (r.stage || "quoted") === wantStatus) : rows;
+    return json({ ok: true, rows: filtered, count: rows.length, ordered: rows.filter((r) => r.order).length }, {}, env, request);
+  }
+  if (sub === "/five-year/stage" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const stage = FYR_STAGES.includes(b.stage) ? b.stage : null;
+    if (!id || !stage) return error("id and a valid stage are required", 400, env, request);
+    await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, id, stage }, {}, env, request);
+  }
+  if (sub === "/five-year/delete" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("Missing id", 400, env, request);
+    await env.DB.prepare("DELETE FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/five-year/import" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const raw = Array.isArray(b.rows) ? b.rows : [];
+    if (!raw.length) return error("Nothing to import.", 400, env, request);
+    const cases = {};
+    for (const r of raw) {
+      const sr = String(r.sr || "").trim().toUpperCase();
+      const store = fyrCode(r.storeCode) || String(r.storeCode || "").trim();
+      const key = sr || "STORE-" + store;
+      if (!key || key === "STORE-") continue;
+      const c = cases[key] || (cases[key] = {
+        id: key,
+        sr,
+        store,
+        siteName: String(r.siteName || "").slice(0, 200),
+        element: String(r.element || "").slice(0, 120),
+        quoteDate: r.quoteDate || "",
+        budgetCost: 0,
+        priority: String(r.priority || "").slice(0, 40),
+        workStatus: String(r.workStatus || "").slice(0, 60),
+        lines: []
+      });
+      const cost = Number(r.budgetCost) || 0;
+      c.budgetCost += cost;
+      if (r.quoteDate && (!c.quoteDate || r.quoteDate < c.quoteDate)) c.quoteDate = r.quoteDate;
+      if (!c.siteName && r.siteName) c.siteName = String(r.siteName).slice(0, 200);
+      if (String(r.action || "").trim()) c.lines.push({ action: String(r.action).slice(0, 2e3), date: r.quoteDate || "", workStatus: r.workStatus || "" });
+    }
+    const list = Object.values(cases);
+    if (!list.length) return error("No rows with an SR or store code.", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let imported = 0;
+    for (let i = 0; i < list.length; i += 25) {
+      const chunk = list.slice(i, i + 25);
+      await env.DB.batch(chunk.map((c) => env.DB.prepare(
+        "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET site_name=excluded.site_name, element=excluded.element, quote_date=excluded.quote_date, budget_cost=excluded.budget_cost, priority=excluded.priority, work_status=excluded.work_status, lines=excluded.lines, updated_at=excluded.updated_at"
+      ).bind(c.id, tid, c.sr, c.store, c.siteName, c.element, c.quoteDate, c.budgetCost, c.priority, c.workStatus, "quoted", JSON.stringify(c.lines), "{}", now, now)));
+      imported += chunk.length;
+    }
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, imported, cases: list.length }, {}, env, request);
+  }
   return error("Not found: " + url.pathname, 404, env, request);
 }
-var STATUS_COUNT_MEMO, T, DEFAULT_CONFIG2, ensureTables4, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
+var STATUS_COUNT_MEMO, T, DEFAULT_CONFIG2, ensureTables4, FYR_STAGES, _fyrTestedCache, ORDER_COLS, STAGES, REMEDIAL_CHARGE, numOf, yy, normEng2, cap, CERT_PF, CERT_DATE, CERT_STATUS, CERT_STOP, PAT_CLASS_I;
 var init_certs = __esm({
   "src/routes/certs.js"() {
     init_http();
@@ -14306,6 +14491,8 @@ var init_certs = __esm({
       // optional CC on the battery enquiry email (remembered)
     };
     ensureTables4 = onceMigration(ensureTables__raw3);
+    FYR_STAGES = ["quoted", "ordered", "in_works", "done", "invoiced"];
+    _fyrTestedCache = { tid: null, at: 0, map: null };
     ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
     REMEDIAL_CHARGE = 50;
@@ -35347,9 +35534,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
