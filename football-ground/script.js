@@ -8,7 +8,7 @@ const CONFIG = {
   siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
   address:   "Coal Park Lane, Swanwick, SO31 7GW",
-  email:     "bookings@example.com",   // where enquiries are sent — set this before go-live
+  email:     "jamie@mostlane.com",     // where enquiries are sent + shown on the site — change here any time
   phone:     "01234 567 890",
   phoneLink: "+440000000000",          // tel: format, no spaces
 
