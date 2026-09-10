@@ -934,6 +934,32 @@ async function init(){
 
   $("jobForm").addEventListener("submit", handleSubmit);
   { const y = new Date().getFullYear(); const el = $("scheduledAt"); el.min = (y - 1) + "-01-01T00:00"; el.max = (y + 3) + "-12-31T23:59"; }
+  // Mouse-wheel over the date/time pickers: a predictable ONE step per notch —
+  // 5 min (Shift = 1 hour) — instead of the native wheel jumping many numbers
+  // at once so you couldn't land on the hour/min you wanted (step=300 quirk).
+  (function wheelTime(){
+    const pad = n => String(n).padStart(2, "0");
+    function bump(el, mins){
+      let v = el.value;
+      if(!v){ const d0 = new Date(); d0.setSeconds(0,0); d0.setMinutes(Math.round(d0.getMinutes()/5)*5);
+        v = d0.getFullYear()+"-"+pad(d0.getMonth()+1)+"-"+pad(d0.getDate())+"T"+pad(d0.getHours())+":"+pad(d0.getMinutes()); }
+      const d = new Date(v); if(isNaN(d)) return;
+      d.setMinutes(d.getMinutes() + mins);
+      let out = d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
+      if(el.min && out < el.min) out = el.min;
+      if(el.max && out > el.max) out = el.max;
+      el.value = out;
+      el.dispatchEvent(new Event("change", { bubbles:true }));
+    }
+    ["scheduledAt","releaseAt"].forEach(function(id){
+      const el = $(id); if(!el) return;
+      el.addEventListener("wheel", function(e){
+        e.preventDefault();
+        const unit = e.shiftKey ? 60 : 5;
+        bump(el, (e.deltaY > 0 || e.deltaX > 0) ? unit : -unit);
+      }, { passive:false });
+    });
+  })();
   initPhotoPicker();
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
   try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
