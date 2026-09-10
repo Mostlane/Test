@@ -148,6 +148,9 @@
     .tested-note{ display:inline-block; margin-left:4px; font-size:10px; font-weight:800; color:#7a5b00;
       background:#fff1c9; border:1px solid #f0d98a; border-radius:999px; padding:0 6px; vertical-align:middle;
       cursor:default; white-space:nowrap; }
+    /* "date rolled but no certificate on file" — a distinct red-edged warning so
+       it reads differently from the amber ✅ "tested — cert to file". */
+    .tested-note.rolled{ color:#8a1c1c; background:#ffe2e0; border-color:#f3b1ab; }
     /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
        is the same height as one without (no wrap → no taller rows). */
     td.dc{ white-space:nowrap; }
@@ -945,23 +948,33 @@ function dateCell(code, colKey, val){
 /* The amber "✅ tested — cert to file" note for an overdue 5-year cell whose
    test has actually been done. Wording + tooltip reflect the evidence. */
 function escAttr(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function testedNote(tf){
-  let label = 'tested', tip;
+function testedNote(tf, mode){
+  mode = mode || 'overdue';
+  // Evidence sentence (shared by both modes).
+  let ev;
   if (tf.source === 'remedial') {
     const stg = tf.stage || 'quoted';
-    const ordered = tf.orderNumber || stg === 'ordered' || stg === 'in_works' || stg === 'done' || stg === 'invoiced';
-    label = 'tested · remedials ' + (ordered ? 'ordered' : 'quoted');
-    tip = 'EICR test done — remedials ' + stg
+    ev = 'EICR test done — remedials ' + stg
         + (tf.orderNumber ? (' (order ' + tf.orderNumber + (tf.orderValue ? ' £' + Math.round(tf.orderValue) : '') + ')')
-                          : (stg === 'quoted' ? ' — awaiting client order' : ''))
-        + '. Certificate still to file.';
+                          : (stg === 'quoted' ? ' — awaiting client order' : ''));
   } else {
-    tip = 'A 5-year test job has been completed'
+    ev = 'A 5-year test job has been completed'
         + (tf.testedAt ? ' (' + fmtDue(tf.testedAt) + ')' : '')
-        + (tf.ref ? ' — ' + tf.ref : '')
-        + '. Certificate still to file.';
+        + (tf.ref ? ' — ' + tf.ref : '');
   }
-  return ` <span class="tested-note" title="${escAttr(tip)}">✅ ${escAttr(label)} — cert to file</span>`;
+  if (mode === 'rolled') {
+    // Date rolled forward but the certificate isn't on the chart.
+    const label = (tf.source === 'remedial')
+      ? ('tested · remedials ' + ((tf.orderNumber || /ordered|in_works|done|invoiced/.test(tf.stage||'')) ? 'ordered' : 'quoted'))
+      : 'tested';
+    const tip = ev + '. The 5-year due date has been rolled forward but NO certificate is on the chart — upload it.';
+    return ` <span class="tested-note rolled" title="${escAttr(tip)}">⚠ ${escAttr(label)} — no cert on file</span>`;
+  }
+  // Overdue but tested.
+  const label = (tf.source === 'remedial')
+    ? ('tested · remedials ' + ((tf.orderNumber || /ordered|in_works|done|invoiced/.test(tf.stage||'')) ? 'ordered' : 'quoted'))
+    : 'tested';
+  return ` <span class="tested-note" title="${escAttr(ev + '. Certificate still to file.')}">✅ ${escAttr(label)} — cert to file</span>`;
 }
 
 /* ===== Helpers ===== */
@@ -1055,11 +1068,16 @@ function renderTable(d){
     const dtd = (type) => {
       let s = closed ? '' : typeStatus(e, type);
       let extra = '';
-      // 5-year store that reads "no cover" (red) but has been TESTED (a completed
-      // job or a quoted remedial) → soften to amber + a "cert to file" note.
-      if (type === 'fiveYear' && s === 'red' && !closed) {
+      // 5-year store with TESTED evidence (a completed job or a quoted remedial):
+      //  • overdue (red) → soften to amber "✅ tested — cert to file"
+      //  • NOT overdue but NO certificate on the chart → the due date has been
+      //    rolled forward as if done, yet the cert was never filed → amber
+      //    "⚠ date rolled — no cert" so it can't hide as covered (green).
+      if (type === 'fiveYear' && !closed) {
         const tf = testedFlags[pad4(e.storeCode)];
-        if (tf) { s = 'amber'; extra = testedNote(tf); }
+        const hasCert = !!(complianceIndex[pad4(e.storeCode)] && complianceIndex[pad4(e.storeCode)].fiveYear);
+        if (tf && s === 'red') { s = 'amber'; extra = testedNote(tf, 'overdue'); }
+        else if (tf && s !== 'red' && !hasCert) { s = 'amber'; extra = testedNote(tf, 'rolled'); }
       }
       return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
