@@ -14346,7 +14346,6 @@ __export(sla_exports, {
   raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
   remindPendingHolds: () => remindPendingHolds,
-  sameSiteJob: () => sameSiteJob,
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
   stripPricing: () => stripPricing,
@@ -16620,7 +16619,7 @@ async function handle12(request, env, ctx, url, sess) {
             return jsonResponse({ error: `Can't set ${target} yet \u2014 still needs ${humanList(missing)}.`, missing, needs: target }, headers, 422);
         }
         if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress") && !(before && (before.emTest || before.pat))) {
-          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id, before);
+          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first \u2014 ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
@@ -17137,25 +17136,13 @@ async function ensureClockOn(env, tenantId, username, gps, localDate) {
   } catch (e) {
   }
 }
-function sameSiteJob(a, b) {
-  if (!a || !b) return false;
-  const ka = siteKeyOf(a.siteCode), kb = siteKeyOf(b.siteCode);
-  if (ka && kb) return ka === kb;
-  const na = String(a.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const nb = String(b.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  return !!na && na === nb;
-}
-async function findBlockingJob(env, tenantId, username, exceptId, exceptJob = null) {
+async function findBlockingJob(env, tenantId, username, exceptId) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
     if (j.emTest || j.pat) continue;
-    if (exceptJob && sameSiteJob(j, exceptJob)) {
-      const stHere = effStatus(j, uNorm);
-      if (stHere === "In Progress" || stHere === "Travelling") continue;
-    }
     const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, kind: "safety", why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
