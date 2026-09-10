@@ -4830,7 +4830,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
   red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls
   /tuya/gate/state (60s, paused when tab hidden); collapses to just the dot when
-  the sidebar is minimised. **The Yard Gate desktop SIDEBAR nav item was removed**
+  the sidebar is minimised. **Office users "couldn't see the gate status — the
+  running clock covers it" (10 Sep 2026):** the light was only drawn at the
+  sidebar's first `build()` from the CACHED `mostlanePermissions`, and
+  portal-config's own slim cache-writer (after `/auth/me`) DROPPED `YardGate`
+  (+ EngTimesheet/Programmes/EicrCheck/Chapplins/CableCalc/WhereEveryone/
+  YardGateAnywhere/StaffType/VehicleAssigned) — so a non-Full-Access office user
+  lost the light the moment they left main.html and only the office-clock pill
+  sat at the top of the sidebar. Now `#pnGate` is always in the DOM (hidden),
+  `initGateLight()` is idempotent and is re-run from `rebuild()` with the server's
+  perms, the slim list (and login.html's PERM_KEYS) carry every permission key,
+  and the minimised sidebar hides the gate LABEL (it used to spill 150px over the
+  page). Any NEW permission key must be added to BOTH lists or a cached-perms
+  page paint won't know about it. portal-config `?v=36`. **The Yard Gate desktop SIDEBAR nav item was removed**
   — desktop uses this light; mobile keeps the main.html menu tile. (An earlier
   full-width top banner was replaced by this on request.)
 - **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=35"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -282,7 +282,9 @@ if (!user || !user.Username) {
          "Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders",
          "Sites","AddSite","Assets","MyDocuments","Weekly","Forms","Compliance","Projects",
          "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan",
-         "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","StaffRecords"];
+         "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes",
+         "YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords",
+         "StaffType","VehicleAssigned","FirstName","LastName"];
        const perms = {};
        PERM_KEYS.forEach(function (k) { perms[k] = user[k]; });
 

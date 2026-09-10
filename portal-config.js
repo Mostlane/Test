@@ -1257,7 +1257,9 @@
           '<div class="pn-brand"><div class="pn-logobox">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
           + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
-          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>' : '')
+          // The gate light is always in the DOM (hidden); initGateLight decides
+          // whether to run it from the FRESH /auth/me perms, not just the cache.
+          + '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>'
           + '</div>'
           + '<nav class="pn-nav" id="pnavNav">' + navInner() + "</nav>"
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
@@ -1285,8 +1287,16 @@
       }
 
       // Yard-gate traffic light under the sidebar logo: green=closed, red=open.
+      // Runs once perms grant it (YardGate|FullAccess). Called at build() from
+      // the cached perms AND again from rebuild() with the server's perms — the
+      // cached list used to lack YardGate, so office users (non-Full-Access)
+      // only ever saw the office-clock pill where the light should have been.
+      var gateLightOn = false;
       function initGateLight() {
         var el = document.getElementById("pnGate"); if (!el) return;
+        if (!(yes(perms.YardGate) || yes(perms.FullAccess))) { if (!gateLightOn) el.style.display = "none"; return; }
+        if (gateLightOn) return;
+        gateLightOn = true;
         var API = window.MOSTLANE_API || "";
         function refresh() {
           if (document.hidden) return;
@@ -1424,6 +1434,7 @@
         if (whoS) whoS.textContent = yes(perms.FullAccess) ? "Full access" : "Team member";
         if (av) av.textContent = initials(name);
         applyBadges();
+        try { initGateLight(); } catch (e) {}   // perms are fresh now — a YardGate user gets the light even off a stale cache
       }
 
       // ── Office clock (desktop office machines) ─────────────────────────────
@@ -1725,7 +1736,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","ThemeColour","ThemeBackground","StaffRecords","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","StaffType","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}
@@ -1756,7 +1767,7 @@
           + "#pnav .pn-gate-dot{ width:11px; height:11px; border-radius:50%; background:#94a3b8; box-shadow:0 0 0 3px rgba(148,163,184,.28); flex:0 0 auto; }"
           + "#pnav .pn-gate.open .pn-gate-dot{ background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.32); }"
           + "#pnav .pn-gate.closed .pn-gate-dot{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.32); }"
-          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; }"
+          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; } html.pnav-collapsed #pnav .pn-gate .pn-gate-lbl{ display:none; }"
           + "#pnav .pn-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding:4px 10px 10px; }"
           + "#pnav .pn-grp{ margin-top:14px; } #pnav .pn-grp h4{ font-size:10.5px; text-transform:uppercase; letter-spacing:.9px; color:#9fc0e8; opacity:.75; margin:0 10px 5px; font-weight:600; white-space:nowrap; }"
           + "html.pnav-collapsed #pnav .pn-grp h4{ opacity:0; height:7px; margin:0; overflow:hidden; }"
