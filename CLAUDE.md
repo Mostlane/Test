@@ -941,17 +941,35 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   in **BOTH** pages — fix engineer-job.html too, it's the one engineers actually
   use. engineer-job.html's RA is a modal opened by the amber "Open risk
   assessment →" lock banner; the skip is a discreet dashed button at its foot.
-  **ONE job at a time is DELIBERATE — do not add a same-site exemption (10 Sep
-  2026).** Jamie: "why are David's jobs not changing colour in the scheduler like
-  Connor's" → the scheduler was fine (it colours from the server status); David
-  was starting the first job at a store, working all three, then running the
-  other two through In Progress→Complete in six minutes at the end (Sandown
-  08:56–09:02; Bosham/Bishops Waltham the day before). A same-site exemption in
-  `findBlockingJob` was built and REVERTED the same day: Jamie's rule is that the
-  engineer keeps the status current between jobs, never retrospectively, and the
-  strict guard is what enforces it. `findBlockingJob` is exported (tests); only
-  EM/PAT jobs overlap. `worker/tools/test-same-site.mjs` asserts the strict
-  behaviour (a job at the same store IS blocked).
+  **Same-site jobs run TOGETHER (10 Sep 2026 — Jamie: "why are David's jobs not
+  changing colour in the scheduler like Connor's").** Diagnosis: no bug in the
+  scheduler — it colours a block from the server status, and David's taps were
+  arriving late: with three/four job numbers at ONE store the cross-job guard let
+  him start only the first, so the others sat amber all visit and were closed as
+  paperwork in a burst at the end (Sandown: 3 jobs "done" 08:58–09:02). Now
+  `findBlockingJob(env,tid,user,exceptId,exceptJob)` (exported) skips an active
+  (Travelling/In Progress) job at the SAME SITE as the one being started —
+  `sameSiteJob(a,b)` = numeric store code (0125 = 125) else the normalised site
+  name; a pending on-hold / safety flag there still blocks. job-view.html's
+  client copy (`findBlockingJob(id,user,job)` + `sameSiteAs`) mirrors it. NB
+  timesheets' `trackJobTime` still keeps ONE open segment per engineer — starting
+  the second same-site job closes the first's segment, so on-site time is split
+  between the jobs, never double-counted. Test `node worker/tools/test-same-site.mjs`.
+  NB this exemption was reverted and then RESTORED the same afternoon — Jamie's
+  final word: "the same site works to run together is fine". Keep it. The
+  underlying finding stands separately: David was completing jobs
+  retrospectively in a burst rather than as the day goes on, which is a
+  behaviour matter, not a portal one.
+  **Stacked queue + same site (10 Sep 2026, Jamie: "when we use hide-job-until-
+  previous-job-is-complete, if the next job to appear happens to be the same site
+  as the one after too, they should both appear").** `hasEarlierOpenJob` (the
+  `afterPrev` release rule) now IGNORES an earlier open job at the SAME site
+  (`sameSiteJob`), so when the queue reveals a job, every queued job at that store
+  appears with it (chains through consecutive same-site jobs); a queued job at a
+  different store still waits until the earlier store's jobs are all finished, and
+  a same-site job behind a job that is itself still hidden stays hidden.
+  `releaseVisibleNow` is exported for the test (7 afterPrev cases). Editor text
+  `sla-jobedit.js?v=33`; help guide + the 🙈 line updated.
   **Live refresh on sla-scheduler.html + sla-main.html:** neither page ever
   re-fetched on its own (only after an edit/drag), so colours froze at page-open
   for EVERY engineer. Both now re-fetch every 60 s while visible (+ on becoming
