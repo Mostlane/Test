@@ -2844,6 +2844,35 @@ async function init(){
 }
 
 init();
+
+// ── Live refresh (Sep 2026) ───────────────────────────────────────────────
+// The office needs job colours to move as engineers tap statuses, so the page
+// re-fetches every 60s while the tab is visible (and the moment it becomes
+// visible again). Skipped whenever something is mid-flight — a drag, any open
+// modal, the shared job editor, a focused text box, a bulk selection — so a
+// re-render never pulls a control out from under someone.
+(function(){
+  let busy = false;
+  function uiBusy(){
+    if(document.hidden) return true;
+    if(typeof dragState !== "undefined" && dragState && dragState.active) return true;
+    if(typeof selected !== "undefined" && selected && selected.size) return true;
+    if(Array.from(document.querySelectorAll(".modal-backdrop")).some(b => getComputedStyle(b).display !== "none")) return true;
+    const mb = document.getElementById("mljeBack"); if(mb && mb.classList.contains("show")) return true;
+    const a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && a.type !== "radio") return true;
+    return false;
+  }
+  async function tick(){
+    if(busy || uiBusy()) return;
+    busy = true;
+    try{ await loadJobs(true); if(typeof render === "function") render(); }catch(e){}
+    busy = false;
+  }
+  window.mlLiveRefresh = tick;
+  setInterval(tick, 60000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) tick(); });
+})();
 </script>
 
 </body>

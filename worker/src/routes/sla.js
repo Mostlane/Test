@@ -2406,7 +2406,7 @@ export async function handle(request, env, ctx, url, sess) {
         // Cross-job guard — but EM/PAT jobs are exempt (they're meant to overlap):
         // starting one is never blocked, and one mid-drain-down never blocks others.
         if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress") && !(before && (before.emTest || before.pat))) {
-          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
+          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id, before);
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first — ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
@@ -2982,7 +2982,22 @@ async function ensureClockOn(env, tenantId, username, gps, localDate) {
   } catch (e) { /* non-fatal */ }
 }
 
-async function findBlockingJob(env, tenantId, username, exceptId) {
+// Two jobs are "at the same site" when their store codes match numerically
+// (0125 = 125), else when their site names match once punctuation/case are
+// stripped. Used so an engineer with several jobs at one store can have them
+// ALL In Progress at once (Sep 2026 — before this, only the first could be
+// started, so the other blocks sat amber on the scheduler all visit and were
+// "completed" as paperwork at the end).
+export function sameSiteJob(a, b) {
+  if (!a || !b) return false;
+  const ka = siteKeyOf(a.siteCode), kb = siteKeyOf(b.siteCode);
+  if (ka && kb) return ka === kb;
+  const na = String(a.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nb = String(b.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return !!na && na === nb;
+}
+
+export async function findBlockingJob(env, tenantId, username, exceptId, exceptJob = null) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
   for (const j of jobs) {
@@ -2992,6 +3007,13 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
     // ~3h battery drain-down and a PAT runs alongside, so one in progress must never
     // block the engineer starting another job.
     if (j.emTest || j.pat) continue;
+    // Jobs at the SAME SITE run together (one visit, several job numbers) — an
+    // active job at this store never blocks starting another job at the store.
+    // A pending on-hold / safety flag there still does.
+    if (exceptJob && sameSiteJob(j, exceptJob)) {
+      const stHere = effStatus(j, uNorm);
+      if (stHere === "In Progress" || stHere === "Travelling") continue;
+    }
     // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
     // must never block them.
     const st = effStatus(j, uNorm);
