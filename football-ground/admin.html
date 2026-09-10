@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Coal Park Lane — Bookings admin</title>
+<style>
+  :root{
+    --ink-900:#0f1216; --ink-800:#171b21; --ink-700:#20262e; --line:#2b323c;
+    --paper:#0f1216; --card:#161b22; --text:#eef2f6; --muted:#9aa7b4;
+    --accent:#e8b02e; --accent-ink:#0f1216;
+    --ok:#2fbf71; --warn:#e8b02e; --bad:#e2574c; --info:#4d9be6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--text);
+    font:15px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+  a{color:var(--accent)}
+  .wrap{max-width:1040px;margin:0 auto;padding:20px 16px 80px}
+  h1{font:700 22px/1.2 Inter,sans-serif;margin:0}
+  .muted{color:var(--muted)}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);
+    background:var(--ink-700);color:var(--text);border-radius:10px;padding:9px 14px;
+    font:600 14px Inter,sans-serif;cursor:pointer}
+  .btn:hover{border-color:#3a434f}
+  .btn.gold{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:6px 10px;font-size:13px;border-radius:8px}
+  .btn.danger{color:#ffb4ad;border-color:#4a2a28}
+  input,select,textarea{background:var(--ink-800);color:var(--text);border:1px solid var(--line);
+    border-radius:9px;padding:9px 10px;font:14px Inter,sans-serif;width:100%}
+  textarea{resize:vertical}
+  label{display:block;font:600 12px Inter,sans-serif;color:var(--muted);margin:0 0 4px;text-transform:uppercase;letter-spacing:.03em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+
+  /* login */
+  #login{max-width:360px;margin:12vh auto 0}
+  #login .brand{font:800 26px Anton,Inter,sans-serif;letter-spacing:.02em;text-align:center;margin-bottom:4px}
+  #login .brand b{color:var(--accent)}
+  #login .sub{text-align:center;color:var(--muted);margin:0 0 18px}
+  #loginErr{color:#ffb4ad;min-height:18px;font-size:13px;margin-top:8px}
+
+  /* app */
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .brand-sm{font:800 20px Anton,Inter,sans-serif;letter-spacing:.02em}
+  .brand-sm b{color:var(--accent)}
+  .tabs{display:flex;gap:6px;margin:0 0 16px}
+  .tab{padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font:600 14px Inter,sans-serif}
+  .tab.on{background:var(--ink-700);color:var(--text);border-color:#3a434f}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+  .chip{padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font:600 13px Inter,sans-serif}
+  .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .chip .n{opacity:.7;margin-left:4px}
+
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:620px){.row{grid-template-columns:1fr}}
+
+  /* booking cards */
+  .bk{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--card)}
+  .bk .hd{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
+  .bk .who{font-weight:700}
+  .bk .meta{color:var(--muted);font-size:13px;margin-top:2px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font:700 11px Inter,sans-serif;text-transform:uppercase;letter-spacing:.04em}
+  .st-new{background:#22303f;color:#8fc4ff}
+  .st-contacted{background:#2c2a1a;color:#e8cf7a}
+  .st-confirmed{background:#17301f;color:#79e0a3}
+  .st-declined{background:#2f2320;color:#ffb0a6}
+  .st-cancelled{background:#26292e;color:#aab4bf}
+  .src{font:700 10px Inter,sans-serif;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px;text-transform:uppercase;letter-spacing:.04em}
+  .bk .body{margin-top:10px;white-space:pre-wrap;color:#d6dde4;font-size:14px}
+  .bk .ctrls{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:12px}
+  .bk .ctrls .f{min-width:150px}
+  .saved{color:var(--ok);font-size:12px;font-weight:600;opacity:0;transition:opacity .2s}
+  .saved.show{opacity:1}
+
+  /* calendar */
+  .cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .cal-title{font:700 17px Inter,sans-serif}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cal .dow{color:var(--muted);font:600 11px Inter,sans-serif;text-align:center;text-transform:uppercase;letter-spacing:.04em;padding:4px 0}
+  .day{min-height:76px;border:1px solid var(--line);border-radius:9px;padding:5px 6px;background:var(--ink-800);cursor:pointer;overflow:hidden}
+  .day.blank{background:transparent;border-color:transparent;cursor:default}
+  .day.today{border-color:var(--accent)}
+  .day .dn{font:700 12px Inter,sans-serif;color:var(--muted)}
+  .day .ev{font:600 11px Inter,sans-serif;background:#17301f;color:#9fe6bd;border-radius:5px;padding:1px 5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .day .ev.contacted{background:#2c2a1a;color:#e8cf7a}
+  .day .more{color:var(--muted);font-size:11px;margin-top:2px}
+
+  .empty{color:var(--muted);text-align:center;padding:40px 0}
+  .hidden{display:none!important}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink-700);border:1px solid var(--line);color:var(--text);padding:10px 16px;border-radius:10px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+  dialog{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:0;max-width:520px;width:calc(100% - 32px)}
+  dialog::backdrop{background:rgba(0,0,0,.55)}
+  .dlg-hd{padding:16px 18px;border-bottom:1px solid var(--line);font:700 17px Inter,sans-serif}
+  .dlg-bd{padding:18px}
+  .dlg-ft{padding:14px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="hidden">
+  <div class="card">
+    <div class="brand">COAL PARK <b>LANE</b></div>
+    <p class="sub">Bookings admin</p>
+    <label for="pw">Password</label>
+    <input type="password" id="pw" autocomplete="current-password" />
+    <div id="loginErr"></div>
+    <button class="btn gold" style="width:100%;margin-top:12px;justify-content:center" id="loginBtn">Sign in</button>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="wrap hidden">
+  <header class="top">
+    <div class="brand-sm">COAL PARK <b>LANE</b> · Bookings</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm ghost" id="refreshBtn">↻ Refresh</button>
+      <button class="btn sm ghost" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab on" data-tab="list">Enquiries &amp; bookings</button>
+    <button class="tab" data-tab="cal">Calendar</button>
+  </div>
+
+  <!-- LIST -->
+  <section id="tab-list">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="chips" id="statusChips"></div>
+      <button class="btn gold sm" id="addBtn">+ Add a booking</button>
+    </div>
+    <div id="list"></div>
+  </section>
+
+  <!-- CALENDAR -->
+  <section id="tab-cal" class="hidden">
+    <div class="cal-head">
+      <button class="btn sm ghost" id="calPrev">‹</button>
+      <div class="cal-title" id="calTitle"></div>
+      <button class="btn sm ghost" id="calNext">›</button>
+    </div>
+    <div class="cal" id="cal"></div>
+    <p class="muted" style="margin-top:12px;font-size:13px">Shows confirmed &amp; contacted bookings and any slots you've added manually — your at-a-glance guard against double-booking.</p>
+  </section>
+</div>
+
+<!-- ADD / EDIT DIALOG -->
+<dialog id="dlg">
+  <form method="dialog">
+    <div class="dlg-hd" id="dlgTitle">Add a booking</div>
+    <div class="dlg-bd">
+      <input type="hidden" id="d-id" />
+      <div class="row">
+        <div><label>Name</label><input id="d-name" /></div>
+        <div><label>Status</label>
+          <select id="d-status">
+            <option value="confirmed">Confirmed</option>
+            <option value="contacted">Contacted</option>
+            <option value="new">New</option>
+            <option value="declined">Declined</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label>Email</label><input id="d-email" /></div>
+        <div><label>Phone</label><input id="d-phone" /></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label>Date</label><input type="date" id="d-date" /></div>
+        <div><label>Time</label><input type="time" id="d-time" step="900" /></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label>Which space</label><input id="d-pitch" placeholder="e.g. Full-size pitch" /></div>
+        <div><label>What for</label><input id="d-use" placeholder="e.g. Saturday junior league" /></div>
+      </div>
+      <div style="margin-top:10px"><label>Notes (private)</label><textarea id="d-notes" rows="2"></textarea></div>
+    </div>
+    <div class="dlg-ft">
+      <button class="btn ghost" value="cancel" type="submit">Cancel</button>
+      <button class="btn gold" id="dlgSave" type="button">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   CONFIG — set this to your deployed worker URL.
+   After you create the "coalparklane-api" Worker in Cloudflare,
+   put its address here (see ../SETUP.md). Default assumes the
+   same account subdomain as mostlane-api.
+   ============================================================ */
+const API_BASE = "https://coalparklane-api.jamie-def.workers.dev";
+
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const TOKEN_KEY = "cpl_admin_token";
+let token = localStorage.getItem(TOKEN_KEY) || "";
+let allBookings = [];
+let statusFilter = "";
+let calMonth = new Date(); calMonth.setDate(1);
+
+const STATUS_LABELS = { new:"New", contacted:"Contacted", confirmed:"Confirmed", declined:"Declined", cancelled:"Cancelled" };
+const esc = (s) => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
+
+async function api(path, opts={}){
+  const res = await fetch(API_BASE + path, {
+    ...opts,
+    headers: { "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}), ...(opts.headers||{}) },
+  });
+  if (res.status === 401 && !path.endsWith("/login")) { doLogout(); throw new Error("Session expired — sign in again."); }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || ("Error " + res.status));
+  return data;
+}
+
+/* ---------- auth ---------- */
+function showLogin(){ $("#login").classList.remove("hidden"); $("#app").classList.add("hidden"); }
+function showApp(){ $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); load(); }
+function doLogout(){ token=""; localStorage.removeItem(TOKEN_KEY); showLogin(); }
+
+$("#loginBtn").addEventListener("click", login);
+$("#pw").addEventListener("keydown", e => { if(e.key==="Enter") login(); });
+async function login(){
+  const pw = $("#pw").value;
+  $("#loginErr").textContent = "";
+  if(!pw) return;
+  $("#loginBtn").disabled = true;
+  try{
+    const { token: t } = await api("/admin/login", { method:"POST", body: JSON.stringify({ password: pw }) });
+    token = t; localStorage.setItem(TOKEN_KEY, t); $("#pw").value=""; showApp();
+  }catch(err){ $("#loginErr").textContent = err.message; }
+  finally{ $("#loginBtn").disabled = false; }
+}
+$("#logoutBtn").addEventListener("click", doLogout);
+$("#refreshBtn").addEventListener("click", load);
+
+/* ---------- tabs ---------- */
+$$(".tab").forEach(t => t.addEventListener("click", () => {
+  $$(".tab").forEach(x=>x.classList.remove("on")); t.classList.add("on");
+  const tab = t.dataset.tab;
+  $("#tab-list").classList.toggle("hidden", tab!=="list");
+  $("#tab-cal").classList.toggle("hidden", tab!=="cal");
+  if(tab==="cal") renderCal();
+}));
+
+/* ---------- load + render list ---------- */
+async function load(){
+  try{
+    const { bookings } = await api("/admin/bookings");
+    allBookings = bookings || [];
+    renderChips(); renderList(); renderCal();
+  }catch(err){ toast(err.message); }
+}
+
+function renderChips(){
+  const counts = { "":allBookings.length };
+  allBookings.forEach(b => counts[b.status] = (counts[b.status]||0)+1);
+  const order = ["","new","contacted","confirmed","declined","cancelled"];
+  $("#statusChips").innerHTML = order.map(s => {
+    const n = counts[s]||0;
+    const label = s===""? "All" : STATUS_LABELS[s];
+    return `<button class="chip ${statusFilter===s?"on":""}" data-s="${s}">${label}<span class="n">${n}</span></button>`;
+  }).join("");
+  $$("#statusChips .chip").forEach(c => c.addEventListener("click", ()=>{ statusFilter=c.dataset.s; renderChips(); renderList(); }));
+}
+
+function renderList(){
+  const rows = allBookings.filter(b => !statusFilter || b.status===statusFilter);
+  if(!rows.length){ $("#list").innerHTML = `<div class="empty">No bookings here yet.</div>`; return; }
+  $("#list").innerHTML = rows.map(bkCard).join("");
+  rows.forEach(b => wireCard(b.id));
+}
+
+function bkCard(b){
+  const when = b.date ? esc(b.date) + (b.time? " · " + esc(b.time) : "") : "No date given";
+  const contact = [b.email, b.phone].filter(Boolean).map(esc).join(" · ");
+  const opts = Object.keys(STATUS_LABELS).map(s => `<option value="${s}" ${b.status===s?"selected":""}>${STATUS_LABELS[s]}</option>`).join("");
+  return `<div class="bk" data-id="${b.id}">
+    <div class="hd">
+      <div>
+        <div class="who">${esc(b.name||"(no name)")} <span class="src">${b.source==="manual"?"added":"enquiry"}</span></div>
+        <div class="meta">${when}${b.pitch?" · "+esc(b.pitch):""}${b.use?" · "+esc(b.use):""}</div>
+        ${contact?`<div class="meta">${contact}</div>`:""}
+      </div>
+      <span class="pill st-${b.status}">${STATUS_LABELS[b.status]}</span>
+    </div>
+    ${b.message?`<div class="body">${esc(b.message)}</div>`:""}
+    <div class="ctrls">
+      <div class="f"><label>Status</label>
+        <select class="c-status">${opts}</select>
+      </div>
+      <div class="f" style="flex:1;min-width:200px"><label>Private notes</label>
+        <input class="c-notes" value="${esc(b.adminNotes||"")}" placeholder="e.g. called back, holding Sat 10am" />
+      </div>
+      <button class="btn gold sm c-save">Save</button>
+      <button class="btn sm ghost c-edit">Edit</button>
+      <button class="btn sm danger c-del">Delete</button>
+      <span class="saved">Saved ✓</span>
+    </div>
+  </div>`;
+}
+
+function wireCard(id){
+  const el = $(`.bk[data-id="${id}"]`); if(!el) return;
+  el.querySelector(".c-save").addEventListener("click", async ()=>{
+    const status = el.querySelector(".c-status").value;
+    const adminNotes = el.querySelector(".c-notes").value;
+    try{
+      const { booking } = await api("/admin/bookings/"+id, { method:"PATCH", body: JSON.stringify({ status, adminNotes }) });
+      const i = allBookings.findIndex(b=>b.id===id); if(i>=0) allBookings[i]=booking;
+      const s = el.querySelector(".saved"); s.classList.add("show"); setTimeout(()=>s.classList.remove("show"),1500);
+      renderChips();
+      const pill = el.querySelector(".pill"); pill.className = "pill st-"+booking.status; pill.textContent = STATUS_LABELS[booking.status];
+    }catch(err){ toast(err.message); }
+  });
+  el.querySelector(".c-edit").addEventListener("click", ()=> openDialog(allBookings.find(b=>b.id===id)));
+  el.querySelector(".c-del").addEventListener("click", async ()=>{
+    if(!confirm("Delete this booking? This can't be undone.")) return;
+    try{ await api("/admin/bookings/"+id, { method:"DELETE" });
+      allBookings = allBookings.filter(b=>b.id!==id); renderChips(); renderList(); renderCal(); toast("Deleted");
+    }catch(err){ toast(err.message); }
+  });
+}
+
+/* ---------- add / edit dialog ---------- */
+const dlg = $("#dlg");
+$("#addBtn").addEventListener("click", ()=> openDialog(null));
+function openDialog(b){
+  $("#dlgTitle").textContent = b ? "Edit booking" : "Add a booking";
+  $("#d-id").value = b?b.id:"";
+  $("#d-name").value = b?.name||""; $("#d-email").value=b?.email||""; $("#d-phone").value=b?.phone||"";
+  $("#d-date").value = b?.date||""; $("#d-time").value=b?.time||"";
+  $("#d-pitch").value = b?.pitch||""; $("#d-use").value=b?.use||"";
+  $("#d-notes").value = b?.adminNotes||""; $("#d-status").value = b?.status||"confirmed";
+  dlg.showModal();
+}
+$("#dlgSave").addEventListener("click", async ()=>{
+  const id = $("#d-id").value;
+  const payload = {
+    name:$("#d-name").value, email:$("#d-email").value, phone:$("#d-phone").value,
+    date:$("#d-date").value, time:$("#d-time").value, pitch:$("#d-pitch").value,
+    use:$("#d-use").value, adminNotes:$("#d-notes").value, status:$("#d-status").value,
+  };
+  try{
+    if(id){ const { booking } = await api("/admin/bookings/"+id, { method:"PATCH", body: JSON.stringify(payload) });
+      const i = allBookings.findIndex(b=>b.id===id); if(i>=0) allBookings[i]=booking;
+    } else { const { booking } = await api("/admin/bookings", { method:"POST", body: JSON.stringify(payload) });
+      allBookings.unshift(booking);
+    }
+    dlg.close(); renderChips(); renderList(); renderCal(); toast("Saved");
+  }catch(err){ toast(err.message); }
+});
+
+/* ---------- calendar ---------- */
+$("#calPrev").addEventListener("click", ()=>{ calMonth.setMonth(calMonth.getMonth()-1); renderCal(); });
+$("#calNext").addEventListener("click", ()=>{ calMonth.setMonth(calMonth.getMonth()+1); renderCal(); });
+function ymd(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function renderCal(){
+  const y=calMonth.getFullYear(), m=calMonth.getMonth();
+  $("#calTitle").textContent = calMonth.toLocaleString("en-GB",{month:"long",year:"numeric"});
+  const first=new Date(y,m,1), startDow=(first.getDay()+6)%7; // Mon=0
+  const days=new Date(y,m+1,0).getDate();
+  const byDate={};
+  allBookings.filter(b=>b.date && (["confirmed","contacted"].includes(b.status) || b.source==="manual"))
+    .forEach(b=>{ (byDate[b.date]=byDate[b.date]||[]).push(b); });
+  const today=ymd(new Date());
+  const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  let html = dows.map(d=>`<div class="dow">${d}</div>`).join("");
+  for(let i=0;i<startDow;i++) html += `<div class="day blank"></div>`;
+  for(let d=1;d<=days;d++){
+    const ds = y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+    const evs = (byDate[ds]||[]).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+    const shown = evs.slice(0,3).map(e=>`<div class="ev ${e.status==="contacted"?"contacted":""}">${e.time?esc(e.time)+" ":""}${esc(e.name||e.use||e.pitch||"Booked")}</div>`).join("");
+    const more = evs.length>3 ? `<div class="more">+${evs.length-3} more</div>` : "";
+    html += `<div class="day ${ds===today?"today":""}" data-d="${ds}"><div class="dn">${d}</div>${shown}${more}</div>`;
+  }
+  $("#cal").innerHTML = html;
+  $$("#cal .day:not(.blank)").forEach(el => el.addEventListener("click", ()=>{
+    const ds=el.dataset.d; const evs=(byDate[ds]||[]);
+    if(!evs.length){ toast("Nothing booked on "+ds); return; }
+    const lines = evs.map(e=>`• ${e.time||"--:--"}  ${e.name||"(no name)"}${e.pitch?" — "+e.pitch:""}${e.use?" ("+e.use+")":""}  [${STATUS_LABELS[e.status]}]`).join("\n");
+    alert(ds+"\n\n"+lines);
+  }));
+}
+
+/* ---------- boot ---------- */
+if(token) showApp(); else showLogin();
+</script>
+</body>
+</html>

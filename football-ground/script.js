@@ -22,7 +22,17 @@ const CONFIG = {
                  formEndpoint below and switch this to "endpoint".
      ------------------------------------------------------- */
   deliveryMode: "mailto",
-  formEndpoint: ""   // e.g. "https://formspree.io/f/xxxx" or your own Worker URL
+  formEndpoint: "",  // e.g. "https://formspree.io/f/xxxx" or your own Worker URL
+
+  /* -------------------------------------------------------
+     BOOKING BACKEND (Coal Park Lane worker)
+     When set, enquiries are saved straight into your bookings
+     database and appear in admin.html. If the save ever fails
+     (worker down / offline), the form falls back to mailto so
+     an enquiry is never lost. Leave blank to disable and use
+     deliveryMode above instead.
+     ------------------------------------------------------- */
+  bookingEndpoint: "https://coalparklane-api.jamie-def.workers.dev/enquiry"
 };
 
 /* ---------- Apply config to the page ---------- */
@@ -156,6 +166,35 @@ form.addEventListener("submit", async (e) => {
 
   const subject = `Booking enquiry — ${data.use} — ${data.date}`;
   const body = buildBody(data);
+
+  // ---- Delivery: booking backend (saves into your bookings database) ----
+  if (CONFIG.bookingEndpoint){
+    submitBtn.disabled = true;
+    const original = submitBtn.textContent;
+    submitBtn.textContent = "Sending…";
+    try{
+      const res = await fetch(CONFIG.bookingEndpoint, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          name: data.name, email: data.email, phone: data.phone,
+          date: data.date, time: data.time, pitch: data.pitch,
+          use: data.use, message: data.message
+        })
+      });
+      if (!res.ok) throw new Error("bad status " + res.status);
+      form.reset();
+      note.textContent = "Thanks — your enquiry is in. We'll be in touch shortly to confirm.";
+      note.classList.add("ok");
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+      return;
+    }catch(err){
+      // Save failed — fall through to mailto so the enquiry is never lost.
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+    }
+  }
 
   // ---- Delivery: hosted endpoint (Formspree / your own Worker) ----
   if (CONFIG.deliveryMode === "endpoint" && CONFIG.formEndpoint){
