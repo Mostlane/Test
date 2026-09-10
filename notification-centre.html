@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Notification Centre — Mostlane</title>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <script src="auth.js"></script>
 <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
@@ -212,7 +212,7 @@ async function skipVanCheck(user, week){
 }
 
 function ruleDesc(r){
-  const t = TYPE_LABEL[r.type] || r.type;
+  const t = esc(TYPE_LABEL[r.type] || r.type);
   if(!r.user && !r.key) return `${t} — <b>everyone</b>`;
   if(r.user && !r.key) return `${t} — all for <b>${esc(r.user)}</b>`;
   if(r.user && r.key) return `${t} — <b>${esc(r.label||r.key)}</b> for <b>${esc(r.user)}</b>`;

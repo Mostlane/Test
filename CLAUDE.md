@@ -2457,6 +2457,46 @@ gives the call 30s, shows "Loading everyone's week…", and on failure says WHIC
 (`health_events` kind='slow') is the place to look when a page "won't load" —
 it records every >2.5s response by endpoint.
 
+## XSS audit of every page (10 Sep 2026)
+Jamie: "How secure is this portal?" → "Do the 143 HTML." Every page + shared script
+(187 files) was read for places API/user text is written into HTML unescaped.
+Why it mattered: job descriptions/refs/site names arrive from an EXTERNAL client's
+Concerto emails and are rendered on office pages, so a script in an email could
+run in the office's browser; chat, notes, names and config strings are typed by
+staff and rendered to admins. A hostile-data smoke test (scratchpad `xss/hostile.cjs`:
+mock every API call with `<img onerror>` payloads in every string field, open 60
+pages) found **7 pages executing injected script before the fix (sla-main, job-view,
+eicr-portal, fareham, chapplins-compliance, po-admin, daily-logs) and 0 after**, with
+no new JS errors. **395 fixes across ~100 files.** Rules now in force:
+- **Every page's escape helper escapes `& < > " '`** (75 helpers were missing `'`).
+  A page with no helper gets the canonical one at the top of its first script:
+  `function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,…)}`.
+- **Inline event handlers never take a quoted interpolation.** HTML-escaping is
+  NOT enough there — the browser decodes `&#39;` back to `'` BEFORE the JS runs, so
+  `onclick="fn('${esc(x)}')"` was still breakable (vehicles.html had 37 of these;
+  sla-scheduler's fallback list, timesheets-admin, po-office/po-raise pickers,
+  chapplins tenants, hs-docs, programme-edit…). The pattern is now
+  `onclick="fn(${esc(JSON.stringify(String(x)))})"` (double-quoted attribute, JSON
+  literal inside) or a `data-*` attribute read in the handler.
+- **User-supplied URLs go through `safeUrl()`** (http/https/mailto/tel/blob/
+  data:image/relative only, else "#") before `href`/`src`: SharePoint links on
+  sites, bot-supplied email links (my-tasks, client-orders, cert-review),
+  stored signature/logo data URLs (RAMS render, CPP builder), notification feed urls.
+- **Formatter fall-throughs are sinks:** `fmtDate/fmtDue/fmtTime/fmtD/fmtP` return
+  the RAW input when it doesn't parse, so their output must be escaped too.
+- `MLUI.rich()`/`richStrip()` escape first (`richEsc`) — safe to render descriptions.
+- Cache bumps: portal-config `?v=34`, cert-form v22, chat-widget v5, firestop-form v2,
+  hs-rams-render v3, programme-gantt v8, pump-form v4, remedials-form v5, SW `mostlane-v124`.
+**Re-run the check after touching a page:** `node scratchpad/xss/check.mjs <files>`
+(syntax) and the hostile smoke (`python3 -m http.server 8099` from the repo root, then
+`NODE_PATH=/opt/node22/lib/node_modules node hostile.cjs 8099 [pages]`) — any
+`exec>0` is a regression. The static scanner (`scan.mjs`) is only a lead generator
+(~2000 noisy flags remain: numbers, class names, page-built HTML).
+Still open from the same review: the job-files R2 bucket's public r2.dev access
+(job photos/signatures are linked by public URL — confirm in the dashboard and
+route them through the signed streams), git history still holding old data files,
+no second factor, 90-day sessions, `ALLOWED_ORIGINS="*"`.
+
 ## Why the portal was slow — and the two fixes (9 Sep 2026)
 Jamie: "Why so slow anyway?" Evidence from `health_events` (kind='slow', >2.5 s):
 8/day on 30 Aug → 585/day on 9 Sep across 24 endpoints, with trivial calls like

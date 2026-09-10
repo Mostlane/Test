@@ -41,7 +41,7 @@
   }
   function pickSource(input){ if(window.MLPhotoInput) window.MLPhotoInput(input); else { input.removeAttribute("capture"); input.click(); } }
 
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
   function fmtDur(min) { min = Math.round(Number(min) || 0); var h = Math.floor(min / 60), m = min % 60; return h ? (h + "h" + (m ? " " + m + "m" : "")) : (m + "m"); }
   function fmtGBP(n) { n = Number(n) || 0; return "£" + n.toFixed(2); }
   function uid() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }

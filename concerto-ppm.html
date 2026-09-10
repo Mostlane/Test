@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Concerto PPM list</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="/xlsx-lite.js?v=2"></script>
@@ -129,10 +129,10 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    const fmtD = s => { if(!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m ? `${d}/${m}/${y}` : String(s); };
-    const fmtP = p => { if(!p) return ""; const [y,m] = p.split("-"); const M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return (M[Number(m)-1]||m)+" "+y; };
+    const fmtD = s => { if(!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return esc(d && m ? `${d}/${m}/${y}` : String(s)); };
+    const fmtP = p => { if(!p) return ""; const [y,m] = p.split("-"); const M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return esc((M[Number(m)-1]||m)+" "+y); };
     const money = v => (v==null||v==="") ? "" : "£"+Number(v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
     const FLAGS = { done:"Done our side", overdue:"Overdue", due:"Due", mismatch:"Dates differ", no_store:"Not mapped", not_on_chart:"Not on chart", no_chart_date:"No chart date", store_closed:"Store closed", gone:"Gone from list", dismissed:"Dismissed" };
     const TYPES = { em:"EM", pat:"PAT", pump:"Pump", pv:"PV", ev:"EV", fiveYear:"5 Year", other:"Other" };
@@ -351,7 +351,7 @@
         tile(st.done||0, "done our side", st.done?"ok":"") + tile(st.overdue||0, "overdue", st.overdue?"bad":"") + tile(st.mismatch||0, "dates differ", st.mismatch?"warn":"") + tile(st.withHistory||0, "with a portal record", "");
       g("schGreet").textContent = (st.releasesLogged ? `${st.releasesLogged} release${st.releasesLogged===1?"":"s"} logged` + (st.releaseLeadDaysAvg!=null ? ` · released on average ${st.releaseLeadDaysAvg} days before the due date` : "") + " · " : "") + `${SCH.rows.length} of ${SCH.total} rows shown`;
       const years = Object.keys(st.byYear||{}).sort();
-      g("schYears").innerHTML = `<button class="chip ${SCH_YEAR===""?"on":""}" data-y="">All years</button>` + years.map(y => `<button class="chip ${SCH_YEAR===y?"on":""}" data-y="${y}">${y} <span class="muted">${st.byYear[y].total}${st.byYear[y].released?" · "+st.byYear[y].released+" released":""}</span></button>`).join("");
+      g("schYears").innerHTML = `<button class="chip ${SCH_YEAR===""?"on":""}" data-y="">All years</button>` + years.map(y => `<button class="chip ${SCH_YEAR===y?"on":""}" data-y="${esc(y)}">${esc(y)} <span class="muted">${st.byYear[y].total}${st.byYear[y].released?" · "+st.byYear[y].released+" released":""}</span></button>`).join("");
       [].forEach.call(g("schYears").querySelectorAll(".chip"), b => b.onclick = () => { SCH_YEAR = b.dataset.y; g("schFrom").value = SCH_YEAR ? SCH_YEAR + "-01" : ""; g("schTo").value = SCH_YEAR ? SCH_YEAR + "-12" : ""; loadSchedule(); });
       g("schType").innerHTML = Object.keys(TYPES).filter(t => t !== "other").map(t => `<button class="chip ${SCH_TYPE===t?"on":""}" data-t="${t}">${TYPES[t]}</button>`).join("");
       [].forEach.call(g("schType").querySelectorAll(".chip"), b => b.onclick = () => { SCH_TYPE = b.dataset.t; loadSchedule(); });
@@ -368,7 +368,7 @@
       if (!r.lastDone) return '<span class="muted">nothing found</span>';
       const x = r.lastDone;
       const link = x.source === "job" ? `<a href="job-view.html?jobId=${encodeURIComponent(x.id)}">${fmtD(x.date)}</a>` : x.source === "archive" ? `<a href="job-archive.html?q=${encodeURIComponent(x.id)}">${fmtD(x.date)}</a>` : `<b>${fmtD(x.date)}</b>`;
-      const more = (r.history||[]).length > 1 ? `<div class="sub">${(r.history||[]).slice(1,4).map(h => `${fmtD(h.date)} ${SRC[h.source]||h.source}`).join(" · ")}</div>` : "";
+      const more = (r.history||[]).length > 1 ? `<div class="sub">${(r.history||[]).slice(1,4).map(h => `${fmtD(h.date)} ${esc(SRC[h.source]||h.source)}`).join(" · ")}</div>` : "";
       return `${link}<div class="sub">${esc(SRC[x.source]||x.source)}${x.title?" · "+esc(x.title):""}${x.engineer?" · "+esc(x.engineer):""}</div>${more}`;
     }
     function renderSchRows() {

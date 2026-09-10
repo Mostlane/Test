@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>My Timesheet — Mostlane</title>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
 <script src="auth.js"></script>
 <style>
@@ -417,7 +417,7 @@ function render(){
           const lab0 = b.label || b.ref || "Job"; const lab = lab0.length>40 ? lab0.slice(0,39)+"…" : lab0;
           return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}" data-booked="${b.extra?"":"1"}">
             <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:(b.extra?" · added":"")}</span></span>
-            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${val}"><span class="jh-unit">h</span>${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
+            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${esc(val)}"><span class="jh-unit">h</span>${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
           </div>`;
         }).join("") : `<div class="jh-none">No portal jobs booked for you this day.</div>`}</div>
         <div class="addjobwrap">
@@ -446,7 +446,7 @@ function render(){
     banner+=`<div class="banner" style="background:#dcfce7;border-color:#86efac;color:#166534">✅ <b>Approved by the office</b>${APPROVAL.by?" ("+esc(APPROVAL.by)+")":""}${when?" on "+when:""}. This week is locked and saved to your history.${APPROVAL.note?`<div style="margin-top:6px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;color:#14532d">📝 <b>Office note:</b> ${esc(APPROVAL.note)}</div>`:""}</div>`;
   }
   if(INVOICE){
-    banner+=`<div class="banner">🧾 Invoice <b>${INVOICE.number}</b> generated (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>.</div>`;
+    banner+=`<div class="banner">🧾 Invoice <b>${esc(INVOICE.number)}</b> generated (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>.</div>`;
   }
   const emptyBooked=countEmptyBooked();
   if(REMIND&&DUE&&!APPROVAL&&!INVOICE&&emptyBooked>0){
@@ -482,7 +482,7 @@ function renderInvoiceCard(){
   if(INVOICE){
     card.innerHTML=`<h3>🧾 Invoice</h3>
       <div class="muted" style="font-size:12.5px;margin-bottom:4px">This week</div>
-      <div class="li"><b>#${INVOICE.number}</b><span>${money(INVOICE.total||0)}</span>
+      <div class="li"><b>#${esc(INVOICE.number)}</b><span>${money(INVOICE.total||0)}</span>
         <a href="${esc(INVOICE.url)}" target="_blank" style="margin-left:auto">Open / print</a>
         <button class="btn del" id="thisWkDel" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`+allBtn;
     if(INVOICE.id!=null)g("thisWkDel").onclick=()=>deleteInvoice(INVOICE.id,INVOICE.number,INVOICE.url);
@@ -495,7 +495,7 @@ function renderInvoiceCard(){
       ${ME.rate?`<div class="invrow muted">Your rate: <b>${money(ME.rate)}${ME.rateType==="day"?"/day":"/hour"}</b>${ME.mileage?` · mileage ${ME.pencePerMile}p/mi`:""}</div>`
         :`<div class="invrow"><label>Your rate £ <input type="number" id="rateIn" min="0" step="0.5" style="width:90px"></label>
            <select id="rateType"><option value="hour">per hour</option><option value="day">per day</option></select></div>`}
-      <div class="invrow"><label>Next invoice number <input type="number" id="nextNo" min="1" step="1" value="${ME.nextInvoice}" style="width:110px" ${ME.canSetNumber?"":"disabled"}></label>
+      <div class="invrow"><label>Next invoice number <input type="number" id="nextNo" min="1" step="1" value="${esc(ME.nextInvoice)}" style="width:110px" ${ME.canSetNumber?"":"disabled"}></label>
         <span class="muted" style="font-size:12.5px" id="noMsg">${ME.canSetNumber?"Set your starting number once — it saves as you type and counts up from there.":""}</span></div>
       <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>`+allBtn;
     if(ME.canSetNumber){
@@ -525,9 +525,9 @@ async function loadInvoiceList(){
   const invs=(r&&r.invoices)||[];
   if(!invs.length){el.innerHTML="";el.hidden=true;if(btn)btn.style.display="none";return;}
   el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">${VIEWONLY?"Invoices (read-only)":"All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)"}</div>`+invs.map(i=>
-    `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
+    `<div class="li"><b>#${esc(i.number)}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
     +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
-    +(VIEWONLY?"":`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button>`)+`</div>`).join("");
+    +(VIEWONLY?"":`<button class="btn del invDel" data-id="${esc(i.id)}" data-no="${esc(i.number)}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button>`)+`</div>`).join("");
   if(!VIEWONLY)el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
   if(btn){
     btn.style.display="";

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <title>Mostlane • Cable Calculator</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -381,7 +381,7 @@
     var g=$("figs"); g.innerHTML="";
     figs.forEach(function(f){ var d=document.createElement("div"); d.className="fig"; d.innerHTML='<span>'+esc(f[0])+'</span><b>'+(f[1]==null?"—":esc(f[1]+(f[2]?" "+f[2]:"")))+'</b>'; g.appendChild(d); });
   }
-  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];}); }
 
   function meta(){
     return { company:CFG.company||"Mostlane", client:$("client").value, site:$("site").value,
@@ -455,7 +455,7 @@
     h+='</tr>';
     sizeList.forEach(function(sz){
       h+='<tr><td><b>'+esc(sz)+'</b></td>';
-      methods.forEach(function(m){ var row=c.methods[m][sz]||{}; h+='<td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="iz" type="number" step="0.1" value="'+(row.iz==null?"":row.iz)+'"></td><td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="vd" type="number" step="0.1" value="'+(row.vd==null?"":row.vd)+'"></td>'; });
+      methods.forEach(function(m){ var row=c.methods[m][sz]||{}; h+='<td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="iz" type="number" step="0.1" value="'+(row.iz==null?"":esc(row.iz))+'"></td><td><input data-m="'+esc(m)+'" data-sz="'+esc(sz)+'" data-k="vd" type="number" step="0.1" value="'+(row.vd==null?"":esc(row.vd))+'"></td>'; });
       h+='</tr>';
     });
     h+='</table><div class="hint" style="margin-top:6px">Method letters follow BS 7671 (A enclosed in insulated wall, B in conduit/trunking, C clipped direct, D buried, E free air/tray, 100 above a ceiling…). Leave a cell blank if the datasheet has no value.</div>';

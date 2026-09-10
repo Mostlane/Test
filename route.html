@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -138,7 +138,7 @@
   var MOSTLANE_API = window.MOSTLANE_API || "";
   var $=function(id){return document.getElementById(id)};
   function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function getEngineer(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }
@@ -260,7 +260,7 @@
     var heroInner;
     if(proj&&proj.totalDays){
       var pct=Math.max(6,Math.round((proj.day||1)/proj.totalDays*100));
-      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+(proj.day||1)+' of ~'+proj.totalDays+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
+      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+esc(proj.day||1)+' of ~'+esc(proj.totalDays)+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
         +'<h2>'+esc(proj.name||jobName(job))+'</h2><div class="sub">'+esc(job.siteName||job.address||"")+'</div>'
         +'<div class="prog"><i style="width:'+pct+'%"></i></div>';
     } else {

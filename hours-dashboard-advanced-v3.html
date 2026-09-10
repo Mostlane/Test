@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="auth.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
@@ -145,6 +145,7 @@
   <div id="tooltip" class="tooltip" role="tooltip" aria-hidden="true"><div class="tip" id="tooltip-tip"></div><div id="tooltip-text"></div></div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 /** ======= CONFIG ======= **/
 const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
 const CAP_PER_ENGINEER = 40;
@@ -395,7 +396,7 @@ function addRows(container, rows){
   rows.forEach(r=>{
     const div=document.createElement('div');
     div.className='row '+(r.sev||'');
-    div.innerHTML=`<div class="name">${r.lead}</div><div class="metric">${r.tail}</div>`;
+    div.innerHTML=`<div class="name">${esc(r.lead)}</div><div class="metric">${esc(r.tail)}</div>`;
     container.appendChild(div);
   });
 }
@@ -786,14 +787,14 @@ function buildSuggestions(engineers, hist){
     suggestions.forEach(s=>{
       const row = document.createElement('div');
       row.className='item';
-      row.innerHTML = `<div class="icon">${s.icon}</div><div class="text">${s.text}<div class="small">${s.small||""}</div></div>`;
+      row.innerHTML = `<div class="icon">${s.icon}</div><div class="text">${esc(s.text)}<div class="small">${esc(s.small||"")}</div></div>`;
       sug.appendChild(row);
     });
 
   }catch(err){
     console.error(err);
     ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
-    $("suggestions").innerHTML = `<div class="item"><div class="icon">❌</div><div class="text">Failed to load hours: ${err.message}</div></div>`;
+    $("suggestions").innerHTML = `<div class="item"><div class="icon">❌</div><div class="text">Failed to load hours: ${esc(err.message)}</div></div>`;
   }
 })();
 </script>

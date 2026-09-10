@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Sign a document — Mostlane</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="auth.js"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
@@ -49,7 +49,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);

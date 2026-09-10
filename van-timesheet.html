@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Van Timesheet — Mostlane</title>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <script src="auth.js"></script>
 <style>
   :root{--ink:#0f172a;--line:#e2e8f0;--brand:#1a237e;--muted:#64748b}
@@ -154,7 +154,7 @@ function render(){
   g("body").innerHTML=names.sort((a,b)=>nameOf(a).localeCompare(nameOf(b))).map(un=>{
     const c=cfgFor(un); let total=0;
     const cells=dates.map((dt,i)=>{ const day=ROWS[un][dt]; if(!day){return `<td class="${i>4?'wknd':''}"><span style="color:#cbd5e1">—</span></td>`;} const p=vanPay(day,c); total+=p.paid; return `<td class="${i>4?'wknd':''}">${hmS(p.paid)}</td>`; });
-    return `<tr><td class="name">${esc(nameOf(un))}</td>${cells.join("")}<td class="tot">${hmS(total)}</td><td><button class="btn" style="padding:5px 10px" onclick="openEdit('${esc(un)}')">Edit</button></td></tr>`;
+    return `<tr><td class="name">${esc(nameOf(un))}</td>${cells.join("")}<td class="tot">${hmS(total)}</td><td><button class="btn" style="padding:5px 10px" onclick="openEdit(${esc(JSON.stringify(String(un)))})">Edit</button></td></tr>`;
   }).join("");
 }
 

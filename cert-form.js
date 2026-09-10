@@ -15,7 +15,7 @@
 
    Endpoints under /certs/*: for-job, one, save, submit, pdf.                    */
 (function () {
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
 
   // Camera-or-gallery chooser (shared across the field photo forms). EM-remedial
   // photos aren't "live only", so the engineer picks camera or gallery. Guarded so

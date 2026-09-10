@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Programme builder — Mostlane</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
-  <script src="/programme-gantt.js?v=7"></script>
+  <script src="/programme-gantt.js?v=8"></script>
   <script src="/programme-export.js?v=3"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
@@ -507,7 +507,7 @@
       <div class="sug">
         <h4>${esc(s.author||"Client")} <span class="pill ${esc(s.status)}">${esc(s.status)}</span></h4>
         <div class="muted">${fmtDT(s.created_at)} · against Rev ${esc(s.rev||"—")}${s.note?` · “${esc(s.note)}”`:""}</div>
-        <div style="margin-top:6px;"><button class="btn ghost" onclick="openSug('${esc(s.id)}')">Review</button></div>
+        <div style="margin-top:6px;"><button class="btn ghost" onclick="openSug(${esc(JSON.stringify(String(s.id)))})">Review</button></div>
       </div>`).join("");
   }
 
@@ -586,8 +586,8 @@
         ${s.access_code?`<span class="muted">code ${esc(s.access_code)}</span>`:""}
         <span class="muted">${state}</span>
         ${s.revoked?"":`<code>${esc(url)}</code>
-        <button class="btn ghost" onclick="copyLink('${esc(s.token)}')">Copy</button>
-        <button class="btn danger" onclick="revokeShare('${esc(s.token)}')">Revoke</button>`}
+        <button class="btn ghost" onclick="copyLink(${esc(JSON.stringify(String(s.token)))})">Copy</button>
+        <button class="btn danger" onclick="revokeShare(${esc(JSON.stringify(String(s.token)))})">Revoke</button>`}
       </div>`;
     }).join("");
   }

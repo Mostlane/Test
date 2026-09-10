@@ -2,7 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <script src="/auth.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mostlane &mdash; Construction Phase H&amp;S Plan Builder</title>
@@ -604,7 +604,8 @@ function persist(){ try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(state))
 /* ============================================================
    3. HELPERS
    ============================================================ */
-const esc = s => (s==null?"":String(s)).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
 const nl  = s => esc(s).replace(/\n/g,"<br>");
 const v   = id => state[id]||"";
 
@@ -1172,7 +1173,7 @@ function applyBranding(){
    if present, otherwise the official Mostlane logo. */
 function logoMarkup(px){
   const src = v("_logo") || DEFAULT_LOGO_URL;
-  return `<img src="${src}" alt="Mostlane" style="height:${px}px;width:auto;max-width:100%;display:block">`;
+  return `<img src="${esc(safeUrl(src))}" alt="Mostlane" style="height:${px}px;width:auto;max-width:100%;display:block">`;
 }
 function buildFoot(){
   FOOT = `<div class="footer-note">${logoMarkup(16)}<span>Mostlane Construction Ltd &nbsp;&bull;&nbsp; Construction Phase Health &amp; Safety Plan &nbsp;&bull;&nbsp; Rev 01</span></div>`;
@@ -1968,7 +1969,7 @@ function pageAppendixCDE(){
     <p class="appendix-tab">APPENDIX <b>C</b></p>
     <h2>Appendix C &mdash; Site Compound Location &amp; Set-up</h2>
     <p>${nl(v("compoundText"))}</p>
-    ${ compoundImg ? `<figure><img src="${compoundImg}" alt="Compound location map"><figcaption>Site compound &amp; access &mdash; ${esc(v("projectName"))}</figcaption></figure>` : "" }
+    ${ compoundImg ? `<figure><img src="${esc(safeUrl(compoundImg))}" alt="Compound location map"><figcaption>Site compound &amp; access &mdash; ${esc(v("projectName"))}</figcaption></figure>` : "" }
     ` : "" }
 
     <p class="appendix-tab">APPENDIX <b>D</b></p>
@@ -1984,7 +1985,7 @@ function pageAppendixCDE(){
     <h2>Appendix E &mdash; Local Hospital &amp; A&amp;E Department</h2>
     <p><b>${esc(v("hospitalName"))}</b><br>${nl(v("hospitalAddress"))}</p>
     ${ state.hospitalRouteText ? `<p class="route-meta"><b>Driving route from site:</b> ${esc(state.hospitalRouteText)}</p>` : "" }
-    ${ routeImg ? `<figure><img src="${routeImg}" alt="Route from site to hospital"><figcaption>Route from site to ${esc(v("hospitalName"))}</figcaption></figure>` : "" }
+    ${ routeImg ? `<figure><img src="${esc(safeUrl(routeImg))}" alt="Route from site to hospital"><figcaption>Route from site to ${esc(v("hospitalName"))}</figcaption></figure>` : "" }
 
     <p class="appendix-tab">APPENDIX <b>F</b></p>
     <h2>Appendix F &mdash; Mostlane Health &amp; Safety Policy</h2>
@@ -2010,7 +2011,7 @@ document.getElementById("btnPreview").addEventListener("click",()=>{
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>${css}</style>
     <style>
-      :root{--brand:${brand};--brand-light:${brand}1c}
+      :root{--brand:${esc(brand)};--brand-light:${esc(brand)}1c}
       body{background:#dce2ea;margin:0;padding:18px}
       .pv-bar{position:sticky;top:-18px;z-index:10;display:flex;gap:8px;justify-content:center;
         padding:12px;margin:-18px -18px 18px;background:#fff;border-bottom:1px solid var(--line)}

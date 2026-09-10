@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -132,7 +132,7 @@
   "use strict";
   var API=(window.MOSTLANE_API||"").replace(/\/$/,"");
   var $=function(id){return document.getElementById(id)};
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function aFetch(p){var h=new Headers();var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{headers:h,cache:"no-store"});}
   function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}
   function today(){return new Date().toISOString().slice(0,10);}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Customer status emails · Mostlane</title>
 <link rel="stylesheet" href="/portal.css?v=1">
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <style>
   body{font-family:"Segoe UI",Arial,sans-serif;background:#f3f5f8;color:#1f2937;margin:0}
   header.page{background:#003468;color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px}
@@ -117,7 +117,7 @@ async function api(path, opts={}){
   return r;
 }
 const $ = id=>document.getElementById(id);
-const esc = s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let CFG=null, DEFS=[];
 
 const VARS = ["{job_ref}","{site_name}","{site_address}","{scheduled}","{status}","{description}"];
@@ -147,7 +147,7 @@ function renderStatuses(){
     el.innerHTML = `
       <div class="top">
         <div class="name">${esc(def.label)}</div>
-        <label class="sw"><input type="checkbox" data-k="${def.key}" class="stOn" ${t.on?"checked":""}><span class="sl"></span></label>
+        <label class="sw"><input type="checkbox" data-k="${esc(def.key)}" class="stOn" ${t.on?"checked":""}><span class="sl"></span></label>
       </div>
       <div class="body">
         <div class="fieldlabel">Subject line</div>
@@ -178,7 +178,7 @@ function renderStatuses(){
 }
 function syncFromDom(){ /* toggles already mutate CFG live */ }
 function populatePvStatus(){
-  const sel=$("pvStatus"); sel.innerHTML = DEFS.map(d=>`<option value="${d.key}">${esc(d.label)}</option>`).join("");
+  const sel=$("pvStatus"); sel.innerHTML = DEFS.map(d=>`<option value="${esc(d.key)}">${esc(d.label)}</option>`).join("");
 }
 async function refreshPreview(){
   const status = $("pvStatus").value || "Scheduled";

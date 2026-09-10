@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <script src="auth.js"></script>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>🧱 Job Costs — Mostlane Portal</title>
@@ -278,8 +278,8 @@ async function onToggle(el){
         const sub=(p2.cost_category||'materials')==='subcontractor';
         const type=sub?'<span class="badge review">👷 '+escapeHtml(p2.trade||'Subcontractor')+'</span>':'<span class="badge office">📦 Materials</span>';
         const cost=p2.cost_ex_vat!=null?money(p2.cost_ex_vat):'<span class="badge review">awaiting cost</span>';
-        return '<tr><td style="font-family:ui-monospace,monospace;font-weight:600;color:#003366">'+p2.po_number+'</td>'+
-          '<td class="muted" style="white-space:nowrap">'+fmtDate(p2.issued_at)+'</td><td>'+type+'</td>'+
+        return '<tr><td style="font-family:ui-monospace,monospace;font-weight:600;color:#003366">'+escapeHtml(p2.po_number)+'</td>'+
+          '<td class="muted" style="white-space:nowrap">'+escapeHtml(fmtDate(p2.issued_at))+'</td><td>'+type+'</td>'+
           '<td>'+escapeHtml(p2.supplier||'—')+'</td><td>'+escapeHtml(p2.description||'')+'</td>'+
           '<td style="text-align:right;white-space:nowrap">'+cost+'</td></tr>';
       }).join('')+'</tbody></table></div>';

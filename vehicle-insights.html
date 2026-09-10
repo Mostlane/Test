@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <title>Mostlane • Fleet Insights</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -214,7 +214,7 @@ function renderPerVan(){
     let segs = "";
     for(const cat of cats){
       const o = v.byCat[cat]; if(!o || !o.cost) continue;
-      segs += `<div class="seg" style="width:${o.cost/max*100}%;background:${catColour[cat]||'#64748b'}" title="${esc(cat)} ${money(o.cost)}${o.count?` (${o.count})`:""}"></div>`;
+      segs += `<div class="seg" style="width:${o.cost/max*100}%;background:${esc(catColour[cat]||'#64748b')}" title="${esc(cat)} ${money(o.cost)}${o.count?` (${o.count})`:""}"></div>`;
     }
     if(v.fuel > 0) segs += `<div class="seg" style="width:${v.fuel/max*100}%;background:var(--fuel)" title="Fuel ${money(v.fuel)}"></div>`;
     if((v.po||0) > 0) segs += `<div class="seg" style="width:${v.po/max*100}%;background:var(--po)" title="Purchase orders ${money(v.po)}"></div>`;
@@ -228,7 +228,7 @@ function renderPerVan(){
   // Legend — only the categories actually present, in the same order/colours.
   const used = cats.filter(cat => list.some(v => (v.byCat[cat]||{}).cost));
   $("perVanLegend").innerHTML =
-    used.map(cat => `<span><i style="background:${catColour[cat]||'#64748b'}"></i>${esc(cat)}</span>`).join("")
+    used.map(cat => `<span><i style="background:${esc(catColour[cat]||'#64748b')}"></i>${esc(cat)}</span>`).join("")
     + (list.some(v => v.fuel > 0) ? `<span><i style="background:var(--fuel)"></i>Fuel</span>` : "")
     + (list.some(v => (v.po||0) > 0) ? `<span><i style="background:var(--po)"></i>Purchase orders</span>` : "")
     + `<span class="muted">Tap a van to focus it.</span>`;
@@ -250,7 +250,7 @@ function renderCatBars(focus){
     const col = e.fuel ? "var(--fuel)" : e.po ? "var(--po)" : (catColour[e.cat] || "#64748b");
     return `<div class="catbar">
       <div class="cn">${esc(e.cat)}${e.count!=null?` <span class="muted">×${e.count}</span>`:""}</div>
-      <div class="track"><div class="seg" style="width:${e.cost/max*100}%;background:${col}"></div></div>
+      <div class="track"><div class="seg" style="width:${e.cost/max*100}%;background:${esc(col)}"></div></div>
       <div class="amt">${money0(e.cost)}</div>
     </div>`;
   }).join("");
@@ -270,7 +270,7 @@ function renderCatCompare(){
     const label = metric==="count" ? (val + "×") : money0(val);
     return `<div class="barrow">
       <div class="name">${esc(v.reg)}</div>
-      <div class="track"><div class="seg" style="width:${val/max*100}%;background:${col}"></div></div>
+      <div class="track"><div class="seg" style="width:${val/max*100}%;background:${esc(col)}"></div></div>
       <div class="amt">${label}</div>
     </div>`;
   }).join("");

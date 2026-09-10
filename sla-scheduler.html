@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
@@ -1451,7 +1451,7 @@ function renderEngDay(list){
   const sum = $("engDaySummary");
   sum.innerHTML =
     `<span class="sc total"><b>${list.length}</b>&nbsp;job${list.length === 1 ? "" : "s"}</span>` +
-    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${s} <b>${counts[s]}</b></span>`).join("");
+    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${escapeHtml(s)} <b>${counts[s]}</b></span>`).join("");
   const wrap = $("engDayJobs");
   if(!list.length){ wrap.innerHTML = '<div class="eng-empty">No jobs scheduled for this day.</div>'; return; }
   // Sort by scheduled time.
@@ -1485,7 +1485,7 @@ function renderEngDay(list){
     else window.open("job-view.html?id=" + encodeURIComponent(id), "_blank");
   }));
 }
-function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;",'\'':"&#39;" }[c])); }
 function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
 document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
@@ -1678,7 +1678,7 @@ function renderOptimise(data){
     ((data.blocks && data.blocks.length) ? `<div class="opt-reason">🚫 Routed around: ${data.blocks.map(b => `${optWallClock(optCtx.date, dayStart, b.offset)}–${optWallClock(optCtx.date, dayStart, b.endOffset)}${b.note ? " " + escapeHtml(b.note) : ""}`).join(" · ")}</div>` : "") +
     ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
   const rows = [];
-  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${dayStart}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${escapeHtml(dayStart)}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
   data.legs.forEach((l, i) => {
     if(data.lunch && data.lunch.beforeJobId === l.jobId){
       rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
@@ -2196,7 +2196,7 @@ function fbJobOptions(sel){
 function fbRemoveLine(label, id, ref, fn){
   return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #eef2f7;font-size:13px;">'
     + '<span style="flex:1;">'+label+'</span>'
-    + '<button type="button" class="btn" style="padding:3px 9px;color:#b91c1c;" onclick="'+fn+'(\''+escapeHtml(String(id)).replace(/'/g,"\\'")+'\',\''+escapeHtml(String(ref)).replace(/'/g,"\\'")+'\')">✕ Remove</button>'
+    + '<button type="button" class="btn" style="padding:3px 9px;color:#b91c1c;" onclick="'+fn+'('+escapeHtml(JSON.stringify(String(id)))+','+escapeHtml(JSON.stringify(String(ref)))+')">✕ Remove</button>'
     + '</div>';
 }
 function renderFbPool(){
@@ -2249,7 +2249,7 @@ function renderFbSearch(){
   host.innerHTML = matches.map(function(j){
     return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #eef2f7;font-size:13px;">'
       + '<span style="flex:1;">'+escapeHtml(fbExistingLabel(j))+'</span>'
-      + '<button type="button" class="btn" style="padding:3px 9px;" onclick="addFbExisting(\''+escapeHtml(j.id).replace(/'/g,"\\'")+'\')">＋ Add</button>'
+      + '<button type="button" class="btn" style="padding:3px 9px;" onclick="addFbExisting('+escapeHtml(JSON.stringify(String(j.id)))+')">＋ Add</button>'
       + '</div>';
   }).join("");
 }
@@ -2661,8 +2661,8 @@ function plotJobs(){
     const engs = job.assignedEngineers.join(", ");
     marker.bindPopup(`
       <div class="pin-pop">
-        <b>${(job.ref || job.id)}</b>
-        <span class="st" style="background:${colour}">${job.status}</span><br>
+        <b>${escHtml(job.ref || job.id)}</b>
+        <span class="st" style="background:${colour}">${escHtml(job.status)}</span><br>
         ${escHtml(job.title)}<br>
         <span style="color:#6b7280;">${escHtml(job.site || "")}${job.address ? " · " + escHtml(job.address) : ""}</span><br>
         ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Add Job</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -409,6 +409,7 @@
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
 /* USERS ENDPOINT */
@@ -1020,7 +1021,7 @@ async function init(){
       .then(function(r){ return r.json(); })
       .then(function(d){ var sel = $("pumpStore"); if(!sel) return;
         PUMP_STORES = (d && d.ok && d.stores) ? d.stores : [];
-        if(PUMP_STORES.length){ sel.innerHTML = PUMP_STORES.map(function(s){ return '<option value="'+s.id+'">'+ (s.name||s.id) +'</option>'; }).join(""); }
+        if(PUMP_STORES.length){ sel.innerHTML = PUMP_STORES.map(function(s){ return '<option value="'+esc(s.id)+'">'+ esc(s.name||s.id) +'</option>'; }).join(""); }
         else sel.innerHTML = '<option value="">No pump stores configured</option>';
         if(pm.checked && PUMP_STORES.length) applyPumpStore();
       }).catch(function(){ var sel=$("pumpStore"); if(sel) sel.innerHTML='<option value="">Couldn\'t load stores</option>'; });

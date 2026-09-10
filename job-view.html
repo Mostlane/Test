@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=31"></script>
-  <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=21"></script>
-  <script src="pump-form.js?v=3"></script>
-  <script src="remedials-form.js?v=4"></script>
+  <script src="firestop-form.js?v=2"></script>
+  <script src="cert-form.js?v=22"></script>
+  <script src="pump-form.js?v=4"></script>
+  <script src="remedials-form.js?v=5"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -821,6 +821,7 @@ let photoGallery = [];
 let currentPhotoIndex = 0;
 
 const $ = id => document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 
 function getUser(){
   return sessionStorage.getItem("mostlaneUser") ||
@@ -1675,7 +1676,7 @@ async function setupAdminNote(){
       .filter(u => u.v && u.v.toLowerCase() !== String(me).toLowerCase())
       .sort((a,b) => a.label.localeCompare(b.label));
     opts.push(...rest);
-    sel.innerHTML = opts.map(o => `<option value="${o.v.replace(/"/g,'&quot;')}">${o.label.replace(/</g,'&lt;')}</option>`).join("");
+    sel.innerHTML = opts.map(o => `<option value="${esc(o.v)}">${esc(o.label)}</option>`).join("");
   }catch(e){
     // Fall back to a free-typed name if the user list can't load.
     sel.outerHTML = '<input id="adminNoteUser" type="text" placeholder="Name" style="margin-left:6px;padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;">';
@@ -1876,11 +1877,11 @@ function buildStatusChips(){
       b.className = "status-chip chip-custom";
       b.style.setProperty("--cc", cc);
       b.style.borderColor = cc;
-      b.innerHTML = `<span class="chip-e">🏷️</span><span>${opt.textContent}</span>`;
+      b.innerHTML = `<span class="chip-e">🏷️</span><span>${esc(opt.textContent)}</span>`;
     }else{
       const m = STATUS_META[opt.value] || { e:"•", c:"grey" };
       b.className = "status-chip chip-" + m.c;
-      b.innerHTML = `<span class="chip-e">${m.e}</span><span>${opt.textContent}</span>`;
+      b.innerHTML = `<span class="chip-e">${m.e}</span><span>${esc(opt.textContent)}</span>`;
     }
     b.addEventListener("click", () => pickStatus(opt.value));
     grid.appendChild(b);

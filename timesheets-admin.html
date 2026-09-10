@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Engineer Timesheets — Mostlane</title>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
 <script src="auth.js"></script>
 <style>
@@ -267,7 +267,7 @@ function renderTable(){
     const vchip=verdictChip(vfFor(u.username));
     return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}${gap}${vchip}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${ot}${lv}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
-      <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
+      <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit(${esc(JSON.stringify(String(u.username)))})" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
 }
 g("showAll").onchange=renderTable;
@@ -313,7 +313,7 @@ function openEdit(username){
       } else if(b&&b.noRoute){ miBlock=`<div class="autoMi muted2">No site postcodes captured — no mileage.</div>`; }
       else miBlock="";
     } else {
-      const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
+      const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${esc(m.miles||"")}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
       miBlock=`<div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button>`;
     }
     const bh=(DATA.bank&&DATA.bank[date])||null;
@@ -322,9 +322,9 @@ function openEdit(username){
     const leaveVal=d.leaveHours!=null?d.leaveHours:(hol&&hol.type==="Unpaid"?0:"");
     const leaveRow=isLeaveDay?`<div class="erow leaverow" style="margin-top:6px;align-items:center;gap:8px">
       <label style="font-size:12px;color:#4f46e5;font-weight:700">Paid hours${needsPaid?' <span style="color:#dc2626">*</span>':''}</label>
-      <input type="number" class="e-leave" step="0.5" min="0" max="24" value="${leaveVal}" placeholder="hrs" style="width:76px">
+      <input type="number" class="e-leave" step="0.5" min="0" max="24" value="${esc(leaveVal)}" placeholder="hrs" style="width:76px">
       <span class="muted" style="font-size:11px">${needsPaid?'required to approve':'0 = unpaid'}</span></div>`:"";
-    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${hol.half?` ${hol.half}`:""}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 ${bh.kind==="shutdown"?"Shutdown":"Bank Hol"}</span>`:""}</h4>
+    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${hol.half?` ${esc(hol.half)}`:""}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 ${bh.kind==="shutdown"?"Shutdown":"Bank Hol"}</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
       ${leaveRow}${miBlock}</div>`;
@@ -454,13 +454,13 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="checkbox" class="c-lunch" ${e.lunch?"checked":""}></td>
         <td><input type="checkbox" class="c-mileage" ${e.mileage?"checked":""}></td>
         <td><input type="checkbox" class="c-radius" ${e.radius?"checked":""}></td>
-        <td><input type="number" class="c-rate" step="0.5" min="0" value="${o.rate!=null?o.rate:(e.rate!=null?e.rate:"")}"></td>
+        <td><input type="number" class="c-rate" step="0.5" min="0" value="${esc(o.rate!=null?o.rate:(e.rate!=null?e.rate:""))}"></td>
         <td><select class="c-ratetype"><option value="hour" ${e.rateType!=="day"?"selected":""}>hour</option><option value="day" ${e.rateType==="day"?"selected":""}>day</option></select></td>
-        <td><input type="number" class="c-otmult" step="0.1" min="0" value="${o.overtimeMult!=null?o.overtimeMult:""}" placeholder="—" style="width:52px" title="e.g. 1.5"></td>
-        <td><input type="number" class="c-otthresh" step="0.5" min="0" value="${o.overtimeThresholdH!=null?o.overtimeThresholdH:""}" placeholder="${e.overtimeThresholdH||8}" style="width:56px" title="Paid hours/day before OT"></td>
-        <td><input type="number" class="c-ppm" value="${o.pencePerMile!=null?o.pencePerMile:""}" placeholder="${e.pencePerMile}"></td>
+        <td><input type="number" class="c-otmult" step="0.1" min="0" value="${esc(o.overtimeMult!=null?o.overtimeMult:"")}" placeholder="—" style="width:52px" title="e.g. 1.5"></td>
+        <td><input type="number" class="c-otthresh" step="0.5" min="0" value="${esc(o.overtimeThresholdH!=null?o.overtimeThresholdH:"")}" placeholder="${esc(e.overtimeThresholdH||8)}" style="width:56px" title="Paid hours/day before OT"></td>
+        <td><input type="number" class="c-ppm" value="${esc(o.pencePerMile!=null?o.pencePerMile:"")}" placeholder="${esc(e.pencePerMile)}"></td>
         <td><input type="text" class="c-home" value="${esc(e.homePostcode||"")}"></td>
-        <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
+        <td><input type="number" class="c-next" min="1" value="${esc(o.nextNumber!=null?o.nextNumber:"")}"></td></tr>`;
     }).join("");
   cfgDirty=false;cfgBusy=false;clearTimeout(cfgTimer);clearTimeout(cfgRetry);
   const cst=g("cfgState");if(cst)cst.textContent="Changes save automatically";
@@ -582,7 +582,7 @@ let MI_LIST=[],miTimer=null,miDirty={},miBusy=false;
 function miRow(s){
   return `<tr data-name="${esc(s.name)}"><td style="text-align:left">${esc(s.name)}</td>
     <td class="muted">${esc(s.postcode||"")}</td>
-    <td><input type="number" class="mi-miles" step="0.1" min="0" value="${s.miles!=null?s.miles:""}" placeholder="—" data-pc="${esc(s.postcode||"")}"></td></tr>`;
+    <td><input type="number" class="mi-miles" step="0.1" min="0" value="${esc(s.miles!=null?s.miles:"")}" placeholder="—" data-pc="${esc(s.postcode||"")}"></td></tr>`;
 }
 function miRender(){
   const t=(g("miSearch").value||"").trim().toLowerCase();
@@ -659,7 +659,7 @@ g("invBtn").onclick=async()=>{
       <td>${i.hours||0}</td><td>${i.miles||0}</td><td>${money(i.total||0)}</td>
       <td>${new Date(i.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})}</td>
       <td><a href="${esc(i.url)}" target="_blank">Open</a></td>
-      <td><button class="btn" onclick="delInv(${i.id},'${esc(i.username).replace(/'/g,"\\'")}',${i.number})">🗑</button></td></tr>`;
+      <td><button class="btn" onclick="delInv(${esc(JSON.stringify(String(i.id)))},${esc(JSON.stringify(String(i.username)))},${esc(JSON.stringify(String(i.number)))})">🗑</button></td></tr>`;
   // Grouped by week (newest first) so a whole pay week reads as one block.
   const byWeek={};
   for(const i of r.invoices)(byWeek[i.week]=byWeek[i.week]||[]).push(i);
@@ -750,7 +750,7 @@ function renderVfResult(r){
   let h=`<div style="font-weight:700;margin:10px 0 4px">Results</div>`;
   if(!names.length)h+=`<div class="muted" style="font-size:13px">No engineers with entered hours this week to check.</div>`;
   h+=names.map(u=>{const v=bu[u];const c=v.verdict==="flag"?"#dc2626":v.verdict==="check"?"#b45309":"#0a8a35";
-    return `<div style="border-bottom:1px solid #f1f5f9;padding:7px 0"><b>${esc(v.name||u)}</b> ${v.score!=null?`<span style="color:${scoreColour(v.score)};font-weight:700">score ${v.score}</span> · `:""}<span style="color:${c};font-weight:700;text-transform:uppercase;font-size:11.5px">${v.verdict}</span><div style="font-size:12.5px;color:#475569">van ${esc(v.reg||"—")} · ${v.driveMins!=null?(Math.round(v.driveMins/6)/10)+"h driving":"no van data"} · entered ${v.total}h${v.summary?" — "+esc(v.summary):""}</div></div>`;
+    return `<div style="border-bottom:1px solid #f1f5f9;padding:7px 0"><b>${esc(v.name||u)}</b> ${v.score!=null?`<span style="color:${scoreColour(v.score)};font-weight:700">score ${v.score}</span> · `:""}<span style="color:${c};font-weight:700;text-transform:uppercase;font-size:11.5px">${esc(v.verdict)}</span><div style="font-size:12.5px;color:#475569">van ${esc(v.reg||"—")} · ${v.driveMins!=null?(Math.round(v.driveMins/6)/10)+"h driving":"no van data"} · entered ${v.total}h${v.summary?" — "+esc(v.summary):""}</div></div>`;
   }).join("");
   const un=r.unassignedVans||[];
   if(un.length)h+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Unassigned / pool vans that moved (${un.length})</summary>`+

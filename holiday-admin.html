@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -351,7 +351,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -1024,7 +1024,7 @@
         <div class="dayrow">
           <span class="dd">${fmtFull(d.date)}</span>
           <span class="lbl">${esc(d.label || "")}</span>
-          <button class="rmday" data-rmday="${d.date}" data-kind="${kind}" title="Remove">×</button>
+          <button class="rmday" data-rmday="${esc(d.date)}" data-kind="${kind}" title="Remove">×</button>
         </div>`).join("") : "<p class='muted' style='margin:6px 0;'>None set for " + YEAR + " yet.</p>";
     }
     function flash(id, ok, txt) { const m = g(id); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = txt; setTimeout(() => m.textContent = "", 3000); }

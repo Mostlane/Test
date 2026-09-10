@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>On-Call — Mostlane Portal</title>
@@ -63,6 +63,7 @@
 <script>
 const API = window.MOSTLANE_API;
 const $ = id => document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function authFetch(url, init = {}){
   init.headers = new Headers(init.headers || {});
   const t = localStorage.getItem("mostlaneToken");
@@ -86,7 +87,7 @@ async function load(){
     const users = (usersRes.Users || []).filter(u => (u.Status || "Active") !== "Disabled");
     const opts = users.map(u => {
       const name = `${u.FirstName || ""} ${u.LastName || ""}`.trim() || u.Username;
-      return `<option value="${name.replace(/"/g,"&quot;")}">${name}</option>`;
+      return `<option value="${esc(name)}">${esc(name)}</option>`;
     }).join("");
     $("selEng").innerHTML = '<option value="">— no change —</option>' + opts;
     $("selMgr").innerHTML = '<option value="">— no change —</option>' + opts;

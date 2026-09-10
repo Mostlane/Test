@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>H&amp;S — Hazard Library</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
   <style>
@@ -82,7 +82,7 @@
 <script>
   const API = window.MOSTLANE_API;
   const g = id => document.getElementById(id);
-  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
   function authFetch(path, opts = {}) {
     opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
     return fetch(API + path, opts);
@@ -130,7 +130,7 @@
     g("hzList").innerHTML = shown.map(id => `
       <div class="hzrow">
         <div><b>${esc(LIB.hazards[id].name||"")}</b> <span class="muted" style="font-size:12px;">${esc(id)}</span></div>
-        <div class="row"><button class="btn ghost small" onclick="editHazard('${id}')">Edit</button><button class="btn red small" onclick="delHazard('${id}')">✕</button></div>
+        <div class="row"><button class="btn ghost small" onclick="editHazard(${esc(JSON.stringify(String(id)))})">Edit</button><button class="btn red small" onclick="delHazard(${esc(JSON.stringify(String(id)))})">✕</button></div>
       </div>`).join("") || `<p class="muted">No hazards${q ? " match." : "."}</p>`;
   }
   function newHazard() {
@@ -224,7 +224,7 @@
                 </div>
                 <div class="muted" style="font-size:12px;margin:6px 0 2px;">Hazards included:</div>
                 <div class="chkgrid">
-                  ${hazIds.map(id => `<label><input type="checkbox" ${(t.hazards||[]).includes(id)?"checked":""} onchange="toggleHaz(${wi},${si},${ti},'${id}',this.checked)"> ${esc(LIB.hazards[id].name||id)}</label>`).join("")}
+                  ${hazIds.map(id => `<label><input type="checkbox" ${(t.hazards||[]).includes(id)?"checked":""} onchange="toggleHaz(${wi},${si},${ti},${esc(JSON.stringify(String(id)))},this.checked)"> ${esc(LIB.hazards[id].name||id)}</label>`).join("")}
                 </div>
               </div>`).join("")}
             <button class="btn ghost small" onclick="addNode('type',${wi},${si})">+ sub-type</button>

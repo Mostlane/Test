@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="auth.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -78,7 +78,8 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -384,7 +385,7 @@
       const nd = r.method === "VIEW" ? "" : niceDetail(r.detail);
       const det = (nd && nd !== subject) ? nd : "";
       const href = linkFor(r);
-      const what = href ? `<a class="msg" href="${esc(href)}">${msg}</a>` : `<span class="msg nolink">${msg}</span>`;
+      const what = href ? `<a class="msg" href="${esc(safeUrl(href))}">${msg}</a>` : `<span class="msg nolink">${msg}</span>`;
       return `<div class="what">${what}</div>${det ? `<div class="det">${esc(det)}</div>` : ""}`;
     }
     function rowHtml(r) {

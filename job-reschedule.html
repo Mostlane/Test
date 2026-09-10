@@ -84,7 +84,7 @@ function fmtWhen(iso){
   try{ return d.toLocaleString("en-GB",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"}); }
   catch(e){ return iso; }
 }
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 
 async function load(){
   if(!jobId){ fail("This link is missing information. Please use the button in your email."); return; }

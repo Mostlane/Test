@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Fleet Report — Mostlane</title>
-<script src="/portal-config.js?v=33"></script>
+<script src="/portal-config.js?v=34"></script>
 <script src="auth.js"></script>
 <style id="fleetCss">
   :root{--indigo-dark:#1a237e;--indigo-mid:#283593;--indigo-light:#3949ab;--yellow:#ffd600;
@@ -1309,7 +1309,7 @@ function renderTrackerPreview(p, host, unmatched, opts){
     const r = await autoTrackerReconcile(R, false);
     host.querySelector("#trackerApplyMsg").innerHTML = r && r.ok
       ? "✓ Written to job costing — " + (r.wrote||0) + " segment"+((r.wrote||0)===1?"":"s")+((r.skippedSitelog||0)>0?" · "+r.skippedSitelog+" skipped (SiteLog covered)":"")+"."
-      : "❌ Apply failed — " + ((r&&r.error)||"see console");
+      : "❌ Apply failed — " + esc((r&&r.error)||"see console");
   };
   host.querySelector("#reRunTrackerBtn").onclick = async (e) => {
     e.target.disabled=true;
@@ -1493,7 +1493,7 @@ function tsDayRow(u,r,i,dfltLunch,dfltMcap,dfltHcap){
     <input type="time" data-tsf="end" data-row="${esc(rowKey)}" value="${tsFmtMin(r.endMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
     <input type="number" min="0" max="120" step="5" data-tsf="lunch" data-row="${esc(rowKey)}" value="${lunch}" placeholder="${dfltLunch}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit;width:78px">
     <span data-paid style="font-size:13px">${paidHtml}</span>
-    <button title="Drop this row" onclick="tsDropRow('${esc(rowKey)}')" style="background:#e2e8f0;border:none;border-radius:6px;padding:3px 6px;cursor:pointer;color:#64748b">✕</button>
+    <button title="Drop this row" onclick="tsDropRow(${esc(JSON.stringify(String(rowKey)))})" style="background:#e2e8f0;border:none;border-radius:6px;padding:3px 6px;cursor:pointer;color:#64748b">✕</button>
   </div>`;
 }
 function tsFindRow(rowKey){
@@ -1690,7 +1690,7 @@ async function generate(){
         // First-pass dry run.
         let r = await autoTrackerReconcile(R, true);
         if (!r || !r.ok) {
-          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost skipped — '+((r&&r.error)||"unknown")+'</div>';
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost skipped — '+esc((r&&r.error)||"unknown")+'</div>';
           return;
         }
         // AI resolve any unmatched trips + any unallocated pool days in one
@@ -1832,18 +1832,18 @@ function renderReport(R){
     const act=v.days.filter(d=>d.trips.length);
     const tMiles=act.reduce((a,d)=>a+d.miles,0), tTrips=act.reduce((a,d)=>a+d.trips.length,0), tSpan=act.reduce((a,d)=>a+(d.span||0),0);
     const key=norm(v.reg);
-    h+=`<div class="drv-card"><div class="drv-head" onclick="tog('b_${key}')"><div><span class="t">${esc(v.driver||v.reg)}</span> ${scoreFlag(R.scores[v.reg])}<div class="r">${esc(v.reg)}</div></div>
+    h+=`<div class="drv-card"><div class="drv-head" onclick="tog(${esc(JSON.stringify('b_'+key))})"><div><span class="t">${esc(v.driver||v.reg)}</span> ${scoreFlag(R.scores[v.reg])}<div class="r">${esc(v.reg)}</div></div>
         <div class="drv-sum"><span>${act.length} days</span><span>${tTrips} trips</span><span>${tMiles.toFixed(1)} mi</span><span>${hmSpan(tSpan)} span</span></div></div>
-        <div class="drv-body" id="b_${key}">`;
+        <div class="drv-body" id="b_${esc(key)}">`;
     const byDow={}; v.days.forEach(d=>byDow[dowOf(d.date)]=d);
     [1,2,3,4,5,6,0].forEach(dw=>{
       const d=byDow[dw]; const wknd=dw===0||dw===6;
       if(!d||!d.trips.length){ h+=`<div class="day"><div class="day-h ${wknd?'wk':''}"><span class="day-nm">${DOW[dw]}</span><span class="muted">No activity</span></div></div>`; return; }
       const dk=key+"_"+d.date;
       const anoms=anomaliesForDay(v.reg,d.date,d,v.isPool).concat(clockFlags(v.driverUser,d.date,d)).map(a=>`<span class="flag ${a[0]==='High'?'f-red':a[0]==='Medium'?'f-warn':'f-ok'}">${esc(a[1])}</span>`).join(" ");
-      h+=`<div class="day"><div class="day-h ${wknd?'wk':''}" onclick="tog('d_${dk}')"><span class="day-nm">${DOW[dw]}</span>
+      h+=`<div class="day"><div class="day-h ${wknd?'wk':''}" onclick="tog(${esc(JSON.stringify('d_'+dk))})"><span class="day-nm">${DOW[dw]}</span>
           <span class="pill p-blue">🕐 ${hmSpan(d.span)}</span><span class="pill p-green">🚗 ${hmSpan(d.travel)}</span><span class="pill p-amber">${d.miles.toFixed(1)} mi</span> ${anoms}</div>
-          <div class="day-b" id="d_${dk}"><table class="rt" style="box-shadow:none;margin:0"><tr><th>#</th><th>From</th><th>To</th><th>Start</th><th>End</th><th>Dur</th><th>Miles</th><th>Type</th></tr>
+          <div class="day-b" id="d_${esc(dk)}"><table class="rt" style="box-shadow:none;margin:0"><tr><th>#</th><th>From</th><th>To</th><th>Start</th><th>End</th><th>Dur</th><th>Miles</th><th>Type</th></tr>
           ${d.trips.map((t,i)=>{ const pc=t.type&&t.type.indexOf("Commute")===0?'p-blue':t.type==='Day Travel'?'p-green':'p-amber'; return `<tr><td>${i+1}</td><td>${esc(locLabel(t.from))}</td><td>${esc(locLabel(t.to))}</td><td>${esc(t.start)}</td><td>${esc(t.end||"")}</td><td>${hmSpan(t.drive)}</td><td>${t.miles.toFixed(1)}</td><td><span class="pill ${pc}">${esc(t.type||"")}</span></td></tr>`; }).join("")}
           </table></div></div>`;
     });

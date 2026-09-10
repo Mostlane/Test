@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Labour Cost Tracker</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -1188,7 +1188,7 @@ function renderEntries(){
     const total = Number(x.totalCost||0);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-  <td><span class="pill">${formatDateDisplay(x.date)}</span></td>
+  <td><span class="pill">${escapeHtml(formatDateDisplay(x.date))}</span></td>
   <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
   <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
 
@@ -1198,7 +1198,7 @@ function renderEntries(){
   <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
   <td class="right">${gbp(fuel)}</td>
   <td class="right" style="font-weight:1200;">${gbp(total)}</td>
-  <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
+  <td class="right"><button class="smallbtn danger" data-del="${escapeHtml(x.id)}">Delete</button></td>
 `;
     entriesBody.appendChild(tr);
   }
@@ -1320,9 +1320,9 @@ function renderEngineerFilters(){
     const wrap = document.createElement("div");
     wrap.className = "toggle";
     wrap.innerHTML = `
-      <input type="checkbox" value="${id}" checked />
+      <input type="checkbox" value="${escapeHtml(id)}" checked />
       <div>
-        <span>${e.name}</span>
+        <span>${escapeHtml(e.name)}</span>
       </div>
     `;
 
@@ -1417,11 +1417,11 @@ function renderManageLists(){
           <div class="muted" style="font-size:12px;">Miles (RT): ${miles ? miles.toFixed(1) : "—"} • Location: ${escapeHtml(loc)}</div>
         </div>
         <div class="actions">
-          <button class="smallbtn warn" data-editjob="${j.id}">Edit</button>
-          <button class="smallbtn ${j.active===false ? "ok" : "warn"}" data-togglejob="${j.id}">
+          <button class="smallbtn warn" data-editjob="${escapeHtml(j.id)}">Edit</button>
+          <button class="smallbtn ${j.active===false ? "ok" : "warn"}" data-togglejob="${escapeHtml(j.id)}">
             ${j.active===false ? "Set Active" : "Set Inactive"}
           </button>
-          <button class="smallbtn danger" data-deljob="${j.id}">Delete</button>
+          <button class="smallbtn danger" data-deljob="${escapeHtml(j.id)}">Delete</button>
         </div>
       `;
       jobsList.appendChild(row);
@@ -1449,11 +1449,11 @@ function renderManageLists(){
           <div class="muted" style="font-size:12px;">Day: ${gbp(e.defaultDayRate)} • Hour: ${gbp(e.defaultHourRate)}</div>
         </div>
         <div class="actions">
-          <button class="smallbtn warn" data-editeng="${e.id}">Edit</button>
-          <button class="smallbtn ${e.active===false ? "ok" : "warn"}" data-toggleeng="${e.id}">
+          <button class="smallbtn warn" data-editeng="${escapeHtml(e.id)}">Edit</button>
+          <button class="smallbtn ${e.active===false ? "ok" : "warn"}" data-toggleeng="${escapeHtml(e.id)}">
             ${e.active===false ? "Set Active" : "Set Inactive"}
           </button>
-          <button class="smallbtn danger" data-deleng="${e.id}">Delete</button>
+          <button class="smallbtn danger" data-deleng="${escapeHtml(e.id)}">Delete</button>
         </div>
       `;
       engList.appendChild(row);
@@ -1758,7 +1758,7 @@ function renderDashboardWithFilters(){
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><span class="pill">${formatDateDisplay(x.date)}</span></td>
+        <td><span class="pill">${escapeHtml(formatDateDisplay(x.date))}</span></td>
         <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
         <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
         <td class="right">${Number(x.normalHours || 0).toFixed(2)}</td>
@@ -1766,7 +1766,7 @@ function renderDashboardWithFilters(){
         <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
         <td class="right">${gbp(fuel)}</td>
         <td class="right" style="font-weight:1200;">${gbp(total)}</td>
-        <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
+        <td class="right"><button class="smallbtn danger" data-del="${escapeHtml(x.id)}">Delete</button></td>
       `;
       entriesBody.appendChild(tr);
     }
@@ -2002,7 +2002,7 @@ async function buildReport(){
                   const fuel = Number(e.fuelCost||0);
                   return `
                     <tr>
-                      <td><span class="pill">${formatDateDisplay(e.date)}</span></td>
+                      <td><span class="pill">${escapeHtml(formatDateDisplay(e.date))}</span></td>
                       <td style="font-weight:1100;">${escapeHtml(jobName(e.jobId))}</td>
                       <td style="font-weight:1100;">${escapeHtml(engName(e.engineerId))}</td>
                       <td class="right">${gbp(labour)}</td>

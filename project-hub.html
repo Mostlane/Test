@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Project</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="docviewer.js?v=7"></script>
@@ -102,7 +102,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const money = n => "£" + Math.round(Number(n) || 0).toLocaleString();
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
@@ -207,8 +207,8 @@
           <div>
             <div class="kv"><b>Project number:</b> ${esc(P.number)}</div>
             <div class="kv"><b>Site:</b> own project-site ${esc(P.number)}${P.fromExisting ? " · from " + esc(P.fromExisting.name) : ""}</div>
-            ${P.postcode ? `<div class="kv"><b>Location:</b> ${esc(P.postcode)}${P.lat != null ? " · " + P.lat + ", " + P.lon : ""}</div>` : ""}
-            ${P.mileageRoundTrip != null ? `<div class="kv"><b>Mileage:</b> ${P.mileageRoundTrip} mi round trip from HQ</div>` : ""}
+            ${P.postcode ? `<div class="kv"><b>Location:</b> ${esc(P.postcode)}${P.lat != null ? " · " + esc(P.lat) + ", " + esc(P.lon) : ""}</div>` : ""}
+            ${P.mileageRoundTrip != null ? `<div class="kv"><b>Mileage:</b> ${esc(P.mileageRoundTrip)} mi round trip from HQ</div>` : ""}
           </div>
           <span class="badge b-${esc(P.status || "live")}">${esc((P.status || "live").toUpperCase())}</span>
         </div>
@@ -227,9 +227,9 @@
       if (!items.length) return sectCard("todo", "✅ To-do", `<p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p>`, false);
       const done = items.filter(i => i.done).length;
       const body = items.map(it => `<div class="todo">
-          <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
-          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${it.key}RefLine"></small>` : ""}</span>
-          <span class="act" data-actfor="${it.key}"></span>
+          <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${esc(it.key)}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
+          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${esc(it.key)}RefLine"></small>` : ""}</span>
+          <span class="act" data-actfor="${esc(it.key)}"></span>
         </div>`).join("");
       return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
     }
@@ -877,7 +877,7 @@
       if (!files.length) { list.innerHTML = `<p class="muted">No documents yet.</p>`; return; }
       list.innerHTML = files.map(f => `<div>
         <span class="nm">📄 <a href="#" data-open="${esc(f.url)}" data-name="${esc(f.title)}" style="text-decoration:none;">${esc(f.title)}</a>${f.hidden ? ' <span class="muted">(hidden)</span>' : ""}<br><span class="muted" style="font-size:12px;">${esc(f.section || "")} · ${esc(f.uploadedBy || "")}</span></span>
-        ${CAN ? `<button class="btn grey small" data-ren="${f.id}" data-t="${esc(f.title || "")}">✏️ Rename</button><button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
+        ${CAN ? `<button class="btn grey small" data-ren="${esc(f.id)}" data-t="${esc(f.title || "")}">✏️ Rename</button><button class="btn grey small" data-hide="${esc(f.id)}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${esc(f.id)}" style="background:#b00020;">✕</button>` : ""}
       </div>`).join("");
       list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault();
         if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.open, fetchUrl: a.dataset.open, name: a.dataset.name, downloadUrl: a.dataset.open });

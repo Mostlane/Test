@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
@@ -112,7 +112,7 @@ function cachedPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlaneP
   }
 })();
 
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 function fmtDate(iso){ if(!iso) return ""; const d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
 function engineersOf(j){ return (Array.isArray(j.assignedEngineers)&&j.assignedEngineers.length)?j.assignedEngineers.join(", "):(j.assignedTo||""); }
 function money(v){ if(v==null||v==="") return ""; const n=parseFloat(v); return isFinite(n)?("£"+n.toFixed(2)):esc(v); }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="UTF-8">
   <title>Device Management – Mostlane Portal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -421,6 +421,7 @@
   </div>
 
   <script>
+    function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
     // Device data now lives in the central D1, served by the mostlane-api
     // /device/* routes. Direct calls to MOSTLANE_API need the Bearer token added
     // by hand (portal-config only auto-attaches it to migrated legacy hosts).
@@ -670,10 +671,10 @@
         html += `
           <tr>
             <td>${i + 1}</td>
-            <td>${d.deviceId}</td>
-            <td>${d.label || ""}</td>
-            <td>${formatDate(d.firstSeen)}</td>
-            <td>${formatDate(d.lastSeen)}</td>
+            <td>${esc(d.deviceId)}</td>
+            <td>${esc(d.label || "")}</td>
+            <td>${esc(formatDate(d.firstSeen))}</td>
+            <td>${esc(formatDate(d.lastSeen))}</td>
           </tr>
         `;
       });
@@ -707,9 +708,9 @@
         if (entry.oldDeviceId) detailParts.push("Replaced: " + entry.oldDeviceId);
 
         html += `<tr>
-          <td>${when}</td>
-          <td>${type}</td>
-          <td>${detailParts.join(" | ") || ""}</td>
+          <td>${esc(when)}</td>
+          <td>${esc(type)}</td>
+          <td>${esc(detailParts.join(" | ") || "")}</td>
         </tr>`;
       });
 
@@ -813,9 +814,9 @@
         history.slice().reverse().forEach(e => {
           html += `
             <tr>
-              <td>${formatDate(e.at)}</td>
-              <td>${e.ip || "–"}</td>
-              <td style="max-width:500px; word-break:break-all;">${e.user_agent || e.userAgent || "–"}</td>
+              <td>${esc(formatDate(e.at))}</td>
+              <td>${esc(e.ip || "–")}</td>
+              <td style="max-width:500px; word-break:break-all;">${esc(e.user_agent || e.userAgent || "–")}</td>
             </tr>
           `;
         });

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Site Documents</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -517,7 +517,7 @@ async function renderCompliance(){
         row.innerHTML = `
           <span class="ic">${fileIcon(f.filename || "")}</span>
           <div class="nm">${esc(f.label || f.filename || "document")}<div class="meta">${badge}${f.date ? " · " + esc(fmt(f.date)) : ""}</div></div>
-          <a class="btn small" href="${f.url}" target="_blank" rel="noopener">Open</a>`;
+          <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener">Open</a>`;
         list.appendChild(row);
       });
       c.appendChild(list);

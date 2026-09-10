@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>EM / PAT Jobs</title>
-  <script src="/portal-config.js?v=33"></script>
+  <script src="/portal-config.js?v=34"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
@@ -117,7 +117,7 @@
   var $=function(id){return document.getElementById(id);};
   function token(){ try{return localStorage.getItem("mostlaneToken")||"";}catch(e){return"";} }
   function af(p,o){ o=o||{}; o.headers=Object.assign({Authorization:"Bearer "+token()},o.headers||{}); return fetch(API+p,o); }
-  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];}); }
   var COOP=["retail","els","els_private","cobra"];
   var ALL=[];
 
