@@ -69,6 +69,9 @@
     .dside .links a,.dside .links button{margin:0 6px 6px 0}
     .dlog{font-size:11.5px;color:#4b5a6b;max-height:180px;overflow:auto} .dlog div{padding:3px 0;border-bottom:1px dashed #eef1f4}
     .hold{background:#fff3cd;color:#7a5b00;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:8px}
+    .flagnote{background:#fde2e2;color:#9b1c1c;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:8px}
+    tr.flagged td{background:#fff7f7} tr.flagged td:first-child{box-shadow:inset 4px 0 #c62828}
+    .st.flag{background:#fde2e2;color:#9b1c1c}
     .engline{font-size:12.5px;color:#4b5a6b;margin-top:8px}
   </style>
 </head>
@@ -401,7 +404,8 @@
       const P = SCH.stats.pipeline, by = P.byStage || {};
       const chip = (k, label, n, cls) => `<button class="chip ${SCH_STAGE===k?"on":""} ${cls||""}" data-stage="${esc(k)}">${esc(label)} <span class="muted">${n}</span></button>`;
       let h = chip("active", "Active", P.active);
-      for (const s of P.steps) if (by[s.key]) h += chip(s.key, "Waiting: " + s.label.replace(/ — .*$/, ""), by[s.key]);
+      if (P.flagged) h += chip("flagged", "🚩 Flagged", P.flagged, "");
+      for (const s of P.steps) if (by[s.key]) h += chip(s.key, s.todo || s.label, by[s.key]);
       if (P.held) h += chip("held", "⏸ On hold", P.held);
       if (P.complete) h += chip("complete", "✓ All done — close", P.complete);
       h += chip("not_due", "Not due yet", P.notDue) + chip("closed", "Closed", P.closed) + chip("all", "Everything", SCH.total);
@@ -417,13 +421,15 @@
     }
     function schVisible() {
       const q = g("schQ").value.trim().toLowerCase();
-      return SCH.rows.filter(r => (SCH_FLAG==="all"||r.flag===SCH_FLAG) && stageMatch(r) && (!q || [r.storeCode, r.siteName, r.orderNr, r.srRef, r.block, r.case && r.case.engineer].join(" ").toLowerCase().includes(q)));
+      const rows = SCH.rows.filter(r => (SCH_FLAG==="all"||r.flag===SCH_FLAG) && stageMatch(r) && (!q || [r.storeCode, r.siteName, r.orderNr, r.srRef, r.block, r.case && r.case.engineer, r.case && r.case.flagNote].join(" ").toLowerCase().includes(q)));
+      return pipelineOn() ? rows.map((r, i) => [r, i]).sort((a, b) => ((b[0].case && b[0].case.flagged) - (a[0].case && a[0].case.flagged)) || (a[1] - b[1])).map(x => x[0]) : rows;
     }
     function stageMatch(r) {
       if (!pipelineOn() || !r.case) return true;
       const c = r.case;
       if (SCH_STAGE === "all") return true;
       if (SCH_STAGE === "active") return c.active && !c.closed;
+      if (SCH_STAGE === "flagged") return c.flagged;
       return c.stage === SCH_STAGE;
     }
     function histCell(r) {
@@ -438,8 +444,9 @@
       if (!c.active) return `<span class="badge f-not_on_chart">Not due yet</span><div class="sub">${c.daysToDue!=null?"in "+Math.round(c.daysToDue/30)+" months":""}</div>`;
       const shown = c.steps.filter(s => s.applicable);
       const strip = `<div class="steps">${shown.map(s => `<span class="st ${s.done?"done":(s.key===c.next?"next":"")} ${c.held?"held":""}" title="${esc(s.label)}${s.at?" · "+esc(String(s.at).slice(0,10)):""}${s.by?" · "+esc(s.by):""}">${s.done?"✓ ":""}${esc(s.short)}</span>`).join("")}</div>`;
-      const line = c.held ? `⏸ On hold — ${esc(c.holdReason)}` : c.allDone ? "✓ All steps done — close the case" : "Next: " + esc(c.nextLabel);
-      return strip + `<div class="sub">${line}</div>`;
+      const line = c.held ? `⏸ On hold — ${esc(c.holdReason)}` : c.allDone ? "✓ All steps done — close the case" : "<b>" + esc(c.nextTodo || c.nextLabel) + "</b> · " + esc(c.nextLabel);
+      const flag = c.flagged ? `<div class="sub" style="color:#9b1c1c">🚩 ${esc(c.flagNote)} <span class="muted">— ${esc(c.flaggedBy)}</span></div>` : "";
+      return flag + strip + `<div class="sub">${line}</div>`;
     }
     function certCell(c, r) {
       if (!c) return histCell(r);
@@ -459,7 +466,7 @@
         const rel = r.released ? `<span class="badge f-due">Released</span><div class="sub"><b>${esc(r.orderNr)}</b>${MONEY && r.orderedValue!=null ? " · " + money(r.orderedValue) : ""}${r.releasedAt ? " · seen " + fmtD(r.releasedAt) : ""}</div>` : `<span class="badge f-not_on_chart">Not released</span>${r.concertoStatus?`<div class="sub">${esc(r.concertoStatus)}</div>`:""}`;
         const c = r.case;
         const tools = [];
-        if (pipe && c) tools.push(`<button class="btn sm ${EXPANDED.has(r.id)?"":"sec"}" data-toggle="${esc(r.id)}">${EXPANDED.has(r.id)?"▾ Close":"▸ Details"}</button>`);
+        if (pipe && c) tools.push(`<button class="btn sm ${EXPANDED.has(r.id)?"":"sec"}" data-toggle="${esc(r.id)}">${EXPANDED.has(r.id)?"▾ Close":"▸ Details"}</button>`, `<button class="btn sm ${c.flagged?"danger":"sec"}" data-flagrow="${esc(r.id)}" title="${c.flagged?"Flagged — open to edit or clear":"Flag this site with a comment"}">🚩</button>`);
         if (r.storeCode) tools.push(`<a class="btn sm sec" href="site-folder.html?site=${encodeURIComponent(r.storeCode)}">Site</a>`);
         if (!pipe) { if (r.status === "open") tools.push(`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss</button>`); else tools.push(`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen</button>`); }
         const first = `<td><b>${fmtD(r.nextDate)}</b>${r.lastDate?`<div class="sub">Concerto last: ${fmtD(r.lastDate)}</div>`:""}</td>
@@ -475,12 +482,13 @@
             <td class="wrap"><span class="badge f-${esc(r.flag)}">${esc(FLAGS[r.flag]||r.flag)}</span><div class="sub">${esc(r.flagText||"")}</div></td><td>${jobCell(r.job)}</td>`;
         }
         const detail = pipe && c && EXPANDED.has(r.id) ? `<tr class="detail"><td colspan="8">${detailPanel(r)}</td></tr>` : "";
-        return `<tr>${first}${mid}<td><div class="rowtools">${tools.join("")}</div></td></tr>${detail}`;
+        return `<tr class="${pipe && c && c.flagged ? "flagged" : ""}">${first}${mid}<td><div class="rowtools">${tools.join("")}</div></td></tr>${detail}`;
       }).join("");
       const tb = g("tblSch");
       [].forEach.call(tb.querySelectorAll("[data-sdismiss]"), b => b.onclick = async () => { await setStatus(b.dataset.sdismiss, "dismissed"); loadSchedule(); });
       [].forEach.call(tb.querySelectorAll("[data-sreopen]"), b => b.onclick = async () => { await setStatus(b.dataset.sreopen, "open"); loadSchedule(); });
       [].forEach.call(tb.querySelectorAll("[data-toggle]"), b => b.onclick = () => { const id = b.dataset.toggle; if (EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderSchRows(); });
+      [].forEach.call(tb.querySelectorAll("[data-flagrow]"), b => b.onclick = () => { const id = b.dataset.flagrow; EXPANDED.add(id); renderSchRows(); const inp = tb.querySelector(`.dgrid[data-ppm="${CSS.escape(id)}"] [data-flagnote]`); if (inp) { inp.focus(); inp.scrollIntoView({ block: "center", behavior: "smooth" }); } });
       [].forEach.call(tb.querySelectorAll("[data-cert]"), a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
       wireDetails(tb);
     }
@@ -514,6 +522,7 @@
       const log = (c.log || []).map(l => `<div><span class="muted">${fmtD(l.at)} ${esc(String(l.at||"").slice(11,16))}</span> · ${esc(l.by)} · ${esc(l.text)}</div>`).join("") || '<div class="muted">Nothing logged yet.</div>';
       return `<div class="dgrid" data-ppm="${esc(r.id)}" data-cycle="${esc(c.cycleDue||"")}">
         <div>
+          ${c.flagged ? `<div class="flagnote">🚩 ${esc(c.flagNote)} <span class="muted">(${esc(c.flaggedBy)}, ${fmtD(c.flaggedAt)})</span></div>` : ""}
           ${c.held ? `<div class="hold">⏸ On hold — ${esc(c.holdReason)} <span class="muted">(${esc(c.heldBy)}, ${fmtD(c.heldAt)})</span></div>` : ""}
           <div class="chk" style="border:0;padding:0 0 6px"><div class="sub">Cycle due ${fmtD(c.cycleDue)}${r.srRef?" · Concerto "+esc(r.srRef):""}${r.orderNr?" · "+esc(r.orderNr):""} · tick in any order — the portal fills what it can see</div></div>
           ${rows}
@@ -521,6 +530,7 @@
         <div class="dside">
           <div class="blk"><h4>Certificate outcome</h4><div class="chips" style="margin:0">${outBtns}</div>${outNote}</div>
           <div class="blk"><h4>Tested by</h4><input list="engList" data-engineer value="${esc(c.engineer)}" placeholder="engineer" style="width:100%"><datalist id="engList"></datalist><div class="sub">${c.engineerSource==="job"?"From the test job's engineer — type to override.":c.engineerSource==="manual"?"Set by hand (clear to go back to the job's engineer).":"No test job yet — type the engineer's name."}</div></div>
+          <div class="blk"><h4>🚩 Flag for attention</h4><div style="display:flex;gap:6px"><input data-flagnote value="${esc(c.flagNote||"")}" placeholder="what needs looking at?" style="flex:1"><button class="btn sm ${c.flagged?"sec":"danger"}" data-flag>${c.flagged?"Update":"🚩 Flag"}</button>${c.flagged?`<button class="btn sm sec" data-unflag>Clear</button>`:""}</div><div class="sub">Flagged sites sit at the top of the list and in the 🚩 Flagged chip until cleared.</div></div>
           <div class="blk"><h4>Hold</h4>${c.held ? `<button class="btn sm sec" data-resume>▶ Take off hold</button>` : `<div style="display:flex;gap:6px"><input data-holdreason placeholder="why is it held? (waiting on client…)" style="flex:1"><button class="btn sm sec" data-hold>⏸ Hold</button></div>`}</div>
           <div class="blk"><h4>Links</h4><div class="links">${links.join("")}</div></div>
           <div class="blk"><h4>Case</h4>${c.closed ? `<button class="btn sm sec" data-reopen="${esc(c.id)}">↩ Reopen</button>` : `<button class="btn sm ${c.allDone?"":"sec"}" data-close>✓ Close this cycle</button>`} ${r.status==="open"?`<button class="btn sm danger" data-sdismiss="${esc(r.id)}">Dismiss row</button>`:`<button class="btn sm sec" data-sreopen="${esc(r.id)}">Reopen row</button>`}<div class="sub">Close when everything is invoiced; the row starts a fresh cycle when Concerto moves the date on.</div></div>
@@ -549,6 +559,8 @@
         const eng = panel.querySelector("[data-engineer]"); if (eng) { eng.onchange = () => act({ engineer: eng.value.trim() }); const names = await loadUsers(); const dl = panel.querySelector("#engList"); if (dl) dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join(""); }
         const hold = panel.querySelector("[data-hold]"); if (hold) hold.onclick = () => { const v = panel.querySelector("[data-holdreason]").value.trim(); if (!v) { alert("Say why it's on hold"); return; } act({ hold: v }); };
         const res = panel.querySelector("[data-resume]"); if (res) res.onclick = () => act({ hold: "" });
+        const fl = panel.querySelector("[data-flag]"); if (fl) { const inp = panel.querySelector("[data-flagnote]"); fl.onclick = () => { const v = inp.value.trim(); if (!v) { alert("Say what needs looking at"); inp.focus(); return; } act({ flag: v }); }; inp.onkeydown = e => { if (e.key === "Enter") fl.click(); }; }
+        const uf = panel.querySelector("[data-unflag]"); if (uf) uf.onclick = () => act({ flag: "" });
         const cl = panel.querySelector("[data-close]"); if (cl) cl.onclick = async () => { const ok = window.MLUI ? await MLUI.confirm("Close this 5-year cycle for the site?", { okLabel: "Close it" }) : confirm("Close this cycle?"); if (ok) act({ close: true }); };
         const ro = panel.querySelector("[data-reopen]"); if (ro) ro.onclick = () => act({ reopen: true, caseId: ro.dataset.reopen });
         [].forEach.call(panel.querySelectorAll("[data-cert]"), b => b.onclick = e => { e.preventDefault(); openCert(b.dataset.cert); });
@@ -563,10 +575,10 @@
         if (!SCH) return;
         const rows = schVisible(); const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
         const pipe = pipelineOn();
-        const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(pipe?["Tested by","Outcome","Stage","Next step","Steps done","On hold"]:[]).concat(MONEY?["Ordered value"]:[]);
-        const stageOf = c => !c ? "" : c.closed ? "Closed" : !c.active ? "Not due yet" : c.held ? "On hold" : c.allDone ? "All done" : "Waiting: " + c.nextLabel;
+        const head = ["Next due","Store","Site","Concerto ref","Released","PPM number","Released seen","Last done (portal)","Source","Chart due","Status","Detail"].concat(pipe?["Tested by","Outcome","Stage","Next step","Steps done","On hold","Flag"]:[]).concat(MONEY?["Ordered value"]:[]);
+        const stageOf = c => !c ? "" : c.closed ? "Closed" : !c.active ? "Not due yet" : c.held ? "On hold" : c.allDone ? "All done" : (c.nextTodo || c.nextLabel);
         const lines = [head.map(q).join(",")].concat(rows.map(r => [r.nextDate||"", r.storeCode, r.siteName, r.srRef, r.released?"Yes":"No", r.orderNr, r.releasedAt?r.releasedAt.slice(0,10):"", r.lastDone?r.lastDone.date:"", r.lastDone?(SRC[r.lastDone.source]||r.lastDone.source):"", r.chartDue||"", FLAGS[r.flag]||r.flag, r.flagText]
-          .concat(pipe?[r.case?r.case.engineer:"", r.case?(OUT_LABEL[r.case.outcome]||""):"", stageOf(r.case), r.case&&r.case.nextLabel||"", r.case?r.case.steps.filter(s=>s.applicable&&s.done).map(s=>s.short).join(" / "):"", r.case&&r.case.held?r.case.holdReason:""]:[])
+          .concat(pipe?[r.case?r.case.engineer:"", r.case?(OUT_LABEL[r.case.outcome]||""):"", stageOf(r.case), r.case&&r.case.nextLabel||"", r.case?r.case.steps.filter(s=>s.applicable&&s.done).map(s=>s.short).join(" / "):"", r.case&&r.case.held?r.case.holdReason:"", r.case&&r.case.flagged?r.case.flagNote:""]:[])
           .concat(MONEY?[r.orderedValue??""]:[]).map(q).join(",")));
         const blob = new Blob([lines.join("\r\n")], { type:"text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concerto-schedule-" + SCH_TYPE + "-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
         return;

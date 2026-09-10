@@ -4623,7 +4623,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     test").** Table **`concerto_cases`** (self-migrating; id = `<ppm_id>@<cycle_due>`)
     holds ONLY the manual state: `steps` JSON `{key:{done,at,by,note}}`, `outcome`,
     `engineer`, `hold_reason/held_at/held_by`, `closed_at/by`. **`CASE_STEPS`**
-    (concerto.js, exported) is the recommended order — scheduled · tested · reviewed ·
+    (concerto.js, exported) is the recommended order — checked ("Checked — due, to be
+    booked", manual; auto once a job exists — Jamie's "checked due but not booked") ·
+    scheduled · tested · reviewed ·
     [unsat: quoted · ordered · works_done · cert_updated] · approved · uploaded ·
     invoiced · [unsat: rem_closed]; it is a **CHECKLIST, not a state machine**: any
     step ticks in any order (Jamie quotes before approval), "next" = the first unticked
