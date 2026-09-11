@@ -338,9 +338,8 @@
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <strong id="nabHead" style="font-size:15px;">⚠ Jobs not attended</strong>
         <button type="button" id="nabToggle" style="margin-left:auto;background:#fff;border:1px solid #f3b1ab;color:#7a1a13;border-radius:999px;padding:3px 12px;font-weight:600;cursor:pointer;">Show list</button>
-        <button type="button" id="nabDismiss" title="Hide until next load" style="background:transparent;border:0;color:#7a1a13;font-size:18px;line-height:1;cursor:pointer;padding:2px 4px;">✕</button>
       </div>
-      <div id="nabList" hidden style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+      <div id="nabList" style="margin-top:10px;display:none;flex-direction:column;gap:6px;"></div>
     </div>
 
     <div class="chips" id="statusChips"></div>
@@ -806,22 +805,21 @@ async function loadNotAttended(){
       + '<div style="font-size:12.5px;color:#7a1a13;">'+pill+'booked '+esc(ago)+' · '+engs+'</div>'
       + '</div>';
   }).join("");
-  // The list ALWAYS starts collapsed on the page (just the count line); tap
-  // "Show list" to expand it for this view only — the open state is NOT
-  // remembered, so it never re-opens itself on the next load. The ✕ dismiss is
-  // still remembered per-device for the day.
-  // Dismiss (✕) only hides it for the current viewing — a fresh open of the
-  // board shows the warning again, since it's an important daily nudge.
-  let dismissed = false; try{ dismissed = sessionStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
-  box.hidden = !!dismissed;
-  listEl.hidden = true;
+  // The bar is ALWAYS shown (collapsed to just the count line) whenever there
+  // are not-attended jobs — there is NO dismiss, so it can't be accidentally
+  // hidden and it's always findable. Tap "Show list" to expand it for this view
+  // only (the open state is not remembered, so it re-collapses on the next load).
+  box.hidden = false;
+  // NB the list div carries an inline `display:flex`, which OVERRIDES the
+  // [hidden] attribute (inline style beats the UA `[hidden]{display:none}`), so
+  // toggling `.hidden` did nothing — control `display` directly instead.
+  listEl.style.display = "none";   // collapsed by default
   $("nabToggle").textContent = "Show list";
   $("nabToggle").onclick = function(){
-    const nowOpen = listEl.hidden;
-    listEl.hidden = !nowOpen;
-    this.textContent = nowOpen ? "Hide list" : "Show list";
+    const open = listEl.style.display === "none";
+    listEl.style.display = open ? "flex" : "none";
+    this.textContent = open ? "Hide list" : "Show list";
   };
-  $("nabDismiss").onclick = function(){ box.hidden = true; try{ sessionStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
   listEl.querySelectorAll(".nab-row").forEach(function(row){
     row.onclick = function(){ location.href = "job-view.html?jobId=" + encodeURIComponent(row.getAttribute("data-jobid")); };
   });
