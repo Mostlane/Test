@@ -16847,12 +16847,112 @@ async function handle12(request, env, ctx, url, sess) {
           actionable: true
         }, updated.hold.approval.requestedBy));
       }
+      if (updated && updated.status === "Quote" && (!before || before.status !== "Quote")) {
+        ctx?.waitUntil((async () => {
+          const to = await getQuoteNotify(env, tenantId);
+          const ref = updated.helpdeskRef || id;
+          const site = updated.siteName || updated.siteCode || "";
+          for (const u of to) await sendToUser(env, tenantId, u, {
+            title: "Quote to send",
+            body: `${sess?.user?.username || "An engineer"} completed a quote for ${ref}${site ? " \u2014 " + site : ""}`,
+            url: "/quotes.html?job=" + encodeURIComponent(id),
+            tag: "quote-done:" + id,
+            actionable: true
+          }).catch(() => {
+          });
+        })());
+      }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
       let dOut = decorateJobWithLiveSla(updated);
       if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));
       if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
+  }
+  if (subpath === "/quotes" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const all = await listJobs(env, tenantId);
+    const quotes = all.filter((j) => j.status === "Quote" || j.quoteSent && j.quoteSent.at);
+    const awaiting = quotes.filter((j) => !(j.quoteSent && j.quoteSent.at));
+    const sent = quotes.filter((j) => j.quoteSent && j.quoteSent.at);
+    if (searchParams.get("count")) return jsonResponse({ ok: true, count: awaiting.length, sent: sent.length }, headers);
+    const money2 = await canSeeMoney(env, tenantId, sess.user.username);
+    const which = (searchParams.get("status") || "awaiting").toLowerCase();
+    const pick = which === "sent" ? sent : which === "all" ? quotes : awaiting;
+    const rows = pick.map((j) => quoteRow(j, money2)).sort((a, b) => String(b.sortAt || "").localeCompare(String(a.sortAt || "")));
+    return jsonResponse({ ok: true, rows, awaiting: awaiting.length, sent: sent.length, money: money2, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/sent" && method === "POST") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const j = await getJob3(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    const num2 = (v) => {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    j.quoteSent = {
+      at: (/* @__PURE__ */ new Date()).toISOString(),
+      by: sess.user.username,
+      quoteNumber: String(b.quoteNumber || "").trim(),
+      amountExVat: num2(b.amountExVat),
+      amountIncVat: num2(b.amountIncVat),
+      labourCost: num2(b.labourCost),
+      materialsCost: num2(b.materialsCost)
+    };
+    j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, j);
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "quote-done:" + j.id, { title: "Quote sent", body: j.helpdeskRef || j.id }).catch(() => {
+    }));
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/reopen" && method === "POST") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const j = await getJob3(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    delete j.quoteSent;
+    j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, j);
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/make-job" && method === "POST") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const src = await getJob3(env, tenantId, b.jobId);
+    if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+    if (src.quoteWorksJobId) {
+      const ex = await getJob3(env, tenantId, src.quoteWorksJobId);
+      if (ex) return jsonResponse({ ok: true, jobId: ex.id, already: true }, headers);
+    }
+    const qs = src.quoteSent || {};
+    const original = String(src.description || "").trim();
+    const description = buildQuoteWorksDescription(src) + (original ? "\n\n\u2014 Original job \u2014\n" + original : "");
+    const job = await cloneJobAsVisit(env, tenantId, src, {
+      description,
+      assignedEngineers: [],
+      // unallocated — office schedules it
+      scheduledAt: void 0,
+      durationMinutes: void 0,
+      changedBy: sess.user && sess.user.username || "system",
+      // orderValue carries the quoted amount (hidden from engineers by stripMoney);
+      // revisitOf/visitGroupId (set by cloneJobAsVisit) link it back to the quote job.
+      extra: { orderValue: qs.amountExVat != null ? qs.amountExVat : void 0 }
+    });
+    src.quoteWorksJobId = job.id;
+    src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, src);
+    return jsonResponse({ ok: true, jobId: job.id }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "GET") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    return jsonResponse({ ok: true, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "POST") {
+    if (!sess || !await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    return jsonResponse({ ok: true, notify: await setQuoteNotify(env, tenantId, b.notify) }, headers);
   }
   if (subpath === "/site/jobs" && method === "GET") {
     const code = storeCodeOf(searchParams.get("siteCode"));
@@ -17299,6 +17399,86 @@ function quoteMissing(job, patch, photoCount) {
   if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
+}
+function quoteCapturedAt(j) {
+  const h = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+  for (let i = h.length - 1; i >= 0; i--) if (h[i] && h[i].status === "Quote") return h[i].at;
+  return j.updatedAt || null;
+}
+function quoteRow(j, money2) {
+  const q = j.quote || {};
+  const qs = j.quoteSent || null;
+  return {
+    id: j.id,
+    ref: j.helpdeskRef || j.id,
+    siteName: j.siteName || "",
+    siteCode: j.siteCode || "",
+    engineers: assignedList(j),
+    description: j.description || "",
+    scheduledAt: j.scheduledAt || null,
+    quotedAt: quoteCapturedAt(j),
+    quote: {
+      materials: q.materials || "",
+      timeRestrictions: q.timeRestrictions || "",
+      estDurationHours: q.estDurationHours != null ? q.estDurationHours : "",
+      engineersRequired: q.engineersRequired || 1,
+      accessEquipment: Array.isArray(q.accessEquipment) ? q.accessEquipment : q.access ? [q.access] : [],
+      barriersRequired: q.barriersRequired,
+      disruptionToClient: q.disruptionToClient,
+      disruptionNote: q.disruptionNote || "",
+      description: q.description || "",
+      reason: q.reason || "",
+      notes: q.notes || "",
+      capturedBy: q.capturedBy || ""
+    },
+    sent: qs ? {
+      at: qs.at,
+      by: qs.by,
+      quoteNumber: qs.quoteNumber || "",
+      amountExVat: money2 ? qs.amountExVat ?? null : null,
+      amountIncVat: money2 ? qs.amountIncVat ?? null : null,
+      labourCost: money2 ? qs.labourCost ?? null : null,
+      materialsCost: money2 ? qs.materialsCost ?? null : null
+    } : null,
+    worksJobId: j.quoteWorksJobId || null,
+    sortAt: qs && qs.at || quoteCapturedAt(j) || j.updatedAt || ""
+  };
+}
+function buildQuoteWorksDescription(src) {
+  const q = src.quote || {};
+  const L2 = ["\u{1F9FE} QUOTED WORKS \u2014 ordered, now to be carried out"];
+  if (q.description) L2.push(q.description);
+  if (q.materials) L2.push("Materials: " + q.materials);
+  const dur = q.estDurationHours != null && q.estDurationHours !== "" ? q.estDurationHours + " hr" + (q.engineersRequired > 1 ? " \xD7 " + q.engineersRequired + " engineers" : "") : "";
+  if (dur) L2.push("Estimated duration: " + dur);
+  if (q.timeRestrictions) L2.push("Time restrictions: " + q.timeRestrictions);
+  const acc = Array.isArray(q.accessEquipment) ? q.accessEquipment.join(", ") : q.access || "";
+  if (acc) L2.push("Access equipment: " + acc);
+  if (q.barriersRequired != null) L2.push("Barriers required: " + (q.barriersRequired ? "Yes" : "No"));
+  if (q.disruptionToClient != null) L2.push("Disruption to client: " + (q.disruptionToClient ? "Yes" + (q.disruptionNote ? " \u2014 " + q.disruptionNote : "") : "No"));
+  if (q.notes) L2.push("Notes: " + q.notes);
+  return L2.join("\n");
+}
+async function getQuoteNotify(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:quoteNotify:" + tenantId).first();
+    if (row) {
+      const v = JSON.parse(row.value);
+      const a = Array.isArray(v) ? v : v && v.users;
+      if (Array.isArray(a) && a.length) return a;
+    }
+  } catch {
+  }
+  return ["Greg Line"];
+}
+async function setQuoteNotify(env, tenantId, notify) {
+  let users = Array.isArray(notify) ? notify : String(notify || "").split(",");
+  users = users.map((s) => String(s).trim()).filter(Boolean);
+  if (!users.length) users = ["Greg Line"];
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:quoteNotify:" + tenantId, JSON.stringify(users)).run();
+  return users;
 }
 function holdMissing(patch, job) {
   if (job && job.investigateOnly) return [];
