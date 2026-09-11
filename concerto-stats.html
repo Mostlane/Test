@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Co-op Stats</title>
+  <script src="/portal-config.js?v=34"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root{--brand:#003468;--line:#e2e8f0;--ink:#1f2937;--muted:#6b7a90;
+      --p1:#dc2626;--p2:#ea7a23;--p3:#eab308;--p4:#16a34a;--p0:#94a3b8;}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:var(--ink);}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    header.page .btn.ghost{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);}
+    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:var(--muted);font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
+    .btn[disabled]{opacity:.55;cursor:default;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px 16px;margin-bottom:14px;}
+    .card h2{font-size:15px;margin:0 0 2px;color:var(--brand);}
+    .card .sub{font-size:12px;color:var(--muted);margin:0 0 12px;}
+    .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;}
+    .tile{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
+    .tile .n{font-size:24px;font-weight:800;color:var(--brand);line-height:1.1;}
+    .tile .l{font-size:12px;color:var(--muted);margin-top:2px;}
+    /* vertical bar chart */
+    .vbars{display:flex;align-items:flex-end;gap:3px;height:150px;overflow-x:auto;padding-top:16px;}
+    .vbar{flex:1 0 14px;min-width:8px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;position:relative;}
+    .vbar .b{width:70%;max-width:34px;background:var(--brand);border-radius:4px 4px 0 0;min-height:2px;transition:height .2s;}
+    .vbar .v{position:absolute;top:-14px;font-size:9.5px;color:var(--muted);white-space:nowrap;}
+    .vbar .x{font-size:9.5px;color:var(--muted);margin-top:4px;white-space:nowrap;transform:rotate(-45deg);transform-origin:top right;height:22px;}
+    .vbar.hot .b{background:var(--p1);}
+    /* horizontal bar rows */
+    .hrow{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:13px;}
+    .hrow .lab{flex:0 0 130px;text-align:right;color:#334;}
+    .hrow .track{flex:1;background:#f1f5f9;border-radius:6px;height:20px;position:relative;overflow:hidden;}
+    .hrow .fill{height:100%;background:var(--brand);border-radius:6px;min-width:2px;}
+    .hrow .val{flex:0 0 78px;font-size:12px;color:var(--muted);}
+    .seg{display:flex;height:26px;border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+    .seg span{display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;min-width:0;}
+    .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:12px;color:#334;}
+    .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px;}
+    table.tt{width:100%;border-collapse:collapse;font-size:12.5px;}
+    table.tt th,table.tt td{padding:5px 6px;border-bottom:1px solid #f1f5f9;text-align:center;}
+    table.tt th{color:var(--muted);font-weight:600;}
+    table.tt td.t{text-align:left;font-weight:600;color:#334;}
+    .toggle{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;}
+    .toggle button{border:0;background:#fff;color:#334;font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;cursor:pointer;}
+    .toggle button.on{background:var(--brand);color:#fff;}
+    #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+    .msg{font-size:12.5px;margin-left:auto;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html?reset=1" style="text-decoration:none;">‹ Back</a>
+    <h1>📊 Co-op job stats</h1>
+    <button class="btn ghost" id="refineBtn" title="Use AI to work out the trade for jobs the keyword classifier couldn't">🤖 Refine trades</button>
+    <button class="btn ghost" id="rebuild" title="Recalculate from the latest jobs">↻</button>
+  </header>
+  <div class="wrap">
+    <div id="forbidden">🚫 This page is for Full Access / SLA-admin users.</div>
+    <div id="board">
+      <p class="muted" id="loading" style="padding:18px 4px;">Crunching the numbers…</p>
+      <div id="content" style="display:none;">
+        <div class="card">
+          <div class="tiles" id="tiles"></div>
+          <div class="muted" id="span" style="margin-top:10px;"></div>
+        </div>
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div style="flex:1"><h2>Incidents over time</h2><div class="sub">How many Co-op jobs came in each period.</div></div>
+            <div class="toggle" id="trendToggle">
+              <button data-m="week">Weekly</button><button data-m="month" class="on">Monthly</button>
+            </div>
+          </div>
+          <div class="vbars" id="trend"></div>
+        </div>
+        <div class="card">
+          <h2>By day of the week</h2><div class="sub">Total across all weeks (busiest day highlighted).</div>
+          <div class="vbars" id="dow" style="height:130px;"></div>
+        </div>
+        <div class="card">
+          <h2>By time of day</h2><div class="sub">When incidents are raised (24h, London time).</div>
+          <div class="vbars" id="hour" style="height:130px;"></div>
+        </div>
+        <div class="card">
+          <h2>By priority</h2><div class="sub">All time.</div>
+          <div class="seg" id="prioSeg"></div>
+          <div class="legend" id="prioLegend"></div>
+          <div id="prioRows" style="margin-top:12px;"></div>
+        </div>
+        <div class="card">
+          <h2>Trades required</h2><div class="sub" id="tradeSub">All time — worked out from the job description.</div>
+          <div id="tradeRows"></div>
+        </div>
+        <div class="card">
+          <h2>Trades by priority</h2><div class="sub">% of each priority that needs each trade (columns add to ~100%).</div>
+          <div style="overflow-x:auto;"><table class="tt" id="tbp"></table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const PRI = { "1":{c:"var(--p1)",l:"P1"}, "2":{c:"var(--p2)",l:"P2"}, "3":{c:"var(--p3)",l:"P3"}, "4":{c:"var(--p4)",l:"P4"}, "0":{c:"var(--p0)",l:"No priority"} };
+    const TRADE_COL = ["#003468","#1c68d6","#0891b2","#0a7d33","#16a34a","#b45309","#ea7a23","#7c3aed","#be185d","#64748b","#0f766e","#9ca3af"];
+    let DATA = null, trendMode = "month";
+
+    function fmtMonth(k){ const [y,m]=k.split("-"); return new Date(Date.UTC(+y,+m-1,1)).toLocaleDateString("en-GB",{month:"short",year:"2-digit"}); }
+    function fmtWeek(k){ const d=new Date(k+"T00:00:00Z"); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"}); }
+
+    // Fill a continuous month/week sequence (so gaps show as zero).
+    function monthSeq(from,to){ const out=[]; let [y,m]=from.split("-").map(Number); const [ty,tm]=to.split("-").map(Number);
+      while(y<ty||(y===ty&&m<=tm)){ out.push(y+"-"+String(m).padStart(2,"0")); m++; if(m>12){m=1;y++;} if(out.length>240)break; } return out; }
+    function weekSeq(from,to){ const out=[]; let d=new Date(from+"T00:00:00Z"); const end=new Date(to+"T00:00:00Z");
+      while(d<=end){ out.push(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()+7); if(out.length>520)break; } return out; }
+
+    function vbars(el, items, opts={}){ // items:[{x,v,hot?}]
+      const max = Math.max(1, ...items.map(i=>i.v));
+      el.innerHTML = items.map(i =>
+        '<div class="vbar'+(i.hot?" hot":"")+'"><span class="v">'+(i.v||"")+'</span>'
+        + '<div class="b" style="height:'+Math.round((i.v/max)*100)+'%"></div>'
+        + '<span class="x">'+esc(i.x)+'</span></div>').join("");
+    }
+
+    function render(){
+      const s = DATA; if(!s) return;
+      g("loading").style.display="none"; g("content").style.display="";
+      // ---- tiles
+      const weeks = Object.keys(s.byWeek).length || 1;
+      const days = Math.max(1, Math.round((Date.parse(s.spanTo)-Date.parse(s.spanFrom))/8.64e7)+1);
+      const perWk = (s.total/weeks), perDay=(s.total/days);
+      const dowNames=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+      const busiestDow = s.byDow.indexOf(Math.max(...s.byDow));
+      const busiestHr = s.byHour.indexOf(Math.max(...s.byHour));
+      g("tiles").innerHTML = [
+        ["Total incidents", s.total.toLocaleString()],
+        ["Per week (avg)", perWk.toFixed(1)],
+        ["Per day (avg)", perDay.toFixed(1)],
+        ["Busiest day", dowNames[busiestDow]||"—"],
+        ["Busiest hour", String(busiestHr).padStart(2,"0")+":00"],
+        ["Weeks of data", weeks],
+      ].map(([l,n])=>'<div class="tile"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>').join("");
+      g("span").textContent = "Data from "+new Date(s.spanFrom).toLocaleDateString("en-GB")+" to "+new Date(s.spanTo).toLocaleDateString("en-GB")+" · rebuilt "+new Date(s.builtAt).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+      renderTrend();
+      // ---- day of week
+      vbars(g("dow"), s.byDow.map((v,i)=>({x:dowNames[i],v,hot:i===busiestDow})));
+      // ---- hour
+      vbars(g("hour"), s.byHour.map((v,i)=>({x:String(i).padStart(2,"0"),v,hot:i===busiestHr})));
+      // ---- priority segmented bar
+      const pOrder=["1","2","3","4","0"];
+      const pcounts=pOrder.map(k=>({k,v:s.byPriority[k]||0})).filter(x=>x.v>0);
+      const ptot=pcounts.reduce((a,b)=>a+b.v,0)||1;
+      g("prioSeg").innerHTML = pcounts.map(x=>{const pc=Math.round(x.v/ptot*100);return '<span style="background:'+PRI[x.k].c+';flex:'+x.v+'" title="'+PRI[x.k].l+': '+x.v+'">'+(pc>=8?pc+"%":"")+'</span>';}).join("");
+      g("prioLegend").innerHTML = pcounts.map(x=>'<span><i style="background:'+PRI[x.k].c+'"></i>'+PRI[x.k].l+' — '+x.v+' ('+Math.round(x.v/ptot*100)+'%)</span>').join("");
+      const pmax=Math.max(...pcounts.map(x=>x.v),1);
+      g("prioRows").innerHTML = pcounts.map(x=>hrow(PRI[x.k].l, x.v, pmax, PRI[x.k].c, Math.round(x.v/ptot*100)+"%")).join("");
+      // ---- trades overall
+      const trades = Object.entries(s.trades).sort((a,b)=>b[1]-a[1]);
+      const ttot = trades.reduce((a,b)=>a+b[1],0)||1;
+      const tmax = Math.max(...trades.map(t=>t[1]),1);
+      const colOf = {}; s.tradeNames.forEach((n,i)=>colOf[n]=TRADE_COL[i%TRADE_COL.length]);
+      g("tradeRows").innerHTML = trades.map(([name,v])=>hrow(name, v, tmax, colOf[name]||"#64748b", Math.round(v/ttot*100)+"%")).join("");
+      g("tradeSub").textContent = "All time — worked out from the job description." + (s.unknownTrade? " · "+s.unknownTrade+" not yet classified (tap 🤖 Refine trades).":"");
+      // ---- trades by priority table
+      renderTBP(s, colOf);
+    }
+
+    function hrow(lab, v, max, colour, right){
+      return '<div class="hrow"><div class="lab">'+esc(lab)+'</div>'
+        + '<div class="track"><div class="fill" style="width:'+Math.round(v/max*100)+'%;background:'+colour+'"></div></div>'
+        + '<div class="val">'+v+(right?' · '+right:'')+'</div></div>';
+    }
+
+    function renderTrend(){
+      const s=DATA;
+      let items;
+      if(trendMode==="month"){
+        const seq=monthSeq(s.spanFrom.slice(0,7), s.spanTo.slice(0,7));
+        items=seq.map(k=>({x:fmtMonth(k),v:s.byMonth[k]||0}));
+      } else {
+        // last 26 weeks max for readability
+        let seq=weekSeq(s.spanFrom.slice(0,10), s.spanTo.slice(0,10));
+        // align to the Monday keys we actually have
+        seq = Object.keys(s.byWeek).sort();
+        if(seq.length>26) seq=seq.slice(-26);
+        items=seq.map(k=>({x:fmtWeek(k),v:s.byWeek[k]||0}));
+      }
+      vbars(g("trend"), items);
+    }
+
+    function renderTBP(s, colOf){
+      const pOrder=["1","2","3","4"].filter(k=>s.byPriority[k]);
+      const trades = Object.entries(s.trades).sort((a,b)=>b[1]-a[1]).map(t=>t[0]);
+      let html = "<tr><th class='t'>Trade</th>"+pOrder.map(k=>"<th>"+PRI[k].l+"</th>").join("")+"<th>Overall</th></tr>";
+      const ttot = Object.values(s.trades).reduce((a,b)=>a+b,0)||1;
+      for(const tr of trades){
+        html += "<tr><td class='t'><i style='display:inline-block;width:9px;height:9px;border-radius:2px;background:"+(colOf[tr]||"#64748b")+";margin-right:5px'></i>"+esc(tr)+"</td>";
+        for(const k of pOrder){
+          const col=s.tradesByPriority[k]||{}; const ptot=Object.values(col).reduce((a,b)=>a+b,0)||1;
+          const pc=Math.round((col[tr]||0)/ptot*100);
+          html += "<td>"+(pc?pc+"%":"·")+"</td>";
+        }
+        html += "<td><b>"+Math.round((s.trades[tr]||0)/ttot*100)+"%</b></td></tr>";
+      }
+      g("tbp").innerHTML = html;
+    }
+
+    async function load(rebuild){
+      g("loading").style.display=""; g("content").style.display="none";
+      g("loading").textContent = rebuild ? "Recalculating from the latest jobs…" : "Crunching the numbers…";
+      let d=null;
+      try{ d = await authFetch("/sla/stats/concerto"+(rebuild?"?rebuild=1":"")).then(r=>r.json()); }catch(e){}
+      if(!d || !d.ok){
+        if(d && /Forbidden/i.test(d.error||"")){ g("forbidden").style.display="block"; g("board").style.display="none"; return; }
+        g("loading").textContent = "Couldn't load the stats"+(d&&d.error?": "+d.error:"."); return;
+      }
+      DATA=d.stats;
+      if(!d.aiConfigured) g("refineBtn").style.display="none";
+      render();
+    }
+
+    g("rebuild").onclick = ()=>load(true);
+    [].forEach.call(g("trendToggle").querySelectorAll("button"), b=> b.onclick=()=>{
+      trendMode=b.dataset.m;
+      [].forEach.call(g("trendToggle").querySelectorAll("button"), x=>x.classList.toggle("on",x===b));
+      renderTrend();
+    });
+    g("refineBtn").onclick = async ()=>{
+      const ok = window.MLUI ? await MLUI.confirm("Use AI to classify the jobs the keyword matcher couldn't place into a trade? This runs in batches and is remembered per job.",{title:"Refine trades with AI",okLabel:"Run it"}) : confirm("Refine trades with AI?");
+      if(!ok) return;
+      g("refineBtn").disabled=true; const old=g("refineBtn").textContent; g("refineBtn").textContent="🤖 Working…";
+      try{
+        const r = await authFetch("/sla/stats/concerto/ai-refine",{method:"POST"}).then(x=>x.json());
+        if(r&&r.ok){ DATA=r.stats; render(); if(window.MLUI) MLUI.toast?.("Classified "+r.classified+" job"+(r.classified===1?"":"s")+(r.remaining?" · "+r.remaining+" more left — run again":"")); }
+        else { if(window.MLUI) MLUI.toast?.((r&&r.error)||"AI refine failed"); }
+      }catch(e){ if(window.MLUI) MLUI.toast?.("AI refine failed"); }
+      g("refineBtn").disabled=false; g("refineBtn").textContent=old;
+    };
+    load(false);
+  </script>
+</body>
+</html>

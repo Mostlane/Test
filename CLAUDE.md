@@ -3652,6 +3652,32 @@ full JSON blob (getJob/saveJob) and patchJob merges, so both fields persist.
   **TODO/next:** auto-detect the order arriving (tie into client-orders / Concerto) to
   prompt "make the works job"; fold the quote £ into job costing.
 
+## Co-op (Concerto) job stats (sla.js + concerto-stats.html — Sep 2026)
+A stats board over every Co-op reactive job — **📊 Co-op stats** in sla-main.html
+🛠 Tools (FullAccess|SLAAdmin; _headers no-cache). Aggregates the LIVE board jobs
+PLUS the imported archive (`sla_jobs_archive`, ~23k, Chapplins excluded), using
+each job's raised/created date (Europe/London) and priority. **`isCoopJob(j)`** =
+NOT a project (P-code), Chapplins, Fareham or projects job (exclusion filter — the
+archive is all Co-op Commusoft history). Shows: incidents per **week / month**
+(toggle), per **weekday**, per **hour of day**; **priority** split; and **trades
+required** overall + a **trades-by-priority** % table. All counts/priorities/times
+are deterministic (no AI). **Trades** = a keyword classifier (`CONCERTO_TRADES`
+taxonomy: Glazing / Doors & shutters / Groundworks & external / Refrigeration &
+HVAC / Plumbing & drainage / Electrical / Fire & safety / Building fabric /
+Joinery / Cleaning & signage / Pest control / General) run over the description;
+a **🤖 Refine trades** button (`POST /sla/stats/concerto/ai-refine`, cap 300/run,
+batched via `anthropicTool`, bumps AI usage) classifies the unknowns into the same
+taxonomy and **caches per job** in app_config `sla:jobtrade:<tid>` (capped ~4000),
+which every rebuild then applies. The whole aggregate is **cached** in app_config
+`sla:concertostats:<tid>` (rebuilt on `?rebuild=1` / the ↻ button / when >6h
+stale) so the page is instant and the 23k-row scan is occasional. Endpoints
+(SLA-admin): **GET /sla/stats/concerto** (`?rebuild=1`), **POST
+/sla/stats/concerto/ai-refine**. Helpers `classifyTradeKw` / `isCoopJob` /
+`buildConcertoStats` / `getConcertoStats` / `aiRefineTrades` /
+`getJobTradeOverrides` near getWorkAreas. Front-end charts are dependency-free
+CSS bars. **TODO/next:** range filter on the priority/trade breakdowns (currently
+all-time); SLA breach rate; per-store league table.
+
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
 set of at-a-glance widgets** — the start of "the hub of everything" (each user

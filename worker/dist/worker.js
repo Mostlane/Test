@@ -17046,6 +17046,18 @@ async function handle12(request, env, ctx, url, sess) {
     const b = await readJson2(request);
     return jsonResponse({ ok: true, notify: await setQuoteNotify(env, tenantId, b.notify) }, headers);
   }
+  if (subpath === "/stats/concerto" && method === "GET") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const stats = await getConcertoStats(env, tenantId, { rebuild: searchParams.get("rebuild") === "1" });
+    return jsonResponse({ ok: true, stats, aiConfigured: !!env.ANTHROPIC_API_KEY }, headers);
+  }
+  if (subpath === "/stats/concerto/ai-refine" && method === "POST") {
+    if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const r = await aiRefineTrades(env, tenantId, ctx, 300);
+    if (!r.ok) return jsonResponse({ error: r.error || "AI refine failed", classified: r.classified || 0 }, headers, 400);
+    const stats = await getConcertoStats(env, tenantId, {});
+    return jsonResponse({ ok: true, classified: r.classified, remaining: r.remaining, stats }, headers);
+  }
   if (subpath === "/site/jobs" && method === "GET") {
     const code = storeCodeOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
@@ -20631,6 +20643,187 @@ async function setWorkAreas(env, tenantId, list) {
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
 }
+function classifyTradeKw(text) {
+  const s = String(text || "");
+  for (const [name, re] of CONCERTO_TRADES) if (re.test(s)) return name;
+  return "";
+}
+function isCoopJob(j) {
+  const st = String(j && j.storeType || "").toLowerCase();
+  const cl = String(j && j.client || "").toLowerCase();
+  const code = String(j && j.siteCode || "");
+  if (/^p\d/i.test(code)) return false;
+  if (["chapplins", "fbc", "fareham", "projects"].includes(st)) return false;
+  if (/chapplin|fareham|fbc|project/.test(cl)) return false;
+  return true;
+}
+async function getJobTradeOverrides(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:jobtrade:" + tid).first();
+    if (row) {
+      const v = JSON.parse(row.value);
+      if (v && typeof v === "object") return v;
+    }
+  } catch {
+  }
+  return {};
+}
+async function setJobTradeOverrides(env, tid, map) {
+  const keys = Object.keys(map);
+  if (keys.length > 4e3) {
+    const drop = keys.slice(0, keys.length - 4e3);
+    for (const k of drop) delete map[k];
+  }
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:jobtrade:" + tid, JSON.stringify(map)).run();
+}
+function londonParts(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const p = {};
+  for (const x of _londonFmt.formatToParts(d)) p[x.type] = x.value;
+  const hour = p.hour === "24" ? 0 : Number(p.hour);
+  const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  return { y: Number(p.year), m: Number(p.month), d: Number(p.day), hour, dow: dowMap[p.weekday] ?? 0 };
+}
+function weekKey(y, m, d) {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const wd = (dt.getUTCDay() + 6) % 7;
+  dt.setUTCDate(dt.getUTCDate() - wd);
+  return dt.toISOString().slice(0, 10);
+}
+function accStats(acc, iso, priorityRaw, trade) {
+  const lp = londonParts(iso);
+  if (!lp) return;
+  acc.total++;
+  const pm = /([1-4])/.exec(String(priorityRaw || ""));
+  const pri = pm ? pm[1] : "0";
+  const mk = lp.y + "-" + String(lp.m).padStart(2, "0");
+  const wk = weekKey(lp.y, lp.m, lp.d);
+  acc.byMonth[mk] = (acc.byMonth[mk] || 0) + 1;
+  acc.byWeek[wk] = (acc.byWeek[wk] || 0) + 1;
+  acc.byDow[lp.dow]++;
+  acc.byHour[lp.hour]++;
+  acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
+  acc.trades[trade] = (acc.trades[trade] || 0) + 1;
+  acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {};
+  acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  if (!acc.spanFrom || iso < acc.spanFrom) acc.spanFrom = iso;
+  if (!acc.spanTo || iso > acc.spanTo) acc.spanTo = iso;
+}
+async function buildConcertoStats(env, tid) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const acc = {
+    total: 0,
+    byMonth: {},
+    byWeek: {},
+    byDow: [0, 0, 0, 0, 0, 0, 0],
+    byHour: new Array(24).fill(0),
+    byPriority: {},
+    trades: {},
+    tradesByPriority: {},
+    spanFrom: "",
+    spanTo: ""
+  };
+  let unknown = 0;
+  const tradeFor = (id, descr) => overrides[id] || classifyTradeKw(descr) || (unknown++, "General / other");
+  const live = await db.prepare("SELECT id, priority, data FROM sla_jobs").all();
+  for (const r of live.results || []) {
+    let j = {};
+    try {
+      j = JSON.parse(r.data) || {};
+    } catch {
+    }
+    if (!isCoopJob(j)) continue;
+    const iso = j.raisedAt || j.createdAt || null;
+    if (!iso) continue;
+    accStats(acc, iso, r.priority || j.priority, tradeFor(r.id, j.description));
+  }
+  let offset = 0;
+  const PAGE = 3e3;
+  for (; ; ) {
+    const pg = await db.prepare(
+      "SELECT id, created_at, completed_at, json_extract(data,'$.priority') AS priority, json_extract(data,'$.description') AS descr, json_extract(data,'$.siteCode') AS site_code FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' LIMIT ? OFFSET ?"
+    ).bind(PAGE, offset).all();
+    const rowsP = pg.results || [];
+    for (const r of rowsP) {
+      if (/^p\d/i.test(String(r.site_code || ""))) continue;
+      const iso = r.created_at || r.completed_at || null;
+      if (!iso) continue;
+      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr));
+    }
+    if (rowsP.length < PAGE) break;
+    offset += PAGE;
+    if (offset > 6e4) break;
+  }
+  const stats = { ...acc, tradeNames: CONCERTO_TRADE_NAMES, unknownTrade: unknown, builtAt: (/* @__PURE__ */ new Date()).toISOString(), overrideCount: Object.keys(overrides).length };
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:concertostats:" + tid, JSON.stringify(stats)).run();
+  return stats;
+}
+async function getConcertoStats(env, tid, { rebuild } = {}) {
+  if (!rebuild) {
+    try {
+      const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:concertostats:" + tid).first();
+      if (row) {
+        const s = JSON.parse(row.value);
+        const ageH = (Date.now() - Date.parse(s.builtAt || 0)) / 36e5;
+        if (s && Number.isFinite(ageH) && ageH < 6) return s;
+      }
+    } catch {
+    }
+  }
+  return buildConcertoStats(env, tid);
+}
+async function aiRefineTrades(env, tid, ctx, cap2 = 300) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const todo = [];
+  const consider = (id, descr) => {
+    if (todo.length >= cap2) return;
+    if (overrides[id]) return;
+    if (classifyTradeKw(descr)) return;
+    const d = String(descr || "").trim();
+    if (d.length < 6) return;
+    todo.push({ id, descr: d.slice(0, 400) });
+  };
+  const live = await db.prepare("SELECT id, data FROM sla_jobs").all();
+  for (const r of live.results || []) {
+    let j = {};
+    try {
+      j = JSON.parse(r.data) || {};
+    } catch {
+    }
+    if (isCoopJob(j)) consider(r.id, j.description);
+  }
+  if (todo.length < cap2) {
+    const arch = await db.prepare("SELECT id, json_extract(data,'$.description') AS descr FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' ORDER BY created_at DESC LIMIT 4000").all();
+    for (const r of arch.results || []) consider(r.id, r.descr);
+  }
+  if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
+  const names = CONCERTO_TRADES.map((t) => t[0]);
+  const schema = { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, trade: { type: "string", enum: names.concat("General / other") } }, required: ["i", "trade"] } } }, required: ["results"] };
+  let classified = 0;
+  const CH = 40;
+  for (let k = 0; k < todo.length; k += CH) {
+    const batch = todo.slice(k, k + CH);
+    const user = "Classify each UK Co-op shop maintenance job into ONE trade from this list:\n" + names.join(", ") + ", General / other.\n\nJobs:\n" + batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
+    const r = await anthropicTool(env, { system: "You classify building/shop maintenance jobs into a single trade. Use only the provided trade names.", user, toolName: "set_trades", schema, maxTokens: 1500 });
+    if (!r.ok) return { ok: false, error: r.error, classified };
+    for (const item of r.input.results || []) {
+      const b = batch[item.i];
+      if (!b) continue;
+      const t = names.concat("General / other").includes(item.trade) ? item.trade : "General / other";
+      if (t && t !== "General / other") {
+        overrides[b.id] = t;
+        classified++;
+      }
+    }
+    ctx?.waitUntil?.(bumpAiUsage(env, tid, "trade-classify"));
+  }
+  await setJobTradeOverrides(env, tid, overrides);
+  await buildConcertoStats(env, tid);
+  return { ok: true, classified, remaining: Math.max(0, todo.length - classified) };
+}
 async function getEngSkills(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_eng_skills'").bind(tenantId).first();
@@ -21005,7 +21198,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADES, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -21099,6 +21292,21 @@ var init_sla = __esm({
     ].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
     FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
     FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
+    CONCERTO_TRADES = [
+      ["Glazing", /glaz|\bglass\b|window ?pane|\bpane\b|shopfront|shatter|toughened|perspex/i],
+      ["Doors & shutters", /\bdoor\b|shutter|roller|hinge|door ?closer|mortice|cylinder|\block(s|ed|ing)?\b|barrel|\blatch\b|automatic door|fob\b/i],
+      ["Groundworks & external", /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|trip hazard|drain cover|manhole|external area|grounds/i],
+      ["Refrigeration & HVAC", /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\ba\/c\b|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i],
+      ["Plumbing & drainage", /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|drain|drainage|blocked|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock|sewage/i],
+      ["Electrical", /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|distribution board|consumer unit|emergency light|\bpat\b|\bfault\b.*power/i],
+      ["Fire & safety", /fire ?alarm|extinguisher|sprinkler|firestop|fire ?stop|smoke detector|fire door|\bems\b/i],
+      ["Building fabric", /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|leak.*roof|masonry/i],
+      ["Joinery", /timber|worktop|shelv|cabinet|joinery|carpentry|counter|kiosk|\bwood\b/i],
+      ["Cleaning & signage", /\bclean|graffiti|\bsign\b|signage|jet ?wash|pressure wash/i],
+      ["Pest control", /\bpest|rodent|vermin|\bwasp|\brat\b|\bmice\b|\bmouse\b|infest|\bbird/i]
+    ];
+    CONCERTO_TRADE_NAMES = CONCERTO_TRADES.map((t) => t[0]).concat("General / other");
+    _londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
     AI_CAP_DEFAULT = 400;
     FS_DEFAULT_DECL = "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. All materials used are correctly installed in accordance with training and to a good standard. Local identification labelling installed to each penetration seal.";
   }
