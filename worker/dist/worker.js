@@ -16677,6 +16677,27 @@ async function handle12(request, env, ctx, url, sess) {
       await saveJob(env, tenantId, job);
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
+    if (parts[2] === "undo-schedule" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const before = await getJob3(env, tenantId, id);
+      if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
+      const ps = before.prevSchedule;
+      if (!ps) return jsonResponse({ error: "Nothing to undo \u2014 no earlier schedule on file for this job." }, headers, 400);
+      const patch = {
+        scheduledAt: ps.scheduledAt || null,
+        scheduledEnd: ps.scheduledEnd || null,
+        engSchedule: ps.engSchedule || {},
+        // {} clears the per-engineer map back to none
+        changedBy: sess.user.username
+      };
+      if (ps.durationMinutes) patch.durationMinutes = ps.durationMinutes;
+      const updated = await patchJob(env, tenantId, id, patch, ctx);
+      if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
+      }));
+      if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+    }
     if (parts[2] === "ra-resolve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -18477,6 +18498,13 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   const hadEngineers = assignedList(job).length > 0;
   const prevEngs = assignedList(job);
   const prevStatus = job.status;
+  const scheduleTouched = ["scheduledAt", "scheduledEnd", "durationMinutes", "engSchedule", "scheduleForEngineer"].some((k) => patch[k] !== void 0);
+  const schedBefore = {
+    scheduledAt: job.scheduledAt || null,
+    scheduledEnd: job.scheduledEnd || null,
+    durationMinutes: job.durationMinutes || null,
+    engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+  };
   if (patch.assignedEngineers !== void 0) {
     job.assignedEngineers = patch.assignedEngineers;
     job.assignedTo = patch.assignedEngineers[0] || "";
@@ -18548,6 +18576,17 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     if (job.scheduledAt) {
       const s = Date.parse(job.scheduledAt);
       if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 6e4).toISOString();
+    }
+  }
+  if (scheduleTouched && !patch.__noSchedSnapshot) {
+    const schedAfter = {
+      scheduledAt: job.scheduledAt || null,
+      scheduledEnd: job.scheduledEnd || null,
+      durationMinutes: job.durationMinutes || null,
+      engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+    };
+    if (JSON.stringify(schedAfter) !== JSON.stringify(schedBefore)) {
+      job.prevSchedule = { ...schedBefore, at: now, by: patch.changedBy || "office" };
     }
   }
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
