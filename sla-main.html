@@ -801,17 +801,18 @@ async function loadNotAttended(){
       + '<div style="font-size:12.5px;color:#7a1a13;">'+pill+'booked '+esc(ago)+' · '+engs+'</div>'
       + '</div>';
   }).join("");
-  // Restore per-device open/dismissed state.
+  // The list ALWAYS starts collapsed on the page (just the count line); tap
+  // "Show list" to expand it for this view only — the open state is NOT
+  // remembered, so it never re-opens itself on the next load. The ✕ dismiss is
+  // still remembered per-device for the day.
   let dismissed = false; try{ dismissed = localStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
   box.hidden = !!dismissed;
-  const open = (function(){ try{ return localStorage.getItem("mlNabOpen") === "1"; }catch(e){ return false; } })();
-  listEl.hidden = !open;
-  $("nabToggle").textContent = open ? "Hide list" : "Show list";
+  listEl.hidden = true;
+  $("nabToggle").textContent = "Show list";
   $("nabToggle").onclick = function(){
     const nowOpen = listEl.hidden;
     listEl.hidden = !nowOpen;
     this.textContent = nowOpen ? "Hide list" : "Show list";
-    try{ localStorage.setItem("mlNabOpen", nowOpen ? "1" : "0"); }catch(e){}
   };
   $("nabDismiss").onclick = function(){ box.hidden = true; try{ localStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
   listEl.querySelectorAll(".nab-row").forEach(function(row){
