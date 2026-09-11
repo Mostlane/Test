@@ -2262,6 +2262,32 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
+    // POST /sla/jobs/{id}/undo-schedule — one-tap revert of the last schedule
+    // change (the common "I nudged it on my phone" fumble). Restores the times
+    // snapshotted on the job by patchJob; running through patchJob again snapshots
+    // the reverted-from times, so pressing it a second time redoes.
+    if (parts[2] === "undo-schedule" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const before = await getJob(env, tenantId, id);
+      if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
+      const ps = before.prevSchedule;
+      if (!ps) return jsonResponse({ error: "Nothing to undo — no earlier schedule on file for this job." }, headers, 400);
+      const patch = {
+        scheduledAt: ps.scheduledAt || null,
+        scheduledEnd: ps.scheduledEnd || null,
+        engSchedule: ps.engSchedule || {},   // {} clears the per-engineer map back to none
+        changedBy: sess.user.username
+      };
+      if (ps.durationMinutes) patch.durationMinutes = ps.durationMinutes;
+      const updated = await patchJob(env, tenantId, id, patch, ctx);
+      if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
+      if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      return updated
+        ? jsonResponse(decorateJobWithLiveSla(updated), headers)
+        : jsonResponse({ error: "Not found" }, headers, 404);
+    }
+
     // POST /sla/jobs/{id}/ra-resolve — an admin clears a safety flag (controls
     // now in place / reassigned / rescheduled). Releases + notifies the engineer.
     if (parts[2] === "ra-resolve" && method === "POST") {
@@ -4230,6 +4256,20 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   const prevEngs = assignedList(job);            // roster before this patch
   const prevStatus = job.status;
 
+  // Undo for accidental schedule changes (a common mobile fumble). Snapshot the
+  // schedule BEFORE this patch touches it; if the patch actually moves the job we
+  // stash it on `job.prevSchedule` so a one-tap undo can restore it. Because the
+  // undo itself runs through here, undoing snapshots the reverted-from times too —
+  // so the button toggles undo↔redo.
+  const scheduleTouched = ["scheduledAt", "scheduledEnd", "durationMinutes", "engSchedule", "scheduleForEngineer"]
+    .some(k => patch[k] !== undefined);
+  const schedBefore = {
+    scheduledAt: job.scheduledAt || null,
+    scheduledEnd: job.scheduledEnd || null,
+    durationMinutes: job.durationMinutes || null,
+    engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+  };
+
   if (patch.assignedEngineers !== undefined) {
     job.assignedEngineers = patch.assignedEngineers;
     job.assignedTo = patch.assignedEngineers[0] || "";   // keep legacy field as the primary
@@ -4322,6 +4362,20 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 60000).toISOString();
     }
   }
+  // Record the pre-patch schedule for one-tap undo, but only if the schedule
+  // genuinely moved (so an unrelated edit — status, note — never overwrites it).
+  if (scheduleTouched && !patch.__noSchedSnapshot) {
+    const schedAfter = {
+      scheduledAt: job.scheduledAt || null,
+      scheduledEnd: job.scheduledEnd || null,
+      durationMinutes: job.durationMinutes || null,
+      engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+    };
+    if (JSON.stringify(schedAfter) !== JSON.stringify(schedBefore)) {
+      job.prevSchedule = { ...schedBefore, at: now, by: patch.changedBy || "office" };
+    }
+  }
+
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
   if (patch.requiresRA !== undefined) job.requiresRA = !!patch.requiresRA;
   if (patch.requiresSignature !== undefined) job.requiresSignature = !!patch.requiresSignature;

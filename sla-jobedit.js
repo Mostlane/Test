@@ -234,6 +234,10 @@
           <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
         </div>
         <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (5&nbsp;min / 1&nbsp;day steps; hold Shift for 1&nbsp;hour). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
+        <div id="mljeSchedUndo" style="display:none;margin-top:6px;">
+          <button type="button" id="mljeSchedUndoBtn" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:600;font-size:13px;border-radius:8px;padding:6px 10px;cursor:pointer;">↩ Undo last schedule change</button>
+          <span id="mljeSchedUndoWhen" class="mlje-hint" style="margin-left:6px;"></span>
+        </div>
 
         <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
         <select id="mljeDuration" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;">
@@ -366,6 +370,32 @@
     $("mljeSchedClear").addEventListener("click", () => {
       $("mljeSchedDate").value = ""; $("mljeSchedStart").value = ""; $("mljeSchedEnd").value = "";
     });
+    // One-tap undo of the last schedule change (a common accidental mobile nudge).
+    // The server stashes the pre-change times on the job; this reverts to them.
+    $("mljeSchedUndoBtn").addEventListener("click", async () => {
+      if (!currentJob) return;
+      const btn = $("mljeSchedUndoBtn"), msg = $("mljeMsg");
+      const prevLabel = fmtSchedSummary(currentJob.prevSchedule);
+      btn.disabled = true; msg.textContent = "Undoing the schedule change…"; msg.className = "mlje-msg";
+      try {
+        const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id) + "/undo-schedule", { method: "POST" });
+        if (!r.ok) { let t = ""; try { t = (await r.json()).error || ""; } catch (e) {} throw new Error(t || ("HTTP " + r.status)); }
+        const saved = await r.json();
+        currentJob = saved;
+        const sAt = saved.scheduledAt ? new Date(saved.scheduledAt) : null, sEnd = saved.scheduledEnd ? new Date(saved.scheduledEnd) : null;
+        const pd = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+        $("mljeSchedDate").value = (sAt && !isNaN(sAt)) ? pd(sAt) : "";
+        $("mljeSchedStart").value = (sAt && !isNaN(sAt)) ? p2(sAt.getHours()) + ":" + p2(sAt.getMinutes()) : "";
+        $("mljeSchedEnd").value = (sEnd && !isNaN(sEnd)) ? p2(sEnd.getHours()) + ":" + p2(sEnd.getMinutes()) : "";
+        renderEngSched(); renderSchedUndo();
+        msg.textContent = "↩ Schedule put back to " + prevLabel + ".";
+        msg.className = "mlje-msg ok";
+        if (onSavedCb) { try { onSavedCb(saved); } catch (e) {} }
+      } catch (e) {
+        msg.textContent = "❌ Couldn't undo (" + e.message + ").";
+        msg.className = "mlje-msg err";
+      } finally { btn.disabled = false; }
+    });
     // Visibility ("release") control: toggle the panel, show the datetime box only
     // for "At a set time", and reflect the chosen mode on the button.
     $("mljeVisBtn").addEventListener("click", () => {
@@ -399,6 +429,37 @@
   // shared date/time is the default for anyone left blank.
   function mljeNorm(s) { return String(s || "").toLowerCase().replace(/\s+/g, ".").trim(); }
   function engNameFor(username) { const e = (engineers || []).find(x => x.username && x.username.toLowerCase() === String(username).toLowerCase()); return e ? e.name : username; }
+  // ---- Schedule-undo display helpers ----
+  function fmtSchedSummary(ps) {
+    if (!ps) return "the previous times";
+    const hasEng = ps.engSchedule && Object.keys(ps.engSchedule).length;
+    if (!ps.scheduledAt && !hasEng) return "unscheduled";
+    const d = ps.scheduledAt ? new Date(ps.scheduledAt) : null;
+    if (d && !isNaN(d)) {
+      const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+      let s = day + " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
+      if (ps.scheduledEnd) { const e = new Date(ps.scheduledEnd); if (!isNaN(e)) s += "–" + p2(e.getHours()) + ":" + p2(e.getMinutes()); }
+      return s;
+    }
+    return "the previous times";
+  }
+  function schedAgo(iso) {
+    const t = Date.parse(iso); if (!Number.isFinite(t)) return "";
+    const mins = Math.round((Date.now() - t) / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + " min ago";
+    const h = Math.round(mins / 60); if (h < 24) return h + "h ago";
+    return Math.round(h / 24) + "d ago";
+  }
+  function renderSchedUndo() {
+    const wrap = $("mljeSchedUndo"); if (!wrap) return;
+    const ps = currentJob && currentJob.prevSchedule;
+    if (!ps || !isSlaAdmin(cachedPerms())) { wrap.style.display = "none"; return; }
+    wrap.style.display = "";
+    const ago = ps.at ? schedAgo(ps.at) : "";
+    $("mljeSchedUndoWhen").textContent = "→ back to " + fmtSchedSummary(ps) + (ago ? " (changed " + ago + ")" : "");
+  }
+
   function renderEngSched() {
     const wrap = $("mljeEngSchedWrap"), host = $("mljeEngSched"); if (!wrap || !host) return;
     const checked = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
@@ -645,6 +706,7 @@
         sel.value = v;
       }
     }
+    renderSchedUndo();   // show the "↩ Undo last schedule change" affordance if the job has a stashed previous schedule
     const tgt = job.targetAt ? new Date(job.targetAt) : null;
     $("mljeDueHint").textContent = (tgt && !isNaN(tgt))
       ? ` · SLA due by ${pd(tgt)} ${p2(tgt.getHours())}:${p2(tgt.getMinutes())}` : "";
