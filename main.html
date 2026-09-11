@@ -1194,6 +1194,11 @@ const MAP = window.ML_PERM_MAP || {
       }
 
       function show(items) {
+        // While the OWNER is impersonating (View As), never show the attention
+        // gate — it isn't the owner's task list, and a blocking overlay would
+        // trap them mid-impersonation. `mostlaneViewAsReal` is the durable
+        // owner-impersonation stash (set only by View As, cleared on return/logout).
+        try { if (localStorage.getItem("mostlaneViewAsReal")) return; } catch (e) {}
         var mobile = window.matchMedia("(max-width:999px)").matches;
         var surface = mobile ? "mobile" : "desktop";
         var sig = items.map(function (i) { return i.href + ":" + i.n; }).join("|");
