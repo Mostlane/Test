@@ -278,7 +278,7 @@
       g("notifyBack").style.display="flex";
       try{
         const u = await authFetch("/users").then(r=>r.json()); const arr = Array.isArray(u)?u:(u.users||[]);
-        NOTIFY_USERS = arr.map(x=>({ username: x.username||x.name||"", staffType: x.StaffType||x.staffType||(x.Profile&&x.Profile.staffType)||"" }))
+        NOTIFY_USERS = arr.map(x=>({ username: x.Username||x.username||x.name||"", staffType: x.StaffType||x.staffType||"" }))
           .filter(x=>x.username)
           .sort((a,b)=> a.username.localeCompare(b.username));
       }catch(e){ NOTIFY_USERS = []; }
