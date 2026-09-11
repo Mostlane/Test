@@ -15640,6 +15640,77 @@ async function handle12(request, env, ctx, url, sess) {
     }).sort((a, b) => a.name.localeCompare(b.name));
     return jsonResponse({ ok: true, date: today, engineers }, headers);
   }
+  if (subpath === "/not-attended" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const permSet = await userPerms(env, tenantId, sess);
+    if (!(permSet.has("FullAccess") || permSet.has("SLA") || permSet.has("SLAAdmin")))
+      return jsonResponse({ error: "Needs the SLA permission" }, headers, 403);
+    const today = londonNow().date;
+    const daysBack = Math.max(1, Math.min(365, parseInt(url.searchParams.get("days") || "14", 10) || 14));
+    const cutoff = new Date(Date.now() - daysBack * 864e5).toISOString().slice(0, 10);
+    const londonDay = (iso) => {
+      try {
+        const d = new Date(iso);
+        return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d);
+      } catch {
+        return "";
+      }
+    };
+    const doneNames = new Set((await getCategories(env, tenantId)).filter((c) => c.done).map((c) => String(c.name).toLowerCase()));
+    const finished = (s) => {
+      const v = String(s || "").toLowerCase();
+      return DONE_STATES.has(v) || doneNames.has(v);
+    };
+    const parked = (s) => {
+      const v = String(s || "").toLowerCase();
+      return v === "on hold" || v === "quote" || v === "order";
+    };
+    const isSlaReactive = (j) => !jobIsProject(j) && !j.projectId && !j.fleetRenewal && !j.renewalType && String(j.storeType || "").toLowerCase() !== "fleet" && !j.fallback;
+    const all = await listJobs(env, tenantId);
+    let nameByNorm = {};
+    try {
+      const { results: us } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tenantId).all();
+      for (const u of us || []) nameByNorm[normId(u.username)] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+    } catch {
+    }
+    const jobs = [];
+    for (const j of all) {
+      if (!isSlaReactive(j)) continue;
+      const missed = [];
+      let earliest = "";
+      for (const a of assignedList(j)) {
+        const norm = normId(a);
+        const sc = effSchedule(j, norm);
+        if (!sc.scheduledAt) continue;
+        const day = londonDay(sc.scheduledAt);
+        if (!day || day >= today) continue;
+        if (day < cutoff) continue;
+        const st = String(effStatus(j, norm) || "");
+        if (finished(st) || parked(st)) continue;
+        missed.push({ engineer: nameByNorm[norm] || a, status: st, day });
+        if (!earliest || day < earliest) earliest = day;
+      }
+      if (!missed.length) continue;
+      const daysAgo = earliest ? Math.round((Date.parse(today) - Date.parse(earliest)) / 864e5) : 0;
+      jobs.push({
+        id: j.id,
+        ref: j.helpdeskRef || j.reference || j.id,
+        site: j.siteName || j.helpdeskRef || j.reference || "",
+        siteCode: j.siteCode || "",
+        priority: j.priority || "",
+        storeType: j.storeType || "",
+        scheduledDay: earliest,
+        daysAgo,
+        engineers: missed
+      });
+    }
+    const pr = (p) => {
+      const m = String(p || "").match(/(\d)/);
+      return m ? parseInt(m[1], 10) : 9;
+    };
+    jobs.sort((a, b) => (b.scheduledDay || "").localeCompare(a.scheduledDay || "") || pr(a.priority) - pr(b.priority));
+    return jsonResponse({ ok: true, date: today, days: daysBack, count: jobs.length, jobs }, headers);
+  }
   if (subpath === "/route-optimize" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess))

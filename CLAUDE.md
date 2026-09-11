@@ -2639,6 +2639,30 @@ Jamie: "Why so slow anyway?" Evidence from `health_events` (kind='slow', >2.5 s)
   Check the effect the same way it was found: `SELECT substr(at,1,10), COUNT(*),
   ROUND(AVG(ms)) FROM health_events WHERE kind='slow' GROUP BY 1`.
 
+## "Jobs not attended" — following-day warning (11 Sep 2026)
+Jamie: "if jobs are not attended in a day, we need a warning the following day — a
+list of allocated jobs not completed. SLA type jobs only, not projects or Yard or
+Office." **GET /sla/not-attended?days=N** (sla.js; office = FullAccess|SLA|SLAAdmin,
+default window 14 days, cap 365) returns reactive SLA jobs that were **allocated to
+an engineer and booked for a day now in the PAST** but never finished. Per-engineer:
+for each assigned engineer it reads `effSchedule`/`effStatus` — a slot whose London
+day is `< today` and whose status is not finished (DONE_STATES + custom done
+categories) and not parked (On Hold/Quote/Order) counts as a miss; the job is
+returned with the missed engineer(s) + earliest missed day + `daysAgo`, sorted
+most-recent-first (P1 floats up). **SLA-reactive only** via `isSlaReactive(j)` =
+NOT `jobIsProject` / `projectId` (so the Yard/Office project sites are excluded),
+NOT `fleetRenewal`/`renewalType`/storeType `fleet`, NOT `fallback` (dormant
+templates already dropped by listJobs). A job scheduled for TODAY is NOT a miss (the
+day isn't over). Surfaces: (a) **sla-main.html red banner** `#notAttendedBanner`
+(the phone-facing surface — the hub is desktop-only) — count + collapsible list of
+site · engineer · "Nd ago", each row opens job-view to reschedule; Show-list and ✕
+dismiss states per-device (localStorage `mlNabOpen`/`mlNabDismissed` keyed to the
+day); loaded via `loadNotAttended()` on board init, office-gated by `nabIsOffice()`.
+(b) **main.html hub widget `notattended`** (area sla, desktop office) lists the top 6
++ "N more", `[data-clear]` when none. (c) **overview KPI** "⚠ not attended". No new
+table; reuses listJobs. TODO/next (offered, not built): a morning cron PUSH to SLA
+admins so the warning reaches the phone proactively without opening the board.
+
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
