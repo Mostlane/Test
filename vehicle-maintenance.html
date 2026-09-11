@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <title>Mostlane • Vehicle maintenance</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -223,7 +223,7 @@
       </div>`).join("") : '<span class="empty">No costs recorded yet.</span>';
     // Filter chips.
     let chips=`<div class="chip ${SELCAT===""?"on":""}" onclick="setFilter('')">All <span class="ct">${money(GRAND)}</span></div>`;
-    chips+=rows.map(x=>`<div class="chip ${SELCAT===x.cat?"on":""}" onclick="setFilter('${esc(x.cat).replace(/'/g,"\\'")}')"><span class="sw" style="background:${esc(colourFor(x.cat))}"></span>${esc(x.cat)} <span class="ct">${money(x.amt)}</span></div>`).join("");
+    chips+=rows.map(x=>`<div class="chip ${SELCAT===x.cat?"on":""}" onclick="setFilter(${esc(JSON.stringify(String(x.cat)))})"><span class="sw" style="background:${esc(colourFor(x.cat))}"></span>${esc(x.cat)} <span class="ct">${money(x.amt)}</span></div>`).join("");
     $("chips").innerHTML=chips;
   }
 
@@ -257,7 +257,7 @@
         </div>
         <div class="ract">
           ${doc}
-          <button class="btn ghost small" onclick="openRecord(${r.id})" style="margin-left:auto">✏️ Edit</button>
+          <button class="btn ghost small" onclick="openRecord(${esc(JSON.stringify(r.id))})" style="margin-left:auto">✏️ Edit</button>
         </div>
       </div>`;
     }).join("");

@@ -134,7 +134,7 @@
     // user is no longer allowed (permission changes win over stale caches).
     var tok = localStorage.getItem("mostlaneToken");
     if (tok) {
-      fetch(window.MOSTLANE_API + "/theme", { headers: { "Authorization": "Bearer " + tok } })
+      fetch(window.MOSTLANE_API + "/theme", { headers: { "Authorization": "Bearer " + tok, "X-Device-Id": (function () { try { return localStorage.getItem("deviceID") || ""; } catch (e) { return ""; } })() } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d || !d.ok) return;
@@ -146,6 +146,26 @@
         }).catch(function () {});
     }
   })();
+
+  // This browser's device id (device-auth.js creates it at login; same key).
+  // Sent as X-Device-Id on EVERY call to the API: a session created since
+  // Sep 2026 is bound to the device it was issued to and the worker refuses
+  // the token from anywhere else.
+  function deviceId() {
+    try {
+      var id = localStorage.getItem("deviceID");
+      if (!id) { id = "dev-" + crypto.randomUUID().slice(0, 7); localStorage.setItem("deviceID", id); }
+      return id;
+    } catch (e) { return ""; }
+  }
+  function withDeviceHeader(init, input) {
+    init = Object.assign({}, init || {});
+    var headers = new Headers(init.headers || (typeof input !== "string" && input ? input.headers : undefined));
+    var id = deviceId();
+    if (id && !headers.has("X-Device-Id")) headers.set("X-Device-Id", id);
+    init.headers = headers;
+    return init;
+  }
 
   // ── Activity log: page views ──────────────────────────────────────────────
   // One tiny beacon per page open (logged-in users only). Actions themselves
@@ -159,7 +179,7 @@
       if (["login.html", "onboard.html", "forgot-password.html", "reset-password.html", "confirmation.html"].indexOf(page) !== -1) return;
       fetch(window.MOSTLANE_API + "/audit/pageview", {
         method: "POST", keepalive: true,
-        headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json" },
+        headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json", "X-Device-Id": deviceId() },
         body: JSON.stringify({ page: page })
       }).catch(function () {});
     } catch (e) {}
@@ -188,7 +208,46 @@
   }
 
   const TOKEN_KEY = "mostlaneToken";
-  const nativeFetch = window.fetch.bind(window);
+  // portal-config's OWN calls (badges, theme, gates, bell) go through this and
+  // must carry the device header too, so it wraps the true native fetch.
+  const nativeFetch0 = window.fetch.bind(window);
+  const nativeFetch = function (input, init) {
+    try {
+      var u = new URL(typeof input === "string" ? input : (input && input.url), location.href);
+      if (u.host === new URL(API).host) return nativeFetch0(input, withDeviceHeader(init, input));
+    } catch (e) {}
+    return nativeFetch0(input, init);
+  };
+
+  // ── The ONE logout (Sep 2026). Every Log out / Sign out button calls this.
+  // It (1) tells the server to end the session (the token used to stay valid
+  // for its full 90 days), (2) wipes everything the app stored on the device —
+  // login flags, permissions, drafts, signatures, queued photos, the offline
+  // queue — except the device id, and (3) goes to the login page. The old
+  // buttons removed only the token, so the app reopened straight to the
+  // previous person's menu.
+  window.mlLogout = async function (opts) {
+    opts = opts || {};
+    try {
+      var queued = 0;
+      try { queued += (JSON.parse(localStorage.getItem("mlOfflineQueue_v1") || "[]") || []).length; } catch (e) {}
+      if (queued && !opts.force && window.MLUI && MLUI.confirm) {
+        var go = await MLUI.confirm(queued + " change" + (queued === 1 ? "" : "s") + " made offline " + (queued === 1 ? "has" : "have") + " not reached the portal yet and will be lost. Log out anyway?", { title: "Unsent changes", okLabel: "Log out", danger: true });
+        if (!go) return false;
+      }
+    } catch (e) {}
+    var tok = null; try { tok = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+    if (tok) { try { nativeFetch(API + "/auth/logout", { method: "POST", keepalive: true, headers: { "Authorization": "Bearer " + tok, "X-Device-Id": deviceId() } }).catch(function () {}); } catch (e) {} }
+    var keepDevice = null; try { keepDevice = localStorage.getItem("deviceID"); } catch (e) {}
+    var keepDevice2 = null; try { keepDevice2 = localStorage.getItem("mlDeviceId"); } catch (e) {}
+    try { localStorage.clear(); } catch (e) {}
+    try { sessionStorage.clear(); } catch (e) {}
+    try { if (keepDevice) localStorage.setItem("deviceID", keepDevice); if (keepDevice2) localStorage.setItem("mlDeviceId", keepDevice2); } catch (e) {}
+    try { if (window.indexedDB) ["mlVanCheck", "mlHandover", "mlPhotoQ"].forEach(function (n) { try { indexedDB.deleteDatabase(n); } catch (e) {} }); } catch (e) {}
+    try { if (window.caches) { var ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); } } catch (e) {}
+    location.replace("/login.html");
+    return true;
+  };
 
   // Request coalescing: the menu and the sidebar both ask for the same badge /
   // attention data on load. For a short list of idempotent GET endpoints we
@@ -235,10 +294,13 @@
             headers.set("Authorization", "Bearer " + token);
           }
           init.headers = headers;
-          return doFetch(newUrl, init);
+          return doFetch(newUrl, withDeviceHeader(init));
         }
-        // Direct calls to the API host (badges/attention) coalesce too.
-        if (typeof input === "string") return doFetch(input, init);
+        // Direct calls to the API host: add the device header; GETs coalesce too.
+        if (u.host === apiHost) {
+          if (typeof input === "string") return doFetch(input, withDeviceHeader(init, input));
+          return nativeFetch(input, withDeviceHeader(init, input));
+        }
       }
     } catch (e) {
       console.error("[portal-config] fetch bridge error:", e);
@@ -281,6 +343,21 @@
   // app. A page's hard-coded back button must never drop them on the office menu
   // — or a page they lack permission for (e.g. van-check's back → vehicles.html).
   // So on every portal page, repoint the standard back button (data-role="home")
+  // ── Client wall ─────────────────────────────────────────────────────────────
+  // An EXTERNAL client login (staffType "client") must never reach a staff page.
+  // client-home.html is standalone (it doesn't load portal-config), so this only
+  // fires if a client lands on a staff page via a bookmark/typed URL — it bounces
+  // them straight back to their portal. Server endpoints are org-walled regardless.
+  (function clientWall() {
+    try {
+      var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      if (st !== "client") return;
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var OK = ["client-home.html", "login.html", "forgot-password.html", "reset-password.html", "change-password.html", "hash.html"];
+      if (OK.indexOf(page) === -1) location.replace("/client-home.html");
+    } catch (e) {}
+  })();
+
   // to you.html. Uses the shared mlIsFieldUser when present, else an inline copy
   // (ml-perms.js isn't loaded on every page; portal-config.js is).
   function mlFieldUserLocal() {
@@ -461,6 +538,82 @@
   // below it, portal-wide. Height is exactly the device's inset (0 on a phone
   // with no notch, and in a normal browser tab), so it's only ever as slim as it
   // needs to be. Content scrolling under it looks right because it's opaque.
+  // ── iOS: keep fixed bars on the VISIBLE screen ─────────────────────────────
+  // On an installed iPhone PWA, WebKit positions `position:fixed` against the
+  // LAYOUT viewport, and after the on-screen keyboard has been up on a form
+  // page (or the page was zoomed) that layout viewport can stay shifted from
+  // the visible one — every fixed element then sits a keyboard-height too high
+  // and slides about as you scroll (Jamie: the purple View-As bar + the field
+  // tab bar floating mid-screen on engineer-jobs / engineer-job, and the navy
+  // status strip pushed off the top). Chromium never does this, so it can't be
+  // reproduced headless. Fix: whenever the visual viewport disagrees with the
+  // layout one, pin the bars to the visual viewport's own edges (visualViewport
+  // offsetTop/height); when they agree again, hand back to the CSS. Skipped
+  // while an input has focus (keyboard genuinely up — don't cover the field).
+  (function pinFixedBars() {
+    var vv = window.visualViewport; if (!vv) return;
+    try { if (window.self !== window.top) return; } catch (e) { return; }
+    var SEL = "#mlStatusCap,#mlVaBar,.tabbar";
+    var raf = 0;
+    function typing() {
+      var a = document.activeElement; if (!a) return false;
+      var t = (a.tagName || "").toLowerCase();
+      return t === "input" || t === "textarea" || t === "select" || a.isContentEditable;
+    }
+    function apply() {
+      raf = 0;
+      var els = document.querySelectorAll(SEL); if (!els.length) return;
+      var off = vv.offsetTop || 0;
+      // Pin ONLY when the layout viewport is genuinely shifted (offsetTop) — the
+      // keyboard-left-it-scrolled case. The old test also tripped on
+      // innerHeight != vv.height, which differs on ordinary iOS scrolls (dynamic
+      // toolbar / rubber-band), so the bars were re-pinned every scroll frame and
+      // floated mid-screen (the purple View-As bar Jamie saw drifting).
+      var drift = Math.abs(off) > 1;
+      var pin = drift && !typing();
+      var stack = 0;   // bottom bars stack upward: View-As bar first, tab bar above it
+      // Process bottom bars in stacking order (mlVaBar before .tabbar).
+      var list = Array.prototype.slice.call(els).sort(function (a, b) { return (a.id === "mlVaBar" ? 0 : 1) - (b.id === "mlVaBar" ? 0 : 1); });
+      list.forEach(function (el) {
+        if (getComputedStyle(el).display === "none") return;
+        var isCap = el.id === "mlStatusCap";
+        if (!pin) {
+          if (el.dataset.mlPinned) {
+            el.style.top = el.dataset.mlTop0 || ""; el.style.bottom = el.dataset.mlBottom0 || "";
+            delete el.dataset.mlPinned; delete el.dataset.mlTop0; delete el.dataset.mlBottom0;
+          }
+          return;
+        }
+        if (!el.dataset.mlPinned) { el.dataset.mlPinned = "1"; el.dataset.mlTop0 = el.style.top || ""; el.dataset.mlBottom0 = el.style.bottom || ""; }
+        if (isCap) { el.style.top = off + "px"; return; }
+        var h = el.offsetHeight || 0;
+        el.style.bottom = "auto";
+        el.style.top = Math.round(off + vv.height - h - stack) + "px";
+        stack += h;
+      });
+    }
+    function queue() { if (!raf) raf = requestAnimationFrame(apply); }
+    // Re-evaluate on the moments that actually shift the viewport (keyboard =
+    // vv resize, rotation, restore) — NOT on scroll. A position:fixed bar stays
+    // put on scroll on its own; re-pinning per scroll frame was what made the
+    // bars drift/jitter mid-screen during momentum scrolling.
+    vv.addEventListener("resize", queue);
+    window.addEventListener("orientationchange", function () { setTimeout(queue, 250); });
+    window.addEventListener("pageshow", function () { setTimeout(queue, 50); });
+    // Keyboard dismissed: WebKit may leave the layout viewport where the keyboard
+    // pushed it. A zero-distance scrollTo is the cheapest nudge that makes it
+    // re-place fixed elements; re-check shortly after in case it settles late.
+    document.addEventListener("focusout", function () {
+      setTimeout(function () { try { window.scrollTo(window.scrollX, window.scrollY); } catch (e) {} queue(); }, 60);
+      setTimeout(queue, 400);
+    }, true);
+    // Bars are added after load (View-As bar, tab bars in page markup) — re-run once the DOM settles.
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(queue, 0); });
+    else setTimeout(queue, 0);
+    window.addEventListener("load", function () { setTimeout(queue, 100); });
+    window.mlPinFixedBars = queue;
+  })();
+
   (function statusCap() {
     // Only the top document paints it — po.html embeds portal pages in an
     // iframe, and a second cap inside the frame would double the gap.
@@ -578,8 +731,8 @@
     }
     var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
     function esc(s) {
-      return String(s).replace(/[&<>"]/g, function (c) {
-        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c];
       });
     }
     function markup(label, big) {
@@ -648,15 +801,31 @@
     // page renders the description plain (list previews). richBar(textarea)
     // attaches a small format toolbar (B · colours · ⚠🚨🔴 emojis) above it.
     var RICH_COLS = { red: "#c1121f", amber: "#b45309", green: "#1f7a44", blue: "#1e40af" };
-    function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+    // Italic: _text_ (underscores; won't touch **bold** which uses asterisks, and
+    // only fires at word boundaries so file_names etc. are left alone).
+    var ITAL = /(^|[\s(>])_([^_\n][^_\n]*?)_(?=$|[\s.,;:)!?<])/g;
     window.MLUI.rich = function (s) {
       var e = richEsc(s);
       e = e.replace(/\*\*([^*][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+      e = e.replace(ITAL, function (_m, pre, t) { return pre + "<em>" + t + "</em>"; });
       e = e.replace(/\{(red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, function (_m, c, t) { return '<span style="color:' + RICH_COLS[c] + ';font-weight:600;">' + t + "</span>"; });
-      return e.replace(/\n/g, "<br>");
+      // Bullet lists: consecutive lines starting with "- " become a real <ul>.
+      var lines = e.split("\n"), out = [], i = 0;
+      while (i < lines.length) {
+        if (/^\s*-\s+\S/.test(lines[i])) {
+          var items = [];
+          while (i < lines.length && /^\s*-\s+\S/.test(lines[i])) { items.push("<li>" + lines[i].replace(/^\s*-\s+/, "") + "</li>"); i++; }
+          out.push("<ul style='margin:4px 0;padding-left:20px;'>" + items.join("") + "</ul>");
+        } else { out.push(lines[i]); i++; }
+      }
+      return out.join("<br>").replace(/<br>\s*(<ul)/g, "$1").replace(/(<\/ul>)\s*<br>/g, "$1");
     };
     window.MLUI.richStrip = function (s) {
-      return richEsc(s).replace(/\*\*([^*][\s\S]*?)\*\*/g, "$1").replace(/\{(?:red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, "$1");
+      return richEsc(s).replace(/\*\*([^*][\s\S]*?)\*\*/g, "$1")
+        .replace(ITAL, "$1$2")
+        .replace(/\{(?:red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, "$1")
+        .replace(/^\s*-\s+/gm, "• ");
     };
     window.MLUI.richBar = function (ta) {
       if (typeof ta === "string") ta = document.getElementById(ta);
@@ -681,6 +850,17 @@
         });
         fire(); updatePrev();
       }
+      // Prefix the start of each selected line (used for bullet points).
+      function linePrefix(prefix) {
+        withScroll(function () {
+          var v = ta.value, s = ta.selectionStart || 0, en = ta.selectionEnd || s;
+          var ls = v.lastIndexOf("\n", s - 1) + 1;
+          var block = v.slice(ls, en), prefixed = block.replace(/^/gm, prefix);
+          ta.value = v.slice(0, ls) + prefixed + v.slice(en);
+          ta.focus(); ta.selectionStart = ls + prefix.length; ta.selectionEnd = ls + prefixed.length;
+        });
+        fire(); updatePrev();
+      }
       var bar = document.createElement("div");
       bar.style.cssText = "display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:5px;";
       function mkBtn(html, title, fn, extra) {
@@ -693,6 +873,8 @@
         bar.appendChild(b);
       }
       mkBtn("<b>B</b>", "Bold", function () { wrap("**", "**"); });
+      mkBtn("<i>I</i>", "Italic", function () { wrap("_", "_"); });
+      mkBtn("• List", "Bullet points", function () { linePrefix("- "); });
       Object.keys(RICH_COLS).forEach(function (c) { mkBtn("A", c + " text", function () { wrap("{" + c + "}", "{/}"); }, "color:" + RICH_COLS[c] + ";font-weight:700;"); });
       var sep = document.createElement("span"); sep.style.cssText = "width:1px;height:18px;background:#e2e8f0;margin:0 3px;"; bar.appendChild(sep);
       ["⚠️", "🚨", "🔴", "🟠", "✅", "🔧", "📍", "🕒"].forEach(function (em) { mkBtn(em, "Insert " + em, function () { ins(em + " "); }); });
@@ -703,7 +885,7 @@
       var PREV_LBL = "<div style='font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;'>Preview — how the engineer sees it</div>";
       function updatePrev() {
         var v = ta.value || "";
-        if (/\*\*|\{(?:red|amber|green|blue)\}/.test(v)) { prev.style.display = "block"; prev.innerHTML = PREV_LBL + window.MLUI.rich(v); }
+        if (/\*\*|_[^_\n]|\{(?:red|amber|green|blue)\}|(?:^|\n)\s*-\s+\S/.test(v)) { prev.style.display = "block"; prev.innerHTML = PREV_LBL + window.MLUI.rich(v); }
         else { prev.style.display = "none"; }
       }
       ta.addEventListener("input", updatePrev);
@@ -734,6 +916,9 @@
         var pj = JSON.stringify(u);
         setBoth("mostlanePermissions", pj);
         setBoth("mostlaneLoggedIn", "true");
+        // Carry the impersonated user's staff type so field/office/CLIENT gating
+        // (the client wall + landing) behaves as that user, not the owner.
+        setBoth("mostlaneStaffType", u.StaffType || "field");
         sessionStorage.setItem("mostlaneFolder", u.SharePointPath || "");
         sessionStorage.setItem("mostlaneVehicle", u.VehicleAssigned || "");
         sessionStorage.setItem("mostlaneEmployment", u.EmploymentType || "");
@@ -796,10 +981,12 @@
               token: token,
               user: localStorage.getItem("mostlaneUser") || OWNER,
               perms: localStorage.getItem("mostlanePermissions") || "{}",
+              staff: localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "",
               master: sessionStorage.getItem("mostlaneMasterLogin") || ""
             }));
             applySession(d);
-            location.href = "/main.html";
+            // A client account lands in its own walled portal; everyone else on main.
+            location.href = ((d.user && d.user.StaffType) === "client") ? "/client-home.html" : "/main.html";
           }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
         };
       };
@@ -832,6 +1019,11 @@
             setBoth("mostlaneUsername", stash.user || "");
             setBoth("mostlanePermissions", stash.perms || "{}");
             setBoth("mostlaneLoggedIn", "true");
+            // Restore the owner's own staff type (else the client wall would bounce
+            // him if he'd just been viewing as a client). Fall back to the perms blob.
+            var realStaff = stash.staff;
+            if (realStaff === undefined || realStaff === null) { try { realStaff = (JSON.parse(stash.perms || "{}").StaffType) || "office"; } catch (e) { realStaff = "office"; } }
+            setBoth("mostlaneStaffType", realStaff || "office");
             if (stash.master) sessionStorage.setItem("mostlaneMasterLogin", stash.master);
             else sessionStorage.removeItem("mostlaneMasterLogin");
             localStorage.removeItem("mostlaneViewAsReal");
@@ -839,6 +1031,7 @@
           };
           bar.appendChild(lbl); bar.appendChild(btn);
           document.body.appendChild(bar);
+          if (window.mlPinFixedBars) setTimeout(window.mlPinFixedBars, 0);
           // The field app (route/jobs/inbox/you) has its own fixed bottom tab bar
           // at bottom:0 — the purple bar would sit ON TOP and hide it. Lift the
           // tab bar to just above the purple bar so both stay usable while viewing.
@@ -930,6 +1123,7 @@
         { title: "Operations", items: [
           { label: "Home", href: "main.html", icon: "home", always: true, match: ["main.html", ""] },
           { label: "SLA / Jobs", href: "sla-main.html?reset=1", icon: "jobs", perms: ["SLA", "SLAAdmin"], match: ["sla-menu.html", "sla-main.html", "job-view.html", "sla-settings.html", "sla-scheduler.html", "engineer-jobs.html", "add-job.html"] },
+          { label: "Where's everyone", href: "engineers-live.html", icon: "jobs", perms: ["SLAAdmin", "WhereEveryone"], match: ["engineers-live.html"] },
           { label: "Sites", href: "sites.html", icon: "sites", perms: ["Sites", "AddSite"] },
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
@@ -939,13 +1133,11 @@
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [
-          { label: "Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["__fullOnly"], match: ["office-timesheet.html"] },
-          { label: "My Timesheet", href: "engineer-timesheet.html", icon: "timesheet", perms: ["EngTimesheet"], match: ["engineer-timesheet.html"] },
-          { label: "Engineer Timesheets", href: "timesheets-admin.html", icon: "timesheet", perms: ["TimesheetAdmin"], match: ["timesheets-admin.html"] },
+          { label: "Employees", href: "employees.html", icon: "users", perms: ["StaffRecords"], match: ["employees.html"] },
+          { label: "Timesheets", href: "timesheets-admin.html", icon: "timesheet", perms: ["TimesheetAdmin", "EngTimesheet"], hrefBy: [["TimesheetAdmin", "timesheets-admin.html"], ["EngTimesheet", "engineer-timesheet.html"]], match: ["timesheets-admin.html", "office-timesheet.html", "engineer-timesheet.html"] },
           { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock", "OfficeTimesheet"] },
           { label: "Holiday", href: "holiday.html", icon: "holiday", perms: ["Holiday"] },
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },
-          { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] },
@@ -960,8 +1152,10 @@
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
-          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["chapplins.html", "chapplins-compliance.html"] },
-          { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["Compliance"], match: ["eicr-check.html"] },
+          { label: "Concerto PPM list", href: "concerto-ppm.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["concerto-ppm.html"] },
+          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
+          { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
+          { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },
@@ -1018,7 +1212,7 @@
         if ((item.href || "").toLowerCase() === page) return true;
         return !!(item.match && item.match.indexOf(page) !== -1);
       }
-      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
 
       function navInner() {
         var out = '<div class="pn-grp"><a class="pn-item pn-search" href="#" title="Quick search (Ctrl+K)">'
@@ -1063,7 +1257,9 @@
           '<div class="pn-brand"><div class="pn-logobox">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
           + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
-          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>' : '')
+          // The gate light is always in the DOM (hidden); initGateLight decides
+          // whether to run it from the FRESH /auth/me perms, not just the cache.
+          + '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>'
           + '</div>'
           + '<nav class="pn-nav" id="pnavNav">' + navInner() + "</nav>"
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
@@ -1079,9 +1275,7 @@
           var srch = e.target.closest ? e.target.closest(".pn-search") : null;
           if (srch) { e.preventDefault(); openPalette(); }
         });
-        document.getElementById("pnavLogout").addEventListener("click", function () {
-          localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html";
-        });
+        document.getElementById("pnavLogout").addEventListener("click", function () { window.mlLogout(); });
         document.getElementById("pnavCollapse").addEventListener("click", function () {
           var c = document.documentElement.classList.toggle("pnav-collapsed");
           try { localStorage.setItem("pnavCollapsed", c ? "1" : "0"); } catch (e) {}
@@ -1093,8 +1287,16 @@
       }
 
       // Yard-gate traffic light under the sidebar logo: green=closed, red=open.
+      // Runs once perms grant it (YardGate|FullAccess). Called at build() from
+      // the cached perms AND again from rebuild() with the server's perms — the
+      // cached list used to lack YardGate, so office users (non-Full-Access)
+      // only ever saw the office-clock pill where the light should have been.
+      var gateLightOn = false;
       function initGateLight() {
         var el = document.getElementById("pnGate"); if (!el) return;
+        if (!(yes(perms.YardGate) || yes(perms.FullAccess))) { if (!gateLightOn) el.style.display = "none"; return; }
+        if (gateLightOn) return;
+        gateLightOn = true;
         var API = window.MOSTLANE_API || "";
         function refresh() {
           if (document.hidden) return;
@@ -1232,6 +1434,7 @@
         if (whoS) whoS.textContent = yes(perms.FullAccess) ? "Full access" : "Team member";
         if (av) av.textContent = initials(name);
         applyBadges();
+        try { initGateLight(); } catch (e) {}   // perms are fresh now — a YardGate user gets the light even off a stale cache
       }
 
       // ── Office clock (desktop office machines) ─────────────────────────────
@@ -1301,7 +1504,7 @@
           if (m === "confirm") {
             var pa = (state && state.pendingAutoStop) || {};
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🕘</div><h2>You didn\'t clock out</h2>'
-              + '<p>On <b>' + niceDay(pa.date) + '</b> your timer was still running, so it was automatically stopped at <b>' + (pa.stoppedAtHM || "19:00") + '</b>.</p>'
+              + '<p>On <b>' + esc(niceDay(pa.date)) + '</b> your timer was still running, so it was automatically stopped at <b>' + esc(pa.stoppedAtHM || "19:00") + '</b>.</p>'
               + '<p>What time did you actually finish that day?</p>'
               + '<input type="time" id="ocFinishTime" value="16:30" style="font-size:22px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:10px;text-align:center;margin-bottom:14px;">'
               + '<button class="oc-cta" id="ocConfirmBtn">✔ Confirm finish time</button>'
@@ -1327,7 +1530,7 @@
           if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
           var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
-          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html"; };
+          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { window.mlLogout(); };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
           var kb = document.getElementById("ocConfirmBtn"); if (kb) kb.onclick = doConfirmFinish;
         }
@@ -1533,7 +1736,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","ThemeColour","ThemeBackground","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","StaffType","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}
@@ -1564,7 +1767,7 @@
           + "#pnav .pn-gate-dot{ width:11px; height:11px; border-radius:50%; background:#94a3b8; box-shadow:0 0 0 3px rgba(148,163,184,.28); flex:0 0 auto; }"
           + "#pnav .pn-gate.open .pn-gate-dot{ background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.32); }"
           + "#pnav .pn-gate.closed .pn-gate-dot{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.32); }"
-          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; }"
+          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; } html.pnav-collapsed #pnav .pn-gate .pn-gate-lbl{ display:none; }"
           + "#pnav .pn-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding:4px 10px 10px; }"
           + "#pnav .pn-grp{ margin-top:14px; } #pnav .pn-grp h4{ font-size:10.5px; text-transform:uppercase; letter-spacing:.9px; color:#9fc0e8; opacity:.75; margin:0 10px 5px; font-weight:600; white-space:nowrap; }"
           + "html.pnav-collapsed #pnav .pn-grp h4{ opacity:0; height:7px; margin:0; overflow:hidden; }"
@@ -1632,7 +1835,7 @@
       if (yes(p.StoryMode)) return;                         // guided My Day users stay out of the bubble
       if (document.querySelector('script[data-mlchat]') || document.getElementById("mlchat-launch")) return;
       var s = document.createElement("script");
-      s.src = "/chat-widget.js?v=4";
+      s.src = "/chat-widget.js?v=5";
       s.async = true; s.setAttribute("data-mlchat", "1");
       (document.body || document.documentElement).appendChild(s);
     } catch (e) {}
@@ -1650,7 +1853,7 @@
       if (SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       nativeFetch(API + "/memos/pending", { headers: { Authorization: "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1668,7 +1871,7 @@
             '<div style="padding:18px 20px 20px;">' +
             '<div style="font-weight:700;color:#003366;font-size:15px;">Re: ' + esc(m.re || "Company memo") + '</div>' +
             '<div style="color:#667085;font-size:13px;margin-top:2px;">From ' + esc(m.from || "the office") + '</div>' + extra +
-            '<a href="/memo-sign.html?id=' + m.id + '" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Read &amp; sign now</a>' +
+            '<a href="/memo-sign.html?id=' + esc(m.id) + '" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Read &amp; sign now</a>' +
             '<p style="margin:10px 0 0;text-align:center;font-size:12px;color:#8a97a6;">This can\'t be dismissed — it must be signed.</p>' +
             '</div></div>';
           (document.body || document.documentElement).appendChild(ov);
@@ -1695,7 +1898,7 @@
       var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
       if (!(yes(perms.FullAccess) || yes(perms.SLAAdmin) || yes(perms.Compliance))) return;
       if (typeof mlFieldUserLocal === "function" && mlFieldUserLocal()) return;   // office only
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       var money = function (n) { return "£" + (Number(n) || 0).toFixed(0); };
       function ack(certId, action, cb) {
         nativeFetch(API + "/certs/remedials/ack", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ certId: certId, action: action }) })
@@ -1706,16 +1909,18 @@
         closeGate();
         if (!list.length) return;
         var rows = list.map(function (m) {
-          var q = m.batteries > 0 ? "Priced the batteries with the supplier &amp; quoted the client?" : "Has the client been quoted for these works?";
+          var status = m.statusLabel === "works" ? "Works required" : m.statusLabel === "batteries" ? "Batteries required" : "Replaced on site";
+          var quote = m.quoteText || "";
           return '<div class="mlrem-item" data-cert="' + esc(m.certId) + '" style="border:1px solid #f0d9a6;background:#fffaf0;border-radius:12px;padding:12px;margin-top:10px;">'
             + '<div style="font-weight:700;color:#8a4b0a;">' + esc(m.siteName || m.siteCode || "Site") + ' · Cert ' + esc(m.certNumber || "") + '</div>'
-            + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed'
-            + (m.charge > 0 ? ' · <b>' + money(m.charge) + '</b> to charge' : '') + (m.batteries ? ' · <b>' + m.batteries + ' need batteries</b> (supplier quote)' : '')
-            + (m.onsite ? ' · ' + m.onsite + ' on site' : '') + '</div>'
-            + '<div style="font-size:13px;color:#8a4b0a;margin-top:6px;font-weight:600;">' + q + '</div>'
-            + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-            + '<button data-act="done" style="flex:1;min-width:130px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Quote sent</button>'
-            + '<button data-act="later" style="flex:1;min-width:100px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
+            + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed · <b>' + esc(status) + '</b>'
+            + (m.charge > 0 ? ' · <b>' + money(m.charge) + '</b> to quote' : '') + '</div>'
+            + '<div style="font-size:12.5px;color:#8a4b0a;margin-top:8px;font-weight:600;">Quote text for the client — copy and paste:</div>'
+            + '<textarea readonly data-quote style="width:100%;box-sizing:border-box;margin-top:4px;font:13px/1.45 Menlo,Consolas,monospace;border:1px solid #e6c98a;border-radius:8px;padding:8px;min-height:' + Math.min(200, 44 + 18 * (quote.split("\n").length)) + 'px;background:#fff;color:#1f2937;resize:vertical;">' + esc(quote) + '</textarea>'
+            + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+            + '<button data-act="copy" style="flex:1;min-width:120px;background:#003366;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#128203; Copy quote text</button>'
+            + '<button data-act="done" style="flex:1;min-width:120px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Quote sent</button>'
+            + '<button data-act="later" style="flex:1;min-width:90px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
             + '</div></div>';
         }).join("");
         var ov = document.createElement("div");
@@ -1724,12 +1929,19 @@
         ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:470px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">'
           + '<div style="background:linear-gradient(180deg,#b45309,#8a4b0a);color:#fff;padding:18px 20px;"><div style="font-size:30px;">&#9888;</div>'
           + '<h2 style="margin:6px 0 0;font-size:18px;color:#fff;">EM remedials &mdash; quote check</h2>'
-          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Quote the client for these works, then track them on the EM remedials list so nothing is missed.</p></div>'
+          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Copy the quote text to the client. Once sent, the case moves to the EM remedials list to wait for their PO.</p></div>'
           + '<div style="padding:14px 18px 18px;max-height:70vh;overflow:auto;">' + rows
           + '<p style="margin:12px 0 0;text-align:center;font-size:12px;color:#8a97a6;">&ldquo;Do later&rdquo; reminds you again in 4 hours.</p></div></div>';
         ov.addEventListener("click", function (e) {
           var b = e.target && e.target.closest ? e.target.closest("button[data-act]") : null; if (!b) return;
           var item = b.closest(".mlrem-item"); var certId = item.getAttribute("data-cert");
+          if (b.getAttribute("data-act") === "copy") {
+            var ta = item.querySelector("textarea[data-quote]"); var txt = ta ? ta.value : "";
+            var done = function () { b.textContent = "\u2713 Copied"; setTimeout(function () { b.innerHTML = "&#128203; Copy quote text"; }, 1800); };
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { if (ta) { ta.focus(); ta.select(); } });
+            else if (ta) { ta.focus(); ta.select(); try { document.execCommand("copy"); done(); } catch (err) {} }
+            return;
+          }
           b.disabled = true;
           ack(certId, b.getAttribute("data-act"), function () { item.remove(); if (!ov.querySelector(".mlrem-item")) closeGate(); });
         });
@@ -1762,7 +1974,7 @@
       if (SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
-      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
       nativeFetch(API + "/hs/to-sign", { headers: { Authorization: "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -1787,6 +1999,55 @@
           (document.body || document.documentElement).appendChild(ov);
           try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
         }).catch(function () {});
+    } catch (e) {}
+  })();
+
+  // ── Van handover gate ───────────────────────────────────────────────────────
+  // A newly-assigned driver MUST complete the van handover check (condition,
+  // damage, equipment + photos, signature) before they use the vehicle — so the
+  // portal is LOCKED behind an UNAVOIDABLE, non-dismissible, NON-SNOOZABLE overlay
+  // on every page (except the handover form + auth pages) until it's submitted.
+  // Same pattern as the memo / risk-assessment sign gates. The completed handover
+  // is saved against the vehicle (vehicle_handovers, keyed by reg).
+  (function handoverGate() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "memo-sign.html",
+        "hs-sign.html", "programme-view.html", "van-handover.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+      function check() {
+        if (document.getElementById("mlHandoverGate")) return;   // already up
+        nativeFetch(API + "/fleet/handover/attention", { headers: { Authorization: "Bearer " + token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok || !d.mineDue) return;
+            if (document.getElementById("mlHandoverGate")) return;
+            if (document.getElementById("mlMemoGate")) return;   // memo goes first
+            if (document.getElementById("mlSignGate")) return;   // then RA sign
+            var ov = document.createElement("div");
+            ov.id = "mlHandoverGate";
+            ov.style.cssText = "position:fixed;inset:0;z-index:100050;background:rgba(3,12,28,.82);display:flex;align-items:center;justify-content:center;padding:22px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;";
+            ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">' +
+              '<div style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:20px;"><div style="font-size:34px;">🤝</div>' +
+              '<h2 style="margin:8px 0 0;font-size:19px;color:#fff;">Van handover required</h2>' +
+              '<p style="margin:6px 0 0;font-size:13.5px;color:#cfe0f5;">You\'ve been given ' + (d.reg ? '<b>' + esc(d.reg) + '</b>' : "a vehicle") + '. Complete the handover check before you use it or carry on.</p></div>' +
+              '<div style="padding:18px 20px 20px;">' +
+              '<div style="color:#667085;font-size:13px;">Condition, damage, equipment, photos &amp; your signature — it\'s saved against the vehicle.</div>' +
+              '<a href="/van-handover.html" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Complete the handover now</a>' +
+              '<p style="margin:10px 0 0;text-align:center;font-size:12px;color:#8a97a6;">This can\'t be dismissed or snoozed — it must be completed.</p>' +
+              '</div></div>';
+            (document.body || document.documentElement).appendChild(ov);
+            try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
+          }).catch(function () {});
+      }
+      check();
+      // Re-assert if a memo/sign gate above it clears, or a handover is assigned
+      // while the tab is open.
+      setInterval(check, 60 * 1000);
     } catch (e) {}
   })();
 
@@ -2050,7 +2311,8 @@
         if (init.body) init.headers["Content-Type"] = "application/json";
         return nativeFetch(API + path, init);
       }
-      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" }[c]; }); }
+      function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
       function ago(iso) {
         try {
           var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -2120,11 +2382,11 @@
             var outstanding = n.actionable && !n.resolved;
             var bg = outstanding ? "#fff8ec" : (n.read ? "#fff" : "#eef6ff");
             var tw = (outstanding || !n.read) ? "700" : "600";
-            var href = n.url ? esc(n.url) : "";
+            var href = n.url ? esc(safeUrl(n.url)) : "";
             var dotC = outstanding ? "#f59e0b" : "#1e88e5";
             var dot = (outstanding || !n.read) ? '<span class="mlBellDot" style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:' + dotC + ';transform:translateY(-50%);"></span>' : "";
             var pill = outstanding ? '<span style="display:inline-block;margin-top:3px;font-size:10.5px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:6px;padding:1px 6px;">Needs action</span>' : "";
-            return '<a class="mlBellItem" data-id="' + n.id + '" data-out="' + (outstanding ? "1" : "0") + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + (outstanding ? ';box-shadow:inset 3px 0 0 #f59e0b' : '') + ';">' +
+            return '<a class="mlBellItem" data-id="' + esc(n.id) + '" data-out="' + (outstanding ? "1" : "0") + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + (outstanding ? ';box-shadow:inset 3px 0 0 #f59e0b' : '') + ';">' +
               dot +
               '<span style="font-size:20px;line-height:1.2;flex:0 0 auto;">' + iconFor(n) + '</span>' +
               '<span style="flex:1;min-width:0;">' +

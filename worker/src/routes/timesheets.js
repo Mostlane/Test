@@ -39,7 +39,8 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
-import { approvedLeaveInRange } from "./holidays.js";
+import { approvedLeaveInRange, bankHolidaysInRange } from "./holidays.js";
+import { sendToUser } from "./push.js";
 
 // Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
 // user — an approved holiday auto-shows on the timesheet without any entry.
@@ -77,6 +78,10 @@ async function ensureTables(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
+  // Office approval: a locked, engineer-read-only week + an office note.
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_at TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_by TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN admin_note TEXT").run(); } catch {}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
@@ -104,6 +109,9 @@ async function ensureTables(env) {
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN source TEXT").run(); } catch {}
   // Site register archived flag (costing.js) — read by /ts/sites suggestions.
   try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
+  // Google-computed drive-home minutes for the day (overwritten on each job
+  // completion); used as the timesheet finish when the engineer doesn't End Day.
+  try { await env.DB.prepare("ALTER TABLE shifts ADD COLUMN home_drive_mins INTEGER").run(); } catch {}
 }
 
 // ── Job-status time capture (called from sla.js on every status change) ─────
@@ -137,6 +145,7 @@ export async function trackJobTime(env, tid, actor, before, after) {
     if (!mine) return;
     await ensureTables(env);
     const now = new Date().toISOString();
+    const DONE = new Set(["complete", "closed", "invoiced"]);   // finished statuses
     if (TS_ACTIVE.has(as)) {
       // one clock at a time: starting this job ends any other open segment
       await env.DB.prepare(
@@ -157,9 +166,55 @@ export async function trackJobTime(env, tid, actor, before, after) {
       ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
         after.siteName || "", String(after.postcode || "").toUpperCase(), now, kind).run();
     } else {
-      await env.DB.prepare(
+      const res = await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(now, tid, actor, String(after.id)).run();
+      const closed = !!(res && res.meta && res.meta.changes > 0);
+      // COMPLETION-ONLY engineers: they "Start Day" then just mark each job
+      // Complete (never tap Travelling/In Progress), so there's no open segment
+      // to close. Infer this job's time as the gap since their last activity —
+      // the previous job's finish, else today's shift clock-on — so their hours
+      // and per-job costing still fill in. Only for genuinely finished statuses.
+      if (!closed && DONE.has(as)) {
+        const dayStart = now.slice(0, 10) + "T00:00:00.000Z", dayEnd = now.slice(0, 10) + "T23:59:59.999Z";
+        const exists = await env.DB.prepare(
+          "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND started_at>=? AND started_at<=? LIMIT 1"
+        ).bind(tid, actor, String(after.id), dayStart, dayEnd).first();
+        if (!exists) {
+          const last = await env.DB.prepare(
+            "SELECT MAX(ended_at) AS e FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NOT NULL AND started_at>=? AND started_at<=?"
+          ).bind(tid, actor, dayStart, dayEnd).first();
+          let anchor = last && last.e ? last.e : null;
+          if (!anchor) {
+            const sh = await env.DB.prepare("SELECT clock_on_at FROM shifts WHERE tenant_id=? AND username=? AND date=?")
+              .bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+            if (sh && sh.clock_on_at) anchor = sh.clock_on_at;
+          }
+          if (anchor) {
+            const span = Date.parse(now) - Date.parse(anchor);
+            if (span > 60000 && span <= MAX_SEG_MS) await env.DB.prepare(
+              "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, source) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
+              after.siteName || "", String(after.postcode || "").toUpperCase(), anchor, now, "onsite", "shift").run();
+          }
+        }
+      }
+    }
+    // On EVERY completion, (re)compute the Google drive time from this job home
+    // and store it on today's shift — overwritten each job, since any completion
+    // could be their last. Used as the timesheet finish when they don't End Day.
+    if (DONE.has(as)) {
+      const sh = await env.DB.prepare("SELECT clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date=?")
+        .bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+      if (sh && sh.clock_on_at && !sh.clock_off_at && after.postcode) {
+        const homePc = await homePostcodeFor(env, tid, actor);
+        if (homePc) {
+          let mins = await driveMinutesGoogle(env, after.postcode, homePc);
+          if (mins == null) { try { const [a, b] = await Promise.all([lookupPostcode(after.postcode), lookupPostcode(homePc)]); if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); } catch {} }
+          if (mins != null && mins >= 0 && mins < 300)
+            await env.DB.prepare("UPDATE shifts SET home_drive_mins=? WHERE tenant_id=? AND username=? AND date=?").bind(mins, tid, actor, now.slice(0, 10)).run();
+        }
+      }
     }
   } catch { /* time capture must never break a job update */ }
 }
@@ -169,7 +224,7 @@ export async function trackJobTime(env, tid, actor, before, after) {
 // A segment left open on an earlier day is lazily closed at 19:00 that day
 // (or an hour after it started, if it started later than that).
 const MAX_SEG_MS = 14 * 3600e3; // a session longer than a long shift = forgotten status change → clamp
-async function jobTimeAuto(env, tid, username, monday) {
+async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
   const end = endD.toISOString().slice(0, 10);
   const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
@@ -201,20 +256,51 @@ async function jobTimeAuto(env, tid, username, monday) {
         endedAt = forgotClose();
         try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
       }
-      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
+      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [], lastPc: "" };
       o.s = Math.min(o.s, Date.parse(seg.started_at));
       if (open) { o.open = true; }
-      else o.e = Math.max(o.e, Date.parse(endedAt));
+      else { const em = Date.parse(endedAt); if (em >= o.e) { o.e = em; o.lastPc = seg.postcode || ""; } }
       const ref = seg.job_ref || seg.job_id;
       if (!o.jobs.some(j => j.ref.toLowerCase() === String(ref).toLowerCase()))
         o.jobs.push({ ref, site: seg.site || "", postcode: seg.postcode || "" });
     }
   } catch {}
+  // "Start Day" / "End Day" shifts are the authoritative day boundaries when set.
+  const shifts = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT date, clock_on_at, clock_off_at, home_drive_mins FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+    ).bind(tid, username, monday, end).all();
+    for (const s of results || []) { const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date; if (dt) shifts[dt] = s; }
+  } catch {}
+  const homePc = normPc(opts.homePostcode || "");
+  let homeCoord;   // resolved lazily, once
+  const getHome = async () => { if (homeCoord !== undefined) return homeCoord; homeCoord = homePc ? await lookupPostcode(homePc).catch(() => null) : null; return homeCoord; };
+
   const shaped = {};
-  for (const [date, o] of Object.entries(out)) {
-    shaped[date] = { start: lTime(new Date(o.s).toISOString()),
-      finish: o.open || !o.e ? null : lTime(new Date(o.e).toISOString()),
-      open: o.open, jobs: o.jobs };
+  for (const date of new Set([...Object.keys(out), ...Object.keys(shifts)])) {
+    const o = out[date], sh = shifts[date];
+    let start = o ? lTime(new Date(o.s).toISOString()) : "";
+    if (sh && sh.clock_on_at) { const cs = lTime(sh.clock_on_at); if (cs && (!start || cs < start)) start = cs; }   // Start Day = real start
+    let finish = null, open = false, travelHome = false;
+    if (sh && sh.clock_off_at) {
+      finish = lTime(sh.clock_off_at);   // End Day = real finish
+    } else if (o) {
+      if (o.open || !o.e) open = true;
+      else {
+        finish = lTime(new Date(o.e).toISOString());
+        // No End Day → add drive home. Prefer the Google minutes captured at the
+        // last job completion (shift.home_drive_mins); else compute via Google
+        // now; last resort only, a straight-line estimate.
+        let mins = (sh && sh.home_drive_mins != null) ? Number(sh.home_drive_mins) : null;
+        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc, { cached: true });
+        if (mins == null && o.lastPc && homePc) {
+          try { const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]); if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); } catch {}
+        }
+        if (mins != null && mins > 0 && mins < 300) { finish = lTime(new Date(o.e + mins * 60000).toISOString()); travelHome = true; }
+      }
+    }
+    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome };
   }
   return shaped;
 }
@@ -291,7 +377,72 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
 
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
-  radiusMiles: 10, basePostcode: "PO15 5RQ", company: "Mostlane" };
+  radiusMiles: 10, overtimeThresholdH: 8, dueDow: 3, dueTime: "12:00", remindersOn: true,
+  basePostcode: "PO15 5RQ", company: "Mostlane" };
+const VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
+const normReg = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// Timesheet reminders are ON unless explicitly turned off in Settings.
+const remindersEnabled = cfg => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+// Minimal forced-tool Anthropic call (mirrors sla.js anthropicTool).
+async function anthropicToolLocal(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1500, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] }),
+    });
+    if (!resp.ok) { let d = ""; try { d = (await resp.json())?.error?.message || ""; } catch {} return { ok: false, error: "AI error" + (d ? " (" + d + ")" : "") }; }
+    const payload = await resp.json();
+    const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === toolName) : null;
+    if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+    return { ok: true, input: block.input };
+  } catch { return { ok: false, error: "Couldn't reach the AI service." }; }
+}
+// AI reconstruction of ONE engineer's week: attribute each van trip to the job
+// they booked (travel to a site = that job's time; drive home → the last job),
+// ignore fuel/quick stops, and suggest per-job hours where the entry looks off.
+const DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+async function tsVerifyEngineerAI(env, e, monday, poolVans) {
+  const dlab = dt => { const d = new Date(dt + "T12:00:00Z"); return DOW3[d.getUTCDay()] + " " + dt.slice(8); };
+  const blocks = e.dayLog.filter(d => d.entered > 0 || d.moved).map(d => {
+    const jobs = (d.jobs || []).length ? d.jobs.map(j => `[${j.ref}] ${j.site || "?"} — entered ${j.entered}h`).join("; ") : "(none booked)";
+    const trips = (d.trips || []).length ? d.trips.map(t => `${t.s}–${t.e} → ${t.to || "?"} (drive ${t.drive}m, stop ${t.stop}m)`).join("\n      ")
+      : (d.moved ? `van out ${d.vanStart}–${d.vanEnd}` : "van did not move");
+    return `  ${dlab(d.date)} (${d.date}) — booked: ${jobs}\n      Trips: ${trips}`;
+  }).join("\n");
+  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (they may have collected one — use to explain a day their own van didn't move):\n" +
+    poolVans.map(v => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}–${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
+  const schema = { type: "object", properties: {
+    verdict: { type: "string", enum: ["ok", "check", "flag"] },
+    summary: { type: "string", description: "One short sentence overall." },
+    days: { type: "array", items: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD" },
+      jobs: { type: "array", items: { type: "object", properties: {
+        ref: { type: "string", description: "the booked job ref exactly as given" },
+        suggested: { type: "number", description: "hours you think this job actually took, 0.25 steps" },
+        note: { type: "string", description: "short reason, only if it differs from entered" }
+      }, required: ["ref", "suggested"] } }
+    }, required: ["date"] } },
+    flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
+  }, required: ["verdict"] };
+  const system = "You reconstruct a UK field engineer's working day from van tracker trips and check the hours they booked PER JOB. Rules: "
+    + "(1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. "
+    + "(2) IGNORE incidental stops — petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job — these are NOT jobs; don't create jobs for them or add their time to a job. "
+    + "(3) Match tracker stop locations to the engineer's booked jobs by town/road/postcode; a booked job is usually the longest stop(s) near that place. On-site time is the stopped time at the job location between arriving and leaving. "
+    + "(4) For each booked job estimate the hours it actually took (travel-to + on-site + drive-home for the last job) to the nearest 0.25h. Compare to what they entered. Only add a `note` when your `suggested` differs from `entered` by more than ~0.75h, saying briefly why. "
+    + "(5) Telematics is approximate and on-site work doesn't always move the van — be conservative; small differences are fine. Verdict: ok (matches well), check (minor differences worth a glance), flag (clear discrepancy or hours with no matching van activity). Use the booked job refs EXACTLY as given.";
+  const user = `Engineer ${e.name} (${e.username}), week beginning ${monday}, assigned van ${e.reg || "none"}. They entered ${e.total}h total; van door-to-door ${e.weekSpanH}h.\n\nDays:\n${blocks}${pool}\n\nReturn your per-job suggested hours and any flags.`;
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify_engineer", schema, maxTokens: 2000 });
+  if (!r.ok) return { error: r.error };
+  return r.input || {};
+}
+async function hasEngTimesheet(env, tid, username) {
+  try { const p = await permissionsFor(env, tid, username); return p.EngTimesheet === "Yes"; } catch { return false; }
+}
+const DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -330,6 +481,10 @@ function effectiveCfg(cfg, u) {
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
     rate: num(mine.rate) ?? (mine.rateType === "day" ? num(profile.dayRate) : num(profile.hourlyRate)) ?? num(profile.hourlyRate),
+    // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
+    // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
+    overtimeMult: num(mine.overtimeMult),
+    overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],   // extra lines under their name on the invoice
     nextNumber: Number(mine.nextNumber) || null,
@@ -360,7 +515,16 @@ function cleanDays(monday, days) {
       }
     }
     const hasHours = Object.keys(jobHours).length > 0;
-    if (start || finish || jobs || note || mileage.length || hasHours) out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}) };
+    // Admin-entered paid hours for a leave / bank-holiday / shutdown day (so every
+    // day carries a value). null when not set (blocks approval on those days).
+    let leaveHours = null;
+    if (d.leaveHours !== undefined && d.leaveHours !== null && d.leaveHours !== "") {
+      const lh = parseFloat(d.leaveHours);
+      if (isFinite(lh) && lh >= 0) leaveHours = Math.min(24, round1(lh));
+    }
+    const hasLeave = leaveHours !== null;
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave)
+      out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}), ...(hasLeave ? { leaveHours } : {}) };
   }
   return out;
 }
@@ -383,24 +547,72 @@ function dayCalc(d, eff) {
 }
 function dayMiles(d) { return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0)); }
 function weekTotals(days, eff) {
-  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
+  const r2 = n => Math.round(n * 100) / 100;
+  // Overtime: hours over the DAILY threshold, paid at rate × multiplier. Only for
+  // hourly staff with a multiplier set (day-rate is excluded).
+  const otOn = eff.rateType !== "day" && eff.overtimeMult > 0;
+  const thrMin = (eff.overtimeThresholdH || 8) * 60;
+  let paidMins = 0, otMins = 0, leaveMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
   for (const d of Object.values(days || {})) {
     const c = dayCalc(d, eff);
     paidMins += c.paid; miles += c.miles; milesClaimed += c.milesClaimed;
     if (c.worked) daysWorked++;
+    if (otOn && c.paid > thrMin) otMins += c.paid - thrMin;
+    if (d && d.leaveHours != null) leaveMins += (parseFloat(d.leaveHours) || 0) * 60;   // admin-entered paid leave
   }
-  const hours = Math.round((paidMins / 60) * 100) / 100;
-  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
+  const hours = r2(paidMins / 60);
+  const otHours = r2(otMins / 60);
+  const leaveHours = r2(leaveMins / 60);
+  const normalHours = r2((paidMins - otMins) / 60);
+  const otRate = otOn && eff.rate ? r2(eff.rate * eff.overtimeMult) : null;
+  let labour = null, otPay = 0, normalPay = 0, leavePay = 0;
+  if (eff.rate) {
+    // Paid leave hours are costed at the normal hourly rate (the office enters 0
+    // for anyone who isn't paid for that day, e.g. self-employed holiday).
+    leavePay = eff.rateType === "day" ? 0 : leaveHours * eff.rate;
+    if (eff.rateType === "day") { labour = r2(daysWorked * eff.rate); }
+    else {
+      normalPay = normalHours * eff.rate;
+      otPay = otHours * (otRate || eff.rate);
+      labour = r2(normalPay + otPay + leavePay);
+    }
+  }
   const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
-  return { paidMins, hours, miles: round1(miles), milesClaimed: round1(milesClaimed),
+  return { paidMins, hours, normalHours, otHours, otRate, otPay: r2(otPay), normalPay: r2(normalPay),
+    leaveHours, leavePay: r2(leavePay),
+    miles: round1(miles), milesClaimed: round1(milesClaimed),
     milesDeducted: round1(miles - milesClaimed), daysWorked, labour, mileagePay,
-    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null };
+    total: labour != null ? r2(labour + mileagePay) : null };
+}
+// Which days in a week REQUIRE an admin paid-hours entry before approval: an
+// approved Holiday/Other or a Bank Holiday / Company Shutdown, UNLESS the person
+// actually worked that day (then it's logged by worked hours). Unpaid leave is
+// auto-0 and never blocks. Returns [{date,label}] still missing a leaveHours value.
+async function missingLeaveHours(env, tid, username, monday, days) {
+  const from = monday, to = weekDays(monday)[6];
+  const leave = (await approvedLeaveInRange(env, tid, from, to, username))[username] || {};
+  const bank = await bankHolidaysInRange(env, tid, from, to);
+  const out = [];
+  for (const date of weekDays(monday)) {
+    const d = days[date] || {};
+    const worked = toMin(d.start) != null && toMin(d.finish) != null;
+    if (worked) continue;                       // a worked day is already logged
+    if (d.leaveHours != null) continue;         // already entered
+    const lv = leave[date];
+    const bh = bank[date];
+    let label = "";
+    if (lv && lv.type !== "Unpaid") label = lv.type === "Other" ? "Leave" : "Holiday";
+    else if (bh) label = bh.kind === "shutdown" ? "Company Shutdown" : "Bank Holiday";
+    if (label) out.push({ date, label });
+  }
+  return out;
 }
 async function loadWeek(env, tid, username, monday) {
-  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?")
+  const row = await env.DB.prepare("SELECT data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?")
     .bind(tid, monday, username).first();
   let days = {}; try { days = row && row.data ? (JSON.parse(row.data).days || {}) : {}; } catch {}
-  return { days, savedAt: row ? row.at : null };
+  return { days, savedAt: row ? row.at : null,
+    approval: (row && row.approved_at) ? { at: row.approved_at, by: row.approved_by || "", note: row.admin_note || "" } : null };
 }
 async function invoiceFor(env, tid, username, monday) {
   return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
@@ -659,6 +871,327 @@ function haversineMiles(a, b) {
 }
 const ROAD_FACTOR = 1.25;
 
+// Google-driven drive TIME (minutes) between two postcodes via Distance Matrix,
+// WITH LIVE TRAFFIC (departure_time=now → duration_in_traffic). We call this at
+// the moment a job is completed — i.e. when the engineer would set off home — so
+// the traffic reading is real. NOT edge-cached (traffic is live). Falls back to
+// the free-flow duration, then null (caller decides the last-resort estimate).
+// Memo for the AUTO-FILL path (opts.cached): the admin overview re-derives the
+// drive home for days already GONE, for every engineer, twice (jobTimeAuto is
+// called directly and again inside applyAutoMileage) — a live-traffic reading is
+// meaningless there and each call is a slow external round trip. Kept per
+// isolate, 12h TTL, bounded. The at-completion caller (trackJobTime) never
+// passes cached, so its reading stays live.
+const DRIVE_MEMO = new Map();
+const DRIVE_MEMO_TTL = 12 * 3600 * 1000;
+async function driveMinutesGoogle(env, fromPc, toPc, opts = {}) {
+  const key = env && env.GOOGLE_MAPS_KEY; if (!key) return null;
+  const f = normPc(fromPc), t = normPc(toPc); if (!f || !t) return null;
+  const mk = f + "|" + t;
+  if (opts.cached) { const hit = DRIVE_MEMO.get(mk); if (hit && Date.now() - hit.at < DRIVE_MEMO_TTL) return hit.mins; }
+  const mins = await driveMinutesGoogleLive(key, f, t);
+  if (opts.cached && mins != null) { if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear(); DRIVE_MEMO.set(mk, { mins, at: Date.now() }); }
+  return mins;
+}
+async function driveMinutesGoogleLive(key, f, t) {
+  try {
+    const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
+    if (!a || !b) return null;
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving"
+      + "&departure_time=now&traffic_model=best_guess"
+      + "&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng
+      + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u);   // no cf cache — a live-traffic reading must be fresh
+    const j = await r.json().catch(() => null);
+    const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
+    if (el && el.status === "OK") {
+      const secs = (el.duration_in_traffic && el.duration_in_traffic.value != null)
+        ? el.duration_in_traffic.value
+        : (el.duration && el.duration.value != null ? el.duration.value : null);
+      if (secs != null) return Math.round(secs / 60);
+    }
+  } catch {}
+  return null;
+}
+// The engineer's home postcode: their timesheet override first, else their profile.
+async function homePostcodeFor(env, tid, username) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
+    if (row && row.value) { const v = JSON.parse(row.value); const mine = (v.byUser && v.byUser[username]) || {}; if (mine.homePostcode) return String(mine.homePostcode); }
+  } catch {}
+  try {
+    const u = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+    if (u && u.profile) { const p = JSON.parse(u.profile); if (p.homePostcode) return String(p.homePostcode); }
+  } catch {}
+  return "";
+}
+
+// ── Door-to-door mileage (fuel-paid self-employed) ───────────────────────────
+// Exact road miles per consecutive leg via Google Distance Matrix. points is an
+// ordered [{lat,lng}]; returns [{miles,src}] for each leg points[i]→points[i+1]
+// (the matrix diagonal in ONE request). Falls back to haversine×ROAD_FACTOR per
+// leg when there's no GOOGLE_MAPS_KEY or the call fails, so it always returns a
+// figure. Edge-cached — postcodes/roads don't move.
+async function legMiles(env, points) {
+  const legs = [];
+  for (let i = 0; i < points.length - 1; i++)
+    legs.push({ miles: round1(haversineMiles(points[i], points[i + 1]) * ROAD_FACTOR), src: "est" });
+  const key = env && env.GOOGLE_MAPS_KEY;
+  if (!key || points.length < 2 || points.length > 12) return legs;
+  try {
+    const origins = points.slice(0, -1).map(p => p.lat + "," + p.lng).join("|");
+    const dests = points.slice(1).map(p => p.lat + "," + p.lng).join("|");
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial&mode=driving"
+      + "&origins=" + encodeURIComponent(origins) + "&destinations=" + encodeURIComponent(dests)
+      + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u, { cf: { cacheTtl: 7 * 86400, cacheEverything: true } });
+    const j = await r.json().catch(() => null);
+    if (j && j.status === "OK" && Array.isArray(j.rows)) {
+      for (let i = 0; i < legs.length; i++) {
+        const el = j.rows[i] && j.rows[i].elements && j.rows[i].elements[i];
+        if (el && el.status === "OK" && el.distance && el.distance.value != null)
+          legs[i] = { miles: round1(el.distance.value / 1609.344), src: "google" };
+      }
+    }
+  } catch {}
+  return legs;
+}
+
+// Site/postcode/scheduled-time for every job the engineer entered hours against
+// on a day (so a hand-added job can still be routed through by location).
+async function jobsMetaForDay(env, tid, day) {
+  const ids = Object.keys((day && day.jobHours) || {}).slice(0, 50);
+  const meta = {};
+  if (!ids.length) return meta;
+  try {
+    const ph = ids.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(
+      `SELECT id, helpdesk_ref, site_code, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...ids).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "",
+        pc: normPc(d.postcode || ""), sched: r.scheduled_at || "" };
+    }
+  } catch {}
+  return meta;
+}
+
+// Ordered postcodes visited on one day, forming ONE chained route (never a
+// round trip per job). Status-tap capture order first (jobTimeAuto = the real
+// driving order), then any hand-entered jobHours jobs IN THE ORDER THE ENGINEER
+// LISTED THEM on the timesheet (that's the order they drove them — a manually
+// added job carries no scheduled time to sort by). Dupes (and consecutive
+// same-site) collapsed; entries with no postcode dropped.
+function visitedSequenceForDay(autoDay, day, jobsMeta) {
+  const seq = [], seen = new Set();
+  const push = (site, pc) => {
+    pc = normPc(pc); if (!pc) return;
+    if (seq.length && seq[seq.length - 1].pc === pc) return;
+    if (seen.has(pc)) return;
+    seq.push({ site: site || "", pc }); seen.add(pc);
+  };
+  const byRef = {}; for (const m of Object.values(jobsMeta || {})) if (m.ref) byRef[String(m.ref).toLowerCase()] = m;
+  for (const j of (autoDay && autoDay.jobs) || []) {
+    let pc = normPc(j.postcode);
+    if (!pc) { const m = byRef[String(j.ref || "").toLowerCase()]; if (m) pc = m.pc; }
+    push(j.site, pc);
+  }
+  // jobHours keys keep the engineer's entry order — that IS the route order.
+  for (const jid of Object.keys((day && day.jobHours) || {})) {
+    const m = jobsMeta && jobsMeta[jid];
+    if (m && m.pc) push(m.site, m.pc);
+  }
+  return seq;
+}
+
+// The engineer's SCHEDULED jobs per London day (site + postcode, time-ordered) —
+// the door-to-door FALLBACK for a worked day where nothing was status-tapped or
+// logged, so an engineer who only enters start/finish still gets their mileage.
+async function scheduledSitesForWeek(env, tid, username, monday) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const byDate = {};
+  try {
+    const normId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = s => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of users || []) { map[normId(u.username)] = u.username; const full = ((u.first_name || "") + " " + (u.last_name || "")).trim(); if (full) map[normId(full)] = u.username; }
+    const meN = norm(username);
+    const isMe = e => { const r = map[normId(e)]; if (r != null) return r === username; const n = norm(e); return !!n && (n === meN || n.includes(meN) || meN.includes(n)); };
+    const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
+    const { results } = await env.DB.prepare(
+      "SELECT id, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, monday, end).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data); } catch { continue; }
+      const engs = (Array.isArray(d.assignedEngineers) && d.assignedEngineers.length) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+      if (!engs.some(isMe)) continue;
+      const date = lDate(r.scheduled_at);
+      (byDate[date] = byDate[date] || []).push({ site: d.siteName || "", pc: normPc(d.postcode || ""), sched: r.scheduled_at });
+    }
+    for (const k of Object.keys(byDate)) byDate[k].sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
+  } catch {}
+  return byDate;
+}
+
+// ── Timesheet deadline + completeness ────────────────────────────────────────
+// London tz offset (minutes ahead of UTC) at a given instant.
+function londonOffsetMinutes(ms) {
+  try {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+      .formatToParts(new Date(ms)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+    return Math.round((asUTC - ms) / 60000);
+  } catch { return 0; }
+}
+// The completion deadline for a Mon-anchored week: the configured day-of-week +
+// time in the FOLLOWING week (e.g. midday Wednesday after the week ends).
+function tsDeadlineFor(monday, cfg) {
+  const dow = Number((cfg.defaults && cfg.defaults.dueDow) ?? 3);           // 0 Sun..6 Sat
+  const [hh, mm] = String((cfg.defaults && cfg.defaults.dueTime) || "12:00").split(":").map(n => parseInt(n, 10) || 0);
+  const nextMon = new Date(monday + "T00:00:00Z"); nextMon.setUTCDate(nextMon.getUTCDate() + 7);
+  const day = new Date(nextMon); day.setUTCDate(day.getUTCDate() + ((dow + 6) % 7));   // Mon=0..Sun=6
+  const ds = day.toISOString().slice(0, 10);
+  const naive = Date.parse(ds + "T" + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":00Z");
+  const ms = naive - londonOffsetMinutes(naive) * 60000;
+  return { ms, iso: new Date(ms).toISOString(), dow, hh, mm, label: DOW_NAME[dow] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
+}
+// Jobs the engineer was scheduled on, per London day: { date: [{jobId, ref, site}] }.
+async function assignedJobsByDay(env, tid, username, monday) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const byDay = {};
+  try {
+    const normId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = s => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of users || []) { map[normId(u.username)] = u.username; const full = ((u.first_name || "") + " " + (u.last_name || "")).trim(); if (full) map[normId(full)] = u.username; }
+    const meN = norm(username);
+    const isMe = e => { const r = map[normId(e)]; if (r != null) return r === username; const n = norm(e); return !!n && (n === meN || n.includes(meN) || meN.includes(n)); };
+    const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
+    const { results } = await env.DB.prepare(
+      "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, monday, end).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data); } catch { continue; }
+      const engs = (Array.isArray(d.assignedEngineers) && d.assignedEngineers.length) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+      if (!engs.some(isMe)) continue;
+      const date = lDate(r.scheduled_at);
+      (byDay[date] = byDay[date] || []).push({ jobId: r.id, ref: r.helpdesk_ref || d.siteName || r.id, site: d.siteName || "" });
+    }
+  } catch {}
+  return byDay;
+}
+// Which booked jobs still have NO hours entered for a week + the deadline state.
+async function timesheetGaps(env, tid, username, monday, cfg) {
+  const byDay = await assignedJobsByDay(env, tid, username, monday);
+  const { days } = await loadWeek(env, tid, username, monday);
+  const missing = [];
+  for (const [date, jobs] of Object.entries(byDay)) {
+    const jh = (days[date] && days[date].jobHours) || {};
+    const seen = new Set();
+    for (const j of jobs) {
+      if (seen.has(j.jobId)) continue; seen.add(j.jobId);
+      if (!(parseFloat(jh[j.jobId]) > 0)) missing.push({ date, ref: j.ref, jobId: j.jobId });
+    }
+  }
+  const dl = tsDeadlineFor(monday, cfg);
+  return { week: monday, missing, count: missing.length, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+}
+// Cron: push engineers with unfinished hours for last week, once, in the ~3h
+// before the deadline (deduped per week in app_config ts:reminded:<tid>).
+export async function sweepTimesheetReminders(env, tid = 1) {
+  try {
+    const cfg = await getCfg(env, tid);
+    if (!remindersEnabled(cfg)) return;   // reminders switched off in Settings
+    const curMon = mondayOf(new Date().toISOString().slice(0, 10));
+    const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const dl = tsDeadlineFor(prevMon, cfg);
+    const nowMs = Date.now();
+    if (nowMs < dl.ms - 3 * 3600e3 || nowMs > dl.ms) return;   // only the 3h run-up to the deadline
+    const key = "ts:reminded:" + tid;
+    let sent = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); if (row && row.value) sent = JSON.parse(row.value) || []; } catch {}
+    if (sent.includes(prevMon)) return;
+    const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    for (const u of users || []) {
+      if (!(await hasEngTimesheet(env, tid, u.username))) continue;   // timesheet-permission engineers only
+      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
+      if (g.count > 0) await sendToUser(env, tid, u.username, {
+        title: "Timesheet due", body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours — complete last week's timesheet by " + dl.label + ".",
+        url: "/engineer-timesheet.html?week=" + prevMon, tag: "ts-due:" + prevMon
+      });
+    }
+    sent.push(prevMon); sent = sent.slice(-8);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {}
+}
+
+// For fuel-paid SELF-EMPLOYED engineers, replace each worked day's mileage with a
+// single LOCKED door-to-door figure: office(base) → each site visited (in order)
+// → home. Returns a working copy of `days` (manual mileage ignored) + a per-date
+// breakdown for display. Anyone else → days unchanged, applies:false.
+async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
+  if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
+  const basePc = normPc(basePostcode || "PO15 5RQ");
+  const homePc = normPc(eff.homePostcode || "") || basePc;
+  const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
+  const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
+  const coordCache = new Map();
+  const coord = async pc => {
+    pc = normPc(pc); if (!pc) return null;
+    if (coordCache.has(pc)) return coordCache.get(pc);
+    const c = await lookupPostcode(pc).catch(() => null);
+    coordCache.set(pc, c); return c;
+  };
+  const out = {}, byDate = {};
+  for (const [date, d] of Object.entries(days || {})) {
+    out[date] = { ...d };
+    const worked = toMin(d.start) != null && toMin(d.finish) != null;
+    const jobsMeta = await jobsMetaForDay(env, tid, d);
+    let seq = visitedSequenceForDay(autoDays[date], d, jobsMeta);
+    // Fallback: nothing captured/logged but they worked → use the day's booked
+    // jobs so mileage still auto-fills. Flagged so the UI/office can see why.
+    let fromSchedule = false;
+    if (worked && !seq.length && (sched[date] || []).length) {
+      const seen = new Set();
+      for (const s of sched[date]) {
+        const pc = normPc(s.pc); if (!pc || seen.has(pc)) continue;
+        if (seq.length && seq[seq.length - 1].pc === pc) continue;
+        seq.push({ site: s.site || "", pc }); seen.add(pc);
+      }
+      fromSchedule = seq.length > 0;
+    }
+    if (!worked || !seq.length) {
+      out[date].mileage = [];
+      if (worked) byDate[date] = { miles: 0, legs: [], sites: seq.map(s => s.site), home: homePc, noRoute: !seq.length };
+      continue;
+    }
+    const pts = [{ site: "Office", pc: basePc }, ...seq, { site: "Home", pc: homePc }];
+    const cleanPts = [], cleanCoords = [];
+    let missing = false;
+    for (const p of pts) { const c = await coord(p.pc); if (c) { cleanPts.push(p); cleanCoords.push(c); } else missing = true; }
+    if (cleanCoords.length < 2) {
+      out[date].mileage = [];
+      byDate[date] = { miles: 0, legs: [], sites: seq.map(s => s.site), home: homePc, noRoute: true };
+      continue;
+    }
+    const lm = await legMiles(env, cleanCoords);
+    let total = 0; const legs = [];
+    for (let i = 0; i < lm.length; i++) {
+      total += lm[i].miles;
+      legs.push({ from: cleanPts[i].site || cleanPts[i].pc, to: cleanPts[i + 1].site || cleanPts[i + 1].pc, miles: lm[i].miles, src: lm[i].src });
+    }
+    total = round1(total);
+    out[date].mileage = [{ site: "Door-to-door (auto)", postcode: "", miles: total, auto: true }];
+    byDate[date] = { miles: total, legs, sites: seq.map(s => s.site), home: homePc, missing, fromSchedule };
+  }
+  return { days: out, auto: { applies: true, home: homePc, base: basePc, byDate } };
+}
+
 // ── Invoice PDF ──────────────────────────────────────────────────────────────
 function fmtDate(iso) { return new Date(iso + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); }
 function fmtHm(mins) { return Math.floor(mins / 60) + "h " + String(Math.round(mins % 60)).padStart(2, "0") + "m"; }
@@ -718,15 +1251,29 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   if (eff.rateType === "day" && eff.rate) {
     doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
     doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true }); y += 16;
+  } else if (totals.otHours > 0 && eff.rate) {
+    // Split normal vs overtime when any overtime was worked.
+    doc.text(cTot, y, "Labour: " + totals.normalHours + " h @ " + money(eff.rate) + "/h", { size: 10 });
+    doc.text(cAmt, y, money(totals.normalPay), { size: 10, alignRight: true }); y += 16;
+    doc.text(cTot, y, "Overtime: " + totals.otHours + " h @ " + money(totals.otRate) + "/h (" + eff.overtimeMult + "×)", { size: 10 });
+    doc.text(cAmt, y, money(totals.otPay), { size: 10, alignRight: true }); y += 16;
   } else {
     doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
     doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true }); y += 16;
   }
+  if (totals.leaveHours > 0 && totals.leavePay > 0 && eff.rateType !== "day") {
+    doc.text(cTot, y, "Holiday / leave: " + totals.leaveHours + " h @ " + money(eff.rate) + "/h", { size: 10 });
+    doc.text(cAmt, y, money(totals.leavePay), { size: 10, alignRight: true }); y += 16;
+  }
   if (totals.miles > 0) {
     const ded = totals.milesDeducted > 0;
-    doc.text(cTot, y, "Mileage: " + (ded
-      ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"
-      : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
+    // The radius breakdown goes on its OWN small grey line so the label can
+    // never run into the right-aligned amount.
+    if (ded) {
+      doc.text(cTot, y, totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi", { size: 8.5, grey: true });
+      y += 12;
+    }
+    doc.text(cTot, y, "Mileage: " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p", { size: 10 });
     doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true }); y += 16;
   }
   y += 6;
@@ -748,7 +1295,14 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/invoice-file" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
-    if (!sess && !(await verifyFileSig(env, key, q))) return error("Link expired or invalid", 403, env, request);
+    // Signed link always passes. A bare session may only open its OWN invoices
+    // (keys are invoices/<tid>/<user>/…, so another engineer's are guessable)
+    // unless it's a timesheet admin.
+    if (!(await verifyFileSig(env, key, q))) {
+      if (!sess) return error("Link expired or invalid", 403, env, request);
+      const own = String(key).startsWith(`${INV_PREFIX(sess.tenantId)}${encodeURIComponent(sess.user.username)}/`);
+      if (!own && !(await isTsAdmin(env, sess.tenantId, sess))) return error("Forbidden", 403, env, request);
+    }
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -762,17 +1316,29 @@ export async function handle(request, env, ctx, url, sess) {
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
 
-  // ── GET /ts/me — the caller's effective settings ──────────────────────────
+  // A TimesheetAdmin can VIEW another engineer's timesheet read-only via ?user=.
+  // Only the GET reads below honour it; every write always acts as the caller.
+  let _adminView = null;
+  const viewUser = async () => {
+    const w = q.get("user");
+    if (!w || w === me) return me;
+    if (_adminView === null) _adminView = await isTsAdmin(env, tid, sess);
+    return _adminView ? w : me;
+  };
+
+  // ── GET /ts/me — the caller's (or a viewed engineer's) effective settings ──
   if (sub === "/me" && method === "GET") {
-    const u = await userRow(env, tid, me);
+    const who = await viewUser();
+    const u = await userRow(env, tid, who);
     if (!u) return error("User not found", 404, env, request);
     const eff = effectiveCfg(cfg, u);
-    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const next = await nextInvoiceNumber(env, tid, who, eff);
     const admin = await isTsAdmin(env, tid, sess);
-    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, who).first();
     return json({ ok: true, name: displayName(u), ...eff, rate: eff.rate, nextInvoice: next,
       basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
-      canSetNumber: !invCount || Number(invCount.n) === 0, admin }, {}, env, request);
+      canSetNumber: !invCount || Number(invCount.n) === 0, admin,
+      viewingUser: who !== me ? who : null }, {}, env, request);
   }
 
   // ── POST /ts/me — self-service settings (postcode, invoice details, rate) ─
@@ -788,18 +1354,40 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
 
-  // ── GET /ts/my — own week ─────────────────────────────────────────────────
+  // ── GET /ts/outstanding — the caller's last completed week's missing hours ──
+  // Drives the "complete your timesheet" reminder (attention gate + push).
+  if (sub === "/outstanding" && method === "GET") {
+    // Only engineers with the EngTimesheet permission are chased, and only when
+    // reminders are switched on in Settings.
+    if (!remindersEnabled(cfg) || !(await hasEngTimesheet(env, tid, me)))
+      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
+    const curMon = mondayOf(new Date().toISOString().slice(0, 10));
+    const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
+    return json({ ok: true, week: prevMon, dueAt: prev.dueAt, dueLabel: prev.dueLabel,
+      overdue: prev.overdue, count: prev.count, missing: prev.missing }, {}, env, request);
+  }
+
+  // ── GET /ts/my — own week (or a viewed engineer's, for an admin) ──────────
   if (sub === "/my" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
-    const u = await userRow(env, tid, me);
+    const u = await userRow(env, tid, who);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt } = await loadWeek(env, tid, me, monday);
-    const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday);
-    const holidays = await holidayDaysFor(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, who, monday);
+    const inv = await invoiceFor(env, tid, who, monday);
+    const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
+    const holidays = await holidayDaysFor(env, tid, who, monday);
+    const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, totals: weekTotals(days, eff),
-      invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
+    const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
+    const gaps = await timesheetGaps(env, tid, who, monday, cfg);
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
+      viewingUser: who !== me ? who : null, remindersOn: remindersEnabled(cfg),
+      due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue }, missingHours: gaps.missing,
+      totals: weekTotals(am.days, eff), autoMileage: am.auto,
+      invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
 
@@ -814,10 +1402,16 @@ export async function handle(request, env, ctx, url, sess) {
     const monday = mondayOf(b.week);
     if (await invoiceFor(env, tid, me, monday))
       return error("This week has already been invoiced — ask the office to remove the invoice first.", 409, env, request);
+    { const { approval } = await loadWeek(env, tid, me, monday);
+      if (approval) return error("This week has been approved by the office and is locked — ask the office to re-open it if something needs changing.", 423, env, request); }
     const u = await userRow(env, tid, me);
     const eff = effectiveCfg(cfg, u);
     const days = cleanDays(monday, b.days);
     if (!eff.mileage) {
+      for (const d of Object.values(days)) d.mileage = [];
+    } else if (eff.selfEmployed) {
+      // Door-to-door mileage is computed + locked server-side (applyAutoMileage
+      // on read/invoice) — whatever the phone submits is discarded.
       for (const d of Object.values(days)) d.mileage = [];
     } else {
       const names = [...new Set(Object.values(days).flatMap(d => (d.mileage || []).map(m => normKey(m.site))).filter(Boolean))];
@@ -840,7 +1434,8 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid, monday, me, JSON.stringify({ days }), new Date().toISOString()).run();
     // Push the per-job hours into the labour ledger for job costing.
     await materialiseTimesheet(env, tid, me, monday, days);
-    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
+    const amSave = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
   }
 
   // ── GET /ts/assigned?week= — the caller's scheduled SLA jobs, per day ─────
@@ -848,11 +1443,12 @@ export async function handle(request, env, ctx, url, sess) {
   // on jobs arrive in several spellings (dotted ids, case differences), so
   // matching is normalised the same way login is forgiving.
   if (sub === "/assigned" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
     const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
     const end = endD.toISOString().slice(0, 10);
     const byDay = {};
-    const debug = { me, matchedAs: [], candidates: [] };
+    const debug = { me: who, matchedAs: [], candidates: [] };
     try {
       const { results } = await env.DB.prepare(
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
@@ -871,11 +1467,11 @@ export async function handle(request, env, ctx, url, sess) {
           if (full) map[normId(full)] = u.username;
         }
       } catch {}
-      const meN = norm(me);
-      const cap = await capturedMinsWeek(env, tid, me, monday);   // status-tap minutes per job/day → pre-fill hours
+      const meN = norm(who);
+      const cap = await capturedMinsWeek(env, tid, who, monday);   // status-tap minutes per job/day → pre-fill hours
       const isMe = e => {
         const resolved = map[normId(e)];
-        if (resolved != null) return resolved === me;
+        if (resolved != null) return resolved === who;
         const n = norm(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };
@@ -1219,11 +1815,13 @@ export async function handle(request, env, ctx, url, sess) {
     const eff = effectiveCfg(cfg, u);
     if (!eff.rate) return error("No pay rate set — enter your rate first.", 400, env, request);
     const { days } = await loadWeek(env, tid, me, monday);
-    const totals = weekTotals(days, eff);
+    const amInv = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    const daysEff = amInv.days;
+    const totals = weekTotals(daysEff, eff);
     if (!totals.daysWorked && !totals.miles) return error("Nothing on this week's timesheet yet — save your times first.", 400, env, request);
     const number = await nextInvoiceNumber(env, tid, me, eff);
     const pdf = buildInvoicePdf({ number, name: displayName(u), details: eff.details,
-      company: cfg.defaults.company, monday, days, eff, totals });
+      company: cfg.defaults.company, monday, days: daysEff, eff, totals });
     const key = `${INV_PREFIX(tid)}${encodeURIComponent(me)}/INV-${number}-${monday}.pdf`;
     await env.JOB_FILES.put(key, pdf, { httpMetadata: { contentType: "application/pdf" },
       customMetadata: { by: me, number: String(number), week: monday, at: new Date().toISOString() } });
@@ -1251,13 +1849,109 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   if (sub === "/invoice/delete" && method === "POST") {
-    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
     if (!row) return error("Invoice not found", 404, env, request);
+    // The office can delete anyone's; a self-employed engineer can delete their
+    // OWN (frees the week + the invoice number to regenerate).
+    const admin = await isTsAdmin(env, tid, sess);
+    if (!admin && row.username !== me) return error("You can only delete your own invoices.", 403, env, request);
     await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
     try { await env.JOB_FILES.delete(row.r2_key); } catch {}
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+
+  // ── Fleet cross-check (AI verify entered hours vs telematics van data) ────
+  // POST /ts/verify  {week, vans:[{reg,driver,driveMins}], scores:{REG:score}}
+  //   (vans + scores are parsed client-side from the uploaded trip export + PDF)
+  // GET  /ts/verify?week=   → the stored verification for the overview.
+  if (sub === "/verify" && method === "POST") {
+    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf(b.week);
+    const vans = Array.isArray(b.vans) ? b.vans : [];
+    const scores = (b.scores && typeof b.scores === "object") ? b.scores : {};
+    const r1 = n => Math.round(n * 10) / 10;
+    const vanByReg = {};
+    for (const v of vans) {
+      const k = normReg(v && v.reg); if (!k) continue;
+      const days = (v && v.days && typeof v.days === "object") ? v.days : {};
+      vanByReg[k] = { reg: v.reg, driver: (v && v.driver) || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0), days };
+    }
+    const scoreByReg = {}; for (const [r, s] of Object.entries(scores)) { const k = normReg(r); if (k && s != null && s !== "") scoreByReg[k] = Math.round(parseFloat(s)); }
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    const week = weekDays(monday);
+    const engineers = [];
+    for (const u of users || []) {
+      if (!(await hasEngTimesheet(env, tid, u.username))) continue;
+      const reg = u.vehicle_assigned || "";
+      const rk = normReg(reg);
+      const van = vanByReg[rk] || null;
+      const { days } = await loadWeek(env, tid, u.username, monday);
+      const meta = await jobMetaFor(env, tid, days);   // jobId → {ref, site}
+      let total = 0, weekSpan = 0;
+      const dayLog = week.map(dt => {
+        const d = days[dt] || {}; const jh = d.jobHours || {};
+        let h = 0; const jobs = [];
+        for (const [jid, hv] of Object.entries(jh)) { const hh = parseFloat(hv) || 0; if (hh > 0) { h += hh; jobs.push({ ref: (meta[jid] && meta[jid].ref) || jid, site: (meta[jid] && meta[jid].site) || "", entered: Math.round(hh * 100) / 100 }); } }
+        if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
+        h = Math.round(h * 100) / 100; total += h;
+        const vd = van && van.days ? van.days[dt] : null;
+        const moved = !!(vd && (vd.span > 0 || (vd.drive || 0) > 0));
+        if (moved) weekSpan += (vd.span || 0);
+        return { date: dt, entered: h, moved, jobs,
+          vanStart: vd ? (vd.s || "") : "", vanEnd: vd ? (vd.e || "") : "",
+          spanH: moved ? r1(vd.span / 60) : null, driveH: (vd && vd.drive) ? r1(vd.drive / 60) : null,
+          locs: (vd && Array.isArray(vd.locs)) ? vd.locs.slice(0, 6) : [],
+          trips: (vd && Array.isArray(vd.trips_detail)) ? vd.trips_detail : [] };
+      });
+      total = Math.round(total * 100) / 100;
+      if (total === 0 && !van) continue;   // nothing to check
+      engineers.push({ username: u.username, name: displayName(u), reg,
+        driveMins: van ? van.driveMins : null, weekSpanH: r1(weekSpan / 60),
+        score: scoreByReg[rk] != null ? scoreByReg[rk] : null, total, dayLog });
+    }
+    // Pool / unassigned vans that moved (per-day), for switch reconciliation.
+    const usedRegs = new Set(engineers.map(e => normReg(e.reg)).filter(Boolean));
+    const poolVans = Object.values(vanByReg).filter(v => !usedRegs.has(normReg(v.reg)) && v.driveMins > 0).map(v => ({
+      reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: scoreByReg[normReg(v.reg)] ?? null,
+      days: Object.fromEntries(week.filter(dt => v.days[dt] && (v.days[dt].span > 0 || (v.days[dt].drive || 0) > 0)).map(dt => [dt, { s: v.days[dt].s, e: v.days[dt].e, locs: (v.days[dt].locs || []).slice(0, 4) }]))
+    }));
+    // Per-engineer AI: attribute trips to jobs (travel-to = that site; drive home
+    // → last job), ignore fuel/quick stops, suggest per-job hours. Capped so a
+    // huge team can't run away with AI cost.
+    let aiErr = null;
+    const byUser = {};
+    // Run the per-engineer AI checks in parallel (bounded) so a whole team's run
+    // stays inside the request window.
+    const aiResults = await Promise.all(engineers.slice(0, 30).map(async e => ({ e, ai: await tsVerifyEngineerAI(env, e, monday, poolVans) })));
+    for (const { e, ai } of aiResults) {
+      if (ai.error) aiErr = ai.error;
+      const byDate = {}; for (const dd of (ai.days || [])) if (dd && dd.date) byDate[dd.date] = dd;
+      // Merge AI per-job suggestions back onto the day log.
+      const dayLog = e.dayLog.map(d => {
+        const ad = byDate[d.date] || {}; const sByRef = {};
+        for (const j of (ad.jobs || [])) if (j && j.ref) sByRef[String(j.ref).toLowerCase()] = j;
+        const jobs = d.jobs.map(j => { const s = sByRef[String(j.ref).toLowerCase()] || {}; return { ref: j.ref, site: j.site, entered: j.entered, suggested: (s.suggested != null ? Math.round(s.suggested * 100) / 100 : null), note: s.note || "" }; });
+        // strip the bulky trip list from stored output (keep it lean)
+        return { date: d.date, entered: d.entered, moved: d.moved, vanStart: d.vanStart, vanEnd: d.vanEnd, spanH: d.spanH, driveH: d.driveH, locs: d.locs, jobs };
+      });
+      byUser[e.username] = { name: e.name, reg: e.reg, driveMins: e.driveMins, weekSpanH: e.weekSpanH,
+        score: e.score, total: e.total, dayLog,
+        verdict: ai.verdict || "ok", summary: ai.summary || "", flags: Array.isArray(ai.flags) ? ai.flags : [] };
+    }
+    const unassignedVans = poolVans.map(v => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
+    const rec = { at: new Date().toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: aiErr };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
+    return json({ ok: true, ...rec }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "GET") {
+    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VERIFY_KEY(tid, monday)).first();
+    let rec = null; try { rec = row && row.value ? JSON.parse(row.value) : null; } catch {}
+    return json({ ok: true, week: monday, verify: rec }, {}, env, request);
   }
 
   // ── Admin ─────────────────────────────────────────────────────────────────
@@ -1269,20 +1963,26 @@ export async function handle(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const { results: rows } = await env.DB.prepare("SELECT username, data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
       const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
-      const dataBy = {}; for (const r of rows || []) { try { dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at }; } catch {} }
+      const dataBy = {}, apprBy = {};
+      for (const r of rows || []) {
+        try { dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at }; } catch {}
+        if (r.approved_at) apprBy[r.username] = { at: r.approved_at, by: r.approved_by || "", note: r.admin_note || "" };
+      }
       const invBy = {}; for (const r of invs || []) invBy[r.username] = r;
       const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);   // approved holidays this week
-      const out = [];
-      for (const u of users || []) {
+      // Every engineer's week is built IN PARALLEL (order preserved by map): done
+      // one after another this took 6-17s on a 16-person team — over the page's
+      // own timeout, so Engineer Timesheets read "Couldn't load" (9 Sep 2026).
+      const out = await Promise.all((users || []).map(async u => {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
         // Job-status time capture fills gaps the engineer hasn't typed over,
         // so the admin sees captured days even before the engineer opens
         // their timesheet.
         try {
-          const auto = await jobTimeAuto(env, tid, u.username, monday);
+          const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
           for (const [date, a] of Object.entries(auto)) {
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
@@ -1293,16 +1993,23 @@ export async function handle(request, env, ctx, url, sess) {
           }
         } catch {}
         const inv = invBy[u.username];
+        // Door-to-door mileage for fuel-paid self-employed staff (else unchanged).
+        const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
+        const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
-        out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
+        return ({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
-          days: d.days, perDay, savedAt: d.at, totals: weekTotals(d.days, eff),
+          days: d.days, perDay, savedAt: d.at, totals: weekTotals(daysEff, eff), autoMileage: am.auto,
+          gapCount: gaps.count, gapMissing: gaps.missing, due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
+          approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
-      }
-      return json({ ok: true, week: monday, days: weekDays(monday), users: out }, {}, env, request);
+      }));
+      const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
+      return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
 
     if (sub === "/admin/save" && method === "POST") {
@@ -1311,10 +2018,54 @@ export async function handle(request, env, ctx, url, sess) {
       const monday = mondayOf(b.week);
       if (await invoiceFor(env, tid, b.username, monday))
         return error("That week is invoiced — delete the invoice first if it needs correcting.", 409, env, request);
+      { const cur = await loadWeek(env, tid, b.username, monday);
+        if (cur.approval) return error("This week is approved & locked — re-open it before editing.", 423, env, request); }
       const days = cleanDays(monday, b.days);
       await env.DB.prepare(
         "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
       ).bind(tid, monday, b.username, JSON.stringify({ days }), new Date().toISOString()).run();
+      // Materialise any admin-edited per-job hours into the labour ledger too.
+      await materialiseTimesheet(env, tid, b.username, monday, days);
+      return json({ ok: true }, {}, env, request);
+    }
+
+    // Approve a week → lock it for the engineer + push them a notification. The
+    // office makes any edits via /admin/save first, then approves.
+    if (sub === "/admin/approve" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      const note = String(b.note || "").slice(0, 500);
+      // Every leave / bank-holiday / shutdown day must carry an admin paid-hours
+      // figure before the week can be approved (so every day is fully logged).
+      const cur = await loadWeek(env, tid, b.username, monday);
+      const missing = await missingLeaveHours(env, tid, b.username, monday, cur.days);
+      if (missing.length) return error(
+        "Enter the paid hours for each leave / bank-holiday day first: " +
+        missing.map(m => fmtDate(m.date) + " (" + m.label + ")").join(", "),
+        400, env, request);
+      const now = new Date().toISOString();
+      await env.DB.prepare(
+        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at, approved_at, approved_by, admin_note) VALUES (?,?,?,?,?,?,?,?) " +
+        "ON CONFLICT(tenant_id, week, username) DO UPDATE SET approved_at=excluded.approved_at, approved_by=excluded.approved_by, admin_note=excluded.admin_note"
+      ).bind(tid, monday, b.username, JSON.stringify({ days: {} }), now, now, sess.user.username, note).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet approved", body: `Your week of ${fmtDate(monday)} has been approved${note ? " — the office left a note" : ""}. Tap to view.`,
+        url: "/engineer-timesheet.html?week=" + monday, tag: "ts-approved:" + monday
+      }));
+      return json({ ok: true, approvedAt: now, approvedBy: sess.user.username }, {}, env, request);
+    }
+    // Re-open an approved week so the office can correct it (engineer stays locked
+    // out until it's re-approved).
+    if (sub === "/admin/reopen" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      await env.DB.prepare("UPDATE eng_timesheets SET approved_at=NULL, approved_by=NULL WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, b.username).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet re-opened", body: `Your week of ${fmtDate(monday)} has been re-opened by the office — you can edit it again.`,
+        url: "/engineer-timesheet.html?week=" + monday, tag: "ts-reopened:" + monday
+      }));
       return json({ ok: true }, {}, env, request);
     }
 
@@ -1336,7 +2087,7 @@ export async function handle(request, env, ctx, url, sess) {
           if (v === null) { delete cfg.byUser[u]; continue; }
           const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
           for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
-          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles", "overtimeMult", "overtimeThresholdH"]) {
             if (k in v) { const n = parseFloat(v[k]); if (isFinite(n) && n >= 0) mine[k] = n; else delete mine[k]; }
           }
           if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;

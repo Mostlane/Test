@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
 <meta charset="UTF-8" />
 <title>Engineer Hours Entry – Mostlane (v4)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -334,6 +334,7 @@
   </div>
 </div>
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 
 const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
 const USERS_URL = API_BASE + "/users";
@@ -689,7 +690,7 @@ ENGINEERS.forEach(e => {
   else if (isDraft) { tickClass = "draft"; tickSymbol = "🟡"; } // amber/yellow for drafts
 
   li.className = "check-item";
-  li.innerHTML = `<div class="check-name">${label}</div><div class="tick ${tickClass}">${tickSymbol}</div>`;
+  li.innerHTML = `<div class="check-name">${esc(label)}</div><div class="tick ${tickClass}">${tickSymbol}</div>`;
   ul.appendChild(li);
 });
 

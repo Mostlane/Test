@@ -1,0 +1,230 @@
+/* =========================================================
+   Coal Park Lane (CPL) — site script
+   ---------------------------------------------------------
+   EDIT THIS BLOCK to make the site yours. It fills in your
+   ground name, location, and contact details in one place.
+   ========================================================= */
+const CONFIG = {
+  siteName:  "Coal Park Lane",         // trading name (CPL)
+  location:  "Coal Park Lane",
+  address:   "Coal Park Lane, Swanwick, SO31 7GW",
+  email:     "bookings@coalparklane.co.uk",  // FALLBACK/DELIVERY ONLY — never shown on the site.
+                                             // Used only if the booking backend is unreachable (opens the
+                                             // visitor's email app). A Coal Park Lane address, not a personal one.
+                                             // Real enquiries arrive via the booking backend + its own
+                                             // (invisible, server-side) email notification.
+  phone:     "01234 567 890",
+  phoneLink: "+440000000000",          // tel: format, no spaces
+
+  /* -------------------------------------------------------
+     HOW ENQUIRIES ARE DELIVERED
+     "mailto"  – opens the visitor's email app with the
+                 enquiry pre-filled (zero setup, works today).
+     "endpoint"– POSTs the enquiry to a URL you provide
+                 (e.g. Formspree, or your own Cloudflare Worker +
+                 Resend endpoint). Set
+                 formEndpoint below and switch this to "endpoint".
+     ------------------------------------------------------- */
+  deliveryMode: "mailto",
+  formEndpoint: "",  // e.g. "https://formspree.io/f/xxxx" or your own Worker URL
+
+  /* -------------------------------------------------------
+     BOOKING BACKEND (Coal Park Lane worker)
+     When set, enquiries are saved straight into your bookings
+     database and appear in admin.html. If the save ever fails
+     (worker down / offline), the form falls back to mailto so
+     an enquiry is never lost. Leave blank to disable and use
+     deliveryMode above instead.
+     ------------------------------------------------------- */
+  bookingEndpoint: "https://coalparklane-api.jamie-def.workers.dev/enquiry"
+};
+
+/* ---------- Apply config to the page ---------- */
+(function applyConfig(){
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("heroLocation", CONFIG.location);
+  set("cAddress", CONFIG.address);
+  // NB: the enquiry email is deliberately NOT rendered anywhere on the page.
+  const yr = document.getElementById("year");
+  if (yr) yr.textContent = new Date().getFullYear();
+})();
+
+/* ---------- Sticky nav background ---------- */
+const nav = document.getElementById("nav");
+const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 40);
+onScroll();
+window.addEventListener("scroll", onScroll, { passive:true });
+
+/* ---------- Mobile menu ---------- */
+const toggle = document.getElementById("navToggle");
+toggle.addEventListener("click", () => {
+  const open = document.body.classList.toggle("menu-open");
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+});
+document.querySelectorAll(".nav-links a").forEach(a =>
+  a.addEventListener("click", () => {
+    document.body.classList.remove("menu-open");
+    toggle.setAttribute("aria-expanded", "false");
+  })
+);
+
+/* ---------- Reveal on scroll (fail-safe) ---------- */
+(function setupReveal(){
+  const reveals = document.querySelectorAll(".reveal");
+  const show = (el) => el.classList.add("in");
+
+  // Enable the hidden-until-revealed state only now that JS is running.
+  document.body.classList.add("reveal-on");
+
+  if ("IntersectionObserver" in window){
+    const io = new IntersectionObserver((entries, obs) => {
+      entries.forEach(e => { if (e.isIntersecting){ show(e.target); obs.unobserve(e.target); } });
+    }, { threshold:0.08, rootMargin:"0px 0px -30px 0px" });
+
+    reveals.forEach(el => {
+      const r = el.getBoundingClientRect();
+      // Anything already on screen (e.g. the hero) shows immediately.
+      if (r.top < window.innerHeight && r.bottom > 0) show(el);
+      else io.observe(el);
+    });
+  } else {
+    reveals.forEach(show);
+  }
+
+  // Absolute backstop: nothing may ever stay hidden.
+  setTimeout(() => reveals.forEach(show), 1000);
+})();
+
+/* ---------- Enquiry form ---------- */
+const form = document.getElementById("enquiryForm");
+const note = document.getElementById("formNote");
+const submitBtn = document.getElementById("submitBtn");
+
+// don't let people pick a date in the past
+const dateInput = document.getElementById("date");
+if (dateInput) dateInput.min = new Date().toISOString().split("T")[0];
+
+const showError = (name, msg) => {
+  const field = form.querySelector(`[name="${name}"]`)?.closest(".field");
+  const err = form.querySelector(`.err[data-for="${name}"]`);
+  if (field) field.classList.add("invalid");
+  if (err) err.textContent = msg;
+};
+const clearError = (name) => {
+  const field = form.querySelector(`[name="${name}"]`)?.closest(".field");
+  const err = form.querySelector(`.err[data-for="${name}"]`);
+  if (field) field.classList.remove("invalid");
+  if (err) err.textContent = "";
+};
+
+// clear a field's error as the user fixes it
+form.querySelectorAll("input,select,textarea").forEach(el =>
+  el.addEventListener("input", () => clearError(el.name))
+);
+
+function validate(){
+  let ok = true;
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  if (!data.name || !data.name.trim()){ showError("name","Please tell us your name."); ok = false; }
+  if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)){ showError("email","Please enter a valid email address."); ok = false; }
+  if (!data.date){ showError("date","Please choose a preferred date."); ok = false; }
+  if (!data.use){ showError("use","Please tell us what it's for."); ok = false; }
+  if (!form.querySelector("#consent").checked){ showError("consent","Please tick to allow us to contact you."); ok = false; }
+  if (data.people && (isNaN(+data.people) || +data.people < 1)){ showError("people","Enter a valid number."); ok = false; }
+
+  return { ok, data };
+}
+
+function buildBody(d){
+  const line = (label, val) => val ? `${label}: ${val}\n` : "";
+  return (
+    `New booking enquiry from ${CONFIG.siteName} website\n` +
+    `----------------------------------------------\n` +
+    line("Name", d.name) +
+    line("Email", d.email) +
+    line("Phone", d.phone) +
+    line("Preferred date", d.date) +
+    line("Preferred time", d.time) +
+    line("What for", d.use) +
+    line("Approx. players", d.people) +
+    line("Message", d.message) +
+    `\nSent from ${location.href}`
+  );
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  note.textContent = ""; note.className = "form-note";
+
+  const { ok, data } = validate();
+  if (!ok){
+    note.textContent = "Please check the highlighted fields.";
+    note.classList.add("bad");
+    form.querySelector(".invalid input,.invalid select,.invalid textarea")?.focus();
+    return;
+  }
+
+  const subject = `Booking enquiry — ${data.use} — ${data.date}`;
+  const body = buildBody(data);
+
+  // ---- Delivery: booking backend (saves into your bookings database) ----
+  if (CONFIG.bookingEndpoint){
+    submitBtn.disabled = true;
+    const original = submitBtn.textContent;
+    submitBtn.textContent = "Sending…";
+    try{
+      const res = await fetch(CONFIG.bookingEndpoint, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          name: data.name, email: data.email, phone: data.phone,
+          date: data.date, time: data.time, pitch: data.pitch,
+          use: data.use, message: data.message
+        })
+      });
+      if (!res.ok) throw new Error("bad status " + res.status);
+      form.reset();
+      note.textContent = "Thanks — your enquiry is in. We'll be in touch shortly to confirm.";
+      note.classList.add("ok");
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+      return;
+    }catch(err){
+      // Save failed — fall through to mailto so the enquiry is never lost.
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+    }
+  }
+
+  // ---- Delivery: hosted endpoint (Formspree / your own Worker) ----
+  if (CONFIG.deliveryMode === "endpoint" && CONFIG.formEndpoint){
+    submitBtn.disabled = true;
+    const original = submitBtn.textContent;
+    submitBtn.textContent = "Sending…";
+    try{
+      const res = await fetch(CONFIG.formEndpoint, {
+        method:"POST",
+        headers:{ "Accept":"application/json", "Content-Type":"application/json" },
+        body: JSON.stringify({ subject, ...data })
+      });
+      if (!res.ok) throw new Error("bad status " + res.status);
+      form.reset();
+      note.textContent = "Thanks — your enquiry has been sent. We'll be in touch shortly.";
+      note.classList.add("ok");
+    }catch(err){
+      note.textContent = "Sorry, something went wrong sending that. Please try again in a moment.";
+      note.classList.add("bad");
+    }finally{
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+    }
+    return;
+  }
+
+  // ---- Delivery: mailto (default, no backend needed) ----
+  const mailto = `mailto:${CONFIG.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href = mailto;
+  note.textContent = "Opening your email app to send the enquiry.";
+  note.classList.add("ok");
+});

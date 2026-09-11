@@ -18,6 +18,7 @@
 
 import { preflight, error, json } from "./lib/http.js";
 import { requireSession } from "./lib/auth.js";
+import { verifyFileSig } from "./lib/filesign.js";
 import * as auth from "./routes/auth.js";          // DONE  (login, logout, me, refresh, passwords)
 import * as users from "./routes/users.js";        // DONE  (/user, /users, admin management)
 import * as devices from "./routes/devices.js";    // DONE  (device lock)
@@ -28,7 +29,7 @@ import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-s
 import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
 import * as sitelog from "./routes/sitelog.js";    // DONE  (portal↔SiteLog bridge: launch token + admin proxy → local module or remote)
 import * as sitelogApi from "./routes/sitelog-api.js"; // DONE  (ported SiteLog backend: scanner API on api.site-log.co.uk + daily auto-close)
-import { handleInboundEmail } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
+import { handleInboundEmail, handleApi as emailIntakeApi } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
@@ -36,6 +37,7 @@ import * as hs from "./routes/hs.js";               // DONE  (H&S documents: ind
 import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks — replaces Jotform walkaround)
 import * as stats from "./routes/stats.js";        // DONE  (Full-access portal stats dashboard)
 import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + company documents)
+import * as staffrecords from "./routes/staffrecords.js"; // DONE  (employee records: qualifications, insurances, licences)
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
@@ -47,18 +49,25 @@ import * as costing from "./routes/costing.js";    // DONE  (site register, labo
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
+import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: plain-English → job draft preview → create)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
+import * as concerto from "./routes/concerto.js"; // DONE  (Concerto PPM list: client's official EM/PAT/pump schedule, drop-in import + chart reconciliation)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
+import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
+import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
+import * as client from "./routes/client.js";      // DONE  (external client portal: walled per-org jobs + raise + compliance)
 import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
 import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
 import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
+import { sweepStaffRecordReminders } from "./routes/staffrecords.js"; // cron: employee-record expiry reminders
+import { sweepTimesheetReminders } from "./routes/timesheets.js"; // cron: timesheet deadline reminder
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -80,6 +89,7 @@ const ROUTES = [
   ["*", "/sla",        sla.handle],
   ["*", "/stats",      stats.handle],
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
+  ["*", "/hr/",        staffrecords.handle], // employee records (qualifications, insurances, licences, licence checks)
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/push",       push.handle],      // web push subscriptions + test send
@@ -87,6 +97,7 @@ const ROUTES = [
   ["*", "/memos",      memos.handle],     // company memos (draft/send/sign)
   ["*", "/documents",  documents.handle], // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
+  ["*", "/ai",         aiassist.handle],  // AI job assistant (draft → preview → create)
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
@@ -118,8 +129,12 @@ const ROUTES = [
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
+  ["*", "/email-intake", (req, env, ctx, url, sess) => emailIntakeApi(req, env, ctx, url, sess, worker.fetch)], // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/concerto",   concerto.handle], // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
+  ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
+  ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
@@ -127,6 +142,7 @@ const ROUTES = [
   ["*", "/comms",      statuscomms.handle], // customer status-email config + reschedule inbox (admin)
   ["*", "/customer",   statuscomms.handle], // public: customer reschedule flow (token-verified)
   ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
+  ["*", "/client",     client.handle],      // external client portal (walled per-org: jobs, raise, compliance)
   ["*", "/fra",        fra.handle],          // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -163,7 +179,13 @@ const worker = {
     let sess = null;
     if (!isPublic(request.method, url.pathname)) {
       sess = await requireSession(env, request);
-      if (!sess) return error("Not authenticated", 401, env, request);
+      if (!sess) {
+        // A job-sheet export may be opened as a plain link IF it carries a valid
+        // signature (signedFileUrl(env, pathname)) — otherwise it needs a login.
+        const signedExport = request.method === "GET" && isSignedJobExport(url.pathname)
+          && await verifyFileSig(env, url.pathname, url.searchParams);
+        if (!signedExport) return error("Not authenticated", 401, env, request);
+      }
     }
 
     // ── Batch: many GETs in ONE round trip (home dashboard) ────────────────
@@ -287,6 +309,10 @@ const worker = {
       ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
       // Daily task reminder — self-gates to ~08:00 London, deduped per day.
       ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
+      // Timesheet deadline reminder — self-gates to the ~3h before the deadline.
+      ctx.waitUntil(sweepTimesheetReminders(env).catch(e => console.error("scheduled timesheet reminder:", e)));
+      // Employee-record expiry reminder — self-gates to ~08:00 London, deduped per day.
+      ctx.waitUntil(sweepStaffRecordReminders(env).catch(e => console.error("scheduled staff-record reminder:", e)));
       // SiteLog auto-close of open visits (was the standalone worker's daily
       // cron). Idempotent — only closes prior-day still-open visits — so it's
       // safe running hourly and safe alongside the old worker's cron until the
@@ -352,13 +378,35 @@ async function ensureAuditCols(env) {
   AUDIT_MIGRATED = true;
 }
 
+// A CLIENT (external) session has its READS logged too — so the Activity log
+// holds a full trail of everything an outside client does (opened their portal,
+// viewed jobs, opened a compliance chart / cert), not just their write actions.
+function isClientSess(sess) {
+  try {
+    const pr = sess && sess.user && sess.user.profile;
+    const p = typeof pr === "string" ? JSON.parse(pr || "{}") : (pr || {});
+    return !!p && p.staffType === "client";
+  } catch { return false; }
+}
+// Chatty housekeeping/auth churn NOT worth logging even for a client — everything
+// else they GET (their jobs, a job, compliance charts + cert links) is recorded.
+const CLIENT_GET_SKIP = [
+  "/auth/me", "/auth/refresh", "/device", "/theme", "/push",
+  "/notify", "/prefs", "/audit", "/batch",
+];
+
 function auditAction(env, ctx, sess, request, url, status, clone, note) {
   try {
     if (!sess) return;
     const m = request.method.toUpperCase();
-    if (!AUDIT_METHODS.includes(m)) return;
     const p = url.pathname;
-    if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    if (AUDIT_METHODS.includes(m)) {
+      if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    } else {
+      // Reads are logged ONLY for client sessions (full external-activity trail).
+      if (!isClientSess(sess)) return;
+      if (CLIENT_GET_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    }
     // Which portal page the action was fired from (so the log can say "on
     // Vehicles"). Taken from the Referer; falls back to blank for API-only calls.
     let ref = "";
@@ -433,9 +481,24 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-photo"],
   // Maintenance-record documents opened in a new tab — signed URL.
   ["GET", "/fleet/maintenance-doc"],
+  // Employee-record documents (certs/scans) — signed URL, verified in-handler.
+  ["GET", "/hr/record-file"],
+  // Firestopping RIA seal photos (<img>) + product spec docs — signed URL,
+  // verified in-handler. An <img> can't send a Bearer, so these must be public
+  // (otherwise the seal photos 401 and show as broken thumbnails).
+  ["GET", "/sla/firestop/photo-file"],
+  ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)
+  // Machine-to-machine TASK intake (e.g. an Outlook "emails to reply to" bot) —
+  // TASKS_INBOUND_TOKEN (or JOBS_INBOUND_TOKEN) verified in-handler.
+  ["POST", "/tasks/inbound"],
+  ["GET", "/tasks/inbound"],   // connection self-check (fingerprint only, no secret)
+  // Machine-to-machine CLIENT-ORDER intake (e.g. a Concerto REM/R-order email bot) —
+  // ORDERS_INBOUND_TOKEN (or TASKS_/JOBS_INBOUND_TOKEN) verified in-handler.
+  ["POST", "/certs/remedials/order-inbound"],
+  ["GET", "/certs/remedials/order-inbound"],   // connection self-check (fingerprint only, no secret)
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
   ["GET", "/sla/archive-file"],
   // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
@@ -446,6 +509,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/compliance/file"],
   // EM remedial battery photos streamed for <img> — signed URL, verified in-handler.
   ["GET", "/certs/photo"],
+  // Pump maintenance photos/videos streamed inline — signed URL, verified in-handler.
+  ["GET", "/pump/media"],
   // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
   // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
   // (The handler re-resolves a real session for logged-in admins on these too.)
@@ -471,9 +536,13 @@ const PUBLIC_ROUTES = [
   ["POST", "/customer/reschedule"],
 ];
 
-function isPublic(method, pathname) {
+export function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
-  // SLA job sheet downloads are opened as plain browser links (no header).
-  if (method === "GET" && /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname)) return true;
+  // NB the job-sheet exports (/sla/jobs/{id}/export[.pdf]) were public here
+  // until Sep 2026 — full job sheets by guessable id, no login. They now need a
+  // session, or a signed link (see the gate: verifyFileSig over the pathname).
   return false;
+}
+export function isSignedJobExport(pathname) {
+  return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }

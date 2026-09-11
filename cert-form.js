@@ -15,7 +15,29 @@
 
    Endpoints under /certs/*: for-job, one, save, submit, pdf.                    */
 (function () {
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
+
+  // Camera-or-gallery chooser (shared across the field photo forms). EM-remedial
+  // photos aren't "live only", so the engineer picks camera or gallery. Guarded so
+  // whichever field script defines it first wins; falls back to the native picker.
+  if (typeof window !== "undefined" && !window.MLPhotoInput) {
+    window.MLPhotoInput = function (input, cb) {
+      function go(mode){ if(!mode) return; if(mode==="camera") input.setAttribute("capture","environment"); else input.removeAttribute("capture"); if(cb) cb(mode); input.click(); }
+      try{
+        var ov=document.createElement("div");
+        ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px";
+        var sh=document.createElement("div");
+        sh.style.cssText="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:14px;box-shadow:0 -6px 28px rgba(0,0,0,.3)";
+        sh.innerHTML='<div style="font-weight:700;color:#003468;font-size:15px;margin:4px 6px 12px">Add a photo</div>';
+        function mk(t,p){ var b=document.createElement("button"); b.type="button"; b.textContent=t; b.style.cssText="display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:14px;border:1px solid #d7dee6;border-radius:12px;background:"+(p?"#f7f9fc":"#fff")+";font:inherit;font-size:15px;font-weight:"+(p?"600":"500")+";color:"+(p?"#0f2438":"#64748b")+";cursor:pointer"; return b; }
+        var cam=mk("📷 Take a photo",1),gal=mk("🖼 Choose from gallery",1),cx=mk("Cancel",0);
+        var done=false; function fin(v){ if(done) return; done=true; try{ov.remove();}catch(e){} go(v); }
+        cam.onclick=function(){fin("camera");}; gal.onclick=function(){fin("gallery");}; cx.onclick=function(){fin(null);};
+        ov.addEventListener("click",function(e){ if(e.target===ov) fin(null); });
+        sh.appendChild(cam); sh.appendChild(gal); sh.appendChild(cx); ov.appendChild(sh); document.body.appendChild(ov);
+      }catch(e){ go("gallery"); }
+    };
+  }
 
   const COLS = {
     em: [
@@ -147,9 +169,13 @@
     rec.rows = Array.isArray(rec.rows) ? rec.rows : [];
     if (!rec.contractor.date) rec.contractor.date = new Date().toISOString().slice(0, 10);
 
-    // "view" = a live READ-ONLY reflection (job-view / office job card). Engineer
-    // can edit a non-final cert; office (review) can always edit.
-    const editable = mode === "view" ? false : (mode === "engineer" ? (rec.status !== "final") : true);
+    // "view" = a live READ-ONLY reflection (job-view / office job card). An
+    // engineer can edit a DRAFT; once it's submitted (review) or issued (final)
+    // it's with the office and read-only for them. Office can always edit.
+    const editable = mode === "view" ? false : (mode === "engineer" ? (rec.status !== "final" && rec.status !== "review") : true);
+    // Tell the host this cert's current status (so a combined job can mark the
+    // tab done + not prompt to resubmit an already-submitted cert on reload).
+    if (opts.onStatus) { try { opts.onStatus(rec.status || "draft"); } catch (e) {} }
 
     function render() {
       const titleType = type === "pat" ? "Portable Appliance Test" : "Emergency Lighting Test";
@@ -221,7 +247,11 @@
       if (mode === "engineer" && editable && !opts.hideComplete) h += '<button class="btn green" id="mlcComplete">✅ Complete &amp; submit</button>';
       h += '<button class="btn ghost sm" id="mlcPdf">⬇ Preview PDF</button>';
       h += '<span class="save" id="mlcSave"></span></div>';
-      if (mode === "engineer" && !opts.hideComplete) h += '<div class="muted" style="margin-top:6px">Completing sends this to the office to check and issue.</div>';
+      if (mode === "engineer" && !opts.hideComplete) {
+        if (rec.status === "review") h += '<div class="muted" style="margin-top:6px;color:#1a8f4c;font-weight:600">✓ Submitted — with the office to check and issue.</div>';
+        else if (rec.status === "final") h += '<div class="muted" style="margin-top:6px;color:#1a8f4c;font-weight:600">✓ Issued.</div>';
+        else h += '<div class="muted" style="margin-top:6px">Completing sends this to the office to check and issue.</div>';
+      }
       h += '</div>';
 
       container.innerHTML = h;
@@ -254,8 +284,21 @@
     function updateListHead() {
       const el = container.querySelector("#mlcCnt"); if (!el) return;
       const n = rec.rows.length, fails = rec.rows.filter(isFail).length, done = rec.rows.filter(isComplete).length;
+      // Break the failures down by what each needs: lights to replace · batteries · replaced on site.
+      let breakdown = "";
+      if (type === "em" && fails) {
+        const rems = rec.rows.map(r => r.remedial).filter(rm => rm && isRealRem(rm));
+        const onsite = rems.filter(rm => rm.replacedOnSite === true).length;
+        const lights = rems.filter(rm => rm.replacedOnSite !== true && rm.kind !== "battery").length;
+        const batts = rems.filter(rm => rm.replacedOnSite !== true && rm.kind === "battery").length;
+        const bits = [];
+        if (lights) bits.push(lights + (lights === 1 ? " light" : " lights"));
+        if (batts) bits.push(batts + " batteries");
+        if (onsite) bits.push(onsite + " replaced on site");
+        if (bits.length) breakdown = ": " + bits.join(" · ");
+      }
       el.innerHTML = '<span class="ok">' + done + " of " + n + " completed</span>"
-        + (fails ? ' · <span class="bad" data-jump="1">⚠ ' + fails + " failed</span>" : (done === n && n ? ' · <span class="ok">✓ all pass</span>' : ""));
+        + (fails ? ' · <span class="bad" data-jump="1">⚠ ' + fails + " failed" + esc(breakdown) + "</span>" : (done === n && n ? ' · <span class="ok">✓ all pass</span>' : ""));
       const j = el.querySelector("[data-jump]");
       if (j) j.onclick = () => { const f = container.querySelector(".mlrow.fail"); if (f) f.scrollIntoView({ behavior: "smooth", block: "center" }); };
     }
@@ -281,33 +324,45 @@
     // separate £50 remedial log. Replaced-on-site rows print "Fitting failed,
     // replaced on site" on the cert; not-replaced rows raise a remedial job for
     // the office to schedule + charge.
+    // A remedial is a REAL fault whenever it has detail — not only when the
+    // failed flag is set (the flag can be lost by the toggle button).
+    function isRealRem(rem) {
+      if (!rem || typeof rem !== "object") return false;
+      if (rem.failed) return true;
+      if (rem.replacedOnSite != null) return true;
+      if (String(rem.batterySpec || "").trim()) return true;
+      if (Number(rem.batteryQty) > 0) return true;
+      if (Array.isArray(rem.photos) && rem.photos.length) return true;
+      if (String(rem.note || "").trim()) return true;
+      return false;
+    }
     function remedialHtml(r, i) {
       const rem = r.remedial || {};
-      const on = !!rem.failed;
+      const on = isRealRem(rem);
       const onsite = rem.replacedOnSite === true ? "yes" : rem.replacedOnSite === false ? "no" : "";
       const kind = rem.kind === "battery" ? "battery" : "light";
       const photos = Array.isArray(rem.photos) ? rem.photos : [];
       if (!editable) {
         if (!on) return "";
         const what = kind === "battery"
-          ? "Batteries" + (rem.batterySpec ? " — " + esc(rem.batterySpec) : "") + (rem.batteryQty ? " ×" + esc(rem.batteryQty) : "")
-          : "Replacement light (£50)";
-        const where = rem.replacedOnSite === true ? "done on site" : rem.replacedOnSite === false ? "remedial required" : "outcome not set";
+          ? "Batteries (£50)" + (rem.batterySpec ? " — " + esc(rem.batterySpec) : "") + (rem.batteryQty ? " ×" + esc(rem.batteryQty) : "")
+          : "Replacement light (£50)" + (rem.lightSpec ? " — " + esc(rem.lightSpec) : "");
+        const where = rem.replacedOnSite === true ? "replaced on site" : rem.replacedOnSite === false ? (kind === "battery" ? "batteries required" : "works required") : "outcome not set";
         const thumbs = photos.map(p => '<img class="mlrem-th" src="' + esc((p && p.url) || "") + '">').join("");
         return '<div class="mlrem ro"><span class="mlrem-tag">⚠ Fitting failed — ' + what + ' · ' + where + '</span>'
           + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '')
           + (thumbs ? '<div class="mlrem-photos">' + thumbs + '</div>' : '') + '</div>';
       }
       const hint = kind === "battery"
-        ? (onsite === "yes" ? 'Batteries replaced on site — NO £50 (supplier prices the batteries). Add spec, qty & photos.'
-          : onsite === "no" ? 'Shown as FAILED — batteries go on a supplier enquiry to price (NO £50). Add spec, qty & photos.'
+        ? (onsite === "yes" ? 'Batteries replaced on site — the office charges £50 for this fitting. Add the battery spec, qty & photos.'
+          : onsite === "no" ? 'Shown as FAILED — the office quotes £50 and orders the batteries from the supplier. Add the spec, qty & photos.'
           : 'Add the battery spec, quantity and photos for the supplier.')
-        : (onsite === "no" ? 'Shown as FAILED on the certificate — a remedial job is raised and the office quoted £50.'
-          : onsite === "yes" ? 'Certificate reads "Fitting failed, replaced on site" — the office charges the client £50.'
-          : 'Choose whether it was replaced on site.');
+        : (onsite === "no" ? 'Shown as FAILED on the certificate — the office quotes £50 and a works job is raised once ordered. Add the fitting type and a photo.'
+          : onsite === "yes" ? 'Certificate reads "Fitting failed, replaced on site" — the office charges the client £50. Add a photo of the fitting.'
+          : 'Choose whether it was replaced on site, and add a photo of the failed fitting.');
       const thumbs = photos.map((p, pi) => '<span class="mlrem-thw"><img class="mlrem-th" src="' + esc((p && p.url) || "") + '"><button type="button" class="mlrem-thx" data-rem="delphoto" data-i="' + i + '" data-p="' + pi + '">✕</button></span>').join("");
       return '<div class="mlrem' + (on ? " open" : "") + '">'
-        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed" : "Mark fitting failed") + '</button>'
+        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed — tap to remove" : "Mark fitting failed") + '</button>'
         + '<div class="mlrem-body" style="' + (on ? "" : "display:none") + '">'
           + '<span class="mlrem-q">Fault</span>'
           + '<div class="tg mlrem-kind" data-rem="kind" data-i="' + i + '">'
@@ -324,10 +379,11 @@
             ? '<div class="mlrem-batt">'
               + '<input type="text" class="mlrem-bspec" data-rem="bspec" data-i="' + i + '" placeholder="Battery type / spec (e.g. 4.8V 4Ah NiCd)" value="' + esc(rem.batterySpec || "") + '">'
               + '<input type="number" inputmode="numeric" class="mlrem-bqty" data-rem="bqty" data-i="' + i + '" placeholder="Qty" value="' + esc(rem.batteryQty == null ? "" : rem.batteryQty) + '">'
-              + '<div class="mlrem-photos">' + thumbs + '</div>'
-              + '<button type="button" class="mlrem-addphoto" data-rem="addphoto" data-i="' + i + '">📷 Add photo</button>'
               + '</div>'
-            : '')
+            : '<input type="text" class="mlrem-note mlrem-lspec" data-rem="lspec" data-i="' + i + '" placeholder="Fitting type / spec for the replacement (optional, e.g. 3W LED bulkhead, maintained)" value="' + esc(rem.lightSpec || "") + '">')
+          + '<span class="mlrem-q">Photos of the failed fitting</span>'
+          + '<div class="mlrem-photos">' + thumbs + '</div>'
+          + '<button type="button" class="mlrem-addphoto" data-rem="addphoto" data-i="' + i + '">📷 Add photo</button>'
           + '<div class="mlrem-hint">' + hint + '</div>'
         + '</div></div>';
     }
@@ -385,10 +441,11 @@
           declaration: rec.declaration || "", contractor: rec.contractor, rows: rec.rows, signature: rec.signature || "",
           emKind: rec.emKind || "",
         };
-        const d = await authFetch("/certs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
-        if (d && d.ok) { rec.id = d.id; setSave("Saved ✓"); if (opts.onChange) opts.onChange(rec.id); }
-        else setSave("Save failed", true);
-      } catch (e) { setSave("Save failed", true); }
+        const res = await authFetch("/certs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json().catch(() => null);
+        if (res.ok && d && d.ok) { rec.id = d.id; setSave("Saved ✓"); if (opts.onChange) opts.onChange(rec.id); return true; }
+        setSave((d && d.error) ? d.error : "Save failed", true); return false;
+      } catch (e) { setSave("Save failed", true); return false; }
     }
 
     // Row-level handlers — re-bound every time the rows re-render (renderRows
@@ -407,31 +464,42 @@
       }));
       container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); queueSave(); }));
       // EM remedial controls
-      container.querySelectorAll('[data-rem="flag"]').forEach(b => b.addEventListener("click", () => {
+      container.querySelectorAll('[data-rem="flag"]').forEach(b => b.addEventListener("click", async () => {
         const i = +b.dataset.i; rec.rows[i] = rec.rows[i] || {};
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.failed = !rem.failed; if (!rem.failed) rem.replacedOnSite = null;
+        if (isRealRem(rem)) {
+          // Turning a fault OFF wipes it — confirm so a filled-in fault (spec,
+          // qty, photos) is never lost by an accidental second tap.
+          const ok = window.MLUI ? await MLUI.confirm("Remove this fault and its details (battery spec, photos, notes)?", { title: "Remove fault", okLabel: "Remove", danger: true }) : confirm("Remove this fault and its details?");
+          if (!ok) return;
+          rec.rows[i].remedial = {};
+        } else {
+          rem.failed = true;   // mark this fitting failed
+        }
         renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="onsite"] button').forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.replacedOnSite = btn.dataset.v === "yes";
+        rem.replacedOnSite = btn.dataset.v === "yes"; rem.failed = true;
         renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="kind"] button').forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
         const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-        rem.kind = btn.dataset.v; renderRows(); queueSave();
+        rem.kind = btn.dataset.v; rem.failed = true; renderRows(); queueSave();
       }));
       container.querySelectorAll('[data-rem="note"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).note = el.value; queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.note = el.value; rem.failed = true; queueSave();
+      }));
+      container.querySelectorAll('[data-rem="lspec"]').forEach(el => el.addEventListener("input", () => {
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.lightSpec = el.value; rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="bspec"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batterySpec = el.value; queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.batterySpec = el.value; rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="bqty"]').forEach(el => el.addEventListener("input", () => {
-        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batteryQty = el.value === "" ? "" : (Number(el.value) || 0); queueSave();
+        const i = +el.dataset.i; const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {}); rem.batteryQty = el.value === "" ? "" : (Number(el.value) || 0); rem.failed = true; queueSave();
       }));
       container.querySelectorAll('[data-rem="addphoto"]').forEach(b => b.addEventListener("click", () => pickRemedialPhoto(+b.dataset.i)));
       container.querySelectorAll('[data-rem="delphoto"]').forEach(b => b.addEventListener("click", () => {
@@ -456,7 +524,7 @@
     }
     function pickRemedialPhoto(i) {
       const inp = document.createElement("input");
-      inp.type = "file"; inp.accept = "image/*"; inp.setAttribute("capture", "environment"); inp.style.display = "none";
+      inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
       inp.onchange = async () => {
         const file = inp.files && inp.files[0]; if (!file) return;
         const btn = container.querySelector('[data-rem="addphoto"][data-i="' + i + '"]');
@@ -470,13 +538,15 @@
           const d = await fetch(api + "/certs/photo", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd }).then(r => r.json());
           if (d && d.ok && d.key) {
             const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
-            rem.photos = rem.photos || []; rem.photos.push({ key: d.key, url: d.url });
+            rem.photos = rem.photos || []; rem.photos.push({ key: d.key, url: d.url }); rem.failed = true;
             renderRows(); queueSave();
           } else alert((d && d.error) || "Photo upload failed.");
         } catch (e) { alert("Photo upload failed."); }
         finally { if (btn) { btn.disabled = false; btn.textContent = "📷 Add photo"; } }
       };
-      document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+      document.body.appendChild(inp);
+      if (window.MLPhotoInput) window.MLPhotoInput(inp); else inp.click();
+      setTimeout(() => inp.remove(), 60000);
     }
     function wire() {
       container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));
@@ -527,7 +597,7 @@
       const cm = container.querySelector("#mlcComplete"); if (cm) cm.addEventListener("click", complete);
     }
     function addRows(n) {
-      const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: "" };
+      const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "II", visual: "Pass", earth: "N/A", insulation: ">200 MΩ", result: "Pass", comments: "" };
       for (let k = 0; k < n; k++) rec.rows.push({ ...def });
       renderRows(); queueSave();
     }
@@ -585,18 +655,23 @@
       need('[data-c="date"]', "Certificate date");
       let badRows = 0;
       if (!rec.rows.length) missing.push("at least one " + (type === "pat" ? "appliance" : "light"));
-      let remOpen = 0, battBad = 0;
+      let remOpen = 0, battBad = 0, photoBad = 0;
       rec.rows.forEach((r, i) => {
         let bad = false;
         if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
         else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
         // A failed fitting MUST say whether it was done on site (drives the charge + remedial job).
-        if (type === "em" && r.remedial && r.remedial.failed) {
+        if (type === "em" && isRealRem(r.remedial)) {
           const rem = r.remedial;
           if (rem.replacedOnSite == null) { bad = true; remOpen++; }
+          const hasPhoto = Array.isArray(rem.photos) && rem.photos.length > 0;
           // Batteries: spec + qty + at least one photo, so the supplier can quote.
           if (rem.kind === "battery") {
-            if (!String(rem.batterySpec || "").trim() || !(Number(rem.batteryQty) > 0) || !(Array.isArray(rem.photos) && rem.photos.length)) { bad = true; battBad++; }
+            if (!String(rem.batterySpec || "").trim() || !(Number(rem.batteryQty) > 0) || !hasPhoto) { bad = true; battBad++; }
+          } else if (!hasPhoto) {
+            // Every failed fitting needs a photo — vital for the office record + the
+            // remedial job that gets raised if the client orders the replacement.
+            bad = true; photoBad++;
           }
         }
         if (bad) { badRows++; const rowEl = container.querySelector('.mlrow[data-i="' + i + '"]'); if (rowEl) { rowEl.classList.add("err-row"); if (!firstEl) firstEl = rowEl; } }
@@ -604,6 +679,7 @@
       if (badRows) missing.push(badRows + (type === "pat" ? " appliance" : " item") + (badRows === 1 ? "" : "s") + " not fully filled in");
       if (remOpen) missing.push(remOpen + " failed fitting" + (remOpen === 1 ? "" : "s") + " — say if done on site");
       if (battBad) missing.push(battBad + " battery fault" + (battBad === 1 ? "" : "s") + " — add spec, quantity & a photo");
+      if (photoBad) missing.push(photoBad + " failed fitting" + (photoBad === 1 ? "" : "s") + " — add a photo");
       if (!rec.signature) { missing.push("signature"); const sc = container.querySelector("#mlcSig"); if (sc && !firstEl) firstEl = sc; }
       // expand any collapsed section that holds a flagged field so it's visible
       container.querySelectorAll("details.mlc-fold").forEach(d => { if (d.querySelector(".err")) d.open = true; });
@@ -618,10 +694,14 @@
         if (!silent) alert("Please complete before submitting:\n\n• " + v.missing.join("\n• "));
         return false;
       }
-      await doSave();
-      if (!rec.id) return false;
-      try { await authFetch("/certs/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }); rec.status = "review"; return true; }
-      catch (e) { return false; }
+      const saved = await doSave();
+      if (!saved || !rec.id) { if (!silent) alert("Couldn't save the certificate — make sure you're the assigned engineer, then try again."); return false; }
+      try {
+        const res = await authFetch("/certs/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || (d && d.ok === false)) { if (!silent) alert("Couldn't submit: " + ((d && d.error) || "please try again")); return false; }
+        rec.status = "review"; return true;
+      } catch (e) { if (!silent) alert("Couldn't submit — check your connection and try again."); return false; }
     }
     async function complete() {
       const btn = container.querySelector("#mlcComplete"); if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }

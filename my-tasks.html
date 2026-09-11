@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>My Tasks — Mostlane</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
@@ -27,10 +27,23 @@
     .pill{display:inline-block;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;}
     .pill.due{background:#fef3c7;color:#92400e;} .pill.overdue{background:#fee2e2;color:#b91c1c;}
     .pill.done{background:#dcfce7;color:#166534;}
+    .pill.age{background:#eef2f6;color:#334155;} .pill.age.warn{background:#fee2e2;color:#b91c1c;}
+    .pill.cat{background:#e0edff;color:#1e40af;font-weight:700;}
+    .card.warn7{border-left:5px solid var(--bad);}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+    .chip{background:#fff;border:1px solid #cbd5e1;color:#334155;border-radius:999px;padding:7px 14px;font:600 13px 'Segoe UI';cursor:pointer;}
+    .chip.on{background:var(--navy);color:#fff;border-color:var(--navy);}
+    .chip .n{opacity:.7;font-weight:600;margin-left:4px;}
+    .flagrow{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);margin:-2px 2px 12px;}
+    .flagrow input{width:56px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;font:700 13.5px 'Segoe UI';text-align:center;color:#1f2a37;}
+    .flagrow .saved{color:var(--ok);font-weight:600;font-size:12px;opacity:0;transition:opacity .2s;}
+    .flagrow .saved.on{opacity:1;}
     .tickbtn{border:2px solid #cbd5e1;background:#fff;border-radius:10px;width:30px;height:30px;font-size:16px;cursor:pointer;flex:none;color:#16a34a;}
     .tickbtn.on{background:#16a34a;border-color:#16a34a;color:#fff;}
     .sec-h{font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin:16px 2px 8px;}
     .auto-note{font-size:12px;color:#0369a1;background:#e0f2fe;border-radius:8px;padding:5px 9px;margin-top:6px;display:inline-block;}
+    .mailink{font:600 13px 'Segoe UI';color:#1e40af;text-decoration:none;background:#eef2f6;border:1px solid #dbe4ee;border-radius:9px;padding:7px 12px;display:inline-block;}
+    .mailink:active{background:#e2e8f0;}
     .empty{text-align:center;color:var(--muted);padding:40px 10px;}
   </style>
 </head>
@@ -41,6 +54,10 @@
     <a class="btn grey small" id="manageBtn" href="tasks-admin.html" style="display:none;">🗂 Manage tasks</a>
   </header>
   <div class="wrap">
+    <div id="filters" class="filters"></div>
+    <div id="flagrow" class="flagrow" style="display:none;">⚑ Flag &amp; warn when older than
+      <input id="flagAge" type="number" min="1" max="90" inputmode="numeric"> days
+      <span class="saved" id="flagSaved">Saved ✓</span></div>
     <div id="list"><div class="empty">Loading…</div></div>
   </div>
 
@@ -49,6 +66,7 @@
     const tok = () => localStorage.getItem("mostlaneToken");
     function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
     function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     const g = id => document.getElementById(id);
 
     // Show the admin "Manage tasks" button for Full-Access users (cached perms).
@@ -71,42 +89,106 @@
     function fmtDMY(s){ if(!s)return""; const d=new Date(s); if(isNaN(d))return""; return String(d.getDate()).padStart(2,"0")+" "+MO[d.getMonth()+1].slice(0,3)+" "+d.getFullYear(); }
     function dueLabel(iso){ try{ return new Date(iso).toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 
+    // Category for filtering: the explicit one, else derived (recurring vs one-off).
+    function catOf(t){ if(t.category) return t.category; return (t.recurrence && t.recurrence!=="once") ? "Recurring" : "General"; }
+    // Age in whole days from the task's "as of" date (an email's received date),
+    // else its creation date. Drives oldest-first ordering + the >7-day warning.
+    function ageBase(t){ return t.refDate || (t.createdAt? String(t.createdAt).slice(0,10) : ""); }
+    function ageDays(t){ const b=ageBase(t); if(!b) return null; const d=new Date(b+"T12:00:00"); if(isNaN(d)) return null; return Math.floor((Date.now()-d.getTime())/86400000); }
+    // Strip a leading "13d · " age prefix an external bot may have baked into the
+    // title — the portal shows the age itself now, so it isn't doubled up.
+    function cleanTitle(t){ const s=String(t.title||""); const c=s.replace(/^\s*\d+\s*d\s*[·\-–—]\s*/i,"").trim(); return c||s; }
+
+    let ALL=[], FILTER="all", FLAG_AGE=7;
+    // Flag/warn threshold (days) — per-user, saved to localStorage (instant) and
+    // mirrored to /prefs so it follows the user across devices.
+    function clampAge(n){ n=Math.round(Number(n)||7); return Math.max(1, Math.min(90, n)); }
+    function initFlagAge(){
+      try{ const l=localStorage.getItem("mlTaskFlagAge"); if(l!=null) FLAG_AGE=clampAge(l); }catch(e){}
+      g("flagAge").value=FLAG_AGE;
+      // Server value (if any) wins, then re-render.
+      aFetch("/prefs").then(r=>r.json()).then(p=>{ const v=p&&p.ok&&p.prefs&&p.prefs.taskFlagAge; if(v!=null){ FLAG_AGE=clampAge(v); g("flagAge").value=FLAG_AGE; try{localStorage.setItem("mlTaskFlagAge",String(FLAG_AGE));}catch(e){} if(ALL.length) render(); } }).catch(()=>{});
+      let t=null;
+      g("flagAge").addEventListener("input", ()=>{
+        FLAG_AGE=clampAge(g("flagAge").value);
+        try{ localStorage.setItem("mlTaskFlagAge", String(FLAG_AGE)); }catch(e){}
+        render();
+        clearTimeout(t); t=setTimeout(()=>{
+          aFetch("/prefs",{method:"POST",body:JSON.stringify({taskFlagAge:FLAG_AGE})}).then(()=>{ const s=g("flagSaved"); s.classList.add("on"); setTimeout(()=>s.classList.remove("on"),1200); }).catch(()=>{});
+        }, 500);
+      });
+      g("flagAge").addEventListener("blur", ()=>{ g("flagAge").value=FLAG_AGE; });
+    }
     async function load(){
       let d;
-      try{ d=await aFetch("/tasks/mine").then(r=>r.json()); }catch(e){ g("list").innerHTML='<div class="empty">⚠️ Couldn\'t load your tasks.</div>'; return; }
+      try{ d=await aFetch("/tasks/mine").then(r=>r.json()); }catch(e){ g("list").innerHTML='<div class="empty">⚠️ Couldn\'t load your tasks.</div>'; g("filters").innerHTML=""; return; }
       if(!d.ok){ g("list").innerHTML='<div class="empty">'+esc(d.error||"Couldn't load.")+'</div>'; return; }
-      const tasks=d.tasks||[];
-      if(!tasks.length){ g("list").innerHTML='<div class="empty">🎉 No tasks assigned to you right now.</div>'; return; }
-      const open=tasks.filter(t=>!t.status.done), done=tasks.filter(t=>t.status.done);
+      ALL=d.tasks||[];
+      render();
+    }
+    function render(){
+      if(!ALL.length){ g("filters").innerHTML=""; g("flagrow").style.display="none"; g("list").innerHTML='<div class="empty">🎉 No tasks assigned to you right now.</div>'; return; }
+      // Filter chips: All + each category present (with a live count).
+      const cats={}; ALL.forEach(t=>{ const c=catOf(t); cats[c]=(cats[c]||0)+1; });
+      const names=Object.keys(cats).sort();
+      if(!names.includes(FILTER) && FILTER!=="all") FILTER="all";
+      let chips='<button class="chip'+(FILTER==="all"?" on":"")+'" data-f="all">All <span class="n">'+ALL.length+'</span></button>';
+      chips+=names.map(c=>'<button class="chip'+(FILTER===c?" on":"")+'" data-f="'+esc(c)+'">'+esc(c)+' <span class="n">'+cats[c]+'</span></button>').join("");
+      g("filters").innerHTML = names.length>1 || names[0]!=="General" ? chips : "";   // hide chips when there's only one plain group
+      [].forEach.call(g("filters").querySelectorAll(".chip"), b=>b.onclick=()=>{ FILTER=b.dataset.f; render(); });
+
+      const shown = FILTER==="all" ? ALL : ALL.filter(t=>catOf(t)===FILTER);
+      // The flag-age control shows ONLY when a specific age-based category is
+      // filtered to (i.e. Emails) — not on "All".
+      g("flagrow").style.display = (FILTER!=="all" && shown.some(t=>t.refDate)) ? "flex" : "none";
+      // OLDEST FIRST: by the age base date ascending (no date → last).
+      const byOldest=(a,b)=>{ const ka=ageBase(a)||"9999-12-31", kb=ageBase(b)||"9999-12-31"; return ka.localeCompare(kb); };
+      const open=shown.filter(t=>!t.status.done).sort(byOldest);
+      const done=shown.filter(t=>t.status.done).sort(byOldest);
       let html="";
       if(open.length){ html+='<div class="sec-h">To do ('+open.length+')</div>'+open.map(row).join(""); }
-      if(done.length){ html+='<div class="sec-h">Done this period ('+done.length+')</div>'+done.map(row).join(""); }
+      if(done.length){ html+='<div class="sec-h">Done ('+done.length+')</div>'+done.map(row).join(""); }
+      if(!open.length && !done.length) html='<div class="empty">No tasks in this filter.</div>';
       g("list").innerHTML=html;
     }
     function row(t){
       const s=t.status;
+      const age=ageDays(t), over7=(age!=null && age>FLAG_AGE && !s.done);
       let pill;
       if(s.done) pill='<span class="pill done">✓ '+(s.auto?"Done automatically":"Done")+'</span>';
+      else if(t.refDate){   // email-style task → show AGE (with a warning past 7 days)
+        pill='<span class="pill age'+(over7?" warn":"")+'">'+(over7?"⚠ ":"")+(age===0?"today":age+" day"+(age===1?"":"s")+" ago")+'</span>';
+      }
       else if(s.overdue) pill='<span class="pill overdue">Overdue — was due '+esc(dueLabel(s.dueAt))+'</span>';
       else pill='<span class="pill due">Due '+esc(dueLabel(s.dueAt))+'</span>';
+      const catPill='<span class="pill cat">'+esc(catOf(t))+'</span> ';
       const canTick=!s.auto;   // auto-completed tasks aren't manually toggled
       const tick=canTick
-        ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle(\''+t.id+'\','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
+        ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle('+esc(JSON.stringify(String(t.id)))+','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
         : '<div class="tickbtn on" title="Completed automatically">✓</div>';
       // A task linked to a portal section opens straight there. The whole title
       // becomes the link, plus an explicit "Go to" button.
+      const disp=esc(cleanTitle(t));
       const title=t.areaPage
-        ? '<h3><a href="'+esc(t.areaPage)+'" style="color:var(--navy);text-decoration:none;">'+esc(t.title)+' ↗</a></h3>'
-        : '<h3>'+esc(t.title)+'</h3>';
+        ? '<h3><a href="'+esc(t.areaPage)+'" style="color:var(--navy);text-decoration:none;">'+disp+' ↗</a></h3>'
+        : '<h3>'+disp+'</h3>';
       const goBtn=t.areaPage
         ? '<a class="btn primary small" href="'+esc(t.areaPage)+'" style="margin-top:8px;">➜ Go to '+esc(t.areaLabel||"section")+'</a>'
         : "";
-      return '<div class="card"><div class="task">'+tick+
+      // Email tasks show when it arrived; scheduled tasks show their recurrence.
+      const meta=t.refDate ? ("Received "+fmtDMY(t.refDate)) : schedule(t);
+      // Keep the detail clean — pull the email link OUT of the text and show it as
+      // a tidy "Open email" link (covers older tasks that had the URL glued in).
+      const rawDetail=String(t.detail||"");
+      const emailUrl=t.link || (rawDetail.match(/https?:\/\/\S+/)||[])[0] || "";
+      const cleanDet=rawDetail.replace(/https?:\/\/\S+/g,"").replace(/\n{2,}/g,"\n").trim();
+      const emailLink=emailUrl ? '<a class="mailink" href="'+esc(safeUrl(emailUrl))+'" target="_blank" rel="noopener">📧 Open email ↗</a>' : "";
+      return '<div class="card'+(over7?" warn7":"")+'"><div class="task">'+tick+
         '<div class="body">'+title+
-        '<div class="meta">'+esc(schedule(t))+'</div>'+pill+
-        (t.detail?'<div class="detail">'+esc(t.detail)+'</div>':"")+
+        '<div class="meta">'+esc(meta)+'</div>'+catPill+pill+
+        (cleanDet?'<div class="detail">'+esc(cleanDet)+'</div>':"")+
         (t.autoMatch&&!s.done?'<div class="auto-note">⤿ Auto-ticks when you do this in the portal</div>':"")+
-        (goBtn?'<div>'+goBtn+'</div>':"")+
+        ((goBtn||emailLink)?'<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">'+goBtn+emailLink+'</div>':"")+
         '</div></div></div>';
     }
     async function toggle(id, isDone){
@@ -116,6 +198,7 @@
     window.toggle=toggle;
     (async function(){
       try{ const me=await aFetch("/auth/me").then(r=>r.json()); if(!me.ok){ location.href="/login.html"; return; } }catch(e){}
+      initFlagAge();
       load();
     })();
   </script>

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=28"></script>
+  <script src="sla-jobedit.js?v=33"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -40,6 +40,7 @@
     .pill-toggle button.active{background:#fff;color:var(--ml-blue);box-shadow:0 1px 3px rgba(0,0,0,0.18);}
     select,input[type="date"]{padding:5px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);background:#fff;}
     .btn{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;background:#f9fafb;display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:#0f172a;}
+    .btn.orange{background:#ea7a23;color:#fff;border-color:#ea7a23;}
     .btn-primary{background:linear-gradient(180deg,#1A4F8F 0%,#003468 100%);color:#fff;border:0;}
     .tag{font-size:11px;padding:3px 7px;border-radius:999px;background:#eef2ff;color:#4338ca;}
 
@@ -107,6 +108,8 @@
       white-space:nowrap;text-overflow:ellipsis;line-height:30px;font-size:11px;
       touch-action:none;user-select:none;
     }
+    .day-job.flash{animation:mlJobFlash 1.4s ease-in-out 3;z-index:5;}
+    @keyframes mlJobFlash{0%,100%{box-shadow:0 0 0 0 rgba(234,122,35,0);}50%{box-shadow:0 0 0 6px rgba(234,122,35,.75);}}
     .day-job-time{display:none;font-weight:700;margin-right:5px;}
     .drag-ghost .day-job-time{display:inline;}
     .day-job-ref{font-weight:700;margin-right:5px;color:#1e3a8a;}
@@ -134,6 +137,15 @@
     .hol-badge{display:inline-block;background:#16a34a;color:#fff;border-radius:6px;padding:2px 6px;font-size:10.5px;font-weight:700;margin:2px;}
     .day-row.on-holiday .day-track{background:repeating-linear-gradient(45deg,#f0fdf4,#f0fdf4 10px,#dcfce7 10px,#dcfce7 20px);}
     .hol-badge-inline{display:inline-block;background:#16a34a;color:#fff;border-radius:999px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle;}
+    /* Holiday takes precedence: a bold banner spanning the whole day track so an
+       off day reads as HOLIDAY first, with any clashing job dimmed + flagged. */
+    .day-holiday-banner{position:absolute;left:0;top:0;height:100%;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:repeating-linear-gradient(45deg,rgba(220,252,231,.72),rgba(220,252,231,.72) 12px,rgba(187,247,208,.72) 12px,rgba(187,247,208,.72) 24px);color:#166534;font-weight:800;font-size:13px;letter-spacing:.02em;pointer-events:none;z-index:6;}
+    /* A job sitting on a day the engineer is on approved leave — dimmed + flagged. */
+    .day-job.leave-clash{outline:2px dashed #d97706;outline-offset:-2px;box-shadow:0 0 0 2px #fef3c7 inset;opacity:.5;z-index:7;}
+    .day-job.leave-clash:hover{opacity:1;}
+    .week-engineer-cell.on-holiday .week-job-chip{opacity:.55;}
+    .week-engineer-cell.on-holiday .week-job-chip:hover{opacity:1;}
+    .week-job-chip.leave-clash{border-style:dashed !important;border-width:2px !important;border-color:#d97706 !important;background:#fffbeb;}
     .week-job-chip{
       background:#e0f2fe;border:1px solid #60a5fa;border-radius:999px;padding:2px 6px;
       font-size:10px;margin:2px;display:inline-block;cursor:pointer;max-width:100%;
@@ -278,6 +290,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="undoAutoBtn" style="display:none;background:#fef2f2;border-color:#fecaca;color:#b91c1c;" title="Revert the jobs booked in by the last auto-day">↩ Undo last auto-day</button>
+        <a class="btn orange" id="addJobBtn" href="add-job.html" title="Raise a new job — you'll come back to the scheduler once it's booked in">＋ Add Job</a>
         <div class="toolwrap">
           <button type="button" class="btn" id="toolsBtn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
           <div class="toolmenu" id="toolsMenu" hidden>
@@ -285,6 +298,7 @@
             <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
             <button class="btn" id="openFallbackBtn" title="Auto-give each engineer at least one job for the next working day">🛟 Fallbacks</button>
             <button class="btn" id="openMapBtn">🗺️ Map view</button>
+            <a class="btn" href="engineers-live.html" title="Live: where every engineer is right now">📍 Where's everyone</a>
             <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
             <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
           </div>
@@ -391,7 +405,7 @@
 
       <div class="buttons" style="justify-content:space-between;">
         <span style="display:flex;gap:8px;">
-          <button type="button" class="btn" id="jobCardBtn" title="Open the full job card">🗂 Job card</button>
+          <button type="button" class="btn" id="jobCardBtn" title="Open the full job (job card / photos / status)">🗂 Open job</button>
           <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
         </span>
         <span style="display:flex;gap:8px;">
@@ -436,6 +450,13 @@
     </div>
     <label style="display:block;font-size:12px;color:var(--muted);margin-top:10px;">Note for the office<br>
       <input type="text" id="blkNote" maxlength="200" placeholder="e.g. Doctor's appointment" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    <details id="blkRepeat" style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;">🔁 Repeat weekly (optional)</summary>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;">
+        <input type="checkbox" id="blkRepOn" style="width:auto;"> Repeat every <b id="blkRepDow">week</b></label>
+      <label style="display:block;font-size:12px;color:var(--muted);margin-top:8px;">Until <span style="opacity:.7;">(optional — leave blank to repeat until removed)</span><br>
+        <input type="date" id="blkRepUntil" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    </details>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
       <button type="button" class="btn" id="blkCancel">Cancel</button>
       <button type="button" class="btn primary" id="blkSave">Add block</button>
@@ -622,7 +643,7 @@ const MIN_HOUR_WIDTH = 52;
 const STATUS_COLOUR = {
   "Pending":"#9f1239", "Scheduled":"#f59e0b", "Travelling":"#3b82f6",
   "In Progress":"#9333ea", "On Hold":"#6b7280", "Quote":"#dc2626",
-  "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75"
+  "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75", "Cancelled":"#b91c1c"
 };
 const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
 // A finished job that stays on the board (green + locked). Closed/Invoiced are
@@ -772,8 +793,17 @@ function normaliseJob(j){
     // Actual worked timestamps (In Progress → Complete) so a finished job can be
     // shown at the time it was really done. The scheduled time above is kept
     // untouched — this is display only.
-    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : []
+    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : [],
+    visitCount: j.visitCount || 0,
+    // Release gating from the worker (engineers never receive hidden jobs; the
+    // office sees 🙈 on the block until it's visible to them).
+    releaseView: j.releaseView || null
   };
+}
+function hiddenFromEng(job){
+  const rv = job && job.releaseView; if(!rv) return false;
+  if(rv.hidden !== undefined) return !!rv.hidden;
+  return rv.mode === "afterPrev" || rv.mode === "skipped" || !!(rv.at && Date.parse(rv.at) > Date.now());
 }
 
 async function loadJobs(){
@@ -781,9 +811,11 @@ async function loadJobs(){
   const data = await res.json();
   // Keep COMPLETE jobs on the board (they render green + locked) so the day
   // still shows what's been done. Closed/Invoiced are downstream accounting
-  // states applied later — those stay off the board.
+  // states applied later — those stay off the board. CANCELLED jobs are dropped
+  // too, so they never appear in a lane, the "Needs scheduling" tray, the
+  // fill-in / backfill suggestions or the auto-day pool.
   jobs = (Array.isArray(data) ? data : []).map(normaliseJob)
-    .filter(j => !["Closed Jobs","Invoiced"].includes(j.status));
+    .filter(j => !["Closed Jobs","Invoiced","Cancelled"].includes(j.status));
 }
 
 // Approved holidays overlaid on the board so you never schedule someone on leave.
@@ -811,9 +843,18 @@ async function loadBlocks(){
   try{ const d = await authFetch("/sla/blocks").then(r=>r.json()); allBlocks = (d && d.blocks) || []; }
   catch(e){ allBlocks = []; }
 }
+const DOW_NAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function dowName(d){ return DOW_NAME[Number(d)] || "that day"; }
 function blocksForDay(username, dateObj){
   const ds = ymd(dateObj), u = String(username||"").toLowerCase();
-  return allBlocks.filter(b => b.date===ds && String(b.username||"").toLowerCase()===u)
+  const dow = new Date(ds+"T12:00:00Z").getUTCDay();
+  return allBlocks.filter(b => {
+      if(String(b.username||"").toLowerCase()!==u) return false;
+      // A weekly repeating block occurs on every matching weekday within its window;
+      // a one-off matches the exact date.
+      if(b.repeat && b.repeat.dow!=null) return Number(b.repeat.dow)===dow && ds>=(b.date||"") && (!b.repeat.until || ds<=b.repeat.until);
+      return b.date===ds;
+    })
     .sort((a,b)=> (a.start||"").localeCompare(b.start||""));
 }
 const hhmmToMins = s => { const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||"")); return m ? Number(m[1])*60+Number(m[2]) : 0; };
@@ -1061,9 +1102,10 @@ function renderDayView(container){
       el.className = "day-block";
       el.style.left = ((bs - dayStartMins) * pxPerMin) + "px";
       el.style.width = Math.max(22, (be - bs) * pxPerMin) + "px";
-      el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + " (tap ✕ to remove)";
-      el.innerHTML = `<span class="db-lbl">🚫 ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
-      el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id); });
+      const rep = b.repeat && b.repeat.dow != null;
+      el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + (rep ? " · repeats every " + dowName(b.repeat.dow) : "") + " (tap ✕ to remove)";
+      el.innerHTML = `<span class="db-lbl">🚫${rep ? " 🔁" : ""} ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
+      el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id, false, ymd(dayDate)); });
       track.appendChild(el);
     });
 
@@ -1079,7 +1121,7 @@ function renderDayView(container){
       }
 
       const el = document.createElement("div");
-      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "");
+      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "") + (holD ? " leave-clash" : "");
       el.dataset.jobId = job.id;
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
@@ -1094,20 +1136,33 @@ function renderDayView(container){
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
+      const hid = hiddenFromEng(job);
+      el.querySelector(".day-job-ref").textContent = (hid ? "🙈 " : "") + (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
                  (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
                  (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
-                 (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "");
+                 (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "") +
+                 (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "") +
+                 (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "");
 
       // Completed jobs are locked (not draggable) — they still open on click.
       if(!done) attachPointerDrag(el, job, false);
       el.addEventListener("click", () => { if(!dragState.active && !dragState.moved) openJobModal(job.id); });
       track.appendChild(el);
     });
+
+    // Holiday takes precedence — a bold banner across the whole day so it reads as
+    // HOLIDAY first; any clashing job is dimmed underneath (still tappable to move).
+    if(holD){
+      const ban = document.createElement("div");
+      ban.className = "day-holiday-banner";
+      const lbl = holD.half ? holD.half + " leave" : (holD.type==="Unpaid" ? "Unpaid leave" : holD.type==="Other" ? "Leave" : "On holiday");
+      ban.textContent = "🌴 " + engineer.name + " — " + lbl + (placements.length ? "  ·  ⚠ " + placements.length + " job" + (placements.length===1?"":"s") + " still booked" : "");
+      track.appendChild(ban);
+    }
 
     bodyH += rowH + 1;   // +1 for the row's bottom border
     row.appendChild(track);
@@ -1183,10 +1238,13 @@ function renderWeekView(container){
         .forEach(job => {
           const done = isDoneStatus(job.status);
           const chip = document.createElement("div");
-          chip.className = "week-job-chip" + (done ? " done" : "");
+          chip.className = "week-job-chip" + (done ? " done" : "") + (hol ? " leave-clash" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title;
+          const hid = hiddenFromEng(job);
+          chip.textContent = (hid ? "🙈 " : "") + (hol ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+          if(hol) chip.title = "⚠ " + engineer.name + " is on " + (hol.half ? hol.half + " leave" : "holiday") + " this day";
+          else if(hid) chip.title = "🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "");
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
@@ -1366,7 +1424,7 @@ let modalJobId = null;
    /sla/jobs/for-engineer which serves THAT engineer's own per-engineer status. */
 // Order statuses sensibly for the summary chips; anything else (custom
 // categories) is appended after these in first-seen order.
-const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs"];
+const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs","Cancelled"];
 function engStatusColour(s){ return STATUS_COLOUR[s] || "#64748b"; }
 let engDayCtx = null;   // remembers who/when the day-summary modal is showing (for the 🗺️ Map button)
 function openEngDay(username, name, date){
@@ -1395,7 +1453,7 @@ function renderEngDay(list){
   const sum = $("engDaySummary");
   sum.innerHTML =
     `<span class="sc total"><b>${list.length}</b>&nbsp;job${list.length === 1 ? "" : "s"}</span>` +
-    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${s} <b>${counts[s]}</b></span>`).join("");
+    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${escapeHtml(s)} <b>${counts[s]}</b></span>`).join("");
   const wrap = $("engDayJobs");
   if(!list.length){ wrap.innerHTML = '<div class="eng-empty">No jobs scheduled for this day.</div>'; return; }
   // Sort by scheduled time.
@@ -1429,7 +1487,7 @@ function renderEngDay(list){
     else window.open("job-view.html?id=" + encodeURIComponent(id), "_blank");
   }));
 }
-function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;",'\'':"&#39;" }[c])); }
 function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
 document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
@@ -1441,6 +1499,11 @@ function openBlockModal(username, name, date){
   blkCtx = { username, name, date };
   $("blkWho").textContent = name + " · " + date.toDateString();
   $("blkStart").value = "08:00"; $("blkEnd").value = "09:00"; $("blkNote").value = "";
+  // Reset the (hidden) repeat controls; the weekday label follows the chosen day.
+  const rp = $("blkRepeat"); if(rp) rp.open = false;
+  if($("blkRepOn")) $("blkRepOn").checked = false;
+  if($("blkRepUntil")) $("blkRepUntil").value = "";
+  if($("blkRepDow")) $("blkRepDow").textContent = dowName(new Date(ymd(date)+"T12:00:00Z").getUTCDay());
   renderBlkList();
   $("blkBackdrop").style.display = "flex";
   setTimeout(() => { try{ $("blkStart").focus(); }catch(e){} }, 50);
@@ -1449,30 +1512,87 @@ function closeBlockModal(){ $("blkBackdrop").style.display = "none"; }
 function renderBlkList(){
   if(!blkCtx) return;
   const list = blocksForDay(blkCtx.username, blkCtx.date);
+  const occ = formatDateInput(blkCtx.date);
   $("blkList").innerHTML = list.length
     ? `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Blocks on this day</div>` +
-      list.map(b => `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`).join("")
+      list.map(b => {
+        const rep = b.repeat && b.repeat.dow != null;
+        return `<div class="blk-entry">`
+          + `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${rep?"🔁 ":""}${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`
+          + (rep ? `<div class="bi-rep" style="font-size:11px;color:var(--muted);margin:1px 0 6px 2px;">🔁 every ${escapeHtml(dowName(b.repeat.dow))}${b.repeat.until?` · ends ${escapeHtml(b.repeat.until)}`:` · no end date`} · <button data-end="${escapeAttr(b.id)}" style="border:none;background:none;color:#003466;cursor:pointer;text-decoration:underline;font:inherit;padding:0;">change end date</button></div>` : ``)
+          + `</div>`;
+      }).join("")
     : "";
-  $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true)));
+  $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true, occ)));
+  $("blkList").querySelectorAll("[data-end]").forEach(btn => btn.addEventListener("click", () => editBlockEnd(btn.getAttribute("data-end"))));
+}
+// Inline "change end date" editor for a repeating block (in the modal list).
+function editBlockEnd(id){
+  const b = allBlocks.find(x => x.id === id); if(!b || !b.repeat) return;
+  const btn = $("blkList").querySelector(`[data-end="${id}"]`); const div = btn && btn.closest(".bi-rep"); if(!div) return;
+  div.innerHTML = `🔁 ends <input type="date" class="bi-end-in" value="${escapeAttr(b.repeat.until||"")}" style="padding:3px 5px;border:1px solid #ccd5dd;border-radius:6px;font:inherit;"> `
+    + `<button class="bi-end-save" style="border:0;background:#003466;color:#fff;border-radius:6px;padding:3px 8px;font:inherit;cursor:pointer;">Save</button> `
+    + `<button class="bi-end-clear" style="border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 8px;font:inherit;cursor:pointer;">No end</button>`;
+  div.querySelector(".bi-end-save").addEventListener("click", () => setBlockUntil(id, div.querySelector(".bi-end-in").value || ""));
+  div.querySelector(".bi-end-clear").addEventListener("click", () => setBlockUntil(id, ""));
+}
+async function setBlockUntil(id, until){
+  try{
+    const r = await authFetch("/sla/blocks/set-until", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, until }) }).then(r => r.json());
+    if(r && r.ok){ await loadBlocks(); render(); renderBlkList(); }
+    else alert((r && r.error) || "Couldn't update the end date.");
+  }catch(e){ alert("Couldn't update the end date."); }
+}
+// Three-way choice when removing a REPEATING block: just this day, or the series.
+function blockRemovalChoice(dowNm, occDate){
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;";
+    const dayLabel = occDate ? new Date(occDate+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"}) : "this day";
+    ov.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:360px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Remove repeating block</div>
+      <div style="font-size:13px;color:#475569;margin-bottom:14px;">This block repeats every ${escapeHtml(dowNm)}. What would you like to remove?</div>
+      <button class="rc-one" style="width:100%;padding:11px;margin-bottom:8px;border:1px solid #cbd5e1;background:#fff;border-radius:9px;font:inherit;font-weight:600;cursor:pointer;">Just ${escapeHtml(dayLabel)}</button>
+      <button class="rc-all" style="width:100%;padding:11px;margin-bottom:8px;border:0;background:#b00020;color:#fff;border-radius:9px;font:inherit;font-weight:600;cursor:pointer;">The whole series (every ${escapeHtml(dowNm)})</button>
+      <button class="rc-cancel" style="width:100%;padding:9px;border:none;background:none;color:#64748b;font:inherit;cursor:pointer;">Cancel</button></div>`;
+    const done = v => { try{ document.body.removeChild(ov); }catch(e){} resolve(v); };
+    ov.querySelector(".rc-one").onclick = () => done("one");
+    ov.querySelector(".rc-all").onclick = () => done("all");
+    ov.querySelector(".rc-cancel").onclick = () => done(null);
+    ov.addEventListener("click", e => { if(e.target === ov) done(null); });
+    document.body.appendChild(ov);
+  });
 }
 async function saveBlock(){
   if(!blkCtx) return;
   const start = $("blkStart").value, end = $("blkEnd").value, note = $("blkNote").value.trim();
   if(!start || !end){ alert("Pick a start and end time."); return; }
   if(hhmmToMins(end) <= hhmmToMins(start)){ alert("End time must be after the start time."); return; }
+  const body = { username: blkCtx.username, date: formatDateInput(blkCtx.date), start, end, note };
+  if($("blkRepOn") && $("blkRepOn").checked) body.repeat = { weekly: true, until: ($("blkRepUntil") && $("blkRepUntil").value) || "" };
   const btn = $("blkSave"); btn.disabled = true;
   try{
     const r = await authFetch("/sla/blocks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ username: blkCtx.username, date: formatDateInput(blkCtx.date), start, end, note }) }).then(r => r.json());
+      body: JSON.stringify(body) }).then(r => r.json());
     if(r && r.ok){ await loadBlocks(); renderBlkList(); render(); $("blkNote").value = ""; }
     else alert((r && r.error) || "Couldn't add the block.");
   }catch(e){ alert("Couldn't add the block."); }
   btn.disabled = false;
 }
-async function deleteBlock(id, keepModal){
+async function deleteBlock(id, keepModal, occDate){
+  const b = allBlocks.find(x => x.id === id);
+  const rep = !!(b && b.repeat && b.repeat.dow != null);
+  let action = "all";   // one-off → straight delete; repeating → ask
+  if(rep){
+    action = await blockRemovalChoice(dowName(b.repeat.dow), occDate);
+    if(!action) return;
+  }
   try{
-    const r = await authFetch("/sla/blocks/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r => r.json());
+    const path = action === "one" ? "/sla/blocks/skip" : "/sla/blocks/delete";
+    const body = action === "one" ? { id, date: occDate } : { id };
+    const r = await authFetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json());
     if(r && r.ok){ await loadBlocks(); render(); if(keepModal) renderBlkList(); }
+    else alert((r && r.error) || "Couldn't update the block.");
   }catch(e){}
 }
 document.getElementById("engDayBlock").addEventListener("click", () => { if(engDayCtx) openBlockModal(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
@@ -1560,7 +1680,7 @@ function renderOptimise(data){
     ((data.blocks && data.blocks.length) ? `<div class="opt-reason">🚫 Routed around: ${data.blocks.map(b => `${optWallClock(optCtx.date, dayStart, b.offset)}–${optWallClock(optCtx.date, dayStart, b.endOffset)}${b.note ? " " + escapeHtml(b.note) : ""}`).join(" · ")}</div>` : "") +
     ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
   const rows = [];
-  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${dayStart}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${escapeHtml(dayStart)}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
   data.legs.forEach((l, i) => {
     if(data.lunch && data.lunch.beforeJobId === l.jobId){
       rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
@@ -2038,7 +2158,10 @@ $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.displa
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
 
 // ── Fallback jobs config (pick a standby OR existing loose job per engineer) ──
-function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
+// MUST match the worker's normId (sla.js): lowercase + spaces→dots. The server
+// stores byEngineer/exclude keyed this way ("Ryan Diggens" → "ryan.diggens"), so
+// reading back with a space-keyed variant showed everything as "no fallback set".
+function fbNorm(s){ return String(s||"").toLowerCase().replace(/\s+/g,".").trim(); }
 let FB_TEMPLATES = [], FB_ALLJOBS = [], FB_POOL = [], FB_CFG = { byEngineer:{} };
 function fbTmplLabel(t){
   const bits = [t.ref || t.id];
@@ -2075,7 +2198,7 @@ function fbJobOptions(sel){
 function fbRemoveLine(label, id, ref, fn){
   return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #eef2f7;font-size:13px;">'
     + '<span style="flex:1;">'+label+'</span>'
-    + '<button type="button" class="btn" style="padding:3px 9px;color:#b91c1c;" onclick="'+fn+'(\''+escapeHtml(String(id)).replace(/'/g,"\\'")+'\',\''+escapeHtml(String(ref)).replace(/'/g,"\\'")+'\')">✕ Remove</button>'
+    + '<button type="button" class="btn" style="padding:3px 9px;color:#b91c1c;" onclick="'+fn+'('+escapeHtml(JSON.stringify(String(id)))+','+escapeHtml(JSON.stringify(String(ref)))+')">✕ Remove</button>'
     + '</div>';
 }
 function renderFbPool(){
@@ -2128,7 +2251,7 @@ function renderFbSearch(){
   host.innerHTML = matches.map(function(j){
     return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #eef2f7;font-size:13px;">'
       + '<span style="flex:1;">'+escapeHtml(fbExistingLabel(j))+'</span>'
-      + '<button type="button" class="btn" style="padding:3px 9px;" onclick="addFbExisting(\''+escapeHtml(j.id).replace(/'/g,"\\'")+'\')">＋ Add</button>'
+      + '<button type="button" class="btn" style="padding:3px 9px;" onclick="addFbExisting('+escapeHtml(JSON.stringify(String(j.id)))+')">＋ Add</button>'
       + '</div>';
   }).join("");
 }
@@ -2144,10 +2267,11 @@ function refreshFbRows(){
   }
   $("fbRows").innerHTML = fields.map(function(e){
     const fb = (FB_CFG.byEngineer||{})[fbNorm(e.username)] || {};
+    // One control per engineer: the dropdown. Pick a job = fallback on; "No
+    // fallback set" = off; use the Omit list below to leave someone out entirely.
     return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
-      + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
-      + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
-      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
+      + '<b style="flex:0 0 120px;">'+escapeHtml(e.name)+'</b>'
+      + '<select class="fb-job" style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
       + '</div>';
   }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
 }
@@ -2157,10 +2281,16 @@ function renderFbOmit(){
   const fields = (engineers||[]).filter(isFieldEng);
   const ex = new Set((FB_CFG.exclude||[]).map(fbNorm));
   if(!fields.length){ host.innerHTML = '<p style="color:#5b6b78;font-size:13px;">No field engineers found.</p>'; return; }
+  // A clean auto-fill grid; each checkbox is EXPLICITLY sized (some pages force
+  // input{width:100%}, which stretched these boxes and scattered the names).
+  host.style.display = "grid";
+  host.style.gridTemplateColumns = "repeat(auto-fill, minmax(150px, 1fr))";
+  host.style.gap = "6px 12px";
   host.innerHTML = fields.map(function(e){
     const on = ex.has(fbNorm(e.username));
-    return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;font-size:13.5px;cursor:pointer;">'
-      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")+'> '+escapeHtml(e.name)+'</label>';
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;">'
+      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")
+      + ' style="flex:0 0 auto;width:18px;height:18px;margin:0;"> <span>'+escapeHtml(e.name)+'</span></label>';
   }).join("");
 }
 async function openFallbacks(){
@@ -2179,7 +2309,7 @@ async function saveFallbacks(){
     const sel = row.querySelector(".fb-job");
     const jobId = sel ? sel.value : "";
     if(!jobId) return;
-    byEngineer[row.dataset.user] = { jobId, active: row.querySelector(".fb-active").checked };
+    byEngineer[row.dataset.user] = { jobId, active: true };   // a picked job = fallback on
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
   const exclude = [];
@@ -2209,6 +2339,7 @@ function openJobModal(jobId){
   $("jobTitle").value = job.title;
   $("jobSite").value = (job.ref ? job.ref + " · " : "") + (job.site || "");
   $("jobDate").value = formatDateInput(d);
+  { const y = new Date().getFullYear(); $("jobDate").min = (y - 1) + "-01-01"; $("jobDate").max = (y + 3) + "-12-31"; }
   $("jobTime").value = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   $("jobDuration").value = job.durationMinutes/60;
   $("jobPriority").value = job.priority || "";
@@ -2253,6 +2384,10 @@ $("jobForm").addEventListener("submit", async function(e){
   if(!job) return;
 
   const dateVal = $("jobDate").value;
+  { // a mistyped year (2006 for 2026) would park the job outside every view
+    const y = Number(String(dateVal).slice(0, 4)), now = new Date().getFullYear();
+    if(!(y >= now - 1 && y <= now + 3)){ setStatus("⚠️ Date has the year " + (y || "?") + " — check the date.", true); $("jobDate").focus(); return; }
+  }
   const timeVal = $("jobTime").value || "08:00";
   const durHours = parseFloat($("jobDuration").value) || 1;
   const [hh, mm] = timeVal.split(":").map(Number);
@@ -2274,7 +2409,7 @@ $("jobForm").addEventListener("submit", async function(e){
         changedBy: currentUser || "scheduler"
       })
     });
-    if(!res.ok) throw new Error("HTTP " + res.status);
+    if(!res.ok){ let t = ""; try{ t = (await res.json()).error || ""; }catch(e){} throw new Error(t || ("HTTP " + res.status)); }
     const saved = await res.json();
     const idx = jobs.findIndex(j => j.id === job.id);
     if(idx >= 0) jobs[idx] = normaliseJob(saved);
@@ -2528,8 +2663,8 @@ function plotJobs(){
     const engs = job.assignedEngineers.join(", ");
     marker.bindPopup(`
       <div class="pin-pop">
-        <b>${(job.ref || job.id)}</b>
-        <span class="st" style="background:${colour}">${job.status}</span><br>
+        <b>${escHtml(job.ref || job.id)}</b>
+        <span class="st" style="background:${colour}">${escHtml(job.status)}</span><br>
         ${escHtml(job.title)}<br>
         <span style="color:#6b7280;">${escHtml(job.site || "")}${job.address ? " · " + escHtml(job.address) : ""}</span><br>
         ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
@@ -2557,6 +2692,24 @@ function plotJobs(){
 function escHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 /* ============== INIT ============== */
+// Scroll to a job's day-view block and flash it (the Add Job hand-off). If the
+// block isn't on screen — its engineer is office staff hidden by the toggle, or
+// the job has no slot on this day — say so rather than leaving a blank board.
+function focusJobBlock(jobId){
+  const el = document.querySelector('.day-job[data-job-id="' + CSS.escape(jobId) + '"]');
+  const job = jobs.find(j => j.id === jobId);
+  if(!el){
+    if(job && job.assignedEngineers.length && !showOffice && engineers.some(e => !isFieldEng(e) && job.assignedEngineers.map(a => a.toLowerCase()).includes(String(e.username).toLowerCase())))
+      setStatus("Job saved — its engineer is office staff. Tick “Show office staff” to see it.", true);
+    else if(job) setStatus("Job saved (" + (job.ref || job.id) + ") — it has no slot on this day.", true);
+    return;
+  }
+  el.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 4500);
+  if(job) setStatus("✅ Job saved — " + (job.ref || "") + (job.assignedEngineers.length ? " · " + job.assignedEngineers.join(", ") : ""));
+  try{ const u = new URL(location.href); u.searchParams.delete("job"); history.replaceState(null, "", u.pathname + u.search + u.hash); }catch(e){}
+}
 async function init(){
   const u = sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername");
   if(!u){ window.location.href = "login.html"; return; }
@@ -2577,6 +2730,13 @@ async function init(){
 
   const dp = $("datePicker");
   selectedDate = new Date();
+  // Deep-link: ?date=YYYY-MM-DD opens that day; ?job=<id> scrolls to + flashes
+  // that job's block (Add Job sends you here after saving a scheduled job).
+  const qs = new URLSearchParams(location.search);
+  const qDate = qs.get("date");
+  if(qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate)){ const d = parseDateInput(qDate); if(d && !isNaN(d)) selectedDate = d; }
+  const focusJobId = qs.get("job") || "";
+  if(focusJobId){ viewMode = "day"; [...document.querySelectorAll("#viewToggle button")].forEach(b => b.classList.toggle("active", b.dataset.mode === "day")); }
   dp.value = formatDateInput(selectedDate);
   dp.addEventListener("change", () => { selectedDate = parseDateInput(dp.value); render(); });
   // Skip to next/previous day (±7 in week view), or jump back to today.
@@ -2674,6 +2834,7 @@ async function init(){
     await loadBlocks();
     render();
     setStatus("Scheduler ready");
+    if(focusJobId) focusJobBlock(focusJobId);
     if(location.hash === "#map") openMap();
   }catch(err){
     console.error(err);
@@ -2683,6 +2844,35 @@ async function init(){
 }
 
 init();
+
+// ── Live refresh (Sep 2026) ───────────────────────────────────────────────
+// The office needs job colours to move as engineers tap statuses, so the page
+// re-fetches every 60s while the tab is visible (and the moment it becomes
+// visible again). Skipped whenever something is mid-flight — a drag, any open
+// modal, the shared job editor, a focused text box, a bulk selection — so a
+// re-render never pulls a control out from under someone.
+(function(){
+  let busy = false;
+  function uiBusy(){
+    if(document.hidden) return true;
+    if(typeof dragState !== "undefined" && dragState && dragState.active) return true;
+    if(typeof selected !== "undefined" && selected && selected.size) return true;
+    if(Array.from(document.querySelectorAll(".modal-backdrop")).some(b => getComputedStyle(b).display !== "none")) return true;
+    const mb = document.getElementById("mljeBack"); if(mb && mb.classList.contains("show")) return true;
+    const a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && a.type !== "radio") return true;
+    return false;
+  }
+  async function tick(){
+    if(busy || uiBusy()) return;
+    busy = true;
+    try{ await loadJobs(true); if(typeof render === "function") render(); }catch(e){}
+    busy = false;
+  }
+  window.mlLiveRefresh = tick;
+  setInterval(tick, 60000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) tick(); });
+})();
 </script>
 
 </body>

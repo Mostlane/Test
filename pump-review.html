@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Certificate Review</title>
+  <!-- Pump maintenance records are reviewed in the one certificate queue now
+       (cert-review.html lists EM, PAT and pump submissions together). -->
+  <script>location.replace("cert-review.html" + (location.search ? location.search.replace(/[?&]open=/, m => m[0] + "pump=") : ""));</script>
+</head>
+<body>
+  <p><a href="cert-review.html">Continue to Certificate review…</a></p>
+</body>
+</html>

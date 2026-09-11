@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -339,8 +339,9 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
   <div class="menu-grid" id="menuGrid">
     
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
-    <a class="button" href="engineer-timesheet.html" id="EngTimesheet"><span class="emoji">⏱️</span> My Timesheet</a>
-    <a class="button" href="timesheets-admin.html" id="EngTsAdmin"><span class="emoji">🧾</span> Engineer Timesheets</a>
+    <!-- ONE Timesheets tile (Sep 2026): office/admins land on Engineer Timesheets,
+         an engineer on My Timesheet — setHref routes it per person. -->
+    <a class="button" href="timesheets-admin.html" id="Timesheets"><span class="emoji">⏱️</span> Timesheets</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="van-check.html" id="VanCheck"><span class="emoji">🚐</span> Van Check</a>
     <a class="button" href="cctv.html" id="CCTV"><span class="emoji">📹</span> CCTV Wall</a>
@@ -366,17 +367,19 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 </a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
+    <a class="button" href="employees.html" id="StaffRecords"><span class="emoji">👷</span> Employees</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
     <a class="button" href="chapplins.html" id="Chapplins"><span class="emoji">🏠</span> Chapplins</a>
     <a class="button" href="eicr-check.html" id="EicrCheck"><span class="emoji">⚡</span> EICR Check</a>
+    <a class="button" href="cable-calc.html" id="CableCalc"><span class="emoji">🔌</span> Cable Calculator</a>
     <a class="button" href="programmes.html" id="Programmes"><span class="emoji">📊</span> Programmes</a>
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
     <a class="button" href="office-my-hours.html" id="MyHours"><span class="emoji">🕒</span> My Hours</a>
-    <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-main.html?reset=1" id="SLA"><span class="emoji">🚨</span> SLA</a>
+    <a class="button" href="client-orders.html" id="ClientOrders"><span class="emoji">📥</span> Client Orders</a>
     <a class="button" href="stats.html" id="Stats"><span class="emoji">📊</span> Stats</a>
     <a class="button" href="health.html" id="Health"><span class="emoji">🩺</span> Health</a>
     <a class="button" href="notification-centre.html" id="Notifications"><span class="emoji">🔕</span> Notification Centre</a>
@@ -391,7 +394,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button visible" id="Help" href="help.html"><span class="emoji">❓</span> Help</a>
 
     <!-- FIXED -->
-    <a class="button visible" id="Logout" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
+    <a class="button visible" id="Logout" href="javascript:void(0)" onclick="if(window.mlLogout){mlLogout();}else{localStorage.clear(); sessionStorage.clear(); window.location.href='login.html';}">
       <span class="emoji">🚪</span> Logout
     </a>
 
@@ -432,8 +435,10 @@ const MAP = window.ML_PERM_MAP || {
   Weekly: ["Weekly"],
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
-  Chapplins: ["Compliance", "SLAAdmin"],
-  EicrCheck: ["Compliance", "complianceBtn"],
+  StaffRecords: ["StaffRecords"],
+  Chapplins: ["Chapplins"],
+  EicrCheck: ["EicrCheck"],
+  CableCalc: ["CableCalc"],
   Programmes: ["Programmes"],
   Users: ["Users", "usersAdmin", "usersAdminBtn", "DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
   TimesheetAdmin: [
@@ -446,6 +451,9 @@ const MAP = window.ML_PERM_MAP || {
 ],
   LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
   SLA: ["SLA", "SLAAdmin", "slaMenu", "slaAccess"],
+  // Client orders board — carries order VALUES, so office roles only (the page +
+  // API also require Full Access or office staff; a field engineer is refused).
+  ClientOrders: ["SLAAdmin", "Compliance", "PurchaseOrders"],
   Stats: ["__fullOnly"],
   Health: ["__fullOnly"],
   Notifications: ["__fullOnly"],
@@ -459,15 +467,12 @@ const MAP = window.ML_PERM_MAP || {
   // "My Hours" — an office-clock user's OWN clocked hours (office-my-hours.html).
   // Every office user who clocks in/out sees this (Full Access too).
   MyHours: ["OfficeClock", "OfficeTimesheet"],
-  // "Timesheet" — the office-WIDE hours (office-timesheet.html) is FULL ACCESS
-  // ONLY. Office / Vehicles users never see this tile; office users use "My
-  // Hours" instead, and Vehicles users reach the van (door-to-door) timesheet
-  // from a "Van Timesheet" button on the Vehicles page.
-  OfficeTimesheet: ["__fullOnly"],
-  // Engineer weekly timesheet (times + jobs; invoices/mileage if self-employed)
-  EngTimesheet: ["EngTimesheet"],
-  // Office view of the engineer timesheets + invoices + deduction settings
-  EngTsAdmin: ["TimesheetAdmin"]
+  // ONE "Timesheets" tile (Sep 2026, Jamie: "consolidated to one Timesheets
+  // page/button"): Full Access / TimesheetAdmin → Engineer Timesheets (which has
+  // buttons for the Office timesheet + My timesheet); an engineer with
+  // EngTimesheet only → My Timesheet. OfficeTimesheet holders (office staff)
+  // still get "My Hours" for their own clock; the office-WIDE sheet is Full Access.
+  Timesheets: ["TimesheetAdmin", "EngTimesheet"]
   // Settings (was Personalise) is now ALWAYS visible (class "button visible")
   // so every user can set their landing page; the appearance options inside
   // stay permission-gated. It is deliberately NOT in this MAP.
@@ -520,12 +525,14 @@ const MAP = window.ML_PERM_MAP || {
         // tile. Persist it so the field-app pages' own guards can read it too.
         const stx = String(user.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
         if (user.StaffType) { try { localStorage.setItem("mostlaneStaffType", user.StaffType); sessionStorage.setItem("mostlaneStaffType", user.StaffType); } catch (e) {} }
-        // Van Check tile: EVERY field user (engineer) gets it — they can do a
-        // check any time. Office/admin/Full-Access users don't (it's not in MAP).
+        // Van Check tile: shown to a field user (engineer) ONLY when they have a
+        // vehicle assigned — a van check is against their van, so an engineer with
+        // no van has nothing to check. Office/admin/Full-Access users never see it.
         const isFieldUser = !fullAccess && (stx === "field"
           || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
+        const hasVan = !!String(user.VehicleAssigned || "").trim();
         const vc = document.getElementById("VanCheck");
-        if (vc) vc.classList.toggle("visible", isFieldUser);
+        if (vc) vc.classList.toggle("visible", isFieldUser && hasVan);
         // My Tasks is an OFFICE feature — hide the tile from field engineers
         // (it's hardcoded "visible", so switch it off for them here).
         const mt = document.getElementById("MyTasks");
@@ -541,7 +548,7 @@ const MAP = window.ML_PERM_MAP || {
           if (!btn) return;
           for (const [perm, href] of choices) { if (has(perm)) { btn.href = href; return; } }
         };
-        setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"]]);   // Full Access only → office-wide timesheet
+        setHref("Timesheets",     [["FullAccess", "timesheets-admin.html"],     ["TimesheetAdmin", "timesheets-admin.html"], ["EngTimesheet", "engineer-timesheet.html"]]);
         setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
         setHref("Projects",       [["Projects", "projects-live.html"],         ["ProjectsAdmin", "projects-live.html"]]);
 
@@ -911,6 +918,7 @@ const MAP = window.ML_PERM_MAP || {
       var token = localStorage.getItem("mostlaneToken");
       if (!token) return;
       var H = { headers: { "Authorization": "Bearer " + token } };
+      function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
       var dotTotals = {};
       function dot(id, n) {
         var btn = document.getElementById(id);
@@ -1100,22 +1108,36 @@ const MAP = window.ML_PERM_MAP || {
           });
         }).catch(function () {}));
 
-      // Van handover: a newly-assigned driver must complete a full handover
-      // check before using the van. Blocking + required, but only ONE 4-hour
-      // snooze (maxSnooze:1) — stricter than the weekly check. Clears on submit.
-      jobs.push(fetch(window.MOSTLANE_API + "/fleet/handover/attention", H)
+      // Timesheet: last week's hours must be completed by the deadline (day/time
+      // set in Engineer Timesheets settings, default midday Wednesday). Snoozeable
+      // up to 2h before the deadline, then enforced — like the weekly van check.
+      jobs.push(fetch(window.MOSTLANE_API + "/ts/outstanding", H)
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (!d || !d.ok || !d.mineDue) return;
-          dot("Vehicles", 1);
+          if (!d || !d.ok || !(d.count > 0)) return;
+          var dueMs = d.dueAt ? new Date(d.dueAt).getTime() : 0;
+          var dueTxt = d.dueAt ? new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : (d.dueLabel || "");
           notes.push({
-            n: 1, icon: "🤝", href: "van-handover.html", maxSnooze: 1,
-            title: "Van handover to complete",
-            text: "Complete the handover check for " + (d.reg || "your new van") + " before you use it."
+            n: d.count, icon: "⏱", href: "engineer-timesheet.html?week=" + encodeURIComponent(d.week),
+            title: d.overdue ? "Timesheet OVERDUE" : "Complete last week's timesheet",
+            text: (d.overdue ? "Enter hours for every job — was due " + dueTxt + "." : "Enter the hours you worked on every job by " + dueTxt + ".") + " " + d.count + " job" + (d.count === 1 ? "" : "s") + " still need hours.",
+            timeGated: true,
+            snoozeUntil: (dueMs && !d.overdue) ? (dueMs - 2 * 3600 * 1000) : 0,
+            dueMs: dueMs
           });
         }).catch(function () {}));
 
-      var ORDER = { "van-handover.html": -1, "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
+      // Van handover: a newly-assigned driver must complete a full handover check
+      // before using the van. This is now enforced portal-wide by the NON-SNOOZABLE
+      // handover gate in portal-config.js (an unavoidable overlay on every page
+      // until it's submitted), so it's no longer a snoozeable attention-gate note
+      // here — the badge on the Vehicles tile still flags it.
+      jobs.push(fetch(window.MOSTLANE_API + "/fleet/handover/attention", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.ok && d.mineDue) dot("Vehicles", 1); })
+        .catch(function () {}));
+
+      var ORDER = { "van-handover.html": -1, "van-check.html": 0, "engineer-timesheet.html": 0.5, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
@@ -1198,9 +1220,9 @@ const MAP = window.ML_PERM_MAP || {
         }
 
         var rows = items.map(function (i) {
-          return '<a class="mln-item" href="' + i.href + '">' +
-            '<span class="mln-ico">' + i.icon + '</span>' +
-            '<span class="mln-txt"><b>' + i.title + '</b><span>' + i.text + '</span></span>' +
+          return '<a class="mln-item" href="' + esc(i.href) + '">' +
+            '<span class="mln-ico">' + esc(i.icon) + '</span>' +
+            '<span class="mln-txt"><b>' + esc(i.title) + '</b><span>' + esc(i.text) + '</span></span>' +
             '<span class="mln-go">›</span></a>';
         }).join("");
 
@@ -1498,7 +1520,7 @@ const MAP = window.ML_PERM_MAP || {
       title: "Van checks",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
       load: function (card) {
-        return jget("/vancheck/week").then(function (d) {
+        function paint(d) {
           if (!d || !d.ok) throw new Error("bad");
           var rows = d.rows || [];
           var required = rows.filter(function (r) { return r.enabled !== false; });
@@ -1517,14 +1539,17 @@ const MAP = window.ML_PERM_MAP || {
             }
           });
           // Pending one-off REQUESTS count too (a pool-van request, or a check
-          // requested for someone whose weekly isn't already outstanding).
+          // requested for someone whose weekly isn't already outstanding). These
+          // carry an id so the office can CANCEL a request straight from the pill
+          // (e.g. a check requested for someone no longer on the portal).
           var custom = (d.customPending || []).filter(function (c) { return !outUsers[String(c.username || "").toLowerCase()]; });
-          custom.forEach(function (c) { outstanding.push(c.name + (c.reg ? " (" + c.reg + ")" : "") + " · requested"); });
-          var N = done + outstanding.length;
+          var requests = custom.map(function (c) { return { id: c.id, label: c.name + (c.reg ? " (" + c.reg + ")" : "") + " · requested" }; });
+          var totalOut = outstanding.length + requests.length;
+          var N = done + totalOut;
           var wk = "";
           try { wk = new Date(d.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" }); } catch (e) {}
           var pct = N ? Math.round(done / N * 100) : 100;
-          var allDone = outstanding.length === 0;
+          var allDone = totalOut === 0;
 
           var html = '<div class="hc-top"><span class="hc-emoji">🚐</span><h3>Van checks</h3>' +
             (wk ? '<span class="hc-when">w/c ' + esc(wk) + '</span>' : '') + '</div>';
@@ -1541,20 +1566,26 @@ const MAP = window.ML_PERM_MAP || {
               return '<div class="hub-alert"><b>' + esc(x.reg || "—") + '</b> · ' + esc(x.name) + ' — ' + bits.join(" · ") + '</div>';
             }).join("");
           }
-          if (outstanding.length) {
-            html += '<div style="font-size:12.5px;color:#5b6b78;font-weight:600;margin:2px 0 4px;">Still to do:</div>' +
-              outstanding.slice(0, 8).map(function (n) { return '<span class="hub-chip">' + esc(n) + '</span>'; }).join("") +
-              (outstanding.length > 8 ? '<span class="hub-chip">+' + (outstanding.length - 8) + ' more</span>' : "");
+          if (totalOut) {
+            var xBtn = 'border:none;background:none;color:#b00020;font-weight:700;cursor:pointer;padding:0 0 0 5px;font-size:14px;line-height:1;';
+            var reqHtml = requests.map(function (r) {
+              return '<span class="hub-chip">' + esc(r.label) +
+                (r.id ? ' <button class="hubVcCancel" data-cancel="' + esc(r.id) + '" title="Cancel this request" aria-label="Cancel request" style="' + xBtn + '">×</button>' : '') +
+                '</span>';
+            }).join("");
+            var wkHtml = outstanding.slice(0, 8).map(function (n) { return '<span class="hub-chip">' + esc(n) + '</span>'; }).join("");
+            var more = outstanding.length > 8 ? '<span class="hub-chip">+' + (outstanding.length - 8) + ' more</span>' : "";
+            html += '<div style="font-size:12.5px;color:#5b6b78;font-weight:600;margin:2px 0 4px;">Still to do:</div>' + reqHtml + wkHtml + more;
           } else if (!defects.length) {
             html += '<div class="hub-ok">✓ All caught up — no outstanding checks or issues.</div>';
           }
 
           html += '<div class="hub-actions">' +
             '<a class="hub-btn ghost" href="van-checks.html">Open van checks</a>' +
-            (outstanding.length ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + outstanding.length + ')</button>' : '') +
+            (totalOut ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + totalOut + ')</button>' : '') +
             '</div>';
           // Clear marker (this widget builds custom HTML, not cardHtml).
-          if (!outstanding.length && !defects.length && !d.globallyPaused) html += '<i data-clear hidden></i>';
+          if (!totalOut && !defects.length && !d.globallyPaused) html += '<i data-clear hidden></i>';
           card.innerHTML = html;
 
           var rb = document.getElementById("hubVcRemind");
@@ -1562,7 +1593,55 @@ const MAP = window.ML_PERM_MAP || {
             rb.disabled = true; rb.textContent = "Sending…";
             jfetch("/vancheck/remind-now", { method: "POST" }, 8000).then(function (r) {
               rb.textContent = r && r.ok ? "✓ Reminded " + (r.reminded || 0) : "Done";
-            }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + outstanding.length + ")"; });
+            }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + totalOut + ")"; });
+          });
+          // ✕ on a requested pill → cancel that one-off request (admin only; the
+          // endpoint deletes only a still-pending request).
+          Array.prototype.forEach.call(card.querySelectorAll(".hubVcCancel"), function (x) {
+            x.addEventListener("click", function () {
+              var id = x.getAttribute("data-cancel"); if (!id) return;
+              x.disabled = true; x.textContent = "…";
+              jfetch("/vancheck/custom-cancel", { method: "POST", body: JSON.stringify({ id: id }) }, 8000)
+                .then(function () { return jfetch("/vancheck/week", null, 8000); })
+                .then(function (fresh) { paint(fresh); })
+                .catch(function () { x.disabled = false; x.textContent = "×"; });
+            });
+          });
+        }
+        return jget("/vancheck/week").then(paint);
+      }
+    });
+
+    // ── Widget: Certificates to review — EM/PAT submitted by engineers, awaiting
+    //    the office to approve + file to compliance. Sits near the top (used a lot).
+    HUB.register({
+      id: "certs", emoji: "📄", title: "Certificates to review", area: "compliance",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance); },
+      load: function (card) {
+        // Pump-maintenance records review in the same queue — fail-soft if that
+        // lookup errors so the EM/PAT count still shows.
+        return Promise.all([jget("/certs/review"), jget("/pump/review").catch(function () { return null; })]).then(function (res) {
+          var d = res[0], p = res[1];
+          if (!d || !d.ok) throw new Error("bad");
+          var certs = d.certs || [];
+          var pumps = (p && p.ok && p.records) || [];
+          var review = certs.filter(function (c) { return c.status === "review"; });
+          var pumpReview = pumps.filter(function (r) { return r.status === "review"; }).length;
+          var drafts = certs.filter(function (c) { return c.status === "draft"; }).length + pumps.filter(function (r) { return r.status === "draft"; }).length;
+          var em = review.filter(function (c) { return c.type === "em"; }).length;
+          var pat = review.filter(function (c) { return c.type === "pat"; }).length;
+          var total = review.length + pumpReview;
+          var rows = "";
+          if (em) rows += metric("EM awaiting approval", em, "warn");
+          if (pat) rows += metric("PAT awaiting approval", pat, "warn");
+          if (pumpReview) rows += metric("Pump maintenance awaiting approval", pumpReview, "warn");
+          if (drafts) rows += metric("Started (not yet submitted)", drafts, "");
+          card.innerHTML = cardHtml({
+            emoji: "📄", title: "Certificates to review",
+            big: total, sub: "submitted, awaiting your approval",
+            tone: total ? "warn" : "",
+            ok: total ? "" : "Nothing waiting to approve.",
+            rows: rows, actions: act("cert-review.html", "Open certificates", true)
           });
         });
       }
@@ -1673,6 +1752,28 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
+    // ── Widget: Employee records — qualifications/licences/insurances expiring ──
+    HUB.register({
+      id: "staffrecords", emoji: "👷", title: "Employee records", area: "staffrecords",
+      can: function (p) { return yes(p.FullAccess) || yes(p.StaffRecords); },
+      load: function (card) {
+        return jget("/hr/attention").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var expired = d.expired || 0, expiring = d.expiring || 0, total = d.count || 0;
+          var rows = "";
+          if (expired) rows += metric("Expired", expired, "bad");
+          if (expiring) rows += metric("Expiring soon", expiring, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "👷", title: "Employee records",
+            big: total, sub: "qualification" + (total === 1 ? "" : "s") + " / licences need attention",
+            tone: expired ? "bad" : (expiring ? "warn" : ""),
+            ok: total ? "" : "All qualifications, licences & insurances in date.",
+            rows: rows, actions: act("employees.html", "Open employees", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Compliance — certificates overdue / due soon (Co-op chart) ───
     HUB.register({
       id: "compliance", emoji: "✔️", title: "Compliance", area: "compliance",
@@ -1698,7 +1799,32 @@ const MAP = window.ML_PERM_MAP || {
             big: overdue || soon, sub: overdue ? "certificate" + (overdue === 1 ? "" : "s") + " overdue" : "due within 30 days",
             tone: overdue ? "bad" : soon ? "warn" : "",
             ok: (overdue || soon) ? "" : "All certificates in date.",
-            rows: rows, actions: act("compliance.html", "Open compliance", true)
+            rows: rows, actions: (overdue ? act("certs-overdue.html?scheme=coop", "View overdue certs", true) : "") + act("compliance.html", "Open compliance", !overdue)
+          });
+        });
+      }
+    });
+
+    // ── Widget: EM & PAT certificates — how many you're waiting on (with the
+    //    engineers, or in your review queue). Opens the certificate tracker. ────
+    HUB.register({
+      id: "certTracker", emoji: "📈", title: "Certificate tracker (30 days)", area: "compliance",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance); },
+      load: function (card) {
+        return jget("/certs/status?range=30d&count=1").then(function (d) {
+          if (!d || !d.ok || !d.counts) throw new Error("bad");
+          var c = d.counts;
+          var outstanding = (c.toReview || 0) + (c.withEngineers || 0);
+          var rows = "";
+          if (c.withEngineers) rows += metric("Awaiting from engineers", c.withEngineers, "warn");
+          if (c.toReview) rows += metric("In your review queue", c.toReview, "warn");
+          if (c.uploaded) rows += metric("Uploaded (last 30 days)", c.uploaded, "ok");
+          card.innerHTML = cardHtml({
+            emoji: "📈", title: "Certificate tracker (30 days)",
+            big: outstanding, sub: "certificate" + (outstanding === 1 ? "" : "s") + " outstanding",
+            tone: outstanding ? "warn" : "",
+            ok: outstanding ? "" : (c.expected ? "All EM, PAT & pump certificates received & filed." : "No certificates recently."),
+            rows: rows, actions: act("cert-status.html", "Open certificate tracker", true)
           });
         });
       }
@@ -1855,8 +1981,12 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (d) { if (!d || d.uncosted == null) return null; return { n: d.uncosted, label: "POs to price", bad: false }; } },
         { area: "holidays", ok: yes(p.FullAccess) || yes(p.HolidayAdmin), emoji: "🌴", href: "holiday-admin.html", get: "/holiday/all?year=" + yr,
           calc: function (a) { if (!Array.isArray(a)) return null; return { n: a.filter(function (h) { return h.status === "Pending"; }).length, label: "holidays to approve", bad: false }; } },
-        { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
+        { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "certs-overdue.html?scheme=coop", get: "/compliance/stores",
           calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
+        { area: "compliance", ok: yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance), emoji: "📄", href: "cert-status.html", get: "/certs/status?range=30d&count=1",
+          calc: function (d) { if (!d || !d.ok || !d.counts) return null; return { n: (d.counts.toReview || 0) + (d.counts.withEngineers || 0), label: "EM/PAT certs outstanding", bad: false }; } },
+        { area: "staffrecords", ok: yes(p.FullAccess) || yes(p.StaffRecords), emoji: "👷", href: "employees.html", get: "/hr/attention",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.count || 0, label: "staff records expiring", bad: (d.expired || 0) > 0 }; } },
         { area: "memos", ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
           calc: function (d) { if (!d || !d.ok) return null; var n = (d.memos || []).filter(function (m) { return m.status === "sent" && (m.total - m.signed) > 0; }).length; return { n: n, label: "memos unsigned", bad: false }; } },
         { area: "timesheets", ok: yes(p.FullAccess) || yes(p.TimesheetAdmin), emoji: "⏱️", href: "timesheets-admin.html", get: "/ts/admin/overview",

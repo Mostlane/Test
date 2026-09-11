@@ -27,9 +27,10 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
-import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries, badScheduleIn, badScheduleDate } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
 import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
+import { onceMigration } from "../lib/once.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -53,7 +54,7 @@ function normName(s) {
 }
 function bool(v) { return v === true || v === 1 || v === "1" || v === "true"; }
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -72,6 +73,7 @@ async function ensureTables(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 async function cfgGet(db, key) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
@@ -362,7 +364,7 @@ export async function handle(request, env, ctx, url, sess) {
         `INSERT OR IGNORE INTO compliance_stores
           (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
           VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
-      ).bind(tenantId, number, name, number, now).run();
+      ).bind(tenantId, number, name, siteNumber, now).run();
     } catch {}
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse(row), 0) }, {}, env, request);
@@ -617,6 +619,7 @@ export async function handle(request, env, ctx, url, sess) {
       ).bind(tenantId, row.number).first();
     } catch {}
     let siteData = {}; try { if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data); } catch {}
+    { const bad = badScheduleIn(b); if (bad) return error(bad, 400, env, request); }
     const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt))
       ? new Date(b.scheduledAt).toISOString() : undefined;
     const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : undefined;
@@ -662,9 +665,22 @@ export async function handle(request, env, ctx, url, sess) {
     if (!description) return error("Description required", 400, env, request);
     const engineers = Array.isArray(b.engineers) ? b.engineers.map(s => String(s || "").trim()).filter(Boolean) : [];
     if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
-    const days = Array.isArray(b.days)
+    let days = Array.isArray(b.days)
       ? b.days.map(d => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes }))
         .filter(d => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    for (const d of days) { const bad = badScheduleDate(d.scheduledAt, "Series day"); if (bad) return error(bad, 400, env, request); }
+    // Authoritative weekend guard: unless the office explicitly ticked "Include
+    // weekends", NEVER create a Saturday/Sunday day — even if the client sent one
+    // (e.g. a stale checkbox). The office should never get project drip days on a
+    // weekend by accident. Weekday computed in Europe/London.
+    if (b.includeWeekends !== true) {
+      const londonDow = (iso) => {
+        const s = new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+        const [y, m, d] = s.split("-").map(Number);
+        return new Date(Date.UTC(y, m - 1, d)).getUTCDay();   // 0=Sun … 6=Sat
+      };
+      days = days.filter(d => { const dow = londonDow(d.scheduledAt); return dow !== 0 && dow !== 6; });
+    }
     if (!days.length) return error("No days given", 400, env, request);
     if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
     const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
@@ -813,12 +829,46 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const meLower = String(me).toLowerCase();
     const normId = u => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const meNorm = normId(me);
+    const engsOf = j => (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
+      ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+    const jobIsMine = j => engsOf(j).some(e => String(e).toLowerCase() === meLower || normId(e) === meNorm);
+
+    // Planned visits — a scheduled job an engineer WORKED but never status-tapped
+    // has no segment, so it would be missing here even though the P&L costs its
+    // planned hours. Add it as a visit marked `planned` so the list matches the
+    // costing and it's clear where the hours came from. Actual taps always win
+    // (skip any job+engineer that already has a captured segment); future-dated
+    // days and cancelled jobs are skipped.
+    const segPairs = new Set();
+    for (const s of segs) segPairs.add(String(s.job_id) + "::" + normId(s.username));
+    const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    for (const j of projectJobs) {
+      if (/^cancelled$/i.test(String(j.status || ""))) continue;
+      for (const rawEng of engsOf(j)) {
+        if (!rawEng) continue;
+        if (segPairs.has(String(j.id) + "::" + normId(rawEng))) continue;   // real time captured → actual wins
+        const es = (j.engSchedule && j.engSchedule[normId(rawEng)]) || {};
+        const startISO = es.scheduledAt || j.scheduledAt;
+        if (!startISO) continue;
+        const date = String(startISO).slice(0, 10);
+        if (date > todayISO) continue;   // not worked yet
+        let mins = 0;
+        const endISO = es.scheduledEnd || j.scheduledEnd;
+        if (endISO) { const d = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (d >= 15 && d <= 24 * 60) mins = Math.round(d); }
+        if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+        if (!mins) continue;
+        const key = "p|" + rawEng + "|" + date + "|" + j.id;
+        if (visitMap.has(key)) continue;
+        visitMap.set(key, { date, user: rawEng, jobId: String(j.id), jobRef: j.helpdeskRef || String(j.id), onsiteMins: mins, travelMins: 0, live: false, manual: false, planned: true, cost: 0, note: "" });
+      }
+    }
+
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage) {
       // Field/engineer view: only their own visits (match on either username or
       // the dotted form some legacy records carry). Strip every £-carrying
       // field — engineers must NEVER see cost/rate/amount in their visit list.
-      const meNorm = normId(me);
       visits = visits.filter(v => v.user.toLowerCase() === meLower || normId(v.user) === meNorm)
         .map(v => { const { cost, rate, amount, ...rest } = v; return rest; });
     }
@@ -834,7 +884,10 @@ export async function handle(request, env, ctx, url, sess) {
       perUser.sort((a, b) => (b.onsiteMins + b.travelMins) - (a.onsiteMins + a.travelMins));
     }
     // Compact job list for the page (title/status/schedule + who's on it).
-    const jobs = projectJobs.map(j => ({
+    // A non-manager (field engineer) sees ONLY the jobs they're on — never the
+    // whole project's jobs — matching the "your visits only" rule for visits.
+    const jobsSource = canManage ? projectJobs : projectJobs.filter(jobIsMine);
+    const jobs = jobsSource.map(j => ({
       id: j.id, ref: j.helpdeskRef || j.id, description: j.description || "",
       status: j.status || "Pending", scheduledAt: j.scheduledAt || null,
       engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length

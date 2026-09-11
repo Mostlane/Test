@@ -254,7 +254,88 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   persist arrays exclusively. sla-scheduler's "postcode not recognised"
   diagnostic reads `geoMiss`, not a stored null.
 
+## Server-side authorisation hardening (2 Sep 2026 — code review Stage 1)
+- **No data files in this PUBLIC repo — enforced by .gitignore now** (root `*.json`
+  except manifest.json, root `*.txt`, `logs/`, `json_logs/`, `Compliance/`,
+  `Mostlane/`, `assets/*.json`). The staff pay-rate / postcode / GPS / holiday /
+  PO / customer-store files that had crept back in were removed; weekly.html,
+  my-timesheet.html (read rates from raw.githubusercontent) and van-scores.html
+  are redirect stubs. **History still holds them until `main` is rewritten** —
+  see the Stage-1 handover message; a `git filter-repo` + force-push is Jamie's call.
+- **holidays.js identity = the session ONLY.** The X-User / X-Role request headers
+  (which let any logged-in user call themselves Admin) are ignored and no longer
+  in CORS Allow-Headers.
+- **Login + forgot-password require an ACTIVE account** (`isActiveStatus`: blank or
+  "Active"), so a self-registered Pending starter can't reset a password and log in.
+- **Job PATCH is scoped for non-admins** (sla.js, anyone without FullAccess|SLAAdmin):
+  must be on the job's roster; body is whitelisted to the field-app fields
+  (status, note, riskAssessment, hold, quote, order, gps, lat, lon, localDate, opId,
+  changedBy, travelStartMileage, remedials, auditItems, emTimer, investigateOnly) —
+  office fields incl. the requiresRA/Photo/Signature/Note gates are dropped; a
+  risk assessment must be real (hazards + declarations.safeToProceed + name) and
+  `skipped` is refused (Full-Access skip still works — it's an admin session).
+  **POST /sla/jobs** (upsert by id/ref) and **POST /sla/config** are SLA-admin only.
+- **File streams:** /staff/doc with a bare session opens only your OWN personal docs
+  or company docs (Full-Access any); /ts/invoice-file only your OWN invoices
+  (timesheet admin any); /sla/firestop/spec-file|photo-file only `firestop/` +
+  `firestopspec/` keys. Signed links behave exactly as before.
+- **Test:** `node worker/tools/test-auth-gates.mjs` (mock D1/R2, 21 cases) — run it
+  after touching any of the above.
+
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
+- **Session hardening (10 Sep 2026 — from the PWA audit; test
+  `node --no-warnings worker/tools/test-auth-sessions.mjs`, 37 cases on a real
+  SQLite):**
+  - **Tokens are stored HASHED** (`hashToken` = sha256("sess:"+token)) — the
+    client keeps the raw token, `requireSession` hashes and looks up; a legacy
+    raw-token row is still accepted once and rewritten to the hash, so nobody was
+    logged out by the change. `destroySession` deletes by hash or raw.
+  - **Sessions are DEVICE-BOUND.** login.html posts `deviceId` (device-auth.js's
+    `deviceID`, `dev-xxxxxxx`); the row's `device_id` is set (never for the owner)
+    and every request must carry **`X-Device-Id`** equal to it or it is 401.
+    portal-config's fetch bridge adds the header to EVERY call to the API host
+    (bridged legacy hosts AND direct MOSTLANE_API calls); client-home.html and
+    ml-offline.js's replay add it themselves. Rows with a NULL device (the owner,
+    pre-change logins) are not restricted, so old phones keep working until they
+    log in again. **Any new standalone page that calls the API with a Bearer
+    token MUST also send X-Device-Id** or bound sessions get 401 there.
+    Impersonated (View As) sessions bind to the owner's device header.
+  - **Login refuses a device registered to ANOTHER user** (403,
+    login_history outcome `device_mismatch`); an unknown device logs in and the
+    client registers it as before. `/device/check-device` + `/register-device`
+    act ONLY for the session's user (the body username used to be trusted — any
+    caller could claim the exempt owner or register devices against others).
+  - **Password change revokes every OTHER session** (`revokeUserSessions`, the
+    changing device stays in); a forgot-password reset revokes ALL.
+  - **The ONE logout is `window.mlLogout()`** (portal-config): POST /auth/logout
+    (keepalive), then `localStorage.clear()` keeping only `deviceID`/`mlDeviceId`,
+    `sessionStorage.clear()`, delete IndexedDB `mlVanCheck`/`mlHandover`/`mlPhotoQ`,
+    delete every Cache Storage cache, `location.replace("/login.html")`. Warns via
+    MLUI.confirm when `mlOfflineQueue_v1` still holds unsent writes. The main.html
+    tile, the sidebar, the office-clock modal and you.html all call it;
+    client-home.html (no portal-config) has its own equivalent. Before this, no
+    logout called the server (tokens stayed live for 90 days) and the menu logout
+    left the login flags, so the app reopened to the previous person's menu.
+  - `ml-offline.js` no longer stores the `Authorization` header in the queue; the
+    live token + device id are re-attached at replay.
+  - **Temp passwords** are now `Mostlane-` + 8 CSPRNG chars (was 4 digits from
+    Math.random). NB `must_change_password` is STILL only enforced by login.html.
+  - API JSON responses carry `Cache-Control: no-store` + `X-Content-Type-Options`
+    (lib/http.js `json()`); CORS allows `X-Device-Id`.
+- **GET /users + GET /user?u= strip the profile blob for non-admins (10 Sep 2026).**
+  `shapeUser(u, perms, level)`: `full` (FullAccess|Users, or your own record) =
+  everything; `sla` (SLAAdmin) = staffType/sortOrder/areas/clientOrg + the home
+  postcode/lat/lng the scheduler routes with; `min` (everyone else) = staffType/
+  sortOrder/areas/clientOrg. Phone, pay rates, fuel card, home location never
+  reach a field engineer's inbox picker or a client login any more. Flat
+  permission flags are still returned (pickers filter on them).
+- **`/sla/jobs/{id}/export` + `/export.pdf` are NO LONGER public** (they returned
+  full job sheets by guessable id). They need a session, or a signed link:
+  `signedFileUrl(env, origin, pathname, pathname, ttl)` — index.js verifies
+  `verifyFileSig(env, url.pathname, params)` when there is no session. No page
+  currently mints one.
+- `/certs/status?count=1` (the home-hub tile) memoises its tallies per isolate for
+  60 s (`STATUS_COUNT_MEMO`) — it was the last endpoint still brushing 2.5 s.
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
   auto-upgraded on login. NEVER paste plaintext into D1 — it won't work.
 - **Sessions last 90 days** (SESSION_TTL_HOURS default 2160). login.html
@@ -263,6 +344,12 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   dotted form (Jamie.Line → "Jamie Line"), or email — phones autofill old
   dotted usernames, which once looked like "new password doesn't work".
   Everything downstream uses the canonical username from the matched row.
+- **Welcome email PWA guide (Sep 2026):** `email.js welcomeEmail` now ends with
+  an `installSection(base)` — email-safe (tables + inline styles) "📲 Add Mostlane
+  to your phone": numbered iPhone(Safari) + Android(Chrome) steps + a button to the
+  hosted **`install.html`** (a standalone, no-auth, branded step-by-step guide with
+  CSS phone mockups using `/icons/icon-192.png` — the M tile). Mockups authored in
+  the scratchpad + published as an artifact; install.html is the portal copy.
 - Self-service reset: login → forgot-password.html → Resend email link (1h)
   → reset-password.html. Admin: Users Admin password box (with "must change
   at next login" tick-box → ForceChange) or Reset password button (temp
@@ -304,7 +391,7 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   audited), change/forgot/reset password, login_history (utcify'd on read).
 - `users.js` — users CRUD (+Password w/ ForceChange), PERMISSION_KEYS (incl.
   AssetAdmin, OfficeClock, OfficeTimesheet, ThemeColour, ThemeBackground,
-  StoryMode, HSPlan, SiteLog), welcome/reset emails, /users N+1-fixed,
+  StoryMode, HSPlan, SiteLog, **EicrCheck**, **Chapplins**), welcome/reset emails, /users N+1-fixed,
   /users/reorder (StaffType/SortOrder), /hs-plan-config, /po-config. **GET /users
   is ACTIVE-ONLY by default** — `isActiveStatus` keeps blank/"Active", drops
   "Disabled" (and any other status), so a disabled account disappears from every
@@ -330,7 +417,9 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   endpoints already accept any username — so a Blocked leaver's documents +
   history remain fully accessible (only a permanent-erase loses that).
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
-  /device/reset, owner exempt.
+  /device/reset, owner exempt. **Since 10 Sep 2026 the lock is enforced
+  SERVER-SIDE via device-bound sessions (see Auth & sessions) — device-auth.js's
+  prompt is now just the registration UI, not the gate.**
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.
@@ -658,7 +747,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   day, how many days, daily start/finish, **reveal time** (the evening before),
   include-weekends. The client builds each day's absolute `scheduledAt` (London)
   and POSTs **/project/create-day-series** (projects-api.js), which creates one
-  SLA job per day linked by **`job.seriesId`**, each with
+  SLA job per day. **Weekend guard (Sep 2026):** the "Include weekends" checkbox is
+  now RESET after each series is created (it used to stick, so a one-off weekend
+  series silently carried "include weekends" into the NEXT project — that's how a
+  Saturday day slipped into Chris/Steve's P0006 drip), the client POSTs
+  **`includeWeekends`**, and **create-day-series DROPS any Sat/Sun day server-side
+  unless `includeWeekends===true`** (Europe/London weekday) — so a project drip can
+  never land on a weekend by accident, even from a stale client.
+  Each day is linked by **`job.seriesId`**, each with
   `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
   now **configurable** — `londonHourDayBefore`). The office sees every day in the
   scheduler; the engineer only sees a day from the reveal time the evening before.
@@ -845,6 +941,42 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   in **BOTH** pages — fix engineer-job.html too, it's the one engineers actually
   use. engineer-job.html's RA is a modal opened by the amber "Open risk
   assessment →" lock banner; the skip is a discreet dashed button at its foot.
+  **Same-site jobs run TOGETHER (10 Sep 2026 — Jamie: "why are David's jobs not
+  changing colour in the scheduler like Connor's").** Diagnosis: no bug in the
+  scheduler — it colours a block from the server status, and David's taps were
+  arriving late: with three/four job numbers at ONE store the cross-job guard let
+  him start only the first, so the others sat amber all visit and were closed as
+  paperwork in a burst at the end (Sandown: 3 jobs "done" 08:58–09:02). Now
+  `findBlockingJob(env,tid,user,exceptId,exceptJob)` (exported) skips an active
+  (Travelling/In Progress) job at the SAME SITE as the one being started —
+  `sameSiteJob(a,b)` = numeric store code (0125 = 125) else the normalised site
+  name; a pending on-hold / safety flag there still blocks. job-view.html's
+  client copy (`findBlockingJob(id,user,job)` + `sameSiteAs`) mirrors it. NB
+  timesheets' `trackJobTime` still keeps ONE open segment per engineer — starting
+  the second same-site job closes the first's segment, so on-site time is split
+  between the jobs, never double-counted. Test `node worker/tools/test-same-site.mjs`.
+  NB this exemption was reverted and then RESTORED the same afternoon — Jamie's
+  final word: "the same site works to run together is fine". Keep it. The
+  underlying finding stands separately: David was completing jobs
+  retrospectively in a burst rather than as the day goes on, which is a
+  behaviour matter, not a portal one.
+  **Stacked queue + same site (10 Sep 2026, Jamie: "when we use hide-job-until-
+  previous-job-is-complete, if the next job to appear happens to be the same site
+  as the one after too, they should both appear").** `hasEarlierOpenJob` (the
+  `afterPrev` release rule) now IGNORES an earlier open job at the SAME site
+  (`sameSiteJob`), so when the queue reveals a job, every queued job at that store
+  appears with it (chains through consecutive same-site jobs); a queued job at a
+  different store still waits until the earlier store's jobs are all finished, and
+  a same-site job behind a job that is itself still hidden stays hidden.
+  `releaseVisibleNow` is exported for the test (7 afterPrev cases). Editor text
+  `sla-jobedit.js?v=33`; help guide + the 🙈 line updated.
+  **Live refresh on sla-scheduler.html + sla-main.html:** neither page ever
+  re-fetched on its own (only after an edit/drag), so colours froze at page-open
+  for EVERY engineer. Both now re-fetch every 60 s while visible (+ on becoming
+  visible; `window.mlLiveRefresh()` runs one), skipped while a drag, any
+  `.modal-backdrop`, the shared editor (`#mljeBack.show`), a focused text box or a
+  bulk selection is live so nothing is pulled from under the user. sla-main's
+  `loadJobs(quiet)` keeps the status bar + photo-flag cache on a quiet refresh.
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
@@ -871,7 +1003,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
   clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
 - **Total cost of a job to us** (job-view.html "💷 Total cost to us" card,
-  **office/admin only** — FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
+  **money = Full Access or office staff only** — `canSeeMoney`, Sep 2026; was
+  FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
   (costing.js) sums **labour on-site** (job_time_segments for the job → per-engineer
   minutes × hourly rate from `ratesMap`; a day rate ÷8; 14h runaway clamp) +
   **travel labour** (one round trip HQ→site→HQ per engineer per distinct day worked,
@@ -1082,6 +1215,117 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
   front-end my-documents.html.
+- `staffrecords.js` — **Employee records (HR): qualifications/tickets,
+  insurances, driving licences + licence (DVLA) checks, WITH expiry tracking
+  + reminders (Sep 2026)**. ONE self-migrating table **staff_records**
+  (tenant/id/username/kind/title/number/issuer/issued/expires/data JSON/doc_key;
+  kind ∈ qualification|insurance|licence|licence_check; kind-specific extras ride
+  in `data`). One optional document per record in R2 `staffrec/<tid>/<user>/<id>/`,
+  served via signed **GET /hr/record-file** (PUBLIC_ROUTES, sig-verified).
+  `statusOf(expires)` → expired | expiring (≤30d) | valid | none. Routes (mounted
+  `/hr/`): **GET /hr/records?user=** (a person's records; non-admins forced to
+  their OWN — the read-only self-view), **GET /hr/overview** (per-person counts
+  for the list), **GET /hr/attention** (expiring/expired across everyone — home
+  hub + cron), **POST /hr/record** (create/update, multipart, file optional),
+  **POST /hr/record/delete**. Manage gate = **FullAccess|StaffRecords** (new
+  PERMISSION_KEY + USER_AREAS `staffrecords`); any session may read its own.
+  Cron **`sweepStaffRecordReminders`** (index.js daily block, self-gates ~08:00
+  London, deduped per day in app_config `staffrec:reminded:<tid>`) pushes
+  FullAccess|StaffRecords a glanceable "N expired · N expiring" summary. Front-end
+  **employees.html** (👷 Employees tile + sidebar "Time & HR", StaffRecords|
+  FullAccess): staff list with expiring/expired chips → per-person view with the
+  four sections, add/edit/delete records, expiry badges, doc view (docviewer).
+  A field/office employee sees their OWN records read-only on **my-documents.html**
+  - **Required documents — per-person ✓/✗ pills (Sep 2026, Jamie: "pills and clear
+    tick or cross if each item is held… set what is needed for them so I don't have
+    a cross for a document that employee does not need to hold").** Config in
+    app_config **`staff:reqs:<tid>`** = `{ items:[{id,kind,title,scope}],
+    byUser:{ "<username>":{on:[id],off:[id]} } }`. `scope` = **all** | **field**
+    (staffType≠office) | **office** | **none** (only where assigned via `on`). A
+    person's per-user `on`/`off` always wins over the scope default (`off` wins over
+    `on`). Helpers (exported for the test): **`requiredForUser(cfg,username,staffType)`**
+    → the items that apply to them; **`reqStatus(item,recs)`** matches their records
+    (same `kind`, normalised title equal or contains-either-way; best-of by
+    valid/none>expiring>expired, furthest expiry) → **held** (in date incl. no-expiry)
+    | **expiring** | **expired** | **missing**. **GET /hr/overview** now returns
+    `required:[{id,kind,title,status,expires}]` + `staffType` per row + `hasRequirements`;
+    **GET /hr/records** (admin) also returns `requirements`/`reqCatalogue`/`reqOver`/
+    `reqStaffType` for the person editor. **GET/POST /hr/requirements** (office):
+    POST takes `{items:[…]}` (replace the catalogue, prunes dangling per-user refs),
+    `{addItem:{kind,title,scope,assignTo}}` (add one + assign to a person), and
+    `{user, over:{on,off}}` (merge one person's overrides). Front-end
+    **employees.html** Staff list renders **one pill per required item** (green ✓ /
+    amber ⏳ / red ✗), a grey records count, and a red/amber left stripe
+    (`.emp.attn`/`.warn`) when something's outstanding; a person with no requirements
+    shows "no requirements set". **⚙ Required documents** button (Staff header) →
+    tenant catalogue modal (title · type · who it applies to); the person view's
+    **📋 Required documents** card ticks items on/off for that individual and adds
+    one-offs. A cross NEVER shows for a document a person isn't required to hold.
+    Nothing seeded — the office builds the catalogue once. Test
+    `node worker/tools/test-staff-required.mjs` (17 cases).
+  ("📋 My qualifications, licences & insurances" card). Home-hub widget + overview
+  KPI (`staffrecords` area).
+  - **Subcontractors (non-portal people) — bidirectionally linked to the PO
+    system (Sep 2026):** table **staff_subcontractors** (main D1; keyed by
+    `name_key` = normalised name, matching the PO `subcontractors` table which is
+    name-unique). Records attach to a subcontractor via `staff_records.username =
+    "sub:"+name_key`. **GET /hr/subcontractors** MERGES local subs with the PO
+    system's (`env.PO_DB.subcontractors`) — so a sub added in the PO system
+    auto-appears here (`inPO`/`local` flags), and **POST /hr/subcontractor**
+    (name/trade/contact/phone/email) upserts locally AND pushes to PO
+    (`INSERT … ON CONFLICT set active=1`); **POST /hr/subcontractor/delete**
+    deactivates in both. All PO calls fail soft when PO_DB is unbound. A PO-only
+    sub is materialised locally (POST /hr/subcontractor) the first time a record
+    is attached. employees.html has **Staff / Subcontractors / Licence checks**
+    tabs.
+  - **Monthly driver licence checks (proof register):** **GET /hr/driver-checks**
+    = every active user with `vehicle_assigned` set, their latest `licence_check`,
+    and a **done|due** status (done = a check logged in the current calendar
+    month). The licence-check add form defaults **Checked on = today, Next due =
+    +1 month**. Drivers due this month are folded into **/hr/attention** (`driverChecksDue`),
+    the home-hub card, and the daily cron summary. The employees.html "Licence
+    checks" tab lists each driver with a one-tap **Log check** (attach the DVLA
+    result as proof). _headers + SW `mostlane-v115`+.
+  - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
+    records of one kind (default `qualification`) into a grid — competencies
+    (distinct record TITLES **that carry an expiry date** — permanent/no-expiry
+    certs are excluded — plus managed columns) as columns × active staff as rows;
+    each cell = that person's latest record of that title (furthest-out expiry) + status
+    (valid/expiring/expired/none). employees.html **📊 Training matrix** tab:
+    sticky name column, colour-coded cells, kind selector, "field engineers only"
+    toggle, **CSV + Print** export. **Interactive (like the compliance chart):**
+    **drag a certificate onto a cell** (or tap it) → the add/edit modal opens with
+    the engineer + competency locked, set the expiry + attach the file → POST
+    /hr/record → the cell colours by status; tapping the **name** opens the person.
+    **Managed columns:** "＋ Add column" adds a competency via **POST
+    /hr/matrix/column** (app_config `staff:matrixcols:<tid>` = {kind:[names]}), so a
+    column can exist before anyone holds it; GET /hr/matrix merges managed columns
+    with the distinct record titles. (+/delete column endpoints admin-gated.)
+  - **Certificate auto-extract (Sep 2026):** the add/edit record modal is a
+    **drop zone**; on attaching a file the client extracts details and pre-fills
+    EMPTY fields (title / cert number / awarding body / issued / expiry). **POST
+    /hr/extract-cert** (Claude, fail-soft — no key ⇒ `{}`) reads the **filename +
+    PDF text** (PDF.js in-browser; scanned PDFs sent as a base64 `document`
+    block) **AND photographed certs / driving-licence IMAGES** (jpg/png/webp/gif
+    sent as a base64 `image` block for OCR). AI result wins; a local filename
+    heuristic (`nameHints`) fills anything the AI leaves blank. Same flow whether
+    the file is dropped on a matrix cell, dropped in the modal, or picked.
+    **Driving licences:** the extractor reads the numbered photocard fields —
+    **4a→issued, 4b→expires, 4c/DVLA→issuer, 5→number**; if 4b can't be read the
+    client defaults **expires = issued + 10 years** (the UK photocard rule for
+    under-70s, flagged "please confirm"), and typing the issue date on a licence
+    record auto-fills the same +10y expiry when blank. **iPhone HEIC/HEIF photos
+    are converted to JPEG in the browser** (lazy-loaded heic2any from jsdelivr)
+    before OCR + upload, so a photographed licence reads AND stores viewable;
+    fails soft to the original file if the converter can't load.
+    **Two distinct driver dates (never conflate):** a `licence` record's `expires`
+    is the **photocard licence expiry (4b, ~10y)** — labelled "Licence expiry
+    (photocard 4b)"; a `licence_check` record's `expires` is the **next monthly
+    DVLA check due (30-day)** — labelled "Next check due (monthly)". Badges are
+    kind-aware ("Licence valid to…" vs "Next check…"), and the drivers tab shows
+    BOTH as separate pills (🔁 monthly check · 🚗 Licence exp). computeDriverChecks
+    returns `licenceExpiry`/`licenceStatus` (latest licence record) alongside the
+    monthly `status`/`nextDue`.
 - `privacy.js` — GDPR: /privacy/export (redacts passwords/tokens),
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
@@ -1540,7 +1784,17 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   everything up to its time, but **an explicit per-defect status ALWAYS wins over
   it** (so one fault can be reopened/marked pending after a bulk resolve). Item
   labels come from `vancheck:settings` (checklist+equipment) or `items.custom` for
-  one-off checks. `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
+  one-off checks. **Recurring-issue grouping (Sep 2026):** because a defect key
+  includes the check timestamp, the SAME fault reported on the next week's check
+  is a new key that would default to OPEN and re-flag. Now `collectDefects` runs a
+  per-`(reg+itemId)` pass (oldest→newest): a default-open repeat whose earlier
+  report is **pending** INHERITS "pending" (`grouped:true`) instead of counting as
+  a new open defect — so an in-hand issue isn't re-highlighted every week. A fault
+  reported again AFTER it was resolved stays OPEN (a genuine recurrence); an
+  explicit office status always wins. `defectSummary(list)` then COLLAPSES weekly
+  repeats — one entry per `(reg+itemId)`, its latest instance decides open vs
+  pending — so the card counts an ongoing issue once (`since` = oldest unresolved).
+  `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
   drives the cards. Endpoints (any Vehicles user): **GET /fleet/defects?reg=&status=&includeResolved=1**
   (flat list + summary — powers the panel + central table), **POST /fleet/defect-status**
   `{key,status?,note?}` (set one), **POST /fleet/defects-resolve** `{reg}` (bulk:
@@ -2160,6 +2414,30 @@ default 400) makes route-optimise/infer fall back to non-AI when hit. **GET/POST
 engineer-skills.html "📊 AI usage this month". (Programme AI is occasional + NOT yet
 metered.)
 
+## Scheduler day blocks / "block off time" (sla.js `/sla/blocks*` + sla-scheduler.html)
+Admin reserves a window on an engineer's day (e.g. a dentist appointment) that
+nothing schedules into and the optimiser routes around. **Admin-only visibility:**
+only sla-scheduler.html (office/SLA-admin) renders blocks — the field app never
+shows them; **POST/delete are SLA-admin-gated**. Stored in app_config
+`sla:blocks:<tid>` as `[{id,username,date,start,end,note,repeat}]`. **Recurring
+(Sep 2026):** an optional **weekly** repeat lives behind a hidden `<details>`
+("🔁 Repeat weekly") in the block modal — `repeat = {dow (0-6 from the block's own
+date), until (optional)}`; a one-off has `repeat:null`. **`blocksOnDate(list,date)`
+(sla.js) + `blocksForDay()` (client)** are the shared expanders: a one-off matches
+its exact date, a repeat occurs on every matching weekday from its start to `until`
+(open-ended if blank). BOTH the scheduler render AND the enforcement paths
+(`/blocks?date=`, autoScheduleDay capacity, `/route-optimize` via `blockOffsets`/
+`avoidBlocks`) go through the expander, so recurring blocks are honoured everywhere.
+Prune: one-offs drop 60 days past; a repeat drops only once its `until` is 60 days
+past (open-ended repeats kept until removed). Recurring bars/list show a 🔁.
+**Removing/editing a repeat (Sep 2026):** the ✕/Remove on a repeating occurrence
+opens a 3-way choice (`blockRemovalChoice`) — **Just this day** (→ **POST
+/sla/blocks/skip** `{id,date}` adds the date to `repeat.skip`, which `blocksOnDate`
+excludes), **The whole series** (→ /blocks/delete), or Cancel. The block modal list
+shows a "change end date" inline editor per repeat (→ **POST /sla/blocks/set-until**
+`{id, until}`; ""=clear). Both new routes SLA-admin-gated. One-off blocks delete
+straight (no dialog).
+
 ## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
 Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal
 `#engDayBackdrop`, alongside 🗺️ Map) that auto-orders that engineer's jobs for a
@@ -2263,6 +2541,151 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   (office reviews → Apply). On sla-main (no optimiser on the page) the jobs are
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
+
+## ONE "Timesheets" tile (9 Sep 2026)
+Jamie: "three different timesheets… consolidated to one Timesheets page/button. On
+opening it should show engineers timesheets, a button for office timesheets, then a
+button in both pages for My timesheet." The three tiles (My Timesheet / Engineer
+Timesheets / Timesheet) are now ONE **⏱️ Timesheets** tile (main.html id `Timesheets`,
+MAP `["TimesheetAdmin","EngTimesheet"]`) routed per person by `setHref`: Full Access
+or TimesheetAdmin → **timesheets-admin.html**; EngTimesheet-only (an engineer) →
+**engineer-timesheet.html**. Same rule in the portal-config sidebar (`hrefBy`, one
+"Timesheets" entry, `match` covers all three pages). Cross-links in each header:
+timesheets-admin has **💼 Office timesheet** (Full Access only — the office-wide sheet
+stays `__fullOnly`) + **⏱️ My timesheet**; office-timesheet has **🧾 Engineer
+timesheets** (TimesheetAdmin|FullAccess) + **⏱️ My timesheet** (its old 🚚 Van
+timesheets link is GONE — van-timesheet.html is reached from the Vehicles page
+only; Jamie doesn't use it); engineer-timesheet has **💼 Office** (Full Access) +
+**🧾 Engineer timesheets** (TimesheetAdmin|FullAccess). NB that page's links are
+`display:none` in the STYLESHEET, so showing them needs `style.display="inline-block"`
+— the old "⚙ Admin" link set `""` and therefore never appeared. OfficeTimesheet
+holders keep "My Hours" for their own clock (unchanged). portal-config `?v=33`, SW
+`mostlane-v123` (the sidebar entry changed).
+**Engineer Timesheets "Couldn't load" (9 Sep 2026) = the overview outrunning the
+page's timeout, not permissions.** `GET /ts/admin/overview` builds every engineer's
+week and had crept from ~3s (late Aug) to 6-17s: it walked the 16 users ONE AFTER
+ANOTHER, each user ran `jobTimeAuto` TWICE (directly + inside `applyAutoMileage`),
+and each of those could call the Google Distance Matrix LIVE for the drive home on
+days already gone; the page's `authFetchTO` gave up at 9s. Now: the per-user work
+runs in parallel (`Promise.all` over users, order preserved), `driveMinutesGoogle`
+takes `{cached:true}` for the auto-fill path (a per-isolate 12h memo,
+`DRIVE_MEMO`; the at-completion caller in `trackJobTime` stays live), and the page
+gives the call 30s, shows "Loading everyone's week…", and on failure says WHICH
+(timeout / no connection / server reply) with a ↻ Try again. The health log
+(`health_events` kind='slow') is the place to look when a page "won't load" —
+it records every >2.5s response by endpoint.
+
+## XSS audit of every page (10 Sep 2026)
+Jamie: "How secure is this portal?" → "Do the 143 HTML." Every page + shared script
+(187 files) was read for places API/user text is written into HTML unescaped.
+Why it mattered: job descriptions/refs/site names arrive from an EXTERNAL client's
+Concerto emails and are rendered on office pages, so a script in an email could
+run in the office's browser; chat, notes, names and config strings are typed by
+staff and rendered to admins. A hostile-data smoke test (scratchpad `xss/hostile.cjs`:
+mock every API call with `<img onerror>` payloads in every string field, open 60
+pages) found **7 pages executing injected script before the fix (sla-main, job-view,
+eicr-portal, fareham, chapplins-compliance, po-admin, daily-logs) and 0 after**, with
+no new JS errors. **395 fixes across ~100 files.** Rules now in force:
+- **Every page's escape helper escapes `& < > " '`** (75 helpers were missing `'`).
+  A page with no helper gets the canonical one at the top of its first script:
+  `function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,…)}`.
+- **Inline event handlers never take a quoted interpolation.** HTML-escaping is
+  NOT enough there — the browser decodes `&#39;` back to `'` BEFORE the JS runs, so
+  `onclick="fn('${esc(x)}')"` was still breakable (vehicles.html had 37 of these;
+  sla-scheduler's fallback list, timesheets-admin, po-office/po-raise pickers,
+  chapplins tenants, hs-docs, programme-edit…). The pattern is now
+  `onclick="fn(${esc(JSON.stringify(String(x)))})"` (double-quoted attribute, JSON
+  literal inside) or a `data-*` attribute read in the handler.
+- **User-supplied URLs go through `safeUrl()`** (http/https/mailto/tel/blob/
+  data:image/relative only, else "#") before `href`/`src`: SharePoint links on
+  sites, bot-supplied email links (my-tasks, client-orders, cert-review),
+  stored signature/logo data URLs (RAMS render, CPP builder), notification feed urls.
+- **Formatter fall-throughs are sinks:** `fmtDate/fmtDue/fmtTime/fmtD/fmtP` return
+  the RAW input when it doesn't parse, so their output must be escaped too.
+- `MLUI.rich()`/`richStrip()` escape first (`richEsc`) — safe to render descriptions.
+- Cache bumps: portal-config `?v=34`, cert-form v22, chat-widget v5, firestop-form v2,
+  hs-rams-render v3, programme-gantt v8, pump-form v4, remedials-form v5, SW `mostlane-v124`.
+**Re-run the check after touching a page:** `node scratchpad/xss/check.mjs <files>`
+(syntax) and the hostile smoke (`python3 -m http.server 8099` from the repo root, then
+`NODE_PATH=/opt/node22/lib/node_modules node hostile.cjs 8099 [pages]`) — any
+`exec>0` is a regression. The static scanner (`scan.mjs`) is only a lead generator
+(~2000 noisy flags remain: numbers, class names, page-built HTML).
+Still open from the same review: the job-files R2 bucket's public r2.dev access
+(job photos/signatures are linked by public URL — confirm in the dashboard and
+route them through the signed streams), git history still holding old data files,
+no second factor, 90-day sessions, `ALLOWED_ORIGINS="*"`.
+
+## Why the portal was slow — and the two fixes (9 Sep 2026)
+Jamie: "Why so slow anyway?" Evidence from `health_events` (kind='slow', >2.5 s):
+8/day on 30 Aug → 585/day on 9 Sep across 24 endpoints, with trivial calls like
+`/messages/unread` averaging 3.2 s. Two causes, both measured:
+- **Distance to the database, not the database.** The cron probe's bare `SELECT 1`
+  from inside the Worker took ~200 ms; the same statements from the D1 console in
+  London (the DB's region, WEUR) take ~2 ms. The Worker ran wherever the phone's
+  request landed and every D1 statement paid the hop. **Fix: `[placement]
+  mode = "smart"` in wrangler.toml** — Cloudflare moves the Worker next to D1.
+  Heuristic: it settles over a day or so of traffic, not instantly.
+- **10–25 sequential statements per request before any real work.** The session
+  gate is 4–5 queries, then EVERY module re-ran its self-migration battery
+  (`CREATE TABLE IF NOT EXISTS` + try/catch `ALTER`s) on EVERY request — certs 10,
+  fleet 7 (from 4 call sites), messages 7… Only timesheets.js had a once flag.
+  **Fix: `lib/once.js onceMigration(fn)`** — every `ensure*()` is now wrapped
+  (`async function ensureX__raw(){…}; const ensureX = onceMigration(ensureX__raw);`,
+  27 functions across 19 modules) so a migration runs ONCE PER ISOLATE; concurrent
+  first calls share one run; a failed run is forgotten so the next request retries.
+  **When you add a module: wrap its ensure the same way.** Heavy endpoints
+  (`/certs/remedials/outstanding`, `/fleet/vehicles`, `/certs/status`,
+  `/ts/admin/overview`) still do their own per-row work — next candidates.
+  Check the effect the same way it was found: `SELECT substr(at,1,10), COUNT(*),
+  ROUND(AVG(ms)) FROM health_events WHERE kind='slow' GROUP BY 1`.
+
+## Board ↔ scheduler hand-offs (9 Sep 2026)
+- **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
+  every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the
+  reactive board), which silently hid a scheduled job (Ryan's Frimley Green EM+PAT
+  "wasn't in the SLA list"). Now a **📄 EM/PAT chip** (`.schip.certchip`, teal, after
+  All) toggles them: lit = shown, greyed/dashed = hidden, count = how many. State in
+  localStorage `slaMainCertJobs` ("0" = hidden; default shown). `boardJobs()` is the
+  filtered base for chipCounts / Open+All counts / jobsInStatusScope / filteredJobs;
+  `allJobs` still holds everything (photo flags, bulk ops). cert-jobs.html is
+  unchanged (the dedicated hub).
+- **🙈 = hidden from the engineer.** GET /sla/jobs now sets `releaseView.hidden =
+  !releaseVisibleNow(job, all)` (gated time not reached / afterPrev queued / skipped).
+  sla-main shows 🙈 INSIDE the status pill (`eyeTag`, table row + mobile card; the
+  🕒/⛓ rel-badge with the "when" stays), sla-scheduler prefixes 🙈 on the day block
+  ref + week chip (`hiddenFromEng`; normaliseJob now carries `releaseView` +
+  `visitCount`). Client fallback when `hidden` is absent: afterPrev/skipped, or `at`
+  in the future.
+- **Add Job → scheduler.** After a successful create, if the payload has
+  `assignedEngineers` AND `scheduledAt` (and isn't a standby template), add-job.html
+  `location.replace`s to **`sla-scheduler.html?date=YYYY-MM-DD&job=<id>`** (day from
+  the datetime-local value). The scheduler reads `?date=` (selectedDate) + `?job=`
+  (forces day view; after the first render `focusJobBlock` scrolls to the
+  `.day-job[data-job-id]`, adds `.flash` — an orange pulse ×3 — and strips `job` from
+  the URL). If the block isn't there (engineer is office staff hidden by the toggle /
+  no slot that day) the status line says so instead of a blank board. Unassigned or
+  unscheduled jobs keep the old success panel.
+
+## Live "Where's everyone" board (sla.js `/sla/live` + engineers-live.html — Sep 2026)
+A live at-a-glance office view of where every field engineer is right now.
+**GET /sla/live** (FullAccess|SLAAdmin|**WhereEveryone** — its own Users Admin toggle under
+"Jobs & SLA", Sep 2026; the plain SLA perm no longer opens it, so engineers don't see
+each other's whereabouts unless granted) computes, per field engineer
+(staffType≠office, active), using each engineer's OWN per-engineer slice
+(`effStatus`/`effSchedule`, NOT the release-gated for-engineer view — the office sees
+the true plan): the job they're **on now** (effStatus Travelling / In Progress, incl.
+one left running from a previous day), and the job they **should be** on next (earliest
+unfinished, non-active job scheduled today — a normal job, a project day, or a 🛟 standby
+fallback). Category = `on_job` (has a current) → `should_be` (has a next) → `off` (on
+approved leave, via `approvedLeaveInRange`) → `idle`. Returns each engineer's WHOLE
+`planned` day (today's jobs sorted by time, each with status/priority/since) so the
+modal needs no extra fetch. Front-end **engineers-live.html** (📍 Where's everyone):
+two sections **🔧 On Job** then **📋 Should Be** (+ a muted 🕔 No job / off), colour-coded
+status pills, **auto-refreshes every 45s**; each engineer **name is clickable → a
+planned-day modal** (time · site · status chips; a row opens job-view.html). Entry
+points: a **📍 Where's everyone** button on sla-scheduler.html + in sla-main.html's 🛠
+Tools menu, and a sidebar nav item (SLA|SLAAdmin). Reuses listJobs + effStatus/
+effSchedule; no new table.
 
 ## EM light test + PAT job types (add-job.html + sla.js — Aug 2026)
 Add Job has **💡 EM light test** + **🔌 PAT** ticks. Ticking them auto-fills the
@@ -2392,6 +2815,19 @@ it straight onto the compliance chart (rolling the next-due date).
   Portsmouth, PO6 3FE** (office-editable). Used to SEED a new cert's client ONLY when
   the previous cert didn't supply one — the previous cert always wins, and it never
   overwrites a typed value. (Non-Co-op EM/PAT would need the office to change it.)
+- **The JOB is completed SERVER-SIDE when its certs are in (Sep 2026 fix):** the
+  job→Complete used to depend ENTIRELY on the engineer's browser calling `patchJob`
+  the moment the last cert submitted. If that was interrupted — the office finalised
+  the certs, or a combined EM+PAT job's two certs were submitted across separate page
+  loads (each reload resets the client's `done` flags, so the "both done → complete"
+  patch never fired) — the job sat **stuck In Progress** with no way to complete it,
+  which then **blocked the engineer's clock-off**. Now `certs.js maybeCompleteCertJob`
+  runs on BOTH `/certs/submit` AND `/certs/finalise`: once every required cert (em
+  and/or pat, from the job's flags) is submitted-or-final, it writes the job to
+  Complete — top-level status AND every assigned engineer's `engStatus` slice (so
+  single- and multi-engineer shared-cert jobs both read Complete). The certificates
+  are the source of truth, not the engineer's device. (Ryan hit this: two combined
+  EM+PAT jobs finalised by the office stayed In Progress and he couldn't end his day.)
 - **Combined EM+PAT job (engineer-job.html):** two tabs, each certificate completed
   INDEPENDENTLY (finish one before the other, any order) — each has its own "Complete
   & submit". The JOB only patches to Complete once BOTH certs are submitted
@@ -2435,6 +2871,33 @@ it straight onto the compliance chart (rolling the next-due date).
   Done / All with per-fitting £ + totals + links to each remedial job; the office
   also sees ⚠ tags per row when reviewing. `createOrUpdateJobFromPayload` imported
   from sla.js. portal-config `?v=20`, SW `mostlane-v84`.
+- **Photos on EVERY failed fitting — light OR battery (Sep 2026, `cert-form.js?v=19`):**
+  the per-fitting **📷 Add photo** control used to render ONLY when the fault kind was
+  Batteries, so a **replace-light** remedial had NOWHERE to photograph the failed
+  fitting (Ryan hit this). The photos block now shows for BOTH kinds (spec + qty stay
+  battery-only), and **validation requires ≥1 photo per failed fitting** ("N failed
+  fitting(s) — add a photo"). Server: `processEmRemedials` now captures `photos` for
+  every kind into `em_remedials.photos` (was battery-only), and
+  `createRemedialJobForCert` **copies each fitting's photos into the raised remedial
+  job's R2 folder** (`jobs/<jobId>/emrem-*`, idempotent) so the works job shows exactly
+  which fittings to replace. Photos are vital for the office record + the ordered works.
+- **Auto-reissue a CLEAN certificate after the works (Sep 2026 — the final step):** once
+  the replacement lights/batteries are fitted, the SAME EM certificate is regenerated
+  with every previously-failed fitting now **Pass** and its comment suffixed
+  **"(Replaced)"** (traceable, not silently hidden). Trigger: sla.js `maybeReissueAfterRemedial`
+  fires when a remedial SLA job (`emrem:<certId>:L|:B`) is COMPLETED and calls
+  `certs.js reissueCleanCertForRemedialJob` (via dynamic import — no static circular dep),
+  which reissues ONCE every remedial job raised for that cert is finished (a split
+  lights+batteries order waits for both). `reissueCleanCert` clones the original cert,
+  flips the failed rows to Pass + "(Replaced)", clears their `remedial`, and inserts a NEW
+  cert (stable id `CERT-reissue-<origId>`, idempotent) at status **`review`** — so it lands
+  in the office review queue (a one-tap Finalise files the clean copy to the compliance
+  chart, keeping the original number) as the human checkpoint before it replaces the failed
+  cert. Pushes the office (deep-links `cert-review.html?open=<newId>`). `em_remedial_acks`
+  gains `reissue_cert_id`/`reissue_at` (self-migrating). **Manual control:** POST
+  **/certs/remedials/reissue** `{certId}` (office) does it on demand; the EM remedials
+  tracker shows a **♻ Issue updated cert** button per case (once a works job exists, hidden
+  after reissue → **♻ Updated cert →** link). `reissueCertId` returned on the board rows.
 - **EM remedial BATTERIES (not a new light) — supplier enquiry (Aug 2026):** a failed
   fitting's remedial can be **batteries** instead of a replacement light. On the cert
   form (cert-form.js `?v=10`, EM only) a failed fitting picks **Fault: Replace light /
@@ -2456,6 +2919,38 @@ it straight onto the compliance chart (rolling the next-due date).
   Notify modal (saved via /certs/config). The blocking gate's wording folds in
   batteries ("N need batteries — supplier quote"). portal-config `?v=21`, cert-form
   `?v=10`, SW `mostlane-v85`.
+- **EM remedials v2 (Sep 2026 — Jamie's spec, supersedes the pipeline notes below):**
+  **£50 per failed fitting, light OR batteries, replaced on site or not.** Engineer marks
+  each failed fitting: fault (Replace light → optional `lightSpec`; Batteries → spec +
+  qty), "Done on site?" Yes/No, photos (required). cert-form's list header breaks the
+  failures down ("⚠ 9 failed: 3 lights · 4 batteries · 2 replaced on site"). Case status
+  (`em_remedial_acks.status_label`, worst-first) = **works** (a light not replaced) >
+  **batteries** (batteries not replaced) > **onsite** (all replaced). **Stages:**
+  `to_quote` (the blocking portal-config pop-up — now shows the CLIENT QUOTE TEXT with a
+  📋 Copy button; "✓ Quote sent" → `quoted`) → `quoted` (waits on the tracker for the
+  client's PO) → **📦 PO received** (`POST /certs/remedials/po-received` = `poReceived()`)
+  → either `done` (nothing left to attend: `reissueCleanCert` now **AUTO-FILES** the clean
+  cert — same number, failed rows → Pass + "(Replaced)", `fileCertNow()` to the chart,
+  bump:false — and offers the PDF) or `in_works` (`createRemedialWorksJob`: ONE
+  site-audit job `emrem:<certId>`, one checklist item per pending fitting with the
+  engineer's photos as refPhotos, unassigned, RA on / other gates off; flagged
+  **"⏳ AWAITING BATTERIES"** in its description when any battery fitting is pending →
+  **🔋 Batteries arrived** (`/remedials/batteries-arrived`) strips it + pushes SLA admins)
+  → engineer completes the audit job → `sla.js maybeReissueAfterRemedial` →
+  `reissueCleanCertForRemedialJob` → auto-filed clean cert → `done` → **🧾 Invoiced**.
+  Legacy `approved` reads as `in_works`. **Quote text** (`buildQuoteText`, GET
+  `/remedials/quote-text`): "Failed EM fittings at store 0622:" + one full line per
+  fitting ("Fitting 3 - Light replacement - £50", "(replaced on site)" suffix where so)
+  + "Total: N fittings - £N". **Supplier email:** GET `/remedials/email-draft?certId=`
+  = To/CC (remembered in cert:config `supplierEmail`/`supplierCc`), subject, body
+  ("Good morning/afternoon" by London time, reference `<store>-EM-<YY>`, signed with
+  the user's name); cert-review's 📧 modal edits it, 📋 copies it, 📄 downloads the
+  battery enquiry PDF, 📧 sends it with the PDF attached (POST `/remedials/supplier-email`
+  `{certId,to,cc,subject,body}` — persists To/CC; lib/email.js gained `cc`). The
+  tracker (💷 EM remedials) shows status text + per-fitting lines and the stage's
+  button; the `/remedials/board` + `/outstanding` payloads carry `items[]`,
+  `statusLabel`, `awaitingBatteries`, `quoteText`. Client-order approve
+  (`/remedials/order-action`) = PO received. **Test:** `node worker/tools/test-em-remedials.mjs`.
 - **EM remedial PIPELINE + continuous tracker (Aug 2026):** a finalised EM cert
   with failures opens a **case** (`em_remedial_acks`, `stage` col) that moves
   **to_quote → quoted → approved → invoiced**, so nothing is forgotten. The
@@ -2475,9 +2970,325 @@ it straight onto the compliance chart (rolling the next-due date).
   + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
   job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
   portal-config `?v=22`, SW `mostlane-v86`.
+- **Pre-v2 remedial rows: "Fitting ?" + missing photos (8 Sep 2026).** The two EM
+  cases finalised BEFORE the v2 deploy (Southbourne 0339-26 on 4 Sep, Frome 0622-26
+  at 08:44 on 8 Sep) were logged by the old `processEmRemedials`, before the
+  `fitting_no` column existed, so the tracker printed "Fitting ?". Backfilled in D1
+  by hand (row id `<certId>:<i>` = the i-th failed row of the cert, in order) AND
+  `fittingsFor` now SELF-HEALS: any case with a null fitting_no / empty photos is
+  re-derived from the certificate's own rows and persisted. Photos: Frome's four
+  photos ARE on file (one per fitting, JPEG keys in both the cert and em_remedials);
+  Southbourne has NONE — its engineer's build marked the fittings `failed:false`
+  (caught by `isRealRemedial`), so the photo requirement never fired and no photo
+  was ever taken — nothing to recover. The battery enquiry PDF (`batterypdf.js`
+  `prepPhotos`) now embeds PNGs too (decoded via pngdecode + shrinkRgb/deflate,
+  exported from pump.js) and PRINTS a "N photos on file not embedded: <reason>"
+  line for anything it can't embed (missing file / HEIC / unreadable) instead of
+  silently dropping it. Covered by `test-em-remedials.mjs` ("legacy rows").
+- **Office correction of a logged fitting (8 Sep 2026):** the Frome engineer logged four
+  bulkheads as "Batteries" that actually need NEW LIGHTS — and the office had already
+  pressed PO received, so the works job read "Replace batteries". The tracker's
+  per-fitting lines are now **inline selects** (fault kind: Light replacement /
+  Batteries; and works-or-batteries required / replaced on site) until the case is
+  done/invoiced → **POST /certs/remedials/fitting-update** `{certId, id, kind?,
+  replacedOnSite?}` (office). It rewrites the CERTIFICATE row (with an audit trail in
+  the note: "Office changed to … (engineer had logged batteries: <spec>)"), the
+  `em_remedials` row, re-derives the case counts/`status_label`/£ (stage untouched),
+  and if the works job (`emrem:<certId>`) already exists rewrites that fitting's
+  checklist line + the description summary (and drops AWAITING BATTERIES when no
+  battery fitting is left). Frome (0622-26) was corrected in D1 by hand the same way
+  (cert rows, em_remedials, ack, job items). Refused once done/invoiced (the clean cert
+  is already re-issued). Covered by `test-em-remedials.mjs` ("fitting-update").
+- **Certificate OWNERSHIP = the job's assigned engineer, not the row's creator (8 Sep
+  2026).** Southbourne 0339-26 has no remedial photos because Ryan's NINE photo
+  uploads on 4 Sep were all refused 403 "Not your certificate": Tanya had opened the
+  job-view certificate panel first (office mode autosaves on open) so the row's
+  `engineer` was Tanya, and `/certs/photo` (+ `/pdf`, `/one`, `/delete`) still used
+  the old creator-only check while `/save` + `/submit` had already moved to
+  `canWriteCert` (office, creator, OR anyone on the job's `assignedEngineers`). All
+  four now use `canWriteCert`, and a NEW cert row created by an office user for a
+  job is stamped with the job's first assigned engineer. The photos were never
+  stored (rejected before the R2 put) — nothing to recover; the works visit must
+  photograph them. Covered by `test-em-remedials.mjs` ("Certificate ownership").
+- **Office adds a photo to a fitting after finalise (8 Sep 2026):** tracker fitting
+  lines show "📷 N" + a **＋ photo** button (office) → **POST
+  /certs/remedials/fitting-photo** (multipart `certId,id,file`; client-shrunk JPEG
+  like cert-form). Stores to `certremedial/<tid>/<certId>/…`, appends to the cert
+  row's `remedial.photos`, the `em_remedials.photos` JSON, and — when the works job
+  (`emrem:<certId>`) exists — copies it into `jobs/<jobId>/audit/<itemId>/` as that
+  fitting's reference photo. Built for Southbourne (engineer's uploads had been
+  refused). Covered by `test-em-remedials.mjs` ("fitting-photo").
+- **Pump-maintenance records review in the SAME certificate queue (Sep 2026):** an
+  engineer's "Complete & submit" on a 🚰 pump job (routes/pump.js `pump_records`,
+  status draft→review→final) now lands in **cert-review.html** alongside EM/PAT —
+  the page merges `GET /pump/review` (+ `/pump/list` when "Show issued") into the
+  queue, renders pump rows with 🚰 "Pump maintenance", and opens them in-page
+  (`openPump`: MLPump office/view mount + **🏁 Approve & file to compliance** →
+  POST /pump/finalise, which draws the PDF and `fileCertificatePdf`s it as the
+  store's CURRENT `pump` doc on the coop chart, rolling the monthly due date; plus
+  upload-replacement / preview / delete). Deep-link `cert-review.html?pump=<id>`
+  (the submit push now points there). **/certs/status** (tracker + hub card) counts
+  pump jobs (`job.pumpMaintenance`) as type `pump`, joined to `pump_records` by
+  job_id, so "Certificates to review" includes them; cert-status.html rows link to
+  the pump deep-link. **pump-review.html is now a redirect stub** to cert-review
+  (sla-main's 🚰 link repointed). The hub card is titled "Certificates to review".
+
+- **Certificate TRACKER + home-page card (Sep 2026):** **GET /certs/status?range=today|7d|30d|all**
+  (office; `count=1` = tallies only) is a **JOB-based** view — one row per EM/PAT
+  **job × the type(s) it needs** (em/pat), joined to its certificate, so a cert that
+  hasn't been started yet still shows. Per-row status: **notstarted** (no cert row —
+  with the engineer), **draft** (being filled), **review** (submitted — office to
+  finalise), **final** (uploaded/filed to the compliance chart). Filtered by the
+  cert's activity day (finalised→submitted→last-edited, else the job's scheduled day);
+  **future-dated work is never shown** (so "Today" = work done/due today, All time =
+  everything up to today). `counts = {expected, uploaded, toReview, withEngineers}`.
+  Front-end **cert-status.html** (📄 tile-less page, reached from the home card) =
+  Today (default) / Last 7 days / Last 30 days / All time chips + summary tiles + a
+  tap-to-open list (a cert → **cert-review.html?open=<certId>** which now deep-opens
+  that cert incl. issued ones; a not-started row → job-view.html). **Home hub card
+  `certs`** (area compliance, FullAccess|SLAAdmin|Compliance) shows outstanding =
+  toReview+withEngineers with an "Awaiting from engineers / In your review queue"
+  breakdown → opens the tracker; matching overview KPI "EM/PAT certs outstanding"
+  (same `/certs/status?range=30d&count=1` fetch, jget-cached).
+- **EICR 5-year certificate NUMBER register (Sep 2026):** a STANDALONE running
+  register of Mostlane's own EICR/5-year certificate numbers (349→…) so the office
+  can see at a glance the **next number** to allocate and spot **gaps/blanks**. Own
+  table **`cert_register`** (self-migrating; PK tenant_id+number, `job`, `cert_type`
+  default fiveYear) — DELIBERATELY separate from the `certificates` table (that's the
+  portal-generated EM/PAT certs; this is just a number log covering the whole
+  history, most of which predates portal certs). Endpoints (office
+  FullAccess|SLAAdmin|Compliance): **GET /certs/register** (entries + `count`/`min`/
+  `max`/`next=max+1` + `gaps` [missing sequence numbers] + `blanks` [numbers with no
+  job]), **POST /certs/register** `{number, job}` (upsert one — inline-edit a row or
+  add the next), **POST /certs/register/delete** `{number}`, **POST
+  /certs/register/import** (`{text}` one "number  job" per line — a leading "(052)"
+  note ignored, number-only line = blank; OR `{entries:[{number,job}]}`; upserts,
+  a blank job never overwrites a set one; `{fillGaps:true}` also inserts missing
+  sequence numbers as blanks). Front-end **cert-register.html** (📇 Register button
+  on cert-review.html) = a big **Next certificate number** banner, a gaps/blanks
+  warning ("Add these as blanks"), a searchable table newest-first with each `job`
+  an inline-editable input (autosaves; a missing number shows a red "type a job to
+  add it" row; the next number sits at the top as a quick-add), and a paste-import
+  box. **Seeded live from Jamie's register 349→999** (649 numbers; loaded straight
+  to D1, customer site names D1-only never the repo): missing **949 & 960**, blanks
+  **615, 618–629, 666**, next number **1000**. _headers no-cache.
+  **Auto-add from the compliance-check pass (Sep 2026):** cert_register gained a
+  `source` column (self-migrating; ""=typed/imported, "scan"=auto-read). When the
+  **compliance-review pass** (compliance-review.html "🔍 Run compliance checks")
+  reads each stored 5-year EICR via MLEICR, it now also picks up the certificate's
+  printed number (`analyze().ref`) and — only when that's a CLEAN whole number
+  (`/^0*\d{1,6}$/`, 1–99999) — fire-and-forget POSTs it to **POST
+  /certs/register/auto** `{number, job:<site name>}` (office-gated). That endpoint
+  **INSERT-OR-IGNOREs** (NEVER overwrites a number the office typed) and stamps
+  `source='scan'`, so re-running the pass is safe and idempotent; the register page
+  badges scan-added rows **"from a cert scan"** for a human to verify. Refs with
+  letters/prefixes are skipped (added by hand). This is the "auto-add a new 5-year
+  cert's number to the schedule" path — capture happens when the cert is verified,
+  not at upload (the number lives inside the PDF, which only the browser engine
+  reads reliably).
+- **Client-order intake → approve a remedial (Sep 2026):** a bot (e.g. Grok watching
+  the client's Concerto REM/R-order emails) POSTs each order to **POST
+  /certs/remedials/order-inbound** (PUBLIC_ROUTES; token verified in-handler —
+  **ORDERS_INBOUND_TOKEN** if set, else TASKS_/JOBS_INBOUND_TOKEN). Body carries the
+  Concerto fields (`orderNumber, client, priority, orderValue, storeCode, siteName,
+  srRef, siteRaw, description/detail, jobCategory, observationCodes, notifiedAt,
+  externalId, link, source`). Stored in table **`client_orders`** (dedupe by
+  `externalId` then `orderNumber`), and **matched by store code** to a remedial
+  AWAITING APPROVAL — an EM remedial case (`em_remedial_acks` stage to_quote/quoted)
+  or an electrical-test job carrying `remedials` with no works job yet. Pushes the
+  office (`actionable`, deep-links `cert-review.html?orders=1`). **NOT auto-actioned**
+  — the office confirms with one tap. Endpoints (office): **GET /certs/remedials/orders**
+  (`?all=1`), **POST /certs/remedials/order-action** `{id, action:"approve"|"dismiss"
+  |"reopen"}` — `approve` on an EM match raises the works job(s) (`createRemedialJobForCert`
+  light+battery) + advances the ack to `approved`; on an elec match it links the job to
+  raise the works there. Front-end: **📥 Client orders** button + modal on
+  cert-review.html (To-action / All, per-order match note + ✅ Approve & raise works /
+  Dismiss + Open-email/Open-job). GET /certs/remedials/order-inbound = a no-secret
+  connection check.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
-  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
+  navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
+- **5-YEAR (fixed-wire / EICR) remedials + "tested — cert to file" schedule marker
+  (Sep 2026):** the 5-year compliance schedule (eicr-portal.html) used to flag a
+  store bright-red **"no cover"** whenever its EICR was overdue — even when the test
+  had actually been carried out and only the certificate was still to file. It now
+  **checks back against reality** and softens such a cell to **amber "✅ tested — cert
+  to file"** (never green — the cert is still outstanding). Evidence a test was done,
+  per store code: (a) a **five_year_remedials** record (a quoted remedial is proof the
+  inspection happened — the strongest signal, carries the remedial stage + order), (b)
+  a **completed 5-year electrical job on the live board**, or (c) a **recently-completed
+  5-year job in sla_jobs_archive** (finished-status + numeric code + `completed_at`
+  within ~300 days — an ancient EICR is the one that EXPIRED, not evidence of cover).
+  - **Table `five_year_remedials`** (self-migrating; id=Concerto SR, store_code,
+    site_name, quote_date, budget_cost, work_status, **stage** quoted→ordered→in_works
+    →done→invoiced, `lines` JSON of the individual required actions, order_* columns).
+    One row per service request (SR); multi-line exports are aggregated by SR on import.
+    `tenant_id` is TEXT → bind the numeric tid (stored "1.0", the usual quirk).
+  - **certs.js endpoints** (office = FullAccess|SLAAdmin|Compliance): **GET
+    /certs/five-year/tested** → `{codes:{<pad4>:{source,stage,orderNumber,testedAt,ref…}}}`
+    (the schedule marker map; cached ~5 min per isolate — the archive scan is heavy),
+    **GET /certs/five-year/board?status=** (the register + a live client-order match by
+    SR/store code + stage), **POST /certs/five-year/import** `{rows:[…]}` (aggregate by
+    SR; re-import preserves stage+order), **POST /certs/five-year/stage** `{id,stage}`,
+    **POST /certs/five-year/delete** `{id}`. `attachRemedialOrders` joins each remedial
+    to a `client_orders` row (by SR ref then store code) so "has an order?" self-updates.
+  - **Front-end:** eicr-portal.html loads `testedFlags` (like `remedialFlags`) and, in
+    `dtd`, overrides a red **fiveYear** cell to amber + a `.tested-note` pill (hover =
+    the evidence + order/stage). **five-year-remedials.html** (🔌 5-Year remedials button
+    on cert-review.html) = the review list: Awaiting-order / Ordered / Done chips, each
+    card showing store · SR · quote date · £ · order (or ⚠ needs review) · the remedial
+    items · a stage dropdown · Open-site. `_headers` no-cache.
+  - **Seeded 10 Sep from Jamie's Concerto "Remedials_1" export** (39 SRs, May–Aug 2026,
+    loaded straight to D1 — customer names D1-only, never the repo). Two matched a
+    captured order at seed time (0380 Wimborne PFS R28987, 0658 Waterlooville 00019404/2)
+    → stage `ordered`. **NB the client_orders table only holds orders notified 27 Aug–8
+    Sep 2026** (backfilled), so a remedial ordered before then shows no order until a
+    fresh order arrives. TODO/next: raise the works job from a 5-year remedial (like the
+    EM one-tap); fold into the client-orders auto-match so a new order advances the stage.
+
+## Sump Pump Monthly Maintenance (routes/pump.js + lib/pumppdf.js + pump-form.js + pump-review.html — Sep 2026)
+A per-store maintenance form ported from Jamie's Jotform ("Sump Pump Monthly
+Maintenance", form 252242531697055 — read via the **Jotform connector**, which the
+network otherwise blocks). Modelled EXACTLY on the EM/PAT cert flow: engineer fills
+it on the job → submits → office review → **Mostlane-branded PDF filed to the site**.
+- **Job type:** add-job.html **🚰 Pump Maintenance** tick + a **store picker**
+  (loads `/pump/stores`) → `job.pumpMaintenance` + `job.pumpStore` (threaded through
+  createOrUpdateJobFromPayload + patchJob + the revisit clone in sla.js). Ticking it
+  sends requiresRA/Sig/Photo/Note=false (the record is the completion); the RA lock
+  is off. `completionMissing` returns [] for pump jobs (like EM/PAT) — the job
+  **auto-completes server-side** via `pump.js maybeCompletePumpJob` when the record is
+  submitted or finalised (top-level status + every engineer's engStatus slice).
+- **Six stores, seeded from the Jotform** in app_config `pump:config:<tid>` (self-
+  seeds on first `/pump/config` read; editable via POST /pump/config, office-gated):
+  **Binfield, Wickham, Eastbourne, Shanklin, Wimbledon, Newport ELS**. Each store
+  carries its own **location & method instructions** (verbatim) + its own **checklist**.
+  Three checklists: **general** (13 items — Eastbourne/Shanklin/Wimbledon/Newport ELS),
+  **Binfield** (14, adds "Control panel or alarm system functioning"), **Wickham** (18,
+  adds the ditch + CCTV items). Each check is **Yes / No / N/A** with a shared
+  "details of any check answered No" box.
+- **Required safety pre-check (Jamie's rule):** every store's form opens with TWO
+  mandatory confirmations that must BOTH be Yes before submit — (1) area made safe and
+  **barriered off** to prevent injury (someone falling into the open hatch/sump), and
+  (2) **staff have been notified** the works are being carried out. Stored in
+  `config.safety`; validated client + implied by the checklist gate.
+- **Photos AND video** upload straight to the record (**POST /pump/media** multipart,
+  kind photo|video → R2 JOB_FILES `pump/<tid>/<recordId>/…`; **GET /pump/media** signed
+  inline stream, PUBLIC_ROUTES; photo cap 12 MB, **video cap 95 MB** — under the
+  Workers ~100 MB body limit, keep clips short). **POST /pump/media-delete**.
+- **Two drawn signatures** (engineer + store DM, both required — matches the Jotform)
+  + names + date + the declaration tick. Stored as data-URL JPEGs in the record.
+- **Table `pump_records`** (self-migrating; status draft|review|final, data JSON).
+  Endpoints (`/pump/*`, office = FullAccess|SLAAdmin|Compliance; engineer owns their
+  job's record): GET /config, POST /config, GET /stores, GET /for-job?jobId=&store=
+  (load or seed), POST /save, POST /submit, POST /media(+/media-delete), GET /one,
+  GET /review (queue), GET /list?store=, GET /pdf?id=, POST /finalise (draw PDF →
+  R2 `pump/<tid>/<id>/record.pdf` + file to the store's site Documents under a
+  "Pump Maintenance" area when the store has a `siteCode`), POST /upload (replacement),
+  POST /reopen, POST /delete.
+- **lib/pumppdf.js** `buildPumpPdf(record, meta{logo,engSig,dmSig})` — the same soft-UI
+  house style as certpdf: navy header + logo + store name + status pill, instructions
+  card, safety card, paginated Yes/No/N-A checklist (green/red/grey dots), details-of-No,
+  declaration + the two signatures. Vector-drawn on lib/pdf.js.
+- **Front-end:** shared **pump-form.js** (`window.MLPump.mount(el,{jobId,store,mode:
+  engineer|office|view,api,token,patchComplete,onComplete})`) — instructions + safety +
+  checklist + photo/video + signature pads + autosave + engineer "Complete & submit"
+  (validates everything). Mounted in **engineer-job.html** (pump branch, slim status
+  set Travelling/In Progress), **job-view.html** (read-only "🚰 Pump maintenance record"
+  card + PDF), and **pump-review.html** (office queue → edit in office mode → 🏁 Finalise
+  & file / ⬆ upload replacement / 🗑 delete; deep-links `?open=<id>`). Entry point:
+  **🚰 Pump review** button on sla-main.html (office roles). Submit pushes the office
+  review queue (`sendToPermission`); finalise pushes the engineer. _headers no-cache on
+  pump-review.html + pump-form.js.
+- **Stores linked to portal sites + Add-Job AUTO-FILL (Sep 2026):** each store carries
+  `siteCode`+`client`+`address`+`postcode` in the config. Five are linked (Binfield
+  0382, Wickham 0066, Shanklin 0125, Wimbledon 0404, Newport ELS 0682 — all Co-op
+  retail/els); **Eastbourne is left unlinked** (3 possible retail stores — awaiting
+  Jamie's pick). On add-job.html, ticking 🚰 Pump Maintenance + picking a store
+  **auto-fills the whole job**: selects the Site type + Site dropdowns (via the store's
+  client→label + siteCode; falls back to the hidden site fields when unlinked), sets the
+  **description**, and names the job **"{Site} Pump Test {Mon}{YY}"** (e.g. "Binfield,
+  Forest Road Pump Test Sep26"). `/pump/stores` returns the link fields; the five
+  specialist job-type blocks (Firestopping · Electrical test · Pump Maintenance ·
+  Standby/fallback · Compliance test type) are wrapped in a collapsed
+  **🧰 Specialist job type** `<details>` to keep the form clean.
+- **Finalise files to the compliance chart's PUMP section (Sep 2026):** finalise calls
+  **`fileCertificatePdf(scheme:"coop", type:"pump", code:<siteCode>, bump:true)`** so the
+  PDF lands as the site's **current pump document** (and surfaces in Site Documents via
+  the /sla/site/docs compliance injection). The **coop `pump` compliance type is MONTHLY**
+  (`SCHEME_DEFAULTS.coop.pump = {months:1, amberDays:14, redDays:7}`) so it flags
+  correctly and each finalise rolls the due date **+1 month** (bumpDue keys off `months`).
+  Unlinked stores (Eastbourne) skip compliance filing — the PDF still lives on the record
+  + review page. The review page **prompts "Do you want to download the PDF?"** right
+  after finalise. **TODO/next:** confirm which Eastbourne store (link it); Help guide.
+
+## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
+Re-attending a finished job is a NEW linked job, never a re-open of the old one
+(re-opening a completed job in place breaks the engineer completion gate). Office
+/admin **🔁 Re-visit** button on a Complete/Closed job (job-view header) → modal
+(date · time · hours) → **POST /sla/jobs/{id}/revisit** clones it at the same site
+(same engineer + requirements + job type) with a FRESH id, so signature/RA/photos/
+history start fresh, but the original visit's FILES + evidence (photos, signature,
+notes, RA, audit/remedial photos) are COPIED across + re-pathed to the new id so the
+re-visit is a full continuation. An optional **re-visit note** (the
+snag) becomes the PRIMARY description with the original kept below (`revisitNote` →
+composed server-side); no note = original description as-is. Links: `revisitOf` (parent id) +
+`visitGroupId` (the ROOT job id shared by the whole chain), threaded through
+createOrUpdateJobFromPayload + patchJob. **GET /sla/jobs/{id}/visits** returns the
+whole group; job-view "🔁 Visits" card lists every visit (status · date · open) with
+each visit's individual cost (/costing/job-full-cost per job) + a combined total
+(shown once ≥2 visits; costs admin-only). NB job-view still loads via the legacy
+mostlane-sla host, so the new endpoints are called on MOSTLANE_API (mApi helper).
+**Multi-visit badge (Sep 2026):** every job in a chain carries **`job.visitCount`**
+(the group size, re-stamped on all members whenever a re-visit is created — threaded
+through createOrUpdateJobFromPayload + patchJob). When `>1` a small **🔁N** pill shows
+on the SLA board (sla-main.html row + mobile card, `.visit-tag`, next to `groupTag`),
+the scheduler **day-view block** (`.day-job-ref`) and **week-view chip** — so a job with
+multiple visits is obvious at a glance; open it and the "🔁 Visits" card lists/opens
+them all.
+
+## Electrical test → remedials → one-tap works job (sla.js + remedials-form.js — Sep 2026)
+An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;
+sends requiresRA/Sig/Photo/Note=false) lets the engineer record a **remedial-works
+list** on the job: `job.remedials = [{id, code (C1/C2/C3/FI/""), description,
+minutes, materialCost, photos:[R2 keys]}]`. Threaded through
+`createOrUpdateJobFromPayload` + `patchJob` (`normRemedials` preserves photos by id);
+GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion is
+**relaxed** (`completionMissing`/engineer-job `outcomeMissing` return [] for elecTest
+— a clean test has no remedials). Photos: **POST /sla/jobs/{id}/remedial-photo**
+(multipart file+thumb+itemId → R2 `jobs/<id>/remedial/<itemId>/…`, returns the key)
++ **DELETE /sla/jobs/{id}/remedial-photo?key=**. **One-tap works job:** **POST
+/sla/jobs/{id}/create-works-job** (FullAccess|SLAAdmin) builds a NEW UNASSIGNED
+**site-audit** job at the same site — each remedial → an audit item (`text` =
+`[code] description`, the engineer's photos COPIED into `jobs/<newId>/audit/<item>/…`
+as the item's refPhotos), **duration + material cost NOT carried** (pricing stays off
+the works job). **Gates suited to an audit job (Sep 2026):** `requiresRA:true` (the
+engineer IS prompted for the RA before starting — electrical remedials), but
+`requiresSignature/Photo/Note:false` — completion is the CHECKLIST (each item
+photographed), NOT a separate signature/note/After-photo. `completionMissing`
+short-circuits to `auditMissing` on BOTH client + server, so the audit checklist is
+the only completion gate. The site name is **resolved from the store code**
+(`resolveSiteMeta`) so the job never reads "0657 - 0657" off an empty siteName, and
+the reference defaults to the source ref. (An audit job's RA lock DIMS the status grid
+until the RA is done — so a stuck RA looks like "no status boxes".) **RA work-area photo
+on audit/cert/firestop/elec jobs (Sep 2026 — the real "photo upload unclickable" bug):**
+the RA modal's photo button always does `$("fileInput").click()`, but `#fileInput` AND
+its `change→uploadPhotos` handler were only rendered/wired inside the STANDARD-job branch
+(`if(!fs&&!au&&!cert&&!elec)`), so on an audit/remedial job the button hit a NULL element
+and did nothing — the RA could never be finished. Fixed: `#fileInput` is now rendered
+unconditionally and its change handler wired for every job type (`uploadPhotos` no-ops
+safely when there's no `#photos` grid). This, not the `shrinkImage` hang, was the remedial
+RA blocker. **Which remedials to include is a PICKER (Sep 2026):** "Create works
+job" opens a modal listing every remedial with a checkbox — **C1/C2/FI pre-ticked,
+C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the POST
+(absent = all). Idempotent (`job.remedialsWorksJobId` links both ways;
+`fromRemedialsOf` on the new job). Front-end: shared **remedials-form.js** (`?v=2`,
+`window.MLRemedials.mount(el,{jobId,mode:engineer|office,api,token,job,canManage})`)
+— engineer mode = add/edit/remove items (code · description · duration(min) · material
+£ · camera photos, autosaves via PATCH {remedials}); office mode = clean table +
+totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTest →
+`remedialHost`, slim Travelling/In Progress/Complete status set) + job-view.html
+(office `remedialCard`). NB the electrical engineer must be ADDED to the portal
+(Users Admin) before he can be assigned these jobs.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
@@ -2536,12 +3347,26 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   companies[]}, contractValue, links{programmeId,ramsIds[],cppRef,costingKey},
   doneOverride{}. **costingKey = normName(project name)** — the SAME key costing
   uses, so PO/labour/valuations roll up automatically.
-- **Wizard (project-new.html)** — 4 steps: **1** site (existing → search+copy
-  coords, or new) + **always creates its own Pxxxx project-site** via `/add-site?
-  category=projects` (auto P-number, pushes the SiteLog geofence, PO picks it up
-  via its add-only mirror) + confirm/drop coords (Leaflet, postcodes.io geocode) +
-  **round-trip mileage** computed client-side (haversine ×1.25×2 from HQ PO15 5RQ,
-  saved to site_miles) + name/number; **2** required-docs tick-box; **3** SiteLog
+- **Wizard (project-new.html)** — 4 steps: **1** SITE + PROJECT.
+  **Site = the PLACE, project = the works on it (Sep 2026 rework — "site should be
+  Goodwood Farm, project Goodwood Farm VPU").** Two site modes:
+  - **Existing site** → search + pick ANY saved site (a store, a place, another
+    project's site); the project **LINKS** to it (`site_number` = the picked site,
+    `site_client` = its client). **No new site is created** — it reuses that site's
+    geofence, address, history + costing. The project still gets its OWN P-number
+    (`number`, from /next-project-job-number) so it has its own valuations +
+    projects-compliance entry.
+  - **New site** → enter a **site/location (place) name** (`#newSiteName`, separate
+    from the project name) → creates a place-named Pxxxx site via `/add-site?
+    category=projects` (auto P-number = the project number, pushes the SiteLog
+    geofence). The SITE is named the place, the PROJECT the works.
+  (Was: ALWAYS cloned a project-site named after the PROJECT even when you picked an
+  existing site — which is what split Goodwood into "Goodwood Farm" + "Goodwood Farm
+  VPU". `collect().linkExisting` drives the finalize branch; `/project/create`'s
+  compliance row now uses `siteNumber` for its `site_number` so a linked project's
+  docs surface under the real site.) Plus confirm/drop coords (Leaflet,
+  postcodes.io geocode) + **round-trip mileage** (haversine ×1.25×2 from HQ PO15 5RQ,
+  saved to site_miles — new sites only); **2** required-docs tick-box; **3** SiteLog
   message (→ site_rules) + companies-on-site (pick from PO `/po/api/subcontractors`
   + free add); **4** review → POST **/project/create** → project-hub.
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
@@ -2570,7 +3395,18 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   documents, not stored files, so only their attached-file form appears there.
   **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
-  Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
+  Projects perm see non-hidden). **Naming (Sep 2026):** every upload now PROMPTS
+  for a document name (`askDocName` modal in project-hub.html) — required, used as
+  the doc `title` (the display name) instead of the raw file name (camera photos
+  arrived as UUIDs). Pre-fills the file's base name unless it looks auto-generated
+  (UUID / IMG_ / long digits) → then blank so a name must be typed. Both upload
+  paths (the Project Documents drop-zone `upload()` + the required-doc picker
+  `uploadDocFile()`) use it. **Multi-file (Sep 2026):** the Project Documents
+  drop-zone now accepts MANY files at once (`uploadMany` loops, naming each) — it
+  was `files[0]` only, so a multi-select silently uploaded just the FIRST file
+  (why a batch upload showed only one or two saved). Existing docs get a **✏️ Rename** button →
+  `askDocName` → POST /project/doc-update `{fileId,title}` (server already accepts
+  `title`). **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
@@ -2646,7 +3482,11 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   **engineer-job.html** — whose "Site documents" button navigates to
   site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
   site-folder show a "· from project" hint and HIDE the Delete button (project
-  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  docs are managed on the project hub). **Admin RENAME from the site folder (Sep
+  2026):** the /site/docs project-doc rows now also carry `fileId`+`projectId`, so
+  site-folder.html shows an admin **✏️** button on a project doc → `askDocRename`
+  prompt → POST /project/doc-update `{fileId,title}` → refresh (same rename as the
+  project hub, in-context). Also: **project-hub.html's doc opener
   was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
   instead of the object form docviewer expects, so the modal never sniffed the
   PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
@@ -2813,6 +3653,9 @@ Current detail widgets (each permission-gated):
     toAction + decided. Open requests + My equipment.
   - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
     / due within 30 days (per-type `due` dates). Open compliance.
+  - **EM & PAT certificates** (FullAccess|SLAAdmin|Compliance): GET
+    /certs/status?range=30d&count=1 → outstanding (toReview + withEngineers), with
+    an "awaiting from engineers / in your review queue" split. Open cert-status.html.
   - **Purchase orders** (FullAccess|PurchaseOrders): GET /po/api/dashboard →
     uncosted (to price) + needs_review/flagged/credit_due/unmatched_site. Open
     PO system (po-office.html).
@@ -2850,6 +3693,42 @@ POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
 ~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
 user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
+**Task types / filtering (Sep 2026):** admin_tasks gained **`category`** (self-
+migrating) — a type label ("Emails" / "Compliance" / …) so My Tasks can filter by
+type; and **`ref_date`** = a task's "as of" date (an email's RECEIVED date) so the
+portal shows the **real age** + a **⚠ warning past 7 days**, self-updating rather
+than frozen in the title. **my-tasks.html** now: category **filter chips** (All +
+each type, live counts; hidden when there's only one plain group), **oldest-first**
+ordering (by `ref_date` else created), an **age pill** ("N days ago", red ⚠ + a red
+card border once past the flag age) for email-style tasks (a due/overdue pill still
+shows for scheduled ones), a **category pill** per card, and it strips a leading
+"13d · " age prefix a bot may bake into the title (the portal owns the age now).
+The **flag/warn threshold is a per-user SETTING on the page** ("⚑ Flag & warn when
+older than N days", default 7, shown only when there are age-based tasks) — saved to
+localStorage (instant) + mirrored to **/prefs `taskFlagAge`** so it follows the user
+across devices. **Clean detail + email link (Sep 2026):** the email URL is kept OUT
+of the summary text — admin_tasks gained a **`link`** column; inbound stores the link
+there (and STRIPS any URL a bot pasted into `detail`, capturing it as the link),
+`shapeTask` returns `link`, and my-tasks.html renders it as a tidy **"📧 Open email
+↗"** button while stripping any `https?://…` from the shown detail (so the older
+tasks that had the URL glued in also read clean). `shapeTask`
+returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
+**Machine-to-machine intake (Sep 2026):** **POST /tasks/inbound** (PUBLIC_ROUTES;
+token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
+**JOBS_INBOUND_TOKEN**) lets an external tool (e.g. an Outlook "emails I need to
+reply to" bot / Grok) create a **one-off** task in someone's list. Body
+`{title (req), detail?, link?, assignee?/assignees[]?, dueDate? (YYYY-MM-DD,
+default today), dueTime? (HH:MM, default 17:00), externalId?, source?, category?
+(default "Emails"), date? (the email's received date → age + >7-day warning)}`. Assignee
+defaults to **OWNER_USERNAME**; each is resolved to a real portal username (exact →
+case-insensitive → "first last"). **Dedupe by `externalId`** (an email message-id):
+re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
++ `ext_key` cols on admin_tasks). GET /tasks/inbound = a no-secret connection check
+(configured? + token fingerprint). Task is `recurrence:"once"`, no auto-match — the
+assignee ticks it on my-tasks.html when they've replied. **Close the loop:** the
+same POST with **`{externalId, action:"done"}`** marks it complete (drops off the
+attention count, shows ticked) and **`{externalId, action:"delete"}`** removes it —
+so the bot clears a task once it sees a sent reply. No-match = success (idempotent).
 
 ## Notifications system
 - **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
@@ -3294,6 +4173,48 @@ scratchpad pattern gen-help-shots*.cjs). Search + tap-to-enlarge lightbox.
 Known gap: PO guide is text-only (external code — Jamie may supply a phone
 screenshot to embed). **UPDATE THE RELEVANT GUIDE WHENEVER FEATURES CHANGE.**
 
+## Cable Calculator (cable-calc.html + routes/cablecalc.js + lib/cablecalcpdf.js + cable-calc-engine.js — Sep 2026)
+A **BS 7671 single-circuit cable-sizing / verification** tool with a branded PDF
+report — the ProCert-style calculation flow, v1. Permission **`CableCalc`**
+(new PERMISSION_KEYS entry; FullAccess implies) gates the 🔌 Cable Calculator tile
+(main.html MAP `CableCalc:["CableCalc"]`) + sidebar NAV + all `/cablecalc/*` routes.
+- **Engine `cable-calc-engine.js`** (`window.MLCable.calculate(inputs, data)`) is
+  DOM-free + pure, modelled on eicr-engine.js. **Split: COMPUTED vs LOOKED-UP.**
+  Computed here (engineering formulae, no copyright): design current
+  (Ib = P/(V·pf), ×√3 for 3-phase), the required tabulated capacity
+  It = In/(Ca·Cg·Ci·Cc), voltage drop (mV/A/m·Ib·L/1000), R1+R2 (from resistivity
+  RHO20 or a supplied mΩ/m, × op-temp factor), Zs = Ze + R1+R2, max Zs
+  (MCB/RCBO = Uoc·0.95/(k·In), k=5/10/20 for B/C/D — same Cmin method
+  eicr-engine uses; fuses from a supplied deviceZs table), prospective fault
+  current, adiabatic min CPC S = √(I²t)/k (k from the standard K_LINE/K_CPC
+  constants, caller-overridable). **Looked up from the caller-supplied `data`**
+  (the user's OWN manufacturer-datasheet values — NOT reproduced from BS 7671
+  Appendix 4 here): tabulated Iz, mV/A/m, and the Ca/Cg/Ci factor tables. A
+  missing value is reported as a check with `pass:null` ("no data"), NEVER a
+  silent pass. Each check carries its reg (433.1.1 / 523 / 525 / 411.4.5 / 543.1.3).
+  Validated against a known worked example (32 A radial: VD 4.67 V, Zs 0.584 Ω,
+  max Zs 1.37 Ω, min CPC 2.17 mm²) — see the build session; re-run before touching
+  the formulae.
+- **Reference data** lives in app_config `cablecalc:data:<tid>` (cables →
+  method → csa → {iz, vd}, plus ambient/grouping/insulation/deviceZs). SEED in
+  cablecalc.js is **SAMPLE data, flagged `sample:true`** (representative commodity
+  cable ratings so the tool works out of the box) — NOT the BS 7671 tables; a red
+  banner tells the user to verify/replace it. The **Datasheet data** tab is a
+  structured editor (per-cable Iz + mV/A/m grid, factor tables, add cable/size,
+  reset-to-sample). Config (company/defaults) in `cablecalc:config:<tid>`.
+- **Saved reports** in table **cable_calcs** (self-migrating; inputs+results JSON).
+  The **PDF** (`lib/cablecalcpdf.js buildCableCalcPdf(record, meta{logo})`, vector
+  A4 on lib/pdf.js — navy header + logo, circuit/installation cards, correction-
+  factor strip, striped verification table with pass/fail dots, key-figures block,
+  declaration + "checking aid" disclaimer) is an **authed blob** (POST
+  /cablecalc/pdf carries the Bearer token → the page opens the blob; NO public
+  route). The client computes with MLCable and posts the record it produced — the
+  PDF just formats it (one source of numbers, no drift).
+- **Endpoints** (`/cablecalc/*`, gate FullAccess|CableCalc): GET/POST /data (+
+  /data/reset), GET/POST /config, GET /list, GET /one?id=, POST /save, POST
+  /delete, POST /pdf. **TODO/next:** multi-circuit / board schedule; fuse deviceZs
+  tables; RCD as a hard check; fold into the compliance chart / job costing.
+
 ## EICR / BS 7671 check (eicr-check.html)
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
 Compliance|FullAccess; sidebar NAV entry too). NO backend — the PDF is read
@@ -3373,6 +4294,15 @@ MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
+- **Dedicated per-tile toggles (Sep 2026):** **EICR Check** (`EicrCheck: ["EicrCheck"]`)
+  and **Chapplins** (`Chapplins: ["Chapplins"]`) each have their OWN permission key
+  now — they used to ride the blanket `Compliance` perm, so a Co-op-only compliance
+  user saw both. Toggles live in Users Admin (Compliance & docs group). eicr-check.html
+  gates on `EicrCheck`; chapplins.html on `Chapplins` (CAN_VIEW/CAN_MANAGE) + the
+  worker `chapplins.js canManage` = FullAccess|Chapplins; sidebar NAV perms updated.
+  Existing non-FullAccess users need the new toggle granted. **Van Check** now shows to
+  a field engineer ONLY when they have a **vehicle assigned** (`user.VehicleAssigned`) —
+  an engineer with no van has nothing to check.
 - **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
   **long-press** (~2.5s — deliberately long so slow taps never trigger it)
   on any visible tile enters "arrange" mode (tiles wobble
@@ -3430,6 +4360,11 @@ is kept as documentation of the hot pages.)
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
+optional **TASKS_INBOUND_TOKEN** (dedicated m2m token for POST /tasks/inbound —
+an external "emails to reply to" bot; falls back to JOBS_INBOUND_TOKEN if unset),
+optional **ORDERS_INBOUND_TOKEN** (dedicated m2m token for POST
+/certs/remedials/order-inbound — the client-order/Concerto email bot; falls back to
+TASKS_INBOUND_TOKEN then JOBS_INBOUND_TOKEN),
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
@@ -3470,7 +4405,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   age as the freshness signal). Table push_subscriptions
   (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
   tid, username, {title,body,url})` fans out to a user's devices + prunes dead
-  (404/410) — **Phase 2 event hooks will call this**.
+  (404/410) — **Phase 2 event hooks will call this**. **`sendToPermission(env,tid,
+  permKeys,payload,excludeUser,opts)` takes an `opts.officeOnly` (5th arg; a bare
+  `true` also works)** — it drops FIELD engineers (users.profile.staffType==="field")
+  from the recipient set so an office-review alert never reaches an engineer who
+  happens to hold SLAAdmin/Compliance (blank staffType stays — owners/office admins).
+  Used by the engineer→office **submit-for-review** pushes: EM/PAT cert submit
+  (certs.js `/certs/submit`), pump submit (pump.js `/pump/submit`), and the EM
+  remedial alerts (to-quote, reissue-filed, batteries-arrived, client-order approve).
 - **VAPID keys** are worker config (VAPID_PUBLIC var + VAPID_PRIVATE secret;
   optional PUSH_CONTACT). Client fetches the public key from /push/public-key.
 - **sw.js is now the single service worker** (cache + push + notificationclick);
@@ -3539,6 +4481,369 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   dedupe-by-reference, forgiving priority/date parsing and assignment push are all
   identical to the old zap. `originator:"email"`. No change to sla.js.
 - The `email()` handler **never throws** (a thrown email handler bounces the mail).
+- **Production-grade intake (9 Sep 2026 — "take Zapier out of the loop"):** the
+  handler now runs a shared **`processEmail()`** pipeline (used by the live email
+  handler, the office test box and re-run) with: an **allow-list** (app_config
+  `email:intake` = `{enabled, allowFrom:[domains/addresses]}`, defaults
+  concerto.co.uk + mostlane.com — anything else is logged `ignored` and NEVER sent
+  to the AI), **dedupe by Message-ID** (a re-delivered email is `duplicate`, no
+  second job), **forward handling** — Outlook "forward as attachment"
+  (`message/rfc822` parts are walked and the ORIGINAL From surfaced) and inline
+  "FW:" forwards (the `From:` block in the body gives `origFrom`, judged by the
+  allow-list), and the Concerto template regex now also reads the **target
+  Response / Completion date-times** (Europe/London → ISO; `respondBy`/`completeBy`
+  in the logged fields; the AI schema carries them too). **Every email is logged**
+  in table **`inbound_emails`** (self-migrating: message_id, from, orig_from,
+  subject, outcome created|updated|dropped|ignored|duplicate|failed|dryrun, reason,
+  reference, job_id, fields JSON, text). **Office API `/email-intake/*`**
+  (FullAccess|SLAAdmin; index.js passes `worker.fetch` so it reuses /sla/inbound
+  in-process): GET `/status` (config + last email + 7-day counts + aiConfigured /
+  inboundConfigured), GET `/log`, POST `/test` `{subject, body, from?, commit?}`
+  (dry-run unless commit — the test box), POST `/rerun` `{id}` (force past the
+  allow-list/dedupe), GET/POST `/config`. Page **email-intake.html** (SLA Settings →
+  📨 Email intake): status lights, paste-an-email test box, recent-emails table with
+  ↻ Re-run, allow-list editor, and the set-up steps (also in DEPLOY.md §4). Concerto
+  emails land in **jamie@mostlane.com** (enquiries@ is not a REST-enabled mailbox),
+  so the Outlook rule lives on Jamie's mailbox. Test:
+  `node worker/tools/test-email-intake.mjs` (synthetic Concerto-shaped emails only).
+  **Cutover plan:** run alongside the zap (dedupe-by-reference makes both paths
+  upsert the same job), watch the log, then disable the zap.
+- **TEMPLATE-FIRST, "100% reliable" intake (9 Sep 2026 — Jamie: "jobs all look
+  different… set templates… this needs to be 100% reliable"):** extraction is no
+  longer AI-first. **`routes/emailtemplates.js`** holds ONE deterministic reader
+  per known layout, matched by SENDER DOMAIN + fixed markers, each returning
+  `{kind: job|order|notice, missing:[…], fields|order}`. Layouts (surveyed from
+  Jamie's mailbox; synthetic fixtures in the test): **concerto-job** ("New Job
+  Alert: <ref> - Priority N [(CON)]" — ref/priority/target dates/Site line →
+  code+postcode/Fault-Issue/phone), **concerto-order** ("Order number <n> from
+  Southern Coop" order sheet → orderNumber/priority/£ value/description/"For :"
+  store + SR ref → **filed IN-PROCESS to `/certs/remedials/order-inbound`** (the
+  client-orders intake, outcome `order`) — no Grok/bot needed for orders any more),
+  **concerto-notice** ("Helpdesk action - …", "Quote :" → dropped), **chapplins-job**
+  (ashley@/support@/kerry@chapplins.co.uk "A new job has been raised…": Tenant/Name/
+  Property/Home/Mobile/E-mail/Job Number/Date Job Entered/Job Description up to the
+  signature; subject variants "P1 - <address>", "Urgent Estimate required - <addr>"
+  (kept as a description prefix), "New job raised: Job Number N -- P1"; reference
+  **`CHAP-<jobNumber>`** (matches the archive ids), `storeType:"chapplins"`, tenant
+  + contacts appended to the description; **`lookupSite()` matches the Property to
+  the 4001–4127 Chapplins site register** — postcode first, then the normalised
+  unit+street (exact, else a unique leading-words match; ambiguous → no site code,
+  the job still lands with the address as its site name)), **metrorod-report** (job
+  cards/quotes → dropped), **mostlane-outbound** (our own "Send N to MetroRod" /
+  "Mostlane - Emergency - Order" → dropped). A subject starting RE:/AW: is dropped
+  as a thread reply before anything else. **Known-layout senders are trusted
+  implicitly** (no allow-list entry needed); everyone else still needs the list
+  (defaults now include chapplins.co.uk). **Held for a human = outcome `review`:**
+  a known layout with a required field the template couldn't read (e.g. no job
+  number), or ANY unknown layout (the AI, if keyed, only ATTACHES its proposed
+  fields; it creates nothing unless config `aiAutoCreate:true`, off by default and
+  labelled "not recommended"). `handleInboundEmail` pushes FullAccess|SLAAdmin an
+  actionable `email-review:<logId>` notification → **email-intake.html?review=<id>**
+  scrolls to a "📨 Needs a look" card with every field editable + **＋ Create the
+  job** (POST `/email-intake/approve {id, fields}` → /sla/inbound, log row updated,
+  notification resolved) / **✕ Dismiss** (POST `/dismiss`). Also GET `/templates`,
+  `/status` carries `reviewOpen` + `templates`, the test box takes a From address
+  (the template depends on the sender) and names which template read it. Outcomes
+  now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
+  **Adding a client = add one template + fixtures** in emailtemplates.js /
+  test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
+- **The SAME INCIDENT arriving again → a linked VISIT, never a duplicate or an
+  overwrite (9 Sep 2026, Jamie: "sometimes I get a duplicate job").** Two real
+  Concerto patterns: (a) we attend "00028541/1", make safe + quote; the client
+  orders the works and RE-ASSIGNS the same incident as **"00028541/2"** (new suffix)
+  — the old intake keyed jobs by reference so this became an unrelated second job;
+  (b) an old incident is RE-OPENED with the EXACT same reference — dedupe-by-
+  reference silently REWROTE the finished job's description and left it Complete.
+  Now **`/sla/inbound`** (sla.js — so the zap path and the email path both get it)
+  calls **`matchSameIncident(env,tid,ref)`**: same reference + a job still OPEN →
+  update it (a genuine re-send); same reference but every job with it is
+  **finished** (DONE_STATES or a custom `done` category — `jobFinishedFor`) →
+  `kind:"reopened"`; no exact match but a **sibling suffix of the same incident**
+  (`^\d{5,12}/\d{1,3}$`, `helpdesk_ref LIKE '<incident>/%'`) → `kind:"reassigned"`.
+  For either kind the intake creates a **NEW job (fresh uuid id, the new reference)
+  linked as a re-visit** — `revisitOf` = the newest earlier job, `visitGroupId` =
+  its root — with a "↩ Same incident sent again…" / "↩ Re-assigned incident —
+  follows our earlier visit 00028541/1 (Complete, date); usually the ordered works
+  after a quote" line appended to the description, then **`stampVisitGroup`** sets
+  the root's visitGroupId + every member's `visitCount` (the board/scheduler ×N
+  badge; job-view "🔁 Visits" lists them). Evidence is NOT copied (a fresh
+  attendance — unlike the office 🔁 Re-visit button); auto-assign applies as for
+  any new job. The response carries `linkedVisit, visitKind, previousRef,
+  previousId, previousStatus, visitGroupId`, and the email-intake log reason
+  says which happened. A different incident with a similar prefix ("000285411/1")
+  is never linked. **Test:** `node worker/tools/test-inbound-incident.mjs` (7 cases).
+- **CANCELLED jobs — a first-class status with a timestamp (9 Sep 2026, Jamie:
+  "we also need a process when a job is cancelled… a cancelled pill and a
+  timestamp… dropped from jobs being suggested").** `normalizeStatus` used to fold
+  "cancelled" into **Closed Jobs**, so a client cancellation was invisible. Now
+  **"Cancelled" is in CANONICAL_STATUSES** and a job moving INTO it is stamped
+  **`cancelledAt` / `cancelledBy` / `cancelReason` / `cancelSource`** (`stampCancelled`
+  in create + both patchJob status branches; moving back OUT clears the stamps —
+  the statusHistory keeps the trail; the editor asks "reason?" when you pick
+  Cancelled → `patch.cancelReason`). **Two Concerto layouts feed it** (emailtemplates
+  `concerto-cancel` = "Cancellled Job: <incident> Order No.: [<ref>]" + "Has been
+  Cancelled" + "Comments: …", and `concerto-quote-cancel` = "Quote : N - Q003. Cancel
+  request by <name>" + "Quote status : Cancelled" + "Title : Quotation required for
+  order number : <ref>") → emailjob `cancelJob()` → **POST /sla/inbound
+  `{action:"cancel", kind:"job"|"quote", reference?, incident?, reason, by, at}`** →
+  sla.js `cancelIncidentJobs`: finds the incident's jobs (`findIncidentJobs`: exact
+  ref, `<incident>/%` suffixes, id); an OPEN job → Cancelled + stamps (cancelledAt =
+  the email's time, cancelledBy = "Southern Co-op (Concerto…)", the Comments line as
+  the reason), its engineers + the SLA admins pushed (tag `job-cancelled:<id>`); a
+  **quote** withdrawal only cancels a job still WAITING (Pending/Quote/On Hold/Order)
+  — a Scheduled/in-hand job is returned `held` and the email goes to **"Needs a look"**
+  for the office to decide; every job for the incident already FINISHED → nothing is
+  un-completed, the newest gets **`clientCancelled {at,by,reason}`** noted (soft ↩
+  pill/banner); no job at all → 404 → the email is held for a look. Intake outcome
+  **`cancelled`** (dedupe includes it). **Where it shows:** sla-main ❌ "Cancelled
+  dd/mm hh:mm" pill (`cancelTag`, hover = who/why; row struck through; Cancelled chip
+  + bulk option; excluded from Open via `isClosed`), job-view `#cancelBanner` (when /
+  by / reason) + a ❌ chip + timeline note, sla-scheduler **drops Cancelled from
+  `jobs` entirely** (so lanes, the Needs-scheduling tray, backfill, fill-ins and
+  auto-day never offer it), engineer-jobs/route/inbox treat it as done. Server-side
+  suggestion paths (nearby, auto-day, engineer-day, fallback pool, live board,
+  release sweep, clock-off) already excluded "cancelled". A cancelled job counts as
+  FINISHED for `matchSameIncident`, so a re-sent incident becomes a linked visit.
+  Tests: `test-inbound-incident.mjs` (7 cancel cases) + `test-email-intake.mjs`
+  (both layouts, dry-run, duplicate). `sla-jobedit.js?v=31`.
+- **CLIENT ORDERS BOARD + order value → job → profit (9 Sep 2026, Jamie: "orders
+  must have their own category… view all live orders… filter by client… tie to
+  the incident… transfer notes and images… the job will know the value… no
+  financial information visible to anyone apart from Full Access users or office
+  staff").** **Money rule, server-side:** `lib/auth.js canSeeMoney(env,tid,username)`
+  = FullAccess OR `users.profile.staffType==="office"` — a field engineer never
+  sees money whatever grants they hold. Enforced on `/certs/orders*` (403),
+  `/costing/job-full-cost` + `/costing/job-pos` (403 — was FullAccess|SLAAdmin|
+  TimesheetAdmin), and every JOB response (`sla.js stripMoney` drops `orderValue`
+  from GET /sla/jobs, /sla/jobs/{id}, /for-engineer, the PATCH reply; `/visits`
+  only includes it for money users). Pages mirror it with `canMoney()` (job-view
+  cost/PO/visits cards + the order card's value; client-orders.html shows a
+  "financial information" notice). **Job fields** `orderNumber` / `orderValue` (£ ex
+  VAT) / `clientOrderId` (create + patch, preserved). **Page `client-orders.html`**
+  (📥 Client Orders tile `ClientOrders:["SLAAdmin","Compliance","PurchaseOrders"]`,
+  sidebar item, board 📥 link, cert-review orders modal links to it; portal-config
+  `?v=29`): every `client_orders` row with a computed **stage** — `needs_job` (no
+  job yet) · `live` (job open) · `done` (job finished) · `dismissed` — chips Live
+  (= needs_job + live) / Needs a job / Done / Dismissed / All, a **client
+  dropdown**, search, a running £ total, each card showing the linked job (ref ·
+  status · engineer · time), the incident's **earlier visits**, ➕ Make the job /
+  Dismiss / Reopen / Open job / 📧. **API (certs.js):** GET `/certs/orders?client=`
+  → `{orders,clients}`; POST `/certs/orders/make-job {id}` → `sla.js raiseJobForOrder`;
+  POST `/certs/orders/link {id,jobId}` (hand-link). **How an order meets its job
+  (sla.js):** (1) order arrives and a job with EXACTLY that reference exists →
+  `linkOrderToExistingJob` stamps value + number on it (intake reply `status:
+  "linked"`, push says so, not actionable); (2) the job arrives later via
+  `/sla/inbound` → `applyOrderToJob` stamps the waiting order; (3) neither → the
+  office presses Make the job: `raiseJobForOrder` links a same-ref job if one
+  exists, else **clones the incident's newest earlier job as a linked visit via
+  the shared `cloneJobAsVisit`** (the 🔁 Re-visit handler now uses the same helper:
+  R2 `jobs/<old>/` copied to `jobs/<new>/`, events/RA/signature/photo tags/audit
+  items/remedials carried, revisitOf/visitGroupId + ×N stamped) with description
+  "🧾 Client order <n> (£v) — <order text> / ↩ Ordered works following our visit
+  <ref> (<status>) … / — Original job — <old text>", reference = the order number,
+  status Pending, unallocated; else a fresh job at the order's store (site name/
+  postcode from `sites`). Make-job twice → links, never duplicates. **Profit:**
+  `/costing/job-full-cost` returns `orderNumber/orderValue/profit/margin`; job-view's
+  cost card shows Cost · Order value · Profit/Loss (+margin, "will fall once POs are
+  priced"), the 🧾 Client order card shows the value + a board link, and the Visits
+  card sums cost + order value across the incident → "Profit across the incident".
+  `client_orders.status` gains `linked` (matched_kind `job`). Tests:
+  `node worker/tools/test-client-orders.mjs` (25 cases: link/clone/fresh, money
+  stripping per role, costing 403, visits, dismissed). NB `client_orders.tenant_id`
+  is TEXT and certs.js binds the session's numeric tenant id — sla.js binds the
+  same number (never `String(tenantId)`) or the rows are invisible (the '1.0' quirk).
+  - **EM remedial orders ↔ the works job, unlink, email copy (9 Sep 2026 — Jamie:
+    "why do the REM orders not link to the REM job… I must be able to unlink… a copy
+    of the email").** Found live: the Frome R29051 order sat "new" while its works
+    job (`emrem:<certId>`) was already scheduled — the office had pressed PO received
+    by hand minutes after the email, the matcher only looked at cases at
+    to_quote/quoted, and even a matched order never put its value on the works job.
+    Now: (a) `matchOrderToRemedial` also matches cases at **approved/in_works** —
+    a LATE order links straight to the existing works job (`m.jobId`) with the value
+    stamped, status `linked`, `matched_kind` stays `em`; (b) **approve** from the
+    orders list AND **PO received on the tracker** (`poReceived`) both link any
+    waiting matched order to the works job they raise and stamp `orderNumber/
+    orderValue` on it; (c) `linkOrderToExistingJob` falls back to a job whose
+    reference CONTAINS the order number as a whole token (`jobsWithRefContaining`,
+    "R29051- EM remedial — 0622"; R2905 never claims R29051); (d) **POST
+    /certs/orders/unlink {id}** (`sla.js unlinkOrderFromJob`): the job forgets
+    number/value/link (+ an event naming who), the order goes back to `new` and the
+    job is remembered in **`client_orders.unlinked_job_id`** — a re-sent email, the
+    job arriving again (`applyOrderToJob`), the matcher and Make the job all skip
+    that pair; a deliberate hand-link (/orders/link) still works; (e) a **COPY of the
+    order email** rides with the order (`email_subject/email_from/email_text`,
+    ≤12 KB, sent by emailjob `fileOrder`; COALESCEd on re-send so a copy is never
+    lost) → **GET /certs/orders/email?id=** (money-gated) + a "📧 View email" modal on
+    client-orders.html, because the mailbox is one person's Outlook. The board's job
+    link is now the EXPLICIT `matched_job_id` only (no by-reference guess, so an
+    unlinked order never re-attaches visually); list queries use `ORDER_COLS`
+    (never the email text) + `has_email`. Backfilled 9 Sep: the 30 orders from
+    27 Aug–8 Sep loaded straight to D1 (with email copies) and R29051 hand-linked to
+    Frome's works job. NB "replaced on site" R/REM orders (R28878, REM0150/0151,
+    R29052) have no case/job to link — they are billing only. **Order text →
+    job description is PRICE-STRIPPED** (`sla.js stripPricing`, used by
+    `orderText`): Concerto orders end in "Labour - 150.00 / Materials: £622.50 /
+    Materials / Specialist Equipment – £143.00 / Total: 2 fittings - £100" and
+    per-fitting " - £50" tails — every line that starts with a cost word AND
+    carries an amount is dropped, trailing " - £N" is cut, stray £ amounts removed
+    (a "Materials to be supplied by the client" line with no amount is kept); the
+    "(£439.00)" that used to head the description is gone too, and the "Client
+    order … linked to this job" timeline note carries no £ — the value lives ONLY
+    on `job.orderValue` (hidden from the field by `stripMoney`). The board keeps
+    the full priced text for the office. Tests: cases 6–12 in
+    `test-client-orders.mjs` (35 cases).
+- **CONCERTO PPM LIST — the client's OFFICIAL schedule, imported + reconciled (9 Sep
+  2026, Jamie: "This is the official list i work to… flag any that dont match up or
+  are overdue on my compliance page and not showing on the concerto list… drop in
+  these spreadsheets in the future and auto add sites due but not duplicate").**
+  `routes/concerto.js` (mounted `/concerto`, office = FullAccess|SLAAdmin|Compliance;
+  order values only for `canSeeMoney`) + page **concerto-ppm.html** (sidebar
+  "Concerto PPM list", 🛠 Tools on eicr-portal.html, help guide). Concerto exports
+  TWO layouts and the page's drop-zone reads both IN THE BROWSER (xlsx-lite / CSV):
+  **"Open PPM jobs overdue (completion)"** = one row per open PPM ORDER (PPMnnnn ·
+  order date · value · "Emergency light - August 2025 : AR005758" · supplier) and
+  **"PPM schedule"** (UPRN=SRnnnnn site ref · "0109 - Romsey…" · Ref EL-5Y · Type ·
+  Planned date). **Order rows carry NO store — only an asset reference** (an
+  `SRnnnnn` Concerto site ref inside "SC-EL-SR00373"/"EL-PAT-SR00161", or an older
+  `ARnnnnnn` asset ref for the 2025 batch), so table **`concerto_refs`** maps
+  ref→store: seeded 9 Sep from the 2025 export Jamie annotated with store numbers
+  (45 AR refs), Tanya's ppm_schedule exports + the All Jobs sheet + the job archive
+  + client_orders (~150 SR refs) and the Concerto cancellation emails (AR003825→0356
+  Eastbourne Lindfield, AR003826→0382 Binfield, AR000709→0249 Bradford on Avon); it
+  LEARNS from every Concerto order email (`certs.js handleOrderInbound` →
+  `learnConcertoRef`) and from schedule exports; anything still unmapped shows
+  "Not mapped" + a **Map store** picker (POST `/concerto/ref`, remembered). Table
+  **`concerto_ppm`** (PK tenant+id; id = order number, or `SCH:<UPRN>:<type>:<planned>`
+  for schedule rows): POST `/concerto/import {layout, rows, fileName}` UPSERTS by id
+  (never a duplicate), and a full "open" orders list is authoritative — any open row
+  it no longer lists is marked **`gone`** (closed on Concerto; re-appearing re-opens
+  it); a schedule export only retires future rows of the types it carries.
+  **Reconciliation** (`reconcileRow`, GET `/concerto/list`): per row vs the coop chart
+  due date for that type (legacy dd/mm/yyyy dates parsed too), using `lastDone =
+  chartDue − frequency` (12m; pump 1m; 5-year 60m) → **done** (done our side in/after
+  the Concerto month — Concerto still open: close it / send the completion date),
+  **due** / **overdue** (both agree), **mismatch** (Concerto EARLIER than the chart — site
+  still covered), **gap** (10 Sep 2026 — Concerto LATER than the chart's due date = our cert
+  runs out before Concerto's planned test, so the site would have no valid certificate in
+  between; bright red pulsing `.f-gap` pill, plain-English `flagText` with both dates + the
+  gap length; `reconcileRow` returns `gapFrom/gapTo/gapDays`; stats carry `gap`. On the
+  5-Year tab `deriveCase(…, rec)` adds **`case.autoFlag {reason:"gap", note}`** — DERIVED,
+  never stored, not clearable by hand (a manual 🚩 `flagNote` sits alongside); it makes the
+  case `flagged` + `active` even 18 months out, and clears itself once the chart rolls to
+  agree. The ≤45-day (12-month types: ≤10-day) slack still reads as "due", so a small
+  Concerto/chart offset is not a gap. **All dates on the page + in every reconcile text
+  are DD/MM/YY** (`fmtUk`/`fmtPeriodUk` worker-side, `ukD`/`fmtD` page-side; CSV too).),
+  **no_store**, **not_on_chart**, **no_chart_date**, **store_closed**; each row also
+  shows the booked EM/PAT/pump job for that store. Reverse check **`chartMissing`**:
+  active chart stores due within 30 days / overdue for fiveYear·em·pat·pump·pv·ev with NO
+  open Concerto row. POST `/concerto/status {id, dismissed|open|done, note}`; GET
+  `/concerto/refs`, `/refs/seed`, `/stores`. NB the export Jamie sent (57 rows) is
+  mostly the Aug-2025 batch Concerto still shows open because completion dates were
+  never logged (Greg's Jan-2026 email) — those read "Done our side". **Test:**
+  `node --no-warnings worker/tools/test-concerto.mjs` (real SQLite via node:sqlite
+  behind a D1-shaped shim — 50 cases). SW `mostlane-v122` (portal-config `?v=32` — the sidebar entry needed a bump because phones held the v31 file fetched before the merge).
+  - **Schedule tab — the FULL 5-year "PPM schedule" export (9 Sep 2026, Jamie: "new tab
+    under Concerto… cross reference jobs in the portal for each site and tell me what we
+    have done and when. Include archive jobs… filter a timeline list… filter by jobs that
+    have been released… mark these as Released and include the PPM number. Log other ones
+    that are not released yet so i can later build stats").** The full layout (Ref ·
+    Type · Discipline · UPRN · Site · Block · Frequency "60 Months" · Last date · Next
+    date · Jan..Dec month markers `ORD01`/`AM01`/`01` · Ordered (960 when released) ·
+    Status · **Order nr. = PPMnnnnn when RELEASED**) is parsed by the page (`colLike("order
+    nr")` etc.) and imported with `layout:"schedule"`. Schedule rows are keyed
+    **`SCH:<SRref>:<type>`** (one row per site+type — a moved next date UPDATES the row and
+    logs `next_date_changed {from,to}`, never a second row); `concerto_ppm` gained
+    `next_date, order_nr, ordered_value, released_at, concerto_status, month_marker,
+    discipline, frequency_months, block` (self-migrating ALTERs — **also run BY HAND on the
+    live D1 on 9 Sep before the seed**, since the ALTERs only fire once the new build
+    serves a request). **Released** = `order_nr` non-empty; `released_at` = when WE first
+    saw the PPM number (COALESCE-kept on re-import), and the first sighting writes a
+    `concerto_log` **`released`** event `{orderNr,next,store,value,daysBeforeDue}` — the
+    stats feed (`stats.releaseLeadDaysAvg`, `releasesLogged`); every new row logs
+    `imported`, a vanished one `gone`. Table **`concerto_log`** (tenant_id, ppm_id, event,
+    detail JSON, at). **GET `/concerto/schedule?type=fiveYear&from=&to=&released=all|yes|no
+    &status=`** → `{rows, stats{sites,released,notReleased,done,overdue,mismatch,noStore,
+    notOnChart,withHistory,byYear,releaseLeadDaysAvg,releasesLogged}}`; each row carries
+    the reconcile flag vs the chart PLUS **`history`** from `historyIndex(env,tid,type)`:
+    the newest coop `compliance_files` cert of that type (doc_date), LIVE `sla_jobs`
+    matched by numeric siteCode + the job's flag (elecTest/emTest/pat/pumpMaintenance) or a
+    `TYPE_KEYWORDS` regex on the description (done date = the Complete entry in
+    statusHistory), and **`sla_jobs_archive`** rows by `site_code` + keyword
+    (completed_at||created_at) — `lastDone` = the newest of those; the page's "Last done"
+    cell links the job (job-view / job-archive) and lists up to 3 more. GET `/concerto/log`.
+    Page: `#tabs` Orders / Schedule chips (`?tab=schedule` deep-link), year chips + from/to
+    month inputs + Released all/yes/no + flag + search, CSV for the tab. **Seeded live 9 Sep**
+    from Jamie's `ppm_schedule_5.xlsx`: 316 rows → **313** (3 duplicate UPRNs collapse to
+    one row each — the same site listed twice), **58 released** (all 2026), 369 refs,
+    0 unresolved (0903 "301 Lakeside" resolves to a store but isn't on the chart — the
+    chart has 1000 Lakeside Head Office). NB the seed's `INSERT…SELECT…ON CONFLICT` needs
+    a `WHERE 1` before `ON CONFLICT` or SQLite parses it as a join. Concerto's own next
+    dates will disagree with the chart on many rows ("Dates differ") — that is the point of
+    the check, not a bug. Test cases "full schedule layout" in test-concerto.mjs.
+  - **5-year EICR PIPELINE — one CASE per site per cycle (10 Sep 2026, Jamie: "a
+    process flow… scheduled → completed → review/approve the certificate → if
+    satisfactory upload to Concerto + invoice; if unsatisfactory quote remedials,
+    get the order, do the works, update the certificate, upload, close + invoice the
+    remedials… held at various points… tick off each stage… who carried out which
+    test").** Table **`concerto_cases`** (self-migrating; id = `<ppm_id>@<cycle_due>`)
+    holds ONLY the manual state: `steps` JSON `{key:{done,at,by,note}}`, `outcome`,
+    `engineer`, `hold_reason/held_at/held_by`, `closed_at/by`. **`CASE_STEPS`**
+    (concerto.js, exported) is the recommended order — checked ("Checked — due, to be
+    booked", manual; auto once a job exists — Jamie's "checked due but not booked") ·
+    scheduled · tested · reviewed ·
+    [unsat: quoted · ordered · works_done · cert_updated] · approved · uploaded ·
+    invoiced · [unsat: rem_closed]; it is a **CHECKLIST, not a state machine**: any
+    step ticks in any order (Jamie quotes before approval), "next" = the first unticked
+    applicable step. **`deriveCase(row, ctx, today, money)`** (exported, tested) reads
+    what the portal can SEE for the cycle window (cycle_due −18 … +24 months): the
+    elec-test job (`scheduled` + `tested` + engineer), the cycle's certificate = the
+    OLDEST 5-year cert filed after the test (a later one = the re-issue →
+    `cert_updated`), `compliance_review` outcome for that cert (file_id match, or
+    doc_at ≥ cert date) → `reviewed` + outcome (REMEDIED reads as unsatisfactory with
+    works_done + cert_updated implied), a `client_orders` row for the store after the
+    test whose text mentions EICR/5 year/electrical/remedial (EM-matched orders
+    excluded) → `ordered`, the test job's `remedialsWorksJobId` → `works_done`. A
+    manual tick/untick ALWAYS beats the automatic reading (`source: manual`; "↺ back
+    to auto" resets it). Unsat steps are `applicable` only when outcome =
+    unsatisfactory or ticked by hand. **Active** = released, due within 365 days, has
+    a test job, or touched by hand — the 2031 rows sit at stage `not_due`. Stages:
+    `not_due | held | complete (all done — close is deliberate) | closed | <stepKey>`.
+    When Concerto rolls the next date on (new cycle) the closed case stays and a
+    fresh virtual case starts; the import now also DROPS a stale release when the
+    next date moves with a blank Order nr. (previously kept forever). **GET
+    /concerto/schedule?type=fiveYear** rows carry `case`, `stats.pipeline`
+    `{byStage, active, held, complete, notDue, closed, steps}`, `stats.byEngineer`
+    `{name:{tested, scheduled, byYear}}`, `stats.byMonth`, `stats.dueSoonNotReleased`.
+    **POST /concerto/case** `{ppmId, cycleDue?, step+done|note|reset, outcome
+    (satisfactory|unsatisfactory|""), engineer, hold (reason|"" = resume), close,
+    reopen+caseId}` — creates the case lazily, every change logged to `concerto_log`
+    event `case` (shown in the row's Log). Page: pipeline card (stage chips = the
+    to-do list, tests per engineer, month strip → from/to), 5-Year table columns
+    Tested by · Progress (step strip) · Certificate (date + outcome badge, opens via
+    /compliance/file-url), **▸ Details** = the checklist + outcome + engineer (datalist
+    from /users) + hold + links (test job / works job / cert / compliance check /
+    client orders / site folder / **➕ Raise the test job** → `add-job.html?site=&
+    elecTest=1&name=&desc=` — add-job's new `applyUrlPrefill`) + close/reopen + log.
+    Other types keep the plain schedule table. `lib/once.js` wrappers now expose
+    `.reset()` (tests only) and `ensureTables` is exported so `test-concerto.mjs` can
+    re-run the migration per mock DB (NB mock `client_orders.tenant_id` must be
+    `"1.0"` — the same D1 numeric-bind quirk as live). 20 pipeline cases in the test.
+  - **Concerto "Last date" is NOT a test date (learned 10 Sep 2026 from
+    `ppm_schedule_6.xlsx`, identical to the seeded 316 rows).** Concerto rolls a
+    site's last/next date forward when the cycle falls due — 19 of its 60 "2026"
+    last dates were still in the FUTURE, and 10 sit a year after the cert we hold
+    (0008/0066/0089/0109/0220/0336/0357/0372/0373/0401: our 2025 EICR is right,
+    Concerto's 2031 next date is a year late). Evidence of a test = the
+    `cert_register` number + the Workever archive job, not Concerto. Reconcile
+    result: 26 sites had their 2026 EICR on the chart; **24 had a 2026 register
+    number (866, 909–970) + a Workever job but NO certificate on the compliance
+    chart** (0028 0079 0127 0178 0202 0330 0340 0376 0377 0389 0391 0392 0396 0426
+    0644 0658 0661 0665 0668 0669 0670 0676 0677 0753) — a `concerto_cases` row was
+    opened for each by hand in D1 (tenant_id `'1.0'`; steps checked/scheduled/
+    tested ticked `by: "Concerto reconcile (10 Sep 2026)"` with the evidence in the
+    note, 🚩 flagged "upload the PDF"; 0079 + 0376 flagged "confirm the test year"
+    because their Workever job is 2025). Uploading the cert to the chart is what
+    clears each one (the chart date rolls, the case auto-detects the cert).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
@@ -3625,7 +4930,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
   red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls
   /tuya/gate/state (60s, paused when tab hidden); collapses to just the dot when
-  the sidebar is minimised. **The Yard Gate desktop SIDEBAR nav item was removed**
+  the sidebar is minimised. **Office users "couldn't see the gate status — the
+  running clock covers it" (10 Sep 2026):** the light was only drawn at the
+  sidebar's first `build()` from the CACHED `mostlanePermissions`, and
+  portal-config's own slim cache-writer (after `/auth/me`) DROPPED `YardGate`
+  (+ EngTimesheet/Programmes/EicrCheck/Chapplins/CableCalc/WhereEveryone/
+  YardGateAnywhere/StaffType/VehicleAssigned) — so a non-Full-Access office user
+  lost the light the moment they left main.html and only the office-clock pill
+  sat at the top of the sidebar. Now `#pnGate` is always in the DOM (hidden),
+  `initGateLight()` is idempotent and is re-run from `rebuild()` with the server's
+  perms, the slim list (and login.html's PERM_KEYS) carry every permission key,
+  and the minimised sidebar hides the gate LABEL (it used to spill 150px over the
+  page). Any NEW permission key must be added to BOTH lists or a cached-perms
+  page paint won't know about it. portal-config `?v=36`. **The Yard Gate desktop SIDEBAR nav item was removed**
   — desktop uses this light; mobile keeps the main.html menu tile. (An earlier
   full-width top banner was replaced by this on request.)
 - **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close
@@ -3818,9 +5135,32 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
    returns raw visits (portal dates SiteLog labour + P4 reconcile from these).
    Worker last pasted ≈ the /update-engineer-portal_username build (3,184 lines,
    tail `};`); before that the /job-costing build. Confirm with Jamie what's live.
-3. **H&S planner** — static app IN THIS REPO at /hs-plan/; worker
-   `mostlane-hs-jobs` (own D1 + APP_TOKEN secret). Menu 🦺 builds
-   `hs-plan/#worker=...&token=` via /hs-plan-config.
+3. **H&S planner** — Menu 🦺 → **hs-docs.html** (the H&S hub: inductions,
+   hot-works permits, RAMS, incidents + the Construction Phase Plan tile).
+   - **Construction Phase Plan is now PORTAL-NATIVE (Sep 2026)** —
+     **cpp-builder.html** (a faithful port of the old /hs-plan app so the OUTPUT
+     document is byte-for-byte the same 18-page CDN 2015 plan) rebuilt as a
+     **stepped wizard** saved to the portal DB. Storage = the generic
+     `hs_documents` store, **`doc_type="cpp"`** (ref `CPP-0001…`, hs.js PREFIX+SEQ);
+     the whole form `state` object rides in `data`. Endpoints reuse hs.js:
+     GET /hs/docs?type=cpp (library), GET/POST /hs/doc, POST /hs/doc/delete.
+     **Wizard** = 🤖 AI step + the 9 form groups (Branding·Project·Team·
+     Arrangements·Directory·RAMS·Compound·Hospital·Method) + Review; tap-to-jump
+     progress chips; debounced autosave to the DB; resumable (open a part-filled
+     plan from the library). **🤖 AI step** (**POST /hs/ai-cpp**, mirrors
+     /hs/ai-rams — drop PDF/Word/text or a scanned PDF for OCR + a description →
+     Claude pre-fills the plan's fields, gap-fill only, nothing saved; fails soft
+     without ANTHROPIC_API_KEY). **Project link:** the builder links itself to a
+     project via /project/link kind `cpp` (→ `links.cppRef` = the `HSD-…` doc id);
+     project-hub.html "Build in the portal" opens **cpp-builder.html?project=<PID>**
+     (opens the existing linked CPP if `cppRef` is an HSD id, else a fresh plan
+     seeded with the project name/number), and "link an existing" lists
+     /hs/docs?type=cpp. Compound map (Google Maps draw/route) + A&E route planner
+     carried over unchanged (the DrawingManager draw/save fix is in). Mobile: the
+     doc pane is hidden until the Review step. _headers + SW `mostlane-v114`.
+   - **Old standalone app** (static /hs-plan/, worker `mostlane-hs-jobs` own D1 +
+     APP_TOKEN, /hs-plan-config launch token) is now UNLINKED but kept as a
+     fallback — do not delete /hs-plan/.
 
 ## FUTURE PLANS / NEXT UP (agreed with Jamie)
 0. **Job costing & SiteLog↔Portal — DONE (Aug 2026)**, see the dedicated
@@ -3946,6 +5286,18 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **engineer-job.html `shrinkImage` must NEVER hang (Sep 2026).** The engineer
+  photo re-encoder returned a Promise that only resolved from `img.onload`/
+  `img.onerror` + `canvas.toBlob`. On iOS an `<img>` can silently stall decoding a
+  HEIC (neither `onload` nor `onerror` ever fires) and `toBlob` can fail to call
+  back under memory pressure — so the Promise never settled, `uploadPhotos`
+  awaited it forever, the photo never attached, and the RA's work-area shot was
+  never marked → **engineers reported "can't add a photo, can't complete the RA".**
+  Fix: `shrinkImage` now has a hard **8s timeout** that resolves(null) (caller
+  falls back to the original full-size file — uploads bigger but goes through), and
+  `uploadPhotos` fires **`ml-rapic` up-front the instant a file is chosen** (not
+  after the shrink), so the RA is satisfiable immediately regardless of encode
+  speed or signal. Any image-shrink Promise in the portal must always resolve.
 - **van-check.html answer buttons must read CFG LIVE, never a captured array.**
   The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
   at load — but `CFG` is fetched async, so at bind time it was null → an empty
@@ -4045,6 +5397,20 @@ files to this public repo.
   on `.sheet` inputs `scrollIntoView({block:"center"})` after a ~280ms keyboard-
   settle delay. The signature canvas keeps `touch-action:none` (draw, don't scroll)
   — scroll happens on the rest of the sheet.
+- **iOS PWA: fixed bars drift a keyboard-height up the screen (Sep 2026).** In the
+  installed app, after the keyboard has been up on a form page (engineer-job audit
+  checklists etc.), WebKit can leave the LAYOUT viewport shifted from the VISIBLE one —
+  then EVERY `position:fixed` element (purple View-As bar, field `.tabbar`, the navy
+  `#mlStatusCap`) sits ~350px too high and slides as you scroll; the cap vanishes off
+  the top. Not a transform issue this time (none present) and not reproducible in
+  Chromium. Fix = portal-config `pinFixedBars()`: on visualViewport resize/scroll +
+  focusout, when `vv.offsetTop`/`vv.height` disagree with the window it pins those
+  three to the visual viewport's own edges (`top = offsetTop + height − h`, bars
+  stacked View-As then tabbar; cap `top = offsetTop`), skipped while an input has
+  focus, and restores the inline styles the moment they agree again; focusout also
+  fires a zero-distance `scrollTo` nudge so WebKit re-places fixed elements after
+  the keyboard closes. Any NEW fixed bar should be added to its `SEL` list.
+  portal-config `?v=28`, SW `mostlane-v116`.
 - **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
   Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
   and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
@@ -4078,6 +5444,23 @@ files to this public repo.
   scratchpad `backsim.cjs` (reported loop, multi-parent round trip, same-job
   excursion collapse, cold start — all resolve, none loop). portal-config bumped to
   `?v=19` across all pages so the fix reaches phones; SW cache `mostlane-v83`.
+- **Schedule dates are YEAR-CHECKED, client + server (8 Sep 2026).** Daniel
+  Walker's 16 Sep job "wasn't on the scheduler": the editor had saved it with
+  `scheduledAt = 2006-09-16` (a mistyped year in the date box) and every dated
+  view — scheduler, engineer day, live board — correctly showed nothing for a job
+  twenty years in the past. Nothing validated the year anywhere. Now
+  **`badScheduleDate(iso,label)` / `badScheduleIn(body)`** (exported from sla.js)
+  refuse any `scheduledAt`/`scheduledEnd`/`scheduledStart`/`scheduleForEngineer`/
+  `engSchedule` slice whose year is outside **now−1 … now+3** with a 400 that
+  names the year ("Scheduled start has the year 2006 — check the date"). Applied
+  to POST /sla/jobs, PATCH /sla/jobs/{id}, PUT /sla/job/{id}, /project/create-job
+  + /project/create-day-series (each day) and /fleet/renewal-status. Client side
+  the same rule runs BEFORE the save in sla-jobedit.js (`mljeBadDate`, `?v=30`),
+  add-job.html (`badScheduleYear`) and the scheduler quick modal, and the date
+  inputs carry `min`/`max` for the same window; the editor + scheduler now show
+  the worker's own error text instead of "HTTP 400". Covered by
+  `worker/tools/test-auth-gates.mjs` (5 cases). The 2006 row was repaired in D1
+  by hand. If a job "isn't showing", check `scheduled_at` for an absurd year first.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Site Audit</title>
-<script src="/portal-config.js?v=26"></script>
+<script src="/portal-config.js?v=36"></script>
 <link rel="stylesheet" href="/portal.css?v=1">
 <style>
   :root{ --nav:#003366; }
@@ -116,7 +116,7 @@ const API_BASE  = "https://mostlane-sla.jamie-def.workers.dev";      // bridged 
 const SITES_API = "https://mostlane-sites.jamie-def.workers.dev";
 const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
 function $(id){ return document.getElementById(id); }
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 function loggedInUser(){ return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||""; }
 function hasSLAAdmin(){ try{ const p=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }catch{ return false; } }
 

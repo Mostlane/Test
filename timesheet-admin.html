@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
 <meta charset="UTF-8" />
 <title>Timesheet Admin – Weekly</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
@@ -115,6 +115,7 @@ header a{
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const WORKER = "https://ckeck-in-out.jamie-def.workers.dev";
 
 let weekStart = startOfWeek(new Date());
@@ -176,8 +177,8 @@ async function load(){
           <span><b>On-site:</b> ${d.onsiteHours.toFixed(2)} h</span>
           <span><b>Travel:</b> ${d.travelHours.toFixed(2)} h</span>
           <span><b>Fuel:</b> ${d.fuelMiles.toFixed(1)} mi</span>
-          <span><b>First site:</b> ${d.firstSite||"—"}</span>
-          <span><b>Last site:</b> ${d.lastSite||"—"}</span>
+          <span><b>First site:</b> ${esc(d.firstSite||"—")}</span>
+          <span><b>Last site:</b> ${esc(d.lastSite||"—")}</span>
         </div>
       </div>`;
   }

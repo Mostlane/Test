@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="auth.js"></script>
-  <script src="/xlsx-lite.js?v=1"></script>
+  <script src="/xlsx-lite.js?v=2"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <title>SLA Data Tools – Mostlane</title>
@@ -163,7 +163,7 @@ function cachedPerms(){
 
 /* ================= SECTION 1: live jobs ================= */
 let LIVE = [];
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
 function engineersOf(j){
   if (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) return j.assignedEngineers.join(", ");
   return j.assignedTo || "";

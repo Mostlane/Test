@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -78,6 +78,7 @@
 
     <a href="forgot-password.html">Forgot password?</a>
     <a href="onboard.html">Sign up</a>
+    <a href="install.html">📲 Add Mostlane to your phone</a>
   </div>
 
   <!-- Device Auth -->
@@ -97,6 +98,12 @@
     // password change always wins.
     function goNext() {
       if (window.__mostlaneMustChange) { window.location.href = "change-password.html?forced=1"; return; }
+      // A CLIENT login goes straight to the walled client portal — never the staff
+      // menu, never a saved landing-page pref (which could point at a staff page).
+      try {
+        var st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        if (st === "client") { window.location.href = "client-home.html"; return; }
+      } catch (e) {}
       // Field users (SLA/jobs, not admin) land in the engineer app; office &
       // admins get the main menu. Reads the permissions just cached at login.
       var fallback = (window.mlIsFieldUser && window.mlIsFieldUser()) ? "route.html" : "main.html";
@@ -114,6 +121,12 @@
     function runDeviceCheckAndContinue(username) {
       // Master-password sign-ins bypass the device lock (break-glass access).
       if (window.__mostlaneMasterLogin) { goNext(); return; }
+      // External CLIENT logins bypass the device lock (they aren't staff devices,
+      // and the device-registration flow would fight the client wall).
+      try {
+        var st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        if (st === "client") { goNext(); return; }
+      } catch (e) {}
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
           DeviceAuth.checkOnLogin(username, function () { goNext(); });
@@ -146,6 +159,8 @@
         var d = await r.json().catch(function () { return {}; });
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
+          // A client login always resumes into the walled client portal.
+          if (d.user && d.user.StaffType === "client") { location.replace("client-home.html"); return; }
           var fb = (window.mlIsFieldUser && window.mlIsFieldUser(d.user)) ? "route.html" : "main.html";
           var lp = null;
           try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}
@@ -189,7 +204,9 @@ const res = await fetch(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       username: usernameInput,
-      password: passwordInput
+      password: passwordInput,
+      // Binds the new session to this browser (see worker requireSession).
+      deviceId: (function(){ try { return (typeof getOrCreateDeviceId === "function") ? getOrCreateDeviceId() : (localStorage.getItem("deviceID") || ""); } catch (e) { return ""; } })()
     })
   }
 );
@@ -265,7 +282,9 @@ if (!user || !user.Username) {
          "Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders",
          "Sites","AddSite","Assets","MyDocuments","Weekly","Forms","Compliance","Projects",
          "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan",
-         "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground"];
+         "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes",
+         "YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords",
+         "StaffType","VehicleAssigned","FirstName","LastName"];
        const perms = {};
        PERM_KEYS.forEach(function (k) { perms[k] = user[k]; });
 

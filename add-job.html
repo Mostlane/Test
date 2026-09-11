@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Add Job</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -179,11 +179,6 @@
   <div class="card">
     <a class="ml-back" href="sla-main.html" title="Back">‹ Back</a>
     <h1>Add Job</h1>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 12px;">
-      <span style="font-size:13px;font-weight:700;color:#5b6b78;">Job type</span>
-      <span class="btn" style="background:#003366;color:#fff;border-color:#003366;cursor:default;">📋 Standard</span>
-      <a class="btn" href="site-audit.html" title="Switch to the Site Audit builder — import a Site Audit Pro PDF, per-item photos, one job with an audit checklist" style="text-decoration:none;">🔍 Site audit →</a>
-    </div>
     <p class="sub">
       Manually create a job — just pick the <b>site</b>, describe it, and set <b>when</b> and <b>who</b>.
     </p>
@@ -205,6 +200,7 @@
             <option value="FBC">FBC</option>
             <option value="Chapplins">Chapplins</option>
             <option value="Projects">Projects</option>
+            <option value="Site">Site (office / yard / one-off)</option>
           </select>
         </div>
         <div class="col field-group">
@@ -230,41 +226,40 @@
         <div class="hint">This is the main text the engineer sees on the job.</div>
       </div>
 
-      <!-- Area of work (AI suggests, office confirms) -->
-      <div class="field-group" id="workAreaGroup" style="display:none;">
-        <label for="workArea">Area of work</label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="workArea" style="flex:1;min-width:160px;"><option value="">— none —</option></select>
-          <button type="button" id="waSuggest" class="btn" style="white-space:nowrap;">🤖 Suggest</button>
-        </div>
-        <div class="hint" id="waHint">Used to match the job to an engineer competent in this work. The AI suggests one from the description — change it if it's wrong.</div>
-      </div>
-
       <!-- Allocate: when + who -->
       <div class="row">
-        <div class="col field-group">
-          <label for="scheduledAt">Allocate for <span class="hint">(date &amp; time)</span></label>
-          <input type="datetime-local" id="scheduledAt" name="scheduledAt">
-          <div class="hint">When the engineer should do it.</div>
+        <div class="col">
+          <div class="field-group">
+            <label for="schedDate">Allocate for <span class="hint">(date &amp; time)</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input type="date" id="schedDate" style="flex:1 1 150px;min-width:140px;">
+              <select id="schedTime" style="flex:0 0 auto;min-width:118px;"></select>
+            </div>
+            <input type="hidden" id="scheduledAt" name="scheduledAt">
+            <div class="hint">When the engineer should do it. Pick the time from the list — 5-minute steps.</div>
+          </div>
+          <!-- Visibility / drip-feed: tucked under Allocate to fill the gap -->
+          <div class="field-group" style="margin-top:12px;">
+            <label for="releaseMode">When the engineer sees this <span class="hint">(drip-feed / hide until a time)</span></label>
+            <select id="releaseMode" name="releaseMode">
+              <option value="now">Straight away</option>
+              <option value="dayBefore">5pm the evening before the scheduled day</option>
+              <option value="at">At a set date &amp; time</option>
+              <option value="afterPrev">After their previous job that day is done</option>
+            </select>
+            <div id="releaseAtWrap" style="display:none;gap:8px;flex-wrap:wrap;margin-top:6px;">
+              <input type="date" id="releaseDate" style="flex:1 1 150px;min-width:140px;">
+              <select id="releaseTime" style="flex:0 0 auto;min-width:118px;"></select>
+            </div>
+            <input type="hidden" id="releaseAt" name="releaseAt">
+            <div class="hint">The office always sees it in the scheduler; the engineer only gets it once it's released.</div>
+          </div>
         </div>
         <div class="col field-group">
           <label>Assign to <span class="hint">(tick one or more — they all see it at the same time)</span></label>
           <div id="assignList" style="max-height:210px;overflow:auto;border:1px solid #cdd6e0;border-radius:10px;padding:4px 8px;background:#fff;">Loading…</div>
           <label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;color:#475569;margin-top:6px;cursor:pointer;"><input type="checkbox" id="showOfficeAssign" style="width:auto;"> Show office / admin staff too</label>
         </div>
-      </div>
-
-      <!-- Visibility / drip-feed: when the engineer first sees this job -->
-      <div class="field-group">
-        <label for="releaseMode">When the engineer sees this <span class="hint">(drip-feed / hide until a time)</span></label>
-        <select id="releaseMode" name="releaseMode">
-          <option value="now">Straight away</option>
-          <option value="dayBefore">5pm the evening before the scheduled day</option>
-          <option value="at">At a set date &amp; time</option>
-          <option value="afterPrev">After their previous job that day is done</option>
-        </select>
-        <input type="datetime-local" id="releaseAt" name="releaseAt" style="display:none;margin-top:6px;">
-        <div class="hint">The office always sees it in the scheduler; the engineer (and their assignment alert) only get it once it's released.</div>
       </div>
 
       <!-- Expected duration (drives the scheduler's route/day prediction) -->
@@ -287,12 +282,36 @@
         <div class="hint">Used to predict the engineer's day length when optimising routes.</div>
       </div>
 
+      <!-- Specialist job types — collapsed by default to keep the form clean -->
+      <details class="field-group" id="jobTypeExtra" style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc">
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;color:#003468;list-style:none">🧰 Specialist job type <span class="hint" style="font-weight:400">— firestopping, electrical test, pump maintenance, standby, EM/PAT, site audit (tap to open)</span></summary>
+      <div style="margin-top:10px">
+
       <!-- Firestopping job -->
       <div class="field-group">
         <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
           <input type="checkbox" id="firestopping" style="width:auto"> 🔥 Firestopping job
         </label>
         <div class="hint" id="fsHint">Tick for fire-stopping works. The engineer fills the Record of Installation Activities (RIA) form — per-seal photos, products used and a signed declaration — and completing the job produces the PDF + product-spec bundle.</div>
+      </div>
+
+      <!-- Electrical test job -->
+      <div class="field-group">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
+          <input type="checkbox" id="elecTest" style="width:auto"> ⚡ Electrical test
+        </label>
+        <div class="hint">Tick for an electrical test (EICR etc.). On the job the engineer records a <b>remedial works list</b> — each item with a code (C1/C2/C3/FI), what needs doing, rough duration, an approximate material cost and photos. When you get the order, one tap on the job turns those remedials into a new works job to allocate.</div>
+      </div>
+
+      <!-- Pump maintenance job -->
+      <div class="field-group">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
+          <input type="checkbox" id="pumpMaintenance" style="width:auto"> 🚰 Pump Maintenance
+        </label>
+        <label id="pumpStoreWrap" style="display:none;margin:8px 0 0">Which pump / store
+          <select id="pumpStore" style="width:100%;padding:8px;margin-top:3px"><option value="">Loading stores…</option></select>
+        </label>
+        <div class="hint">Tick for a sump-pump monthly maintenance visit. Pick the store — the engineer gets that store's set form (a required safety pre-check, the location &amp; method instructions, the monthly Yes/No/N-A checklist, photo &amp; video upload, and both signatures). Completing it submits it for office review, which files a Mostlane PDF to the site.</div>
       </div>
 
       <!-- Standby / fallback job (dormant pool) -->
@@ -316,6 +335,15 @@
         </div>
         <div class="hint" id="emHint">Auto-fills the certificate-import text + duration. Yearly EM = 3h (PAT runs in the first 45 min); Monthly EM flick test = 30 min; PAT alone = 45 min. EM cert numbers come from last year's compliance certs.</div>
       </div>
+
+      <!-- Site audit — its own builder (import a Site Audit Pro PDF, per-item photos + checklist) -->
+      <div class="field-group">
+        <a class="btn" href="site-audit.html" title="Import a Site Audit Pro PDF, per-item photos, one job with an audit checklist" style="text-decoration:none;">🔍 Site audit builder →</a>
+        <div class="hint">A site audit is its own builder — import a Site Audit Pro PDF, add per-item photos, and raise one job with an audit checklist. Opens the Site Audit page.</div>
+      </div>
+
+      </div>
+      </details>
 
       <!-- On-site requirements -->
       <div class="field-group" id="reqGroup">
@@ -347,6 +375,16 @@
         </div>
         <div id="photoPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
         <div class="hint">These upload to the job once it's created, and show on the job card for the office and the engineer.</div>
+      </div>
+
+      <!-- Area of work (auto-detected; kept at the bottom, out of the way) -->
+      <div class="field-group" id="workAreaGroup" style="display:none;">
+        <label for="workArea">Area of work <span class="hint">(auto-detected)</span></label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="workArea" disabled style="flex:1;min-width:160px;background:#eef2f7;color:#475569;"><option value="">— auto-detected —</option></select>
+          <a href="javascript:void(0)" id="waEdit" style="white-space:nowrap;font-size:13px;font-weight:600;color:#003468;">✎ Change</a>
+        </div>
+        <div class="hint" id="waHint">Detected automatically from the description — you don't need to set this. Tap “Change” only if it's wrong.</div>
       </div>
 
       <!-- Site details captured from the picker (not shown) -->
@@ -381,6 +419,7 @@
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
 /* USERS ENDPOINT */
@@ -412,6 +451,16 @@ function toIsoOrNull(value){
   const d = new Date(value);
   if(isNaN(d)) return null;
   return d.toISOString();
+}
+// A mistyped year (2006 for 2026) once went through and the job vanished from
+// the scheduler. Same window as the worker: now−1 … now+3.
+function badScheduleYear(value, label){
+  if(!value) return null;
+  const d = new Date(value);
+  if(isNaN(d)) return label + " isn't a valid date.";
+  const y = d.getFullYear(), now = new Date().getFullYear();
+  if(y < now - 1 || y > now + 3) return label + " has the year " + y + " — check the date.";
+  return null;
 }
 // ── EM light test + PAT: auto certificate text + duration ──
 var EM_SETS = {};              // store code -> EM cert "set number"
@@ -561,6 +610,18 @@ async function fetchSitesForKey(key){
   }
 }
 
+function applyUrlPrefill(){
+  var q = new URLSearchParams(location.search);
+  var code = (q.get("site")||"").trim(); if(!code) return;
+  var sel = $("siteSelect"), want = Number(code.replace(/\D/g,""));
+  var opt = null;
+  for (var i=0;i<sel.options.length;i++){ var v = sel.options[i].value; if(!v) continue; if(v===code || (/^\d+$/.test(v) && Number(v)===want)){ opt = sel.options[i]; break; } }
+  if(!opt) return;
+  sel.value = opt.value; handleSiteChange();
+  if(q.get("elecTest")==="1" && $("elecTest")){ $("elecTest").checked = true; var det = $("elecTest").closest("details"); if(det) det.open = true; }
+  var nm = (q.get("name")||"").trim(); if(nm && $("jobName")){ $("jobName").value = nm; window.jobNameAuto = nm; }
+  var ds = (q.get("desc")||"").trim(); if(ds && $("description") && !$("description").value.trim()){ $("description").value = ds; $("description").dispatchEvent(new Event("input")); }
+}
 async function populateSites(){
   const siteTypeVal = $("siteType").value.trim().toLowerCase();
   const sel = $("siteSelect");
@@ -575,7 +636,8 @@ async function populateSites(){
     "wenzels":"wenzels",
     "fbc":"fbc",
     "chapplins":"chapplins",
-    "projects":"projects"
+    "projects":"projects",
+    "site":"site"
   };
 
   let sites = [];
@@ -746,10 +808,29 @@ async function handleSubmit(evt){
 
   const description = $("description").value.trim();
   const siteName = $("siteName").value.trim();
+  {
+    const badDate = badScheduleYear($("scheduledAt").value, "Allocated date");
+    if(badDate){ statusEl.textContent = "⚠ " + badDate; statusEl.classList.add("err"); $("schedDate").focus(); return; }
+  }
   if(!siteName || !description){
     statusEl.textContent = "Please pick a site and enter a description.";
     statusEl.classList.add("err");
     return;
+  }
+
+  // Electrical test jobs: engineers reference the store number constantly, so
+  // the job name shows it up front — "<store no> <name>". Uses the typed job
+  // name (else the site name, else "Electrical test") and only prefixes when it
+  // doesn't already start with that store number.
+  let refVal = ($("jobName") && $("jobName").value.trim()) || "";
+  if ($("elecTest") && $("elecTest").checked) {
+    const storeNo = $("siteCode").value.trim();
+    let base = refVal || siteName || "Electrical test";
+    if (storeNo) {
+      const esc = storeNo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (!new RegExp("^\\s*" + esc + "\\b").test(base)) base = storeNo + " " + base;
+    }
+    refVal = base;
   }
 
   // Site details ride along from the picker (hidden). Priority / status / raised
@@ -770,7 +851,7 @@ async function handleSubmit(evt){
     description,
     // Editable job name (the reference the board + engineer see). Blank = the
     // server auto-names it (site name / number-site).
-    reference: ($("jobName") && $("jobName").value.trim()) || undefined,
+    reference: refVal || undefined,
     // A dormant fallback template is never scheduled or assigned — it just sits
     // in the pool until it's an engineer's fallback and comes into play.
     fallbackTemplate: ($("fallbackTemplate") && $("fallbackTemplate").checked) || undefined,
@@ -779,14 +860,17 @@ async function handleSubmit(evt){
     scheduledAt: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : toIsoOrNull($("scheduledAt").value),
     durationMinutes: Number($("expectedDuration").value) || 60,
     workArea: ($("workArea") && $("workArea").value) || undefined,
-    requiresRA: $("firestopping").checked ? false : $("reqRA").checked,
-    requiresSignature: $("firestopping").checked ? false : $("reqSig").checked,
-    requiresPhoto: $("firestopping").checked ? false : $("reqPhoto").checked,
-    requiresNote: $("firestopping").checked ? false : $("reqNote").checked,
+    requiresRA: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqRA").checked,
+    requiresSignature: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqSig").checked,
+    requiresPhoto: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqPhoto").checked,
+    requiresNote: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked) || ($("pumpMaintenance") && $("pumpMaintenance").checked)) ? false : $("reqNote").checked,
     firestopping: $("firestopping").checked,
+    elecTest: $("elecTest") ? $("elecTest").checked : false,
     emTest: $("emTest") ? $("emTest").checked : false,
     emKind: ($("emTest") && $("emTest").checked) ? emKindVal() : "",
     pat: $("patTest") ? $("patTest").checked : false,
+    pumpMaintenance: $("pumpMaintenance") ? $("pumpMaintenance").checked : false,
+    pumpStore: ($("pumpMaintenance") && $("pumpMaintenance").checked && $("pumpStore")) ? $("pumpStore").value : "",
     release: buildRelease(),
     originator: getLoggedInUser() || undefined
   };
@@ -816,6 +900,15 @@ async function handleSubmit(evt){
 
     const ref = data.helpdeskRef || data.id;
     const isFb = $("fallbackTemplate") && $("fallbackTemplate").checked;
+    // Allocated to an engineer AND given a date/time → go straight to that day
+    // on the scheduler with the new job highlighted. Anything else (unassigned,
+    // unscheduled, a standby template) stays on the success panel as before.
+    if(!isFb && payload.scheduledAt && (payload.assignedEngineers || []).length){
+      const day = String($("scheduledAt").value || "").slice(0, 10);
+      statusEl.textContent = `✅ Job created: ${ref}${photoNote} — opening the scheduler…`;
+      location.replace(`sla-scheduler.html?date=${encodeURIComponent(day)}&job=${encodeURIComponent(data.id)}`);
+      return;
+    }
     statusEl.textContent = "";
     successPanel.style.display = "flex";
     if(isFb){
@@ -849,6 +942,38 @@ async function init(){
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
 
   $("jobForm").addEventListener("submit", handleSubmit);
+  // Date + a clean 5-minute TIME DROPDOWN instead of the native datetime-local
+  // picker — its popup scrolls minute-by-minute (every number) so you couldn't
+  // land on the exact time you wanted. A <select> is the same on every device.
+  (function schedControls(){
+    const pad = n => String(n).padStart(2, "0");
+    const y = new Date().getFullYear();
+    // Fill a time <select> with 5-minute options (00:00 → 23:55), blank first.
+    function fillTimes(sel){
+      if(!sel) return;
+      let html = '<option value="">--:--</option>';
+      for(let m = 0; m < 24 * 60; m += 5){ const t = pad(Math.floor(m/60)) + ":" + pad(m%60); html += '<option value="' + t + '">' + t + '</option>'; }
+      sel.innerHTML = html;
+    }
+    // Combine a date box + time select into the hidden datetime-local field.
+    function wire(dateId, timeId, hiddenId, defTime){
+      const dEl = $(dateId), tEl = $(timeId), hEl = $(hiddenId);
+      if(!dEl || !tEl || !hEl) return;
+      fillTimes(tEl);
+      dEl.min = (y - 1) + "-01-01"; dEl.max = (y + 3) + "-12-31";
+      function sync(){
+        const d = dEl.value;
+        if(!d){ hEl.value = ""; }
+        else { hEl.value = d + "T" + (tEl.value || defTime || "08:00"); }
+        hEl.dispatchEvent(new Event("change", { bubbles:true }));
+      }
+      // Picking a day with no time yet → default the time so it's never blank.
+      dEl.addEventListener("change", function(){ if(dEl.value && !tEl.value){ tEl.value = defTime || "08:00"; } sync(); });
+      tEl.addEventListener("change", sync);
+    }
+    wire("schedDate", "schedTime", "scheduledAt", "08:00");
+    wire("releaseDate", "releaseTime", "releaseAt", "17:00");
+  })();
   initPhotoPicker();
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
   try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
@@ -868,7 +993,7 @@ async function init(){
   // don't apply — dim them when firestopping is ticked.
   // Visibility: reveal the datetime picker only for "At a set time".
   (function(){
-    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAt").style.display = rm.value==="at" ? "block" : "none"; }); }
+    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAtWrap").style.display = rm.value==="at" ? "flex" : "none"; }); }
   })();
   // EM/PAT test type: load the cert set-numbers, wire the ticks + refresh.
   (function(){
@@ -898,10 +1023,74 @@ async function init(){
     g.style.pointerEvents = on ? "none" : "";
     $("fsHint").style.color = on ? "#b45309" : "";
   });
+  // Pump maintenance: reveal the store picker, load the stores, and AUTO-FILL the
+  // whole job from the chosen pump site — site type + site (so the office doesn't
+  // pick it), a "{Site} Pump Test {Mon}{YY}" job name and a ready description.
+  (function(){
+    var pm = $("pumpMaintenance"); if(!pm) return;
+    var MAPI = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    var PUMP_STORES = [];
+    // client key (retail/els/…) -> the siteType dropdown's option label
+    var CLIENT_LABEL = { retail:"Retail", els:"ELS", els_private:"ELS Private", cobra:"Cobra", wenzels:"Wenzel’s", fbc:"FBC", chapplins:"Chapplins", projects:"Projects" };
+    function monYY(){
+      var v = $("scheduledAt") && $("scheduledAt").value ? new Date($("scheduledAt").value) : new Date();
+      if(isNaN(v)) v = new Date();
+      var mon = v.toLocaleString("en-GB",{month:"short"});
+      return mon + String(v.getFullYear()).slice(-2);
+    }
+    function pumpDesc(store){
+      return "Sump pump monthly maintenance — " + (store.name||"") + ".\n"
+        + "Complete the on-site pump form: safety pre-check, the monthly checklist, photos/video of the maintenance, and both signatures.";
+    }
+    function setJobName(siteName){
+      var jn = $("jobName"); if(!jn) return;
+      jn.value = (siteName||"") + " Pump Test " + monYY();
+      window.jobNameAuto = jn.value;
+    }
+    async function applyPumpStore(){
+      var id = $("pumpStore") ? $("pumpStore").value : "";
+      var store = PUMP_STORES.filter(function(s){ return s.id===id; })[0];
+      if(!store) return;
+      // Description
+      $("description").value = pumpDesc(store);
+      // Site type + site — select the real portal site when the store is linked.
+      var label = CLIENT_LABEL[(store.client||"").toLowerCase()] || "";
+      if(store.siteCode && label){
+        $("siteType").value = label;
+        try{ await populateSites(); }catch(e){}
+        var sel = $("siteSelect");
+        if(sel){ sel.value = store.siteCode; }
+        if(sel && sel.value === store.siteCode){ handleSiteChange(); setJobName($("siteName").value || store.name); return; }
+      }
+      // Fallback (not linked yet, e.g. Eastbourne): fill the hidden site fields direct.
+      $("siteName").value = store.name || "";
+      $("siteCode").value = store.siteCode || "";
+      $("address").value = store.address || "";
+      $("postcode").value = store.postcode || "";
+      setJobName(store.name);
+      applyReqDefaults();
+    }
+    fetch(MAPI + "/pump/stores", { headers: { "Authorization": "Bearer " + (localStorage.getItem("mostlaneToken")||"") } })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ var sel = $("pumpStore"); if(!sel) return;
+        PUMP_STORES = (d && d.ok && d.stores) ? d.stores : [];
+        if(PUMP_STORES.length){ sel.innerHTML = PUMP_STORES.map(function(s){ return '<option value="'+esc(s.id)+'">'+ esc(s.name||s.id) +'</option>'; }).join(""); }
+        else sel.innerHTML = '<option value="">No pump stores configured</option>';
+        if(pm.checked && PUMP_STORES.length) applyPumpStore();
+      }).catch(function(){ var sel=$("pumpStore"); if(sel) sel.innerHTML='<option value="">Couldn\'t load stores</option>'; });
+    pm.addEventListener("change", function(){
+      var on = this.checked;
+      var w = $("pumpStoreWrap"); if(w) w.style.display = on ? "block" : "none";
+      var g = $("reqGroup"); g.style.opacity = on ? "0.45" : ""; g.style.pointerEvents = on ? "none" : "";
+      if(on && PUMP_STORES.length) applyPumpStore();
+    });
+    if($("pumpStore")) $("pumpStore").addEventListener("change", function(){ if(pm.checked) applyPumpStore(); });
+  })();
   applyReqDefaults();
 
-  // Load sites
-  populateSites();
+  // Load sites — then apply any ?site=&elecTest=1&name=&desc= prefill (the
+  // Concerto 5-year pipeline's "Raise the test job" link lands here).
+  populateSites().then(function(){ try{ applyUrlPrefill(); }catch(e){} });
 
   // Load portal users into AssignedTo dropdown
   populateUsersDropdown();
@@ -912,7 +1101,7 @@ async function init(){
 
 // ── Area of work: load the managed list; AI suggests one from the description
 // (office confirms). Only shows when areas exist. ───────────────────────────
-var WA_LOADED = false, WA_LAST = "", waSuggesting = false;
+var WA_LOADED = false, WA_LAST = "", waSuggesting = false, WA_MANUAL = false;
 async function initWorkArea(){
   try{
     var d = await fetchJSON(API_BASE + "/work-areas");
@@ -922,32 +1111,38 @@ async function initWorkArea(){
     areas.forEach(function(a){ var o=document.createElement("option"); o.value=a.id; o.textContent=a.name; sel.appendChild(o); });
     $("workAreaGroup").style.display = "";
     WA_LOADED = true;
-    $("waSuggest").addEventListener("click", function(){ suggestWorkArea(true); });
-    // Auto-suggest once when the description is filled and no area picked yet.
+    // Auto-detect only: the office never needs to set this. "✎ Change" un-greys
+    // the dropdown for the rare manual override.
+    $("waEdit").addEventListener("click", function(){
+      var sel = $("workArea");
+      sel.disabled = false; sel.style.background = "#fff"; sel.style.color = "";
+      WA_MANUAL = true; $("waEdit").style.display = "none";
+      $("waHint").textContent = "Pick the trade this job needs.";
+      sel.focus();
+    });
+    // Auto-detect once the description is filled (and re-detect if it changes,
+    // unless the office has taken manual control).
     $("description").addEventListener("blur", function(){ suggestWorkArea(false); });
   }catch(e){}
 }
 async function suggestWorkArea(force){
-  if(!WA_LOADED || waSuggesting) return;
+  if(!WA_LOADED || waSuggesting || WA_MANUAL) return;  // manual override wins
   var desc = ($("description").value || "").trim();
   if(desc.length < 8) return;
-  if(!force){
-    if($("workArea").value) return;         // office already chose — don't override
-    if(desc === WA_LAST) return;            // already suggested for this text
-  }
+  if(!force && desc === WA_LAST) return;               // already detected for this text
   WA_LAST = desc; waSuggesting = true;
-  var hint = $("waHint"), btn = $("waSuggest");
-  var prev = hint.textContent; hint.textContent = "🤖 Suggesting an area…"; btn.disabled = true;
+  var hint = $("waHint");
+  hint.textContent = "🤖 Detecting the area…";
   try{
     var r = await fetch(API_BASE + "/infer-work-area", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ description: desc }) }).then(function(x){ return x.json(); });
-    if(r && r.capped){ hint.textContent = r.error || "Daily AI limit reached — pick an area manually."; }
+    if(r && r.capped){ hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
     else if(r && r.ok && r.areaId){
-      if(force || !$("workArea").value){ $("workArea").value = r.areaId; }
-      hint.textContent = "🤖 Suggested: " + (r.name || r.areaId) + " — change it if that's not right.";
-    } else if(r && r.ok){ hint.textContent = "AI couldn't match an area — pick one if it needs a trade."; }
-    else { hint.textContent = (r && r.error) || "Couldn't suggest an area — pick one manually."; }
-  }catch(e){ hint.textContent = "Couldn't reach the AI — pick an area manually."; }
-  waSuggesting = false; btn.disabled = false;
+      $("workArea").value = r.areaId;
+      hint.textContent = "Detected: " + (r.name || r.areaId) + ". Tap “Change” only if it's wrong.";
+    } else if(r && r.ok){ hint.textContent = "No trade needed for this one — tap “Change” to set one if it does."; }
+    else { hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
+  }catch(e){ hint.textContent = "Couldn't auto-detect — tap “Change” to set the area."; }
+  waSuggesting = false;
 }
 
 document.addEventListener("DOMContentLoaded", init);

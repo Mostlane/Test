@@ -208,7 +208,7 @@
         }
         if (t.milestone && marked.length) segs = `<div class="mlp-dia${t.extra ? " extra" : ""}" style="left:${marked[0] * DAYW + DAYW / 2 - 6}px;background:${esc(colour)}" title="${esc(t.name)}${t.extra ? " — extra works" : ""}"></div>`;
       }
-      body += `<tr class="mlp-row" data-row="${t.id}">
+      body += `<tr class="mlp-row" data-row="${esc(t.id)}">
         <td class="mlp-sticky mlp-actcol">${editable
           ? `<textarea class="mlp-act" data-op="name" rows="1" placeholder="Works / task">${esc(t.name)}</textarea>`
           : `<span class="mlp-actro">${esc(t.name) || "&nbsp;"}</span>`}</td>

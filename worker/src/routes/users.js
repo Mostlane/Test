@@ -112,6 +112,21 @@ export async function handle(request, env, ctx, url, sess) {
     }, {}, env, request);
   }
 
+  // What the CALLER may see of other people's profiles (Sep 2026). The raw
+  // profile blob carries phone, home postcode/pin, pay rates, fuel card — that
+  // used to go to every session (a field engineer's inbox picker, a client
+  // login). Now: admins (FullAccess|Users) and the person themself get it all;
+  // SLA admins get the home fields the scheduler routes with; everyone else
+  // gets staff type + sort order only.
+  async function profileLevelFor(targetUsername) {
+    if (!sess) return "min";
+    if (sess.user.username === targetUsername) return "full";
+    const p = await permissionsFor(env, sess.tenantId, sess.user.username);
+    if (p.FullAccess === "Yes" || p.Users === "Yes") return "full";
+    if (p.SLAAdmin === "Yes") return "sla";
+    return "min";
+  }
+
   // GET /user?u=username
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
@@ -120,7 +135,7 @@ export async function handle(request, env, ctx, url, sess) {
       .bind(db.tenantId, username).first();
     if (!user) return json({ found: false }, {}, env, request);
     const perms = await permissionsFor(env, tenantId, username);
-    return json({ found: true, user: shapeUser(user, perms) }, {}, env, request);
+    return json({ found: true, user: shapeUser(user, perms, await profileLevelFor(username)) }, {}, env, request);
   }
 
   // GET /users  (list) — returned in the canonical people order (office staff
@@ -142,7 +157,8 @@ export async function handle(request, env, ctx, url, sess) {
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
     const rows = includeAll ? (results || []) : (results || []).filter(u => isActiveStatus(u.status));
     const out = [];
-    for (const u of rows) out.push(shapeUser(u, permMap[u.username] || {}));
+    const lvl = await profileLevelFor("");
+    for (const u of rows) out.push(shapeUser(u, permMap[u.username] || {}, sess && u.username === sess.user.username ? "full" : lvl));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }
@@ -161,7 +177,9 @@ export async function handle(request, env, ctx, url, sess) {
       if (!row) continue;
       let profile = {};
       try { profile = row.profile ? JSON.parse(row.profile) : {}; } catch { profile = {}; }
-      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      // Never let a drag-reorder downgrade a CLIENT login to a staff type.
+      profile.staffType = profile.staffType === "client" ? "client"
+        : (item.StaffType === "office" ? "office" : "field");
       profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
       await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?")
         .bind(JSON.stringify(profile), db.tenantId, item.Username).run();
@@ -439,6 +457,7 @@ const USER_AREAS = [
   { key: "memos",          label: "Company memos",         perm: "FullAccess" },
   { key: "timesheets",     label: "Engineer timesheets",   perm: "TimesheetAdmin" },
   { key: "messages",       label: "Messages",              perm: "" },
+  { key: "staffrecords",   label: "Employee records",      perm: "StaffRecords" },
 ];
 const PERMISSION_KEYS = [
   "FullAccess", "Users", "DeviceAdmin", "CheckInOut", "Vehicles", "Holiday",
@@ -458,6 +477,11 @@ const PERMISSION_KEYS = [
   "Programmes",      // job programmes: build/issue/share programmes of works
   "YardGate",        // trigger the yard gate (Tuya) + see its open/closed state
   "YardGateAnywhere",// exempt from the yard-gate geofence (operate from anywhere)
+  "EicrCheck",       // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
+  "Chapplins",       // the Chapplins customer area (directory + compliance chart)
+  "CableCalc",       // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
+  "WhereEveryone",   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
+  "StaffRecords",    // HR: manage staff qualifications, insurances, licences + licence checks
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly
@@ -468,9 +492,17 @@ function isActiveStatus(s) {
   return t === "" || t === "active";
 }
 
-function shapeUser(u, perms) {
+function shapeUser(u, perms, level = "full") {
   let profile = {};
   try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch { profile = {}; }
+  if (level !== "full") {
+    const keep = level === "sla"
+      ? ["staffType", "sortOrder", "areas", "clientOrg", "homePostcode", "homeLat", "homeLng"]
+      : ["staffType", "sortOrder", "areas", "clientOrg"];
+    const slim = {};
+    for (const k of keep) if (profile[k] !== undefined) slim[k] = profile[k];
+    profile = slim;
+  }
   return {
     EngineerNumber: u.engineer_number,
     FirstName: u.first_name,
@@ -483,7 +515,9 @@ function shapeUser(u, perms) {
     SharePointPath: u.sharepoint_path,
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
-    StaffType: profile.staffType === "office" ? "office" : "field",
+    StaffType: (profile.staffType === "office" || profile.staffType === "client") ? profile.staffType : "field",
+    // External client login: which client org it's tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: profile.staffType === "client" && profile.clientOrg ? String(profile.clientOrg).toLowerCase() : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the

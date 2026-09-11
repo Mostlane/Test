@@ -36,3 +36,16 @@ Thumbs.db
 # Node
 node_modules/
 npm-debug.log*
+
+# ── Data must never live in this PUBLIC repo (it is the live site) ──────────
+# Staff/pay/customer data belongs in D1/R2. Only manifest.json is a real file.
+/*.json
+!/manifest.json
+/*.txt
+/*.webp
+/logs/
+/json_logs/
+/Compliance/
+/Mostlane/
+/assets/*.json
+/sites/

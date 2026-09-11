@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Email Intake</title>
+  <script src="/portal-config.js?v=36"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:960px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;} .btn:disabled{opacity:.5;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .card h2{font-size:15px;margin:0 0 8px;color:var(--brand);}
+    .stat{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 4px;}
+    .stat div{background:#f6f8fb;border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:110px;}
+    .stat b{display:block;font-size:22px;color:var(--brand);line-height:1.1;} .stat span{font-size:11.5px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;}
+    .p-created{background:#dcfce7;color:#166534;} .p-updated{background:#e0f2fe;color:#075985;} .p-dropped{background:#f1f5f9;color:#475569;}
+    .p-ignored{background:#fef3c7;color:#92400e;} .p-duplicate{background:#ede9fe;color:#5b21b6;} .p-failed{background:#fee2e2;color:#b91c1c;} .p-dryrun{background:#e0f2fe;color:#075985;}
+    .p-order{background:#dbeafe;color:#1e40af;} .p-review{background:#fef3c7;color:#92400e;border:1px solid #f59e0b;} .p-dismissed{background:#f1f5f9;color:#64748b;}
+    .p-cancelled{background:#fee2e2;color:#991b1b;}
+    .rv{border:1px solid #f5d58a;background:#fffbeb;border-radius:12px;padding:12px;margin:10px 0;} .rv.flash{box-shadow:0 0 0 3px #f59e0b;}
+    .rv h3{margin:0 0 4px;font-size:14px;} .rv .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:8px;}
+    .rv label{display:block;font-size:11.5px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;} .rv input,.rv textarea,.rv select{width:100%;border:1px solid #ccd5dd;border-radius:8px;padding:7px 9px;font:13.5px inherit;font-family:inherit;background:#fff;}
+    .rv textarea{min-height:90px;font-family:inherit;} .rv details{margin-top:8px;} .rv pre{white-space:pre-wrap;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;max-height:260px;overflow:auto;}
+    .tpl{display:flex;flex-wrap:wrap;gap:6px;} .tpl span{background:#f6f8fb;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12.5px;}
+    table{width:100%;border-collapse:collapse;font-size:13px;}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;text-align:left;padding:6px 8px;border-bottom:2px solid #eef2f6;}
+    td{padding:6px 8px;border-bottom:1px solid #f2f5f8;vertical-align:top;}
+    .tbl{overflow-x:auto;}
+    textarea,input[type=text]{width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:9px 10px;font:14px inherit;font-family:inherit;}
+    textarea{min-height:140px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;}
+    .msg{font-size:13px;margin-top:8px;} .msg.ok{color:var(--ok);} .msg.err{color:var(--bad);}
+    pre.out{background:#f6f8fb;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-word;margin:8px 0 0;}
+    ol.steps li{margin:6px 0;} code{background:#f1f5f9;border-radius:5px;padding:1px 5px;font-size:12.5px;}
+    .light{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;}
+    .light.on{background:#22c55e;} .light.off{background:#cbd5e1;} .light.warn{background:#f59e0b;}
+  </style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="sla-settings.html" title="Back">‹ Back</a>
+  <h1>📨 Email intake — jobs straight from Outlook</h1>
+</header>
+<div class="wrap">
+  <div class="card" id="statusCard">
+    <h2>Status</h2>
+    <div id="statusBody" class="muted">Loading status…</div>
+  </div>
+
+  <div class="card" id="reviewCard" hidden>
+    <h2>📨 Needs a look <span id="reviewCount" class="pill p-review"></span></h2>
+    <p class="muted">Emails the portal would not turn into a job on its own — a layout it hasn't got a template for, or a known layout with a field it couldn't read. Check the details, correct anything, then <b>Create the job</b> or <b>Dismiss</b>. Nothing here has been created yet.</p>
+    <div id="reviewList"></div>
+  </div>
+
+  <div class="card">
+    <h2>Try it — paste an email</h2>
+    <p class="muted">Paste the subject and body of a job email (a Concerto "New Job Alert" or a Chapplins "new job has been raised" works as-is). <b>Check</b> shows what the portal would make of it without creating anything. <b>Create the job</b> really logs it.</p>
+    <input type="text" id="tFrom" placeholder="From address — e.g. noreply@concerto.co.uk (which template applies depends on the sender)">
+    <div style="height:8px"></div>
+    <input type="text" id="tSubject" placeholder="Subject — e.g. New Job Alert: 00012345/1 - Priority 2">
+    <div style="height:8px"></div>
+    <textarea id="tBody" placeholder="Paste the email body here…"></textarea>
+    <div class="row">
+      <button class="btn" id="tCheck">🔍 Check</button>
+      <button class="btn ghost" id="tCommit">＋ Create the job</button>
+      <span class="msg" id="tMsg"></span>
+    </div>
+    <pre class="out" id="tOut" hidden></pre>
+  </div>
+
+  <div class="card">
+    <h2>Recent emails</h2>
+    <p class="muted">Every email the intake address receives, newest first, with what happened to it. <span class="pill p-created">created</span> / <span class="pill p-updated">updated</span> = a job on the board · <span class="pill p-order">order</span> = a Concerto order sheet filed under Client orders (cert-review) · <span class="pill p-cancelled">cancelled</span> = a Concerto cancellation applied to the job (❌ pill + timestamp on the board) · <span class="pill p-review">review</span> = held for a human (above) · <span class="pill p-dropped">dropped</span> = a reply, notice, quote or supplier paperwork · <span class="pill p-duplicate">duplicate</span> = the same email arrived twice.</p>
+    <div class="tbl"><table><thead><tr><th>Received</th><th>From</th><th>Subject</th><th>Outcome</th><th>Job</th><th></th></tr></thead><tbody id="logBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Layouts the portal reads on its own</h2>
+    <p class="muted">Each of these is a fixed template (no AI, no guessing) matched by the sender and the email's own markers. Only these create jobs automatically; anything else is held above for a check. To add a client, send Jamie a few example emails and a template gets built and tested for it.</p>
+    <div class="tpl" id="tplList"><span class="muted">Loading…</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Who may send jobs in</h2>
+    <p class="muted">Only emails from these senders / domains are processed (anything else is logged as ignored and never sent to the AI). One per line — a domain like <code>concerto.co.uk</code> or a full address.</p>
+    <textarea id="allowFrom" style="min-height:80px"></textarea>
+    <div class="row">
+      <label><input type="checkbox" id="enabled"> Intake switched on</label>
+      <label title="Off (recommended): an email with no template is always held for a check. On: if the AI can read a reference or description, the job is created straight away."><input type="checkbox" id="aiAuto"> Let the AI create jobs from unknown layouts (not recommended)</label>
+      <button class="btn sm" id="saveCfg">Save</button>
+      <span class="msg" id="cfgMsg"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Setting it up (one-off, Cloudflare + Outlook)</h2>
+    <ol class="steps">
+      <li><b>Cloudflare → a domain whose DNS is on Cloudflare → Email → Email Routing → Enable.</b> Add a custom address, e.g. <code>jobs@your-domain</code>, action <b>Send to a Worker → mostlane-api</b>.</li>
+      <li><b>Outlook (web) → Settings → Mail → Rules → Add rule:</b> when the message is from <code>noreply@concerto.co.uk</code> or <code>chapplins.co.uk</code> (add any other job senders) → <b>Forward to</b> <code>jobs@your-domain</code>. Use <i>forward</i>, not <i>redirect</i>, so the copy is sent from your own address and passes the spam checks.</li>
+      <li>If the rule refuses to forward outside the company, an admin must allow automatic external forwarding for that mailbox (Microsoft 365 Defender → Anti-spam → Outbound policy).</li>
+      <li>Send yourself a test job email, then check <b>Recent emails</b> above. Run alongside the Zapier zap for a few days — the same job is never duplicated (it matches by reference) — then switch the zap off.</li>
+    </ol>
+  </div>
+</div>
+<script>
+(function(){
+  var API = window.MOSTLANE_API;
+  var $ = function(id){ return document.getElementById(id); };
+  var esc = function(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]; }); };
+  function authFetch(p, o){ o = o || {}; o.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, o.headers || {}); return fetch(API + p, o); }
+  function fmt(iso){ if(!iso) return "—"; var d = new Date(iso); if(isNaN(d)) return esc(iso); return d.toLocaleString("en-GB", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }); }
+  function ago(iso){ if(!iso) return "never"; var m = Math.round((Date.now()-Date.parse(iso))/60000); if(m<1) return "just now"; if(m<60) return m+" min ago"; var h=Math.round(m/60); if(h<48) return h+" h ago"; return Math.round(h/24)+" days ago"; }
+  var CFG = null;
+
+  async function loadStatus(){
+    try{
+      var r = await authFetch("/email-intake/status").then(function(x){ return x.json(); });
+      if(!r || !r.ok) throw new Error((r&&r.error)||"status failed");
+      CFG = r.config;
+      var c = r.counts7d || {};
+      var last = r.last;
+      $("statusBody").innerHTML =
+        '<div><span class="light '+(r.config.enabled===false?"off":(last?"on":"warn"))+'"></span>' +
+        (r.config.enabled===false ? "Intake is <b>switched off</b>." : (last ? "Last email received <b>"+ago(last.received_at)+"</b> — “"+esc(last.subject)+"” → <span class=\"pill p-"+esc(last.outcome)+"\">"+esc(last.outcome)+"</span>" : "<b>No emails received yet</b> — finish the set-up steps below, then send a test.")) + '</div>' +
+        '<div class="stat"><div><b>'+(c.created||0)+'</b><span>jobs created (7d)</span></div><div><b>'+(c.updated||0)+'</b><span>updated (7d)</span></div><div><b>'+(c.order||0)+'</b><span>client orders</span></div><div><b>'+(r.reviewOpen||0)+'</b><span>need a look</span></div><div><b>'+(c.dropped||0)+'</b><span>not a job</span></div><div><b>'+(c.ignored||0)+'</b><span>ignored sender</span></div><div><b>'+(c.failed||0)+'</b><span>failed</span></div></div>' +
+        '<div class="muted"><span class="light on"></span>'+((r.templates||[]).length)+' layouts read by template &nbsp;·&nbsp; <span class="light '+(r.aiConfigured?"on":"warn")+'"></span>AI '+(r.aiConfigured?"suggests fields for unknown layouts (they still wait for a check)":"OFF — unknown layouts are held with no suggested fields (add ANTHROPIC_API_KEY)")+' &nbsp;·&nbsp; <span class="light '+(r.inboundConfigured?"on":"off")+'"></span>Job intake token '+(r.inboundConfigured?"set":"MISSING (JOBS_INBOUND_TOKEN)")+'</div>';
+      $("allowFrom").value = (r.config.allowFrom||[]).join("\n");
+      $("enabled").checked = r.config.enabled !== false;
+      $("aiAuto").checked = r.config.aiAutoCreate === true;
+      $("tplList").innerHTML = (r.templates||[]).map(function(t){ return '<span title="'+esc(t.id)+'">'+esc(t.label)+' <span class="muted">('+esc(t.domains.join(", "))+')</span></span>'; }).join("") || '<span class="muted">None</span>';
+    }catch(e){ $("statusBody").innerHTML = '<span class="msg err">Couldn’t load the status ('+esc(e.message)+').</span>'; }
+  }
+  async function loadLog(){
+    try{
+      var r = await authFetch("/email-intake/log?limit=80").then(function(x){ return x.json(); });
+      var rows = (r && r.rows) || [];
+      if(!rows.length){ $("logBody").innerHTML = '<tr><td colspan="6" class="muted">Nothing received yet.</td></tr>'; return; }
+      renderReview(rows.filter(function(x){ return x.outcome === "review"; }));
+      $("logBody").innerHTML = rows.map(function(x){
+        var job = x.job_id ? '<a href="job-view.html?jobId='+encodeURIComponent(x.job_id)+'">'+esc(x.reference||x.job_id)+'</a>' : (x.outcome==="order" ? '<a href="cert-review.html?orders=1">'+esc(x.reference||"order")+'</a>' : esc(x.reference||""));
+        var from = esc(x.orig_from && x.orig_from!==x.from_addr ? x.orig_from+" (via "+x.from_addr+")" : x.from_addr);
+        var canRerun = ["dropped","ignored","failed","dismissed","duplicate"].indexOf(x.outcome) >= 0;
+        return '<tr><td style="white-space:nowrap">'+fmt(x.received_at)+'</td><td>'+from+'</td><td>'+esc(x.subject)+'<div class="muted">'+esc(x.reason)+'</div></td><td><span class="pill p-'+esc(x.outcome)+'">'+esc(x.outcome)+'</span></td><td>'+job+'</td><td>'+(canRerun?'<button class="btn ghost sm" data-rerun="'+x.id+'" title="Run this email through the templates again">↻ Re-run</button>':(x.outcome==="review"?'<a class="btn ghost sm" href="#rv'+x.id+'">↑ Check</a>':''))+'</td></tr>';
+      }).join("");
+      Array.prototype.forEach.call(document.querySelectorAll("[data-rerun]"), function(b){ b.onclick = async function(){
+        if(!(window.MLUI ? await MLUI.confirm("Re-run this email and create the job if it is one?", { title:"Re-run", okLabel:"Re-run" }) : confirm("Re-run this email?"))) return;
+        b.disabled = true;
+        try{ var r = await authFetch("/email-intake/rerun", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id: Number(b.dataset.rerun) }) }).then(function(x){ return x.json(); });
+          alert(r && r.ok ? (r.outcome + " — " + r.reason) : ((r&&r.error)||"Re-run failed")); loadLog(); loadStatus(); }
+        catch(e){ alert("Re-run failed."); b.disabled=false; }
+      }; });
+    }catch(e){ $("logBody").innerHTML = '<tr><td colspan="6" class="msg err">Couldn’t load the log.</td></tr>'; }
+  }
+  var FIELDS = [["reference","Reference"],["priority","Priority"],["siteCode","Site / store code"],["siteName","Site name"],["address","Address"],["postcode","Postcode"],["telephone","Telephone"]];
+  function renderReview(rows){
+    $("reviewCard").hidden = !rows.length;
+    $("reviewCount").textContent = rows.length ? String(rows.length) : "";
+    $("reviewList").innerHTML = rows.map(function(x){
+      var f = x.fields || {};
+      var from = esc(x.orig_from && x.orig_from!==x.from_addr ? x.orig_from+" (via "+x.from_addr+")" : x.from_addr);
+      var pri = ["","Priority 1","Priority 2","Priority 3","Priority 4"];
+      if(f.action === "cancel"){
+        // A cancellation the portal couldn't apply on its own (no job for the
+        // incident, or a quote withdrawn on a job already in hand) — no fields to
+        // correct, nothing to create: open the job if there is one, then dismiss.
+        return '<div class="rv" id="rv'+x.id+'" data-id="'+x.id+'"><h3>❌ '+esc(x.subject||"(no subject)")+'</h3><div class="muted">'+fmt(x.received_at)+' · '+from+' · '+esc(x.reason)+'</div>' +
+          '<div style="margin-top:8px;font-size:13.5px">Client cancellation of <b>'+esc(f.reference||f.incident||"?")+'</b>'+(f.reason ? ' — “'+esc(f.reason)+'”' : '')+(f.title ? ' · '+esc(f.title) : '')+'</div>' +
+          '<details><summary class="muted">Show the email</summary><pre>'+esc(x.text||"")+'</pre></details>' +
+          '<div class="row">'+(x.job_id ? '<a class="btn" href="/job-view.html?jobId='+encodeURIComponent(x.job_id)+'">Open the job</a>' : '')+'<button class="btn ghost" data-dismiss="'+x.id+'">✓ Dealt with — dismiss</button><span class="msg" data-msg="'+x.id+'"></span></div></div>';
+      }
+      return '<div class="rv" id="rv'+x.id+'" data-id="'+x.id+'"><h3>'+esc(x.subject||"(no subject)")+'</h3><div class="muted">'+fmt(x.received_at)+' · '+from+' · '+esc(x.reason)+'</div>' +
+        '<div class="grid">' + FIELDS.map(function(p){ var k=p[0];
+          if(k==="priority") return '<div><label>'+p[1]+'</label><select data-f="priority">'+pri.map(function(v){ return '<option value="'+v+'"'+(String(f.priority||"")===v?' selected':'')+'>'+(v||"— none —")+'</option>'; }).join("")+'</select></div>';
+          return '<div><label>'+p[1]+'</label><input data-f="'+k+'" value="'+esc(f[k]||"")+'"></div>'; }).join("") + '</div>' +
+        '<div style="margin-top:8px"><label>Description (what the engineer needs to know)</label><textarea data-f="description">'+esc(f.description||"")+'</textarea></div>' +
+        '<details><summary class="muted">Show the email</summary><pre>'+esc(x.text||"")+'</pre></details>' +
+        '<div class="row"><button class="btn" data-approve="'+x.id+'">＋ Create the job</button><button class="btn ghost" data-dismiss="'+x.id+'">✕ Dismiss</button><span class="msg" data-msg="'+x.id+'"></span></div></div>';
+    }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-approve]"), function(b){ b.onclick = function(){ decide(b.dataset.approve, true); }; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dismiss]"), function(b){ b.onclick = function(){ decide(b.dataset.dismiss, false); }; });
+    var want = new URLSearchParams(location.search).get("review");
+    if(want && $("rv"+want)){ $("rv"+want).classList.add("flash"); $("rv"+want).scrollIntoView({ behavior:"smooth", block:"start" }); }
+  }
+  async function decide(id, approve){
+    var box = $("rv"+id), msg = box.querySelector("[data-msg]");
+    var fields = {}; Array.prototype.forEach.call(box.querySelectorAll("[data-f]"), function(el){ fields[el.dataset.f] = el.value; });
+    if(approve && !fields.reference.trim() && !fields.description.trim()){ msg.textContent = "Give it a reference or a description first."; msg.className="msg err"; return; }
+    var q = approve ? "Create job " + (fields.reference || "(no reference)") + " on the board?" : "Dismiss this email? (It stays in the log; you can re-run it later.)";
+    if(!(window.MLUI ? await MLUI.confirm(q, { title: approve ? "Create the job" : "Dismiss", okLabel: approve ? "Create" : "Dismiss", danger: !approve }) : confirm(q))) return;
+    msg.textContent = approve ? "Creating…" : "Dismissing…"; msg.className = "msg";
+    try{
+      var r = await authFetch("/email-intake/" + (approve ? "approve" : "dismiss"), { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(approve ? { id: Number(id), fields: fields } : { id: Number(id) }) }).then(function(x){ return x.json(); });
+      if(!r || !r.ok) throw new Error((r&&r.error)||"failed");
+      alert(approve ? ("Job " + (r.reference||"") + " — " + r.reason) : "Dismissed");
+      loadLog(); loadStatus();
+    }catch(e){ msg.textContent = "Couldn’t do that ("+e.message+")."; msg.className="msg err"; }
+  }
+  async function runTest(commit){
+    var subject = $("tSubject").value.trim(), body = $("tBody").value;
+    if(!subject && !body.trim()){ $("tMsg").textContent = "Paste a subject and body first."; $("tMsg").className="msg err"; return; }
+    if(commit && !(window.MLUI ? await MLUI.confirm("Create a real job from this email?", { title:"Create the job", okLabel:"Create" }) : confirm("Create a real job?"))) return;
+    $("tMsg").textContent = commit ? "Creating…" : "Checking…"; $("tMsg").className="msg"; $("tOut").hidden = true;
+    try{
+      var r = await authFetch("/email-intake/test", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ subject: subject, body: body, from: $("tFrom").value.trim() || undefined, commit: !!commit }) }).then(function(x){ return x.json(); });
+      if(!r || !r.ok) throw new Error((r&&r.error)||"failed");
+      var by = r.template ? "template: " + r.template : (r.source==="ai" ? "the AI (no template — would be held for a check)" : "no template, no AI");
+      $("tMsg").innerHTML = '<span class="pill p-'+esc(r.outcome)+'">'+esc(r.outcome)+'</span> '+esc(r.reason)+' <span class="muted">(read by '+esc(by)+')</span>';
+      $("tMsg").className = "msg " + (r.outcome==="failed"?"err":"ok");
+      var f = r.fields || {};
+      $("tOut").textContent = f && Object.keys(f).length ? Object.keys(f).filter(function(k){ return f[k]!=="" && f[k]!==null && f[k]!==undefined && k!=="isJob"; }).map(function(k){ return k.padEnd(12)+" "+f[k]; }).join("\n") : "No fields were read from this email.";
+      $("tOut").hidden = false;
+      if(commit){ loadLog(); loadStatus(); }
+    }catch(e){ $("tMsg").textContent = "Couldn’t run it ("+e.message+")."; $("tMsg").className="msg err"; }
+  }
+  $("tCheck").onclick = function(){ runTest(false); };
+  $("tCommit").onclick = function(){ runTest(true); };
+  $("saveCfg").onclick = async function(){
+    var list = $("allowFrom").value.split(/\n|,/).map(function(s){ return s.trim(); }).filter(Boolean);
+    $("cfgMsg").textContent = "Saving…"; $("cfgMsg").className = "msg";
+    try{ var r = await authFetch("/email-intake/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ allowFrom: list, enabled: $("enabled").checked, aiAutoCreate: $("aiAuto").checked }) }).then(function(x){ return x.json(); });
+      if(!r||!r.ok) throw new Error((r&&r.error)||"failed"); $("cfgMsg").textContent = "Saved ✓"; $("cfgMsg").className="msg ok"; loadStatus(); }
+    catch(e){ $("cfgMsg").textContent = "Couldn’t save ("+e.message+")."; $("cfgMsg").className="msg err"; }
+  };
+  loadStatus(); loadLog();
+})();
+</script>
+</body>
+</html>

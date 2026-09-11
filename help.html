@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -236,6 +236,21 @@
         ]},
       ]},
 
+      { title: "Employees & HR records", arts: [
+        { icon: "📋", title: "Set what each person must hold", perms: ["StaffRecords"], steps: [
+          ["Open <b>Employees</b> → <b>Staff</b>. Each person now shows a <b>pill per required document</b> — green <b>✓</b> when it's held and in date, amber <b>⏳</b> when it's expiring soon, red <b>✗</b> when it's missing or expired. A red stripe down the left flags anyone with something outstanding."],
+          ["<b>A cross only ever shows for documents that person actually needs</b> — nothing they don't need is marked missing."],
+          ["Tap <b>⚙ Required documents</b> (top right of the Staff list) to set up the master list: add each document (e.g. CSCS, First Aid, Public Liability), pick its <b>type</b>, and choose who it applies to — <b>Everyone</b>, <b>Field engineers</b>, <b>Office staff</b>, or <b>Only where assigned</b>."],
+          ["Open a person to fine-tune it just for them: the <b>📋 Required documents</b> card lets you tick documents on or off for that individual, or add a one-off requirement only they need."],
+          ["The ✓/✗ is worked out automatically from the qualifications, insurances and licences you record against each person — keep those up to date and the pills follow."],
+        ]},
+        { icon: "🎓", title: "Record a qualification, insurance or licence", perms: ["StaffRecords"], steps: [
+          ["Open <b>Employees</b>, tap a person, then <b>+ Add</b> in the right section (Qualifications, Insurances, Driving licences or Licence checks)."],
+          ["Drag the certificate onto the form and the portal reads the number, awarding body and expiry for you — check them, then Save. Set an <b>expiry date</b> so it's tracked and it warns you before it lapses."],
+          ["The <b>📊 Training matrix</b> tab shows the whole team against each competency at a glance; <b>🚗 Licence checks</b> tracks the monthly DVLA checks."],
+        ]},
+      ]},
+
       { title: "Office & admin", arts: [
         { icon: "📊", title: "Portal stats", perms: ["__fullOnly"], steps: [
           ["Open <b>📊 Stats</b> (Full-access only) for a live overview of the whole portal."],
@@ -275,7 +290,7 @@
           ["<b>My Hours</b> (sidebar or menu) shows your week: each day's clock times and total, plus the week total at the top. Use <b>← Prev / Next →</b> to look at other weeks.", "myhours.png"],
         ]},
         { icon: "⏱️", title: "Fill in your weekly timesheet", perms: ["EngTimesheet"], steps: [
-          ["Open <b>My Timesheet</b> from the menu. Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
+          ["Open <b>Timesheets</b> from the menu (it opens straight on your own week — the office sees everyone's and reaches yours with the <b>⏱️ My timesheet</b> button). Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
           ["Any deductions the office has set for you (30&nbsp;minutes travel each way, or a lunch break on longer days) are shown greyed on each day and taken off automatically — the green figure is your <b>paid</b> time."],
           ["If you claim <b>mileage</b>: just pick the site in the <b>job box</b> — the mileage claim is <b>added automatically</b> with the office’s preset miles for that site. Miles can’t be typed in; if a site shows <i>no preset</i>, ask the office to set its mileage. Tap ✕ on a claim to withdraw it. For anywhere unknown, tap <b>🧮</b> for an estimate, or type the miles. If your account has the 10-mile radius rule, the first and last 10 miles of each day are deducted automatically."],
           ["Everything <b>saves automatically as you type</b> — the bar at the bottom shows “Saved ✓”. Come back and change things any time until the week is invoiced."],
@@ -288,13 +303,13 @@
           ["All your past invoices are listed under the card — tap <b>Open</b> to view or re-download any of them."],
         ]},
         { icon: "🧾", title: "Engineer timesheets & invoices (admin)", perms: ["TimesheetAdmin"], steps: [
-          ["<b>Engineer Timesheets</b> shows everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
+          ["The <b>Timesheets</b> tile opens on <b>Engineer Timesheets</b> — everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
           ["<b>⚙️ Settings</b> is where you set <b>who gets the 30-minute travel deduction</b> (each way), <b>who has lunch deducted</b>, who gets <b>fuel</b> (the mileage switch), their rate (per hour or per day), pence per mile, home postcode and next invoice number. It also holds the company details printed on invoices."],
           ["<b>🗺️ Site mileage</b> holds the round-trip miles paid for each site (from base). <b>⚡ Work out missing</b> estimates every portal site's figure in one go; type over any value to correct it, and add one-off sites at the top. Engineers' mileage boxes fill from this list automatically."],
           ["<b>🧾 Invoices</b> lists every generated invoice — open the PDF or delete a wrong one (that unlocks the engineer's week and frees the number)."],
         ]},
         { icon: "💼", title: "The office timesheet (admin)", perms: ["OfficeTimesheet"], steps: [
-          ["<b>Office Timesheet</b> shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
+          ["Open <b>Timesheets</b> then <b>💼 Office timesheet</b> (top right). It shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
           ["A <b>running</b> tag means they're still clocked in — that open session isn't counted until they clock out (or you close it)."],
           ["<b>✏️ Edit</b> a person to correct clock times — the original automatic times are kept and shown struck through, so edits are always visible. Voided segments count as zero."],
           ["<b>Download CSV</b> exports the week for payroll; <b>Print</b> makes a paper copy."],
@@ -305,6 +320,8 @@
         { icon: "🚨", title: "The SLA job board (office)", perms: ["SLAAdmin"], steps: [
           ["Tap <b>SLA</b> — the job board opens straight away. This is the <b>SLA Admin</b> area (dashboard, scheduler, add/edit jobs); give a user the <b>SLA Admin</b> permission for it. Engineers with just <b>SLA</b> land on <b>My Jobs</b> and can only see their own work."],
           ["The <b>status chips</b> across the top (Pending, Scheduled, In Progress…) show live counts — tap one to filter. Use the search box for a ref, site or description."],
+          ["The <b>📄 EM/PAT</b> chip at the end of the row is a switch: lit = the EM light test and PAT certificate jobs are on the board with everything else; tap it to hide them during the yearly test run (the count on the chip always shows how many are hidden, and it remembers your choice on that device)."],
+          ["A <b>🙈</b> in a job's status pill means the engineer can't see the job yet — it's drip-fed (hidden until 5pm the evening before, a set time, or after their previous job — a queued job at the same site as the one just shown appears with it). Hover for when it's released. The same 🙈 shows on the block in the scheduler."],
           ["<b>👤 Send</b> on a job: tick <b>every engineer attending</b>, roll the smooth <b>start</b> and <b>finish</b> time wheels (finish auto-sets to an hour after start), and send. The job flips to <b>Scheduled</b> automatically and appears on each engineer's list."],
           ["Jobs with nobody on them show <b>Not Allocated</b> in red. Tick several rows and use <b>Mark selected as…</b> for bulk status changes."],
           ["Top buttons: <b>🗓️ Scheduler</b> (drag-and-drop day plan), <b>🗺️ Map</b> (all open jobs as pins — tap a pin for the job summary), <b>＋ Add Job</b>, <b>⚙️ Settings</b>."],
@@ -312,6 +329,7 @@
         { icon: "🗓️", title: "The SLA scheduler & map", perms: ["SLAAdmin"], steps: [
           ["The scheduler shows every engineer's day. <b>Drag a job</b> anywhere — the drop time updates for <b>everyone assigned to that job</b>. A double border means several engineers share it."],
           ["Jobs with no time or no engineer sit in the <b>Needs scheduling</b> tray — drag one onto an engineer's row to book it in."],
+          ["<b>Add Job</b> with an engineer and a date/time picked lands you straight here on that day with the new job flashing on their lane, so you can see it against the rest of their work. A job saved without an engineer or a time stays on the Add Job success panel as before."],
           ["A job's width is its booked duration (finish time). Tap a job to edit details, duration or the engineer list."],
           ["<b>🗺️ Map view</b> shows Pending / Scheduled / In Progress / On Hold jobs as coloured pins. Tap a pin for the summary and an <b>Open job</b> link."],
         ]},
@@ -395,10 +413,18 @@
           ["<b>Compliance</b> holds the client-specific compliance paperwork, grouped by client.", "compliance.png"],
           ["Pick the client, then follow the form for the work you're doing. Use <b>Other</b> for anything that doesn't fit a listed client."],
         ]},
+        { icon: "📋", title: "Concerto PPM list (the client's official schedule)", perms: ["Compliance", "SLAAdmin"], steps: [
+          ["Southern Co-op's Concerto system is the list we work to. Open <b>Concerto PPM list</b> (sidebar, or 🛠 Tools on the Southern Co-op chart) and <b>drop the Concerto export</b> on the page — either the <i>Open PPM jobs overdue</i> sheet or a <i>PPM schedule</i> sheet. It's read in your browser and imported; a row you've imported before is updated, never duplicated, and a row that has dropped off a later full list is marked <b>gone</b> (closed on Concerto)."],
+          ["Concerto rows carry only a reference (SR… site ref or AR… asset ref), so the page maps each one to a store. Most are known already; anything showing <b>Not mapped</b> gets a <b>Map store</b> button — pick the store once and every future export resolves it automatically."],
+          ["Each row is checked against the compliance chart: <b>Done our side</b> (the chart shows the test done but Concerto still lists it open — close it / send the completion date), <b>Due</b> / <b>Overdue</b> (both agree), <b>Dates differ</b> (Concerto's date is EARLIER than the chart's — the site stays covered, Concerto is just early), and the bright red <b>⛔ NO COVER — Concerto too late</b> (our certificate runs out BEFORE Concerto's planned date, so if the site were tested to Concerto's date it would have no valid certificate in between — the note under the pill says the two dates and how long the gap is, in plain English). On the 5 Year tab a no-cover site is also flagged automatically (🚩 Flagged, top of the list) with that note; the automatic flag can't be cleared by hand — it clears itself once the chart and Concerto agree (upload the new certificate, or get Concerto's date corrected). All dates on this page read DD/MM/YY. A booked EM/PAT job shows against the row."],
+          ["The <b>Overdue on our chart but not on Concerto</b> card is the reverse check — stores the chart says are due or overdue that Concerto hasn't raised an order for. <b>Dismiss</b> a row you've dealt with; <b>Export CSV</b> gives you the list to send back to Concerto."],
+          ["<b>5-year EICR pipeline (Schedule tab, 5 Year):</b> every site is a <b>case</b> for its current 5-year cycle with a checklist — job scheduled · test carried out · certificate reviewed · (if unsatisfactory: remedials quoted · order received · works completed · certificate updated) · certificate approved in EasyCert · uploaded to Concerto · test invoiced · remedials closed &amp; invoiced. The portal ticks what it can see (the electrical-test job, the certificate on file, the compliance-check outcome, a client order, the works job, a re-issued certificate); tap <b>▸ Details</b> to tick the rest — in any order — add a note per step, set the outcome or the engineer by hand, put a site <b>on hold</b> with a reason, and <b>close the cycle</b> once everything is invoiced. The stage chips at the top are the to-do list in plain words — <b>To check</b> (nobody has looked yet), <b>To book</b> (checked, due, needs a job), <b>Test due</b>, <b>To review</b>, <b>To quote</b>, <b>To approve</b>, <b>To upload</b>, <b>To invoice</b>… Tap <b>🚩</b> on any row to flag it with a comment (it jumps to the top and into the 🚩 Flagged chip until cleared); <b>Not due yet</b> hides sites years away, and the month strip shows the workload ahead. <b>Tested by</b> comes from the job's engineer (override if needed) and the pipeline card totals tests per engineer. A site with no job yet has a <b>➕ Raise the test job</b> link that opens Add Job pre-filled."],
+          ["<b>Schedule tab (5-year electrical tests):</b> drop Concerto's full <i>PPM schedule</i> sheet (every site, years ahead) and the tab lists each site by next due date. Filter the timeline by <b>year</b> or a <b>from/to</b> month range, and by <b>Released</b> — a row the client has released shows a green <b>Released</b> badge with its <b>PPM number</b> (and the value for office users); everything else reads <b>Not yet released</b> with Concerto's month marker. Each row cross-references what we've done at that site — the newest 5-year certificate on the chart, live jobs and <b>archived</b> jobs — and shows the date and who did it. The first time a PPM number appears it's logged with how many days before the due date it was released, so the release lead-time stats build up as you drop in each new export."],
+        ]},
         { icon: "⚡", title: "My Day (guided mode)", perms: ["StoryMode"], steps: [
           ["Your whole day runs from <b>My Day</b> — three tabs across the top: <b>1 · Start</b>, <b>2 · Jobs</b>, <b>3 · Finish</b>.", "myday.png"],
           ["<b>Start:</b> on Wednesdays complete the weekly vehicle check (tick each item, note any defects), enter your van's mileage, and tap <b>▶ Start my day</b> — your start time and location are recorded."],
-          ["<b>Jobs:</b> you get one job at a time — travel to site, complete the <b>risk assessment</b>, do the work, then close it with a note, photo and signature (or quote / order / hold if it can't be finished)."],
+          ["<b>Jobs:</b> you get one job at a time — travel to site, complete the <b>risk assessment</b>, do the work, then close it with a note, photo and signature (or quote / order / hold if it can't be finished). <b>Several jobs at the same store?</b> Start each one as you begin it — jobs at the same site can all be In Progress together, and the office sees each block change colour as you go."],
           ["<b>Finish:</b> end your day from the third tab to log your finish time and see your day's summary."],
           ["The floating <b>⚡ button</b> on any other page always brings you back to My Day."],
         ]},
@@ -524,7 +550,7 @@
         text:"In <b>Users Admin</b> you add staff and tick exactly what each person can see and do.", page:"users-admin.html" },
     ];
 
-    function esc(s){ return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+    function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;" }[c])); }
     function gsArr(){ try { const v = JSON.parse(localStorage.getItem("mlGsDone") || "[]"); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
     let GS_DONE = gsArr();
     let GS_HIDDEN = localStorage.getItem("mlGsHidden") === "1";

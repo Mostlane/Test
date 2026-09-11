@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>My Van Scores — Mostlane</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="auth.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -93,7 +93,7 @@
              <b>🏆 Top of the fleet — nice work!</b> Keep it up.
            </div>` : "";
       hero.innerHTML=`<div class="hero">
-        <div class="big" style="color:${colour(latest.score)}">${latest.score}</div>
+        <div class="big" style="color:${colour(latest.score)}">${esc(latest.score)}</div>
         <div><div class="lbl">Latest score · ${esc(band(latest.score))}</div>
           <div style="font-weight:600">${esc(fmtRange(latest.weekStart,latest.weekEnd))}</div>
           ${latest.reg?`<div class="muted" style="font-size:12px">${esc(latest.reg)}</div>`:""}
@@ -112,7 +112,7 @@
             : "";
           return `<div class="row">
             <div class="rng"><b>${esc(fmtRange(s.weekStart,s.weekEnd))}</b>${s.reg?`<div class="reg">${esc(s.reg)}</div>`:""}${rk}</div>
-            <div class="chip" style="background:${colour(s.score)}">${s.score}</div></div>`;
+            <div class="chip" style="background:${colour(s.score)}">${esc(s.score)}</div></div>`;
         }).join("");
         return `<div class="yr">${esc(y)}</div>${rows}`;
       }).join("");

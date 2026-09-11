@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=28"></script>
+  <script src="sla-jobedit.js?v=33"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -85,6 +85,9 @@
     .schip.active .n{background:rgba(255,255,255,0.25);color:#fff;}
     .schip.allchip{border-color:#ea7a23;}
     .schip.allchip.active{background:#ea7a23;}
+    .schip.certchip{border-color:#0e7490;border-style:dashed;}
+    .schip.certchip.active{border-style:solid;}
+    .statuspick .eye{font-size:13px;margin-right:2px;}
 
     /* ---- Toolbar ---- */
     .toolbar{
@@ -128,6 +131,11 @@
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
     .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
+    .visit-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#003466;background:#eef4fb;border:1px solid #cfe0f3;border-radius:999px;padding:1px 7px;vertical-align:middle;}
+    .client-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:1px 7px;vertical-align:middle;}
+    .cancel-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:999px;padding:1px 7px;vertical-align:middle;white-space:nowrap;}
+    .cancel-tag.soft{color:#7c2d12;background:#ffedd5;border-color:#fdba74;}
+    tr.cancelled td .sitename, .mjob.cancelled .mjob-title{text-decoration:line-through;color:#6b7280;}
     .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
     .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
     .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
@@ -225,7 +233,9 @@
     .wheel .item.sel{color:#0f172a;font-weight:700;}
     .wheelsep{font-size:18px;font-weight:700;color:#64748b;z-index:1;}
     #forbidden{display:none;margin:26px auto;max-width:480px;padding:20px;background:#fff;border-radius:12px;text-align:center;color:#b91c1c;border:1px solid #fca5a5;}
-  </style>
+    /* Priority 1 (emergency) — bold red so it can't be missed on the board */
+  tr.p1 .ref, tr.p1 .sitename, tr.p1 .pri, .mjob.p1 .ref, .mjob.p1 .mjob-title, .mjob.p1 .pri { color:#b91c1c !important; font-weight:700 !important; }
+</style>
 </head>
 <body>
 <div class="shell">
@@ -241,16 +251,20 @@
       </div>
       <div class="header-right">
         <a href="sla-scheduler.html" class="btn">🗓️ Scheduler</a>
+        <button type="button" id="askAiBtn" class="btn" style="background:#0b5cab;color:#fff;border-color:#0b5cab" title="Ask the AI assistant to raise a job">⚡ Ask AI</button>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
         <div class="toolwrap">
           <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
           <div class="toolmenu" id="toolsMenu" hidden>
+            <a href="engineers-live.html" class="btn" id="whereLink" style="display:none" title="Live: where every engineer is right now">📍 Where's everyone</a>
             <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
             <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
             <a href="you.html" class="btn" title="Your personal screen">👤 You</a>
             <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
+            <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
+            <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
             <a href="sla-settings.html" class="btn">⚙️ Settings</a>
@@ -271,10 +285,16 @@
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }
+        // "Where's everyone" has its own permission (SLA Admin / Full Access always see it).
+        if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.WhereEveryone)) {
+          var wl = document.getElementById("whereLink"); if (wl) wl.style.display = "";
+        }
         // Certificate review queue — office roles that can issue EM/PAT certs.
         if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance)) {
           var crl = document.getElementById("certReviewLink"); if (crl) crl.style.display = "";
+          var orl = document.getElementById("ordersLink"); if (orl) orl.style.display = "";
           var cjl = document.getElementById("certJobsLink"); if (cjl) cjl.style.display = "";
+          var prl = document.getElementById("pumpReviewLink"); if (prl) prl.style.display = "";
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
@@ -310,6 +330,7 @@
         <option value="Complete">Complete</option>
         <option value="Invoiced">Invoiced</option>
         <option value="Closed Jobs">Closed Jobs</option>
+        <option value="Cancelled">Cancelled</option>
       </select>
       <button class="btn small" id="bulkApply">Apply</button>
       <select id="priorityFilter">
@@ -318,6 +339,13 @@
         <option value="Priority 2">P2</option>
         <option value="Priority 3">P3</option>
         <option value="Priority 4">P4</option>
+      </select>
+      <!-- Client / site-type filter — narrows WITHIN whichever status chip is
+           active (e.g. Pending → Co-op only). Co-op combines its sub-types
+           (retail/els/els private/cobra) into one option, per Jamie. Options +
+           counts are rebuilt from the loaded jobs on every render. -->
+      <select id="clientFilter" title="Filter by client / site type">
+        <option value="all">All clients</option>
       </select>
       <div class="spacer"></div>
       <button class="btn small" id="resetBtn">Reset</button>
@@ -535,7 +563,8 @@ const BASE_STATUSES = [
   ["Order",       "#0d9488"],
   ["Complete",    "#84cc16"],
   ["Invoiced",    "#22c55e"],
-  ["Closed Jobs", "#701a75"]
+  ["Closed Jobs", "#701a75"],
+  ["Cancelled",   "#b91c1c"]
 ];
 /* Custom categories (office-defined) behave exactly like statuses. Loaded from
    GET /sla/categories and appended after the built-ins. */
@@ -559,11 +588,26 @@ async function loadCategories(){
 function doneCatNames(){ return CUSTOM_CATS.filter(c => c.done).map(c => c.name); }
 
 let allJobs = [];
+// 📄 EM/PAT chip: show/hide the certificate jobs (emTest/pat). Remembered per
+// device — the chip itself shows the state + count, so a hidden set is never silent.
+let showCertJobs = true;
+try{ showCertJobs = localStorage.getItem("slaMainCertJobs") !== "0"; }catch(e){}
+function isCertJob(j){ return !!(j && (j.emTest || j.pat)); }
+function boardJobs(){ return showCertJobs ? allJobs : allJobs.filter(j => !isCertJob(j)); }
+// 🙈 = the engineer can't see this job yet (release gated / queued / skipped).
+function hiddenFromEng(j){
+  const rv = j && j.releaseView; if(!rv) return false;
+  if(rv.hidden !== undefined) return !!rv.hidden;
+  return rv.mode === "afterPrev" || rv.mode === "skipped" || !!(rv.at && Date.parse(rv.at) > Date.now());
+}
+function eyeTag(j){ return hiddenFromEng(j) ? `<span class="eye" title="Hidden from the engineer — ${esc((j.releaseView && j.releaseView.label) || "")}">🙈</span> ` : ""; }
 let archiveMatches = [];        // archived jobs matching the current search
 let archiveSeq = 0;             // guards against out-of-order async archive results
 let cachedUsers = [];
 let activeStatus = "all";      // default board view (restoreFilters may override); "open" = everything not complete/closed/invoiced
 let activePriority = "all";
+let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
+let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
 let selected = new Set();
 let currentUpdateId = null, currentPdfJobId = null;
 let countdownTimerId = null;
@@ -585,8 +629,49 @@ function fmtSched(job){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
+// Priority 1 (emergency) jobs read bold red on the board — ref, site + P1 label.
+function isP1(j){ return !isProjectJob(j) && /1/.test(String((j&&j.priority)||"")); }
 // Projects carry no priority level and no SLA — blank both on the board.
 function isProjectJob(j){ return /^p\d/i.test(String((j&&j.siteCode)||"")) || /project/i.test(String((j&&(j.storeType||j.client))||"")); }
+
+/* ---- Client / site-type filter (within a status chip) ----
+   Buckets shown in the dropdown, in order. Co-op is ONE option that groups its
+   four sub-types (retail / els / els private / cobra) — that's how Jamie asked
+   for it ("Co-op (Retail,ELS,ELS Private, Cobra)"). "other" catches anything
+   unrecognised so nothing silently disappears from a filtered view. */
+const CLIENT_BUCKETS = [
+  ["coop",      "Co-op"],
+  ["chapplins", "Chapplins"],
+  ["fbc",       "Fareham (FBC)"],
+  ["wenzels",   "Wenzel's"],
+  ["projects",  "Projects"],
+  ["other",     "Other"]
+];
+// Map a raw storeType/client string to a bucket key.
+function normClientKey(raw){
+  const s = String(raw||"").toLowerCase().trim();
+  if(!s) return "";
+  if(/^(retail|els|cobra)\b|els[_ ]?private|co[-_ ]?op|coop|southern/.test(s)) return "coop";
+  if(/chapplin/.test(s)) return "chapplins";
+  if(/\bfbc\b|fareham/.test(s)) return "fbc";
+  if(/wenzel/.test(s)) return "wenzels";
+  if(/project/.test(s)) return "projects";
+  return "other";
+}
+// A job's bucket: project jobs first, then its own storeType/client, then a
+// lookup by site code against the loaded sites register (jobs from email intake
+// / the archive often carry only a code, no storeType).
+function clientBucketOf(j){
+  if(isProjectJob(j)) return "projects";
+  // The sites register's client is the authoritative bucket, and it's keyed by
+  // the real store code even when a Concerto job's ref/site name carries a
+  // ticket number. Fall back to a client/storeType on the job only when the
+  // site isn't in the register.
+  const code = String((j && j.siteCode) || "").replace(/^0+/,"");
+  let raw = (code && siteClientByCode[code]) || "";
+  if(!raw) raw = (j && (j.client || j.storeType)) || "";
+  return normClientKey(raw) || "other";
+}
 // EM 3-hour drain-down timer chip — mirrors the engineer job-list chip so the
 // office can see how long each running emergency-light discharge test has left.
 function fmtHM(ms){ var s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h+":"+String(m).padStart(2,"0"); }
@@ -604,7 +689,20 @@ function tickEmChips(){
     else { el.textContent="✅ lights due"; el.classList.add("em-done"); } }
 }
 setInterval(tickEmChips, 1000);
-function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status) || doneCatNames().includes(j.status); }
+function isClosed(j){ return ["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status) || doneCatNames().includes(j.status); }
+/* ❌ Cancelled pill — WHEN it was cancelled (+ who/why on hover). A client
+   cancellation that arrived after we'd already finished the job shows as a
+   softer "client cancelled" note instead (the job keeps its real status). */
+function fmtWhen(iso){ const d = parseDate(iso); return d ? d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : ""; }
+function cancelTag(j){
+  if(j.status === "Cancelled" && j.cancelledAt){
+    const tip = "Cancelled " + fmtShort(parseDate(j.cancelledAt)) + (j.cancelledBy ? " by " + j.cancelledBy : "") + (j.cancelReason ? " — " + j.cancelReason : "");
+    return ` <span class="cancel-tag" title="${esc(tip)}">❌ Cancelled ${esc(fmtWhen(j.cancelledAt))}</span>`;
+  }
+  const cc = j.clientCancelled;
+  if(cc && cc.at) return ` <span class="cancel-tag soft" title="${esc("Client cancelled " + fmtShort(parseDate(cc.at)) + (cc.reason ? " — " + cc.reason : "") + " (job was already " + j.status + ")")}">↩ client cancelled ${esc(fmtWhen(cc.at))}</span>`;
+  return "";
+}
 
 function slaBadge(job){
   if(isProjectJob(job)) return {text:"", cls:"sla-badge sla-none"};
@@ -648,14 +746,15 @@ async function gate(){
 }
 
 /* ============ data ============ */
-async function loadJobs(){
-  $("statusBar").textContent = "Loading jobs…";
+async function loadJobs(quiet){
+  if(!quiet) $("statusBar").textContent = "Loading jobs…";
   try{
     const res = await authFetch("/sla/jobs?t=" + Date.now());
     const json = await res.json();
-    // EM/PAT jobs live in their own area (cert-jobs.html) so they don't clog the
-    // board — keep them off the main dashboard.
-    allJobs = (Array.isArray(json) ? json : []).filter(j => !(j && (j.emTest || j.pat))).map(j => ({
+    // EM/PAT certificate jobs are ON the board (Sep 2026 — they used to be
+    // dropped here so the yearly test run didn't swamp it, which silently hid
+    // a scheduled job). The 📄 EM/PAT chip toggles them off instead.
+    allJobs = (Array.isArray(json) ? json : []).filter(Boolean).map(j => ({
       ...j,
       status: j.status || "Pending",
       assignedEngineers: (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
@@ -663,10 +762,10 @@ async function loadJobs(){
         : (j.assignedTo ? [j.assignedTo] : [])
     }));
     render();
-    fetchPhotoFlags();   // once per load; render() then just applies the cached set
+    if(!quiet) fetchPhotoFlags();   // once per load; render() then just applies the cached set (a quiet live refresh keeps it)
   }catch(err){
     console.error(err);
-    $("statusBar").textContent = "❌ Error loading jobs.";
+    if(!quiet) $("statusBar").textContent = "❌ Error loading jobs.";
   }
 }
 async function ensureUsers(){
@@ -693,7 +792,7 @@ function nameOf(username){
 function chipCounts(){
   const counts = {};
   STATUSES.forEach(([s]) => counts[s] = 0);
-  allJobs.forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
+  boardJobs().forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
   return counts;
 }
 function renderChips(){
@@ -702,7 +801,7 @@ function renderChips(){
   host.innerHTML = "";
   const openChip = document.createElement("button");
   openChip.className = "schip allchip" + (activeStatus === "open" ? " active" : "");
-  openChip.innerHTML = `Open <span class="n">${allJobs.filter(j => !isClosed(j)).length}</span>`;
+  openChip.innerHTML = `Open <span class="n">${boardJobs().filter(j => !isClosed(j)).length}</span>`;
   openChip.onclick = () => { activeStatus = "open"; render(); };
   host.appendChild(openChip);
   STATUSES.forEach(([s, c]) => {
@@ -715,17 +814,59 @@ function renderChips(){
   });
   const all = document.createElement("button");
   all.className = "schip allchip" + (activeStatus === "all" ? " active" : "");
-  all.innerHTML = `All <span class="n">${allJobs.length}</span>`;
+  all.innerHTML = `All <span class="n">${boardJobs().length}</span>`;
   all.onclick = () => { activeStatus = "all"; render(); };
   host.appendChild(all);
+  // 📄 EM/PAT toggle — lit = certificate jobs are on the board; greyed = hidden.
+  const certN = allJobs.filter(isCertJob).length;
+  const cert = document.createElement("button");
+  cert.className = "schip certchip" + (showCertJobs ? " active" : "");
+  cert.style.setProperty("--c", "#0e7490");
+  cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
+  cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
+  cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
+  host.appendChild(cert);
+}
+// Jobs in the currently-active status chip (ignoring priority/client/search) —
+// the scope the client dropdown counts against.
+function jobsInStatusScope(){
+  return boardJobs().filter(j => {
+    if(activeStatus === "open") return !isClosed(j);
+    if(activeStatus === "all") return true;
+    return j.status === activeStatus;
+  });
+}
+// Rebuild the client dropdown from the jobs in the active status, with a live
+// count beside each. Empty buckets are hidden (except the one currently picked),
+// and a pick that no longer exists in this status falls back to "All clients".
+function populateClientFilter(){
+  const sel = $("clientFilter");
+  if(!sel) return;
+  const scope = jobsInStatusScope();
+  const counts = {};
+  scope.forEach(j => { const b = clientBucketOf(j); counts[b] = (counts[b]||0)+1; });
+  const keep = activeClient;
+  sel.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "all"; optAll.textContent = `All clients (${scope.length})`;
+  sel.appendChild(optAll);
+  CLIENT_BUCKETS.forEach(([key,label]) => {
+    if(!counts[key] && key !== keep) return;
+    const o = document.createElement("option");
+    o.value = key; o.textContent = `${label} (${counts[key]||0})`;
+    sel.appendChild(o);
+  });
+  if([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  else { activeClient = "all"; sel.value = "all"; }
 }
 
 function filteredJobs(){
   const search = $("searchBox").value.trim().toLowerCase();
-  return allJobs.filter(j => {
+  return boardJobs().filter(j => {
     if(activeStatus === "open"){ if(isClosed(j)) return false; }
     else if(activeStatus !== "all" && j.status !== activeStatus) return false;
     if(activePriority !== "all" && (j.priority||"") !== activePriority) return false;
+    if(activeClient !== "all" && clientBucketOf(j) !== activeClient) return false;
     if(search){
       const blob = [j.helpdeskRef, j.id, j.description, j.siteName, j.siteCode, j.address,
                     j.status, (j.assignedEngineers||[]).join(" ")].join(" ").toLowerCase();
@@ -738,8 +879,9 @@ function filteredJobs(){
 }
 
 function render(){
-  persistFilters();   // remember search + status + priority so Back restores them
+  persistFilters();   // remember search + status + priority + client so Back restores them
   renderChips();
+  populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
   const list = filteredJobs();
   const tbody = $("jobsTbody");
   const cards = $("jobCards");
@@ -750,6 +892,13 @@ function render(){
   for(const g of allJobs){ if(g.groupId) groupCounts[g.groupId] = (groupCounts[g.groupId]||0)+1; }
   const groupTag = j => (j.groupId && groupCounts[j.groupId] > 1)
     ? ` <span class="grp-tag" title="Multi-engineer job — each engineer works their own day independently">👥 ${esc(j.groupLabel||"")}/${groupCounts[j.groupId]}</span>`
+    : "";
+  // Re-visit chain badge: this job is one of N visits raised against the same original.
+  // Client-raised jobs came in through a client portal login — flag them so the
+  // office can spot them at a glance.
+  const clientTag = j => j.raisedByClient ? ` <span class="client-tag" title="Raised by the client via their portal">🏢 Client</span>` : "";
+  const visitTag = j => (j.visitCount > 1)
+    ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
     : "";
 
   for(const j of list){
@@ -782,13 +931,15 @@ function render(){
 
     const tr = document.createElement("tr");
     tr.dataset.jobId = j.id;
+    if (isP1(j)) tr.classList.add("p1");
+    if (j.status === "Cancelled") tr.classList.add("cancelled");
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
+        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
-      <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
+      <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
         <div class="sitename">${name || site}</div>
         <div class="small muted">${addr}</div>
@@ -798,7 +949,7 @@ function render(){
         ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
       </td>
       <td class="nowrap small">${sched || "<span class='muted'>—</span>"}</td>
-      <td class="small">${engNames || `<span class="noalloc">Not Allocated</span>`}</td>
+      <td class="small">${engNames ? esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</td>
       <td>
         <div class="rowactions">
           <button class="btn small" data-action="update">✏️ Edit</button>
@@ -809,17 +960,17 @@ function render(){
     tbody.appendChild(tr);
 
     const card = document.createElement("div");
-    card.className = "mjob";
+    card.className = "mjob" + (isP1(j) ? " p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
-        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
-        <span class="small nowrap">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
+        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}${clientTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
+        <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
         ${emTimerChip(j)}
       </div>
@@ -933,11 +1084,23 @@ async function ensureSites(){
           lat: s.lat ?? null,
           lon: s.lon ?? null,
           storeType: s.storeType || s.client || "",
+          client: s.client || "",
           sharepointURL: s.sharepointURL || s.sharepoint || ""
         };
       })
       .filter(s => s.name)
       .sort((a,b) => a.name.localeCompare(b.name));
+    // Build a code → storeType/client lookup so the client filter can bucket
+    // jobs that carry only a site code (email-intake / archive jobs). Key is the
+    // code with leading zeros stripped, matching clientBucketOf's normalisation.
+    siteClientByCode = {};
+    sitesList.forEach(s => {
+      const code = String(s.code||"").replace(/^0+/,"");
+      // Use the site's CLIENT (retail/els/els_private/cobra/fbc/chapplins/…) —
+      // the taxonomy bucket — NOT storeType, which is a physical descriptor
+      // ("coffee", "convenience") that doesn't map to a client.
+      if(code && s.client) siteClientByCode[code] = s.client;
+    });
   }catch(e){ sitesList = []; }
 }
 function fillSiteSelect(filter){
@@ -1258,7 +1421,7 @@ async function catSaveChanges(){
 // survives leaving the page (into a job) and coming back, and across tabs. It is
 // cleared only when SLA is entered fresh from the menu (?reset=1).
 function persistFilters(){
-  try{ localStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority })); }catch(e){}
+  try{ localStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority, client: activeClient })); }catch(e){}
 }
 function restoreFilters(){
   try{
@@ -1267,6 +1430,7 @@ function restoreFilters(){
     if(typeof s.q === "string") $("searchBox").value = s.q;
     if(s.status) activeStatus = s.status;
     if(s.priority){ activePriority = s.priority; const pf = $("priorityFilter"); if(pf) pf.value = s.priority; }
+    if(s.client) activeClient = s.client;   // clientFilter options are rebuilt each render(), so just set the state
     return true;
   }catch(e){ return false; }
 }
@@ -1283,8 +1447,9 @@ function cameFromBackForward(){
 }
 // Clear search + status + priority back to the defaults and forget the saved set.
 function resetView(){
-  activeStatus = "all"; activePriority = "all";
+  activeStatus = "all"; activePriority = "all"; activeClient = "all";
   const pf = $("priorityFilter"); if(pf) pf.value = "all";
+  const cf = $("clientFilter"); if(cf) cf.value = "all";
   $("searchBox").value = ""; archiveMatches = [];
   resetSavedFilters();
   render();
@@ -1358,7 +1523,7 @@ function openStatusMenu(id, anchor){
   const menu = document.createElement("div");
   menu.className = "status-menu";
   menu.innerHTML = list.map(([s,c]) =>
-    `<button class="sm-item${s===job.status?" cur":""}" data-s="${esc(s)}"><span class="dot" style="background:${c}"></span>${esc(s)}${s===job.status?" ✓":""}</button>`
+    `<button class="sm-item${s===job.status?" cur":""}" data-s="${esc(s)}"><span class="dot" style="background:${esc(c)}"></span>${esc(s)}${s===job.status?" ✓":""}</button>`
   ).join("");
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -1431,6 +1596,7 @@ function init(){
     $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
   });
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
+  $("clientFilter").addEventListener("change", () => { activeClient = $("clientFilter").value; render(); });
   $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", resetView);
   { const jt = $("jobsTitle"); if(jt) jt.addEventListener("click", resetView); }
@@ -1448,6 +1614,35 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", async () => {
   init();
+
+// ── Live refresh (Sep 2026) ───────────────────────────────────────────────
+// The office needs job colours to move as engineers tap statuses, so the page
+// re-fetches every 60s while the tab is visible (and the moment it becomes
+// visible again). Skipped whenever something is mid-flight — a drag, any open
+// modal, the shared job editor, a focused text box, a bulk selection — so a
+// re-render never pulls a control out from under someone.
+(function(){
+  let busy = false;
+  function uiBusy(){
+    if(document.hidden) return true;
+    if(typeof dragState !== "undefined" && dragState && dragState.active) return true;
+    if(typeof selected !== "undefined" && selected && selected.size) return true;
+    if(Array.from(document.querySelectorAll(".modal-backdrop")).some(b => getComputedStyle(b).display !== "none")) return true;
+    const mb = document.getElementById("mljeBack"); if(mb && mb.classList.contains("show")) return true;
+    const a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && a.type !== "radio") return true;
+    return false;
+  }
+  async function tick(){
+    if(busy || uiBusy()) return;
+    busy = true;
+    try{ await loadJobs(true); }catch(e){}
+    busy = false;
+  }
+  window.mlLiveRefresh = tick;
+  setInterval(tick, 60000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) tick(); });
+})();
   // Per-user memory: ALWAYS restore the last search/status/priority (so Back from
   // a job — or a refresh — returns to the same filtered board) EXCEPT when SLA is
   // opened fresh from the menu, which carries ?reset=1 and clears back to "All".
@@ -1465,6 +1660,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
+    // Load the sites register in the background so the client filter can bucket
+    // jobs that carry only a site code; re-render once the map is ready so the
+    // dropdown counts are accurate. Never blocks the board.
+    ensureSites().then(() => { if(allJobs.length) render(); }).catch(()=>{});
     loadCategories().then(() => {
       populateBulkDropdown(); render();
       // Deep-link from ⚙️ Settings: open the Categories / Sheet-settings modal
@@ -1486,6 +1685,244 @@ window.addEventListener("DOMContentLoaded", async () => {
 window.addEventListener("pageshow", e => {
   if(e.persisted && restoreFilters()) render();
 });
+</script>
+
+<!-- ⚡ AI job assistant ─────────────────────────────────────────────────── -->
+<style>
+#aiAsk{position:fixed;inset:0;background:rgba(0,20,40,.45);display:none;z-index:9000;align-items:flex-end;justify-content:center;}
+#aiAsk.on{display:flex;}
+#aiPanel{background:#fff;width:100%;max-width:640px;height:88vh;max-height:88vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -6px 30px rgba(0,0,0,.3);}
+@media(min-width:700px){#aiAsk{align-items:center;} #aiPanel{border-radius:16px;height:80vh;}}
+#aiHead{background:#0b3d68;color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px;}
+#aiHead h3{margin:0;font-size:16px;flex:1;}
+#aiHead .sub{font-size:11px;opacity:.8;font-weight:400;display:block;margin-top:2px;}
+#aiHead button{background:transparent;border:0;color:#fff;font-size:20px;cursor:pointer;padding:2px 6px;}
+#aiLog{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;background:#f4f7fa;}
+.aibub{max-width:88%;margin:0 0 10px;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
+.aibub.me{background:#0b5cab;color:#fff;margin-left:auto;border-bottom-right-radius:4px;}
+.aibub.ai{background:#fff;color:#12324e;border:1px solid #dbe6ef;border-bottom-left-radius:4px;}
+.aibub.sys{background:#fff3cd;color:#7a5b00;border:1px solid #ffe08a;font-size:13px;}
+.aijob{background:#fff;border:1px solid #cfe0ee;border-left:4px solid #0b5cab;border-radius:10px;padding:10px 12px;margin:0 0 8px;font-size:13px;}
+.aijob.cardyes{border-left-color:#1a8f4c;background:#f2fbf5;}
+.aijob.cardno{opacity:.55;border-left-color:#b0b8c0;}
+.callbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #e2ecf3;flex-wrap:wrap;}
+.callnum{font-size:13px;font-weight:600;color:#0b5cab;text-decoration:none;}
+.calltogs{display:flex;gap:6px;}
+.ctog{border:1px solid #cfd9e2;background:#fff;border-radius:8px;padding:5px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#55707f;}
+.cardyes .cyes{background:#1a8f4c;color:#fff;border-color:#1a8f4c;}
+.cardno .cno{background:#c53434;color:#fff;border-color:#c53434;}
+.aijob b{color:#0b3d68;}
+.aijob .row{margin:2px 0;color:#33556e;}
+.aiwarn{color:#b45309;font-size:12.5px;margin:4px 0;}
+.aiacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.aiacts button{border:0;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+.aiacts .go{background:#1a8f4c;color:#fff;} .aiacts .no{background:#e6edf3;color:#33556e;}
+#aiInputRow{display:flex;gap:8px;padding:10px;border-top:1px solid #e2ecf3;background:#fff;align-items:flex-end;}
+#aiInput{flex:1;border:1px solid #cfd9e2;border-radius:10px;padding:10px;font:inherit;font-size:14px;resize:none;max-height:120px;}
+#aiSend{background:#0b5cab;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;}
+#aiSend:disabled{opacity:.5;}
+#aiRulesBtn{font-size:11px;background:rgba(255,255,255,.18);border-radius:8px;padding:4px 8px;}
+</style>
+<div id="aiAsk">
+  <div id="aiPanel">
+    <div id="aiHead">
+      <div style="flex:1"><h3>⚡ Job assistant</h3><span class="sub" id="aiTier"></span></div>
+      <button type="button" id="aiRulesBtn" style="display:none">✎ Rules</button>
+      <button type="button" id="aiClose" aria-label="Close">✕</button>
+    </div>
+    <div id="aiLog"></div>
+    <div id="aiInputRow">
+      <textarea id="aiInput" rows="1" placeholder="Ask anything — jobs, sites, compliance, vehicles — or raise/assign a job"></textarea>
+      <button type="button" id="aiSend">Send</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var box=$("aiAsk"), log=$("aiLog"), input=$("aiInput"), sendBtn=$("aiSend"), openBtn=$("askAiBtn"),
+      rulesBtn=$("aiRulesBtn"), tierEl=$("aiTier");
+  if(!openBtn) return;
+  var hist=[], full=false, greeted=false;
+  function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
+  function isFull(){ return String(perms().FullAccess||"").toLowerCase()==="yes"; }
+  // Degrade Markdown the phone chat can't render: pipe tables → " · " lines,
+  // #/## headings → bold. MLUI.rich then handles **bold** / _italic_ / "- " bullets.
+  function fmtReply(t){
+    var lines=String(t==null?"":t).split("\n"), hdrDone=false, out=[];
+    for(var i=0;i<lines.length;i++){
+      var ln=lines[i], m=ln.match(/^\s*\|(.+)\|\s*$/);
+      if(m){
+        var cells=m[1].split("|").map(function(c){return c.trim();});
+        if(cells.every(function(c){return c===""||/^:?-{2,}:?$/.test(c);})) continue; // separator row
+        cells=cells.filter(function(c){return c!=="";});
+        if(!hdrDone){ hdrDone=true; out.push("**"+cells.join(" · ")+"**"); }
+        else out.push("- "+cells.join(" · "));
+        continue;
+      }
+      hdrDone=false;
+      var h=ln.match(/^\s*#{1,6}\s+(.*)$/);
+      out.push(h?("**"+h[1].trim()+"**"):ln);
+    }
+    return out.join("\n");
+  }
+  function rich(t){ try{ return (window.MLUI&&MLUI.rich)?MLUI.rich(String(t)):esc(t); }catch(e){ return esc(t); } }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  function scroll(){ log.scrollTop=log.scrollHeight; }
+  function bubble(cls,html){ var d=document.createElement("div"); d.className="aibub "+cls; d.innerHTML=html; log.appendChild(d); scroll(); return d; }
+  function fmtDate(d){ if(!d) return "no date yet (set on the board)"; try{ return new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }catch(e){ return d; } }
+  function fmtDur(m){ m=+m||0; var h=Math.floor(m/60),mm=m%60; return h?(mm?h+"h "+mm+"m":h+"h"):(mm+"m"); }
+  function addMins(hm,mins){ if(!hm) return ""; var p=String(hm).split(":"); var t=(+p[0])*60+(+p[1])+(+mins); t=((t%1440)+1440)%1440; return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0"); }
+  function fmtJobTime(x){
+    if(!x.date) return "📅 No date yet — set on the board";
+    if(!x.startTime) return "📅 "+fmtDate(x.date);
+    var end = x.durationMinutes? addMins(x.startTime,x.durationMinutes):"";
+    var s = "📅 "+fmtDate(x.date)+" · 🕘 "+x.startTime+(end?"–"+end:"");
+    if(x.emTest) s += " · 🔦 lights check ~"+addMins(x.startTime,165);
+    return s;
+  }
+
+  function open(){
+    full=isFull();
+    tierEl.textContent = full ? "Full Access · relaxed chat — you can also tweak the rules"
+                              : "Ask me to raise or manage a job";
+    rulesBtn.style.display = full ? "" : "none";
+    box.classList.add("on");
+    if(!greeted){ greeted=true; bubble("ai", rich(full
+      ? "Hi — ask me anything across the portal (jobs, sites, compliance due dates, vehicles, engineers) or tell me a job to raise, assign or reschedule. I'll look it up and confirm before anything changes. You can also ask me to adjust the house rules."
+      : "Hi — ask me about jobs, sites, compliance or vehicles, or tell me a job to raise/assign. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**, or **when is the EICR due at store 649?**")); }
+    setTimeout(function(){ input.focus(); }, 50);
+  }
+  function close(){ box.classList.remove("on"); }
+  openBtn.addEventListener("click", open);
+  $("aiClose").addEventListener("click", close);
+  box.addEventListener("click", function(e){ if(e.target===box) close(); });
+  input.addEventListener("input", function(){ input.style.height="auto"; input.style.height=Math.min(120,input.scrollHeight)+"px"; });
+  input.addEventListener("keydown", function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } });
+  sendBtn.addEventListener("click", send);
+
+  function busy(on){ sendBtn.disabled=on; sendBtn.textContent=on?"…":"Send"; }
+
+  async function send(){
+    var msg=input.value.trim(); if(!msg) return;
+    input.value=""; input.style.height="auto";
+    bubble("me", esc(msg));
+    var thinking=bubble("ai","<i style='opacity:.6'>thinking…</i>");
+    busy(true);
+    try{
+      var r=await authFetch("/ai/assistant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:hist})});
+      var j=await r.json();
+      thinking.remove();
+      hist.push({role:"user",text:msg});
+      render(j);
+    }catch(e){ thinking.remove(); bubble("sys","⚠️ Couldn't reach the assistant. Try again."); }
+    busy(false);
+  }
+
+  function render(j){
+    if(!j||!j.ok){ bubble("sys","⚠️ "+((j&&j.error)||"Something went wrong.")); return; }
+    if(j.kind==="reply"||j.kind==="ask"){
+      var txt=j.kind==="ask"?j.question:j.text;
+      bubble("ai", rich(fmtReply(txt))); hist.push({role:"assistant",text:txt}); return;
+    }
+    if(j.kind==="rules"){
+      bubble("ai", rich("**Proposed rule change:** "+(j.summary||"")));
+      var d=bubble("ai","<pre style='white-space:pre-wrap;font:inherit;font-size:12.5px;max-height:200px;overflow:auto;margin:0'>"+esc(j.proposed)+"</pre>");
+      var acts=document.createElement("div"); acts.className="aiacts";
+      acts.innerHTML="<button class='go'>💾 Save these rules</button><button class='no'>Cancel</button>";
+      d.appendChild(acts);
+      acts.querySelector(".go").onclick=async function(){
+        acts.querySelector(".go").disabled=true;
+        try{ var r=await authFetch("/ai/jobrules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rules:j.proposed,logNote:j.summary})}); var res=await r.json();
+          if(res.ok){ acts.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ Rules updated</span>"; } else acts.innerHTML="<span class='aiwarn'>Couldn't save.</span>";
+        }catch(e){ acts.innerHTML="<span class='aiwarn'>Couldn't save.</span>"; }
+      };
+      acts.querySelector(".no").onclick=function(){ acts.remove(); };
+      hist.push({role:"assistant",text:"(proposed a rule change)"}); return;
+    }
+    if(j.kind==="preview"){
+      var jobs=j.jobs||[];
+      if(!jobs.length){ bubble("sys","I didn't have the job details to show cards. Tell me the sites/engineer/day (e.g. \"raise EM & PAT for 0247, 0014, 0019, 0008 for Ryan tomorrow\") and I'll show cards with a Create button."); return; }
+      if(j.summary) bubble("ai", rich(fmtReply(j.summary)));
+      var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
+      var htmlp="";
+      jobs.forEach(function(x,i){
+        var assign = x.action==="assign";
+        var head = assign ? ("🔁 <b>Assign</b> · "+esc(x.title||x.siteName||x.siteCode))
+                          : ("<b>"+esc(x.typeLabel||x.jobType)+"</b> · "+esc(x.siteCode)+" "+esc(x.siteName));
+        var tel = x.telephone?String(x.telephone):"";
+        htmlp+="<div class='aijob' data-idx='"+i+"'>"+head+
+          "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+"</div>"+
+          "<div class='row'>"+esc(fmtJobTime(x))+(x.durationMinutes?(" · ⏱ "+esc(fmtDur(x.durationMinutes))):"")+(x.priority?(" · 🏷 "+esc(x.priority)):"")+"</div>"+
+          (x.windowNote?("<div class='row' style='font-size:11.5px;color:#8593a0'>🕒 "+esc(x.windowNote)+"</div>"):"")+
+          (assign?("<div class='row' style='font-size:11.5px;color:#8593a0'>was: "+esc((x.currentEngineers&&x.currentEngineers.length?x.currentEngineers.join(", "):"unassigned"))+(x.currentStatus?(" · "+esc(x.currentStatus)):"")+"</div>"):"")+
+          (x.description?("<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description)+"</div>"):"")+
+          ((x.warn&&x.warn.length)?("<div class='aiwarn'>⚠️ "+x.warn.map(esc).join(" · ")+"</div>"):"")+
+          // Call-ahead checklist row
+          "<div class='callbar'>"+
+            (tel?("<a class='callnum' href='tel:"+esc(tel.replace(/\s/g,''))+"'>📞 "+esc(tel)+"</a>"):"<span class='callnum' style='color:#b0b8c0'>no number</span>")+
+            "<span class='calltogs'><button type='button' class='ctog cyes' data-idx='"+i+"' data-call='yes'>✓ Yes</button><button type='button' class='ctog cno' data-idx='"+i+"' data-call='no'>✗ No</button></span>"+
+          "</div>"+
+          "</div>";
+      });
+      if((j.warnings||[]).length) htmlp+="<div class='aiwarn'>⚠️ "+j.warnings.map(esc).join("<br>")+"</div>";
+      wrap.innerHTML=htmlp;
+      var allAssign=jobs.every(function(x){return x.action==="assign";});
+      var verb=allAssign?"Assign":(jobs.some(function(x){return x.action==="assign";})?"Apply":"Create");
+      var acts=document.createElement("div"); acts.className="aiacts";
+      acts.innerHTML="<button class='go'></button><button class='no'>Discard</button>";
+      wrap.appendChild(acts); log.appendChild(wrap); scroll();
+      var goBtn=acts.querySelector(".go");
+      function included(){ var anyYes=jobs.some(function(x){return x._call==="yes";}); return jobs.filter(function(x){ return anyYes? x._call==="yes" : x._call!=="no"; }); }
+      function updateGo(){ var inc=included(); var anyYes=jobs.some(function(x){return x._call==="yes";}); goBtn.textContent="✓ "+verb+" "+inc.length+(anyYes?" confirmed":"")+" job"+(inc.length!==1?"s":""); goBtn.disabled=inc.length===0; }
+      updateGo();
+      // Tick Yes/No per site as you call round.
+      wrap.addEventListener("click", function(e){ var b=e.target.closest(".ctog"); if(!b) return; var i=+b.dataset.idx, v=b.dataset.call; jobs[i]._call = (jobs[i]._call===v?null:v); var card=wrap.querySelector(".aijob[data-idx='"+i+"']"); if(card){ card.classList.toggle("cardyes", jobs[i]._call==="yes"); card.classList.toggle("cardno", jobs[i]._call==="no"); } updateGo(); });
+      goBtn.onclick=async function(){
+        var toCreate=included(); if(!toCreate.length) return;
+        goBtn.disabled=true; goBtn.textContent="Creating…";
+        try{ var r=await authFetch("/ai/assistant/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobs:toCreate})}); var res=await r.json();
+          if(res.ok){
+            var okc=(res.created||[]).filter(function(c){return !c.error;});
+            var errc=(res.created||[]).filter(function(c){return c.error;});
+            acts.innerHTML="";
+            var done=document.createElement("div");
+            var vb=okc.every(function(c){return c.action==="assign";})?"Assigned":"Done —";
+            done.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ "+vb+" "+okc.length+" job"+(okc.length!==1?"s":"")+".</span> "+
+              okc.map(function(c){return "<a href='job-view.html?jobId="+encodeURIComponent(c.id)+"' style='color:#0b5cab'>"+esc(c.ref)+"</a>";}).join(" · ")+
+              (errc.length?("<div class='aiwarn'>"+errc.length+" failed: "+errc.map(function(c){return esc(c.site+": "+c.error);}).join("; ")+"</div>"):"");
+            wrap.appendChild(done);
+            hist.push({role:"assistant",text:"(created "+okc.length+" job(s))"});
+            try{ if(typeof load==="function") load(); }catch(e){}
+          } else acts.innerHTML="<span class='aiwarn'>Couldn't create the jobs.</span>";
+        }catch(e){ acts.innerHTML="<span class='aiwarn'>Couldn't create the jobs.</span>"; }
+      };
+      acts.querySelector(".no").onclick=function(){ acts.remove(); bubble("ai","Okay, discarded. Tell me what to change."); hist.push({role:"assistant",text:"(draft discarded)"}); };
+      hist.push({role:"assistant",text:"(proposed "+jobs.length+" job draft(s) for confirmation)"});
+      return;
+    }
+    bubble("sys","Unexpected reply.");
+  }
+
+  // Rules editor (Full Access)
+  rulesBtn.addEventListener("click", async function(){
+    var r=await authFetch("/ai/jobrules"); var j=await r.json();
+    if(!j.ok||!j.canEdit){ bubble("sys","Rules are read-only for you."); return; }
+    var ov=document.createElement("div"); ov.style.cssText="position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:9100;display:flex;align-items:center;justify-content:center;padding:14px;";
+    ov.innerHTML="<div style='background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden'>"+
+      "<div style='background:#0b3d68;color:#fff;padding:12px 14px;font-weight:600'>House rules — the assistant follows these</div>"+
+      "<textarea id='aiRulesTA' style='flex:1;min-height:340px;border:0;padding:14px;font:inherit;font-size:13px;resize:none'></textarea>"+
+      "<div style='display:flex;gap:8px;padding:10px;border-top:1px solid #e2ecf3'><button id='aiRulesSave' style='background:#1a8f4c;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:600'>💾 Save</button><button id='aiRulesCancel' style='background:#e6edf3;border:0;border-radius:8px;padding:9px 16px'>Cancel</button></div></div>";
+    document.body.appendChild(ov);
+    ov.querySelector("#aiRulesTA").value=j.rules||"";
+    ov.querySelector("#aiRulesCancel").onclick=function(){ ov.remove(); };
+    ov.querySelector("#aiRulesSave").onclick=async function(){
+      var v=ov.querySelector("#aiRulesTA").value;
+      try{ var rr=await authFetch("/ai/jobrules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rules:v,logNote:"Manual edit"})}); var res=await rr.json();
+        if(res.ok){ ov.remove(); bubble("sys","✓ Rules saved."); } else alert("Couldn't save.");
+      }catch(e){ alert("Couldn't save."); }
+    };
+  });
+})();
 </script>
 </body>
 </html>

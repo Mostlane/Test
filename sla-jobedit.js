@@ -70,7 +70,7 @@
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function slug(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
-  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs"];
+  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs", "Cancelled"];
   let STATUSES = BASE_STATUSES.slice();   // built-ins + custom categories (loaded lazily)
   let catsLoaded = false;
   async function loadCats() {
@@ -172,6 +172,18 @@
   .mlje-msg.ok{color:#166534;}
   `;
 
+  // Plausible schedule window (matches the worker's badScheduleDate): a
+  // year outside now−1…now+3 is a typo, never a real booking.
+  const MLJE_YR = new Date().getFullYear();
+  const MLJE_DMIN = (MLJE_YR - 1) + "-01-01", MLJE_DMAX = (MLJE_YR + 3) + "-12-31";
+  function mljeBadDate(iso, label) {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return label + " isn't a valid date.";
+    const y = new Date(t).getFullYear();
+    if (y < MLJE_YR - 1 || y > MLJE_YR + 3) return label + " has the year " + y + " — check the date.";
+    return null;
+  }
   const HTML = `
   <div class="mlje-modal" role="dialog" aria-modal="true">
     <h2 id="mljeTitle">Edit job</h2>
@@ -217,11 +229,11 @@
 
         <label for="mljeSchedDate">Scheduled date &amp; times</label>
         <div class="mlje-3">
-          <input id="mljeSchedDate" type="date" aria-label="Scheduled date">
+          <input id="mljeSchedDate" type="date" aria-label="Scheduled date" min="${MLJE_DMIN}" max="${MLJE_DMAX}">
           <input id="mljeSchedStart" type="time" step="300" aria-label="Start time">
           <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
         </div>
-        <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (15&nbsp;min / 1&nbsp;day steps). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
+        <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (5&nbsp;min / 1&nbsp;day steps; hold Shift for 1&nbsp;hour). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
 
         <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
         <select id="mljeDuration" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;">
@@ -253,7 +265,7 @@
           <label class="mlje-visopt"><input type="radio" name="mljeVis" value="dayBefore"> <span><b>5pm the day before</b><small>Hidden until 17:00 the evening before the scheduled day.</small></span></label>
           <label class="mlje-visopt"><input type="radio" name="mljeVis" value="at"> <span><b>At a set date &amp; time…</b><small>You choose exactly when it appears.</small></span></label>
           <input type="datetime-local" id="mljeVisAt" style="display:none;margin:4px 0 4px 30px;width:calc(100% - 30px);">
-          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one.</small></span></label>
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one. Queued jobs at the same site as the one just shown appear with it.</small></span></label>
         </div>
 
         <details class="mlje-coll" id="mljeEngRelWrap" style="display:none;margin-top:10px;border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px;background:#fff;">
@@ -403,7 +415,7 @@
       else { const o = es[mljeNorm(u)]; if (o && o.scheduledAt) { const a = new Date(o.scheduledAt); if (!isNaN(a)) { d = a.getFullYear() + "-" + p2(a.getMonth() + 1) + "-" + p2(a.getDate()); s = p2(a.getHours()) + ":" + p2(a.getMinutes()); } if (o.scheduledEnd) { const b = new Date(o.scheduledEnd); if (!isNaN(b)) f = p2(b.getHours()) + ":" + p2(b.getMinutes()); } } }
       return '<div class="mlje-es-row" data-user="' + esc(u) + '" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">'
         + '<span style="flex:0 0 120px;font-size:13px;font-weight:600;">' + esc(engNameFor(u)) + '</span>'
-        + '<input class="es-d" type="date" value="' + esc(d) + '" style="flex:1;min-width:130px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + '<input class="es-d" type="date" min="' + MLJE_DMIN + '" max="' + MLJE_DMAX + '" value="' + esc(d) + '" style="flex:1;min-width:130px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '<input class="es-s" type="time" step="300" value="' + esc(s) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '<span style="font-size:12px;color:#64748b;">to</span>'
         + '<input class="es-f" type="time" step="300" value="' + esc(f) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
@@ -456,7 +468,7 @@
       e.preventDefault();
       const dir = e.deltaY < 0 ? 1 : -1;
       if (el.type === "time") {
-        el.value = stepTime(el.value, dir * (e.shiftKey ? 60 : 15), 8 * 60);
+        el.value = stepTime(el.value, dir * (e.shiftKey ? 60 : 5), 8 * 60);
       } else if (el.type === "date") {
         const d = el.value ? new Date(el.value + "T12:00:00") : new Date();
         d.setDate(d.getDate() + dir);
@@ -464,7 +476,7 @@
       } else if (el.type === "datetime-local") {
         const d = el.value ? new Date(el.value) : new Date();
         if (!isNaN(d)) {
-          d.setMinutes(d.getMinutes() + dir * (e.shiftKey ? 60 : 15));
+          d.setMinutes(d.getMinutes() + dir * (e.shiftKey ? 60 : 5));
           el.value = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
         }
       } else if (el.type === "number") {
@@ -822,6 +834,14 @@
       const arr = Object.values(engSchedule).filter(x => x.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt));
       if (arr[0]) { scheduledAt = arr[0].scheduledAt; if (!scheduledEnd) scheduledEnd = arr[0].scheduledEnd; }
     }
+    // A mistyped year (2006 for 2026) once slipped through here and the job
+    // vanished from every dated view. Refuse anything outside a plausible window
+    // — the worker enforces the same rule, this just says so before the save.
+    {
+      const badDate = mljeBadDate(scheduledAt, "Scheduled date") || mljeBadDate(scheduledEnd, "Finish")
+        || Object.entries(engSchedule).map(([k, v]) => mljeBadDate(v.scheduledAt, engNameFor(k) + "'s date") || mljeBadDate(v.scheduledEnd, engNameFor(k) + "'s finish")).find(Boolean);
+      if (badDate) { msg.textContent = "⚠ " + badDate; msg.className = "mlje-msg err"; $("mljeSave").disabled = false; return; }
+    }
 
     // Visibility ("release"): null = visible now, else the chosen mode.
     let release = null;
@@ -849,9 +869,18 @@
       });
     }
 
+    // Cancelling from the editor: ask WHY once (optional) — it's stamped on the job
+    // with the time + your name and shown on the board pill / job card.
+    let cancelReason;
+    if ($("mljeStatus").value === "Cancelled" && String(currentJob.status || "") !== "Cancelled") {
+      const why = window.prompt("Cancelling this job — reason? (optional, shown on the job)", "");
+      if (why === null) { $("mljeSave").disabled = false; return; }
+      cancelReason = String(why || "").trim() || undefined;
+    }
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
+      cancelReason,
       release: release,
       engRelease: engRelease,   // per-engineer overrides (full replace; {} clears)
       helpdeskRef: $("mljeRef").value.trim() || undefined,
@@ -895,7 +924,7 @@
       const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
-      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (!r.ok) { let t = ""; try { t = (await r.json()).error || ""; } catch (e) {} throw new Error(t || ("HTTP " + r.status)); }
       const saved = await r.json();
       msg.textContent = "✅ Saved.";
       msg.className = "mlje-msg ok";
@@ -1027,19 +1056,65 @@
     });
   }
 
+  // Recurring-series delete choice: just this day, or the whole series?
+  // Returns "one" | "series" | "cancel".
+  function seriesDeleteChoice(jobs, curId, ref) {
+    return new Promise(resolve => {
+      const dfmt = iso => { try { return new Date(iso).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }); } catch { return iso || ""; } };
+      const cur = jobs.find(j => j.id === curId) || {};
+      const curDate = cur.scheduledAt ? dfmt(cur.scheduledAt) : "this day";
+      const rows = jobs.map(j => '<li style="margin:2px 0;' + (j.id === curId ? "font-weight:700;color:#0f2438;" : "color:#475569;") + '">'
+        + (j.scheduledAt ? dfmt(j.scheduledAt) : "unscheduled")
+        + (j.id === curId ? " ← this one" : "") + '</li>').join("");
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+      const btn = "padding:11px 14px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;text-align:left;";
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:82vh;overflow:auto;">'
+        + '<h3 style="margin:0 0 6px;color:#0f2438;font-size:17px;">🔁 This is a recurring job</h3>'
+        + '<p style="margin:0 0 8px;color:#334;font-size:13.5px;"><b>' + esc(ref) + '</b> runs across <b>' + jobs.length + ' days</b>. What do you want to delete?</p>'
+        + '<ul style="margin:0 0 12px 18px;padding:0;font-size:13px;">' + rows + '</ul>'
+        + '<div style="display:flex;flex-direction:column;gap:8px;">'
+        + '<button data-c="one" style="' + btn + 'background:#0f2438;color:#fff;border-color:#0f2438;">Just this day — ' + esc(curDate) + '</button>'
+        + '<button data-c="series" style="' + btn + 'background:#fff;color:#b00020;border-color:#f3c2c9;">Delete the whole series — all ' + jobs.length + ' days</button>'
+        + '<button data-c="cancel" style="' + btn + 'background:#fff;color:#334;text-align:center;">Cancel</button>'
+        + '</div></div>';
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("[data-c]");
+        if (b) { document.body.removeChild(ov); resolve(b.dataset.c); }
+        else if (e.target === ov) { document.body.removeChild(ov); resolve("cancel"); }
+      });
+      document.body.appendChild(ov);
+    });
+  }
+
   async function del() {
     if (!currentJob) return;
     const ref = currentJob.helpdeskRef || currentJob.id;
-    if (!confirm(`Delete job ${ref} completely?\n\nThis permanently removes the job, its history and its photos/files. It cannot be undone.`)) return;
+    // Recurring series? Offer "just this day" vs "the whole series" so deleting
+    // one day never silently removes the others.
+    let series = null;
+    try {
+      const sr = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id) + "/series").then(r => r.json()).catch(() => null);
+      if (sr && sr.seriesId && Array.isArray(sr.jobs) && sr.jobs.length > 1) series = sr.jobs;
+    } catch (e) {}
+    let scope = "one";
+    if (series) {
+      const choice = await seriesDeleteChoice(series, currentJob.id, ref);
+      if (choice === "cancel") return;
+      scope = choice;
+    } else {
+      if (!confirm(`Delete job ${ref} completely?\n\nThis permanently removes the job, its history and its photos/files. It cannot be undone.`)) return;
+    }
     const msg = $("mljeMsg");
     msg.className = "mlje-msg";
     msg.textContent = "Deleting…";
     $("mljeDelete").disabled = true;
     try {
-      const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), { method: "DELETE" });
+      const q = scope === "series" ? "?scope=series" : "";
+      const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id) + q, { method: "DELETE" });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
-      msg.textContent = "🗑 Deleted.";
+      msg.textContent = scope === "series" ? ("🗑 Deleted " + (d.count || series.length) + " days.") : "🗑 Deleted.";
       msg.className = "mlje-msg ok";
       if (onDeletedCb) { try { onDeletedCb(null); } catch (e) {} }
       closeTimer = setTimeout(close, 400);

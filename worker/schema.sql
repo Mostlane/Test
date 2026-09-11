@@ -847,3 +847,44 @@ CREATE TABLE IF NOT EXISTS health_events (
   at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_health_at ON health_events (tenant_id, at);
+
+-- Concerto PPM list (routes/concerto.js): the client's official planned-maintenance
+-- rows imported from their spreadsheet exports, reconciled against the compliance
+-- chart. concerto_refs maps a Concerto reference (SRnnnnn site ref / ARnnnnnn
+-- asset ref) to a store number. Both self-migrate.
+CREATE TABLE IF NOT EXISTS concerto_ppm (
+  id TEXT NOT NULL, tenant_id TEXT NOT NULL, kind TEXT, order_date TEXT, order_value REAL,
+  description TEXT, ppm_type TEXT, period TEXT, asset_ref TEXT, sr_ref TEXT,
+  store_code TEXT, site_name TEXT, supplier TEXT, target_response TEXT, actual_response TEXT,
+  planned_date TEXT, last_date TEXT, status TEXT, note TEXT, source_file TEXT,
+  first_seen_at TEXT, last_seen_at TEXT, gone_at TEXT, updated_at TEXT,
+  -- schedule-export columns (self-migrating ALTERs): next due date, the client's
+  -- RELEASED order (Order nr. PPMnnnn + value + when we first saw it), Concerto
+  -- status, the chart's month marker (ORD01/AM01/01), discipline, frequency, block
+  next_date TEXT, order_nr TEXT, ordered_value REAL, released_at TEXT,
+  concerto_status TEXT, month_marker TEXT, discipline TEXT, frequency_months INTEGER, block TEXT,
+  PRIMARY KEY (tenant_id, id)
+);
+-- Append-only event log per schedule row (imported / released / next_date_changed /
+-- gone) — the raw material for release-lead-time stats.
+CREATE TABLE IF NOT EXISTS concerto_log (
+  tenant_id TEXT NOT NULL, ppm_id TEXT NOT NULL, event TEXT, detail TEXT, at TEXT
+);
+CREATE TABLE IF NOT EXISTS concerto_refs (
+  tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
+  kind TEXT, source TEXT, updated_at TEXT,
+  PRIMARY KEY (tenant_id, ref)
+);
+
+-- Concerto 5-year EICR pipeline: one CASE per schedule row per 5-year cycle.
+-- `steps` = JSON of MANUAL ticks {stepKey:{done,at,by,note}}; every step the
+-- portal can see (job, test, cert, compliance check, order, works job) is
+-- derived live in routes/concerto.js deriveCase() and never stored here.
+CREATE TABLE IF NOT EXISTS concerto_cases (
+  tenant_id TEXT NOT NULL, id TEXT NOT NULL,          -- id = <ppm_id>@<cycle_due>
+  ppm_id TEXT NOT NULL, store_code TEXT, ppm_type TEXT,
+  cycle_due TEXT, outcome TEXT, engineer TEXT, steps TEXT,
+  hold_reason TEXT, held_at TEXT, held_by TEXT,
+  opened_at TEXT, closed_at TEXT, closed_by TEXT, updated_at TEXT, updated_by TEXT,
+  PRIMARY KEY (tenant_id, id)
+);

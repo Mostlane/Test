@@ -97,7 +97,15 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/doc" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("staffdocs/")) return jr({ error: "Bad key" }, headers, 400);
-    if (!sess && !(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
+    // A signed link (minted by an authorised listing) always passes. A bare
+    // session may only open its OWN personal docs or the company docs — never
+    // another person's file by guessing its key — unless it's Full-Access.
+    const signed = await verifyFileSig(env, key, q);
+    if (!signed) {
+      if (!sess) return jr({ error: "Link expired or invalid" }, headers, 403);
+      const own = String(key).startsWith(personalPrefix(tenantId, sess.user.username)) || String(key).startsWith(companyPrefix(tenantId));
+      if (!own && !(await isFull(env, tenantId, sess))) return jr({ error: "Forbidden" }, headers, 403);
+    }
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {

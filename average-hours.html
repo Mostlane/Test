@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
 <meta charset="UTF-8" />
 <title>Time Analysis – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -195,6 +195,7 @@ tfoot td{
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
 let metric="onsite";
@@ -259,7 +260,7 @@ async function calculate(){
 
     const tr=document.createElement("tr");
     tr.innerHTML=`
-      <td>${e.engineer}</td>
+      <td>${esc(e.engineer)}</td>
       <td>${e.days}</td>
       <td>${e.average.toFixed(2)}</td>
       <td>${e.min.toFixed(2)}</td>

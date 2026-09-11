@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
-  <script src="sla-jobedit.js?v=28"></script>
-  <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=15"></script>
+  <script src="sla-jobedit.js?v=33"></script>
+  <script src="firestop-form.js?v=2"></script>
+  <script src="cert-form.js?v=22"></script>
+  <script src="remedials-form.js?v=5"></script>
+  <script src="pump-form.js?v=4"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -198,8 +200,8 @@
   var SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
   var MOSTLANE_API = window.MOSTLANE_API || "";
   var $=function(id){return document.getElementById(id)};
-  function toast(m){var t=$("toast");t.innerHTML=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function toast(m){var t=$("toast");t.innerHTML=esc(m);t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function getUser(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
   function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
@@ -259,18 +261,30 @@
   // grid never decodes full-res camera photos).
   function shrinkImage(file, maxDim, quality){
     return new Promise(function(resolve){
+      // ALWAYS resolve — never hang. On iOS an <img> can silently stall decoding a
+      // HEIC (onload/onerror never fire) and canvas.toBlob can fail to call back
+      // under memory pressure. Either would leave uploadPhotos awaiting forever, so
+      // the photo never attaches and the RA's work-area shot is never marked — the
+      // engineer is stuck. A hard timeout resolves(null) so the caller falls back to
+      // the original file (uploads bigger, but it goes through).
+      var done=false, u=null;
+      function finish(b){ if(done) return; done=true; if(u){ try{ URL.revokeObjectURL(u); }catch(e){} } resolve(b||null); }
       if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
-      var img=new Image(), u=URL.createObjectURL(file);
-      img.onload=function(){
-        URL.revokeObjectURL(u);
-        var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
-        w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
-        var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
-        cv.getContext("2d").drawImage(img,0,0,w,h);
-        cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
-      };
-      img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
-      img.src=u;
+      var t=setTimeout(function(){ finish(null); }, 8000);
+      try{
+        var img=new Image(); u=URL.createObjectURL(file);
+        img.onload=function(){
+          try{
+            var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+            w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+            var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+            cv.getContext("2d").drawImage(img,0,0,w,h);
+            cv.toBlob(function(b){ clearTimeout(t); finish(b); },"image/jpeg",quality||0.7);
+          }catch(e){ clearTimeout(t); finish(null); }
+        };
+        img.onerror=function(){ clearTimeout(t); finish(null); };
+        img.src=u;
+      }catch(e){ clearTimeout(t); finish(null); }
     });
   }
   // Self-healing for older photos with no stored thumbnail: fetch the full image
@@ -386,7 +400,9 @@
     var fs = !!(job && job.firestopping);
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
-    if(!fs && !au && !cert){
+    var elec = !!(job && job.elecTest) && !fs && !cert && !au;
+    var pump = !!(job && job.pumpMaintenance) && !fs && !cert && !au && !elec;
+    if(!fs && !au && !cert && !elec && !pump){
       h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
       h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
       h+='<div class="hint">Pick when the photo was taken, then add it.</div>';
@@ -396,9 +412,19 @@
       h+='<div id="hqRow" style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px;">'
         +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"><input type="checkbox" id="hqToggle" style="width:16px;height:16px;"> <span>📷 High-quality upload</span></label>'
         +'<span id="hqStatus" style="font-size:12px;color:#8a97a6;"></span></div>';
-      h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
+      h+='</div>';
     }
-    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au||cert)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    // The RA "photo of the work area" ALWAYS uses #fileInput — so it must exist on
+    // EVERY job type (audit / cert / firestop / elec included), not just standard
+    // jobs. Rendering it only inside the photos card left the RA photo button dead
+    // (a null-element .click()) on a remedial/audit job, so the RA couldn't finish.
+    // #fileInput is shared by the RA work-area photo AND the job's
+    // before/during/after photos. The RA photo is LIVE ONLY (its button forces the
+    // camera); the before/during/after photos let the engineer choose camera or
+    // camera-roll (the MLPhotoInput chooser sets/removes capture per tap). So no
+    // static capture here — each button sets it as needed.
+    h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none">';
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au||cert||elec||pump)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     if(fs){
       // Firestopping jobs complete via the RIA form (per-seal photos + products +
       // a signed declaration) — the shared component handles it + the download.
@@ -411,8 +437,17 @@
       h+='<div class="card"><div id="certHost"></div></div>';
     } else if(au){
       // Site-audit job: a checklist — each item needs one completion photo.
-      h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" capture="environment" style="display:none"></div>';
+      h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" style="display:none"></div>';
       h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    } else if(elec){
+      // Electrical test: the engineer records the remedial-works list on the job.
+      h+='<div class="card"><div id="remedialHost"></div></div>';
+      h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    } else if(pump){
+      // Sump pump monthly maintenance: the per-store form (safety pre-check +
+      // checklist + photos/video + signatures) IS the completion — the shared
+      // component handles submit + auto-completes the job for office review.
+      h+='<div class="card"><div id="pumpHost"></div></div>';
     } else {
       h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
       h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
@@ -467,7 +502,7 @@
     host.innerHTML=html;
     var np=pendingPhotos.length;
     $("phcount").textContent=(photos.length+np)+(photos.length+np===1?" photo":" photos")+(np?" · "+np+" uploading":"");
-    $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
+    $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; if(window.MLPhotoInput){ window.MLPhotoInput($("fileInput")); } else { $("fileInput").removeAttribute("capture"); $("fileInput").click(); } };
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
     [].forEach.call(host.querySelectorAll(".ph[data-i] img"),function(im){
       // Reveal (stop the skeleton) as soon as the photo has loaded.
@@ -491,6 +526,11 @@
     // Site-audit jobs: slim set — Travelling · In Progress · Complete (Complete is
     // gated on every checklist item having its photo).
     if(jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
+    // Electrical test: slim set — Travelling · In Progress · Complete (the
+    // remedials list is the deliverable; completion is relaxed).
+    if(job && job.elecTest && !job.firestopping && !(job.emTest||job.pat) && !jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
+    // Pump maintenance completes via the form panel — only the start-work statuses here.
+    if(job && job.pumpMaintenance) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
     [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
   }
@@ -537,6 +577,9 @@
     // Investigate-only jobs have relaxed gates — any status (incl. Quote / Complete)
     // can be set with nothing required (findings go in the note if he adds one).
     if(job && job.investigateOnly) return [];
+    // Electrical test: the remedials list is the deliverable — nothing else is
+    // gated, so Complete is always allowed.
+    if(job && job.elecTest && !jobIsAudit()){ return (chosen==="Complete") ? [] : null; }
     // Site-audit job: Complete needs every checklist item photographed.
     if(jobIsAudit()){ if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; } return null; }
     if(chosen==="Complete"){var m=[];if(noteRequired() && ($("note").value||"").trim().length<15)m.push("a completion note");if(photoRequired() && !photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
@@ -579,14 +622,19 @@
     var fs = !!(job && job.firestopping);
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
+    var elec = !!(job && job.elecTest) && !fs && !cert && !au;
+    var pump = !!(job && job.pumpMaintenance) && !fs && !cert && !au && !elec;
     // Back goes through the portal's shared breadcrumb (window.mlBack) so it
     // returns to the genuine previous page and can never trap the user in a
     // revolving cycle. backTo is only the cold-start fallback.
     $("backBtn").onclick=function(){ if(window.mlBack) window.mlBack(backTo); else location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
-    if(!fs && !au && !cert){
+    // #fileInput is present on EVERY job type (it backs the RA work-area photo),
+    // so wire its change handler unconditionally — otherwise the RA photo does
+    // nothing on an audit/remedial/cert job.
+    var _fi=$("fileInput"); if(_fi) _fi.addEventListener("change",uploadPhotos);
+    if(!fs && !au && !cert && !elec && !pump){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
-      $("fileInput").addEventListener("change",uploadPhotos);
       wireHqToggle();
       restoreNoteDraft();   // bring back a note typed before an app kill / bounce
       $("note").addEventListener("input",function(){ saveNoteDraft(); refresh(); });
@@ -597,7 +645,7 @@
       $("auditFile").addEventListener("change", onAuditPhoto);
       renderAuditList();
     }
-    if(!fs && !cert){   // the completion slider exists for standard AND audit jobs (not firestop / EM-PAT cert)
+    if(!fs && !cert && !pump){   // the completion slider exists for standard/audit/elec jobs (not firestop / EM-PAT cert / pump — they complete via their own form)
       var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
       knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
       knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
@@ -609,6 +657,8 @@
     drawStatus(); drawTimeline(); applyLock();
     if(fs) mountFirestop();
     if(cert) mountCert();
+    if(elec) mountRemedials();
+    if(job && job.pumpMaintenance && !fs && !cert && !elec && !jobIsAudit()) mountPump();
     if(cert && job.emTest && job.emKind!=="monthly") initEmTimer();
   }
   // ── EM 3-hour drain-down timer (shared, persisted on job.emTimer) ──────────
@@ -682,6 +732,9 @@
     }
     ["em","pat"].forEach(function(t){
       certInstances[t]=window.MLCert.mount($("certPane_"+t), { jobId:jobId, type:t, mode:"engineer", api:api, token:token,
+        // On (re)load, reflect a cert that's ALREADY submitted/issued as done so
+        // the tab shows ✓ and the engineer isn't prompted to resubmit it.
+        onStatus: function(st){ if(st==="review"||st==="final"){ done[t]=true; markTabs(); if(done.em&&done.pat){ $("certHint").textContent="✓ Both certificates submitted — with the office."; } } },
         // Only patch the JOB to Complete once BOTH certs are in.
         patchComplete: function(){ done[t]=true; return (done.em && done.pat) ? patchJob({status:"Complete"}) : Promise.resolve(); },
         onComplete: function(){ afterOne(t); } });
@@ -697,6 +750,27 @@
       api: (window.MOSTLANE_API || MOSTLANE_API), token: localStorage.getItem("mostlaneToken"),
       patchComplete: function(){ return patchJob({status:"Complete"}); },
       onComplete: function(){ toast("Firestopping job completed"); setTimeout(function(){ location.href=backTo; }, 1200); }
+    });
+  }
+  var remMounted=false;
+  function mountRemedials(){
+    var host=$("remedialHost"); if(!host || remMounted || !window.MLRemedials) return;
+    remMounted=true;
+    window.MLRemedials.mount(host, {
+      jobId: jobId, mode: "engineer",
+      api: (window.MOSTLANE_API || MOSTLANE_API), token: localStorage.getItem("mostlaneToken"),
+      job: job
+    });
+  }
+  var pumpMounted=false;
+  function mountPump(){
+    var host=$("pumpHost"); if(!host || pumpMounted || !window.MLPump) return;
+    pumpMounted=true;
+    window.MLPump.mount(host, {
+      jobId: jobId, store: (job && job.pumpStore) || "", mode: "engineer",
+      api: (window.MOSTLANE_API || MOSTLANE_API), token: localStorage.getItem("mostlaneToken"),
+      patchComplete: function(){ return patchJob({status:"Complete"}); },
+      onComplete: function(){ toast("Pump maintenance submitted for office review"); setTimeout(function(){ location.href=backTo; }, 1200); }
     });
   }
   function fillPoButton(){
@@ -916,6 +990,11 @@
     var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }
     var wasRA = raPicPending;
     var useStage = raPicPending ? "Before" : stage;
+    // Mark the RA's work-area photo satisfied THE MOMENT a file is chosen — never
+    // wait on the shrink/upload. The photo is captured; the durable save + upload
+    // happen below. This guarantees the RA can be completed even if the phone is
+    // slow to re-encode the image or has no signal.
+    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo saved"); }
     var added=0;
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
@@ -943,10 +1022,8 @@
     }
     raPicPending=false; e.target.value="";
     await loadPending(); drawPhotos(); refresh();
-    // The RA "work-area photo" is satisfied the instant it's captured (durable),
-    // not only once it uploads.
-    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo saved"); }
-    else if(added){ toast(pendingCount()? ("Photo saved ("+useStage+") — uploading…") : ("Photo added — tagged "+useStage)); }
+    // (ml-rapic already fired up-front, the instant the file was chosen.)
+    if(!wasRA && added){ toast(pendingCount()? ("Photo saved ("+useStage+") — uploading…") : ("Photo added — tagged "+useStage)); }
     flushPhotoQueue();   // kick the uploader (non-blocking)
   }
   // ── Completion-note draft: saved to the device as it's typed, restored on
@@ -968,7 +1045,9 @@
     var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
     var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
     host.innerHTML=items.map(function(it,i){
-      var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy">'; };
+      // Reference photos copied from a certificate / added by the office have no
+      // ".thumb" copy — fall back to the full photo rather than a broken tile.
+      var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full){this.src=this.dataset.full}else{this.onerror=null}">'; };
       var refs=(it.refPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref"); }).join("");
       var extra=(it.extraPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref au-extra"); }).join("");
       var pending=pend[it.id] && !(it.done&&it.donePhoto);
@@ -990,8 +1069,30 @@
     [].forEach.call(host.querySelectorAll("[data-extra]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-extra"),"extra"); }; });
     [].forEach.call(host.querySelectorAll(".au-ref,.au-done"),function(im){ im.onclick=function(){ var f=im.getAttribute("data-full"); if(f) openAuditImg(f); }; });
   }
+  // Camera-or-gallery chooser (shared with remedials/cert/pump forms). Photo areas
+  // that AREN'T "live only" call this: it asks the engineer, then opens the given
+  // file input as the camera (capture) or the gallery (no capture). Guarded so
+  // whichever script defines it first wins; the fallback is the native picker.
+  if(!window.MLPhotoInput){
+    window.MLPhotoInput=function(input,cb){
+      function go(mode){ if(!mode) return; if(mode==="camera") input.setAttribute("capture","environment"); else input.removeAttribute("capture"); if(cb) cb(mode); input.click(); }
+      try{
+        var ov=document.createElement("div");
+        ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px";
+        var sh=document.createElement("div");
+        sh.style.cssText="background:#fff;border-radius:16px;max-width:420px;width:100%;padding:14px;box-shadow:0 -6px 28px rgba(0,0,0,.3)";
+        sh.innerHTML='<div style="font-weight:700;color:#003468;font-size:15px;margin:4px 6px 12px">Add a photo</div>';
+        function mk(t,p){ var b=document.createElement("button"); b.type="button"; b.textContent=t; b.style.cssText="display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:14px;border:1px solid #d7dee6;border-radius:12px;background:"+(p?"#f7f9fc":"#fff")+";font:inherit;font-size:15px;font-weight:"+(p?"600":"500")+";color:"+(p?"#0f2438":"#64748b")+";cursor:pointer"; return b; }
+        var cam=mk("📷 Take a photo",1),gal=mk("🖼 Choose from gallery",1),cx=mk("Cancel",0);
+        var done=false; function fin(v){ if(done) return; done=true; try{ov.remove();}catch(e){} go(v); }
+        cam.onclick=function(){fin("camera");}; gal.onclick=function(){fin("gallery");}; cx.onclick=function(){fin(null);};
+        ov.addEventListener("click",function(e){ if(e.target===ov) fin(null); });
+        sh.appendChild(cam); sh.appendChild(gal); sh.appendChild(cx); ov.appendChild(sh); document.body.appendChild(ov);
+      }catch(e){ go("gallery"); }
+    };
+  }
   var _auItem=null, _auStage="done";
-  function pickAuditPhoto(itemId,stage){ _auItem=itemId; _auStage=(stage==="extra")?"extra":"done"; $("auditFile").value=""; $("auditFile").click(); }
+  function pickAuditPhoto(itemId,stage){ _auItem=itemId; _auStage=(stage==="extra")?"extra":"done"; $("auditFile").value=""; if(window.MLPhotoInput){ window.MLPhotoInput($("auditFile")); } else { $("auditFile").click(); } }
   async function onAuditPhoto(e){
     var f=e.target.files && e.target.files[0]; e.target.value=""; if(!f||!_auItem) return;
     var itemId=_auItem, stg=_auStage; _auItem=null; _auStage="done";
@@ -1076,7 +1177,8 @@
 
   var raPicTaken=false;
   $("raChecks").innerHTML=HAZ.map(function(v){return '<div class="hz" data-hz><span class="hzl">'+v+'</span><span class="hzopt"><button class="hb" data-v="ok">In place</button><button class="hb" data-v="na">N/A</button></span></div>';}).join("");
-  $("raPic").onclick=function(){ raPicPending=true; $("fileInput").click(); };
+  // The RA work-area photo stays LIVE ONLY — force the camera (no camera roll).
+  $("raPic").onclick=function(){ raPicPending=true; $("fileInput").setAttribute("capture","environment"); $("fileInput").click(); };
   $("raChecks").addEventListener("click",function(e){var b=e.target.closest(".hb");if(!b)return;var row=b.closest(".hz");row.classList.remove("err");[].forEach.call(row.querySelectorAll(".hb"),function(x){x.classList.toggle("on",x===b);});row.dataset.ans=b.dataset.v;});
   var decls=function(){return [].slice.call(document.querySelectorAll("#raModal .decl"));};
   var hazRows=function(){return [].slice.call(document.querySelectorAll("#raChecks .hz"));};

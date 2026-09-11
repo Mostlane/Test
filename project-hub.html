@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Project</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="docviewer.js?v=7"></script>
@@ -102,7 +102,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const money = n => "£" + Math.round(Number(n) || 0).toLocaleString();
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
@@ -207,8 +207,8 @@
           <div>
             <div class="kv"><b>Project number:</b> ${esc(P.number)}</div>
             <div class="kv"><b>Site:</b> own project-site ${esc(P.number)}${P.fromExisting ? " · from " + esc(P.fromExisting.name) : ""}</div>
-            ${P.postcode ? `<div class="kv"><b>Location:</b> ${esc(P.postcode)}${P.lat != null ? " · " + P.lat + ", " + P.lon : ""}</div>` : ""}
-            ${P.mileageRoundTrip != null ? `<div class="kv"><b>Mileage:</b> ${P.mileageRoundTrip} mi round trip from HQ</div>` : ""}
+            ${P.postcode ? `<div class="kv"><b>Location:</b> ${esc(P.postcode)}${P.lat != null ? " · " + esc(P.lat) + ", " + esc(P.lon) : ""}</div>` : ""}
+            ${P.mileageRoundTrip != null ? `<div class="kv"><b>Mileage:</b> ${esc(P.mileageRoundTrip)} mi round trip from HQ</div>` : ""}
           </div>
           <span class="badge b-${esc(P.status || "live")}">${esc((P.status || "live").toUpperCase())}</span>
         </div>
@@ -227,9 +227,9 @@
       if (!items.length) return sectCard("todo", "✅ To-do", `<p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p>`, false);
       const done = items.filter(i => i.done).length;
       const body = items.map(it => `<div class="todo">
-          <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
-          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${it.key}RefLine"></small>` : ""}</span>
-          <span class="act" data-actfor="${it.key}"></span>
+          <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${esc(it.key)}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
+          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${esc(it.key)}RefLine"></small>` : ""}</span>
+          <span class="act" data-actfor="${esc(it.key)}"></span>
         </div>`).join("");
       return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
     }
@@ -329,7 +329,7 @@
           <div style="margin-top:10px;"><button class="btn" id="jvCreate">➕ Create job</button> <span class="msg" id="jvMsg" style="display:inline;"></span></div>
           <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
         </div>` : ""}
-        <h3 style="margin:2px 0 6px;font-size:14.5px;">Project jobs</h3>
+        <h3 style="margin:2px 0 6px;font-size:14.5px;">${CAN ? "Project jobs" : "My jobs"}</h3>
         <div id="jvJobs"><p class="muted">Loading…</p></div>
         <div id="jvSeries"></div>
         <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
@@ -384,7 +384,11 @@
       const byDay = {};
       for (const v of visits) { (byDay[v.date] = byDay[v.date] || []).push(v); }
       const days = Object.keys(byDay).sort().reverse();
-      el.innerHTML = days.map(day => {
+      const anyPlanned = visits.some(v => v.planned);
+      const caption = anyPlanned
+        ? `<p class="muted" style="font-size:12px;margin:0 0 8px;">🛠 <b>on-site</b> = time from the engineer's status changes. <span class="badge" style="background:#e0e7ff;color:#3730a3;">PLANNED</span> = no status was logged, so it's costed on the <b>hours scheduled</b> for that job. Actual status times always take priority.</p>`
+        : "";
+      el.innerHTML = caption + days.map(day => {
         const rows = byDay[day];
         return `<div style="margin:6px 0 10px;"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;">${esc(day)}</div>
           ${rows.map(v => {
@@ -392,13 +396,15 @@
               ? " · <a href='/job-view.html?jobId=" + encodeURIComponent(v.jobId) + "' style='text-decoration:none;color:var(--brand);'>" + esc(v.jobRef) + "</a>"
               : (v.manual ? ' · <span class="badge" style="background:#fef3c7;color:#92400e;">MANUAL</span>' : "");
             const live = v.live ? ' <span class="badge" style="background:#dcfce7;color:#166534;">LIVE</span>' : "";
+            const planned = v.planned ? ' <span class="badge" style="background:#e0e7ff;color:#3730a3;" title="No status change was logged — costed on the hours scheduled for this job">PLANNED</span>' : "";
             const note = v.note ? ' <span class="muted" style="font-size:12px;">— ' + esc(v.note) + '</span>' : "";
             // Engineers must NEVER see £ — only admins get the cost line, even
             // if the server had somehow sent it. (Server also strips it.)
             const cost = (CAN && v.manual && v.cost) ? " · £" + v.cost.toFixed(2) : "";
+            const hoursLabel = v.planned ? "scheduled" : "on-site";
             return `<div class="frow">
-              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${note}</span>
-              <span>🛠 ${esc(fmtMins(v.onsiteMins))} on-site${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
+              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${planned}${note}</span>
+              <span>🛠 ${esc(fmtMins(v.onsiteMins))} ${hoursLabel}${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
             </div>`;
           }).join("")}
         </div>`;
@@ -571,10 +577,14 @@
       msg.textContent = "Creating " + days.length + " days…"; msg.className = "msg";
       try {
         const r = await authFetch("/project/create-day-series", { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh }) }).then(r => r.json());
+          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh,
+            includeWeekends: document.getElementById("jvWeekends").checked }) }).then(r => r.json());
         if (!r.ok) throw new Error(r.error || "Couldn't create");
         msg.textContent = "Created ✓ " + r.count + " days drip-fed"; msg.className = "msg ok";
         document.getElementById("jvDesc").value = "";
+        // Reset the weekend toggle so a one-off "include weekends" never silently
+        // carries into the NEXT project's series (that's how a Saturday slipped in).
+        document.getElementById("jvWeekends").checked = false; renderDayPreview();
         document.getElementById("jvMulti").checked = false; document.getElementById("jvMultiPanel").classList.add("hide"); document.getElementById("jvDur").disabled = false;
         JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
         loadJobsVisits();
@@ -656,13 +666,8 @@
       }
       if (kind === "rams") { location.href = "/hs-docs.html?newRams=1&site=" + encodeURIComponent(P.name) + "&project=" + encodeURIComponent(PID); return; }
       if (kind === "cpp") {
-        // Mark the CPP as started (links it), then open the builder pre-filled.
-        await authFetch("/project/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, kind: "cpp", value: P.number }) });
-        try {
-          const c = await authFetch("/hs-plan-config").then(r => r.json());
-          if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token) + "&projectName=" + encodeURIComponent(P.name) + "&projectNo=" + encodeURIComponent(P.number);
-          else alert("The Construction Phase Plan tool isn't configured for your account.");
-        } catch { alert("Couldn't open the Construction Phase Plan tool."); }
+        // Portal-native CPP builder — it links itself to the project on first save.
+        location.href = "/cpp-builder.html?project=" + encodeURIComponent(PID);
         return;
       }
       if (kind === "valuations") {
@@ -719,8 +724,14 @@
         },
       },
       cpp: {
-        title: "📄 Construction Phase Plan", build: () => build("cpp"), buildLabel: "Build in the planner",
-        portal: null, // CPPs aren't stored in the portal — attach the file instead
+        title: "📄 Construction Phase Plan", build: () => build("cpp"), buildLabel: "Build in the portal",
+        portal: {
+          label: "…or link an existing Construction Phase Plan:", single: true, linkKind: "cpp",
+          list: async () => (await authFetch("/hs/docs?type=cpp").then(r => r.json()).catch(() => ({}))).docs || [],
+          linked: () => (P.links && P.links.cppRef && /^HSD-/.test(String(P.links.cppRef))) ? [P.links.cppRef] : [],
+          name: x => x.ref || x.site || "CPP", sub: x => [x.site, x.created_at ? fmtDay(x.created_at) : ""].filter(Boolean).join(" · "),
+          match: (x, q) => (String(x.ref || "") + " " + String(x.site || "")).toLowerCase().includes(q),
+        },
       },
     };
 
@@ -732,14 +743,16 @@
       let docs = [];
       try { docs = (await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json())).files || []; } catch {}
       const docById = {}; docs.forEach(f => docById[f.id] = f);
-      let ramsBy = {}, progBy = {};
+      let ramsBy = {}, progBy = {}, cppBy = {};
       if ((L.ramsIds || []).length) { try { ((await authFetch("/hs/docs?type=rams").then(r => r.json())).docs || []).forEach(x => ramsBy[x.id] = x); } catch {} }
       if (L.programmeId) { try { ((await authFetch("/prog/list").then(r => r.json())).programmes || []).forEach(x => progBy[x.id] = x); } catch {} }
+      if (L.cppRef && /^HSD-/.test(String(L.cppRef))) { try { ((await authFetch("/hs/docs?type=cpp").then(r => r.json())).docs || []).forEach(x => cppBy[x.id] = x); } catch {} }
       const filePill = id => { const f = docById[id]; return f ? `<a class="pill" href="#" data-docopen="${esc(f.url)}" data-docname="${esc(f.title || "File")}" style="text-decoration:none;">📎 ${esc(f.title || "File")}</a>` : ""; };
       for (const key of keys) {
         const line = g(key + "RefLine"); const pills = [];
         if (key === "programme" && L.programmeId) pills.push(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`);
         if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`));
+        if (key === "cpp" && L.cppRef && /^HSD-/.test(String(L.cppRef))) pills.push(`<a class="pill" href="/cpp-builder.html?doc=${encodeURIComponent(L.cppRef)}" style="text-decoration:none;">📄 ${esc((cppBy[L.cppRef] && (cppBy[L.cppRef].ref || cppBy[L.cppRef].site)) || "CPP")}</a>`);
         (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(p); });
         line.innerHTML = pills.length ? " " + pills.join(" ") : "";
       }
@@ -808,9 +821,11 @@
       if (!DP) return;
       const inp = g("docFileInput"), file = inp.files && inp.files[0];
       if (!file) { g("docPickMsg").textContent = "Choose a file first."; g("docPickMsg").className = "msg err"; return; }
+      const name = await askDocName(file.name);
+      if (name == null) { g("docPickMsg").textContent = ""; return; }   // cancelled
       g("docPickMsg").textContent = "Uploading…"; g("docPickMsg").className = "msg"; g("docUpBtn").disabled = true;
       try {
-        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", DP.cfg.title.replace(/^[^A-Za-z0-9]+/, "").trim()); fd.append("title", file.name);
+        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", DP.cfg.title.replace(/^[^A-Za-z0-9]+/, "").trim()); fd.append("title", name);
         const r = await authFetch("/project/doc", { method: "POST", body: fd }).then(r => r.json());
         if (r.ok && r.id) {
           await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "doc-file", docKey: DP.key, value: r.id }) });
@@ -862,28 +877,78 @@
       if (!files.length) { list.innerHTML = `<p class="muted">No documents yet.</p>`; return; }
       list.innerHTML = files.map(f => `<div>
         <span class="nm">📄 <a href="#" data-open="${esc(f.url)}" data-name="${esc(f.title)}" style="text-decoration:none;">${esc(f.title)}</a>${f.hidden ? ' <span class="muted">(hidden)</span>' : ""}<br><span class="muted" style="font-size:12px;">${esc(f.section || "")} · ${esc(f.uploadedBy || "")}</span></span>
-        ${CAN ? `<button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
+        ${CAN ? `<button class="btn grey small" data-ren="${esc(f.id)}" data-t="${esc(f.title || "")}">✏️ Rename</button><button class="btn grey small" data-hide="${esc(f.id)}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${esc(f.id)}" style="background:#b00020;">✕</button>` : ""}
       </div>`).join("");
       list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault();
         if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.open, fetchUrl: a.dataset.open, name: a.dataset.name, downloadUrl: a.dataset.open });
         else window.open(a.dataset.open, "_blank");
       });
       if (CAN) {
+        list.querySelectorAll("[data-ren]").forEach(b => b.onclick = async () => {
+          const name = await askDocName("", b.dataset.t || "");
+          if (name == null) return;
+          await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.ren, title: name }) });
+          loadDocs();
+        });
         list.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => { await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.hide, hidden: b.dataset.h !== "1" }) }); loadDocs(); });
         list.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this document?")) return; await authFetch("/project/doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.del }) }); loadDocs(); loadProject(); });
       }
     }
     function wireDrop() {
       const dz = g("dropZone"); if (!dz) return;
-      const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.onchange = () => inp.files[0] && upload(inp.files[0]); inp.click(); };
+      // MULTI-file: pick or drop several at once — each is named + uploaded in turn.
+      // (Was files[0] only, so a multi-select silently uploaded just the first one.)
+      const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.multiple = true; inp.onchange = () => uploadMany(inp.files); inp.click(); };
       dz.onclick = pick;
       dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
       dz.ondragleave = () => dz.classList.remove("over");
-      dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
+      dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); uploadMany(e.dataTransfer.files); };
+    }
+    async function uploadMany(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      for (const f of files) { await upload(f); }   // each prompts for its own name (Cancel skips just that one)
+    }
+    // Ask for a friendly document name before saving. Pre-fills the file's own
+    // base name UNLESS it looks auto-generated (a UUID / camera name), in which
+    // case it starts blank so the user must name it. Resolves to the name, or
+    // null if cancelled. Every document therefore gets a real name.
+    function docBaseName(fn){ return String(fn || "").replace(/\.[a-z0-9]+$/i, ""); }
+    function looksAutoName(n){
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(n)
+          || /^(image|img|photo|untitled|fullsizerender|scan)[-_ ]?\d*$/i.test(n)
+          || /^\d{8,}([-_].*)?$/.test(n);
+    }
+    function askDocName(fileName, current){
+      return new Promise(function(resolve){
+        var def = current != null ? current : docBaseName(fileName);
+        if (current == null && looksAutoName(def)) def = "";
+        var ov = document.createElement("div");
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(6,24,54,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;";
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:360px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.3);">'
+          + '<div style="font-weight:700;font-size:16px;color:#0f2438;margin-bottom:4px;">Name this document</div>'
+          + '<div style="font-size:13px;color:#64748b;margin-bottom:10px;">What should it be called?</div>'
+          + '<input id="mlDocNameInp" type="text" placeholder="e.g. Site layout drawing" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;color:#0f2438;">'
+          + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'
+          + '<button id="mlDocNameCancel" style="padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-weight:600;color:#0f2438;">Cancel</button>'
+          + '<button id="mlDocNameSave" style="padding:9px 16px;border:none;background:#003366;color:#fff;border-radius:8px;font-weight:700;">Save</button>'
+          + '</div></div>';
+        document.body.appendChild(ov);
+        var inp = ov.querySelector("#mlDocNameInp"); inp.value = def;
+        function done(v){ try { document.body.removeChild(ov); } catch(e){} resolve(v); }
+        function save(){ var v = inp.value.trim(); if (!v){ inp.style.borderColor = "#dc2626"; inp.focus(); return; } done(v); }
+        ov.querySelector("#mlDocNameCancel").onclick = function(){ done(null); };
+        ov.querySelector("#mlDocNameSave").onclick = save;
+        ov.addEventListener("click", function(e){ if (e.target === ov) done(null); });
+        inp.addEventListener("keydown", function(e){ if (e.key === "Enter") save(); });
+        setTimeout(function(){ inp.focus(); inp.select(); }, 60);
+      });
     }
     async function upload(file) {
+      const name = await askDocName(file.name);
+      if (name == null) { g("docMsg").textContent = ""; return; }   // cancelled — nothing saved
       const fd = new FormData(); fd.append("file", file); fd.append("id", PID);
-      fd.append("title", file.name); fd.append("section", g("docSection") ? g("docSection").value.trim() || "Documents" : "Documents");
+      fd.append("title", name); fd.append("section", g("docSection") ? g("docSection").value.trim() || "Documents" : "Documents");
       g("docMsg").textContent = "Uploading…"; g("docMsg").className = "msg";
       try {
         const r = await authFetch("/project/doc", { method:"POST", body: fd }).then(r => r.json());

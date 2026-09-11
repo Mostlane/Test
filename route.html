@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -138,7 +138,7 @@
   var MOSTLANE_API = window.MOSTLANE_API || "";
   var $=function(id){return document.getElementById(id)};
   function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
-  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c];});}
   function getEngineer(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }
@@ -147,7 +147,7 @@
   function mondayOfWeek(){ var x=new Date(); var day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
   function getGps(){ return new Promise(function(res){ if(!navigator.geolocation) return res(""); navigator.geolocation.getCurrentPosition(function(p){res(p.coords.latitude.toFixed(5)+","+p.coords.longitude.toFixed(5));},function(){res("");},{timeout:8000}); }); }
 
-  var DONE_STATUS=["Complete","Closed Jobs","Invoiced"];
+  var DONE_STATUS=["Complete","Closed Jobs","Invoiced","Cancelled"];
   var VC_ITEMS=["Lights & indicators","Tyres & wheels","Windscreen, wipers & washers","Mirrors & glass","Bodywork (walk 4 sides)","Fluid levels (oil/coolant/washer)","Brakes & handbrake","Horn","Seatbelts","Load area secure / racking","Number plates","Dashboard warning lights","No leaks underneath","First aid & extinguisher"];
   var STATUS_COL={Pending:"#9f1239",Scheduled:"var(--accent)",Travelling:"var(--accent)","In Progress":"var(--purple)","On Hold":"var(--amber)",Quote:"var(--purple)",Order:"var(--teal)"};
 
@@ -260,7 +260,7 @@
     var heroInner;
     if(proj&&proj.totalDays){
       var pct=Math.max(6,Math.round((proj.day||1)/proj.totalDays*100));
-      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+(proj.day||1)+' of ~'+proj.totalDays+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
+      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+esc(proj.day||1)+' of ~'+esc(proj.totalDays)+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
         +'<h2>'+esc(proj.name||jobName(job))+'</h2><div class="sub">'+esc(job.siteName||job.address||"")+'</div>'
         +'<div class="prog"><i style="width:'+pct+'%"></i></div>';
     } else {

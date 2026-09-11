@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="auth.js"></script>
   <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
   <script src="docviewer.js?v=7"></script>
@@ -142,6 +142,15 @@
     }
     .cert-link{ text-decoration:none; margin-left:3px; cursor:pointer; font-size:13px; vertical-align:middle; }
     .cert-link:hover{ opacity:.7; }
+    /* "Tested — cert to file": a 5-year store that's overdue on paper but has been
+       inspected (a completed job or a quoted remedial), so the red cell softens to
+       amber with this note. Hover shows the evidence. */
+    .tested-note{ display:inline-block; margin-left:4px; font-size:10px; font-weight:800; color:#7a5b00;
+      background:#fff1c9; border:1px solid #f0d98a; border-radius:999px; padding:0 6px; vertical-align:middle;
+      cursor:default; white-space:nowrap; }
+    /* "date rolled but no certificate on file" — a distinct red-edged warning so
+       it reads differently from the amber ✅ "tested — cert to file". */
+    .tested-note.rolled{ color:#8a1c1c; background:#ffe2e0; border-color:#f3b1ab; }
     /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
        is the same height as one without (no wrap → no taller rows). */
     td.dc{ white-space:nowrap; }
@@ -273,6 +282,7 @@
           <button class="bubble" id="summaryBtn">％ Summary</button>
           <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
           <button class="bubble" id="reviewBtn" onclick="location.href='compliance-review.html'" title="Verify all stored 5-year certificates">🔍 Run compliance checks</button>
+          <button class="bubble" id="concertoBtn" onclick="location.href='concerto-ppm.html'" title="The client's official PPM list from Concerto, reconciled against this chart">📋 Concerto PPM list</button>
           <button class="bubble" id="closedSitesBtn">🗄 Closed sites</button>
           <button class="bubble" id="clearBtn">✕ Clear filters</button>
 
@@ -484,6 +494,19 @@ async function loadRemedialFlags(){
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
 }
+// store code → evidence the 5-year test was DONE (a completed job or a quoted
+// remedial) even though the cert isn't filed yet. Softens a red 5-year cell to
+// amber "tested — cert to file". {source,stage,orderNumber,testedAt,ref,…}
+let testedFlags = {};
+async function loadTestedFlags(){
+  try {
+    const r = await authFetch('/certs/five-year/tested');
+    if (!r.ok) return;
+    const j = await r.json();
+    testedFlags = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+  } catch(e){ /* non-critical */ }
+}
 async function loadComplianceIndex(){
   try {
     const r = await authFetch('/compliance/index');
@@ -491,6 +514,7 @@ async function loadComplianceIndex(){
     const j = await r.json();
     complianceIndex = (j && j.map) ? j.map : {};
     loadRemedialFlags();
+    loadTestedFlags();
     // re-render so cells pick up their 📄 links (data may already be shown)
     if (allData.length) applyFilters();
   } catch(e){ /* certs are non-critical — table still works without them */ }
@@ -663,7 +687,7 @@ function openUploadModal(code, file){
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
     <h2>Add document</h2>
-    <p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p>
+    <p style="margin:.2em 0 .6em"><b>${esc(code)}</b> — ${esc(rec.siteName||'')}</p>
     <label>Compliance type</label>
     <div class="typegrid" id="ug"></div>
     <label id="unl">Document name (optional)</label>
@@ -790,7 +814,7 @@ async function openVersionsModal(code){
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
     <h2>Documents</h2>
-    <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
+    <p style="margin:.2em 0 .4em"><b>${esc(code)}</b> — ${esc(rec.siteName||'')}</p>
     ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
     <div id="vlist">Loading…</div>
     <div class="actions">${canEdit?`<button class="btn" id="vadd">＋ Add document</button>`:''}<button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
@@ -813,7 +837,7 @@ async function openVersionsModal(code){
     const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
     const keep=(canEdit&&!isOther)?`<label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
     const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
-    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${f.id}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${f.url}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
+    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${esc(f.id)}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${esc(f.url)}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
   }
   function typeHtml(type, items){
     items = items||[];
@@ -911,14 +935,46 @@ function fmtDue(s){
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
   const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
-  const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
+  const link = has ? ` <a class="cert-link" href="#" data-code="${esc(code)}" data-type="${t}" title="Open certificate">📄</a>` : '';
   // EM cell: flag an outstanding remedial (a fitting failed on the last EM cert).
   let warn = '';
   if (t === 'em' && remedialFlags[pad4(code)]) {
     const f = remedialFlags[pad4(code)];
     warn = ` <span class="rem-warn" title="EM remedial outstanding — ${f.fittings} fitting(s), £${Math.round(f.charge||0)} to charge/quote">⚠️</span>`;
   }
-  return `${fmtDue(val)}${link}${warn}`;
+  return `${esc(fmtDue(val))}${link}${warn}`;
+}
+
+/* The amber "✅ tested — cert to file" note for an overdue 5-year cell whose
+   test has actually been done. Wording + tooltip reflect the evidence. */
+function escAttr(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function testedNote(tf, mode){
+  mode = mode || 'overdue';
+  // Evidence sentence (shared by both modes).
+  let ev;
+  if (tf.source === 'remedial') {
+    const stg = tf.stage || 'quoted';
+    ev = 'EICR test done — remedials ' + stg
+        + (tf.orderNumber ? (' (order ' + tf.orderNumber + (tf.orderValue ? ' £' + Math.round(tf.orderValue) : '') + ')')
+                          : (stg === 'quoted' ? ' — awaiting client order' : ''));
+  } else {
+    ev = 'A 5-year test job has been completed'
+        + (tf.testedAt ? ' (' + fmtDue(tf.testedAt) + ')' : '')
+        + (tf.ref ? ' — ' + tf.ref : '');
+  }
+  if (mode === 'rolled') {
+    // Date rolled forward but the certificate isn't on the chart.
+    const label = (tf.source === 'remedial')
+      ? ('tested · remedials ' + ((tf.orderNumber || /ordered|in_works|done|invoiced/.test(tf.stage||'')) ? 'ordered' : 'quoted'))
+      : 'tested';
+    const tip = ev + '. The 5-year due date has been rolled forward but NO certificate is on the chart — upload it.';
+    return ` <span class="tested-note rolled" title="${escAttr(tip)}">⚠ ${escAttr(label)} — no cert on file</span>`;
+  }
+  // Overdue but tested.
+  const label = (tf.source === 'remedial')
+    ? ('tested · remedials ' + ((tf.orderNumber || /ordered|in_works|done|invoiced/.test(tf.stage||'')) ? 'ordered' : 'quoted'))
+    : 'tested';
+  return ` <span class="tested-note" title="${escAttr(ev + '. Certificate still to file.')}">✅ ${escAttr(label)} — cert to file</span>`;
 }
 
 /* ===== Helpers ===== */
@@ -997,11 +1053,11 @@ function renderTable(d){
     tr.dataset.code = e.storeCode;
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
     const reopenBtn = (viewMode==='closed' && canEditCompliance())
-      ? ` <button class="doc-btn reopen" data-code="${e.storeCode}" title="Reopen to the live chart">↩</button>` : '';
+      ? ` <button class="doc-btn reopen" data-code="${esc(e.storeCode)}" title="Reopen to the live chart">↩</button>` : '';
     // 📎 upload is manage-only; 🗂 view stays for everyone (view-only engineers included).
-    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button> ` : '';
+    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${esc(e.storeCode)}" title="Upload / drop a document">📎</button> ` : '';
     const docsCell = upBtn
-      + (nFiles ? `<button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
+      + (nFiles ? `<button class="doc-btn view" data-code="${esc(e.storeCode)}" title="View documents">🗂 ${nFiles}</button>` : '')
       + reopenBtn;
     // Archived stores render "plain" (no status light/tints — due warnings don't
     // apply). This is per-ROW so an archived store that surfaces via a search in
@@ -1009,11 +1065,26 @@ function renderTable(d){
     const closed = (viewMode === 'closed') || e.active === 0;
     const closedBadge = (e.active === 0 && viewMode !== 'closed') ? ' <span class="closed-badge">🗄 Closed</span>' : '';
     const ws = closed ? '' : worstStatus(e);
-    const dtd = (type) => { const s = closed ? '' : typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+    const dtd = (type) => {
+      let s = closed ? '' : typeStatus(e, type);
+      let extra = '';
+      // 5-year store with TESTED evidence (a completed job or a quoted remedial):
+      //  • overdue (red) → soften to amber "✅ tested — cert to file"
+      //  • NOT overdue but NO certificate on the chart → the due date has been
+      //    rolled forward as if done, yet the cert was never filed → amber
+      //    "⚠ date rolled — no cert" so it can't hide as covered (green).
+      if (type === 'fiveYear' && !closed) {
+        const tf = testedFlags[pad4(e.storeCode)];
+        const hasCert = !!(complianceIndex[pad4(e.storeCode)] && complianceIndex[pad4(e.storeCode)].fiveYear);
+        if (tf && s === 'red') { s = 'amber'; extra = testedNote(tf, 'overdue'); }
+        else if (tf && s !== 'red' && !hasCert) { s = 'amber'; extra = testedNote(tf, 'rolled'); }
+      }
+      return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
+    };
     if (closed) tr.classList.add('closed-row');
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td class="site">${e.siteName}${closedBadge}</td><td>${e.storeType}</td>
-      <td>${e.postcode}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
+      <td>${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${closedBadge}</td><td>${esc(e.storeType)}</td>
+      <td>${esc(e.postcode)}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
       ${dtd('pv')}${dtd('ev')}${dtd('pump')}
       <td class="docs-cell">${docsCell}</td>
@@ -1495,11 +1566,11 @@ function openAddFromSitesModal(){
     listEl.innerHTML = rows.map(s => {
       const num = String(s.siteNumber||'').trim();
       const label = cfg.clients[(s.client||'').toLowerCase()] || '';
-      return `<button type="button" class="afs-row" data-num="${num}"
+      return `<button type="button" class="afs-row" data-num="${esc(num)}"
         style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid #eef1f4;background:#fff;cursor:pointer;">
-        <b style="min-width:52px;color:#0a66c2;">${num}</b>
-        <span style="flex:1;">${(s.siteName||'(no name)')}</span>
-        <span style="color:#889;font-size:12px;">${s.postcode||''}${label?' · '+label:''}</span>
+        <b style="min-width:52px;color:#0a66c2;">${esc(num)}</b>
+        <span style="flex:1;">${esc(s.siteName||'(no name)')}</span>
+        <span style="color:#889;font-size:12px;">${esc(s.postcode||'')}${label?' · '+esc(label):''}</span>
       </button>`;
     }).join('');
     listEl.querySelectorAll('.afs-row').forEach(b => b.onclick = ()=> addOne(b.dataset.num, b));

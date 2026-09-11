@@ -34,9 +34,10 @@
 // existed. Nothing here may ever break a job save or timesheet save.
 
 import { json, error } from "../lib/http.js";
-import { permissionsFor } from "../lib/auth.js";
+import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { poOrderSiteNames } from "./timesheets.js";
 import * as sitelogApi from "./sitelog-api.js";
+import { onceMigration } from "../lib/once.js";
 
 // Fetch a SiteLog admin endpoint. When the SiteLog DB is bound into this worker
 // (post-migration) run the ported backend directly — no api.site-log.co.uk
@@ -281,7 +282,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Powers the "Materials (POs)" panel on job-view — true reflection of the job's
   // material spend, updating automatically as each PO is priced. Office/admin only.
   if (path === "/costing/job-pos" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const rows = await jobPoRows(env, jobId);
@@ -314,7 +315,8 @@ export async function handle(request, env, ctx, url, sess) {
   // fixed £0.50/mile + materials (priced POs; unpriced ones are flagged, never
   // counted as £0). Everything is derived — nothing new is stored.
   if (path === "/costing/job-full-cost" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
+    // Money: Full Access / office staff only (Jamie's rule) — never a field engineer.
+    if (!(await canSeeMoney(env, tid, me))) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR = 1.25, HQ_PC = "PO15 5RQ";
@@ -345,12 +347,59 @@ export async function handle(request, env, ctx, url, sess) {
       e.mins += mins; e.days.add(String(s.started_at).slice(0, 10));
     }
 
-    // 3) round-trip miles for the site: the admin's site_miles register first
-    //    (already a round-trip figure), else a HQ→site geocode × road factor × 2.
+    // 2b) Scheduled-hours fallback: an ASSIGNED engineer who worked this job but
+    //    never changed status has no segment → cost the PLANNED hours instead
+    //    (their own scheduled slot span, else the job's duration). Actual
+    //    status-tap time ALWAYS wins — only engineers with no captured segment
+    //    are filled. Skips a day still in the future (not worked yet).
+    const normIdL = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const todayISO = londonDate(new Date().toISOString());
+    const plannedEng = new Set();
+    if (!/^cancelled$/i.test(String(jd.status || ""))) {
+      const engs = Array.isArray(jd.assignedEngineers) && jd.assignedEngineers.length ? jd.assignedEngineers : (jd.assignedTo ? [jd.assignedTo] : []);
+      for (const rawEng of engs) {
+        if (!rawEng) continue;
+        if (Object.keys(byEng).some(u => normName(u) === normName(rawEng))) continue;   // real segment exists → actual wins
+        const es = (jd.engSchedule && jd.engSchedule[normIdL(rawEng)]) || {};
+        const startISO = es.scheduledAt || jd.scheduledAt;
+        if (!startISO) continue;
+        const day = String(startISO).slice(0, 10);
+        if (day > todayISO) continue;   // not worked yet
+        let mins = 0;
+        const endISO = es.scheduledEnd || jd.scheduledEnd;
+        if (endISO) { const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin); }
+        if (!mins && Number(jd.durationMinutes) > 0) mins = Math.round(Number(jd.durationMinutes));
+        if (!mins) continue;
+        byEng[rawEng] = { mins, days: new Set([day]) };
+        plannedEng.add(rawEng);
+      }
+    }
+
+    // 3) round-trip miles + drive TIME for the site.
+    //    Miles: the admin's site_miles register first (already a round-trip figure),
+    //    else the real Google driving distance, else a HQ→site geocode × factor × 2.
+    //    Drive time: the REAL Google Distance Matrix driving duration (HQ↔site, ×2
+    //    for the round trip) — NOT a flat 30 mph assumption. The 30 mph estimate is
+    //    kept only as a fallback when GOOGLE_MAPS_KEY is unset or the API errors.
     let rtMiles = 0, milesSource = "unknown";
+    let rtDriveMins = 0, travelSource = "estimate";
     const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
     if (key) { try { const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).first(); if (row && row.miles != null) { rtMiles = Number(row.miles) || 0; milesSource = "register"; } } catch {} }
+    if (sitePc && (env.GOOGLE_MAPS_KEY || "")) {
+      try {
+        const gu = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC)
+          + "&destinations=" + encodeURIComponent(sitePc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
+        const gr = await fetch(gu); const gd = await gr.json();
+        const el = gd && gd.status === "OK" && gd.rows && gd.rows[0] && gd.rows[0].elements && gd.rows[0].elements[0];
+        if (el && el.status === "OK") {
+          rtDriveMins = r1((el.duration.value / 60) * 2);   // one-way seconds → round-trip minutes
+          travelSource = "google";
+          if (!rtMiles) { rtMiles = r1((el.distance.value / 1609.344) * 2); milesSource = "google"; }
+        }
+      } catch {}
+    }
     if (!rtMiles && sitePc) { const base = await geoPc(HQ_PC), dest = await geoPc(sitePc); if (base && dest) { rtMiles = r1(havMi(base, dest) * ROAD_FACTOR * 2); milesSource = "geocoded"; } }
+    if (!rtDriveMins) rtDriveMins = rtMiles > 0 ? r1((rtMiles / SPEED_MPH) * 60) : 0;   // 30 mph fallback
 
     // 4) rates (hourly; a day rate → /8)
     const rates = await ratesMap(env, tid);
@@ -362,13 +411,13 @@ export async function handle(request, env, ctx, url, sess) {
       const rate = hourlyOf(u); if (rate == null) anyNoRate = true;
       const days = e.days.size || 0;
       const engMiles = rtMiles * days;
-      const tMins = rtMiles > 0 ? (rtMiles / SPEED_MPH) * 60 * days : 0;
+      const tMins = rtDriveMins * days;   // real Google round-trip drive time (× days), 30 mph only as fallback
       const oCost = rate != null ? (e.mins / 60) * rate : 0;
       const tCost = rate != null ? (tMins / 60) * rate : 0;
       const fCost = engMiles * FUEL_PER_MILE;
       onSiteMins += e.mins; travelMins += tMins; totalMiles += engMiles;
       onSiteCost += oCost; travelCost += tCost; fuelCost += fCost;
-      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null });
+      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null, planned: plannedEng.has(u) });
     }
 
     // 5) materials from POs (priced total + unpriced flag)
@@ -378,12 +427,18 @@ export async function handle(request, env, ctx, url, sess) {
 
     const labourCost = onSiteCost + travelCost;
     const total = labourCost + fuelCost + materials;
+    // Revenue side: the client's ORDER value on the job (ex VAT) → profit + margin.
+    const orderValue = (jd.orderValue != null && Number.isFinite(Number(jd.orderValue))) ? Number(jd.orderValue) : null;
+    const profit = orderValue != null ? r2(orderValue - total) : null;
+    const margin = orderValue ? Math.round((profit / orderValue) * 1000) / 10 : null;
     return json({
-      ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, roundTripMiles: r1(rtMiles),
+      ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, travelSource, roundTripMiles: r1(rtMiles), roundTripDriveMins: r1(rtDriveMins),
+      orderNumber: jd.orderNumber || null, orderValue, profit, margin,
       labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
       fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
       materials: { cost: r2(materials), unpriced, count: poRows.length },
-      total: r2(total), unpricedPOs: unpriced, hasSegments: (segs || []).length > 0
+      total: r2(total), unpricedPOs: unpriced, hasSegments: (segs || []).length > 0,
+      plannedLabour: plannedEng.size > 0
     }, {}, env, request);
   }
 
@@ -468,6 +523,10 @@ export async function handle(request, env, ctx, url, sess) {
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
+    // Hourly-equivalent rate: an hourly rate as-is; a DAY rate ÷ 8 so it's
+    // pro-rata by hours (8h scheduled = a full day, 4h = half a day). null when
+    // there's no usable rate on file (labour shown as hours, flagged partial).
+    const hrRate = r => (r && r.rate) ? (r.rateType === "day" ? r.rate / 8 : (r.rateType === "hour" ? r.rate : null)) : null;
     const days = await reconcileRange(env, tid, from, to, reg);
     // Engineer aliases: collapse different names for one person (e.g. the PO
     // system's "JT" → the portal's "John Thorn") so their labour + POs group.
@@ -595,18 +654,79 @@ export async function handle(request, env, ctx, url, sess) {
         eng.mins += e.mins;
         eng.days.add(d.date);   // distinct on-site days = visits for tap-only people
         addSrc(eng, "sla");
-        const r = rates[cu];
-        if (r && r.rateType === "hour" && r.rate) {
-          eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
-          s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
-          addDay(s.labD, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
-        } else if (r && r.rateType === "day") {
-          s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
+        const hr = hrRate(rates[cu]);
+        if (hr != null) {
+          eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * hr) * 100) / 100;
+          s.cost = Math.round((s.cost + (e.mins / 60) * hr) * 100) / 100;
+          addDay(s.labD, d.date, (e.mins / 60) * hr);   // dated labour for this site's trend
         } else {
-          s.costPartial = true;   // no rate on file
+          s.costPartial = true;   // no rate on file — hours shown, £ can't be computed
         }
       }
     }
+
+    // ── Scheduled-hours fallback (planned labour) ────────────────────────────
+    // A scheduled job an engineer WORKED but never status-tapped captures no
+    // job_time_segments, so it would cost £0. Fall back to the HOURS PLANNED on
+    // the job (the engineer's own scheduled slot span, else the job's duration)
+    // so those visits are still costed. Actual status-tap time ALWAYS takes
+    // priority — skip any (job, engineer) that has a captured segment — and skip
+    // anyone SiteLog already covers, and any day still in the future.
+    try {
+      const { listJobs } = await import("./sla.js");
+      const allJobs = await listJobs(env, tid);
+      const segPairs = new Set();   // "<job_id>::<normName(canonEng(user))>" with real captured time
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT DISTINCT job_id, username FROM job_time_segments WHERE tenant_id=? AND job_id IS NOT NULL"
+        ).bind(tid).all();
+        for (const r of results || []) segPairs.add(String(r.job_id) + "::" + normName(canonEng(r.username)));
+      } catch {}
+      const normIdL = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+      for (const j of allJobs) {
+        if (!j || j.fallbackTemplate) continue;
+        if (/^cancelled$/i.test(String(j.status || ""))) continue;
+        const engList = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+        if (!engList.length) continue;
+        const siteLabel = j.siteName || j.siteCode || "(no site)";
+        const resolved = resolveSite(reg, j.siteName || j.siteCode || "");
+        const sKey = siteKeyOf(resolved, j.siteName || j.siteCode);
+        let s = null;   // created lazily, only if an engineer actually contributes
+        for (const rawEng of engList) {
+          if (!rawEng) continue;
+          const es = (j.engSchedule && j.engSchedule[normIdL(rawEng)]) || {};
+          const startISO = es.scheduledAt || j.scheduledAt;
+          if (!startISO) continue;
+          const day = String(startISO).slice(0, 10);
+          if (day < from || day > to) continue;   // outside the window (incl. future)
+          let mins = 0;
+          const endISO = es.scheduledEnd || j.scheduledEnd;
+          if (endISO) { const dmin = (Date.parse(endISO) - Date.parse(startISO)) / 60000; if (dmin >= 15 && dmin <= 24 * 60) mins = Math.round(dmin); }
+          if (!mins && Number(j.durationMinutes) > 0) mins = Math.round(Number(j.durationMinutes));
+          if (!mins) continue;
+          const who = canonEng(rawEng);
+          const whoNorm = normName(who);
+          if (slCovered.has(sKey + "::" + whoNorm)) continue;         // SiteLog authoritative
+          if (segPairs.has(String(j.id) + "::" + whoNorm)) continue;  // actual segment wins
+          if (!s) s = siteFor(siteLabel, resolved);
+          s.onsiteMins += mins;
+          if (j.helpdeskRef) s.jobs[j.helpdeskRef] = (s.jobs[j.helpdeskRef] || 0) + mins;
+          const eng = engFor(s, who);
+          eng.mins += mins;
+          eng.days.add(day);
+          addSrc(eng, "sla");
+          eng.planned = true;
+          const hr = hrRate(rates[who]);
+          if (hr != null) {
+            eng.cost = Math.round(((eng.cost || 0) + (mins / 60) * hr) * 100) / 100;
+            s.cost = Math.round((s.cost + (mins / 60) * hr) * 100) / 100;
+            addDay(s.labD, day, (mins / 60) * hr);
+          } else {
+            s.costPartial = true;   // no rate on file — hours shown, £ can't be computed
+          }
+        }
+      }
+    } catch {}
 
     // PO spend (ex VAT) from the PO system's D1 — folded in per site + per
     // engineer. Fails soft when PO_DB isn't bound. Unpriced POs (no cost yet)
@@ -1400,7 +1520,7 @@ export async function ratesMap(env, tid) {
 
 /* ══ Tables + small helpers ═════════════════════════════════════════════════ */
 
-async function ensure(env) {
+async function ensure__raw(env) {
   // Register flag on sites (created elsewhere; column added here).
   try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
   // Segment table may not exist yet on a fresh DB (normally created by
@@ -1423,6 +1543,7 @@ async function ensure(env) {
       at TEXT NOT NULL, source TEXT)`).run();
   } catch {}
 }
+const ensure = onceMigration(ensure__raw); // once per isolate — see lib/once.js
 
 // Single writer for `proj_fin` — used by both /costing/fin and projects-api.js
 // so contract-value edits on either page share one canonical helper. Pass

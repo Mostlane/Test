@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<script src="/portal-config.js?v=26"></script>
+<script src="/portal-config.js?v=36"></script>
 <script src="auth.js"></script>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>📊 PO Stats — Mostlane Portal</title>
@@ -213,7 +213,7 @@ async function init() {
     authFetch('/po/api/engineers').then(r => r.json()),
     authFetch('/po/api/suppliers').then(r => r.json())
   ]);
-  document.getElementById('f-engineer').innerHTML = '<option value="">All engineers</option>' + engineers.filter(e=>e.active).map(e => '<option value="' + e.slug + '">' + escapeHtml(e.name) + '</option>').join('');
+  document.getElementById('f-engineer').innerHTML = '<option value="">All engineers</option>' + engineers.filter(e=>e.active).map(e => '<option value="' + escapeHtml(e.slug) + '">' + escapeHtml(e.name) + '</option>').join('');
   document.getElementById('f-supplier').innerHTML = '<option value="">All suppliers</option>' + suppliers.map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
   ['f-engineer','f-supplier','f-source','f-from','f-to'].forEach(id => document.getElementById(id).onchange = load);
   load();

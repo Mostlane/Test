@@ -4,10 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Certificate Review</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
-  <script src="cert-form.js?v=15"></script>
+  <script src="cert-form.js?v=22"></script>
+  <script src="pump-form.js?v=4"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -38,7 +39,10 @@
     <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
     <h1>📄 Certificate review</h1>
     <a class="btn ghost sm" href="cert-jobs.html" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);text-decoration:none;">🗂 EM/PAT jobs</a>
+    <a class="btn ghost sm" href="cert-register.html" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);text-decoration:none;">📇 Register</a>
+    <button class="btn ghost sm" id="ordersBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">📥 Client orders</button>
     <button class="btn ghost sm" id="remedBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">💷 EM remedials</button>
+    <a class="btn ghost sm" href="five-year-remedials.html" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);text-decoration:none;">🔌 5-Year remedials</a>
     <button class="btn ghost sm" id="notifyBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">🔔 Notify list</button>
   </header>
 
@@ -49,7 +53,7 @@
         <h2 style="margin:0;font-size:17px;flex:1;">💷 EM remedials tracker</h2>
         <button class="btn ghost sm" id="rmClose">Close</button>
       </div>
-      <p class="muted" style="margin:0 0 8px;">Every failed-fitting remedial and where it's up to — quote → order/approve → invoice — so none get forgotten.</p>
+      <p class="muted" style="margin:0 0 8px;">Every failed-fitting case and where it's up to: quote sent → PO received → works (or straight to the updated certificate when everything was replaced on site) → invoiced.</p>
       <div style="display:flex;gap:6px;margin:6px 0 10px" id="rmTabs">
         <button class="btn ghost sm rmtab" data-view="open">Open</button>
         <button class="btn ghost sm rmtab" data-view="all">All (incl. invoiced)</button>
@@ -57,7 +61,45 @@
       <div id="rmBody"><p class="muted">Loading…</p></div>
     </div>
   </div>
+  <!-- Client orders — incoming approvals (Concerto REM/R-orders) matched to a remedial awaiting approval -->
+  <div id="ordersModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:720px;margin:24px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">📥 Client orders</h2>
+        <button class="btn ghost sm" id="omClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 8px;">Orders matched to a remedial awaiting approval — one tap raises the works job. <a href="/client-orders.html">Every client order, live and filterable by client, is on the Client orders board →</a></p>
+      <div style="display:flex;gap:6px;margin:6px 0 10px" id="omTabs">
+        <button class="btn ghost sm omtab" data-view="open">To action</button>
+        <button class="btn ghost sm omtab" data-view="all">All</button>
+      </div>
+      <div id="omBody"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <!-- Battery supplier email — pre-written, editable, copy or send with the enquiry PDF attached -->
+  <div id="battMailModal" style="display:none;position:fixed;inset:0;z-index:5001;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:640px;margin:30px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">📧 Battery quotation request</h2>
+        <button class="btn ghost sm" id="bmClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 10px;">The enquiry PDF (spec, quantities and the engineer's photos) is attached when you send from here. To and CC are remembered for next time.</p>
+      <div class="finbar" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
+        <div><label>To (supplier)</label><input type="email" id="bmTo" placeholder="supplier@example.com" style="width:100%"></div>
+        <div><label>CC (optional)</label><input type="text" id="bmCc" placeholder="you@mostlane.com" style="width:100%"></div>
+      </div>
+      <div style="margin-top:8px"><label>Subject</label><input type="text" id="bmSubject" style="width:100%"></div>
+      <div style="margin-top:8px"><label>Email text</label><textarea id="bmBody" style="width:100%;box-sizing:border-box;min-height:190px;font:14px/1.5 'Segoe UI',system-ui,sans-serif;border:1px solid #cbd5e1;border-radius:9px;padding:9px"></textarea></div>
+      <div class="msg" id="bmMsg" style="margin-top:6px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn green" id="bmSend">📧 Send with PDF attached</button>
+        <button class="btn ghost sm" id="bmCopy">📋 Copy email text</button>
+        <button class="btn ghost sm" id="bmPdf">⬇ Download enquiry PDF</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Who gets pushed when an engineer submits a cert for review -->
   <div id="notifyModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
@@ -85,7 +127,8 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
     const fmt = t => { try { return new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return t||""; } };
 
@@ -94,27 +137,104 @@
         const me = await authFetch("/auth/me").then(r=>r.json());
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
-      loadList();
+      // Deep-link from the certificate tracker: ?open=<certId> opens that cert
+      // straight away (issued certs included, so a filed one can be re-opened).
+      const OPEN_ID = new URLSearchParams(location.search).get("open") || "";
+      const OPEN_PUMP = new URLSearchParams(location.search).get("pump") || "";
+      if (OPEN_ID) { SHOW_ISSUED = true; await loadList(); openCert(OPEN_ID); }
+      else if (OPEN_PUMP) { SHOW_ISSUED = true; await loadList(); openPump(OPEN_PUMP); }
+      else loadList();
     })();
 
+    var SHOW_ISSUED = false;
     async function loadList() {
       g("wrap").innerHTML = '<p class="muted" style="padding:20px;">Loading certificates…</p>';
       let certs = [];
-      try { const d = await authFetch("/certs/review").then(r=>r.json()); certs = (d && d.certs) || []; }
+      try { const d = await authFetch("/certs/review" + (SHOW_ISSUED ? "?all=1" : "")).then(r=>r.json()); certs = (d && d.certs) || []; }
       catch { g("wrap").innerHTML = '<p class="msg err" style="padding:20px;">Couldn\'t load the review queue.</p>'; return; }
-      if (!certs.length) { g("wrap").innerHTML = '<div class="card"><p class="muted">Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.</p></div>'; return; }
-      let h = '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit and issue.</div>';
+      // Pump maintenance records submitted by engineers sit in the SAME queue
+      // (they file to the site's Pump compliance section on finalise). Fail-soft:
+      // a pump lookup error never hides the EM/PAT certs.
+      try {
+        const pr = await authFetch("/pump/review").then(r=>r.json());
+        let pumps = (pr && pr.records) || [];
+        if (SHOW_ISSUED) { try { const pl = await authFetch("/pump/list").then(r=>r.json()); pumps = pumps.concat((pl && pl.records) || []); } catch {} }
+        pumps.forEach(p => certs.push({ kind: "pump", id: p.id, type: "pump", status: p.status, engineer: p.engineer,
+          submittedAt: p.updatedAt, updatedAt: p.updatedAt, installation: { name: p.storeName || p.store || "Pump" }, siteCode: p.siteCode || "", rows: null, pumpDate: p.date || "" }));
+        certs.sort((a, b) => String(b.submittedAt || b.updatedAt || "").localeCompare(String(a.submittedAt || a.updatedAt || "")));
+      } catch {}
+      var toggle = '<div style="margin-bottom:8px"><button class="btn ghost sm" id="toggleIssued">'+(SHOW_ISSUED?"Show pending only":"Show issued certs too")+'</button></div>';
+      if (!certs.length) { g("wrap").innerHTML = toggle + '<div class="card"><p class="muted">'+(SHOW_ISSUED?"No certificates found.":"Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.")+'</p></div>'; g("toggleIssued").onclick=function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); }; return; }
+      let h = toggle + '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit'+(SHOW_ISSUED?", issue or re-issue.":" and issue.")+'</div>';
       certs.forEach(c => {
-        const em = c.type==="pat" ? "🔌" : "💡";
+        const em = c.kind==="pump" ? "🚰" : (c.type==="pat" ? "🔌" : "💡");
         const site = (c.installation && c.installation.name) || c.siteCode || "—";
-        h += '<div class="item" data-id="'+esc(c.id)+'"><div class="em">'+em+'</div><div class="m">'
-          + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.type==="pat"?"PAT":"EM")+'</span></div>'
-          + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")+'</div></div>'
-          + '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span></div>';
+        var badge = c.status==="final" ? '<span class="badge" style="background:#d8f0e0;color:#0e7a3b">Issued'+(c.certNumber?" "+esc(c.certNumber):"")+'</span>' : '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span>';
+        h += '<div class="item" data-id="'+esc(c.id)+'" data-kind="'+esc(c.kind||"cert")+'"><div class="em">'+em+'</div><div class="m">'
+          + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.kind==="pump"?"Pump maintenance":(c.type==="pat"?"PAT":"EM"))+'</span></div>'
+          + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.kind==="pump"?(c.pumpDate?"visit "+esc(c.pumpDate):"monthly visit"):((c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")))+'</div></div>'
+          + badge+'</div>';
       });
       h += '</div>';
       g("wrap").innerHTML = h;
-      [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => openCert(el.dataset.id));
+      g("toggleIssued").onclick = function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); };
+      [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => (el.dataset.kind==="pump" ? openPump(el.dataset.id) : openCert(el.dataset.id)));
+    }
+
+    // ── Pump maintenance record (engineer's per-store form) — review, finalise
+    //    (draws the branded PDF + files it to the site's Pump compliance section,
+    //    rolling the next-due date), upload a replacement, or delete. ────────────
+    async function openPump(id) {
+      let rec = null;
+      try { const d = await authFetch("/pump/one?id="+encodeURIComponent(id)).then(r=>r.json()); rec = d && d.record; } catch {}
+      if (!rec) { alert("Couldn't open that pump record."); return; }
+      const isFinal = rec.status === "final";
+      g("wrap").innerHTML =
+        '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
+        + '<div class="card"><h2 style="margin:0 0 4px;font-size:17px;color:#003468">🚰 '+esc(rec.storeName||rec.store||"Pump")+'</h2>'
+        + '<div class="muted">'+esc(rec.engineer||"")+(rec.date?" · visit "+esc(rec.date):"")+' · '+(isFinal?"Filed to compliance":(rec.status==="review"?"Submitted — awaiting your review":"Draft — still with the engineer"))+'</div></div>'
+        + '<div class="card"><div id="pumpHost"></div></div>'
+        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">'+(isFinal?"Filed pump record":"Approve this pump record")+'</h2>'
+        + '<div class="finbar">'
+        + (isFinal ? '' : '<button class="btn green" id="pumpFinBtn">🏁 Approve &amp; file to compliance</button>')
+        + '<button class="btn ghost sm" id="pumpPdfBtn">⬇ Preview PDF</button>'
+        + '<button class="btn ghost sm" id="pumpUpBtn">⬆ Upload replacement PDF</button>'
+        + '<button class="btn red sm" id="pumpDelBtn">🗑 Delete</button>'
+        + '<input type="file" id="pumpUpFile" accept="application/pdf" style="display:none">'
+        + '</div><div class="msg" id="pumpMsg"></div>'
+        + '<div class="muted" style="margin-top:8px">'+(isFinal
+            ? "Already filed under this store's Pump section on the compliance chart."
+            : "Approving draws the Mostlane PDF, files it under this store's Pump section on the compliance chart and rolls the next monthly due date.")+'</div></div>';
+      g("backList").onclick = loadList;
+      const pmsg = (t, err) => { const m = g("pumpMsg"); if (m) { m.textContent = t || ""; m.className = "msg" + (err ? " err" : ""); } };
+      if (!window.MLPump) { g("pumpHost").innerHTML = '<p class="msg err">The pump form script didn\'t load — pull down to refresh.</p>'; return; }
+      window.MLPump.mount(g("pumpHost"), { recordId: id, jobId: rec.jobId||"", store: rec.store||"", mode: isFinal ? "view" : "office", api: API, token: localStorage.getItem("mostlaneToken") });
+      g("pumpPdfBtn").onclick = () => authFetch("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()).then(b=>window.open(URL.createObjectURL(b),"_blank")).catch(()=>pmsg("Couldn't build the PDF.", true));
+      if (g("pumpFinBtn")) g("pumpFinBtn").onclick = async function(){
+        this.disabled = true; pmsg("Approving…");
+        try {
+          const d = await authFetch("/pump/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r=>r.json());
+          if (d && d.ok) {
+            pmsg(d.filedToSite ? "Approved and filed to the site's Pump compliance section ✓" : "Approved ✓ (this store isn't linked to a portal site yet, so nothing was filed to the chart)");
+            const dl = window.MLUI ? await MLUI.confirm("Download a copy of the pump record PDF?", { title:"Pump record approved ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Download the PDF?");
+            if (dl) { try { const b = await authFetch("/pump/pdf?id="+encodeURIComponent(id)).then(r=>r.blob()); window.open(URL.createObjectURL(b),"_blank"); } catch {} }
+            loadList();
+          } else { pmsg((d && d.error) || "Approve failed", true); this.disabled = false; }
+        } catch { pmsg("Approve failed", true); this.disabled = false; }
+      };
+      g("pumpUpBtn").onclick = () => g("pumpUpFile").click();
+      g("pumpUpFile").onchange = async function(){
+        if (!this.files[0]) return; pmsg("Uploading…");
+        const fd = new FormData(); fd.append("id", id); fd.append("file", this.files[0]);
+        try { const d = await authFetch("/pump/upload", { method:"POST", body: fd }).then(r=>r.json()); if (d && d.ok) { pmsg("Replacement PDF filed ✓"); loadList(); } else pmsg((d && d.error) || "Upload failed", true); }
+        catch { pmsg("Upload failed", true); }
+      };
+      g("pumpDelBtn").onclick = async function(){
+        const ok = window.MLUI ? await MLUI.confirm("Delete this pump record permanently?", { danger:true, okLabel:"Delete" }) : confirm("Delete this pump record?");
+        if (!ok) return;
+        try { const d = await authFetch("/pump/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r=>r.json()); if (d && d.ok) loadList(); else pmsg((d && d.error) || "Delete failed", true); }
+        catch { pmsg("Delete failed", true); }
+      };
     }
 
     async function openCert(id) {
@@ -130,16 +250,20 @@
         '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
         + (hasBattery ? '<div class="card" style="border-color:#f0c98a;background:#fffaf0"><h2 style="margin:0 0 6px;font-size:15px;color:#8a4b0a">🔋 '+battCount+' fitting'+(battCount===1?"":"s")+' need batteries</h2><p class="muted" style="margin:0 0 8px">Get a price from the supplier before quoting. £50/light does not apply to batteries.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="battPdf">📄 Preview enquiry PDF</button><button class="btn green sm" id="battEmail">📧 Email supplier</button></div><div class="msg" id="battMsg"></div></div>' : '')
         + '<div class="card"><div id="certHost"></div></div>'
-        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">Issue this certificate</h2>'
+        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">'+(cert.status==="final"?"Re-issue this certificate":"Issue this certificate")+'</h2>'
         + '<div class="finbar">'
         + '<div><label>Certificate number</label><input type="text" id="finNum" value="'+esc(suggestion)+'" style="width:150px"></div>'
         + '<div><label>Certificate date</label><input type="text" id="finDate" value="'+esc(cert.contractor && cert.contractor.date ? cert.contractor.date : today)+'" placeholder="yyyy-mm-dd" style="width:150px"></div>'
-        + '<button class="btn green" id="finBtn">🏁 Finalise &amp; file to compliance</button>'
+        + (cert.status==="final"
+            ? '<button class="btn green" id="reissueBtn">♻ Re-issue PDF</button>'
+            : '<button class="btn green" id="finBtn">🏁 Finalise &amp; file to compliance</button>')
         + '<button class="btn ghost sm" id="upBtn">⬆ Upload replacement PDF</button>'
         + '<button class="btn red sm" id="delBtn">🗑 Delete</button>'
         + '<input type="file" id="upFile" accept="application/pdf" style="display:none">'
         + '</div><div class="msg" id="finMsg"></div>'
-        + '<div class="muted" style="margin-top:8px">Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.</div></div>';
+        + '<div class="muted" style="margin-top:8px">'+(cert.status==="final"
+            ? "Already issued as "+esc(cert.certNumber||"")+". Re-issue rebuilds the PDF from the current details and replaces the filed copy on the compliance chart — the number and due date stay the same."
+            : "Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.")+'</div></div>';
       g("backList").onclick = loadList;
       window.MLCert.mount(g("certHost"), { certId: id, type: cert.type, mode: "office", api: API, token: localStorage.getItem("mostlaneToken") });
 
@@ -153,30 +277,89 @@
             if (w) w.location = u; else window.location = u;
           } catch { if(w) w.close(); g("battMsg").textContent = "Couldn't build the PDF."; g("battMsg").className="msg err"; }
         };
-        g("battEmail").onclick = async function(){
-          this.disabled = true; g("battMsg").textContent = "Sending…"; g("battMsg").className="msg";
-          try {
-            const d = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: id }) }).then(r=>r.json());
-            if (d && d.ok) { g("battMsg").textContent = "Sent to "+d.sentTo+" ✓"; g("battMsg").className="msg ok"; }
-            else { g("battMsg").textContent = (d && d.error) || "Couldn't send."; g("battMsg").className="msg err"; }
-          } catch { g("battMsg").textContent = "Couldn't send."; g("battMsg").className="msg err"; }
-          this.disabled = false;
-        };
+        g("battEmail").onclick = function(){ openBattMail(id, function(t){ g("battMsg").textContent = t; g("battMsg").className = "msg ok"; }); };
       }
 
-      g("finBtn").onclick = async function(){
+      // Fetch the finalised cert PDF and hand it to the browser as a download.
+      async function downloadCertPdf(cid, num, ctype){
+        const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid));
+        if (!r.ok) throw new Error("http");
+        const blob = await r.blob();
+        const u = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = u;
+        a.download = ((ctype==="pat"?"PAT":"EM")+" certificate "+(num||cid)+".pdf").replace(/[\/\\:*?"<>|]+/g,"-");
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+      }
+      // DD/MM/YY HH:MM in local (London) time.
+      function fmtDT(iso){
+        if (!iso) return "—";
+        const d = new Date(iso); if (isNaN(d)) return "—";
+        const p = n => String(n).padStart(2,"0");
+        return p(d.getDate())+"/"+p(d.getMonth()+1)+"/"+String(d.getFullYear()).slice(-2)+" "+p(d.getHours())+":"+p(d.getMinutes());
+      }
+      // Details modal after "Yes, download" — shows site, cert number & completed
+      // time, with a Download button.
+      function certDownloadModal(info){
+        const esc2 = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+        const ov = document.createElement("div");
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+        const row = (k,v) => '<div style="display:flex;gap:10px;justify-content:space-between;padding:6px 0;border-top:1px solid #eef1f5;"><span style="color:#64748b;">'+k+'</span><b style="text-align:right;">'+esc2(v)+'</b></div>';
+        const btn = "padding:11px 16px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;";
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:420px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
+          + '<h3 style="margin:0 0 4px;color:#0f2438;font-size:17px;">✓ Certificate issued</h3>'
+          + '<div style="margin:6px 0 12px;">'
+            + row("Site", info.site)
+            + row("Certificate no.", info.number)
+            + row("Completed", info.completed)
+          + '</div>'
+          + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button data-x="close" style="'+btn+'background:#fff;color:#334;">Close</button>'
+            + '<button data-x="dl" style="'+btn+'background:#0f2438;color:#fff;border-color:#0f2438;">⬇ Download copy</button>'
+          + '</div></div>';
+        document.body.appendChild(ov);
+        return new Promise(resolve => {
+          ov.addEventListener("click", async e => {
+            const b = e.target.closest("[data-x]");
+            if (e.target === ov || (b && b.dataset.x === "close")) { ov.remove(); resolve(); return; }
+            if (b && b.dataset.x === "dl") {
+              b.disabled = true; b.textContent = "Downloading…";
+              try { await downloadCertPdf(info.cid, info.number, info.ctype); ov.remove(); resolve(); }
+              catch { b.disabled = false; b.textContent = "⬇ Download copy"; setMsg("Couldn't download — open it from the compliance chart's 📄 link.", true); }
+            }
+          });
+        });
+      }
+
+      if (g("finBtn")) g("finBtn").onclick = async function(){
         const num = g("finNum").value.trim(); if (!num) { setMsg("Enter a certificate number.", true); return; }
         this.disabled = true; setMsg("Finalising…");
         try {
           const d = await authFetch("/certs/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, certNumber:num, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
           if (d && d.ok) {
             setMsg("Issued as "+d.number+" and filed to compliance ✓" + (d.remedial && d.remedial.count ? " — "+d.remedial.count+" fitting(s) failed, £"+d.remedial.charge+" to charge" : ""));
+            // Offer a copy of the issued certificate to download.
+            const wantDl = window.MLUI ? await MLUI.confirm("Download a copy of certificate "+d.number+"?", { title:"Certificate issued ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Download a copy of certificate "+d.number+"?");
+            if (wantDl) {
+              const site = (cert.installation && cert.installation.name) || cert.siteCode || "—";
+              const completed = fmtDT(cert.submittedAt || cert.finalisedAt || Date.now());
+              await certDownloadModal({ cid: id, number: d.number, ctype: cert.type, site: site, completed: completed });
+            }
             // Pop the charge/quote confirmation immediately for a cert with remedials.
             if (d.remedial && d.remedial.count && window.mlRemedialCheck) setTimeout(window.mlRemedialCheck, 400);
-            setTimeout(loadList, 1300);
+            setTimeout(loadList, wantDl ? 1600 : 1300);
           }
           else { setMsg((d && d.error) || "Couldn't finalise.", true); this.disabled = false; }
         } catch { setMsg("Couldn't finalise.", true); this.disabled = false; }
+      };
+      if (g("reissueBtn")) g("reissueBtn").onclick = async function(){
+        this.disabled = true; setMsg("Re-issuing…");
+        try {
+          const d = await authFetch("/certs/reissue", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
+          if (d && d.ok) { setMsg("Re-issued "+d.number+" — PDF replaced on the compliance chart ✓"); setTimeout(loadList, 1300); }
+          else { setMsg((d && d.error) || "Couldn't re-issue.", true); this.disabled = false; }
+        } catch { setMsg("Couldn't re-issue.", true); this.disabled = false; }
       };
       g("upBtn").onclick = () => g("upFile").click();
       g("upFile").onchange = async function(){
@@ -256,32 +439,164 @@
     // ── EM remedials tracker (pipeline) ────────────────────────────────────────
     let RM_VIEW = "open";
     const money = n => "£" + (Number(n) || 0).toFixed(0);
-    const STAGE_LABEL = { to_quote:"To quote", quoted:"Quoted", approved:"Approved / ordered", invoiced:"Invoiced ✓" };
-    const STAGE_COL = { to_quote:["#fff4e6","#b45309"], quoted:["#eef4ff","#1d4ed8"], approved:["#eef9f0","#0a7d33"], invoiced:["#f1f5f9","#475569"] };
+    const STAGE_LABEL = { to_quote:"To quote", quoted:"Quoted — awaiting PO", approved:"In works", in_works:"In works", done:"Cert updated ✓", invoiced:"Invoiced ✓" };
+    const STAGE_COL = { to_quote:["#fff4e6","#b45309"], quoted:["#eef4ff","#1d4ed8"], approved:["#eef9f0","#0a7d33"], in_works:["#eef9f0","#0a7d33"], done:["#e6f4ea","#166534"], invoiced:["#f1f5f9","#475569"] };
+    const STATUS_TEXT = { works:"Works required", batteries:"Batteries required", onsite:"Replaced on site" };
+    const STATUS_COL = { works:"#b00020", batteries:"#b45309", onsite:"#0a7d33" };
+    // Download a certificate PDF as a file (used for the auto-filed updated cert).
+    async function downloadPdfFile(cid, name){
+      const r = await authFetch("/certs/pdf?id="+encodeURIComponent(cid)); if (!r.ok) throw new Error("pdf");
+      const u = URL.createObjectURL(await r.blob()); const a = document.createElement("a"); a.href = u; a.download = (name||"certificate")+".pdf"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u), 4000);
+    }
+    // ── Battery supplier email modal (draft from the server; copy or send) ─────
+    let BM_CERT = "", BM_DONE = null;
+    function openBattMail(certId, onSent){
+      BM_CERT = certId; BM_DONE = onSent || null;
+      g("battMailModal").style.display = "block";
+      g("bmMsg").textContent = "Preparing the email…"; g("bmMsg").className = "msg";
+      ["bmTo","bmCc","bmSubject","bmBody"].forEach(k => g(k).value = "");
+      authFetch("/certs/remedials/email-draft?certId="+encodeURIComponent(certId)).then(r=>r.json()).then(d => {
+        if (!d || !d.ok) { g("bmMsg").textContent = (d && d.error) || "Couldn't prepare the email."; g("bmMsg").className = "msg err"; return; }
+        g("bmTo").value = d.to || ""; g("bmCc").value = d.cc || ""; g("bmSubject").value = d.subject || ""; g("bmBody").value = d.body || "";
+        g("bmMsg").textContent = d.to ? "" : "Enter the supplier's email — it'll be remembered."; g("bmMsg").className = "msg";
+      }).catch(() => { g("bmMsg").textContent = "Couldn't prepare the email."; g("bmMsg").className = "msg err"; });
+    }
+    g("bmClose").onclick = () => g("battMailModal").style.display = "none";
+    g("battMailModal").onclick = e => { if (e.target === g("battMailModal")) g("battMailModal").style.display = "none"; };
+    g("bmCopy").onclick = async () => {
+      const t = "To: " + g("bmTo").value + (g("bmCc").value ? "\nCC: " + g("bmCc").value : "") + "\nSubject: " + g("bmSubject").value + "\n\n" + g("bmBody").value;
+      try { await navigator.clipboard.writeText(t); g("bmMsg").textContent = "✓ Email text copied"; g("bmMsg").className = "msg ok"; }
+      catch { g("bmBody").focus(); g("bmBody").select(); g("bmMsg").textContent = "Select and copy the text above."; g("bmMsg").className = "msg"; }
+    };
+    g("bmPdf").onclick = async () => {
+      const w = window.open("", "_blank");
+      try { const r = await authFetch("/certs/remedials/supplier-pdf?certId="+encodeURIComponent(BM_CERT)); if (!r.ok) throw new Error(); const u = URL.createObjectURL(await r.blob()); if (w) w.location = u; else window.location = u; }
+      catch { if (w) w.close(); g("bmMsg").textContent = "Couldn't build the PDF."; g("bmMsg").className = "msg err"; }
+    };
+    g("bmSend").onclick = async function(){
+      const to = g("bmTo").value.trim(); if (!to) { g("bmMsg").textContent = "Enter the supplier's email address."; g("bmMsg").className = "msg err"; return; }
+      this.disabled = true; g("bmMsg").textContent = "Sending…"; g("bmMsg").className = "msg";
+      try {
+        const d = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: BM_CERT, to, cc: g("bmCc").value.trim(), subject: g("bmSubject").value, body: g("bmBody").value }) }).then(r=>r.json());
+        if (d && d.ok) { g("bmMsg").textContent = "Sent to " + d.sentTo + " ✓ (PDF attached)"; g("bmMsg").className = "msg ok"; if (BM_DONE) BM_DONE("Sent to " + d.sentTo + " ✓"); }
+        else { g("bmMsg").textContent = (d && d.error) || "Couldn't send."; g("bmMsg").className = "msg err"; }
+      } catch { g("bmMsg").textContent = "Couldn't send."; g("bmMsg").className = "msg err"; }
+      this.disabled = false;
+    };
     g("remedBtn").onclick = () => { g("remedModal").style.display = "block"; loadTracker(); };
     g("rmClose").onclick = () => g("remedModal").style.display = "none";
     g("remedModal").onclick = e => { if (e.target === g("remedModal")) g("remedModal").style.display = "none"; };
     [].forEach.call(document.querySelectorAll(".rmtab"), b => b.onclick = () => { RM_VIEW = b.dataset.view; loadTracker(); });
 
+    // ── Client orders ────────────────────────────────────────────────────────────
+    let OM_VIEW = "open";
+    function openOrders(){ g("ordersModal").style.display="block"; loadOrders(); }
+    g("ordersBtn").onclick = openOrders;
+    g("omClose").onclick = () => g("ordersModal").style.display = "none";
+    g("ordersModal").onclick = e => { if (e.target === g("ordersModal")) g("ordersModal").style.display = "none"; };
+    [].forEach.call(document.querySelectorAll(".omtab"), b => b.onclick = () => { OM_VIEW = b.dataset.view; loadOrders(); });
+    async function loadOrders(){
+      [].forEach.call(document.querySelectorAll(".omtab"), b => b.style.fontWeight = (b.dataset.view === OM_VIEW ? "800" : "600"));
+      g("omBody").innerHTML = '<p class="muted">Loading…</p>';
+      let d=null;
+      try { d = await authFetch("/certs/remedials/orders" + (OM_VIEW==="all"?"?all=1":"")).then(r=>r.json()); }
+      catch { g("omBody").innerHTML = '<p class="msg err">Couldn\'t load orders.</p>'; return; }
+      const orders = (d && d.orders) || [];
+      if (!orders.length) { g("omBody").innerHTML = '<p class="muted">'+(OM_VIEW==="all"?"No client orders yet.":"Nothing to action — no unmatched or pending orders. 🎉")+'</p>'; return; }
+      g("omBody").innerHTML = orders.map(orderRow).join("");
+      const setMsg = (oid,t,err) => { const m=g("omBody").querySelector('[data-omsg="'+CSS.escape(oid)+'"]'); if(m){ m.textContent=t; m.className="rcase-msg msg"+(err?" err":" ok"); } };
+      g("omBody").querySelectorAll("[data-oapprove]").forEach(b => b.onclick = async () => {
+        const oid=b.dataset.oapprove; b.disabled=true; setMsg(oid,"Raising the works job…");
+        try { const r = await authFetch("/certs/remedials/order-action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:oid,action:"approve"})}).then(x=>x.json());
+          if (r&&r.ok){ setMsg(oid,(r.note||"Done")+(r.jobId?"":""), false); loadOrders(); if(r.jobId&&r.status==="actioned"){ /* leave a link */ } }
+          else { setMsg(oid,(r&&r.error)||"Couldn't approve.",true); b.disabled=false; } }
+        catch { setMsg(oid,"Couldn't approve.",true); b.disabled=false; }
+      });
+      g("omBody").querySelectorAll("[data-odismiss]").forEach(b => b.onclick = async () => {
+        const oid=b.dataset.odismiss; b.disabled=true;
+        try { const r = await authFetch("/certs/remedials/order-action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:oid,action:"dismiss"})}).then(x=>x.json());
+          if (r&&r.ok) loadOrders(); else { setMsg(oid,"Couldn't dismiss.",true); b.disabled=false; } }
+        catch { setMsg(oid,"Couldn't dismiss.",true); b.disabled=false; }
+      });
+    }
+    function orderRow(o){
+      const matched = o.matchedKind==="em"||o.matchedKind==="elec";
+      const badge = o.status==="actioned" ? '<span class="badge" style="background:#d8f0e0;color:#0e7a3b">Actioned</span>'
+        : o.status==="dismissed" ? '<span class="badge draft">Dismissed</span>'
+        : matched ? '<span class="badge" style="background:#e0f2e9;color:#0e7a3b">Matched</span>'
+        : '<span class="badge review">No match yet</span>';
+      const val = (o.orderValue!=null) ? (" · £"+Number(o.orderValue).toFixed(2)) : "";
+      const site = o.siteName || o.storeCode || "—";
+      let acts="";
+      if (o.status==="new" || o.status==="matched") {
+        if (o.matchedKind==="em") acts += '<button class="btn green sm" data-oapprove="'+esc(o.id)+'">✅ Approve &amp; raise works job</button> ';
+        else if (o.matchedKind==="elec" && o.matchedJobId) acts += '<a class="btn sm" href="/job-view.html?jobId='+encodeURIComponent(o.matchedJobId)+'" style="text-decoration:none">➜ Open job to raise works</a> ';
+        acts += '<button class="btn ghost sm" data-odismiss="'+esc(o.id)+'">Dismiss</button>';
+      } else if (o.matchedJobId) {
+        acts += '<a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(o.matchedJobId)+'" style="text-decoration:none">Open job →</a>';
+      }
+      if (o.link) acts += ' <a class="btn ghost sm" href="'+esc(safeUrl(o.link))+'" target="_blank" rel="noopener" style="text-decoration:none">📧 Email</a>';
+      return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          + '<b style="font-size:14.5px">'+esc(site)+'</b> <span class="muted">'+esc(o.orderNumber||"")+val+'</span>'
+          + '<span style="margin-left:auto">'+badge+'</span></div>'
+        + '<div class="muted" style="margin:4px 0 6px">'+esc(o.title||"")+(o.srRef?' · '+esc(o.srRef):'')+(o.jobCategory?' · '+esc(o.jobCategory):'')+'</div>'
+        + (o.matchNote?'<div style="font-size:12.5px;color:#0e7a3b;margin-bottom:6px">🔗 '+esc(o.matchNote)+'</div>':'<div style="font-size:12.5px;color:#b45309;margin-bottom:6px">No matching remedial awaiting approval — check the site.</div>')
+        + (o.detail?'<div class="muted" style="margin-bottom:6px">'+esc(o.detail)+'</div>':'')
+        + '<div class="rcase-msg msg" data-omsg="'+esc(o.id)+'"></div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap">'+acts+'</div></div>';
+    }
+    // Deep-link from the push: ?orders=1 opens the orders modal.
+    if (new URLSearchParams(location.search).get("orders")==="1") setTimeout(openOrders, 300);
+
     function caseRow(c) {
       const [bg, fg] = STAGE_COL[c.stage] || STAGE_COL.to_quote;
+      const status = STATUS_TEXT[c.statusLabel] || STATUS_TEXT.onsite, statusCol = STATUS_COL[c.statusLabel] || STATUS_COL.onsite;
       const bits = [];
-      if (c.charge) bits.push(money(c.charge) + " in lights");
-      if (c.batteries) bits.push(c.batteries + " battery" + (c.batteries === 1 ? "" : " sets"));
-      if (c.onsite) bits.push(c.onsite + " done on site");
+      if (c.charge) bits.push(money(c.charge) + " to quote");
+      if (c.onsite) bits.push(c.onsite + " replaced on site");
       if (c.pending) bits.push(c.pending + " to attend");
+      const battPending = (c.items || []).some(it => it.kind === "battery" && !it.replacedOnSite);
+      // Per-fitting lines: "Fitting 3 — Light replacement · replaced on site".
+      // The office can correct what the engineer logged (fault kind / replaced on
+      // site) right here until the case is finished — Frome's four bulkheads were
+      // logged as "batteries" but needed new lights.
+      const editable = c.stage !== "done" && c.stage !== "invoiced";
+      const selCss = 'font:inherit;font-size:12px;padding:1px 4px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f2438;';
+      const fitLines = (c.items || []).map(it =>
+        '<div style="font-size:12.5px;color:#334155;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:2px 0">Fitting ' + esc(it.no != null ? it.no : "?") + ' — '
+        + (editable && it.id
+          ? '<select data-fk="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" style="' + selCss + '" title="Change what this fitting needs"><option value="light"' + (it.kind === "battery" ? "" : " selected") + '>Light replacement</option><option value="battery"' + (it.kind === "battery" ? " selected" : "") + '>Batteries</option></select>'
+          : (it.kind === "battery" ? "Batteries" : "Light replacement"))
+        + (editable && it.id
+          ? ' <button class="btn ghost sm" style="padding:1px 7px;font-size:11.5px" data-fs="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" data-kind="' + esc(it.kind) + '" data-spec="' + esc(it.spec || '') + '" data-qty="' + esc(it.qty || '') + '" title="Edit the spec / quantity">' + (it.spec ? esc(it.spec) + (it.qty ? ' ×' + esc(it.qty) : '') : (it.kind === "battery" ? 'spec + qty?' : 'spec?')) + ' ✎</button>'
+          : (it.spec ? ' <span class="muted">(' + esc(it.spec) + (it.qty ? ' ×' + esc(it.qty) : '') + ')</span>' : ''))
+        + ' · ' + (editable && it.id
+          ? '<select data-fo="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" style="' + selCss + 'color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '" title="Was it replaced on site?"><option value="0"' + (it.replacedOnSite ? "" : " selected") + '>' + (it.kind === "battery" ? "batteries required" : "works required") + '</option><option value="1"' + (it.replacedOnSite ? " selected" : "") + '>replaced on site</option></select>'
+          : '<span style="color:' + (it.replacedOnSite ? "#0a7d33" : "#b45309") + '">' + (it.replacedOnSite ? "replaced on site" : (it.kind === "battery" ? "batteries required" : "works required")) + '</span>')
+        + ' · <span class="muted" title="Photos on file">📷 ' + (it.photos || 0) + '</span>'
+        + (it.id ? ' <button class="btn ghost sm" style="padding:1px 7px;font-size:11.5px" data-fph="' + esc(it.id) + '" data-c="' + esc(c.certId) + '" title="Add a photo of this fitting">＋ photo</button>' : '')
+        + '</div>').join("");
       let acts = '';
-      if (c.stage === "to_quote") acts += '<button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
-      else if (c.stage === "quoted") acts += '<button class="btn sm" data-adv="approved" data-c="'+esc(c.certId)+'">'+(c.pending ? "📦 Order received → raise job" : "✓ Approved")+'</button>';
-      else if (c.stage === "approved") acts += '<button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
-      if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
-      if (c.jobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.jobId)+'" style="text-decoration:none">Open job →</a>';
-      if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open">↩</button>';
+      acts += '<button class="btn ghost sm" data-quote="'+esc(c.certId)+'">📋 Copy quote text</button>';
+      if (battPending && c.stage !== "done" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Battery quote PDF</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Email supplier</button>';
+      if (c.stage === "to_quote") acts += ' <button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
+      else if (c.stage === "quoted") acts += ' <button class="btn green sm" data-po="'+esc(c.certId)+'" title="'+(c.statusLabel==="onsite"?"Everything was replaced on site — files the updated certificate straight to compliance":"Raises the works job for the fittings still to attend")+'">📦 PO received</button>';
+      else if (c.stage === "in_works") {
+        if (c.awaitingBatteries) acts += ' <button class="btn sm" data-batt="'+esc(c.certId)+'">🔋 Batteries arrived</button>';
+        if (c.jobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.jobId)+'" style="text-decoration:none">Open works job →</a>';
+        if (c.jobId && !c.reissueCertId) acts += ' <button class="btn ghost sm" data-reissue="'+esc(c.certId)+'" title="Works done but the job wasn\'t completed in the portal? File the updated certificate now.">♻ File updated cert now</button>';
+      }
+      else if (c.stage === "done") acts += ' <button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
+      if (c.reissueCertId) acts += ' <button class="btn ghost sm" data-dl="'+esc(c.reissueCertId)+'" data-num="'+esc(c.certNumber||"")+'">⬇ Updated cert PDF</button> <a class="btn ghost sm" href="cert-review.html?open='+encodeURIComponent(c.reissueCertId)+'" style="text-decoration:none">♻ Open →</a>';
+      if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open from the start">↩</button>';
       return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
         + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
           + '<b style="font-size:14.5px">'+esc(c.siteName||c.siteCode||"Site")+'</b> <span class="muted">Cert '+esc(c.certNumber||"")+'</span>'
-          + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||c.stage)+'</span></div>'
-        + '<div class="muted" style="margin:4px 0 8px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
+          + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||esc(c.stage))+'</span></div>'
+        + '<div style="margin:4px 0 4px;font-weight:700;color:'+statusCol+'">'+esc(status)+(c.awaitingBatteries?' <span class="badge" style="background:#fff4e6;color:#b45309">⏳ awaiting batteries</span>':'')+'</div>'
+        + '<div class="muted" style="margin:0 0 6px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
+        + (fitLines ? '<div style="margin:0 0 8px;padding:6px 8px;background:#f8fafc;border-radius:8px">'+fitLines+'</div>' : '')
         + '<div class="rcase-msg msg" data-msg="'+esc(c.certId)+'"></div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap">'+acts+'</div></div>';
     }
@@ -293,7 +608,7 @@
       catch { g("rmBody").innerHTML = '<p class="msg err">Couldn\'t load the tracker.</p>'; return; }
       const cases = (d && d.cases) || [];
       if (!cases.length) { g("rmBody").innerHTML = '<p class="muted">Nothing here — no open EM remedials. 🎉</p>'; return; }
-      const order = { to_quote:0, quoted:1, approved:2, invoiced:3 };
+      const order = { to_quote:0, quoted:1, approved:2, in_works:2, done:3, invoiced:4 };
       cases.sort((a,b) => (order[a.stage]||0) - (order[b.stage]||0));
       g("rmBody").innerHTML = cases.map(caseRow).join("");
       const setMsg = (cid, t, err) => { const m = g("rmBody").querySelector('[data-msg="'+CSS.escape(cid)+'"]'); if (m) { m.textContent = t; m.className = "rcase-msg msg" + (err?" err":" ok"); } };
@@ -304,6 +619,107 @@
           if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
         catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
       });
+      // Per-fitting corrections (fault kind / replaced on site) → fitting-update.
+      const fitFix = async (sel, body) => {
+        const cid = sel.dataset.c; sel.disabled = true; setMsg(cid, "Updating fitting…");
+        try {
+          const r = await authFetch("/certs/remedials/fitting-update", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(Object.assign({ certId: cid, id: sel.dataset.fk || sel.dataset.fo }, body)) }).then(x=>x.json());
+          if (r && r.ok) { if (window.MLUI && MLUI.toast) MLUI.toast(r.jobFixed ? "Fitting updated — works job checklist updated too" : "Fitting updated"); loadTracker(); }
+          else { setMsg(cid, (r&&r.error)||"Couldn't update the fitting.", true); sel.disabled=false; }
+        } catch { setMsg(cid, "Couldn't update the fitting.", true); sel.disabled=false; }
+      };
+      // Office adds a photo to a fitting (e.g. the engineer's uploads were refused at the time).
+      const shrinkToJpeg = file => new Promise(resolve => {
+        const img = new Image(); const u = URL.createObjectURL(file);
+        const done = v => { URL.revokeObjectURL(u); resolve(v); };
+        const t = setTimeout(() => done(file), 8000);
+        img.onload = () => { try { let w = img.width, h = img.height, m = 1400; if (w > h && w > m) { h = Math.round(h * m / w); w = m; } else if (h > m) { w = Math.round(w * m / h); h = m; }
+          const cv = document.createElement("canvas"); cv.width = w; cv.height = h; cv.getContext("2d").drawImage(img, 0, 0, w, h);
+          cv.toBlob(b => { clearTimeout(t); done(b || file); }, "image/jpeg", 0.82); } catch { clearTimeout(t); done(file); } };
+        img.onerror = () => { clearTimeout(t); done(file); };
+        img.src = u;
+      });
+      g("rmBody").querySelectorAll("[data-fph]").forEach(b => b.onclick = () => {
+        const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+        inp.onchange = async () => {
+          const file = inp.files && inp.files[0]; if (!file) return;
+          const cid = b.dataset.c; b.disabled = true; setMsg(cid, "Uploading photo…");
+          try {
+            const blob = await shrinkToJpeg(file);
+            const fd = new FormData(); fd.append("certId", cid); fd.append("id", b.dataset.fph); fd.append("file", blob, "fitting.jpg");
+            const r = await authFetch("/certs/remedials/fitting-photo", { method:"POST", body: fd }).then(x=>x.json());
+            if (r && r.ok) { if (window.MLUI && MLUI.toast) MLUI.toast(r.jobFixed ? "Photo added — also on the works job" : "Photo added"); loadTracker(); }
+            else { setMsg(cid, (r&&r.error)||"Photo upload failed.", true); b.disabled=false; }
+          } catch { setMsg(cid, "Photo upload failed.", true); b.disabled=false; }
+        };
+        document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+      });
+      g("rmBody").querySelectorAll("[data-fs]").forEach(b => b.onclick = () => {
+        const isB = b.dataset.kind === "battery";
+        const spec = prompt(isB ? "Battery spec for this fitting (e.g. 4500mAh 2.4v):" : "Light fitting spec:", b.dataset.spec || "");
+        if (spec === null) return;
+        let qty;
+        if (isB) { const q = prompt("How many batteries for this fitting?", b.dataset.qty || "2"); if (q === null) return; qty = Number(q) || 0; }
+        b.dataset.fk = b.dataset.fs;   // fitFix reads data-fk/data-fo for the row id
+        fitFix(b, isB ? { spec, qty } : { spec });
+      });
+      g("rmBody").querySelectorAll("[data-fk]").forEach(s => s.onchange = () => fitFix(s, { kind: s.value }));
+      g("rmBody").querySelectorAll("[data-fo]").forEach(s => s.onchange = () => fitFix(s, { replacedOnSite: s.value === "1" }));
+      g("rmBody").querySelectorAll("[data-quote]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.quote; setMsg(cid, "Building quote…");
+        try {
+          const r = await authFetch("/certs/remedials/quote-text?certId="+encodeURIComponent(cid)).then(x=>x.json());
+          if (!r || !r.ok || !r.text) { setMsg(cid, (r&&r.message)||"No light remedials to quote.", true); return; }
+          let copied = false;
+          try { await navigator.clipboard.writeText(r.text); copied = true; } catch(e) {}
+          const m = g("rmBody").querySelector('[data-msg="'+CSS.escape(cid)+'"]');
+          if (m) {
+            m.className = "rcase-msg msg ok";
+            m.innerHTML = (copied ? "✓ Copied to clipboard — paste into your quote:" : "Select & copy this quote:")
+              + '<textarea readonly style="width:100%;margin-top:6px;font:inherit;font-size:13px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;min-height:60px;">'+esc(r.text)+'</textarea>';
+            const ta = m.querySelector("textarea"); if (ta && !copied) { ta.focus(); ta.select(); }
+          }
+        } catch { setMsg(cid, "Couldn't build the quote.", true); }
+      });
+      g("rmBody").querySelectorAll("[data-po]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.po; b.disabled = true; setMsg(cid, "Recording the PO…");
+        try {
+          const r = await authFetch("/certs/remedials/po-received", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (!r || !r.ok) { setMsg(cid, (r&&r.error)||"Couldn't record the PO.", true); b.disabled=false; return; }
+          if (r.stage === "done" && r.reissueCertId) {
+            const num = (r.case && r.case.certNumber) || "";
+            const dl = window.MLUI ? await MLUI.confirm("All fittings were replaced on site, so the updated certificate has been filed to the compliance chart. Download a copy?", { title:"Certificate updated ✓", okLabel:"⬇ Download a copy", cancelLabel:"No thanks" }) : confirm("Updated certificate filed. Download a copy?");
+            if (dl) { try { await downloadPdfFile(r.reissueCertId, "EM certificate " + num + " (updated)"); } catch {} }
+          } else if (r.stage === "in_works") {
+            if (window.MLUI && MLUI.toast) MLUI.toast(r.awaitingBatteries ? "Works job raised — flagged awaiting batteries" : "Works job raised — assign it on the scheduler");
+          }
+          loadTracker();
+        } catch { setMsg(cid, "Couldn't record the PO.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-batt]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.batt; b.disabled = true; setMsg(cid, "Clearing the awaiting-batteries flag…");
+        try { const r = await authFetch("/certs/remedials/batteries-arrived", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
+        catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+        try { await downloadPdfFile(b.dataset.dl, "EM certificate " + (b.dataset.num||"") + " (updated)"); } catch { alert("Couldn't download the PDF."); }
+      });
+      g("rmBody").querySelectorAll("[data-raiselights]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.raiselights; b.disabled = true; setMsg(cid, "Raising lights job…");
+        try {
+          const r = await authFetch("/certs/remedials/raise-lights", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't raise the job.", true); b.disabled=false; }
+        } catch { setMsg(cid, "Couldn't raise the job.", true); b.disabled=false; }
+      });
+      g("rmBody").querySelectorAll("[data-reissue]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.reissue; b.disabled = true; setMsg(cid, "Generating updated certificate…");
+        try {
+          const r = await authFetch("/certs/remedials/reissue", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok && r.id) { setMsg(cid, "Updated certificate filed to compliance ✓"); loadTracker(); }
+          else { setMsg(cid, (r&&r.error)||"Couldn't generate the updated certificate.", true); b.disabled=false; }
+        } catch { setMsg(cid, "Couldn't generate the updated certificate.", true); b.disabled=false; }
+      });
       g("rmBody").querySelectorAll("[data-battpdf]").forEach(b => b.onclick = async () => {
         const cid = b.dataset.battpdf; const w = window.open("", "_blank");
         try { const r = await authFetch("/certs/remedials/supplier-pdf?certId="+encodeURIComponent(cid));
@@ -311,12 +727,7 @@
           const u = URL.createObjectURL(await r.blob()); if (w) w.location = u; else window.location = u;
         } catch { if(w) w.close(); setMsg(cid, "Couldn't build the PDF.", true); }
       });
-      g("rmBody").querySelectorAll("[data-battmail]").forEach(b => b.onclick = async () => {
-        const cid = b.dataset.battmail; b.disabled = true; setMsg(cid, "Sending…");
-        try { const r = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
-          if (r && r.ok) setMsg(cid, "Sent to "+r.sentTo+" ✓"); else setMsg(cid, (r&&r.error)||"Couldn't send.", true); }
-        catch { setMsg(cid, "Couldn't send.", true); } b.disabled = false;
-      });
+      g("rmBody").querySelectorAll("[data-battmail]").forEach(b => b.onclick = () => openBattMail(b.dataset.battmail, t => setMsg(b.dataset.battmail, t)));
     }
   </script>
 </body>

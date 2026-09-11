@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -310,12 +310,12 @@ function renderOptions(showAll) {
   let html = '';
   if (projects.length) {
     html += hdr('Live projects');
-    html += projects.map(p => '<div class="ac-item" onmousedown="pickSite(\'' + escapeJsAttr(p.name) + '\')">📁 ' + (q ? highlight(p.name, q) : escapeHtml(p.name)) + '</div>').join('');
+    html += projects.map(p => '<div class="ac-item" onmousedown="pickSite(' + escapeHtml(JSON.stringify(String(p.name))) + ')">📁 ' + (q ? highlight(p.name, q) : escapeHtml(p.name)) + '</div>').join('');
   }
   // Your assigned van first, then shared/pool vehicles (e.g. the tippers).
   const mine = vehicles.filter(v => v.mine);
   const shared = vehicles.filter(v => !v.mine && v.pool);
-  const vRow = v => '<div class="ac-item" onmousedown="pickVehicle(\'' + escapeJsAttr(v.reg) + '\',\'' + escapeJsAttr(v.desc || '') + '\')">🚐 '
+  const vRow = v => '<div class="ac-item" onmousedown="pickVehicle(' + escapeHtml(JSON.stringify(String(v.reg))) + ',' + escapeHtml(JSON.stringify(String(v.desc || ''))) + ')">🚐 '
     + (q ? highlight(v.reg, q) : escapeHtml(v.reg)) + (v.desc ? ' <span class="muted">— ' + escapeHtml(v.desc) + '</span>' : '') + '</div>';
   if (mine.length) { html += hdr('Your vehicle'); html += mine.map(vRow).join(''); }
   if (shared.length) { html += hdr('Shared vehicles'); html += shared.map(vRow).join(''); }
@@ -350,7 +350,7 @@ function filterSuppliers() {
   if (!q) { dd.style.display = 'none'; return; }
   const matches = SUPPLIERS.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickSupplier(\''+escapeJsAttr(s.name)+'\')">'+highlight(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickSupplier('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlight(s.name, q)+'</div>').join('');
   dd.style.display = 'block';
 }
 function highlight(text, q) {
@@ -377,7 +377,7 @@ async function loadMyPOs(officeHours) {
     list.innerHTML = pos.slice(0, 20).map(p => {
       const dStr = fmtDateTime(p.issued_at);
       const where = p.incident_no ? ('🎫 ' + escapeHtml(p.incident_no) + (p.site ? ' · ' + escapeHtml(p.site) : '')) : escapeHtml(p.site || '—');
-      return '<div class="my-po"><div class="my-po-num">'+p.po_number+'</div><div class="my-po-detail"><div><strong>'+escapeHtml(p.supplier || '—')+'</strong> · <span class="muted">'+where+'</span></div><div class="muted" style="font-size:12px;margin-top:2px">'+dStr+'</div></div></div>';
+      return '<div class="my-po"><div class="my-po-num">'+escapeHtml(p.po_number)+'</div><div class="my-po-detail"><div><strong>'+escapeHtml(p.supplier || '—')+'</strong> · <span class="muted">'+where+'</span></div><div class="muted" style="font-size:12px;margin-top:2px">'+escapeHtml(dStr)+'</div></div></div>';
     }).join('');
     if (officeHours) {
       document.getElementById('status-area').appendChild(card);
@@ -418,7 +418,7 @@ async function submitPO(btn) {
     document.getElementById('result-area').innerHTML = `
       <div class="card fade-in" style="text-align:center;padding:40px 20px">
         <p class="muted" style="text-transform:uppercase;font-size:12px;letter-spacing:0.08em;margin-bottom:8px">PO Number Issued</p>
-        <div class="po-display">${res.po_number}</div>
+        <div class="po-display">${escapeHtml(res.po_number)}</div>
         <div style="margin:24px 0;color:#5a6677;font-size:14px;line-height:1.7">
           <strong style="color:#003366">${incident ? '🎫 ' + escapeHtml(incident) + (site ? ' · ' + escapeHtml(site) : '') : escapeHtml(site)}</strong><br>
           ${escapeHtml(supplier)}<br><span style="font-size:13px">${escapeHtml(description)}</span>

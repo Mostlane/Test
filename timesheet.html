@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <meta charset="UTF-8" />
   <title>Timesheet – Mostlane</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
@@ -110,6 +110,7 @@
   </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
 const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
 
@@ -325,7 +326,7 @@ function render(){
       if (monRecord) {
         const rawVal = monRecord.vanCheck || monRecord.vanCheckWeekStatus || "";
         const checkVal = String(rawVal).trim().toLowerCase();
-        mondayVanCheckText = `Monday Van Check: ${rawVal}`;
+        mondayVanCheckText = `Monday Van Check: ${esc(rawVal)}`;
 
         if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
           mondayVanCheckText +=
@@ -367,12 +368,12 @@ function render(){
     tr.innerHTML = `
       <td>${pretty}</td>
       <td>${dayName}</td>
-      <td>${start || "<span class='muted'>—</span>"}</td>
-      <td>${finish || "<span class='muted'>—</span>"}</td>
+      <td>${start ? esc(start) : "<span class='muted'>—</span>"}</td>
+      <td>${finish ? esc(finish) : "<span class='muted'>—</span>"}</td>
       <td>${total.toFixed(2)}</td>
       <td>${std.toFixed(2)}</td>
       <td>${ot.toFixed(2)}</td>
-      <td>${notes ? notes.replace(/</g,"&lt;") : "<span class='muted'>—</span>"}</td>
+      <td>${notes ? esc(notes) : "<span class='muted'>—</span>"}</td>
     `;
     tbody.appendChild(tr);
   });

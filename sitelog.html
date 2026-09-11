@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SiteLog — Mostlane Portal</title>
@@ -51,7 +51,7 @@
 <script>
 const API = window.MOSTLANE_API;
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 function authFetch(url, init = {}){
   init.headers = new Headers(init.headers || {});
   const t = localStorage.getItem("mostlaneToken");
@@ -78,7 +78,7 @@ async function loadOnSite(){
       const site = v.site_name || v.site || v.site_code || v.provided_site_name || "";
       const co   = v.company || "";
       const inAt = v.check_in_at || v.checkin_at || v.in_at || "";
-      return `<div class="row"><b>${esc(name)}</b><span>${esc(site)}${co ? " · " + esc(co) : ""}</span><span class="meta">${inAt ? "in " + fmtTime(inAt) : ""}</span></div>`;
+      return `<div class="row"><b>${esc(name)}</b><span>${esc(site)}${co ? " · " + esc(co) : ""}</span><span class="meta">${inAt ? "in " + esc(fmtTime(inAt)) : ""}</span></div>`;
     }).join("");
   }catch(e){
     $("onSiteList").textContent = "";

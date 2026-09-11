@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • SLA Settings</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -222,6 +222,15 @@
     </div>
   </details>
 
+  <!-- Email intake -->
+  <details class="sect">
+    <summary>📨 Email intake (jobs from Outlook)</summary>
+    <div class="sect-body">
+      <p class="muted">Job emails forwarded from Outlook land on the board automatically — no Zapier. See every email received, test with a pasted email, and set who may send jobs in.</p>
+      <a class="btn primary" href="email-intake.html">Open email intake →</a>
+    </div>
+  </details>
+
   <!-- Data tools -->
   <details class="sect">
     <summary>🧰 Data tools</summary>
@@ -325,8 +334,8 @@ function renderReadOnly(){
 
     box.innerHTML += `
       <div class="setting-row">
-        <div class="setting-label">${key.replace("Priority","P")}</div>
-        <div class="setting-value">${hours} hours ${days}</div>
+        <div class="setting-label">${wkEsc(key.replace("Priority","P"))}</div>
+        <div class="setting-value">${wkEsc(hours)} hours ${days}</div>
       </div>
     `;
   }
@@ -347,8 +356,8 @@ function renderEditMode(){
 
     box.innerHTML += `
       <div class="setting-row">
-        <div class="setting-label">${key.replace("Priority","P")}</div>
-        <input type="number" min="1" step="1" id="${key}" value="${hours}">
+        <div class="setting-label">${wkEsc(key.replace("Priority","P"))}</div>
+        <input type="number" min="1" step="1" id="${wkEsc(key)}" value="${wkEsc(hours)}">
       </div>
     `;
   }
@@ -407,7 +416,7 @@ loadConfig();
 const PAPI = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
 function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
 function pFetch(p, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+pTok() }, opts.headers||{}); if(opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"]="application/json"; return fetch(PAPI+p, opts); }
-const wkEsc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const wkEsc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const PORTAL_STATUSES = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Closed Jobs","Invoiced","Cancelled","FRA Works"];
 let WK_MAP = {};
 
@@ -680,7 +689,7 @@ wkLoadConfig();
     });
   }catch(e){}
 
-  function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;",'\'':"&#39;"}[c])); }
   function winRow(w){
     w=w||{days:[1,2,3,4,5],from:"08:00",to:"17:00",engineer:""};
     const row=document.createElement("div");

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="auth.js"></script>
   <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
   <script src="docviewer.js?v=7"></script>
@@ -632,7 +632,7 @@ function openUploadModal(code, file){
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
     <h2>Add document</h2>
-    <p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p>
+    <p style="margin:.2em 0 .6em"><b>${esc(code)}</b> — ${esc(rec.siteName||'')}</p>
     <label>Compliance type</label>
     <div class="typegrid" id="ug"></div>
     <label id="unl">Document name (optional)</label>
@@ -759,7 +759,7 @@ async function openVersionsModal(code){
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
     <h2>Documents</h2>
-    <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
+    <p style="margin:.2em 0 .4em"><b>${esc(code)}</b> — ${esc(rec.siteName||'')}</p>
     ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
     <div id="vlist">Loading…</div>
     <div class="actions">${canEdit?`<button class="btn" id="vadd">＋ Add document</button>`:''}<button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
@@ -787,7 +787,7 @@ async function openVersionsModal(code){
     const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
     const keep=(canEdit&&!nv)?`<label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
     const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
-    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${f.id}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${f.url}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
+    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${esc(f.id)}" data-type="${esc(type)}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${esc(f.url)}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
   }
   function typeHtml(type, items){
     items = items||[];
@@ -811,7 +811,7 @@ async function openVersionsModal(code){
         body+=`<div class="doc-sub" ${canEdit?'draggable="true"':''} data-ids='${esc(JSON.stringify(ids))}'>📁 ${esc(sname)}</div>`+subs[sname].map(f=>rowHtml(f,type)).join('');
       });
     }
-    return `<div class="doc-type" data-type="${type}"><div class="hbar">${esc(HEAD[type]||type)} <span class="cnt">(${items.length})</span></div><div class="body">${body}</div></div>`;
+    return `<div class="doc-type" data-type="${esc(type)}"><div class="hbar">${esc(HEAD[type]||type)} <span class="cnt">(${items.length})</span></div><div class="body">${body}</div></div>`;
   }
   async function refresh(){
     let files={};
@@ -897,8 +897,8 @@ function fmtDue(s){
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
   const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
-  const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
-  return `${fmtDue(val)}${link}`;
+  const link = has ? ` <a class="cert-link" href="#" data-code="${esc(code)}" data-type="${esc(t)}" title="Open certificate">📄</a>` : '';
+  return `${esc(fmtDue(val))}${link}`;
 }
 
 /* ===== Helpers ===== */
@@ -977,19 +977,19 @@ function renderTable(d){
     tr.dataset.code = e.storeCode;
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
     // 📎 upload is manage-only; 🗂 view stays for everyone (view-only engineers included).
-    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button> ` : '';
+    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${esc(e.storeCode)}" title="Upload / drop a document">📎</button> ` : '';
     const docsCell = upBtn
-      + (nFiles ? `<button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
+      + (nFiles ? `<button class="doc-btn view" data-code="${esc(e.storeCode)}" title="View documents">🗂 ${nFiles}</button>` : '');
     const m = e.meta || {};
     const pinSet = (m.lat!=null && m.lng!=null) || m.w3w;
     const keySet = (m.access && m.access.trim()) || (m.contact && m.contact.trim()) || (m.keys && m.keys.trim());
-    const locCell = `<button class="doc-btn loc" data-code="${e.storeCode}" title="${pinSet?'Location set — view/edit':'Set location'}">${pinSet?'📍':'📍❓'}</button>`;
-    const keyCell = `<button class="doc-btn key" data-code="${e.storeCode}" title="${keySet?'Access info — view/edit':'Add access info'}">${keySet?'🔑':'🔑❓'}</button>`;
+    const locCell = `<button class="doc-btn loc" data-code="${esc(e.storeCode)}" title="${pinSet?'Location set — view/edit':'Set location'}">${pinSet?'📍':'📍❓'}</button>`;
+    const keyCell = `<button class="doc-btn key" data-code="${esc(e.storeCode)}" title="${keySet?'Access info — view/edit':'Add access info'}">${keySet?'🔑':'🔑❓'}</button>`;
     const ws = worstStatus(e);
     const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
     if(e.active===0) tr.classList.add('closed-row');
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td class="site">${e.siteName}${(e.active===0 && viewMode!=='closed')?' <span class=\"closed-badge\">🗄 Closed</span>':''}</td><td>${esc(e.storeType||'')}</td>
+      <td>${esc(e.storeCode)}</td><td class="site">${esc(e.siteName)}${(e.active===0 && viewMode!=='closed')?' <span class=\"closed-badge\">🗄 Closed</span>':''}</td><td>${esc(e.storeType||'')}</td>
       <td class="${ws?'st-'+ws:''}">${statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('emMonthly')}${dtd('emYearly')}${dtd('pat')}${dtd('pv')}
       <td>${locCell}</td><td>${keyCell}</td>
@@ -1386,11 +1386,11 @@ function openAddFromSitesModal(){
     listEl.innerHTML = rows.map(s => {
       const num = String(s.siteNumber||'').trim();
       const label = cfg.clients[(s.client||'').toLowerCase()] || '';
-      return `<button type="button" class="afs-row" data-num="${num}"
+      return `<button type="button" class="afs-row" data-num="${esc(num)}"
         style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid #eef1f4;background:#fff;cursor:pointer;">
-        <b style="min-width:52px;color:#0a66c2;">${num}</b>
-        <span style="flex:1;">${(s.siteName||'(no name)')}</span>
-        <span style="color:#889;font-size:12px;">${s.postcode||''}${label?' · '+label:''}</span>
+        <b style="min-width:52px;color:#0a66c2;">${esc(num)}</b>
+        <span style="flex:1;">${esc(s.siteName||'(no name)')}</span>
+        <span style="color:#889;font-size:12px;">${esc(s.postcode||'')}${label?' · '+esc(label):''}</span>
       </button>`;
     }).join('');
     listEl.querySelectorAll('.afs-row').forEach(b => b.onclick = ()=> addOne(b.dataset.num, b));
@@ -1600,7 +1600,7 @@ function openSummaryModal(){
     const pct = n => ( (n*100/t).toFixed(1) + '%' );
     return `
       <div style="border:1px solid #ddd; border-radius:10px; margin:10px 0; padding:10px; background:#fff;">
-        <div style="font-weight:bold; border-bottom:1px solid #ddd; padding-bottom:6px; margin-bottom:10px; color:#0071CE; text-transform:capitalize;">${k}</div>
+        <div style="font-weight:bold; border-bottom:1px solid #ddd; padding-bottom:6px; margin-bottom:10px; color:#0071CE; text-transform:capitalize;">${esc(k)}</div>
         <div>Total: <b>${g.total}</b></div>
         <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
         <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
@@ -1670,9 +1670,9 @@ function openSettingsModal(){
     const freq = unit==='months' ? (s.months!=null?s.months:1) : s.years;
     return `<tr>
       <td>${lbl}</td>
-      <td><input type="number" min="1" max="120" id="fy_${k}" value="${freq}"> <span style="color:#64748b">${unit}</span></td>
-      <td><input type="number" min="0" max="3650" id="am_${k}" value="${s.amberDays}"></td>
-      <td><input type="number" min="0" max="3650" id="rd_${k}" value="${s.redDays}"></td>
+      <td><input type="number" min="1" max="120" id="fy_${k}" value="${esc(freq)}"> <span style="color:#64748b">${unit}</span></td>
+      <td><input type="number" min="0" max="3650" id="am_${k}" value="${esc(s.amberDays)}"></td>
+      <td><input type="number" min="0" max="3650" id="rd_${k}" value="${esc(s.redDays)}"></td>
     </tr>`;
   }).join('');
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';

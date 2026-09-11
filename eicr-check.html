@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <title>Mostlane • EICR / BS 7671 Check</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -207,7 +207,7 @@
     // Gate: Compliance or Full Access.
     var perms = {};
     try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
-    var ok = perms.FullAccess === "Yes" || perms.Compliance === "Yes";
+    var ok = perms.FullAccess === "Yes" || perms.EicrCheck === "Yes";
     document.getElementById(ok ? "app" : "gate").classList.remove("hide");
     if (!ok) return;
 
@@ -352,7 +352,7 @@
     /* PDF VERIFY — reads an EICR PDF in the browser and reports it. All the
        analysis lives in the shared engine (eicr-engine.js → window.MLEICR), so
        this page and the compliance batch worklist stay in lock-step. */
-    function esc2(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+    function esc2(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function regTags(regs) { return (regs || []).map(function (r) { return "<span style='display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:700;margin:2px 3px 0 0'>" + esc2(r) + "</span>"; }).join(""); }
 
     async function handlePdf(file) {
@@ -402,7 +402,7 @@
           verified.map(function (c, i) {
             return "<tr><td><b>" + (c.db ? esc2(c.db) + " · " : "") + esc2(c.cct) + "</b></td>" +
               "<td>" + esc2(c.live) + "/" + esc2(c.cpc) + " mm²</td>" +
-              "<td>Type " + esc2(c.type) + " " + c.rating + " A</td>" +
+              "<td>Type " + esc2(c.type) + " " + esc2(c.rating) + " A</td>" +
               "<td class='n'>" + (c.maxZs ? fmt(c.maxZs) + " Ω" : "—") + "</td>" +
               "<td class='n'>" + (c.measured == null ? "—" : fmt(c.measured) + " Ω") + "</td>" +
               "<td><button class='rowraw' data-i='" + i + "' style='font-weight:600;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;color:var(--muted)'>row</button></td></tr>" +

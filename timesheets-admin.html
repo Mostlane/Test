@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Engineer Timesheets — Mostlane</title>
-<script src="/portal-config.js?v=26"></script>
+<script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
 <script src="auth.js"></script>
 <style>
@@ -14,6 +14,10 @@
   header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
   header.page a{color:#fff;text-decoration:none}
   header.page h1{font-size:18px;flex:1}
+  header.page{flex-wrap:wrap}
+  header.page .hdr-links{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  header.page .hdr-btn{font-size:13px;background:rgba(255,255,255,.15);padding:6px 10px;border-radius:9px;white-space:nowrap}
+  @media(max-width:600px){ header.page h1{font-size:16px} header.page .hdr-btn{font-size:12px;padding:5px 8px} }
   .wrap{max-width:1150px;margin:14px auto;padding:0 12px}
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font:inherit;cursor:pointer}
@@ -50,6 +54,14 @@
   .eday{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:7px 0}
   .eday.wk2{background:#fffdf2}
   .eday h4{font-size:13px;color:var(--brand);margin-bottom:5px}
+  .autoMi{margin-top:6px;background:#f6f9fc;border:1px solid #e8eef6;border-radius:9px;padding:6px 10px}
+  .autoMi-h{font-size:11px;font-weight:700;color:#334155;margin-bottom:3px}
+  .autoMi.muted2{color:#64748b;font-size:12px}
+  .autoleg{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;border-bottom:1px dashed #e2e8f0}
+  .autoleg:last-child{border-bottom:none}
+  .autoleg span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#475569}
+  .autoleg b{flex:none}
+  .autoleg.tot{font-weight:700;border-top:1px solid #cbd5e1;border-bottom:none;margin-top:2px;padding-top:5px}
   .erow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0}
   .erow input[type=time]{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
   .erow input[type=text],.erow input[type=number]{font:inherit;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px}
@@ -72,7 +84,20 @@
 </style>
 </head>
 <body>
-<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>🧾 Engineer Timesheets</h1></header>
+<header class="page"><a class="ml-back" href="/main.html" title="Back">‹ Back</a><h1>🧾 Engineer Timesheets</h1>
+  <span class="hdr-links">
+    <a class="hdr-btn" id="officeTsLink" href="office-timesheet.html" style="display:none" title="The whole office team's week">💼 Office timesheet</a>
+    <a class="hdr-btn" id="myTsLink" href="engineer-timesheet.html" title="Your own weekly timesheet">⏱️ My timesheet</a>
+  </span>
+</header>
+<script>
+  // The three timesheets live under ONE menu tile — cross-link where permitted.
+  (function(){ try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = function(v){ return String(v||"").toLowerCase() === "yes"; };
+    if (yes(p.FullAccess)) document.getElementById("officeTsLink").style.display = "";
+  }catch(e){} })();
+</script>
 <div class="wrap">
   <div class="bar">
     <button class="btn" id="prevWk">‹ Prev</button>
@@ -80,6 +105,7 @@
     <button class="btn" id="nextWk">Next ›</button>
     <label style="margin-left:8px;font-size:13px"><input type="checkbox" id="showAll"> Show everyone</label>
     <span style="flex:1"></span>
+    <button class="btn" id="verifyBtn" style="background:#003468;color:#fff;font-weight:700">✅ Verify with fleet data</button>
     <div class="toolwrap">
       <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
       <div class="toolmenu" id="toolsMenu" hidden>
@@ -100,8 +126,15 @@
   <h2 id="editTitle">Edit week</h2>
   <p class="note" id="editSub"></p>
   <div id="editBody"></div>
+  <div id="apprBox" style="border-top:1px solid #e5e9f0;margin-top:12px;padding-top:12px">
+    <div id="apprStatus" style="font-size:13px;margin-bottom:6px"></div>
+    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">Office note to the engineer (optional)</label>
+    <textarea id="apprNote" rows="2" placeholder="e.g. Adjusted Tuesday finish to match the tracker" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical"></textarea>
+  </div>
   <div class="foot"><span class="muted" id="editState" style="margin-right:auto;align-self:center">Changes save automatically</span>
-  <button class="btn primary" onclick="closeEdit()">Close</button></div>
+  <button class="btn" id="reopenBtn" style="display:none" onclick="reopenWeek()">↩ Re-open</button>
+  <button class="btn primary" id="approveBtn" onclick="approveWeek()">✅ Approve &amp; lock</button>
+  <button class="btn" onclick="closeEdit()">Close</button></div>
 </div></div>
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
@@ -139,6 +172,32 @@
   <div class="foot"><button class="btn" onclick="document.getElementById('invOv').classList.remove('show')">Close</button></div>
 </div></div>
 
+<div class="ov" id="verifyOv"><div class="panel" style="max-width:720px">
+  <h2>✅ Verify timesheets with fleet data</h2>
+  <p class="note" id="vfWeek"></p>
+  <div id="vfSteps">
+    <div class="vfstep" style="border:1px solid #e5e9f0;border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;margin-bottom:4px">1. VelocityFleet trip export (.xls)</div>
+      <div class="muted" style="font-size:12.5px;margin-bottom:8px">The VelocityFleet Trip History export (the workbook with a “Detailed View” tab + a tab per van). It checks each engineer's entered hours against their van's per-day door-to-door movement.</div>
+      <input type="file" id="vfXls" accept=".xls,.xlsx"><div id="vfXlsInfo" class="muted" style="font-size:12.5px;margin-top:6px"></div>
+    </div>
+    <div class="vfstep" style="border:1px solid #e5e9f0;border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;margin-bottom:4px">2. Driver Score PDF <span class="muted" style="font-weight:400">(optional)</span></div>
+      <div class="muted" style="font-size:12.5px;margin-bottom:8px">Telematics Driver Score summary — shows each engineer's van score alongside the check.</div>
+      <input type="file" id="vfPdf" accept=".pdf"><div id="vfPdfInfo" class="muted" style="font-size:12.5px;margin-top:6px"></div>
+    </div>
+  </div>
+  <div id="vfResult" style="max-height:44vh;overflow:auto"></div>
+  <div class="foot" style="display:flex;gap:8px;align-items:center">
+    <button class="btn" id="vfRun" style="background:#003468;color:#fff;font-weight:700">🤖 Run check</button>
+    <span id="vfState" class="muted" style="font-size:12.5px;flex:1"></span>
+    <button class="btn" onclick="document.getElementById('verifyOv').classList.remove('show')">Close</button>
+  </div>
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>try{ if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }catch(e){}</script>
 <script>
 const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
 function tok(){return localStorage.getItem("mostlaneToken")||"";}
@@ -149,23 +208,42 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;",
 function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.toISOString().slice(0,10);}
 function addDays(iso,n){const d=new Date(iso+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
 const hmS=m=>(!m||m<=0)?"—":Math.floor(m/60)+"h"+String(Math.round(m%60)).padStart(2,"0");
+const leaveFull=t=>t==="Unpaid"?"Unpaid Leave":t==="Other"?"Leave":"Holiday";
+const leaveShort=t=>t==="Unpaid"?"Unpaid":t==="Other"?"Leave":"Hol";
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOW=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 let WEEK=mondayOf(new Date()), DATA=null, EDIT_U=null;
 
+let VERIFY=null;
 async function load(){
   g("wkLabel").textContent="Week of "+new Date(WEEK+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-  let r=null;
-  try{r=await authFetchTO("/ts/admin/overview?week="+WEEK).then(x=>x.json());}catch(e){}
-  if(!r||!r.ok){g("body").innerHTML='<tr><td class="empty" colspan="12">'+esc((r&&r.error)||"Couldn't load — check your connection or permissions.")+"</td></tr>";return;}
+  g("body").innerHTML='<tr><td class="empty" colspan="12">Loading everyone\u2019s week…</td></tr>';
+  let r=null, why="";
+  // The overview builds every engineer's week server-side — give it a real
+  // budget (30s) rather than the 9s default, and say WHICH it was on failure.
+  try{const res=await authFetchTO("/ts/admin/overview?week="+WEEK,{},30000);r=await res.json().catch(()=>null);if(!r)why="The server sent an unreadable reply (HTTP "+res.status+").";}
+  catch(e){why=(e&&e.message==="timeout")?"The server took more than 30 seconds — try again in a moment.":"No connection to the server.";}
+  if(!r||!r.ok){g("body").innerHTML='<tr><td class="empty" colspan="12">'+esc((r&&r.error)||("Couldn't load — "+(why||"check your permissions.")))+' <button class="btn" onclick="load()">↻ Try again</button></td></tr>';return;}
   DATA=r;
+  try{const vr=await authFetchTO("/ts/verify?week="+WEEK).then(x=>x.json());VERIFY=(vr&&vr.ok&&vr.verify)||null;}catch(e){VERIFY=null;}
   renderTable();
+}
+function vfFor(username){ return (VERIFY&&VERIFY.byUser&&VERIFY.byUser[username])||null; }
+function scoreColour(s){ return s>=85?'#0a8a35':s>=70?'#b45309':'#d11f2a'; }
+function verdictChip(v){
+  if(!v)return"";
+  var out="";
+  if(v.score!=null) out+=` <span title="Van driver score" style="display:inline-block;background:${scoreColour(v.score)};color:#fff;border-radius:6px;padding:1px 6px;font-size:10.5px;font-weight:800">${v.score}</span>`;
+  if(v.verdict==="flag") out+=` <span title="${esc(v.summary||'')}" style="display:inline-block;background:#dc2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚠ check hours</span>`;
+  else if(v.verdict==="check") out+=` <span title="${esc(v.summary||'')}" style="display:inline-block;background:#f59e0b;color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚑ review</span>`;
+  else if(v.driveMins!=null) out+=` <span title="${esc(v.summary||'Looks consistent with the van data')}" style="display:inline-block;color:#0a8a35;font-size:11px;font-weight:700">✓</span>`;
+  return out;
 }
 
 function renderTable(){
   const days=DATA.days;
-  g("head").innerHTML='<th class="name">Engineer</th>'+days.map((d,i)=>`<th>${DOW[i]}<br><span style="font-weight:400">${d.slice(8)}</span></th>`).join("")+
+  g("head").innerHTML='<th class="name">Engineer</th>'+days.map((d,i)=>`<th>${DOW[i]}<br><span style="font-weight:400">${d.slice(8)}${(DATA.bank&&DATA.bank[d])?' <span title="'+esc(DATA.bank[d].label)+'">🏦</span>':''}</span></th>`).join("")+
     '<th>Total</th><th class="hideS">Miles</th><th>Invoice</th><th></th>';
   const showAll=g("showAll").checked;
   const rows=DATA.users.filter(u=>showAll||u.totals.daysWorked>0||u.totals.miles>0||u.selfEmployed||u.cfg.commute||u.cfg.lunch);
@@ -173,16 +251,23 @@ function renderTable(){
   g("body").innerHTML=rows.map(u=>{
     const cells=days.map(d=>{
       const hol=(u.holidays||{})[d];
-      if(hol) return `<td style="background:#f0fdf4"><span class="holchip" title="Approved leave">🌴 ${hol.half?hol.half:"Hol"}</span></td>`;
+      if(hol) return `<td style="background:#f0fdf4"><span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${(hol.half==="AM"||hol.half==="PM")?` ${hol.half}`:""}</span></td>`;
+      const bh=(DATA.bank||{})[d];
       const p=u.perDay[d];
-      return "<td>"+(p&&p.worked?hmS(p.paid):"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
+      if(bh && !(p&&p.worked)) return `<td style="background:#eef2ff"><span title="${esc(bh.label)}" style="font-size:16px">🏦</span></td>`;
+      const bhTag=bh?` <span title="${esc(bh.label)}">🏦</span>`:"";
+      return "<td>"+(p&&p.worked?hmS(p.paid)+bhTag:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
     }).join("");
     const inv=u.invoice?`<a class="inv" href="${esc(u.invoice.url)}" target="_blank" title="Open invoice PDF">#${u.invoice.number}</a>`
       :(u.selfEmployed?"<span class='muted'>—</span>":"");
     const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
-    return `<tr><td class="name">${esc(u.name)}${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
-      <td class="tot">${hmS(u.totals.paidMins)}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
-      <td>${inv}</td><td><button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="Edit this week">✎</button></td></tr>`;
+    const ot=u.totals.otHours>0?`<br><span style="font-size:11px;color:#b45309">OT ${u.totals.otHours}h${u.totals.otPay?` · ${money(u.totals.otPay)}`:""}</span>`:"";
+    const lv=u.totals.leaveHours>0?`<br><span style="font-size:11px;color:#4f46e5">Leave ${u.totals.leaveHours}h${u.totals.leavePay?` · ${money(u.totals.leavePay)}`:""}</span>`:"";
+    const gap=u.gapCount>0?` <span title="${u.gapCount} job(s) still need hours${u.due&&u.due.label?' — due '+esc(u.due.label):''}" style="display:inline-block;background:${u.due&&u.due.overdue?'#dc2626':'#f59e0b'};color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚠ ${u.gapCount} no hrs</span>`:"";
+    const vchip=verdictChip(vfFor(u.username));
+    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}${gap}${vchip}</td>${cells}
+      <td class="tot">${hmS(u.totals.paidMins)}${ot}${lv}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
+      <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit(${esc(JSON.stringify(String(u.username)))})" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
 }
 g("showAll").onchange=renderTable;
@@ -193,20 +278,89 @@ function openEdit(username){
   EDIT_U=u;
   g("editTitle").textContent="Edit — "+u.name;
   g("editSub").textContent=u.invoice?"This week is invoiced (#"+u.invoice.number+") — delete the invoice first to make changes.":"Times are as the engineer entered them; deductions are applied automatically from Settings.";
-  g("editBody").innerHTML=DATA.days.map((date,i)=>{
+  const autoMi=!!(u.autoMileage&&u.autoMileage.applies);   // door-to-door, locked
+  const vf=vfFor(username); let vfHtml="";
+  if(vf){
+    const col=vf.verdict==="flag"?"#fef2f2":vf.verdict==="check"?"#fffbeb":"#f0fdf4";
+    const bc=vf.verdict==="flag"?"#fecaca":vf.verdict==="check"?"#fde68a":"#bbf7d0";
+    const table=(vf.dayLog||[]).filter(d=>d.entered>0||d.moved).map(d=>{
+      const dd=new Date(d.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+      const vanTxt=d.moved?`van ${esc(d.vanStart)}–${esc(d.vanEnd)} · D2D ${d.spanH}h${d.driveH!=null?" · "+d.driveH+"h drive":""}`:'<span style="color:#b91c1c">van didn\'t move</span>';
+      const jobRows=(d.jobs||[]).map(j=>{
+        const diff=j.suggested!=null&&Math.abs(j.suggested-j.entered)>0.75;
+        return `<div style="display:flex;gap:8px;font-size:12px;padding:1px 0;${diff?"color:#b91c1c":""}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.ref)}${j.site?" · "+esc(j.site):""}</span><span style="flex:none;font-weight:700">${j.entered}h${diff?` → ${j.suggested}h`:""}</span></div>${(diff&&j.note)?`<div style="font-size:11px;color:#991b1b;margin:0 0 3px 4px">↳ ${esc(j.note)}</div>`:""}`;
+      }).join("");
+      return `<div style="border-top:1px solid #eef2f7;padding:5px 0"><div style="font-size:12px;font-weight:700">${dd} <span style="font-weight:400;color:#64748b">${vanTxt}</span> · entered ${d.entered}h</div>${jobRows||'<div style="font-size:11px;color:#94a3b8">no jobs booked this day</div>'}</div>`;
+    }).join("");
+    vfHtml=`<div style="background:${col};border:1px solid ${bc};border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-weight:700">🚚 Fleet cross-check${vf.score!=null?` · van score <span style="color:${scoreColour(vf.score)}">${vf.score}</span>`:""}</div>
+      <div style="font-size:13px;margin-top:3px">Van <b>${esc(vf.reg||"—")}</b> · door-to-door <b>${vf.weekSpanH!=null?vf.weekSpanH+"h":"—"}</b> this week · entered <b>${vf.total}h</b></div>
+      ${vf.summary?`<div style="font-size:13px;margin-top:4px">${esc(vf.summary)}</div>`:""}
+      ${(vf.flags||[]).map(f=>`<div style="font-size:12.5px;margin-top:3px;color:#991b1b">• ${f.date?esc(new Date(f.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"}))+": ":""}${esc(f.reason)}${f.severity?` <i>(${esc(f.severity)})</i>`:""}</div>`).join("")}
+      ${table}
+      <div class="muted" style="font-size:11px;margin-top:6px">The AI attributes each trip to the job booked — travel to a site counts as that job, the drive home counts to the last job — and ignores fuel/quick stops. Red shows where it thinks a job's hours differ (→ suggested). Telematics is approximate, so adjust the days below or leave as-is.</div>
+    </div>`;
+  }
+  g("editBody").innerHTML=vfHtml+DATA.days.map((date,i)=>{
     const d=u.days[date]||{};
-    const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
     const hol=(u.holidays||{})[date];
-    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip">🌴 ${hol.half||"Hol"}</span>`:""}</h4>
+    let miBlock;
+    if(autoMi){
+      const b=(u.autoMileage.byDate||{})[date];
+      if(b&&(b.legs||[]).length){
+        const legs=b.legs.map(l=>`<div class="autoleg"><span>${esc(l.from)} → ${esc(l.to)}</span><b>${l.miles} mi${l.src==="est"?" ~":""}</b></div>`).join("");
+        miBlock=`<div class="autoMi"><div class="autoMi-h">🚗 Door-to-door (auto, locked)</div>${legs}<div class="autoleg tot"><span>Total</span><b>${b.miles} mi</b></div></div>`;
+      } else if(b&&b.noRoute){ miBlock=`<div class="autoMi muted2">No site postcodes captured — no mileage.</div>`; }
+      else miBlock="";
+    } else {
+      const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${esc(m.miles||"")}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
+      miBlock=`<div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button>`;
+    }
+    const bh=(DATA.bank&&DATA.bank[date])||null;
+    const isLeaveDay=!!(hol||bh);
+    const needsPaid=!!((hol&&hol.type!=="Unpaid")||bh);   // blocks approval if blank
+    const leaveVal=d.leaveHours!=null?d.leaveHours:(hol&&hol.type==="Unpaid"?0:"");
+    const leaveRow=isLeaveDay?`<div class="erow leaverow" style="margin-top:6px;align-items:center;gap:8px">
+      <label style="font-size:12px;color:#4f46e5;font-weight:700">Paid hours${needsPaid?' <span style="color:#dc2626">*</span>':''}</label>
+      <input type="number" class="e-leave" step="0.5" min="0" max="24" value="${esc(leaveVal)}" placeholder="hrs" style="width:76px">
+      <span class="muted" style="font-size:11px">${needsPaid?'required to approve':'0 = unpaid'}</span></div>`:"";
+    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${hol.half?` ${esc(hol.half)}`:""}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 ${bh.kind==="shutdown"?"Shutdown":"Bank Hol"}</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
-      <div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button></div>`;
+      ${leaveRow}${miBlock}</div>`;
   }).join("");
-  const locked=!!u.invoice;
+  const appr=u.approval||null;
+  const locked=!!u.invoice||!!appr;   // approved OR invoiced → day inputs read-only
   g("editBody").querySelectorAll("input,button").forEach(el=>el.disabled=locked);
-  g("editState").textContent=locked?"Week locked (invoiced)":"Changes save automatically";
+  g("editState").textContent=u.invoice?"Week locked (invoiced)":(appr?"Approved & locked":"Changes save automatically");
+  // Approval controls
+  const when=appr&&appr.at?new Date(appr.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"";
+  g("apprStatus").innerHTML=appr
+    ? `<span style="color:#166534;font-weight:700">✅ Approved</span> by ${esc(appr.by||"office")}${when?" on "+when:""} — locked for the engineer.`
+    : `<span style="color:#92400e">Not yet approved.</span> Make any edits above, then approve to lock it and notify the engineer.`;
+  g("apprNote").value=appr?(appr.note||""):"";
+  g("apprNote").disabled=!!u.invoice;
+  g("approveBtn").style.display=(appr||u.invoice)?"none":"";
+  g("reopenBtn").style.display=(appr&&!u.invoice)?"":"none";
   editDirty=false;editBusy=false;clearTimeout(editTimer);clearTimeout(editRetry);
   g("editOv").classList.add("show");
+}
+async function approveWeek(){
+  if(!EDIT_U)return;
+  // Flush any pending edits first, then approve.
+  if(editDirty||editBusy){clearTimeout(editTimer);await doEditSave();}
+  const note=g("apprNote").value.trim();
+  const btn=g("approveBtn");btn.disabled=true;btn.textContent="Approving…";
+  const r=await authFetchTO("/ts/admin/approve",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,note})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else{ btn.disabled=false;btn.textContent="✅ Approve & lock"; alert((r&&r.error)||"Couldn't approve."); }
+}
+async function reopenWeek(){
+  if(!EDIT_U)return;
+  if(!confirm("Re-open this week? The engineer will be able to edit it again until you re-approve."))return;
+  const r=await authFetchTO("/ts/admin/reopen",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else alert((r&&r.error)||"Couldn't re-open.");
 }
 function addMi(btn){
   const host=btn.parentNode.querySelector(".mihost");
@@ -219,25 +373,32 @@ let editTimer=null,editRetry=null,editBusy=false,editDirty=false;
 function collectEditDays(){
   const days={};
   g("editBody").querySelectorAll(".eday").forEach(ed=>{
+    const date=ed.dataset.date;
+    const orig=(EDIT_U&&EDIT_U.days&&EDIT_U.days[date])||{};
     const d={start:ed.querySelector(".e-start").value,finish:ed.querySelector(".e-finish").value,
       jobs:ed.querySelector(".e-jobs").value.trim(),mileage:[]};
+    // Preserve the engineer's per-job hours (the modal doesn't edit them) so the
+    // admin correcting times never wipes the job-costing data.
+    if(orig.jobHours&&Object.keys(orig.jobHours).length)d.jobHours=orig.jobHours;
+    const lv=ed.querySelector(".e-leave");
+    if(lv&&lv.value!=="")d.leaveHours=lv.value;
     ed.querySelectorAll(".mirow").forEach(r=>{
       const site=r.querySelector(".m-site").value.trim(),pc=r.querySelector(".m-pc").value.trim().toUpperCase(),
         miles=parseFloat(r.querySelector(".m-miles").value)||0;
       if(site||pc||miles)d.mileage.push({site,postcode:pc,miles});
     });
-    if(d.start||d.finish||d.jobs||d.mileage.length)days[ed.dataset.date]=d;
+    if(d.start||d.finish||d.jobs||d.mileage.length||d.jobHours||d.leaveHours!=null)days[date]=d;
   });
   return days;
 }
 function queueEditSave(){
-  if(!EDIT_U||EDIT_U.invoice)return;
+  if(!EDIT_U||EDIT_U.invoice||EDIT_U.approval)return;
   editDirty=true;
   clearTimeout(editTimer);
   editTimer=setTimeout(()=>doEditSave(),900);
 }
 async function doEditSave(){
-  if(!EDIT_U)return;
+  if(!EDIT_U||EDIT_U.approval)return;
   clearTimeout(editTimer);clearTimeout(editRetry);
   if(editBusy){editDirty=true;return;}
   editBusy=true;editDirty=false;
@@ -274,10 +435,16 @@ g("cfgBtn").onclick=async()=>{
     <label>Lunch applies from (hours) <input type="number" id="d-thresh" value="${r.defaults.lunchThresholdH}" style="width:80px"></label>
     <label>Default mileage (p/mile) <input type="number" id="d-ppm" value="${r.defaults.pencePerMile}" style="width:80px"></label>
     <label>Radius (miles, first/last) <input type="number" id="d-radius" value="${r.defaults.radiusMiles!=null?r.defaults.radiusMiles:10}" style="width:80px"></label>
+    <label title="Hours in a day after which overtime is paid, for anyone with an OT × set">Overtime after (hours/day) <input type="number" id="d-otthresh" value="${r.defaults.overtimeThresholdH!=null?r.defaults.overtimeThresholdH:8}" style="width:80px"></label>
+    <label title="The deadline for engineers to complete a week's hours — the day/time in the week AFTER the timesheet week (like van checks).">Timesheet due by
+      <select id="d-duedow" style="width:120px">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${(r.defaults.dueDow!=null?+r.defaults.dueDow:3)===i?"selected":""}>${n}</option>`).join("")}</select>
+      <input type="time" id="d-duetime" value="${esc(r.defaults.dueTime||"12:00")}" step="300" style="width:110px"></label>
+    <label style="display:flex;align-items:center;gap:8px" title="Turn off to stop chasing engineers to complete their hours (reminders, home-screen alerts and pushes). Only engineers with the Engineer Timesheet permission are ever alerted.">
+      <input type="checkbox" id="d-remind" ${r.defaults.remindersOn===false?"":"checked"}> Send timesheet reminders to engineers</label>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
-  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th title="Overtime multiplier of the normal hourly rate, for hours over the daily threshold. Blank = no overtime.">OT ×</th><th title="Overtime kicks in after this many PAID hours in a day (after lunch/travel come off). Blank = use the default below.">OT after h</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
     r.users.map(u=>{
       const o=(r.byUser&&r.byUser[u.username])||{};
       const e=u.effective;
@@ -287,11 +454,13 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="checkbox" class="c-lunch" ${e.lunch?"checked":""}></td>
         <td><input type="checkbox" class="c-mileage" ${e.mileage?"checked":""}></td>
         <td><input type="checkbox" class="c-radius" ${e.radius?"checked":""}></td>
-        <td><input type="number" class="c-rate" step="0.5" min="0" value="${o.rate!=null?o.rate:(e.rate!=null?e.rate:"")}"></td>
+        <td><input type="number" class="c-rate" step="0.5" min="0" value="${esc(o.rate!=null?o.rate:(e.rate!=null?e.rate:""))}"></td>
         <td><select class="c-ratetype"><option value="hour" ${e.rateType!=="day"?"selected":""}>hour</option><option value="day" ${e.rateType==="day"?"selected":""}>day</option></select></td>
-        <td><input type="number" class="c-ppm" value="${o.pencePerMile!=null?o.pencePerMile:""}" placeholder="${e.pencePerMile}"></td>
+        <td><input type="number" class="c-otmult" step="0.1" min="0" value="${esc(o.overtimeMult!=null?o.overtimeMult:"")}" placeholder="—" style="width:52px" title="e.g. 1.5"></td>
+        <td><input type="number" class="c-otthresh" step="0.5" min="0" value="${esc(o.overtimeThresholdH!=null?o.overtimeThresholdH:"")}" placeholder="${esc(e.overtimeThresholdH||8)}" style="width:56px" title="Paid hours/day before OT"></td>
+        <td><input type="number" class="c-ppm" value="${esc(o.pencePerMile!=null?o.pencePerMile:"")}" placeholder="${esc(e.pencePerMile)}"></td>
         <td><input type="text" class="c-home" value="${esc(e.homePostcode||"")}"></td>
-        <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
+        <td><input type="number" class="c-next" min="1" value="${esc(o.nextNumber!=null?o.nextNumber:"")}"></td></tr>`;
     }).join("");
   cfgDirty=false;cfgBusy=false;clearTimeout(cfgTimer);clearTimeout(cfgRetry);
   const cst=g("cfgState");if(cst)cst.textContent="Changes save automatically";
@@ -363,6 +532,8 @@ function collectCfg(){
       radius:tr.querySelector(".c-radius").checked,
       rate:tr.querySelector(".c-rate").value,
       rateType:tr.querySelector(".c-ratetype").value,
+      overtimeMult:tr.querySelector(".c-otmult").value,
+      overtimeThresholdH:tr.querySelector(".c-otthresh").value,
       pencePerMile:tr.querySelector(".c-ppm").value,
       homePostcode:tr.querySelector(".c-home").value,
       nextNumber:tr.querySelector(".c-next").value,
@@ -370,7 +541,10 @@ function collectCfg(){
   });
   const defaults={commuteMins:+g("d-commute").value||30,lunchMins:+g("d-lunch").value||30,
     lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,
-    radiusMiles:+g("d-radius").value||10,basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
+    radiusMiles:+g("d-radius").value||10,overtimeThresholdH:+g("d-otthresh").value||8,
+    dueDow:+g("d-duedow").value,dueTime:g("d-duetime").value||"12:00",
+    remindersOn:g("d-remind").checked,
+    basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
     company:g("d-company").value};
   return {defaults,byUser};
 }
@@ -408,7 +582,7 @@ let MI_LIST=[],miTimer=null,miDirty={},miBusy=false;
 function miRow(s){
   return `<tr data-name="${esc(s.name)}"><td style="text-align:left">${esc(s.name)}</td>
     <td class="muted">${esc(s.postcode||"")}</td>
-    <td><input type="number" class="mi-miles" step="0.1" min="0" value="${s.miles!=null?s.miles:""}" placeholder="—" data-pc="${esc(s.postcode||"")}"></td></tr>`;
+    <td><input type="number" class="mi-miles" step="0.1" min="0" value="${esc(s.miles!=null?s.miles:"")}" placeholder="—" data-pc="${esc(s.postcode||"")}"></td></tr>`;
 }
 function miRender(){
   const t=(g("miSearch").value||"").trim().toLowerCase();
@@ -485,7 +659,7 @@ g("invBtn").onclick=async()=>{
       <td>${i.hours||0}</td><td>${i.miles||0}</td><td>${money(i.total||0)}</td>
       <td>${new Date(i.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})}</td>
       <td><a href="${esc(i.url)}" target="_blank">Open</a></td>
-      <td><button class="btn" onclick="delInv(${i.id},'${esc(i.username).replace(/'/g,"\\'")}',${i.number})">🗑</button></td></tr>`;
+      <td><button class="btn" onclick="delInv(${esc(JSON.stringify(String(i.id)))},${esc(JSON.stringify(String(i.username)))},${esc(JSON.stringify(String(i.number)))})">🗑</button></td></tr>`;
   // Grouped by week (newest first) so a whole pay week reads as one block.
   const byWeek={};
   for(const i of r.invoices)(byWeek[i.week]=byWeek[i.week]||[]).push(i);
@@ -508,6 +682,106 @@ async function delInv(id,user,number){
 
 g("prevWk").onclick=()=>{WEEK=addDays(WEEK,-7);load();};
 g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
+
+// ── Verify timesheets against fleet telematics data ──────────────────────────
+const normRegC=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+const toMinC=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||"").trim());return m?(+m[1])*60+(+m[2]):null;};
+const xlDate=v=>{ if(v instanceof Date)return v.toISOString().slice(0,10); if(typeof v==="number")return new Date(Date.UTC(1899,11,30)+v*86400000).toISOString().slice(0,10); const m=String(v||"").match(/\d{4}-\d{2}-\d{2}/); return m?m[0]:""; };
+const hmC=m=>m==null?"":String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+function parseDur(v){ if(v==null)return 0; if(typeof v==="number"){ if(v>0&&v<1)return Math.round(v*1440); return Math.round(v*60);} const s=String(v); let m=s.match(/(\d+)\s*h\s*(\d+)?/i); if(m)return (+m[1])*60+(+(m[2]||0)); m=s.match(/^(\d+):(\d{2})/); if(m)return (+m[1])*60+(+m[2]); const f=parseFloat(s); return isFinite(f)?Math.round(f*60):0; }
+// Parse a VelocityFleet Trip History workbook. The "Summary" tab gives driver
+// name + weekly totals per van; the "Detailed View" tab (every trip) gives the
+// per-DAY door-to-door span (first move → last stop) + sites visited.
+async function parseTripXls(file){
+  if(!window.XLSX)throw new Error("spreadsheet reader didn't load");
+  const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"});
+  const nameByReg={}, sumByReg={};
+  const sumSheet=wb.Sheets["Summary"];
+  if(sumSheet){
+    const rows=XLSX.utils.sheet_to_json(sumSheet,{header:1,blankrows:false});
+    let h=-1,cReg=-1,cDrv=-1,cDur=-1,cTrp=-1;
+    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());const ri=low.findIndex(c=>c.includes("registration"));if(ri>=0){h=i;cReg=ri;cDrv=low.findIndex(c=>c.includes("driver"));cDur=low.findIndex(c=>c.includes("duration"));cTrp=low.findIndex(c=>c.includes("trip"));break;}}
+    if(h>=0)for(let i=h+1;i<rows.length;i++){const row=rows[i];if(!row)continue;const rr=row[cReg];const reg=normRegC(rr);if(!reg||reg.length<5||String(rr).toLowerCase().includes("total"))continue;nameByReg[reg]=cDrv>=0?String(row[cDrv]||"").trim():"";sumByReg[reg]={driveMins:cDur>=0?parseDur(row[cDur]):0,trips:cTrp>=0?(parseInt(row[cTrp],10)||0):0,regRaw:String(rr).trim()};}
+  }
+  const vanMap={};
+  const van=(reg,rr)=>{ if(!vanMap[reg])vanMap[reg]={reg:(sumByReg[reg]&&sumByReg[reg].regRaw)||rr||reg,driver:nameByReg[reg]||"",driveMins:(sumByReg[reg]&&sumByReg[reg].driveMins)||0,trips:(sumByReg[reg]&&sumByReg[reg].trips)||0,days:{}}; return vanMap[reg]; };
+  const det=wb.Sheets["Detailed View"];
+  if(det){
+    const rows=XLSX.utils.sheet_to_json(det,{header:1,blankrows:false});
+    let h=-1,cDrv=-1,cReg=-1,cDate=-1,cS=-1,cE=-1,cSL=-1,cEL=-1,cDrive=-1,cStop=-1;
+    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());if(low.some(c=>c.includes("start time"))){h=i;cDrv=low.findIndex(c=>c.includes("driver"));cReg=low.findIndex(c=>c.includes("registration"));cDate=low.findIndex(c=>c.includes("date"));cS=low.findIndex(c=>c.includes("start time"));cE=low.findIndex(c=>c.includes("end time"));cSL=low.findIndex(c=>c.includes("start location"));cEL=low.findIndex(c=>c.includes("end location"));cDrive=low.findIndex(c=>c.includes("drive time"));cStop=low.findIndex(c=>c.includes("stopped"));break;}}
+    if(h>=0)for(let i=h+1;i<rows.length;i++){
+      const row=rows[i];if(!row)continue; const rr=row[cReg]; const reg=normRegC(rr); if(!reg||reg.length<5)continue;
+      const st=String(row[cS]||"").trim(); if(!st||st==="-")continue;
+      const date=xlDate(row[cDate]); if(!/^\d{4}-\d{2}-\d{2}$/.test(date))continue;
+      const sM=toMinC(st), eM=toMinC(row[cE]);
+      const v=van(reg,rr); if(!v.driver&&cDrv>=0)v.driver=String(row[cDrv]||"").trim();
+      const d=v.days[date]||(v.days[date]={firstM:null,lastM:null,driveMins:0,trips:0,locs:[],tripList:[]});
+      if(sM!=null&&(d.firstM==null||sM<d.firstM))d.firstM=sM;
+      if(eM!=null&&(d.lastM==null||eM>d.lastM))d.lastM=eM;
+      const drv=cDrive>=0?parseDur(row[cDrive]):0, stp=cStop>=0?parseDur(row[cStop]):0;
+      d.driveMins+=drv; d.trips++;
+      const el=String((cEL>=0?row[cEL]:"")||"").trim();
+      if(el&&!/^office$|^yard$/i.test(el)){ const short=el.split(",")[0].trim(); if(short&&!d.locs.includes(short)&&d.locs.length<6)d.locs.push(short); }
+      if(d.tripList.length<45)d.tripList.push({s:hmC(sM),e:hmC(eM),to:el.slice(0,70),drive:drv,stop:stp});
+    }
+  }
+  const out=Object.keys(vanMap).length?Object.values(vanMap):Object.keys(nameByReg).map(reg=>van(reg));
+  return out.map(v=>({reg:v.reg,driver:v.driver,driveMins:v.driveMins,trips:v.trips,
+    days:Object.fromEntries(Object.entries(v.days).map(([dt,d])=>[dt,{s:hmC(d.firstM),e:hmC(d.lastM),span:(d.firstM!=null&&d.lastM!=null)?Math.max(0,d.lastM-d.firstM):0,drive:Math.round(d.driveMins),trips:d.trips,locs:d.locs,trips_detail:d.tripList||[]}]))}));
+}
+async function parseScores(file){
+  if(!window.pdfjsLib)return {};
+  const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise; const scores={};
+  for(let p=1;p<=pdf.numPages;p++){
+    const pg=await pdf.getPage(p); const tc=await pg.getTextContent();
+    const toks=tc.items.map(i=>String(i.str).trim()).filter(Boolean);
+    for(let i=0;i<toks.length;i++){
+      const t=toks[i].toUpperCase().replace(/\s+/g,"");
+      if(/^[A-Z0-9]{5,8}$/.test(t)&&/[A-Z]/.test(t)&&/\d/.test(t)){
+        for(let j=i+1;j<Math.min(i+8,toks.length);j++){ const n=parseInt(toks[j],10); if(!isNaN(n)&&n>=0&&n<=100){ scores[t]=n; break; } }
+      }
+    }
+  }
+  return scores;
+}
+function renderVfResult(r){
+  const bu=r.byUser||{}; const names=Object.keys(bu);
+  let h=`<div style="font-weight:700;margin:10px 0 4px">Results</div>`;
+  if(!names.length)h+=`<div class="muted" style="font-size:13px">No engineers with entered hours this week to check.</div>`;
+  h+=names.map(u=>{const v=bu[u];const c=v.verdict==="flag"?"#dc2626":v.verdict==="check"?"#b45309":"#0a8a35";
+    return `<div style="border-bottom:1px solid #f1f5f9;padding:7px 0"><b>${esc(v.name||u)}</b> ${v.score!=null?`<span style="color:${scoreColour(v.score)};font-weight:700">score ${v.score}</span> · `:""}<span style="color:${c};font-weight:700;text-transform:uppercase;font-size:11.5px">${esc(v.verdict)}</span><div style="font-size:12.5px;color:#475569">van ${esc(v.reg||"—")} · ${v.driveMins!=null?(Math.round(v.driveMins/6)/10)+"h driving":"no van data"} · entered ${v.total}h${v.summary?" — "+esc(v.summary):""}</div></div>`;
+  }).join("");
+  const un=r.unassignedVans||[];
+  if(un.length)h+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Unassigned / pool vans that moved (${un.length})</summary>`+
+    un.map(v=>`<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid #f6f9fc">${esc(v.reg)} — ${v.driveMins?(Math.round(v.driveMins/6)/10)+"h driving":"—"}${v.driver?" · "+esc(v.driver):""}${v.score!=null?" · score "+v.score:""}</div>`).join("")+
+    `<div class="muted" style="font-size:11px;margin-top:4px">These moved but aren't an engineer's assigned van — e.g. a tipper someone collected. If an engineer's hours don't match their own van, their time may be on one of these.</div></details>`;
+  g("vfResult").innerHTML=h;
+}
+g("verifyBtn").onclick=()=>{
+  g("vfWeek").textContent="Week of "+new Date(WEEK+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" — upload this week's fleet files to cross-check the hours before payroll.";
+  g("vfResult").innerHTML="";g("vfState").textContent="";g("vfXls").value="";g("vfPdf").value="";g("vfXlsInfo").textContent="";g("vfPdfInfo").textContent="";
+  g("verifyOv").classList.add("show");
+};
+g("vfXls").onchange=()=>{const f=g("vfXls").files[0];g("vfXlsInfo").textContent=f?("Selected: "+f.name):"";};
+g("vfPdf").onchange=()=>{const f=g("vfPdf").files[0];g("vfPdfInfo").textContent=f?("Selected: "+f.name):"";};
+g("vfRun").onclick=async()=>{
+  const xf=g("vfXls").files[0];
+  if(!xf){g("vfState").textContent="Add the trip export (.xls) first.";return;}
+  g("vfRun").disabled=true;g("vfState").textContent="Reading files…";
+  let vans=[],scores={};
+  try{vans=await parseTripXls(xf);}catch(e){g("vfState").textContent="Couldn't read the .xls — "+(e.message||e);g("vfRun").disabled=false;return;}
+  if(!vans.length){g("vfState").textContent="No vehicles found in that file — is it the Trip History export?";g("vfRun").disabled=false;return;}
+  const pf=g("vfPdf").files[0];
+  if(pf){try{scores=await parseScores(pf);}catch(e){scores={};}}
+  g("vfState").textContent="Checking "+vans.length+" vans with AI…";
+  const r=await authFetchTO("/ts/verify",{method:"POST",body:JSON.stringify({week:WEEK,vans,scores})},120000).then(x=>x.json()).catch(()=>null);
+  g("vfRun").disabled=false;
+  if(!r||!r.ok){g("vfState").textContent=(r&&r.error)||"Check failed — try again.";return;}
+  g("vfState").textContent="Done ✓"+(r.aiError?(" — AI note: "+r.aiError):"");
+  renderVfResult(r);
+  await load();
+};
 
 // 🛠 Tools dropdown — open/close + close on outside click / Escape.
 (function(){

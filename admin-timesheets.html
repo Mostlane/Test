@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Timesheet Manager</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -573,6 +573,7 @@ tbody td:nth-child(2) {
 </div>
 
 <script>
+  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
   // Basic auth gate
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
@@ -875,7 +876,7 @@ if (ref) {
         if (recognised){
           statusChip = `<span class="chip ok">Matched Site</span>`;
         }else if (site){
-          statusChip = `<span class="chip warn">Nearest: ${site.siteName || "Site"}</span>`;
+          statusChip = `<span class="chip warn">Nearest: ${esc(site.siteName || "Site")}</span>`;
         }else{
           statusChip = `<span class="chip bad">Unknown Location</span>`;
         }
@@ -899,7 +900,7 @@ if (ref) {
         <td>${dayName(dayDate)}</td>
         <td>${inStr}</td>
         <td>${outStr}</td>
-        <td>${siteName}</td>
+        <td>${esc(siteName)}</td>
         <td>${statusChip}</td>
         <td><input type="number" step="0.25" min="0" value="${hours.toFixed(2)}" class="hours-input"></td>
         <td style="text-align:center;"><input type="checkbox" class="fuel-check"></td>

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -351,7 +351,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -601,7 +601,22 @@
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
       if (t.dataset.approve) {
-        const r = await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }).then(x => x.json()).catch(() => ({}));
+        const id = t.dataset.approve, astype = t.dataset.astype || undefined;
+        const rec = ALL.find(h => h.id === id);
+        const who = rec ? nm(rec) : "This person";
+        let r = await post("/holiday/approve", { id, type: astype }).then(x => x.json()).catch(() => ({}));
+        // Server found jobs booked on those days — warn + confirm before forcing.
+        if (r && r.clash && Array.isArray(r.jobs) && r.jobs.length) {
+          const n = r.jobs.length;
+          const list = r.jobs.map(j => {
+            const d = j.date ? new Date(j.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : "";
+            return `${d} — ${j.ref || "job"}${j.site ? " (" + j.site + ")" : ""} [${j.status || "Scheduled"}]`;
+          }).join("  ·  ");
+          const msg = `${who} has ${n} job${n === 1 ? "" : "s"} booked on those days:  ${list}.  Approve the holiday anyway? You'll still need to move or reassign ${n === 1 ? "it" : "them"}.`;
+          const ok = window.MLUI ? await MLUI.confirm(msg, { title: "⚠ Jobs booked on those days", okLabel: "Approve holiday", cancelLabel: "Not yet", danger: true }) : confirm(msg);
+          if (!ok) return;
+          r = await post("/holiday/approve", { id, type: astype, force: true }).then(x => x.json()).catch(() => ({}));
+        }
         if (r && r.warning) alert(r.warning + "\n\nApproved anyway — check the calendar for a possible duplicate.");
         loadAll();
       }
@@ -1009,7 +1024,7 @@
         <div class="dayrow">
           <span class="dd">${fmtFull(d.date)}</span>
           <span class="lbl">${esc(d.label || "")}</span>
-          <button class="rmday" data-rmday="${d.date}" data-kind="${kind}" title="Remove">×</button>
+          <button class="rmday" data-rmday="${esc(d.date)}" data-kind="${kind}" title="Remove">×</button>
         </div>`).join("") : "<p class='muted' style='margin:6px 0;'>None set for " + YEAR + " yet.</p>";
     }
     function flash(id, ok, txt) { const m = g(id); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = txt; setTimeout(() => m.textContent = "", 3000); }

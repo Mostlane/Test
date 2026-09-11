@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <script src="auth.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -78,7 +78,8 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -108,6 +109,15 @@
 
     // Friendly names for the common endpoints; anything unmapped shows its raw path.
     const FRIENDLY = [
+      // ── Client (external) portal — actions AND reads are logged ──────────────
+      [/^POST \/client\/raise-photo/,     "📷 Client added a job photo"],
+      [/^POST \/client\/raise/,           "🆕 Client raised a job"],
+      [/^GET \/client\/me/,               "🏢 Client opened their portal"],
+      [/^GET \/client\/jobs/,             "📋 Client viewed their jobs list"],
+      [/^GET \/client\/job\b/,            "🔍 Client opened a job"],
+      [/^GET \/compliance\/stores/,       "📊 Client viewed a compliance chart"],
+      [/^GET \/compliance\/file-url/,     "📄 Client opened a compliance certificate"],
+      [/^GET \/compliance\/files/,        "🗂 Client viewed store documents"],
       [/^POST \/ts\/my/,                  "⏱️ Saved their weekly timesheet"],
       [/^POST \/ts\/me/,                  "⏱️ Updated their timesheet details"],
       [/^POST \/ts\/invoice\/next/,       "🔢 Set their next invoice number"],
@@ -375,7 +385,7 @@
       const nd = r.method === "VIEW" ? "" : niceDetail(r.detail);
       const det = (nd && nd !== subject) ? nd : "";
       const href = linkFor(r);
-      const what = href ? `<a class="msg" href="${esc(href)}">${msg}</a>` : `<span class="msg nolink">${msg}</span>`;
+      const what = href ? `<a class="msg" href="${esc(safeUrl(href))}">${msg}</a>` : `<span class="msg nolink">${msg}</span>`;
       return `<div class="what">${what}</div>${det ? `<div class="det">${esc(det)}</div>` : ""}`;
     }
     function rowHtml(r) {

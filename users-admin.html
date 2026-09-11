@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -52,10 +52,11 @@
     .lvl-field  { background:rgba(0,122,255,.12); color:#0060df; }
     .lvl-office { background:rgba(52,199,89,.16); color:#248a3d; }
     .lvl-admin  { background:rgba(255,149,0,.18); color:#a15c00; }
+    .lvl-client { background:rgba(30,64,175,.12); color:#1e40af; }
     .lvl-full   { background:rgba(175,82,222,.15); color:#8944ab; }
     .muted { color:var(--text2); font-size:13px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.28); -webkit-backdrop-filter:saturate(120%) blur(10px); backdrop-filter:saturate(120%) blur(10px); display:none; align-items:flex-start; justify-content:center; padding:18px; padding-top:calc(env(safe-area-inset-top, 0px) + 18px); overflow:auto; }
+    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.28); -webkit-backdrop-filter:saturate(120%) blur(10px); backdrop-filter:saturate(120%) blur(10px); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; top:env(safe-area-inset-top, 0px); }
     .overlay.open { display:flex; }
     .panel { background:var(--card); border-radius:20px; width:100%; max-width:680px; padding:20px; box-shadow:0 24px 60px rgba(0,0,0,.24); }
     .panel h2 { color:var(--text); margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.02em; }
@@ -73,6 +74,12 @@
     label { font-size:13px; color:var(--text2); display:block; margin:10px 0 3px; letter-spacing:-.005em; }
     .panel input, .panel select { width:100%; padding:11px 12px; border:1px solid var(--sep); border-radius:11px; font-size:15px; background:var(--card); color:var(--text); transition:border-color .15s ease, box-shadow .15s ease; }
     .panel input:focus, .panel select:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(0,122,255,.16); }
+    /* Tick boxes must NOT take the 100% width above — a full-width checkbox in a
+       flex label shoves its text clean out of the card (seen on the Account tab's
+       Story Mode / Office clock rows on a phone). One rule here beats the
+       per-input style="width:auto" hacks scattered through the form. */
+    .panel input[type="checkbox"], .panel input[type="radio"] { width:auto; flex:0 0 auto; padding:0; margin:0; accent-color:var(--blue); }
+    .panel label > input[type="checkbox"] + span { min-width:0; flex:1 1 auto; }
     .permwrap { display:block; }
     .famaster { background:rgba(0,122,255,.06); border:1px solid rgba(0,122,255,.18); border-radius:12px; padding:4px 14px; margin-bottom:4px; }
     .permsec { margin-top:16px; }
@@ -105,6 +112,11 @@
       .wrap{ padding:0 10px; }
       .grid2{ grid-template-columns:1fr; }
 
+      /* The ⋯ More button wraps to the left edge on a phone, so a right:0 menu
+         ran off the left of the screen. Anchor it to the left and cap it to the
+         viewport so every item stays readable. */
+      .toolmenu{ left:0; right:auto; max-width:calc(100vw - 24px); }
+
       /* People rows → stacked cards (the 6-col grid doesn't fit a phone) */
       .uhead{ display:none; }
       .ulist{ background:transparent; box-shadow:none; border-radius:0; overflow:visible; min-height:0; }
@@ -134,7 +146,11 @@
 
       /* Editor modal → full-width, comfortable tap targets. Clear the notch so
          the tabs bar isn't hidden under the iOS clock on an installed PWA. */
-      .overlay{ padding:8px; padding-top:calc(env(safe-area-inset-top, 0px) + 8px); }
+      /* The overlay is the SCROLL container, so an inset expressed as padding
+         scrolls away and the title ends up under the clock. Start the overlay
+         itself below the status bar instead (top:, set above) — then nothing
+         inside it can ever scroll under the notch. */
+      .overlay{ padding:8px; }
       .panel{ padding:16px; border-radius:14px; }
       /* Wrap the tabs so EVERY tab is visible (Permissions/Devices/Account were
          cut off in a horizontal-scroll strip with no affordance). */
@@ -237,6 +253,11 @@
         <div class="zonehead">Field staff <span class="count" id="cntField"></span></div>
         <div class="ulist" id="listField" data-staff="field"></div>
       </div>
+      <div class="zone" id="zoneClients" style="display:none;">
+        <div class="zonehead">🏢 Client logins <span class="count" id="cntClients"></span></div>
+        <div style="font-size:12px;color:#64748b;margin:0 0 6px;">External customer accounts — walled to their org's own jobs + compliance chart. No staff access, no financial info.</div>
+        <div class="ulist" id="listClients" data-staff="client"></div>
+      </div>
     </div>
   </div>
 
@@ -294,7 +315,12 @@
           </div>
           <div>
             <label>Staff type</label>
-            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option></select>
+            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option><option value="client">Client (external)</option></select>
+          </div>
+          <div id="clientOrgWrap" style="display:none;">
+            <label>Client organisation</label>
+            <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's own jobs + compliance chart. No staff access, no financial info.</div>
           </div>
         </div>
       </div>
@@ -442,7 +468,7 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
-      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere"];
+      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins","WhereEveryone","StaffRecords"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -462,20 +488,24 @@
       EngTimesheet:"Engineer timesheet (times, jobs, invoices)",
       ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background",
       YardGate:"Yard gate — open + see status",
-      YardGateAnywhere:"Yard gate — operate from anywhere (skip the at-the-yard geofence)"
+      YardGateAnywhere:"Yard gate — operate from anywhere (skip the at-the-yard geofence)",
+      EicrCheck:"EICR Check tool (BS 7671 PDF checker)",
+      Chapplins:"Chapplins customer area",
+      WhereEveryone:"Where's everyone — live board of what each engineer is on right now",
+      StaffRecords:"Employee records (qualifications, licences, insurances)"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
     // appears here exactly once.
     const PERM_GROUPS = [
-      { title:"Administration",       perms:["Users","DeviceAdmin"] },
+      { title:"Administration",       perms:["Users","DeviceAdmin","StaffRecords"] },
       { title:"Sites & assets",       perms:["Sites","AddSite","Assets","AssetAdmin","SiteLog"] },
-      { title:"Jobs & SLA",           perms:["SLA","SLAAdmin","Forms"] },
+      { title:"Jobs & SLA",           perms:["SLA","SLAAdmin","WhereEveryone","Forms"] },
       { title:"Time & hours",         perms:["CheckInOut","EngTimesheet","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","OfficeTimesheet","Weekly"] },
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
-      { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] },
+      { title:"Compliance & docs",    perms:["Compliance","EicrCheck","Chapplins","MyDocuments","HSPlan"] },
       { title:"Facilities",           perms:["YardGate","YardGateAnywhere"] },
       { title:"Personalisation",      perms:["ThemeColour","ThemeBackground"] }
     ];
@@ -573,8 +603,11 @@
       if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
       return fetch(API + path, opts);
     }
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const g = id => document.getElementById(id);
+    // Show the client-org picker only when the account type is "client".
+    function syncClientOrg(){ const w = g("clientOrgWrap"); if (w) w.style.display = (g("f_staff") && g("f_staff").value === "client") ? "" : "none"; }
+    try { if (g("f_staff")) g("f_staff").addEventListener("change", syncClientOrg); } catch (e) {}
 
     // ── Areas of responsibility (home dashboard) ───────────────────────────
     // key = the home dashboard's area domain (see main.html widgets).
@@ -836,6 +869,7 @@
     }
 
     function accessSummary(u) {
+      if (u.StaffType === "client") { const o = String(u.ClientOrg || u.Profile?.clientOrg || "").toLowerCase(); return o ? (ORG_LABELS[o] || o.toUpperCase()) + " portal" : "Client portal"; }
       if (u.FullAccess === "Yes") return "Full access";
       const n = PERMISSIONS.filter(p => u[p] === "Yes").length;
       return n ? n + " area" + (n === 1 ? "" : "s") : "None";
@@ -844,7 +878,9 @@
     // Permissions that make someone an "Admin" (manage an area for everyone).
     const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
     // A person's headline access level (highest wins).
+    const ORG_LABELS = { fbc: "FBC" };
     function levelOf(u) {
+      if (u.StaffType === "client") return { label: "Client", cls: "lvl-client" };
       if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
       if (ADMIN_PERMS.some(p => u[p] === "Yes")) return { label: "Admin", cls: "lvl-admin" };
       if (u.StaffType === "office") return { label: "Office", cls: "lvl-office" };
@@ -890,9 +926,12 @@
       // allUsers arrives already in canonical order (office first, then field,
       // each by manual drag order) from the server — keep that order per zone.
       const office = allUsers.filter(u => u.StaffType === "office");
-      const field  = allUsers.filter(u => u.StaffType !== "office");
+      const field  = allUsers.filter(u => u.StaffType !== "office" && u.StaffType !== "client");
+      const clients = allUsers.filter(u => u.StaffType === "client");
       g("listOffice").innerHTML = office.map(userRow).join("");
       g("listField").innerHTML  = field.map(userRow).join("");
+      g("listClients").innerHTML = clients.map(userRow).join("");
+      g("zoneClients").style.display = clients.length ? "" : "none";
       const match = u => !q || [u.Username, u.FirstName, u.LastName, u.Email]
         .some(v => String(v || "").toLowerCase().includes(q));
       document.querySelectorAll(".urow").forEach(r => {
@@ -904,8 +943,10 @@
     function refreshCounts() {
       const nO = g("listOffice").querySelectorAll(".urow").length;
       const nF = g("listField").querySelectorAll(".urow").length;
+      const nC = g("listClients").querySelectorAll(".urow").length;
       g("cntOffice").textContent = nO ? `(${nO})` : "";
       g("cntField").textContent  = nF ? `(${nF})` : "";
+      if (g("cntClients")) g("cntClients").textContent = nC ? `(${nC})` : "";
       g("listOffice").classList.toggle("empty", !nO);
       g("listField").classList.toggle("empty", !nF);
     }
@@ -1067,6 +1108,9 @@
       g("f_status").value = user?.Status || "Active";
       refreshBlockBtn(user?.Username || "");
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
+      // Client org picker: shown only for a client account.
+      if (g("f_clientOrg")) g("f_clientOrg").value = (user?.ClientOrg || user?.Profile?.clientOrg || "fbc");
+      syncClientOrg();
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
@@ -1175,7 +1219,15 @@
         const el = g("p_" + k); if (!el) return;
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
-      profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      profile.staffType = g("f_staff").value;   // field / office / client — preserves sortOrder from editingProfile
+      // A CLIENT account carries its org (walls it to that client's data) and never
+      // gets staff permissions/areas/compliance-levels (the server derives its
+      // read-only compliance access from the org).
+      if (profile.staffType === "client") {
+        profile.clientOrg = (g("f_clientOrg") && g("f_clientOrg").value) || "fbc";
+      } else {
+        delete profile.clientOrg;
+      }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
@@ -1225,17 +1277,25 @@
       full:    { label: "Full access", sub: "Owner / director — sees and does everything", staffType: "office", fullAccess: true, perms: [] }
     };
     let W = null;
+    // A Client (external) login isn't a saved STAFF preset, but it must always be
+    // offerable from the get-go — so it's appended to the role list regardless of
+    // the server presets. staffType "client" + a clientOrg wall the account.
+    const CLIENT_ROLE = { id: "client", label: "Client (external)", sub: "Client login — raise jobs + read-only compliance", staffType: "client", fullAccess: false, perms: [] };
     // The wizard uses the OWNER-EDITED server presets (PRESETS) when available,
     // falling back to the built-in defaults so it always works.
     function wizRoles() {
+      let rs;
       if (typeof PRESETS !== "undefined" && PRESETS && PRESETS.length) {
-        return PRESETS.map(p => ({
+        rs = PRESETS.map(p => ({
           id: p.id, label: p.name,
-          sub: (p.staffType === "office" ? "Office" : "Field") + (p.fullAccess ? " · full access" : " · " + ((p.perms||[]).length) + " permissions"),
+          sub: (p.staffType === "office" ? "Office" : p.staffType === "client" ? "Client" : "Field") + (p.fullAccess ? " · full access" : " · " + ((p.perms||[]).length) + " permissions"),
           staffType: p.staffType, fullAccess: !!p.fullAccess, perms: p.perms || []
         }));
+      } else {
+        rs = Object.entries(ROLE_PRESETS).map(([id, pr]) => ({ id, label: pr.label, sub: pr.sub, staffType: pr.staffType, fullAccess: !!pr.fullAccess, perms: pr.perms || [] }));
       }
-      return Object.entries(ROLE_PRESETS).map(([id, pr]) => ({ id, label: pr.label, sub: pr.sub, staffType: pr.staffType, fullAccess: !!pr.fullAccess, perms: pr.perms || [] }));
+      if (!rs.some(r => r.staffType === "client")) rs = rs.concat(CLIENT_ROLE);
+      return rs;
     }
     function wizRole(id) { const rs = wizRoles(); return rs.find(r => r.id === id) || rs[0]; }
     function applyRole(role) {
@@ -1244,8 +1304,11 @@
       W.perms = new Set(pr.perms);
       // A self-employed field engineer also needs their timesheet/invoice area.
       if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
+      if (pr.staffType === "client" && !W.clientOrg) W.clientOrg = "fbc";
     }
     function wizSteps() {
+      // A client login needs no permissions/vehicle/pay — just who, role+org, finish.
+      if (W.staffType === "client") return [{ id: "who", t: "Who are they?" }, { id: "role", t: "Role & client" }, { id: "finish", t: "Password & finish" }];
       const s = [{ id: "who", t: "Who are they?" }, { id: "role", t: "Role & access level" }, { id: "access", t: "Access" }];
       if (W.staffType === "field") s.push({ id: "field", t: "Vehicle & location" });
       s.push({ id: "pay", t: "Pay" }, { id: "finish", t: "Password & finish" });
@@ -1303,17 +1366,23 @@
           + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Phone", "phone", d.phone)}</div><div style="flex:1;">${wizInput("Job title", "jobTitle", d.jobTitle)}</div></div>`
           + wizInput("Start date", "startDate", d.startDate, "date");
       } else if (st.id === "role") {
-        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role — it sets sensible permissions you can fine-tune on the next step.</div>`
+        const isClient = wizRole(W.role).staffType === "client";
+        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role${isClient ? " — a client gets a walled external login (raise jobs + read-only compliance charts, no financials)." : " — it sets sensible permissions you can fine-tune on the next step."}</div>`
           + wizRoles().map(pr =>
             `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === pr.id ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
                <input type="radio" name="wizRole" value="${esc(pr.id)}" ${W.role === pr.id ? "checked" : ""} style="width:auto;margin-top:3px;">
                <div><div style="font-weight:700;">${esc(pr.label)}</div><div style="font-size:12.5px;color:#64748b;">${esc(pr.sub)}</div></div></label>`).join("")
-          + `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
-             <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
-               <option${W.employment === "Employed" ? " selected" : ""}>Employed</option>
-               <option${/self/i.test(W.employment) ? " selected" : ""}>Self Employed</option></select>
-             <div style="font-size:12px;color:#64748b;margin-top:4px;">Self-employed people get their invoice/timesheet area automatically.</div>`;
-        b.querySelectorAll('input[name="wizRole"]').forEach(r => r.onclick = () => { W.employment = g("wiz_employment").value; applyRole(r.value); wizRender(); });
+          + (isClient
+             ? `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Client organisation</label>
+                <select id="wiz_clientOrg" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
+                  <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option></select>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">They'll see only this client's jobs and compliance charts.</div>`
+             : `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
+                <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
+                  <option${W.employment === "Employed" ? " selected" : ""}>Employed</option>
+                  <option${/self/i.test(W.employment) ? " selected" : ""}>Self Employed</option></select>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">Self-employed people get their invoice/timesheet area automatically.</div>`);
+        b.querySelectorAll('input[name="wizRole"]').forEach(r => r.onclick = () => { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; applyRole(r.value); wizRender(); });
       } else if (st.id === "access") {
         if (W.full) {
           b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
@@ -1361,7 +1430,7 @@
       const steps = wizSteps(), st = steps[W.step], d = W.d;
       const v = id => { const el = g("wiz_" + id); return el ? el.value.trim() : undefined; };
       if (st.id === "who") { ["first","last","username","email","phone","jobTitle","startDate"].forEach(k => d[k] = v(k)); }
-      else if (st.id === "role") { W.employment = g("wiz_employment").value; applyRole(W.role); }
+      else if (st.id === "role") { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; applyRole(W.role); }
       else if (st.id === "access") {
         if (!W.full) {
           // Update only the perms shown as checkboxes; preserve any preset perm
@@ -1397,6 +1466,7 @@
       const d = W.d, msg = g("wizMsg"); msg.style.color = "#b91c1c"; msg.textContent = "Creating…";
       if (d.password) { const bad = pwProblem(d.password); if (bad) { msg.textContent = bad; return; } }
       const profile = { staffType: W.staffType, areas: [...W.areas] };
+      if (W.staffType === "client") profile.clientOrg = W.clientOrg || "fbc";
       const pmap = { phone: d.phone, jobTitle: d.jobTitle, startDate: d.startDate, homePostcode: d.homePostcode,
         hourlyRate: d.hourlyRate, overtimeRate: d.overtimeRate, dayRate: d.dayRate, travelRate: d.travelRate,
         fuelCard: d.fuelCard, pencePerMile: d.pencePerMile };

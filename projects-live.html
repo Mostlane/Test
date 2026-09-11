@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Live Projects</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
@@ -52,7 +52,7 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     function authFetch(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
@@ -97,7 +97,7 @@
             <div><h3>${esc(p.name)}</h3><div class="pnum">${esc(p.number)}</div></div>
             <span class="badge b-${esc(p.status || "live")}">${esc((p.status || "live").toUpperCase())}</span>
           </div>
-          ${p.postcode ? `<div class="meta">📍 ${esc(p.postcode)}${p.mileageRoundTrip != null ? " · " + p.mileageRoundTrip + " mi" : ""}</div>` : ""}
+          ${p.postcode ? `<div class="meta">📍 ${esc(p.postcode)}${p.mileageRoundTrip != null ? " · " + esc(p.mileageRoundTrip) + " mi" : ""}</div>` : ""}
           ${tot ? `<div class="meta">✅ ${done}/${tot} to-do done</div><div class="prog"><span style="width:${p2}%"></span></div>` : `<div class="meta">No documents required</div>`}
         </div>`;
       }).join("");

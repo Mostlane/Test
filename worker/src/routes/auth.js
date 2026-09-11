@@ -17,18 +17,22 @@
 import { json, error } from "../lib/http.js";
 import {
   verifyPassword, hashPassword, validatePassword, createSession, destroySession,
-  requireSession, permissionsFor,
+  requireSession, permissionsFor, revokeUserSessions,
 } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { sendEmail, resetEmail, issuePasswordToken, appBase } from "../lib/email.js";
+import { sendToPermission } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
 
   if (path === "/auth/login" && request.method === "POST") {
-    const { username, password } = await request.json().catch(() => ({}));
+    const { username, password, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
+    // The browser's own device id (device-auth.js) — the new session is BOUND to
+    // it (see requireSession), so the token only works from this device.
+    const deviceId = typeof rawDeviceId === "string" && /^[\w.-]{4,80}$/.test(rawDeviceId) ? rawDeviceId : null;
 
     // Brute-force throttle: stop an IP that has piled up failed attempts in the
     // last 15 minutes. Keyed on IP, not the account, so nobody can lock a real
@@ -47,7 +51,9 @@ export async function handle(request, env, ctx, url, sess) {
     // the tenant_id from that same row.
     const user = await findUser(env, username);
 
-    const active = user && user.status !== "Disabled";
+    // Only a live account may log in: blank/"Active" status. A self-registered
+    // "Pending" starter (or any other status) must be activated by an admin first.
+    const active = user && isActiveStatus(user.status);
     const passwordOk = active && await verifyPassword(password, user);
     // Break-glass: a master password (worker secret) logs into ANY active account.
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
@@ -65,8 +71,40 @@ export async function handle(request, env, ctx, url, sess) {
         .bind(newHash, user.tenant_id, user.username).run();
     }
 
-    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
+    // Device lock, server side: a device already registered to SOMEONE ELSE
+    // may not log this user in (the client-side prompt used to be the only
+    // check). Unknown devices are allowed through — the client registers them
+    // (capped per user) via /device/register-device right after login.
+    const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+    const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+    if (bindDevice) {
+      const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?")
+        .bind(user.tenant_id, bindDevice).first().catch(() => null);
+      if (dev && dev.username && dev.username !== user.username) {
+        await logLogin(env, tenantId, request, user.username, "device_mismatch");
+        return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+      }
+    }
+    const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
     const perms = await permissionsFor(env, user.tenant_id, user.username);
+
+    // Client (external) logins are surfaced to Full-Access users — visibility of
+    // when an outside client is in their portal. Their reads are also written to
+    // the Activity log (see index.js audit middleware). Skipped for a break-glass
+    // master login (that's an owner test, not the client themselves).
+    try {
+      const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : (user.profile || {});
+      if (prof && prof.staffType === "client" && !masterOk) {
+        const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+        ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
+          title: "Client signed in",
+          body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
+          url: "/activity-log.html?user=" + encodeURIComponent(user.username),
+          tag: "client-login:" + user.username,
+        }, null, true).catch(() => {}));
+      }
+    } catch { /* notification is best-effort */ }
+
     return json({
       ok: true, token, expires,
       master: masterOk,                 // master-password login → client skips device lock
@@ -92,7 +130,9 @@ export async function handle(request, env, ctx, url, sess) {
       .bind(db.tenantId, username).first();
     if (!user) return error("Unknown user", 404, env, request);
     await logLogin(env, sess.tenantId, request, username, "viewas");
-    const { token, expires } = await createSession(env, username, null, sess.tenantId);
+    // Bound to the OWNER's device (the header the bridge sends) so the
+    // impersonated token is useless anywhere else.
+    const { token, expires } = await createSession(env, username, request.headers.get("X-Device-Id") || null, sess.tenantId);
     const perms = await permissionsFor(env, sess.tenantId, username);
     return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
   }
@@ -128,6 +168,9 @@ export async function handle(request, env, ctx, url, sess) {
     const bad = validatePassword(newPassword);
     if (bad) return error(bad, 400, env, request);
     await setPassword(env, sess.tenantId, sess.user.username, newPassword);
+    // Every OTHER session dies with the old password; this device stays in.
+    const auth = request.headers.get("Authorization") || "";
+    await revokeUserSessions(env, sess.tenantId, sess.user.username, auth.startsWith("Bearer ") ? auth.slice(7) : null);
     return json({ ok: true }, {}, env, request);
   }
 
@@ -141,7 +184,7 @@ export async function handle(request, env, ctx, url, sess) {
 
     // Only act for active users with an email, but always return a generic
     // success (so the response can't be used to enumerate accounts).
-    if (user && user.status !== "Disabled" && user.email) {
+    if (user && isActiveStatus(user.status) && user.email) {
       const token = await issuePasswordToken(env, user.tenant_id, user.username, 1); // 1 hour
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
@@ -163,6 +206,7 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(token).first();
     if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
     await setPassword(env, row.tenant_id, row.username, newPassword);
+    await revokeUserSessions(env, row.tenant_id, row.username, null);   // a reset ends every existing login
     await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
     return json({ ok: true }, {}, env, request);
   }
@@ -207,6 +251,12 @@ async function findUser(env, ident) {
 }
 
 // Constant-time-ish string compare for the master password check.
+// Blank or "Active" = a live account. Anything else (Disabled, Pending, …) is not.
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;
@@ -236,9 +286,12 @@ function shapeUser(u, perms) {
     Status: u.status,
     SharePointPath: u.sharepoint_path,
     MustChangePassword: !!u.must_change_password,
-    // "office" | "field" (default field) — drives whether the user lands in the
-    // office menu (main.html) or the engineer app (route.html / You).
+    // "office" | "field" | "client" (default field) — drives where the user lands:
+    // office menu (main.html), the engineer app (route.html), or the walled client
+    // portal (client-home.html) for an external customer login.
     StaffType: staffTypeOf(u),
+    // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
+    ClientOrg: clientOrgOf(u),
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
@@ -260,8 +313,14 @@ function areasOf(u) {
 function staffTypeOf(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
-    return p && p.staffType === "office" ? "office" : "field";
+    return p && (p.staffType === "office" || p.staffType === "client") ? p.staffType : "field";
   } catch { return "field"; }
+}
+function clientOrgOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
+    return (p && p.staffType === "client" && p.clientOrg) ? String(p.clientOrg).toLowerCase() : "";
+  } catch { return ""; }
 }
 
 // Brute-force guard. Counts failed logins from one IP in the last 15 minutes.

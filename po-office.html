@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -262,7 +262,7 @@ function downloadCSV(pos){ var H=["PO","Issued","Source","Category","Trade","Iss
 // Client-side print-friendly report of the currently-shown POs.
 function printReport(pos){ var money=function(n){return "\u00a3"+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");};
   var totalEx=0,totalInc=0,un=0; pos.forEach(function(p){ if(p.cost_ex_vat!=null){var r=p.vat_rate!=null?p.vat_rate:20; totalEx+=p.cost_ex_vat; totalInc+=p.cost_ex_vat*(1+r/100);} else un++; });
-  var rows=pos.map(function(p){var r=p.vat_rate!=null?p.vat_rate:20; return "<tr><td>"+p.po_number+"</td><td>"+fmtDate(p.issued_at)+"</td><td>"+escapeHtml(p.engineer_name||p.office_user_name||"")+"</td><td>"+escapeHtml(p.site||p.incident_no||"")+"</td><td>"+escapeHtml(p.supplier||"")+"</td><td>"+escapeHtml(p.description||"")+"</td><td style=text-align:right>"+(p.cost_ex_vat!=null?money(p.cost_ex_vat):"\u2014")+"</td><td>"+escapeHtml(p.status||"open")+"</td></tr>";}).join("");
+  var rows=pos.map(function(p){var r=p.vat_rate!=null?p.vat_rate:20; return "<tr><td>"+escapeHtml(p.po_number)+"</td><td>"+escapeHtml(fmtDate(p.issued_at))+"</td><td>"+escapeHtml(p.engineer_name||p.office_user_name||"")+"</td><td>"+escapeHtml(p.site||p.incident_no||"")+"</td><td>"+escapeHtml(p.supplier||"")+"</td><td>"+escapeHtml(p.description||"")+"</td><td style=text-align:right>"+(p.cost_ex_vat!=null?money(p.cost_ex_vat):"\u2014")+"</td><td>"+escapeHtml(p.status||"open")+"</td></tr>";}).join("");
   var w=window.open("","_blank"); if(!w){alert("Allow pop-ups to print the report");return;}
   w.document.write("<!doctype html><meta charset=utf-8><title>PO Report</title><style>body{font-family:Segoe UI,sans-serif;margin:24px;color:#1a1a1a}h1{color:#003366}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid #e3e7ee;padding:5px 6px;text-align:left}th{border-bottom:2px solid #003366;font-size:10px;text-transform:uppercase;color:#5a6677}</style>"+
     "<h1>Purchase Order Report</h1><p>"+pos.length+" PO(s) \u00b7 Net "+money(totalEx)+" \u00b7 Gross "+money(totalInc)+(un?" \u00b7 "+un+" awaiting cost":"")+" \u00b7 "+new Date().toLocaleString("en-GB")+"</p>"+
@@ -283,9 +283,9 @@ async function init() {
     authFetch('/po/api/trades').then(r => r.json()).catch(() => [])
   ]);
   allEngineers = engineers; allSuppliers = suppliers; allSites = sites; allSubcontractors = subs; allTrades = trades;
-  document.getElementById('filter-engineer').innerHTML = '<option value="">All engineers</option>' + engineers.filter(e => e.active).map(e => '<option value="' + e.slug + '">' + escapeHtml(e.name) + '</option>').join('');
+  document.getElementById('filter-engineer').innerHTML = '<option value="">All engineers</option>' + engineers.filter(e => e.active).map(e => '<option value="' + escapeHtml(e.slug) + '">' + escapeHtml(e.name) + '</option>').join('');
   document.getElementById('filter-supplier').innerHTML = '<option value="">All suppliers</option>' + suppliers.map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
-  document.getElementById('filter-office-user').innerHTML = '<option value="">All office users</option>' + officeUsers.filter(u => u.active).map(u => '<option value="' + u.slug + '">' + escapeHtml(u.name) + '</option>').join('');
+  document.getElementById('filter-office-user').innerHTML = '<option value="">All office users</option>' + officeUsers.filter(u => u.active).map(u => '<option value="' + escapeHtml(u.slug) + '">' + escapeHtml(u.name) + '</option>').join('');
   ['filter-engineer','filter-supplier','filter-category','filter-from','filter-to','filter-office-user'].forEach(id => { document.getElementById(id).onchange = loadPOs; });
   document.querySelectorAll('#status-tabs .tab').forEach(t => {
     t.addEventListener('click', () => { setStatusTab(t.dataset.status || ''); loadPOs(); });
@@ -483,15 +483,15 @@ function renderPOs(pos) {
     let supplierCell = escapeHtml(p.supplier || '—');
     if (isSub) supplierCell += '<div style="font-size:12px;margin-top:2px"><span class="badge review" title="Subcontractor PO">👷 ' + escapeHtml(p.trade || 'Subcontractor') + '</span></div>';
     return `<tr>
-      <td><strong style="color:#003366">${p.po_number}</strong></td>
-      <td class="muted">${dStr}</td>
+      <td><strong style="color:#003366">${escapeHtml(p.po_number)}</strong></td>
+      <td class="muted">${escapeHtml(dStr)}</td>
       <td>${escapeHtml(p.office_user_name || (p.source === 'engineer' ? '(engineer)' : '—'))}</td>
       <td>${escapeHtml(p.engineer_name || '—')}</td>
       <td>${siteCell}</td>
       <td>${supplierCell}</td>
       <td>${cost}</td>
       <td>${statusBadge(p)}</td>
-      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ghost small" onclick='openEdit(${p.po_number})'>Edit</button><button class="danger small" title="Delete PO ${p.po_number}" onclick='hardDeletePO(${p.po_number}, false)'>🗑</button></div></td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ghost small" onclick='openEdit(${Number(p.po_number)})'>Edit</button><button class="danger small" title="Delete PO ${escapeHtml(p.po_number)}" onclick='hardDeletePO(${Number(p.po_number)}, false)'>🗑</button></div></td>
     </tr>`;
   }).join('');
 }
@@ -512,7 +512,7 @@ async function openNewPO() {
     try { allTrades = await authFetch('/po/api/trades').then(r => r.json()); } catch (e) { console.error('fetch trades failed', e); }
   }
   const activeEngs = (allEngineers || []).filter(e => Number(e.active) === 1);
-  const engOptions = activeEngs.map(e => '<option value="' + e.slug + '">' + escapeHtml(e.name) + '</option>').join('');
+  const engOptions = activeEngs.map(e => '<option value="' + escapeHtml(e.slug) + '">' + escapeHtml(e.name) + '</option>').join('');
   const subOptions = (allSubcontractors || []).map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
   const tradeOptions = (allTrades || []).map(t => '<option value="' + escapeAttr(t.name) + '">' + escapeHtml(t.name) + '</option>').join('');
   document.getElementById('modal-title').textContent = 'New PO';
@@ -557,7 +557,7 @@ function filterMSites() {
   if (!q) { dd.style.display = 'none'; return; }
   const matches = (allSites || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No match — will be saved as free-text site</div>'; dd.style.display = 'block'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSite(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSite('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlightText(s.name, q)+'</div>').join('');
   dd.style.display = 'block';
 }
 function pickMSite(name) { document.getElementById('m-site').value = name; hideMSites(); }
@@ -570,7 +570,7 @@ function filterMSuppliers() {
   if (!q) { dd.style.display = 'none'; return; }
   const matches = (allSuppliers || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSupplier(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSupplier('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlightText(s.name, q)+'</div>').join('');
   dd.style.display = 'block';
 }
 function pickMSupplier(name) { document.getElementById('m-supplier').value = name; hideMSuppliers(); }
@@ -583,7 +583,7 @@ function filterESuppliers() {
   if (!q) { dd.style.display = 'none'; return; }
   const matches = (allSuppliers || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickESupplier(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickESupplier('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlightText(s.name, q)+'</div>').join('');
   dd.style.display = 'block';
 }
 function pickESupplier(name) { document.getElementById('e-supplier').value = name; hideESuppliers(); }
@@ -655,7 +655,7 @@ function openEdit(poNumber) {
   const auditHtml = auditBits.length ? '<div class="muted" style="font-size:12px;margin-bottom:12px;line-height:1.5">' + auditBits.join('<br>') + '</div>' : '';
   document.getElementById('modal-body').innerHTML = auditHtml + `
     <h3 style="margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Details</h3>
-    <div class="field"><label>Engineer</label><select id="e-engineer"><option value="">— None —</option>${allEngineers.map(e => '<option value="' + e.slug + '"' + (e.slug === p.engineer_slug ? ' selected' : '') + '>' + escapeHtml(e.name) + '</option>').join('')}</select></div>
+    <div class="field"><label>Engineer</label><select id="e-engineer"><option value="">— None —</option>${allEngineers.map(e => '<option value="' + escapeHtml(e.slug) + '"' + (e.slug === p.engineer_slug ? ' selected' : '') + '>' + escapeHtml(e.name) + '</option>').join('')}</select></div>
     <div class="field" style="position:relative"><label>Site</label>
       <input id="e-site" type="text" autocomplete="off" value="${escapeAttr(p.site || '')}" oninput="filterEditSites()" onfocus="filterEditSites()" onblur="setTimeout(hideEditSites,200)">
       <div id="e-site-dropdown" class="ac-dropdown" style="display:none"></div>
@@ -668,10 +668,10 @@ function openEdit(poNumber) {
 
     <h3 style="margin-top:18px;margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Invoice / Cost</h3>
     <div class="grid-2">
-      <div class="field"><label>Cost ex VAT (£)</label><input id="e-cost-ex" type="number" step="0.01" value="${costEx}" oninput="syncCost('ex')"></div>
-      <div class="field"><label>VAT rate (%)</label><input id="e-vat-rate" type="number" step="0.01" value="${vatRate}" oninput="syncCost('rate')"></div>
+      <div class="field"><label>Cost ex VAT (£)</label><input id="e-cost-ex" type="number" step="0.01" value="${escapeHtml(costEx)}" oninput="syncCost('ex')"></div>
+      <div class="field"><label>VAT rate (%)</label><input id="e-vat-rate" type="number" step="0.01" value="${escapeHtml(vatRate)}" oninput="syncCost('rate')"></div>
     </div>
-    <div class="field"><label>Cost inc VAT (£)</label><input id="e-cost-inc" type="number" step="0.01" value="${costInc}" oninput="syncCost('inc')"></div>
+    <div class="field"><label>Cost inc VAT (£)</label><input id="e-cost-inc" type="number" step="0.01" value="${escapeHtml(costInc)}" oninput="syncCost('inc')"></div>
 
     <h3 style="margin-top:18px;margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Status</h3>
     <div class="field"><label>Status</label>
@@ -731,7 +731,7 @@ function filterEditSites() {
   if (!q) { dd.style.display = 'none'; return; }
   const matches = allSites.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { dd.style.display = 'none'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickEditSite(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickEditSite('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlightText(s.name, q)+'</div>').join('');
   dd.style.display = 'block';
 }
 function pickEditSite(name) { document.getElementById('e-site').value = name; hideEditSites(); filterEditSites(); }

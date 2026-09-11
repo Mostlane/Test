@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=36"></script>
 <meta charset="UTF-8" />
 <title>My Timesheet – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
@@ -199,6 +199,7 @@ header button{
 </div>
 
 <script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function ordinal(n){
   const s=["th","st","nd","rd"],v=n%100;
   return n+(s[(v-20)%10]||s[v]||s[0]);
@@ -371,9 +372,9 @@ async function loadWeek(){
         /* ===================== END NEW ===================== */
 
         let locationHTML=list[i].matchedSite
-          ? `📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`
+          ? `📍 ${esc(list[i].matchedSite.siteName)} <span class="verified">✔ Verified</span>`
           : list[i].nearestSite
-            ? `📍 Near ${list[i].nearestSite.siteName}`
+            ? `📍 Near ${esc(list[i].nearestSite.siteName)}`
             : `📍 <span class="unknown">Unknown location</span>`;
 
         group.innerHTML+=`
@@ -385,7 +386,7 @@ async function loadWeek(){
               <span>OT ${o.toFixed(2)}</span>
             </div>
             <div class="location">${locationHTML}</div>
-            <div class="location"><a href="${mapURL}" target="_blank">View on map</a></div>
+            <div class="location"><a href="${esc(mapURL)}" target="_blank">View on map</a></div>
           </div>`;
       }
     }
@@ -421,8 +422,8 @@ async function loadWeek(){
         std   += sTravel;
         ot    += oTravel;
 
-        const startLabel = startSite ? `${startSite.siteName} (${startMins} min)` : `Unknown`;
-        const endLabel   = endSite   ? `${endSite.siteName} (${endMins} min)` : `Unknown`;
+        const startLabel = startSite ? `${esc(startSite.siteName)} (${esc(startMins)} min)` : `Unknown`;
+        const endLabel   = endSite   ? `${esc(endSite.siteName)} (${esc(endMins)} min)` : `Unknown`;
 
         group.innerHTML+=`
           <div class="session-card">
