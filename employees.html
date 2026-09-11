@@ -33,7 +33,17 @@
   .chip.grey{ background:#eef1f5; color:#5a6675; }
   .emp{ display:flex; align-items:center; gap:12px; padding:12px 6px; border-bottom:1px solid #eef1f5; cursor:pointer; }
   .emp:hover{ background:#f7fafd; }
-  .emp .nm{ flex:1; font-weight:600; }
+  .emp .nm{ flex:1; font-weight:600; min-width:120px; }
+  .emp.attn{ box-shadow: inset 3px 0 0 #d64535; }
+  .emp.warn{ box-shadow: inset 3px 0 0 #d69a2b; }
+  .emp .pills{ display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+  .reqrow{ display:flex; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid #eef1f5; font-size:14px; cursor:pointer; }
+  .reqrow input[type=checkbox]{ width:auto; margin:0; transform:scale(1.15); }
+  .reqrow .reqk{ font-weight:600; }
+  .reqrow .reqkind{ font-size:12px; }
+  .reqcat-row{ display:grid; grid-template-columns:1fr 140px 170px auto; gap:8px; align-items:center; margin-bottom:8px; }
+  .reqcat-row input, .reqcat-row select{ width:100%; }
+  @media(max-width:620px){ .reqcat-row{ grid-template-columns:1fr 1fr; } }
   .rec{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:8px 0; }
   .rec .top{ display:flex; align-items:flex-start; gap:8px; }
   .rec .top .t{ flex:1; font-weight:600; }
@@ -80,6 +90,10 @@
 
     <div id="tab-staff" class="tabpane">
       <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+          <p class="muted" style="margin:0;font-size:13px">A ✓ or ✗ shows for each document a person must hold. Open a person to set what they need.</p>
+          <button class="btn ghost small hide" id="reqCatBtn" style="white-space:nowrap">⚙ Required documents</button>
+        </div>
         <input id="empSearch" class="search" type="search" placeholder="Search staff by name…">
         <div id="empList"><p class="muted">Loading staff…</p></div>
       </div>
@@ -144,6 +158,7 @@
       </div>
       <p id="personSub" class="muted" style="margin:4px 0 0"></p>
     </div>
+    <div id="reqCard"></div>
     <div id="sections"></div>
   </div>
 
@@ -191,6 +206,22 @@
   </div>
 </div>
 
+<!-- Required documents catalogue (tenant-wide defaults) -->
+<div class="modal" id="reqCatModal">
+  <div class="sheet" style="max-width:640px">
+    <h2 style="margin:.1em 0 .3em">⚙ Required documents</h2>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">The documents each person must hold. Choose who each one applies to — you can still turn any on or off for one person on their record. Only listed items ever show a ✓ or ✗ on the staff list.</p>
+    <div id="reqCatRows"></div>
+    <button class="btn ghost small" id="reqCatAdd" style="margin-top:6px">＋ Add a document</button>
+    <p id="reqCatMsg" class="msg"></p>
+    <div class="row" style="justify-content:flex-end;margin-top:8px">
+      <button class="btn ghost" id="reqCatCancel">Cancel</button>
+      <button class="btn" id="reqCatSave">Save</button>
+    </div>
+  </div>
+</div>
+<datalist id="reqTitleList"></datalist>
+
 <script>
   const API = (window.MOSTLANE_API || "").replace(/\/+$/,"");
   function authFetch(path, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+(localStorage.getItem("mostlaneToken")||"") }, opts.headers||{}); return fetch(API+path, opts); }
@@ -224,6 +255,7 @@
 
   let ME=null, CAN=false, CUR_USER="", CUR_NAME="", editing=null, editKind="";
   let CUR_IS_SUB=false, CUR_SUB_LOCAL=true, RETURN_TAB="staff";
+  let CUR_RECS=[], CUR_ST="", REQ_CAT=[], REQ_OVER={on:[],off:[]}, CUR_REQ=[];
 
   (async ()=>{
     try{
@@ -232,7 +264,7 @@
       ME = me.user;
       CAN = me.user.FullAccess==="Yes" || me.user.StaffRecords==="Yes";
     }catch(e){ location.href="main.html"; return; }
-    if(CAN){ g("listView").classList.remove("hide"); wireTabs(); showTab("staff"); loadList(); }
+    if(CAN){ g("listView").classList.remove("hide"); g("reqCatBtn").classList.remove("hide"); wireTabs(); showTab("staff"); loadList(); }
     else { // self-view: own records only, read-only
       g("pageTitle").textContent = "My records";
       openPerson(ME.username, ((ME.FirstName||"")+" "+(ME.LastName||"")).trim()||ME.username, true);
@@ -252,13 +284,22 @@
   }
 
   // ── Staff list ───────────────────────────────────────────────────────────
-  let ROWS=[];
+  let ROWS=[], HAS_REQS=false, TITLE_SUGGEST=new Set();
   async function loadList(){
     try{
       const r = await authFetch("/hr/overview").then(x=>x.json());
       ROWS = (r&&r.rows)||[];
+      HAS_REQS = !!(r&&r.hasRequirements);
       renderList();
     }catch(e){ g("empList").innerHTML='<p class="msg err">Couldn’t load staff.</p>'; }
+  }
+  const KIND_SHORT = { qualification:"Qualification", insurance:"Insurance", licence:"Driving licence", licence_check:"DVLA check" };
+  function reqPill(x){
+    const t=esc(x.title), exp=x.expires?esc(fmtDate(x.expires)):"";
+    if(x.status==="held")     return `<span class="chip green" title="Held${exp?" · valid to "+exp:""}">✓ ${t}</span>`;
+    if(x.status==="expiring") return `<span class="chip amber" title="Expiring${exp?" "+exp:""}">⏳ ${t}</span>`;
+    if(x.status==="expired")  return `<span class="chip red" title="Expired${exp?" "+exp:""}">✗ ${t}</span>`;
+    return `<span class="chip red" title="Not held">✗ ${t}</span>`; // missing
   }
   function statusChips(c){
     const out=[];
@@ -272,11 +313,21 @@
     const q=(g("empSearch").value||"").toLowerCase().trim();
     const rows = ROWS.filter(r=>!q || r.name.toLowerCase().includes(q));
     if(!rows.length){ g("empList").innerHTML='<p class="muted">No staff match.</p>'; return; }
-    g("empList").innerHTML = rows.map(r=>`
-      <div class="emp" data-u="${esc(r.username)}" data-n="${esc(r.name)}">
+    g("empList").innerHTML = rows.map(r=>{
+      const req=r.required||[];
+      const bad=req.some(x=>x.status==="missing"||x.status==="expired");
+      const warn=!bad && req.some(x=>x.status==="expiring");
+      let pills;
+      if(req.length){
+        pills = req.map(reqPill).join(" ") + ` <span class="chip grey" title="Total records on file">${r.counts.total||0} rec${(r.counts.total===1)?"":"s"}</span>`;
+      } else {
+        pills = statusChips(r.counts) + (CAN?` <span class="chip grey" style="opacity:.65">no requirements set</span>`:"");
+      }
+      return `<div class="emp ${bad?"attn":warn?"warn":""}" data-u="${esc(r.username)}" data-n="${esc(r.name)}">
         <span class="nm">${esc(r.name)}</span>
-        <span class="row" style="gap:5px">${statusChips(r.counts)}</span>
-      </div>`).join("");
+        <span class="pills">${pills}</span>
+      </div>`;
+    }).join("");
     document.querySelectorAll(".emp").forEach(el=>el.onclick=()=>openPerson(el.dataset.u, el.dataset.n, false));
   }
   g("empSearch").addEventListener("input", renderList);
@@ -288,11 +339,18 @@
     g("personName").textContent = name;
     g("backToList").classList.toggle("hide", !CAN);
     g("personSub").textContent = "Loading…";
-    g("sections").innerHTML="";
+    g("sections").innerHTML=""; g("reqCard").innerHTML="";
     try{
       const r = await authFetch("/hr/records?user="+encodeURIComponent(username)).then(x=>x.json());
       const recs = (r&&r.records)||[];
       const manage = CAN && r.canManage;
+      CUR_RECS = recs;
+      recs.forEach(x=>{ if(x.title) TITLE_SUGGEST.add(x.title); });
+      if(manage && !isSub){
+        CUR_ST = r.reqStaffType||""; REQ_CAT = r.reqCatalogue||[]; REQ_OVER = r.reqOver||{on:[],off:[]}; CUR_REQ = r.requirements||[];
+        (REQ_CAT||[]).forEach(it=>{ if(it.title) TITLE_SUGGEST.add(it.title); });
+        renderReqCard();
+      }
       const exp = recs.filter(x=>x.status==="expired").length, soon = recs.filter(x=>x.status==="expiring").length;
       g("personSub").innerHTML = recs.length ? `${recs.length} record${recs.length===1?"":"s"}` + (exp?` · <span style="color:#c0392b">${exp} expired</span>`:"") + (soon?` · <span style="color:#8a6100">${soon} expiring</span>`:"") : "No records yet.";
       g("sections").innerHTML = KINDS.map(k=>{
@@ -310,6 +368,134 @@
         if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
     }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
   }
+  // ── Required documents (per-person editor) ───────────────────────────────────
+  function defApplies(it, st){ st=String(st||"").toLowerCase(); const s=it.scope||"all"; return s==="all"||(s==="field"&&st!=="office")||(s==="office"&&st==="office"); }
+  function renderReqCard(){
+    const onIds=new Set(CUR_REQ.map(x=>x.id));
+    const statusById={}; CUR_REQ.forEach(x=>statusById[x.id]=x);
+    const cat=(REQ_CAT||[]).slice().sort((a,b)=>String(a.title).localeCompare(String(b.title)));
+    const rows = cat.length ? cat.map(it=>{
+      const on=onIds.has(it.id); const stt=statusById[it.id];
+      const right = on ? (stt?reqPill(stt):'<span class="chip green">✓ required</span>') : '<span class="chip grey" style="opacity:.7">not required</span>';
+      return `<label class="reqrow">
+        <input type="checkbox" data-req="${esc(it.id)}" ${on?"checked":""}>
+        <span class="reqk">${esc(kindDef(it.kind)?kindDef(it.kind).emoji:"")} ${esc(it.title)}</span>
+        <span class="chip grey reqkind">${esc(KIND_SHORT[it.kind]||it.kind)}</span>
+        <span style="margin-left:auto">${right}</span>
+      </label>`;
+    }).join("") : '<p class="muted" style="margin:6px 0">No document types set up yet. Add one below, or set them up for everyone with “⚙ Required documents”.</p>';
+    g("reqCard").innerHTML = `<div class="card">
+      <h2 style="margin:0 0 2px">📋 Required documents</h2>
+      <p class="muted" style="font-size:13px;margin:0 0 8px">Tick what <b>${esc(CUR_NAME)}</b> must hold. Only ticked items show a ✓/✗ on the staff list — nothing else is ever marked missing.</p>
+      <div id="reqCardRows">${rows}</div>
+      <div class="row" style="gap:6px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
+        <label class="field" style="margin:0"><span class="lbl" style="font-size:12px">Add a document</span>
+          <input id="reqAddTitle" list="reqTitleList" placeholder="e.g. CSCS Card" style="min-width:180px"></label>
+        <label class="field" style="margin:0"><span class="lbl" style="font-size:12px">Type</span>
+          <select id="reqAddKind" style="width:auto">${KINDS.map(k=>`<option value="${k.kind}">${esc(KIND_SHORT[k.kind]||k.kind)}</option>`).join("")}</select></label>
+        <button class="btn small" id="reqAddBtn">＋ Add for ${esc(CUR_NAME.split(" ")[0]||"this person")}</button>
+      </div>
+      <p id="reqCardMsg" class="msg" style="margin:6px 0 0"></p>
+    </div>`;
+    buildTitleList();
+    document.querySelectorAll("#reqCardRows [data-req]").forEach(b=>b.onchange=onReqToggle);
+    g("reqAddBtn").onclick=addReqForPerson;
+    g("reqAddTitle").addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); addReqForPerson(); } });
+  }
+  async function onReqToggle(){
+    const on=[], off=[];
+    document.querySelectorAll("#reqCardRows [data-req]").forEach(b=>{
+      const it=(REQ_CAT||[]).find(x=>x.id===b.dataset.req); if(!it) return;
+      const def=defApplies(it, CUR_ST);
+      if(b.checked){ if(!def) on.push(it.id); } else { if(def) off.push(it.id); }
+    });
+    g("reqCardMsg").textContent="Saving…"; g("reqCardMsg").className="msg";
+    try{
+      const res=await authFetch("/hr/requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user:CUR_USER, over:{on,off}})}).then(x=>x.json());
+      if(!res.ok) throw 0;
+      REQ_OVER={on,off};
+      // recompute this person's effective list client-side for instant pills
+      recomputeCurReq(res.items||REQ_CAT);
+      renderReqCard();
+      g("reqCardMsg").textContent="Saved ✓"; setTimeout(()=>{ const m=g("reqCardMsg"); if(m) m.textContent=""; },1500);
+    }catch(e){ g("reqCardMsg").textContent="Couldn’t save."; g("reqCardMsg").className="msg err"; }
+  }
+  async function addReqForPerson(){
+    const title=(g("reqAddTitle").value||"").trim(); const kind=g("reqAddKind").value;
+    if(!title){ g("reqAddTitle").focus(); return; }
+    g("reqCardMsg").textContent="Adding…"; g("reqCardMsg").className="msg";
+    try{
+      const res=await authFetch("/hr/requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({addItem:{title,kind,scope:"none",assignTo:CUR_USER}})}).then(x=>x.json());
+      if(!res.ok) throw 0;
+      REQ_CAT=res.items||REQ_CAT;
+      REQ_OVER=(res.byUser&&res.byUser[CUR_USER])||REQ_OVER;
+      g("reqAddTitle").value="";
+      recomputeCurReq(REQ_CAT);
+      renderReqCard();
+      g("reqCardMsg").textContent="Added ✓"; setTimeout(()=>{ const m=g("reqCardMsg"); if(m) m.textContent=""; },1500);
+    }catch(e){ g("reqCardMsg").textContent="Couldn’t add."; g("reqCardMsg").className="msg err"; }
+  }
+  // Effective requirements for the current person from a catalogue + overrides,
+  // matched to their loaded records — mirrors the worker so pills update at once.
+  function normT(s){ return String(s||"").trim().toLowerCase().replace(/\s+/g," "); }
+  function matchStatus(it){
+    const want=normT(it.title);
+    const ms=(CUR_RECS||[]).filter(r=>r.kind===it.kind && (()=>{const t=normT(r.title); return t===want||(t&&want&&(t.includes(want)||want.includes(t)));})());
+    if(!ms.length) return {status:"missing",expires:""};
+    const rank={valid:3,none:3,expiring:2,expired:1}; let best=null;
+    ms.forEach(r=>{ const s=r.status||"none"; const rk=rank[s]||0; if(!best||rk>best.rk||(rk===best.rk&&String(r.expires||"")>String(best.expires||""))) best={rk,status:s,expires:r.expires||""}; });
+    const held=best.status==="valid"||best.status==="none";
+    return {status:held?"held":best.status,expires:best.expires};
+  }
+  function recomputeCurReq(cat){
+    const off=new Set(REQ_OVER.off||[]), on=new Set(REQ_OVER.on||[]);
+    CUR_REQ=(cat||[]).filter(it=>{ let a=defApplies(it,CUR_ST); if(on.has(it.id))a=true; if(off.has(it.id))a=false; return a; })
+      .map(it=>{ const s=matchStatus(it); return {id:it.id,kind:it.kind,title:it.title,scope:it.scope,status:s.status,expires:s.expires}; });
+  }
+  function buildTitleList(){ g("reqTitleList").innerHTML=[...TITLE_SUGGEST].sort((a,b)=>a.localeCompare(b)).map(t=>`<option value="${esc(t)}">`).join(""); }
+
+  // ── Required documents catalogue (tenant-wide) ───────────────────────────────
+  let CAT_ROWS=[];
+  async function openReqCat(){
+    g("reqCatMsg").textContent="Loading…"; g("reqCatModal").classList.add("show");
+    try{
+      const r=await authFetch("/hr/requirements").then(x=>x.json());
+      CAT_ROWS=(r&&r.items)||[]; (CAT_ROWS||[]).forEach(it=>{ if(it.title) TITLE_SUGGEST.add(it.title); });
+      renderCatRows(); g("reqCatMsg").textContent="";
+    }catch(e){ g("reqCatMsg").textContent="Couldn’t load."; g("reqCatMsg").className="msg err"; }
+  }
+  const SCOPE_OPTS=[["all","Everyone"],["field","Field engineers"],["office","Office staff"],["none","Only where assigned"]];
+  function renderCatRows(){
+    buildTitleList();
+    g("reqCatRows").innerHTML = (CAT_ROWS.length?CAT_ROWS:[]).map((it,i)=>`
+      <div class="reqcat-row" data-i="${i}">
+        <input list="reqTitleList" value="${esc(it.title||"")}" placeholder="Document name" data-f="title">
+        <select data-f="kind">${KINDS.map(k=>`<option value="${k.kind}" ${it.kind===k.kind?"selected":""}>${esc(KIND_SHORT[k.kind]||k.kind)}</option>`).join("")}</select>
+        <select data-f="scope">${SCOPE_OPTS.map(s=>`<option value="${s[0]}" ${(it.scope||"all")===s[0]?"selected":""}>${esc(s[1])}</option>`).join("")}</select>
+        <button class="btn danger small" data-del="${i}">✕</button>
+      </div>`).join("") || '<p class="muted" style="margin:4px 0">No documents yet — add the ones your team must hold (e.g. CSCS, First Aid, Public Liability).</p>';
+    g("reqCatRows").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{ syncCatFromDom(); CAT_ROWS.splice(+b.dataset.del,1); renderCatRows(); });
+  }
+  function syncCatFromDom(){
+    CAT_ROWS = [...g("reqCatRows").querySelectorAll(".reqcat-row")].map(row=>({
+      id: CAT_ROWS[+row.dataset.i] ? CAT_ROWS[+row.dataset.i].id : "",
+      title: row.querySelector('[data-f=title]').value.trim(),
+      kind: row.querySelector('[data-f=kind]').value,
+      scope: row.querySelector('[data-f=scope]').value,
+    }));
+  }
+  async function saveReqCat(){
+    syncCatFromDom();
+    const items=CAT_ROWS.filter(r=>r.title);
+    g("reqCatMsg").textContent="Saving…"; g("reqCatMsg").className="msg";
+    try{
+      const r=await authFetch("/hr/requirements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items})}).then(x=>x.json());
+      if(!r.ok) throw 0;
+      g("reqCatModal").classList.remove("show");
+      loadList();
+    }catch(e){ g("reqCatMsg").textContent="Couldn’t save."; g("reqCatMsg").className="msg err"; }
+  }
+
   function badge(x){
     // Word the date by record type so a monthly check's "next due" is never
     // mistaken for the photocard licence's expiry.
@@ -646,6 +832,12 @@
     g("recCancel").onclick=()=>g("recModal").classList.remove("show");
     g("recModal").onclick=e=>{ if(e.target===g("recModal")) g("recModal").classList.remove("show"); };
     g("recSave").onclick=saveRec;
+    // Required-documents catalogue
+    if(g("reqCatBtn")) g("reqCatBtn").onclick=openReqCat;
+    if(g("reqCatCancel")) g("reqCatCancel").onclick=()=>g("reqCatModal").classList.remove("show");
+    if(g("reqCatModal")) g("reqCatModal").onclick=e=>{ if(e.target===g("reqCatModal")) g("reqCatModal").classList.remove("show"); };
+    if(g("reqCatAdd")) g("reqCatAdd").onclick=()=>{ syncCatFromDom(); CAT_ROWS.push({id:"",title:"",kind:"qualification",scope:"all"}); renderCatRows(); };
+    if(g("reqCatSave")) g("reqCatSave").onclick=saveReqCat;
     // File picker + drag-drop into the record modal, with auto-extract.
     if(g("recPick")) g("recPick").onclick=()=>g("recFile").click();
     if(g("recFile")) g("recFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(f){ g("recDocNow").innerHTML="Attaching: <b>"+esc(f.name)+"</b>"; g("recDocNow").dataset.remove=""; onCertFile(f); } };

@@ -1236,6 +1236,33 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   FullAccess): staff list with expiring/expired chips → per-person view with the
   four sections, add/edit/delete records, expiry badges, doc view (docviewer).
   A field/office employee sees their OWN records read-only on **my-documents.html**
+  - **Required documents — per-person ✓/✗ pills (Sep 2026, Jamie: "pills and clear
+    tick or cross if each item is held… set what is needed for them so I don't have
+    a cross for a document that employee does not need to hold").** Config in
+    app_config **`staff:reqs:<tid>`** = `{ items:[{id,kind,title,scope}],
+    byUser:{ "<username>":{on:[id],off:[id]} } }`. `scope` = **all** | **field**
+    (staffType≠office) | **office** | **none** (only where assigned via `on`). A
+    person's per-user `on`/`off` always wins over the scope default (`off` wins over
+    `on`). Helpers (exported for the test): **`requiredForUser(cfg,username,staffType)`**
+    → the items that apply to them; **`reqStatus(item,recs)`** matches their records
+    (same `kind`, normalised title equal or contains-either-way; best-of by
+    valid/none>expiring>expired, furthest expiry) → **held** (in date incl. no-expiry)
+    | **expiring** | **expired** | **missing**. **GET /hr/overview** now returns
+    `required:[{id,kind,title,status,expires}]` + `staffType` per row + `hasRequirements`;
+    **GET /hr/records** (admin) also returns `requirements`/`reqCatalogue`/`reqOver`/
+    `reqStaffType` for the person editor. **GET/POST /hr/requirements** (office):
+    POST takes `{items:[…]}` (replace the catalogue, prunes dangling per-user refs),
+    `{addItem:{kind,title,scope,assignTo}}` (add one + assign to a person), and
+    `{user, over:{on,off}}` (merge one person's overrides). Front-end
+    **employees.html** Staff list renders **one pill per required item** (green ✓ /
+    amber ⏳ / red ✗), a grey records count, and a red/amber left stripe
+    (`.emp.attn`/`.warn`) when something's outstanding; a person with no requirements
+    shows "no requirements set". **⚙ Required documents** button (Staff header) →
+    tenant catalogue modal (title · type · who it applies to); the person view's
+    **📋 Required documents** card ticks items on/off for that individual and adds
+    one-offs. A cross NEVER shows for a document a person isn't required to hold.
+    Nothing seeded — the office builds the catalogue once. Test
+    `node worker/tools/test-staff-required.mjs` (17 cases).
   ("📋 My qualifications, licences & insurances" card). Home-hub widget + overview
   KPI (`staffrecords` area).
   - **Subcontractors (non-portal people) — bidirectionally linked to the PO

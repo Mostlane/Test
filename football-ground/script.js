@@ -8,7 +8,11 @@ const CONFIG = {
   siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
   address:   "Coal Park Lane, Swanwick, SO31 7GW",
-  email:     "bookings@example.com",   // where enquiries are sent — set this before go-live
+  email:     "bookings@coalparklane.co.uk",  // FALLBACK/DELIVERY ONLY — never shown on the site.
+                                             // Used only if the booking backend is unreachable (opens the
+                                             // visitor's email app). A Coal Park Lane address, not a personal one.
+                                             // Real enquiries arrive via the booking backend + its own
+                                             // (invisible, server-side) email notification.
   phone:     "01234 567 890",
   phoneLink: "+440000000000",          // tel: format, no spaces
 
@@ -17,12 +21,22 @@ const CONFIG = {
      "mailto"  – opens the visitor's email app with the
                  enquiry pre-filled (zero setup, works today).
      "endpoint"– POSTs the enquiry to a URL you provide
-                 (e.g. Formspree, or a Cloudflare Worker +
-                 Resend like your Mostlane stack). Set
+                 (e.g. Formspree, or your own Cloudflare Worker +
+                 Resend endpoint). Set
                  formEndpoint below and switch this to "endpoint".
      ------------------------------------------------------- */
   deliveryMode: "mailto",
-  formEndpoint: ""   // e.g. "https://formspree.io/f/xxxx" or your own Worker URL
+  formEndpoint: "",  // e.g. "https://formspree.io/f/xxxx" or your own Worker URL
+
+  /* -------------------------------------------------------
+     BOOKING BACKEND (Coal Park Lane worker)
+     When set, enquiries are saved straight into your bookings
+     database and appear in admin.html. If the save ever fails
+     (worker down / offline), the form falls back to mailto so
+     an enquiry is never lost. Leave blank to disable and use
+     deliveryMode above instead.
+     ------------------------------------------------------- */
+  bookingEndpoint: "https://coalparklane-api.jamie-def.workers.dev/enquiry"
 };
 
 /* ---------- Apply config to the page ---------- */
@@ -30,10 +44,7 @@ const CONFIG = {
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   set("heroLocation", CONFIG.location);
   set("cAddress", CONFIG.address);
-  const email = document.getElementById("cEmail");
-  if (email){ email.textContent = CONFIG.email; email.href = "mailto:" + CONFIG.email; }
-  const phone = document.getElementById("cPhone");
-  if (phone){ phone.textContent = CONFIG.phone; phone.href = "tel:" + CONFIG.phoneLink; }
+  // NB: the enquiry email is deliberately NOT rendered anywhere on the page.
   const yr = document.getElementById("year");
   if (yr) yr.textContent = new Date().getFullYear();
 })();
@@ -157,6 +168,35 @@ form.addEventListener("submit", async (e) => {
   const subject = `Booking enquiry — ${data.use} — ${data.date}`;
   const body = buildBody(data);
 
+  // ---- Delivery: booking backend (saves into your bookings database) ----
+  if (CONFIG.bookingEndpoint){
+    submitBtn.disabled = true;
+    const original = submitBtn.textContent;
+    submitBtn.textContent = "Sending…";
+    try{
+      const res = await fetch(CONFIG.bookingEndpoint, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          name: data.name, email: data.email, phone: data.phone,
+          date: data.date, time: data.time, pitch: data.pitch,
+          use: data.use, message: data.message
+        })
+      });
+      if (!res.ok) throw new Error("bad status " + res.status);
+      form.reset();
+      note.textContent = "Thanks — your enquiry is in. We'll be in touch shortly to confirm.";
+      note.classList.add("ok");
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+      return;
+    }catch(err){
+      // Save failed — fall through to mailto so the enquiry is never lost.
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+    }
+  }
+
   // ---- Delivery: hosted endpoint (Formspree / your own Worker) ----
   if (CONFIG.deliveryMode === "endpoint" && CONFIG.formEndpoint){
     submitBtn.disabled = true;
@@ -173,7 +213,7 @@ form.addEventListener("submit", async (e) => {
       note.textContent = "Thanks — your enquiry has been sent. We'll be in touch shortly.";
       note.classList.add("ok");
     }catch(err){
-      note.textContent = "Sorry, something went wrong sending that. Please email us directly at " + CONFIG.email + ".";
+      note.textContent = "Sorry, something went wrong sending that. Please try again in a moment.";
       note.classList.add("bad");
     }finally{
       submitBtn.disabled = false;
@@ -185,6 +225,6 @@ form.addEventListener("submit", async (e) => {
   // ---- Delivery: mailto (default, no backend needed) ----
   const mailto = `mailto:${CONFIG.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = mailto;
-  note.textContent = "Opening your email app to send the enquiry. If nothing happens, email us at " + CONFIG.email + ".";
+  note.textContent = "Opening your email app to send the enquiry.";
   note.classList.add("ok");
 });

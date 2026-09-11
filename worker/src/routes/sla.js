@@ -2941,9 +2941,15 @@ function quoteMissing(job, patch, photoCount) {
   if (job && job.investigateOnly) return [];
   const q = (patch.quote && typeof patch.quote === "object") ? patch.quote : (job.quote || {});
   const miss = [];
-  if (!String(q.description || "").trim()) miss.push("the works description");
-  if (!String(q.reason || "").trim())      miss.push("why it needs quoting");
-  if (!String(q.materials || "").trim())   miss.push("the materials");
+  // Match the engineer's on-site quote panel (engineer-job.html collectQuote):
+  // materials, time restrictions, estimated duration, access equipment. The old
+  // free-text description/reason fields were replaced by these structured ones —
+  // requiring them here (with no field to fill) is what blocked engineers.
+  const hasAccess = Array.isArray(q.accessEquipment) ? q.accessEquipment.length > 0 : !!String(q.access || "").trim();
+  if (!String(q.materials || "").trim())        miss.push("the materials");
+  if (!String(q.timeRestrictions || "").trim()) miss.push("time restrictions (put ‘none’ if there are none)");
+  if (!(parseFloat(q.estDurationHours) > 0))    miss.push("the estimated duration");
+  if (!hasAccess)                               miss.push("the access equipment");
   if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
