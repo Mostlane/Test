@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -27307,6 +27302,54 @@ async function setMatrixCols(db, kind, cols) {
   all[kind] = cols;
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:matrixcols:" + db.tenantId, JSON.stringify(all)).run();
 }
+var normTitle = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+var REQ_SCOPES = ["all", "field", "office", "none"];
+async function getReqCfg(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:reqs:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return { items: Array.isArray(v.items) ? v.items : [], byUser: v.byUser && typeof v.byUser === "object" ? v.byUser : {} };
+  } catch {
+    return { items: [], byUser: {} };
+  }
+}
+async function saveReqCfg(db, cfg) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:reqs:" + db.tenantId, JSON.stringify({ items: cfg.items || [], byUser: cfg.byUser || {} })).run();
+}
+function requiredForUser(cfg, username, staffType) {
+  const st = String(staffType || "").toLowerCase();
+  const over = cfg.byUser && cfg.byUser[username] || {};
+  const off = new Set(over.off || []);
+  const on = new Set(over.on || []);
+  const out = [];
+  for (const it of cfg.items || []) {
+    if (!it || !it.id) continue;
+    const scope = it.scope || "all";
+    let applies = scope === "all" || scope === "field" && st !== "office" || scope === "office" && st === "office";
+    if (on.has(it.id)) applies = true;
+    if (off.has(it.id)) applies = false;
+    if (applies) out.push({ id: it.id, kind: it.kind, title: it.title, scope });
+  }
+  return out;
+}
+function reqStatus(item, recs) {
+  const want = normTitle(item.title);
+  const matches = (recs || []).filter((r) => {
+    if (r.kind !== item.kind) return false;
+    const t = normTitle(r.title);
+    return t === want || t && want && (t.includes(want) || want.includes(t));
+  });
+  if (!matches.length) return { status: "missing", expires: "" };
+  const rank = { valid: 3, none: 3, expiring: 2, expired: 1 };
+  let best = null;
+  for (const r of matches) {
+    const s = statusOf3(r.expires);
+    const rk = rank[s] || 0;
+    if (!best || rk > best.rk || rk === best.rk && String(r.expires || "") > String(best.expires || "")) best = { rk, status: s, expires: r.expires || "" };
+  }
+  const held = best.status === "valid" || best.status === "none";
+  return { status: held ? "held" : best.status, expires: best.expires };
+}
 var todayISO = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -27436,32 +27479,109 @@ async function handle24(request, env, ctx, url, sess) {
     ).bind(db.tenantId, user).all();
     const records = [];
     for (const r of results || []) records.push(await shape(env, url.origin, r));
-    return json({ ok: true, user, canManage: isAdmin, records }, {}, env, request);
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "";
+    if (isAdmin) {
+      const cfg = await getReqCfg(db);
+      try {
+        const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first();
+        reqStaffType = String(JSON.parse(urow && urow.profile || "{}").staffType || "").toLowerCase();
+      } catch {
+      }
+      requirements = requiredForUser(cfg, user, reqStaffType).map((it) => {
+        const s = reqStatus(it, results || []);
+        return { id: it.id, kind: it.kind, title: it.title, scope: it.scope, status: s.status, expires: s.expires || "" };
+      });
+      reqCatalogue = cfg.items;
+      reqOver = cfg.byUser && cfg.byUser[user] || { on: [], off: [] };
+    }
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType }, {}, env, request);
+  }
+  if (path === "/hr/requirements" && method === "GET") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const cfg = await getReqCfg(db);
+    return json({ ok: true, items: cfg.items, byUser: cfg.byUser, scopes: REQ_SCOPES }, {}, env, request);
+  }
+  if (path === "/hr/requirements" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const cfg = await getReqCfg(db);
+    if (Array.isArray(b.items)) {
+      cfg.items = b.items.map((it) => ({
+        id: String(it.id || "req_" + Math.random().toString(36).slice(2, 9)),
+        kind: KINDS.includes(it.kind) ? it.kind : "qualification",
+        title: String(it.title || "").trim().slice(0, 80),
+        scope: REQ_SCOPES.includes(it.scope) ? it.scope : "all"
+      })).filter((it) => it.title);
+      const live = new Set(cfg.items.map((i) => i.id));
+      for (const u of Object.keys(cfg.byUser)) {
+        const o = cfg.byUser[u] || {};
+        const on = (o.on || []).filter((id) => live.has(id)), off = (o.off || []).filter((id) => live.has(id));
+        if (on.length || off.length) cfg.byUser[u] = { on, off };
+        else delete cfg.byUser[u];
+      }
+    }
+    if (b.addItem && b.addItem.title) {
+      const it = {
+        id: "req_" + Math.random().toString(36).slice(2, 9),
+        kind: KINDS.includes(b.addItem.kind) ? b.addItem.kind : "qualification",
+        title: String(b.addItem.title).trim().slice(0, 80),
+        scope: REQ_SCOPES.includes(b.addItem.scope) ? b.addItem.scope : "none"
+      };
+      if (it.title) {
+        cfg.items.push(it);
+        if (b.addItem.assignTo) {
+          const o = cfg.byUser[b.addItem.assignTo] || { on: [], off: [] };
+          o.on = [.../* @__PURE__ */ new Set([...o.on || [], it.id])];
+          cfg.byUser[b.addItem.assignTo] = o;
+        }
+      }
+    }
+    if (b.user && b.over && typeof b.over === "object") {
+      const on = [...new Set((b.over.on || []).map(String))], off = [...new Set((b.over.off || []).map(String))];
+      if (on.length || off.length) cfg.byUser[b.user] = { on, off };
+      else delete cfg.byUser[b.user];
+    }
+    await saveReqCfg(db, cfg);
+    return json({ ok: true, items: cfg.items, byUser: cfg.byUser }, {}, env, request);
   }
   if (path === "/hr/overview" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
     const { results: users } = await db.prepare(
-      "SELECT username, first_name, last_name, status, employment_type FROM users WHERE tenant_id=?"
+      "SELECT username, first_name, last_name, status, employment_type, profile FROM users WHERE tenant_id=?"
     ).bind(db.tenantId).all();
     const active = (users || []).filter((u) => {
       const s = String(u.status || "").trim().toLowerCase();
       return s === "" || s === "active";
     });
     const { results: recs } = await db.prepare(
-      "SELECT username, kind, expires FROM staff_records WHERE tenant_id=?"
+      "SELECT username, kind, title, expires FROM staff_records WHERE tenant_id=?"
     ).bind(db.tenantId).all();
-    const byUser = {};
+    const byUser = {}, recsByUser = {};
     for (const r of recs || []) {
       const k = byUser[r.username] = byUser[r.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
       k.total++;
       k[statusOf3(r.expires)]++;
+      (recsByUser[r.username] = recsByUser[r.username] || []).push(r);
     }
+    const cfg = await getReqCfg(db);
+    const staffTypeOf3 = (u) => {
+      try {
+        return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase();
+      } catch {
+        return "";
+      }
+    };
     const rows = active.map((u) => {
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
       const c = byUser[u.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
-      return { username: u.username, name, employmentType: u.employment_type || "", counts: c };
+      const st = staffTypeOf3(u);
+      const required = requiredForUser(cfg, u.username, st).map((it) => {
+        const s = reqStatus(it, recsByUser[u.username] || []);
+        return { id: it.id, kind: it.kind, title: it.title, status: s.status, expires: s.expires || "" };
+      });
+      return { username: u.username, name, staffType: st, employmentType: u.employment_type || "", counts: c, required };
     }).sort((a, b) => a.name.localeCompare(b.name));
-    return json({ ok: true, rows }, {}, env, request);
+    return json({ ok: true, rows, hasRequirements: (cfg.items || []).length > 0 }, {}, env, request);
   }
   if (path === "/hr/attention" && method === "GET") {
     if (!isAdmin) return json({ ok: true, count: 0, items: [] }, {}, env, request);
@@ -35548,9 +35668,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });

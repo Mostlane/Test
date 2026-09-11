@@ -236,6 +236,21 @@
         ]},
       ]},
 
+      { title: "Employees & HR records", arts: [
+        { icon: "📋", title: "Set what each person must hold", perms: ["StaffRecords"], steps: [
+          ["Open <b>Employees</b> → <b>Staff</b>. Each person now shows a <b>pill per required document</b> — green <b>✓</b> when it's held and in date, amber <b>⏳</b> when it's expiring soon, red <b>✗</b> when it's missing or expired. A red stripe down the left flags anyone with something outstanding."],
+          ["<b>A cross only ever shows for documents that person actually needs</b> — nothing they don't need is marked missing."],
+          ["Tap <b>⚙ Required documents</b> (top right of the Staff list) to set up the master list: add each document (e.g. CSCS, First Aid, Public Liability), pick its <b>type</b>, and choose who it applies to — <b>Everyone</b>, <b>Field engineers</b>, <b>Office staff</b>, or <b>Only where assigned</b>."],
+          ["Open a person to fine-tune it just for them: the <b>📋 Required documents</b> card lets you tick documents on or off for that individual, or add a one-off requirement only they need."],
+          ["The ✓/✗ is worked out automatically from the qualifications, insurances and licences you record against each person — keep those up to date and the pills follow."],
+        ]},
+        { icon: "🎓", title: "Record a qualification, insurance or licence", perms: ["StaffRecords"], steps: [
+          ["Open <b>Employees</b>, tap a person, then <b>+ Add</b> in the right section (Qualifications, Insurances, Driving licences or Licence checks)."],
+          ["Drag the certificate onto the form and the portal reads the number, awarding body and expiry for you — check them, then Save. Set an <b>expiry date</b> so it's tracked and it warns you before it lapses."],
+          ["The <b>📊 Training matrix</b> tab shows the whole team against each competency at a glance; <b>🚗 Licence checks</b> tracks the monthly DVLA checks."],
+        ]},
+      ]},
+
       { title: "Office & admin", arts: [
         { icon: "📊", title: "Portal stats", perms: ["__fullOnly"], steps: [
           ["Open <b>📊 Stats</b> (Full-access only) for a live overview of the whole portal."],
