@@ -331,6 +331,17 @@
       })();
     </script>
 
+    <!-- Following-day warning: reactive SLA jobs booked before today and never
+         finished. Office only; hidden until it has content. -->
+    <div id="notAttendedBanner" hidden style="margin:10px 0;padding:12px 14px;border:1px solid #f3b1ab;background:#ffe8e6;border-radius:12px;color:#7a1a13;font-size:14px;line-height:1.5;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong id="nabHead" style="font-size:15px;">⚠ Jobs not attended</strong>
+        <button type="button" id="nabToggle" style="margin-left:auto;background:#fff;border:1px solid #f3b1ab;color:#7a1a13;border-radius:999px;padding:3px 12px;font-weight:600;cursor:pointer;">Show list</button>
+        <button type="button" id="nabDismiss" title="Hide until next load" style="background:transparent;border:0;color:#7a1a13;font-size:18px;line-height:1;cursor:pointer;padding:2px 4px;">✕</button>
+      </div>
+      <div id="nabList" hidden style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+
     <div class="chips" id="statusChips"></div>
 
     <div class="toolbar">
@@ -755,6 +766,57 @@ async function gate(){
     $("mainCard").style.display = "block";
     return true;
   }
+}
+
+/* ── Following-day "jobs not attended" warning ─────────────────────────────
+   Office roles only. Lists reactive SLA jobs booked before today and never
+   finished (projects / fleet / standby are excluded server-side). Tap a row to
+   open the job to reschedule it. State (open/dismissed) is per-device. */
+function nabIsOffice(){
+  try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = v => String(v||"").toLowerCase() === "yes";
+    return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin);
+  }catch(e){ return false; }
+}
+async function loadNotAttended(){
+  if(!nabIsOffice()) return;
+  const box = $("notAttendedBanner"); if(!box) return;
+  let data;
+  try{
+    const res = await authFetchTO("/sla/not-attended", 9000);
+    data = await res.json();
+  }catch(e){ return; }               // never let a hung fetch disturb the board
+  const jobs = (data && Array.isArray(data.jobs)) ? data.jobs : [];
+  if(!jobs.length){ box.hidden = true; return; }
+  const n = jobs.length;
+  $("nabHead").textContent = "⚠ " + n + " job" + (n===1?"":"s") + " not attended";
+  const listEl = $("nabList");
+  listEl.innerHTML = jobs.map(function(j){
+    const engs = (j.engineers||[]).map(e => esc(e.engineer) + " — " + esc(e.status)).join(" · ");
+    const ago = j.daysAgo <= 0 ? "yesterday" : (j.daysAgo + " day" + (j.daysAgo===1?"":"s") + " ago");
+    const pill = j.priority ? '<span style="font-weight:700;">'+esc(j.priority)+'</span> · ' : '';
+    return '<div class="nab-row" data-jobid="'+esc(j.id)+'" style="background:#fff;border:1px solid #f3b1ab;border-radius:8px;padding:8px 10px;cursor:pointer;">'
+      + '<div style="font-weight:600;">'+esc(j.site || j.ref)+' <span style="color:#9a5;">'+esc(j.ref)+'</span></div>'
+      + '<div style="font-size:12.5px;color:#7a1a13;">'+pill+'booked '+esc(ago)+' · '+engs+'</div>'
+      + '</div>';
+  }).join("");
+  // Restore per-device open/dismissed state.
+  let dismissed = false; try{ dismissed = localStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
+  box.hidden = !!dismissed;
+  const open = (function(){ try{ return localStorage.getItem("mlNabOpen") === "1"; }catch(e){ return false; } })();
+  listEl.hidden = !open;
+  $("nabToggle").textContent = open ? "Hide list" : "Show list";
+  $("nabToggle").onclick = function(){
+    const nowOpen = listEl.hidden;
+    listEl.hidden = !nowOpen;
+    this.textContent = nowOpen ? "Hide list" : "Show list";
+    try{ localStorage.setItem("mlNabOpen", nowOpen ? "1" : "0"); }catch(e){}
+  };
+  $("nabDismiss").onclick = function(){ box.hidden = true; try{ localStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
+  listEl.querySelectorAll(".nab-row").forEach(function(row){
+    row.onclick = function(){ location.href = "job-view.html?jobId=" + encodeURIComponent(row.getAttribute("data-jobid")); };
+  });
 }
 
 /* ============ data ============ */
@@ -1672,6 +1734,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
+    loadNotAttended().catch(()=>{});   // following-day "jobs not attended" warning (office only)
     // Load the sites register in the background so the client filter can bucket
     // jobs that carry only a site code; re-render once the map is ready so the
     // dropdown counts are accurate. Never blocks the board.
