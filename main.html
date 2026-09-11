@@ -1206,7 +1206,14 @@ const MAP = window.ML_PERM_MAP || {
 
         var css = document.createElement("style");
         css.textContent =
-          "#mlNotify{position:fixed;z-index:2200;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;}" +
+          // z-index 99999: the mobile blocking gate MUST sit ABOVE every fixed
+          // escape hatch (notification bell 99000, chat launcher 99998,
+          // hard-refresh 98000, pull-to-refresh 99500) so an engineer can't tap
+          // the bell/chat over the "van check overdue" lock and navigate away via
+          // a feed link. Kept BELOW the owner "Viewing as" return bar (100001) so
+          // impersonation can still be exited, and below the memo/remedial gates
+          // (100050/100060) which are also mandatory and may layer on top.
+          "#mlNotify{position:fixed;z-index:99999;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;}" +
           "#mlNotify .mln-card{background:#fff;border-radius:18px;box-shadow:0 12px 40px rgba(3,12,28,.35);overflow:hidden;}" +
           "#mlNotify .mln-head{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:16px 18px;}" +
           "#mlNotify .mln-head h2{margin:0;font-size:17px;color:#fff;}" +
