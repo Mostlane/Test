@@ -1473,9 +1473,12 @@ export async function handle(request, env, ctx, url, sess) {
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
     // ── Day-end protection ──────────────────────────────────────────────────
-    // An engineer can't finish their day while jobs are still outstanding:
-    //   • any job they've actively started (Travelling / In Progress), any date;
-    //   • any job booked for TODAY they haven't started (Scheduled/Pending).
+    // An engineer can finish their day AT ANY POINT. The ONLY thing that blocks
+    // is a job they've actively STARTED and not finished (Travelling / In
+    // Progress, any date) — leaving a job running mid-visit is the real risk
+    // (its evidence/packs, and the timesheet segment). A job merely booked for
+    // today that they never got to does NOT block: running out of time on a
+    // scheduled visit is normal, it just rolls forward still assigned.
     // Parked jobs (On Hold / Quote — which already required their packs to set)
     // and finished ones (Complete / Closed / done-categories) don't block.
     // An office admin can pass force:true to close a stuck day.
@@ -1498,12 +1501,11 @@ export async function handle(request, env, ctx, url, sess) {
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
-          const today = j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
-          if (active || today) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+          if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
         }
         if (outstanding.length) {
           return jsonResponse({
-            error: "You still have " + outstanding.length + " unfinished job" + (outstanding.length === 1 ? "" : "s") + " today — finish them before ending your day.",
+            error: "You still have " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " in progress — finish or park " + (outstanding.length === 1 ? "it" : "them") + " before ending your day.",
             outstanding
           }, headers, 409);
         }

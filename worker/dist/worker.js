@@ -15895,12 +15895,11 @@ async function handle12(request, env, ctx, url, sess) {
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
-          const today = j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
-          if (active || today) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+          if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
         }
         if (outstanding.length) {
           return jsonResponse({
-            error: "You still have " + outstanding.length + " unfinished job" + (outstanding.length === 1 ? "" : "s") + " today \u2014 finish them before ending your day.",
+            error: "You still have " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " in progress \u2014 finish or park " + (outstanding.length === 1 ? "it" : "them") + " before ending your day.",
             outstanding
           }, headers, 409);
         }
