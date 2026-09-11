@@ -339,7 +339,7 @@
         <strong id="nabHead" style="font-size:15px;">⚠ Jobs not attended</strong>
         <button type="button" id="nabToggle" style="margin-left:auto;background:#fff;border:1px solid #f3b1ab;color:#7a1a13;border-radius:999px;padding:3px 12px;font-weight:600;cursor:pointer;">Show list</button>
       </div>
-      <div id="nabList" hidden style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+      <div id="nabList" style="margin-top:10px;display:none;flex-direction:column;gap:6px;"></div>
     </div>
 
     <div class="chips" id="statusChips"></div>
@@ -810,12 +810,15 @@ async function loadNotAttended(){
   // hidden and it's always findable. Tap "Show list" to expand it for this view
   // only (the open state is not remembered, so it re-collapses on the next load).
   box.hidden = false;
-  listEl.hidden = true;
+  // NB the list div carries an inline `display:flex`, which OVERRIDES the
+  // [hidden] attribute (inline style beats the UA `[hidden]{display:none}`), so
+  // toggling `.hidden` did nothing — control `display` directly instead.
+  listEl.style.display = "none";   // collapsed by default
   $("nabToggle").textContent = "Show list";
   $("nabToggle").onclick = function(){
-    const nowOpen = listEl.hidden;
-    listEl.hidden = !nowOpen;
-    this.textContent = nowOpen ? "Hide list" : "Show list";
+    const open = listEl.style.display === "none";
+    listEl.style.display = open ? "flex" : "none";
+    this.textContent = open ? "Hide list" : "Show list";
   };
   listEl.querySelectorAll(".nab-row").forEach(function(row){
     row.onclick = function(){ location.href = "job-view.html?jobId=" + encodeURIComponent(row.getAttribute("data-jobid")); };
