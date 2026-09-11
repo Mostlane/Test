@@ -264,6 +264,7 @@
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
             <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
+            <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
@@ -282,6 +283,17 @@
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
+          var ql = document.getElementById("quotesLink");
+          if (ql) { ql.style.display = "";
+            // Awaiting-quote count badge (best-effort; API bypasses the SW).
+            try{ var base=(window.MOSTLANE_API||"")+"/sla/quotes?status=awaiting&count=1";
+              var tok=localStorage.getItem("mostlaneToken")||"";
+              fetch(base,{headers:tok?{Authorization:"Bearer "+tok}:{}}).then(function(r){return r.json();}).then(function(d){
+                var n=d&&d.count||0, b=document.getElementById("quotesBadge");
+                if(b&&n>0){ b.textContent=n; b.style.display=""; }
+              }).catch(function(){});
+            }catch(e){}
+          }
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }

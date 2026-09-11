@@ -3435,6 +3435,44 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   wizard front-end orchestrates the /add-site call (D1) so the P-number + geofence
   come from the existing sites path.
 
+## Quote pipeline (engineer "To Quote" → office sends → order → works job) (sla.js + quotes.html — Sep 2026)
+A flow process built ON the job itself (no new table): a job with **status
+"Quote"** IS the record, `job.quote` is the engineer's on-site pack (materials /
+time restrictions / duration / access / barriers / disruption — see the quote-gate
+fix). Two office-side fields are added to the job: **`job.quoteSent`** =
+`{at, by, quoteNumber, amountExVat, amountIncVat, labourCost, materialsCost}` and
+**`job.quoteWorksJobId`** (the works job raised once the order lands). Jobs are a
+full JSON blob (getJob/saveJob) and patchJob merges, so both fields persist.
+- **Push on completion:** when a PATCH turns a job to status Quote (the engineer
+  finishing "To Quote"), the worker pushes the **configured recipient(s)** —
+  app_config **`sla:quoteNotify:<tid>`**, default **Greg Line**, editable on the
+  Quotes page (FullAccess) — tag `quote-done:<id>`, url `/quotes.html?job=<id>`,
+  actionable (resolved when marked sent). Uses `updated.status`/`before.status`
+  (NOT the block-scoped target/beforeStatus — they close before the push block).
+- **Endpoints (sla.js, office = isSlaAdmin; £ = canSeeMoney):** GET
+  **/sla/quotes?status=awaiting|sent|all** (`&count=1` for the badge) →
+  `{rows, awaiting, sent, notify}`, money-stripped for non-money users;
+  **/sla/quotes/sent** `{jobId, quoteNumber, amountExVat, amountIncVat, labourCost,
+  materialsCost}` stamps quoteSent; **/sla/quotes/reopen** clears it;
+  **/sla/quotes/make-job** `{jobId}` clones the quote job via **`cloneJobAsVisit`**
+  (photos/notes/RA/signature carried, revisitOf/visitGroupId + ×N) with the quote
+  scope as PRIMARY description (`buildQuoteWorksDescription` — NO £, engineer-
+  visible) and the original text below, unallocated, `orderValue` = the ex-VAT
+  amount (hidden from the field by stripMoney); links `job.quoteWorksJobId`,
+  idempotent. **/sla/quotes/config** GET (any office) / POST (FullAccess) sets the
+  notify recipient(s). Helpers `quoteRow`/`quoteCapturedAt`/`buildQuoteWorksDescription`/
+  `getQuoteNotify`/`setQuoteNotify` near quoteMissing.
+- **Front-end quotes.html** (💷 Quotes in sla-main.html 🛠 Tools, FullAccess|SLAAdmin,
+  with an awaiting-count badge; _headers no-cache): **Awaiting quote** / **Quote sent**
+  tabs. Each card shows the engineer's quote pack, the original job text, a photo grid
+  (lazy `/sla/jobs/{id}/files`, tap = open/save full-res) and a link to the job. Awaiting
+  → **✓ Mark quote sent** modal (quote number + amount ex/inc VAT that auto-calc each
+  other at 20% + optional labour/materials breakdown). Sent → **📦 Order received → make
+  works job** (or "Works job →"), ✎ Edit, ↩ Back to awaiting. 🔔 Notify sets the push
+  recipient(s). Money (amounts/breakdown) is Full-Access/office only, server-stripped.
+  **TODO/next:** auto-detect the order arriving (tie into client-orders / Concerto) to
+  prompt "make the works job"; fold the quote £ into job costing.
+
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
 set of at-a-glance widgets** — the start of "the hub of everything" (each user
