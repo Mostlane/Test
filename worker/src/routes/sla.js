@@ -2557,6 +2557,20 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, notify: await setQuoteNotify(env, tenantId, b.notify) }, headers);
   }
 
+  /* ===== Co-op (Concerto) job stats ===== */
+  if (subpath === "/stats/concerto" && method === "GET") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const stats = await getConcertoStats(env, tenantId, { rebuild: searchParams.get("rebuild") === "1" });
+    return jsonResponse({ ok: true, stats, aiConfigured: !!env.ANTHROPIC_API_KEY }, headers);
+  }
+  if (subpath === "/stats/concerto/ai-refine" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const r = await aiRefineTrades(env, tenantId, ctx, 300);
+    if (!r.ok) return jsonResponse({ error: r.error || "AI refine failed", classified: r.classified || 0 }, headers, 400);
+    const stats = await getConcertoStats(env, tenantId, {});   // fresh (just rebuilt)
+    return jsonResponse({ ok: true, classified: r.classified, remaining: r.remaining, stats }, headers);
+  }
+
   /* ===== Site folder: per-site jobs, photos and documents ===== */
 
   // Jobs previously raised at this site (basic sheet data), newest first —
@@ -6227,6 +6241,178 @@ async function setWorkAreas(env, tenantId, list) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_work_areas', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
+}
+
+/* ── Co-op / Concerto job stats (jobs page → 🛠 Tools → 📊 Co-op stats) ────────
+   Aggregates every Co-op reactive job (live board + the imported archive) into
+   counts by week / month / weekday / hour, by priority, and by trade. Trade is
+   a keyword classifier by default; the office can "Refine with AI" the unknowns
+   (cached per job in app_config sla:jobtrade). The whole aggregate is cached in
+   app_config sla:concertostats and rebuilt on demand / when >6h stale. */
+const CONCERTO_TRADES = [
+  ["Glazing", /glaz|\bglass\b|window ?pane|\bpane\b|shopfront|shatter|toughened|perspex/i],
+  ["Doors & shutters", /\bdoor\b|shutter|roller|hinge|door ?closer|mortice|cylinder|\block(s|ed|ing)?\b|barrel|\blatch\b|automatic door|fob\b/i],
+  ["Groundworks & external", /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|trip hazard|drain cover|manhole|external area|grounds/i],
+  ["Refrigeration & HVAC", /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\ba\/c\b|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i],
+  ["Plumbing & drainage", /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|drain|drainage|blocked|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock|sewage/i],
+  ["Electrical", /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|distribution board|consumer unit|emergency light|\bpat\b|\bfault\b.*power/i],
+  ["Fire & safety", /fire ?alarm|extinguisher|sprinkler|firestop|fire ?stop|smoke detector|fire door|\bems\b/i],
+  ["Building fabric", /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|leak.*roof|masonry/i],
+  ["Joinery", /timber|worktop|shelv|cabinet|joinery|carpentry|counter|kiosk|\bwood\b/i],
+  ["Cleaning & signage", /\bclean|graffiti|\bsign\b|signage|jet ?wash|pressure wash/i],
+  ["Pest control", /\bpest|rodent|vermin|\bwasp|\brat\b|\bmice\b|\bmouse\b|infest|\bbird/i],
+];
+const CONCERTO_TRADE_NAMES = CONCERTO_TRADES.map(t => t[0]).concat("General / other");
+function classifyTradeKw(text) {
+  const s = String(text || "");
+  for (const [name, re] of CONCERTO_TRADES) if (re.test(s)) return name;
+  return "";   // unknown → "General / other" at rollup (and an AI-refine candidate)
+}
+// A Co-op reactive job = anything that ISN'T a project / Chapplins / Fareham job.
+function isCoopJob(j) {
+  const st = String((j && j.storeType) || "").toLowerCase();
+  const cl = String((j && j.client) || "").toLowerCase();
+  const code = String((j && j.siteCode) || "");
+  if (/^p\d/i.test(code)) return false;                         // project (P-number)
+  if (["chapplins", "fbc", "fareham", "projects"].includes(st)) return false;
+  if (/chapplin|fareham|fbc|project/.test(cl)) return false;
+  return true;
+}
+async function getJobTradeOverrides(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:jobtrade:" + tid).first();
+    if (row) { const v = JSON.parse(row.value); if (v && typeof v === "object") return v; }
+  } catch {}
+  return {};
+}
+async function setJobTradeOverrides(env, tid, map) {
+  // cap the map so the config row can't grow unbounded (keep the newest ~4000)
+  const keys = Object.keys(map);
+  if (keys.length > 4000) { const drop = keys.slice(0, keys.length - 4000); for (const k of drop) delete map[k]; }
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, "sla:jobtrade:" + tid, JSON.stringify(map)).run();
+}
+// London wall-clock parts for one ISO instant (correct across BST/GMT).
+const _londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
+function londonParts(iso) {
+  const d = new Date(iso); if (isNaN(d)) return null;
+  const p = {}; for (const x of _londonFmt.formatToParts(d)) p[x.type] = x.value;
+  const hour = p.hour === "24" ? 0 : Number(p.hour);
+  const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  return { y: Number(p.year), m: Number(p.month), d: Number(p.day), hour, dow: dowMap[p.weekday] ?? 0 };
+}
+// Monday-of-week key (YYYY-MM-DD) for a London date.
+function weekKey(y, m, d) {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const wd = (dt.getUTCDay() + 6) % 7;           // 0 = Monday
+  dt.setUTCDate(dt.getUTCDate() - wd);
+  return dt.toISOString().slice(0, 10);
+}
+function accStats(acc, iso, priorityRaw, trade) {
+  const lp = londonParts(iso); if (!lp) return;
+  acc.total++;
+  const pm = /([1-4])/.exec(String(priorityRaw || "")); const pri = pm ? pm[1] : "0";
+  const mk = lp.y + "-" + String(lp.m).padStart(2, "0");
+  const wk = weekKey(lp.y, lp.m, lp.d);
+  acc.byMonth[mk] = (acc.byMonth[mk] || 0) + 1;
+  acc.byWeek[wk] = (acc.byWeek[wk] || 0) + 1;
+  acc.byDow[lp.dow]++;
+  acc.byHour[lp.hour]++;
+  acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
+  acc.trades[trade] = (acc.trades[trade] || 0) + 1;
+  (acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {});
+  acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  if (!acc.spanFrom || iso < acc.spanFrom) acc.spanFrom = iso;
+  if (!acc.spanTo || iso > acc.spanTo) acc.spanTo = iso;
+}
+async function buildConcertoStats(env, tid) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const acc = { total: 0, byMonth: {}, byWeek: {}, byDow: [0, 0, 0, 0, 0, 0, 0], byHour: new Array(24).fill(0),
+    byPriority: {}, trades: {}, tradesByPriority: {}, spanFrom: "", spanTo: "" };
+  let unknown = 0;
+  const tradeFor = (id, descr) => overrides[id] || classifyTradeKw(descr) || (unknown++, "General / other");
+  // LIVE board jobs
+  const live = await db.prepare("SELECT id, priority, data FROM sla_jobs").all();
+  for (const r of (live.results || [])) {
+    let j = {}; try { j = JSON.parse(r.data) || {}; } catch {}
+    if (!isCoopJob(j)) continue;
+    const iso = j.raisedAt || j.createdAt || null; if (!iso) continue;
+    accStats(acc, iso, r.priority || j.priority, tradeFor(r.id, j.description));
+  }
+  // ARCHIVE (paginated so 23k rows never load at once; Chapplins excluded)
+  let offset = 0; const PAGE = 3000;
+  for (;;) {
+    const pg = await db.prepare(
+      "SELECT id, created_at, completed_at, json_extract(data,'$.priority') AS priority, json_extract(data,'$.description') AS descr, json_extract(data,'$.siteCode') AS site_code FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' LIMIT ? OFFSET ?"
+    ).bind(PAGE, offset).all();
+    const rowsP = pg.results || [];
+    for (const r of rowsP) {
+      if (/^p\d/i.test(String(r.site_code || ""))) continue;   // stray project
+      const iso = r.created_at || r.completed_at || null; if (!iso) continue;
+      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr));
+    }
+    if (rowsP.length < PAGE) break;
+    offset += PAGE;
+    if (offset > 60000) break;   // safety
+  }
+  const stats = { ...acc, tradeNames: CONCERTO_TRADE_NAMES, unknownTrade: unknown, builtAt: new Date().toISOString(), overrideCount: Object.keys(overrides).length };
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, "sla:concertostats:" + tid, JSON.stringify(stats)).run();
+  return stats;
+}
+async function getConcertoStats(env, tid, { rebuild } = {}) {
+  if (!rebuild) {
+    try {
+      const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:concertostats:" + tid).first();
+      if (row) {
+        const s = JSON.parse(row.value);
+        const ageH = (Date.now() - Date.parse(s.builtAt || 0)) / 3.6e6;
+        if (s && Number.isFinite(ageH) && ageH < 6) return s;   // fresh enough
+      }
+    } catch {}
+  }
+  return buildConcertoStats(env, tid);
+}
+// AI-refine: classify Co-op jobs whose trade is still unknown into the taxonomy,
+// newest first, capped. Stores overrides + rebuilds. Batches to Claude.
+async function aiRefineTrades(env, tid, ctx, cap = 300) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const todo = [];   // {id, descr}
+  const consider = (id, descr) => {
+    if (todo.length >= cap) return;
+    if (overrides[id]) return;
+    if (classifyTradeKw(descr)) return;            // keyword already knows it
+    const d = String(descr || "").trim(); if (d.length < 6) return;
+    todo.push({ id, descr: d.slice(0, 400) });
+  };
+  const live = await db.prepare("SELECT id, data FROM sla_jobs").all();
+  for (const r of (live.results || [])) { let j = {}; try { j = JSON.parse(r.data) || {}; } catch {} if (isCoopJob(j)) consider(r.id, j.description); }
+  if (todo.length < cap) {
+    const arch = await db.prepare("SELECT id, json_extract(data,'$.description') AS descr FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' ORDER BY created_at DESC LIMIT 4000").all();
+    for (const r of (arch.results || [])) consider(r.id, r.descr);
+  }
+  if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
+  const names = CONCERTO_TRADES.map(t => t[0]);
+  const schema = { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, trade: { type: "string", enum: names.concat("General / other") } }, required: ["i", "trade"] } } }, required: ["results"] };
+  let classified = 0; const CH = 40;
+  for (let k = 0; k < todo.length; k += CH) {
+    const batch = todo.slice(k, k + CH);
+    const user = "Classify each UK Co-op shop maintenance job into ONE trade from this list:\n" + names.join(", ") + ", General / other.\n\nJobs:\n" +
+      batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
+    const r = await anthropicTool(env, { system: "You classify building/shop maintenance jobs into a single trade. Use only the provided trade names.", user, toolName: "set_trades", schema, maxTokens: 1500 });
+    if (!r.ok) return { ok: false, error: r.error, classified };
+    for (const item of (r.input.results || [])) {
+      const b = batch[item.i]; if (!b) continue;
+      const t = names.concat("General / other").includes(item.trade) ? item.trade : "General / other";
+      if (t && t !== "General / other") { overrides[b.id] = t; classified++; }
+    }
+    ctx?.waitUntil?.(bumpAiUsage(env, tid, "trade-classify"));
+  }
+  await setJobTradeOverrides(env, tid, overrides);
+  await buildConcertoStats(env, tid);
+  return { ok: true, classified, remaining: Math.max(0, todo.length - classified) };
 }
 
 async function getEngSkills(env, tenantId) {

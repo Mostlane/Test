@@ -265,6 +265,7 @@
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
             <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
             <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
+            <a href="concerto-stats.html" class="btn" id="coopStatsLink" style="display:none">📊 Co-op stats</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
@@ -283,6 +284,7 @@
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
+          var csl = document.getElementById("coopStatsLink"); if (csl) csl.style.display = "";
           var ql = document.getElementById("quotesLink");
           if (ql) { ql.style.display = "";
             // Awaiting-quote count badge (best-effort; API bypasses the SW).

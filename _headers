@@ -183,6 +183,8 @@
   Cache-Control: no-cache
 /quotes.html
   Cache-Control: no-cache
+/concerto-stats.html
+  Cache-Control: no-cache
 /cert-status.html
   Cache-Control: no-cache
 /certs-overdue.html
