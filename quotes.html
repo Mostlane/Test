@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Quotes</title>
+  <script src="/portal-config.js?v=34"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --amber:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    header.page .btn.ghost{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);}
+    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px;}
+    .chip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#334;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .chip .n{opacity:.8;font-weight:700;margin-left:4px;}
+    input,select,textarea{padding:7px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:13.5px;background:#fff;color:#0f2438;}
+    .tot{margin-left:auto;font-size:13px;color:#334;}
+    .qcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:10px;border-left:5px solid #d97706;}
+    .qcard.sent{border-left-color:var(--ok);}
+    .qcard.flash{animation:fl 1.6s ease 3;}
+    @keyframes fl{0%,100%{box-shadow:0 2px 10px rgba(6,24,54,.06);}50%{box-shadow:0 0 0 3px #f59e0b;}}
+    .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
+    .top .ref{font-weight:800;font-size:15.5px;color:var(--brand);}
+    .top .val{font-weight:800;font-size:15.5px;margin-left:auto;white-space:nowrap;}
+    .site{font-weight:600;margin-top:2px;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+    .p-await{background:#fef3c7;color:#92400e;} .p-sent{background:#dcfce7;color:#166534;}
+    .p-eng{background:#eef4fb;color:#003466;border:1px solid #cfe0f3;}
+    .kv{display:grid;grid-template-columns:150px 1fr;gap:2px 10px;font-size:13.5px;margin:8px 0;}
+    .kv b{color:#475569;font-weight:600;}
+    .kv span{white-space:pre-wrap;}
+    .orig{font-size:13px;color:#475569;margin:6px 0;white-space:pre-wrap;border-left:3px solid #e2e8f0;padding-left:8px;}
+    .photos{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px;}
+    .photos a{display:block;width:74px;height:74px;border-radius:8px;overflow:hidden;border:1px solid #d7dee6;background:#f1f5f9;}
+    .photos img{width:100%;height:100%;object-fit:cover;}
+    .sentbox{background:#f6fbf7;border:1px solid #c9e8d2;border-radius:10px;padding:8px 10px;margin:8px 0;font-size:13.5px;}
+    .sentbox b{color:#166534;}
+    .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
+    .btn.green{background:var(--ok);}
+    .btn[disabled]{opacity:.55;cursor:default;}
+    .msg{font-size:12.5px;margin-top:6px;} .msg.err{color:var(--bad);} .msg.ok{color:var(--ok);}
+    #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+    /* modal */
+    .back{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;align-items:center;justify-content:center;padding:16px;}
+    .box{background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:16px 18px;}
+    .box h3{margin:0 0 10px;font-size:16px;color:var(--brand);}
+    .box label{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:10px 0 3px;}
+    .box input{width:100%;}
+    .row2{display:flex;gap:10px;}
+    .row2>div{flex:1;}
+    .box .acts{justify-content:flex-end;margin-top:16px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html?reset=1" style="text-decoration:none;">‹ Back</a>
+    <h1>💷 Quotes</h1>
+    <button class="btn ghost" id="notifyBtn" title="Who gets the push when a quote is completed">🔔 Notify</button>
+    <button class="btn ghost" id="refresh">↻</button>
+  </header>
+
+  <!-- Mark quote sent -->
+  <div class="back" id="sentBack" role="dialog" aria-modal="true"><div class="box">
+    <h3>Mark quote sent</h3>
+    <label for="qNum">Quote number</label>
+    <input id="qNum" placeholder="e.g. Q-1042">
+    <div class="row2">
+      <div><label for="qEx">Amount — ex VAT (£)</label><input id="qEx" type="number" step="0.01" min="0" inputmode="decimal"></div>
+      <div><label for="qInc">Amount — inc VAT (£)</label><input id="qInc" type="number" step="0.01" min="0" inputmode="decimal"></div>
+    </div>
+    <div class="muted" style="margin-top:3px;">Type either — the other fills in at 20% VAT.</div>
+    <div class="row2" style="margin-top:6px;">
+      <div><label for="qLab">Labour cost (£)</label><input id="qLab" type="number" step="0.01" min="0" inputmode="decimal"></div>
+      <div><label for="qMat">Materials cost (£)</label><input id="qMat" type="number" step="0.01" min="0" inputmode="decimal"></div>
+    </div>
+    <div class="muted" style="margin-top:3px;">Breakdown is optional — you can add it later.</div>
+    <div class="msg" id="sentMsg"></div>
+    <div class="acts">
+      <button class="btn ghost" id="sentCancel">Cancel</button>
+      <button class="btn green" id="sentSave">✓ Quote sent</button>
+    </div>
+  </div></div>
+
+  <!-- Notify recipient -->
+  <div class="back" id="notifyBack" role="dialog" aria-modal="true"><div class="box">
+    <h3>Who gets the “quote to send” push</h3>
+    <div class="muted" style="margin-bottom:6px;">Tick the people who should get a phone notification the moment an engineer completes a “To Quote”. Only ticked people are notified.</div>
+    <input type="search" id="notifySearch" placeholder="Search people…" style="width:100%;margin-bottom:8px;">
+    <div id="notifyList" style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;padding:4px 6px;">Loading…</div>
+    <div class="msg" id="notifyMsg"></div>
+    <div class="acts">
+      <button class="btn ghost" id="notifyCancel">Cancel</button>
+      <button class="btn" id="notifySave">Save</button>
+    </div>
+  </div></div>
+
+  <div class="wrap">
+    <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
+    <div id="board">
+      <div class="bar" id="tabBar"></div>
+      <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
+      <div id="list"><p class="muted" style="padding:18px 4px;">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const money = n => (n == null || !isFinite(Number(n))) ? "" : "£" + Number(n).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
+    const fmtDT = iso => { if(!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-GB",{ day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }); };
+    const VAT = 0.20;
+    let DATA = { rows: [], awaiting: 0, sent: 0, money: false, notify: [] };
+    let tab = "awaiting";
+    try { tab = localStorage.getItem("mlQuotesTab") || "awaiting"; } catch(e){}
+    const focusJob = new URLSearchParams(location.search).get("job") || "";
+
+    async function load(){
+      let d = null;
+      try { d = await authFetch("/sla/quotes?status=all").then(r => r.json()); } catch(e){}
+      if(!d || !d.ok){
+        if(d && /Forbidden/i.test(d.error||"")){ g("forbidden").style.display="block"; g("board").style.display="none"; return; }
+        g("list").innerHTML = '<p class="msg err" style="padding:12px 4px;">Couldn\'t load quotes' + (d && d.error ? ": " + esc(d.error) : ".") + '</p>'; return;
+      }
+      DATA = d;
+      render();
+    }
+
+    function render(){
+      const q = g("q").value.trim().toLowerCase();
+      const all = DATA.rows || [];
+      const awaiting = all.filter(r => !r.sent), sent = all.filter(r => r.sent);
+      g("tabBar").innerHTML =
+        '<button class="chip'+(tab==="awaiting"?' on':'')+'" data-tab="awaiting">📝 Awaiting quote<span class="n">'+awaiting.length+'</span></button>' +
+        '<button class="chip'+(tab==="sent"?' on':'')+'" data-tab="sent">✅ Quote sent<span class="n">'+sent.length+'</span></button>';
+      [].forEach.call(g("tabBar").querySelectorAll(".chip"), b => b.onclick = () => { tab=b.dataset.tab; try{localStorage.setItem("mlQuotesTab",tab);}catch(e){} render(); });
+      let rows = (tab==="sent"?sent:awaiting).filter(r => !q || [r.ref,r.siteName,r.siteCode,r.description,(r.engineers||[]).join(" "),(r.sent&&r.sent.quoteNumber)].join(" ").toLowerCase().includes(q));
+      g("tot").textContent = rows.length + (tab==="sent"?" sent":" awaiting");
+      g("list").innerHTML = rows.length ? rows.map(card).join("") : '<p class="muted" style="padding:18px 4px;">Nothing here.</p>';
+      wire();
+      rows.forEach(r => loadPhotos(r.id));
+      if(focusJob){ const el = g("c"+focusJob); if(el){ el.classList.add("flash"); el.scrollIntoView({block:"center"}); } }
+    }
+
+    function accessTxt(a){ return Array.isArray(a) ? a.join(", ") : (a||""); }
+    function packRows(r){
+      const q = r.quote || {};
+      const dur = (q.estDurationHours!=null && q.estDurationHours!=="") ? (q.estDurationHours+" hr"+(q.engineersRequired>1?" × "+q.engineersRequired+" engineers":"")) : "";
+      const out = [];
+      const add=(k,v)=>{ if(v!==""&&v!=null) out.push('<b>'+esc(k)+'</b><span>'+esc(v)+'</span>'); };
+      add("Materials", q.materials);
+      add("Est. duration", dur);
+      add("Time restrictions", q.timeRestrictions);
+      add("Access equipment", accessTxt(q.accessEquipment));
+      if(q.barriersRequired!=null) add("Barriers required", q.barriersRequired?"Yes":"No");
+      if(q.disruptionToClient!=null) add("Disruption to client", q.disruptionToClient?("Yes"+(q.disruptionNote?" — "+q.disruptionNote:"")):"No");
+      add("Works description", q.description);
+      add("Why quote", q.reason);
+      add("Notes", q.notes);
+      return out.length ? '<div class="kv">'+out.join("")+'</div>' : '<div class="muted" style="margin:6px 0;">No quote details were recorded.</div>';
+    }
+
+    function card(r){
+      const site = [r.siteCode, r.siteName].filter(Boolean).join(" · ") || "—";
+      const s = r.sent;
+      let sentBox = "";
+      if(s){
+        const bits = [];
+        if(s.quoteNumber) bits.push("Quote <b>"+esc(s.quoteNumber)+"</b>");
+        if(s.amountExVat!=null) bits.push(money(s.amountExVat)+" ex VAT");
+        if(s.amountIncVat!=null) bits.push(money(s.amountIncVat)+" inc VAT");
+        const brk=[];
+        if(s.labourCost!=null) brk.push("Labour "+money(s.labourCost));
+        if(s.materialsCost!=null) brk.push("Materials "+money(s.materialsCost));
+        sentBox = '<div class="sentbox">✅ Sent '+esc(fmtDT(s.at))+(s.by?" by "+esc(s.by):"")+(bits.length?' · '+bits.join(" · "):"")+
+          (brk.length?'<div class="muted" style="margin-top:2px;">'+esc(brk.join(" · "))+'</div>':"")+'</div>';
+      }
+      let acts = "";
+      if(!s){
+        acts += '<button class="btn green" data-sent="'+esc(r.id)+'">✓ Mark quote sent</button>';
+      } else {
+        if(r.worksJobId) acts += '<a class="btn ghost" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Works job →</a>';
+        else acts += '<button class="btn green" data-make="'+esc(r.id)+'">📦 Order received → make works job</button>';
+        acts += ' <button class="btn ghost" data-edit="'+esc(r.id)+'">✎ Edit</button>';
+        acts += ' <button class="btn ghost" data-reopen="'+esc(r.id)+'">↩ Back to awaiting</button>';
+      }
+      acts += ' <a class="btn ghost" href="/job-view.html?jobId='+encodeURIComponent(r.id)+'">Open job →</a>';
+      return '<div class="qcard '+(s?"sent":"await")+'" id="c'+esc(r.id)+'">'
+        + '<div class="top"><span class="ref">'+esc(r.ref)+'</span>'
+        + (r.engineers&&r.engineers.length?'<span class="pill p-eng">👤 '+esc(r.engineers.join(", "))+'</span>':'')
+        + '<span class="pill '+(s?"p-sent":"p-await")+'">'+(s?"Quote sent":"To send")+'</span>'
+        + '<span class="muted">Quoted '+esc(fmtDT(r.quotedAt))+'</span>'
+        + (s&&s.amountExVat!=null?'<span class="val">'+money(s.amountExVat)+' <span class="muted" style="font-weight:600;font-size:11px;">ex VAT</span></span>':'')
+        + '</div>'
+        + '<div class="site">'+esc(site)+'</div>'
+        + packRows(r)
+        + (r.description?'<div class="orig">'+esc(r.description)+'</div>':'')
+        + '<div class="photos" data-photos="'+esc(r.id)+'"></div>'
+        + sentBox
+        + '<div class="msg" data-msg="'+esc(r.id)+'"></div>'
+        + '<div class="acts">'+acts+'</div>'
+        + '</div>';
+    }
+
+    async function loadPhotos(id){
+      const box = document.querySelector('[data-photos="'+CSS.escape(id)+'"]'); if(!box) return;
+      try{
+        const d = await authFetch("/sla/jobs/"+encodeURIComponent(id)+"/files").then(r=>r.json());
+        const files = (d && d.files) || [];
+        if(!files.length){ box.remove(); return; }
+        box.innerHTML = files.map(f => '<a href="'+esc(f.publicURL||f.thumb)+'" target="_blank" rel="noopener" title="Open / save"><img loading="lazy" src="'+esc(f.thumb||f.publicURL)+'"></a>').join("");
+      }catch(e){ box.remove(); }
+    }
+
+    function setMsg(id,t,err){ const m=document.querySelector('[data-msg="'+CSS.escape(id)+'"]'); if(m){ m.textContent=t; m.className="msg"+(err?" err":" ok"); } }
+
+    // ---- Mark sent modal ----
+    let sentId = null;
+    function openSent(id){
+      sentId = id;
+      const r = (DATA.rows||[]).find(x=>x.id===id) || {}; const s = r.sent || {};
+      g("qNum").value = s.quoteNumber||""; g("qEx").value = s.amountExVat!=null?s.amountExVat:""; g("qInc").value = s.amountIncVat!=null?s.amountIncVat:"";
+      g("qLab").value = s.labourCost!=null?s.labourCost:""; g("qMat").value = s.materialsCost!=null?s.materialsCost:"";
+      g("sentMsg").textContent=""; g("sentBack").style.display="flex";
+    }
+    g("qEx").addEventListener("input", function(){ const v=parseFloat(g("qEx").value); g("qInc").value = isFinite(v)? (Math.round(v*(1+VAT)*100)/100) : ""; });
+    g("qInc").addEventListener("input", function(){ const v=parseFloat(g("qInc").value); g("qEx").value = isFinite(v)? (Math.round(v/(1+VAT)*100)/100) : ""; });
+    g("sentCancel").onclick = ()=>{ g("sentBack").style.display="none"; };
+    g("sentBack").onclick = e=>{ if(e.target===g("sentBack")) g("sentBack").style.display="none"; };
+    g("sentSave").onclick = async ()=>{
+      if(!sentId) return;
+      g("sentSave").disabled=true; g("sentMsg").textContent="Saving…";
+      const body = { jobId:sentId, quoteNumber:g("qNum").value.trim(),
+        amountExVat:g("qEx").value, amountIncVat:g("qInc").value, labourCost:g("qLab").value, materialsCost:g("qMat").value };
+      try{
+        const r = await authFetch("/sla/quotes/sent",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(x=>x.json());
+        if(r&&r.ok){ g("sentBack").style.display="none"; tab="sent"; try{localStorage.setItem("mlQuotesTab","sent");}catch(e){} await load(); }
+        else { g("sentMsg").textContent=(r&&r.error)||"Couldn't save."; g("sentMsg").className="msg err"; g("sentSave").disabled=false; }
+      }catch(e){ g("sentMsg").textContent="Couldn't save."; g("sentMsg").className="msg err"; g("sentSave").disabled=false; }
+    };
+
+    // ---- Notify modal (tick-box picker — ONLY ticked people are notified) ----
+    let NOTIFY_USERS = [];   // [{username, staffType}]
+    const norm = s => String(s||"").trim().toLowerCase();
+    function renderNotifyList(){
+      const chosen = new Set((DATA.notify||[]).map(norm));
+      const q = norm(g("notifySearch").value);
+      const rows = NOTIFY_USERS.filter(u => !q || norm(u.username).includes(q));
+      if(!rows.length){ g("notifyList").innerHTML = '<p class="muted" style="padding:8px;">No matching people.</p>'; return; }
+      g("notifyList").innerHTML = rows.map(u => {
+        const on = chosen.has(norm(u.username));
+        return '<label style="display:flex;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:14px;">'
+          + '<input type="checkbox" data-user="'+esc(u.username)+'"'+(on?' checked':'')+' style="width:auto;transform:scale(1.15);">'
+          + '<span>'+esc(u.username)+(u.staffType?' <span class="muted">· '+esc(u.staffType)+'</span>':'')+'</span></label>';
+      }).join("");
+      // Keep DATA.notify in step with the ticks as they change (survives a search re-filter).
+      [].forEach.call(g("notifyList").querySelectorAll("input[data-user]"), cb => cb.onchange = ()=>{
+        const set = new Set((DATA.notify||[]).map(norm));
+        const u = cb.dataset.user;
+        if(cb.checked) set.add(norm(u)); else set.delete(norm(u));
+        // rebuild DATA.notify preserving the canonical username casing from the user list
+        DATA.notify = NOTIFY_USERS.filter(x => set.has(norm(x.username))).map(x => x.username);
+      });
+    }
+    g("notifyBtn").onclick = async ()=>{
+      g("notifyMsg").textContent=""; g("notifySearch").value="";
+      g("notifyList").innerHTML = '<p class="muted" style="padding:8px;">Loading people…</p>';
+      g("notifyBack").style.display="flex";
+      try{
+        const u = await authFetch("/users").then(r=>r.json()); const arr = Array.isArray(u)?u:(u.users||[]);
+        NOTIFY_USERS = arr.map(x=>({ username: x.Username||x.username||x.name||"", staffType: x.StaffType||x.staffType||"" }))
+          .filter(x=>x.username)
+          .sort((a,b)=> a.username.localeCompare(b.username));
+      }catch(e){ NOTIFY_USERS = []; }
+      renderNotifyList();
+    };
+    g("notifySearch").oninput = renderNotifyList;
+    g("notifyCancel").onclick = ()=>{ g("notifyBack").style.display="none"; };
+    g("notifyBack").onclick = e=>{ if(e.target===g("notifyBack")) g("notifyBack").style.display="none"; };
+    g("notifySave").onclick = async ()=>{
+      g("notifySave").disabled=true; g("notifyMsg").textContent="Saving…";
+      try{
+        const r = await authFetch("/sla/quotes/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({notify:(DATA.notify||[])})}).then(x=>x.json());
+        if(r&&r.ok){ DATA.notify=r.notify; g("notifyBack").style.display="none"; }
+        else { g("notifyMsg").textContent=(r&&r.error)||"Couldn't save (Full Access only)."; g("notifyMsg").className="msg err"; }
+      }catch(e){ g("notifyMsg").textContent="Couldn't save."; g("notifyMsg").className="msg err"; }
+      g("notifySave").disabled=false;
+    };
+
+    function wire(){
+      [].forEach.call(document.querySelectorAll("[data-sent],[data-edit]"), b => b.onclick = () => openSent(b.dataset.sent||b.dataset.edit));
+      [].forEach.call(document.querySelectorAll("[data-reopen]"), b => b.onclick = async () => {
+        const id=b.dataset.reopen;
+        if(!(window.MLUI?await MLUI.confirm("Move this quote back to Awaiting?",{title:"Back to awaiting",okLabel:"Move back"}):confirm("Move back to awaiting?"))) return;
+        b.disabled=true;
+        try{ const r=await authFetch("/sla/quotes/reopen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobId:id})}).then(x=>x.json());
+          if(r&&r.ok) load(); else { setMsg(id,"Couldn't move back.",true); b.disabled=false; } }catch(e){ setMsg(id,"Couldn't move back.",true); b.disabled=false; }
+      });
+      [].forEach.call(document.querySelectorAll("[data-make]"), b => b.onclick = async () => {
+        const id=b.dataset.make;
+        const q="Order received — make the works job?\n\nA new job is raised at the same site with the quote details as the main description (the original job text kept below) and all the photos and notes carried across. It lands unallocated — assign an engineer from the job card.";
+        if(!(window.MLUI?await MLUI.confirm(q,{title:"Make works job",okLabel:"Make the job"}):confirm(q))) return;
+        b.disabled=true; setMsg(id,"Making the works job…");
+        try{ const r=await authFetch("/sla/quotes/make-job",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobId:id})}).then(x=>x.json());
+          if(r&&r.ok){ setMsg(id,(r.already?"Works job already exists — ":"Works job made — ")+"opening it…"); setTimeout(()=>{ location.href="/job-view.html?jobId="+encodeURIComponent(r.jobId); },600); }
+          else { setMsg(id,(r&&r.error)||"Couldn't make the job.",true); b.disabled=false; } }
+        catch(e){ setMsg(id,"Couldn't make the job.",true); b.disabled=false; }
+      });
+    }
+
+    g("refresh").onclick = load;
+    g("q").oninput = render;
+    load();
+  </script>
+</body>
+</html>

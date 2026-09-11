@@ -87,6 +87,7 @@
     .schip.allchip.active{background:#ea7a23;}
     .schip.certchip{border-color:#0e7490;border-style:dashed;}
     .schip.certchip.active{border-style:solid;}
+    .schip.morechip{border-color:#94a3b8;color:#334155;font-weight:600;background:#f1f5f9;}
     .statuspick .eye{font-size:13px;margin-right:2px;}
 
     /* ---- Toolbar ---- */
@@ -128,7 +129,7 @@
     .muted{color:var(--muted);}
     .small{font-size:13px;}
     .nowrap{white-space:nowrap;}
-    .noalloc{color:#dc2626;font-weight:600;}
+    .noalloc{display:inline-block;background:#fff4e5;color:#b45309;border:1px solid #fed7aa;border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:700;white-space:nowrap;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
     .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
     .visit-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#003466;background:#eef4fb;border:1px solid #cfe0f3;border-radius:999px;padding:1px 7px;vertical-align:middle;}
@@ -264,6 +265,7 @@
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
             <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
+            <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
@@ -282,6 +284,17 @@
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
+          var ql = document.getElementById("quotesLink");
+          if (ql) { ql.style.display = "";
+            // Awaiting-quote count badge (best-effort; API bypasses the SW).
+            try{ var base=(window.MOSTLANE_API||"")+"/sla/quotes?status=awaiting&count=1";
+              var tok=localStorage.getItem("mostlaneToken")||"";
+              fetch(base,{headers:tok?{Authorization:"Bearer "+tok}:{}}).then(function(r){return r.json();}).then(function(d){
+                var n=d&&d.count||0, b=document.getElementById("quotesBadge");
+                if(b&&n>0){ b.textContent=n; b.style.display=""; }
+              }).catch(function(){});
+            }catch(e){}
+          }
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }
@@ -318,6 +331,17 @@
         document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
       })();
     </script>
+
+    <!-- Following-day warning: reactive SLA jobs booked before today and never
+         finished. Office only; hidden until it has content. -->
+    <div id="notAttendedBanner" hidden style="margin:10px 0;padding:12px 14px;border:1px solid #f3b1ab;background:#ffe8e6;border-radius:12px;color:#7a1a13;font-size:14px;line-height:1.5;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong id="nabHead" style="font-size:15px;">⚠ Jobs not attended</strong>
+        <button type="button" id="nabToggle" style="margin-left:auto;background:#fff;border:1px solid #f3b1ab;color:#7a1a13;border-radius:999px;padding:3px 12px;font-weight:600;cursor:pointer;">Show list</button>
+        <button type="button" id="nabDismiss" title="Hide until next load" style="background:transparent;border:0;color:#7a1a13;font-size:18px;line-height:1;cursor:pointer;padding:2px 4px;">✕</button>
+      </div>
+      <div id="nabList" hidden style="margin-top:10px;display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
 
     <div class="chips" id="statusChips"></div>
 
@@ -606,6 +630,10 @@ let archiveSeq = 0;             // guards against out-of-order async archive res
 let cachedUsers = [];
 let activeStatus = "all";      // default board view (restoreFilters may override); "open" = everything not complete/closed/invoiced
 let activePriority = "all";
+// Status chips: only a minimal primary set shows by default (too many on mobile).
+// "More ▾" reveals the rest for the current view; collapsed again on every load.
+const PRIMARY_STATUSES = new Set(["Pending", "Scheduled", "Complete"]);
+let chipsExpanded = false;
 let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
 let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
 let selected = new Set();
@@ -745,6 +773,60 @@ async function gate(){
   }
 }
 
+/* ── Following-day "jobs not attended" warning ─────────────────────────────
+   Office roles only. Lists reactive SLA jobs booked before today and never
+   finished (projects / fleet / standby are excluded server-side). Tap a row to
+   open the job to reschedule it. State (open/dismissed) is per-device. */
+function nabIsOffice(){
+  try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = v => String(v||"").toLowerCase() === "yes";
+    return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin);
+  }catch(e){ return false; }
+}
+async function loadNotAttended(){
+  if(!nabIsOffice()) return;
+  const box = $("notAttendedBanner"); if(!box) return;
+  let data;
+  try{
+    const res = await authFetchTO("/sla/not-attended", 9000);
+    data = await res.json();
+  }catch(e){ return; }               // never let a hung fetch disturb the board
+  const jobs = (data && Array.isArray(data.jobs)) ? data.jobs : [];
+  if(!jobs.length){ box.hidden = true; return; }
+  const n = jobs.length;
+  $("nabHead").textContent = "⚠ " + n + " job" + (n===1?"":"s") + " not attended";
+  const listEl = $("nabList");
+  listEl.innerHTML = jobs.map(function(j){
+    const engs = (j.engineers||[]).map(e => esc(e.engineer) + " — " + esc(e.status)).join(" · ");
+    const ago = j.daysAgo <= 0 ? "yesterday" : (j.daysAgo + " day" + (j.daysAgo===1?"":"s") + " ago");
+    const pill = j.priority ? '<span style="font-weight:700;">'+esc(j.priority)+'</span> · ' : '';
+    return '<div class="nab-row" data-jobid="'+esc(j.id)+'" style="background:#fff;border:1px solid #f3b1ab;border-radius:8px;padding:8px 10px;cursor:pointer;">'
+      + '<div style="font-weight:600;">'+esc(j.site || j.ref)+' <span style="color:#9a5;">'+esc(j.ref)+'</span></div>'
+      + '<div style="font-size:12.5px;color:#7a1a13;">'+pill+'booked '+esc(ago)+' · '+engs+'</div>'
+      + '</div>';
+  }).join("");
+  // The list ALWAYS starts collapsed on the page (just the count line); tap
+  // "Show list" to expand it for this view only — the open state is NOT
+  // remembered, so it never re-opens itself on the next load. The ✕ dismiss is
+  // still remembered per-device for the day.
+  // Dismiss (✕) only hides it for the current viewing — a fresh open of the
+  // board shows the warning again, since it's an important daily nudge.
+  let dismissed = false; try{ dismissed = sessionStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
+  box.hidden = !!dismissed;
+  listEl.hidden = true;
+  $("nabToggle").textContent = "Show list";
+  $("nabToggle").onclick = function(){
+    const nowOpen = listEl.hidden;
+    listEl.hidden = !nowOpen;
+    this.textContent = nowOpen ? "Hide list" : "Show list";
+  };
+  $("nabDismiss").onclick = function(){ box.hidden = true; try{ sessionStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
+  listEl.querySelectorAll(".nab-row").forEach(function(row){
+    row.onclick = function(){ location.href = "job-view.html?jobId=" + encodeURIComponent(row.getAttribute("data-jobid")); };
+  });
+}
+
 /* ============ data ============ */
 async function loadJobs(quiet){
   if(!quiet) $("statusBar").textContent = "Loading jobs…";
@@ -804,7 +886,11 @@ function renderChips(){
   openChip.innerHTML = `Open <span class="n">${boardJobs().filter(j => !isClosed(j)).length}</span>`;
   openChip.onclick = () => { activeStatus = "open"; render(); };
   host.appendChild(openChip);
+  // Only the primary statuses show by default; the rest hide behind "More ▾"
+  // (but the one you're currently filtered to always stays visible).
+  let hidden = 0;
   STATUSES.forEach(([s, c]) => {
+    if(!(chipsExpanded || PRIMARY_STATUSES.has(s) || activeStatus === s)){ hidden++; return; }
     const b = document.createElement("button");
     b.className = "schip" + (activeStatus === s ? " active" : "");
     b.style.setProperty("--c", c);
@@ -818,14 +904,25 @@ function renderChips(){
   all.onclick = () => { activeStatus = "all"; render(); };
   host.appendChild(all);
   // 📄 EM/PAT toggle — lit = certificate jobs are on the board; greyed = hidden.
-  const certN = allJobs.filter(isCertJob).length;
-  const cert = document.createElement("button");
-  cert.className = "schip certchip" + (showCertJobs ? " active" : "");
-  cert.style.setProperty("--c", "#0e7490");
-  cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
-  cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
-  cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
-  host.appendChild(cert);
+  // A secondary control: only shown once expanded.
+  if(chipsExpanded){
+    const certN = allJobs.filter(isCertJob).length;
+    const cert = document.createElement("button");
+    cert.className = "schip certchip" + (showCertJobs ? " active" : "");
+    cert.style.setProperty("--c", "#0e7490");
+    cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
+    cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
+    cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
+    host.appendChild(cert);
+  } else {
+    hidden++;   // EM/PAT chip is hidden while collapsed
+  }
+  // More ▾ / Fewer ▲ — expand or re-collapse the extra chips for this view only.
+  const more = document.createElement("button");
+  more.className = "schip morechip";
+  more.innerHTML = chipsExpanded ? "Fewer ▲" : `More <span class="n">${hidden}</span> ▾`;
+  more.onclick = () => { chipsExpanded = !chipsExpanded; renderChips(); };
+  host.appendChild(more);
 }
 // Jobs in the currently-active status chip (ignoring priority/client/search) —
 // the scope the client dropdown counts against.
@@ -1660,6 +1757,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
+    loadNotAttended().catch(()=>{});   // following-day "jobs not attended" warning (office only)
     // Load the sites register in the background so the client filter can bucket
     // jobs that carry only a site code; re-render once the map is ready so the
     // dropdown counts are accurate. Never blocks the board.

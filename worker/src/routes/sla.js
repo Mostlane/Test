@@ -1219,6 +1219,70 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, date: today, engineers }, headers);
   }
 
+  /* GET /sla/not-attended?days=N — the "following-day" warning: reactive SLA jobs
+     that were ALLOCATED to an engineer and BOOKED for a day now in the PAST, but
+     were never finished. So the office can chase / reschedule them the next
+     morning. SLA jobs ONLY — projects (incl. the Yard/Office project sites),
+     fleet MOT/service renewals and standby/fallback jobs are excluded, because a
+     planned/internal job "not done on the day" is normal, not a miss.
+     Office view (FullAccess | SLA | SLAAdmin). */
+  if (subpath === "/not-attended" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const permSet = await userPerms(env, tenantId, sess);
+    if (!(permSet.has("FullAccess") || permSet.has("SLA") || permSet.has("SLAAdmin")))
+      return jsonResponse({ error: "Needs the SLA permission" }, headers, 403);
+    const today = londonNow().date;                          // YYYY-MM-DD (Europe/London)
+    const daysBack = Math.max(1, Math.min(365, parseInt(url.searchParams.get("days") || "14", 10) || 14));
+    const cutoff = new Date(Date.now() - daysBack * 864e5).toISOString().slice(0, 10);
+    const londonDay = (iso) => { try { const d = new Date(iso); return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); } catch { return ""; } };
+    const doneNames = new Set((await getCategories(env, tenantId)).filter(c => c.done).map(c => String(c.name).toLowerCase()));
+    const finished = s => { const v = String(s || "").toLowerCase(); return DONE_STATES.has(v) || doneNames.has(v); };
+    const parked = s => { const v = String(s || "").toLowerCase(); return v === "on hold" || v === "quote" || v === "order"; };
+    // A genuine reactive SLA job: NOT a project, NOT a fleet renewal, NOT a
+    // standby/fallback. (Dormant templates are already dropped by listJobs.)
+    const isSlaReactive = j => !jobIsProject(j) && !j.projectId
+      && !j.fleetRenewal && !j.renewalType && String(j.storeType || "").toLowerCase() !== "fleet"
+      && !j.fallback;
+    const all = await listJobs(env, tenantId);
+    // Engineer display names for the list.
+    let nameByNorm = {};
+    try {
+      const { results: us } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tenantId).all();
+      for (const u of (us || [])) nameByNorm[normId(u.username)] = (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username;
+    } catch {}
+    const jobs = [];
+    for (const j of all) {
+      if (!isSlaReactive(j)) continue;
+      const missed = [];
+      let earliest = "";
+      for (const a of assignedList(j)) {
+        const norm = normId(a);
+        const sc = effSchedule(j, norm);
+        if (!sc.scheduledAt) continue;                       // never booked to a day → not a "missed" day
+        const day = londonDay(sc.scheduledAt);
+        if (!day || day >= today) continue;                  // today or future → the day isn't over
+        if (day < cutoff) continue;                          // older than the window
+        const st = String(effStatus(j, norm) || "");
+        if (finished(st) || parked(st)) continue;            // done or legitimately parked
+        missed.push({ engineer: nameByNorm[norm] || a, status: st, day });
+        if (!earliest || day < earliest) earliest = day;
+      }
+      if (!missed.length) continue;
+      const daysAgo = earliest ? Math.round((Date.parse(today) - Date.parse(earliest)) / 864e5) : 0;
+      jobs.push({
+        id: j.id, ref: j.helpdeskRef || j.reference || j.id,
+        site: j.siteName || j.helpdeskRef || j.reference || "", siteCode: j.siteCode || "",
+        priority: j.priority || "", storeType: j.storeType || "",
+        scheduledDay: earliest, daysAgo,
+        engineers: missed
+      });
+    }
+    // Most-recently-missed first; a P1 floats above same-day others.
+    const pr = p => { const m = String(p || "").match(/(\d)/); return m ? parseInt(m[1], 10) : 9; };
+    jobs.sort((a, b) => (b.scheduledDay || "").localeCompare(a.scheduledDay || "") || pr(a.priority) - pr(b.priority));
+    return jsonResponse({ ok: true, date: today, days: daysBack, count: jobs.length, jobs }, headers);
+  }
+
   /* POST /sla/route-optimize — order ONE engineer's jobs for a day into the most
      efficient round trip (home → jobs → home). Google Distance Matrix gives real
      driving times/miles (haversine estimate is the no-key fallback); a
@@ -2486,12 +2550,103 @@ export async function handle(request, env, ctx, url, sess) {
           url: "/inbox.html", tag: "hold-approve:" + id, actionable: true
         }, updated.hold.approval.requestedBy));
       }
+      // Engineer completed a "To Quote" → push the configured reviewer(s)
+      // (default Greg Line, editable on the Quotes page) so it's picked up.
+      if (updated && updated.status === "Quote" && (!before || before.status !== "Quote")) {
+        ctx?.waitUntil((async () => {
+          const to = await getQuoteNotify(env, tenantId);
+          const ref = updated.helpdeskRef || id;
+          const site = updated.siteName || updated.siteCode || "";
+          for (const u of to) await sendToUser(env, tenantId, u, {
+            title: "Quote to send",
+            body: `${sess?.user?.username || "An engineer"} completed a quote for ${ref}${site ? " — " + site : ""}`,
+            url: "/quotes.html?job=" + encodeURIComponent(id), tag: "quote-done:" + id, actionable: true
+          }).catch(() => {});
+        })());
+      }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
       let dOut = decorateJobWithLiveSla(updated);
       if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));   // actor's own slice, for the field app
       if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
+  }
+
+  /* ===== Quote pipeline (office): list awaiting / sent, mark sent, make works job ===== */
+  if (subpath === "/quotes" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const all = await listJobs(env, tenantId);
+    const quotes = all.filter(j => j.status === "Quote" || (j.quoteSent && j.quoteSent.at));
+    const awaiting = quotes.filter(j => !(j.quoteSent && j.quoteSent.at));
+    const sent = quotes.filter(j => j.quoteSent && j.quoteSent.at);
+    if (searchParams.get("count")) return jsonResponse({ ok: true, count: awaiting.length, sent: sent.length }, headers);
+    const money = await canSeeMoney(env, tenantId, sess.user.username);
+    const which = (searchParams.get("status") || "awaiting").toLowerCase();
+    const pick = which === "sent" ? sent : which === "all" ? quotes : awaiting;
+    const rows = pick.map(j => quoteRow(j, money)).sort((a, b) => String(b.sortAt || "").localeCompare(String(a.sortAt || "")));
+    return jsonResponse({ ok: true, rows, awaiting: awaiting.length, sent: sent.length, money, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/sent" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const j = await getJob(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+    j.quoteSent = {
+      at: new Date().toISOString(), by: sess.user.username,
+      quoteNumber: String(b.quoteNumber || "").trim(),
+      amountExVat: num(b.amountExVat), amountIncVat: num(b.amountIncVat),
+      labourCost: num(b.labourCost), materialsCost: num(b.materialsCost)
+    };
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "quote-done:" + j.id, { title: "Quote sent", body: (j.helpdeskRef || j.id) }).catch(() => {}));
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/reopen" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const j = await getJob(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    delete j.quoteSent;
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/make-job" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const src = await getJob(env, tenantId, b.jobId);
+    if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+    if (src.quoteWorksJobId) {
+      const ex = await getJob(env, tenantId, src.quoteWorksJobId);
+      if (ex) return jsonResponse({ ok: true, jobId: ex.id, already: true }, headers);
+    }
+    const qs = src.quoteSent || {};
+    const original = String(src.description || "").trim();
+    const description = buildQuoteWorksDescription(src) + (original ? "\n\n— Original job —\n" + original : "");
+    const job = await cloneJobAsVisit(env, tenantId, src, {
+      description,
+      assignedEngineers: [],   // unallocated — office schedules it
+      scheduledAt: undefined, durationMinutes: undefined,
+      changedBy: (sess.user && sess.user.username) || "system",
+      // orderValue carries the quoted amount (hidden from engineers by stripMoney);
+      // revisitOf/visitGroupId (set by cloneJobAsVisit) link it back to the quote job.
+      extra: { orderValue: (qs.amountExVat != null ? qs.amountExVat : undefined) }
+    });
+    src.quoteWorksJobId = job.id; src.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, src);
+    return jsonResponse({ ok: true, jobId: job.id }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "GET") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    return jsonResponse({ ok: true, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "POST") {
+    if (!sess || !(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    return jsonResponse({ ok: true, notify: await setQuoteNotify(env, tenantId, b.notify) }, headers);
   }
 
   /* ===== Site folder: per-site jobs, photos and documents ===== */
@@ -2979,6 +3134,81 @@ function quoteMissing(job, patch, photoCount) {
   if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
+}
+
+/* ── Quote pipeline helpers (engineer "To Quote" → office sends → order → works job) ──
+   A job with status "Quote" IS the record; job.quote is the engineer's pack.
+   The office stamps job.quoteSent when the quote is sent to the client, and
+   job.quoteWorksJobId links the works job raised once the order lands. */
+function quoteCapturedAt(j) {
+  const h = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+  for (let i = h.length - 1; i >= 0; i--) if (h[i] && h[i].status === "Quote") return h[i].at;
+  return j.updatedAt || null;
+}
+function quoteRow(j, money) {
+  const q = j.quote || {};
+  const qs = j.quoteSent || null;
+  return {
+    id: j.id,
+    ref: j.helpdeskRef || j.id,
+    siteName: j.siteName || "", siteCode: j.siteCode || "",
+    engineers: assignedList(j),
+    description: j.description || "",
+    scheduledAt: j.scheduledAt || null,
+    quotedAt: quoteCapturedAt(j),
+    quote: {
+      materials: q.materials || "", timeRestrictions: q.timeRestrictions || "",
+      estDurationHours: (q.estDurationHours != null ? q.estDurationHours : ""),
+      engineersRequired: q.engineersRequired || 1,
+      accessEquipment: Array.isArray(q.accessEquipment) ? q.accessEquipment : (q.access ? [q.access] : []),
+      barriersRequired: q.barriersRequired, disruptionToClient: q.disruptionToClient,
+      disruptionNote: q.disruptionNote || "", description: q.description || "",
+      reason: q.reason || "", notes: q.notes || "", capturedBy: q.capturedBy || ""
+    },
+    sent: qs ? {
+      at: qs.at, by: qs.by, quoteNumber: qs.quoteNumber || "",
+      amountExVat: money ? (qs.amountExVat ?? null) : null,
+      amountIncVat: money ? (qs.amountIncVat ?? null) : null,
+      labourCost: money ? (qs.labourCost ?? null) : null,
+      materialsCost: money ? (qs.materialsCost ?? null) : null
+    } : null,
+    worksJobId: j.quoteWorksJobId || null,
+    sortAt: (qs && qs.at) || quoteCapturedAt(j) || j.updatedAt || ""
+  };
+}
+// The works-job description: quote scope PRIMARY (no £ — engineer-visible), the
+// original job text kept below as secondary.
+function buildQuoteWorksDescription(src) {
+  const q = src.quote || {};
+  const L = ["🧾 QUOTED WORKS — ordered, now to be carried out"];
+  if (q.description) L.push(q.description);
+  if (q.materials) L.push("Materials: " + q.materials);
+  const dur = (q.estDurationHours != null && q.estDurationHours !== "")
+    ? (q.estDurationHours + " hr" + ((q.engineersRequired > 1) ? " × " + q.engineersRequired + " engineers" : "")) : "";
+  if (dur) L.push("Estimated duration: " + dur);
+  if (q.timeRestrictions) L.push("Time restrictions: " + q.timeRestrictions);
+  const acc = Array.isArray(q.accessEquipment) ? q.accessEquipment.join(", ") : (q.access || "");
+  if (acc) L.push("Access equipment: " + acc);
+  if (q.barriersRequired != null) L.push("Barriers required: " + (q.barriersRequired ? "Yes" : "No"));
+  if (q.disruptionToClient != null) L.push("Disruption to client: " + (q.disruptionToClient ? ("Yes" + (q.disruptionNote ? " — " + q.disruptionNote : "")) : "No"));
+  if (q.notes) L.push("Notes: " + q.notes);
+  return L.join("\n");
+}
+async function getQuoteNotify(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:quoteNotify:" + tenantId).first();
+    if (row) { const v = JSON.parse(row.value); const a = Array.isArray(v) ? v : (v && v.users); if (Array.isArray(a) && a.length) return a; }
+  } catch {}
+  return ["Greg Line"];   // default recipient (editable on the Quotes page)
+}
+async function setQuoteNotify(env, tenantId, notify) {
+  let users = Array.isArray(notify) ? notify : String(notify || "").split(",");
+  users = users.map(s => String(s).trim()).filter(Boolean);
+  if (!users.length) users = ["Greg Line"];
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:quoteNotify:" + tenantId, JSON.stringify(users)).run();
+  return users;
 }
 
 // On Hold = a reason and what's needed to resume (approval is handled separately).

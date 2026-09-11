@@ -1711,6 +1711,33 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
+    // ── Widget: Not attended — SLA jobs booked before today, never finished ──
+    HUB.register({
+      id: "notattended", emoji: "⚠️", title: "Jobs not attended", area: "sla",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin); },
+      load: function (card) {
+        return jget("/sla/not-attended").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var jobs = Array.isArray(d.jobs) ? d.jobs : [];
+          var rows = "";
+          jobs.slice(0, 6).forEach(function (j) {
+            var engs = (j.engineers || []).map(function (e) { return esc(e.engineer); }).join(", ");
+            var ago = j.daysAgo <= 0 ? "yesterday" : (j.daysAgo + "d ago");
+            rows += '<div class="hub-alert"><b>' + esc(j.site || j.ref) + '</b> — ' + engs + ' · ' + esc(ago) + '</div>';
+          });
+          if (jobs.length > 6) rows += '<div style="font-size:12px;color:#5b6b78;padding:4px 0">+ ' + (jobs.length - 6) + ' more…</div>';
+          card.innerHTML = cardHtml({
+            emoji: "⚠️", title: "Jobs not attended",
+            big: jobs.length, sub: "booked before today, not done",
+            tone: jobs.length ? "bad" : "",
+            ok: jobs.length ? "" : "Every booked job was attended.",
+            rows: rows,
+            actions: act("sla-main.html", "Open board", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Holidays — requests awaiting approval + staff cancellations ──
     HUB.register({
       id: "holidays", emoji: "🌴", title: "Holidays", area: "holidays",
@@ -1980,6 +2007,8 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (d) { if (!d || !d.ok) return null; var f = {}; (d.vehicles || []).filter(function (v) { return v.active !== false; }).forEach(function (v) { var m = daysUntil(v.motDue), t = daysUntil(v.taxDue); if ((m != null && m <= 30) || (t != null && t <= 30) || v.serviceStatus === "bad" || v.serviceStatus === "warn" || v.pendingHandover) f[v.reg] = 1; }); return { n: Object.keys(f).length, label: "vans to attend", bad: false }; } },
         { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var n = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")) && !x.scheduledAt; }).length; return { n: n, label: "to schedule", bad: false }; } },
+        { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "⚠️", href: "sla-main.html", get: "/sla/not-attended",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.count || 0, label: "not attended", bad: (d.count || 0) > 0 }; } },
         { area: "equipment", ok: yes(p.FullAccess) || yes(p.AssetAdmin), emoji: "⚙️", href: "asset-requests.html", get: "/asset/requests/attention",
           calc: function (d) { if (!d || !d.ok) return null; return { n: d.toAction || 0, label: "equipment to action", bad: false }; } },
         { area: "purchaseorders", ok: yes(p.FullAccess) || yes(p.PurchaseOrders), emoji: "🧾", href: "po-office.html", get: "/po/api/dashboard",
