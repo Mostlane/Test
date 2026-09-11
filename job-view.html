@@ -1549,11 +1549,21 @@ function renderCapture(){
   if(job.quote){
     any = true;
     const q = job.quote;
+    const qAccess = Array.isArray(q.accessEquipment) ? q.accessEquipment.join(", ") : (q.access || "");
+    const qDur = (q.estDurationHours != null && q.estDurationHours !== "")
+      ? `${q.estDurationHours} hr${(q.engineersRequired > 1 ? ` × ${q.engineersRequired} engineers` : "")}`
+      : (q.labourHours != null ? `${q.labourHours} hrs × ${q.engineers || 1} engineer(s)` : "");
+    const qBarriers = q.barriersRequired === true ? "Yes" : (q.barriersRequired === false ? "No" : "");
+    const qDisr = q.disruptionToClient === true ? ("Yes" + (q.disruptionNote ? " — " + q.disruptionNote : "")) : (q.disruptionToClient === false ? "No" : "");
     body.appendChild(captureSection("💰 Quote pack" + (q.capturedBy ? ` — ${q.capturedBy}` : ""), [
-      kvRow("Works required", q.description), kvRow("Why quote", q.reason),
       kvRow("Materials", q.materials),
-      kvRow("Est. labour", q.labourHours != null ? `${q.labourHours} hrs × ${q.engineers || 1} engineer(s)` : ""),
-      kvRow("Access", q.access), kvRow("Notes", q.notes)
+      kvRow("Est. duration", qDur),
+      kvRow("Time restrictions", q.timeRestrictions),
+      kvRow("Access equipment", qAccess),
+      kvRow("Barriers required", qBarriers),
+      kvRow("Disruption to client", qDisr),
+      // Legacy free-text fields (only show if an old/office-authored quote has them)
+      kvRow("Works required", q.description), kvRow("Why quote", q.reason), kvRow("Notes", q.notes)
     ]));
   }
   if(job.riskAssessment){
@@ -1964,8 +1974,11 @@ function jobBlockReason(j){
   if(s === "In Progress" || s === "Travelling") return "still open (" + s + ")";
   if(s === "On Hold" && !(j.hold && j.hold.reason && j.hold.needs))
     return "On Hold without the required details";
-  if(s === "Quote" && !(j.quote && j.quote.description && j.quote.reason && j.quote.materials))
-    return "a Quote without the required details";
+  if(s === "Quote"){ var q=j.quote||{};
+    var okNew = q.materials && q.timeRestrictions && parseFloat(q.estDurationHours)>0;
+    var okOld = q.description && q.reason && q.materials;   // legacy quotes
+    if(!(okNew || okOld)) return "a Quote without the required details";
+  }
   return null;
 }
 // Legacy name kept for any other callers: true if the job needs closing out.

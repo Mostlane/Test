@@ -1092,7 +1092,11 @@ async function loadUnscheduled(){
 /* ===== Parked-without-info banner ===== */
 function jobIsBlocking(j){
   if(j.status === "On Hold") return !(j.hold && j.hold.reason && j.hold.needs);
-  if(j.status === "Quote")   return !(j.quote && j.quote.description && j.quote.reason && j.quote.materials);
+  if(j.status === "Quote"){ var q=j.quote||{};
+    var okNew = q.materials && q.timeRestrictions && parseFloat(q.estDurationHours)>0;
+    var okOld = q.description && q.reason && q.materials;   // legacy quotes
+    return !(okNew || okOld);
+  }
   return false;
 }
 async function checkBlocked(){
