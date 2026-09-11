@@ -87,6 +87,7 @@
     .schip.allchip.active{background:#ea7a23;}
     .schip.certchip{border-color:#0e7490;border-style:dashed;}
     .schip.certchip.active{border-style:solid;}
+    .schip.morechip{border-color:#94a3b8;color:#334155;font-weight:600;background:#f1f5f9;}
     .statuspick .eye{font-size:13px;margin-right:2px;}
 
     /* ---- Toolbar ---- */
@@ -629,6 +630,10 @@ let archiveSeq = 0;             // guards against out-of-order async archive res
 let cachedUsers = [];
 let activeStatus = "all";      // default board view (restoreFilters may override); "open" = everything not complete/closed/invoiced
 let activePriority = "all";
+// Status chips: only a minimal primary set shows by default (too many on mobile).
+// "More ▾" reveals the rest for the current view; collapsed again on every load.
+const PRIMARY_STATUSES = new Set(["Pending", "Scheduled", "Complete"]);
+let chipsExpanded = false;
 let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
 let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
 let selected = new Set();
@@ -805,7 +810,9 @@ async function loadNotAttended(){
   // "Show list" to expand it for this view only — the open state is NOT
   // remembered, so it never re-opens itself on the next load. The ✕ dismiss is
   // still remembered per-device for the day.
-  let dismissed = false; try{ dismissed = localStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
+  // Dismiss (✕) only hides it for the current viewing — a fresh open of the
+  // board shows the warning again, since it's an important daily nudge.
+  let dismissed = false; try{ dismissed = sessionStorage.getItem("mlNabDismissed") === data.date; }catch(e){}
   box.hidden = !!dismissed;
   listEl.hidden = true;
   $("nabToggle").textContent = "Show list";
@@ -814,7 +821,7 @@ async function loadNotAttended(){
     listEl.hidden = !nowOpen;
     this.textContent = nowOpen ? "Hide list" : "Show list";
   };
-  $("nabDismiss").onclick = function(){ box.hidden = true; try{ localStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
+  $("nabDismiss").onclick = function(){ box.hidden = true; try{ sessionStorage.setItem("mlNabDismissed", data.date); }catch(e){} };
   listEl.querySelectorAll(".nab-row").forEach(function(row){
     row.onclick = function(){ location.href = "job-view.html?jobId=" + encodeURIComponent(row.getAttribute("data-jobid")); };
   });
@@ -879,7 +886,11 @@ function renderChips(){
   openChip.innerHTML = `Open <span class="n">${boardJobs().filter(j => !isClosed(j)).length}</span>`;
   openChip.onclick = () => { activeStatus = "open"; render(); };
   host.appendChild(openChip);
+  // Only the primary statuses show by default; the rest hide behind "More ▾"
+  // (but the one you're currently filtered to always stays visible).
+  let hidden = 0;
   STATUSES.forEach(([s, c]) => {
+    if(!(chipsExpanded || PRIMARY_STATUSES.has(s) || activeStatus === s)){ hidden++; return; }
     const b = document.createElement("button");
     b.className = "schip" + (activeStatus === s ? " active" : "");
     b.style.setProperty("--c", c);
@@ -893,14 +904,25 @@ function renderChips(){
   all.onclick = () => { activeStatus = "all"; render(); };
   host.appendChild(all);
   // 📄 EM/PAT toggle — lit = certificate jobs are on the board; greyed = hidden.
-  const certN = allJobs.filter(isCertJob).length;
-  const cert = document.createElement("button");
-  cert.className = "schip certchip" + (showCertJobs ? " active" : "");
-  cert.style.setProperty("--c", "#0e7490");
-  cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
-  cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
-  cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
-  host.appendChild(cert);
+  // A secondary control: only shown once expanded.
+  if(chipsExpanded){
+    const certN = allJobs.filter(isCertJob).length;
+    const cert = document.createElement("button");
+    cert.className = "schip certchip" + (showCertJobs ? " active" : "");
+    cert.style.setProperty("--c", "#0e7490");
+    cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
+    cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
+    cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
+    host.appendChild(cert);
+  } else {
+    hidden++;   // EM/PAT chip is hidden while collapsed
+  }
+  // More ▾ / Fewer ▲ — expand or re-collapse the extra chips for this view only.
+  const more = document.createElement("button");
+  more.className = "schip morechip";
+  more.innerHTML = chipsExpanded ? "Fewer ▲" : `More <span class="n">${hidden}</span> ▾`;
+  more.onclick = () => { chipsExpanded = !chipsExpanded; renderChips(); };
+  host.appendChild(more);
 }
 // Jobs in the currently-active status chip (ignoring priority/client/search) —
 // the scope the client dropdown counts against.
