@@ -93,10 +93,9 @@
   <!-- Notify recipient -->
   <div class="back" id="notifyBack" role="dialog" aria-modal="true"><div class="box">
     <h3>Who gets the “quote to send” push</h3>
-    <label for="notifyInput">Name(s) — comma-separated</label>
-    <input id="notifyInput" list="userList" placeholder="e.g. Greg Line">
-    <datalist id="userList"></datalist>
-    <div class="muted" style="margin-top:4px;">These people get a phone notification the moment an engineer completes a “To Quote”.</div>
+    <div class="muted" style="margin-bottom:6px;">Tick the people who should get a phone notification the moment an engineer completes a “To Quote”. Only ticked people are notified.</div>
+    <input type="search" id="notifySearch" placeholder="Search people…" style="width:100%;margin-bottom:8px;">
+    <div id="notifyList" style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;padding:4px 6px;">Loading…</div>
     <div class="msg" id="notifyMsg"></div>
     <div class="acts">
       <button class="btn ghost" id="notifyCancel">Cancel</button>
@@ -250,21 +249,48 @@
       }catch(e){ g("sentMsg").textContent="Couldn't save."; g("sentMsg").className="msg err"; g("sentSave").disabled=false; }
     };
 
-    // ---- Notify modal ----
+    // ---- Notify modal (tick-box picker — ONLY ticked people are notified) ----
+    let NOTIFY_USERS = [];   // [{username, staffType}]
+    const norm = s => String(s||"").trim().toLowerCase();
+    function renderNotifyList(){
+      const chosen = new Set((DATA.notify||[]).map(norm));
+      const q = norm(g("notifySearch").value);
+      const rows = NOTIFY_USERS.filter(u => !q || norm(u.username).includes(q));
+      if(!rows.length){ g("notifyList").innerHTML = '<p class="muted" style="padding:8px;">No matching people.</p>'; return; }
+      g("notifyList").innerHTML = rows.map(u => {
+        const on = chosen.has(norm(u.username));
+        return '<label style="display:flex;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:14px;">'
+          + '<input type="checkbox" data-user="'+esc(u.username)+'"'+(on?' checked':'')+' style="width:auto;transform:scale(1.15);">'
+          + '<span>'+esc(u.username)+(u.staffType?' <span class="muted">· '+esc(u.staffType)+'</span>':'')+'</span></label>';
+      }).join("");
+      // Keep DATA.notify in step with the ticks as they change (survives a search re-filter).
+      [].forEach.call(g("notifyList").querySelectorAll("input[data-user]"), cb => cb.onchange = ()=>{
+        const set = new Set((DATA.notify||[]).map(norm));
+        const u = cb.dataset.user;
+        if(cb.checked) set.add(norm(u)); else set.delete(norm(u));
+        // rebuild DATA.notify preserving the canonical username casing from the user list
+        DATA.notify = NOTIFY_USERS.filter(x => set.has(norm(x.username))).map(x => x.username);
+      });
+    }
     g("notifyBtn").onclick = async ()=>{
-      g("notifyInput").value = (DATA.notify||[]).join(", ");
-      g("notifyMsg").textContent="";
-      // populate the datalist with active users (best-effort)
-      try{ const u = await authFetch("/users").then(r=>r.json()); const arr = Array.isArray(u)?u:(u.users||[]);
-        g("userList").innerHTML = arr.map(x=> '<option value="'+esc(x.username||x.name||"")+'">').join(""); }catch(e){}
+      g("notifyMsg").textContent=""; g("notifySearch").value="";
+      g("notifyList").innerHTML = '<p class="muted" style="padding:8px;">Loading people…</p>';
       g("notifyBack").style.display="flex";
+      try{
+        const u = await authFetch("/users").then(r=>r.json()); const arr = Array.isArray(u)?u:(u.users||[]);
+        NOTIFY_USERS = arr.map(x=>({ username: x.username||x.name||"", staffType: x.StaffType||x.staffType||(x.Profile&&x.Profile.staffType)||"" }))
+          .filter(x=>x.username)
+          .sort((a,b)=> a.username.localeCompare(b.username));
+      }catch(e){ NOTIFY_USERS = []; }
+      renderNotifyList();
     };
+    g("notifySearch").oninput = renderNotifyList;
     g("notifyCancel").onclick = ()=>{ g("notifyBack").style.display="none"; };
     g("notifyBack").onclick = e=>{ if(e.target===g("notifyBack")) g("notifyBack").style.display="none"; };
     g("notifySave").onclick = async ()=>{
       g("notifySave").disabled=true; g("notifyMsg").textContent="Saving…";
       try{
-        const r = await authFetch("/sla/quotes/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({notify:g("notifyInput").value})}).then(x=>x.json());
+        const r = await authFetch("/sla/quotes/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({notify:(DATA.notify||[])})}).then(x=>x.json());
         if(r&&r.ok){ DATA.notify=r.notify; g("notifyBack").style.display="none"; }
         else { g("notifyMsg").textContent=(r&&r.error)||"Couldn't save (Full Access only)."; g("notifyMsg").className="msg err"; }
       }catch(e){ g("notifyMsg").textContent="Couldn't save."; g("notifyMsg").className="msg err"; }
