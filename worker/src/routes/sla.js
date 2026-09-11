@@ -4248,7 +4248,23 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // named, or the site was renamed afterwards. Falls back to the site code.
   let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
   const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
-  if (!siteNameResolved && siteCodeVal) {
+  // A purely-NUMERIC store code is authoritative: resolve the REAL portal site
+  // name (numeric-tolerant, so "85" matches "0085") and let it WIN over whatever
+  // siteName the intake supplied. This fixes Concerto/Zapier jobs that were named
+  // off the ADDRESS ("Car Park, The Parade") instead of the store ("East
+  // Wittering, Cakeham Road"). Projects (P-numbers) and other non-numeric codes
+  // keep the supplied/typed name (only filled in when it's blank).
+  if (/^\d+$/.test(siteCodeVal)) {
+    try {
+      const forms = [...new Set([siteCodeVal, String(Number(siteCodeVal)), siteCodeVal.padStart(4, "0")])].filter(Boolean);
+      const ph = forms.map(() => "?").join(",");
+      const srow = await tenantDB(env, tenantId).prepare(
+        `SELECT site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph}) ORDER BY LENGTH(site_number) DESC LIMIT 1`
+      ).bind(tenantId, ...forms).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && !/^\d+$/.test(nm)) siteNameResolved = nm;
+    } catch {}
+  } else if (!siteNameResolved && siteCodeVal) {
     try {
       const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
       const nm = srow && String(srow.site_name || "").trim();

@@ -18550,7 +18550,18 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const targetAt = noSla ? null : computeSlaTarget(raisedAt, priority, cfg);
   let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
   const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
-  if (!siteNameResolved && siteCodeVal) {
+  if (/^\d+$/.test(siteCodeVal)) {
+    try {
+      const forms = [.../* @__PURE__ */ new Set([siteCodeVal, String(Number(siteCodeVal)), siteCodeVal.padStart(4, "0")])].filter(Boolean);
+      const ph = forms.map(() => "?").join(",");
+      const srow = await tenantDB(env, tenantId).prepare(
+        `SELECT site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph}) ORDER BY LENGTH(site_number) DESC LIMIT 1`
+      ).bind(tenantId, ...forms).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && !/^\d+$/.test(nm)) siteNameResolved = nm;
+    } catch {
+    }
+  } else if (!siteNameResolved && siteCodeVal) {
     try {
       const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
       const nm = srow && String(srow.site_name || "").trim();
