@@ -72,7 +72,7 @@
     .tray-jobs.collapsed{display:none;}
     .tray-job{
       background:#fff7ed;border:1px solid #fb923c;border-radius:8px;
-      padding:5px 8px 5px 9px;font-size:12px;cursor:grab;touch-action:none;user-select:none;
+      padding:5px 8px 5px 9px;font-size:12px;cursor:grab;touch-action:pan-x pan-y;-webkit-touch-callout:none;user-select:none;
       max-width:260px;display:inline-flex;align-items:center;gap:6px;
     }
     .tray-job .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -106,9 +106,13 @@
       background:#e0f2fe;border:1px solid #60a5fa;color:#0f172a;
       box-shadow:0 2px 5px rgba(15,23,42,0.18);cursor:grab;overflow:hidden;
       white-space:nowrap;text-overflow:ellipsis;line-height:30px;font-size:11px;
-      touch-action:none;user-select:none;
+      touch-action:pan-x pan-y;-webkit-touch-callout:none;user-select:none;
     }
     .day-job.flash{animation:mlJobFlash 1.4s ease-in-out 3;z-index:5;}
+    /* Long-press to pick up (touch): a subtle grow while the hold is registering,
+       then a lift once it's picked up — so a scroll/tap never moves a job. */
+    .day-job.lp-arming,.tray-job.lp-arming{transition:transform .25s ease;transform:scale(.97);}
+    .day-job.lp-lifted,.tray-job.lp-lifted{transform:scale(1.05);box-shadow:0 6px 16px rgba(15,23,42,0.3);}
     @keyframes mlJobFlash{0%,100%{box-shadow:0 0 0 0 rgba(234,122,35,0);}50%{box-shadow:0 0 0 6px rgba(234,122,35,.75);}}
     .day-job-time{display:none;font-weight:700;margin-right:5px;}
     .drag-ghost .day-job-time{display:inline;}
@@ -1257,9 +1261,50 @@ function renderWeekView(container){
 }
 
 /* ============== DRAG ============== */
+// A block can be moved by accident on a phone — a scroll gets read as a drag.
+// So on TOUCH a drag only begins after a deliberate ~0.4s hold (a quick tap opens
+// the job, a scroll scrolls). A mouse (desktop, precise) still picks up instantly.
+const LP_HOLD_MS = 400;      // hold this long to pick a block up
+const LP_MOVE_CANCEL = 10;   // …but a finger that moves >10px first = a scroll, not a hold
+
 function attachPointerDrag(jobEl, job, fromTray){
   jobEl.addEventListener("pointerdown", (e) => {
     if(e.button !== undefined && e.button !== 0) return;
+    const isTouch = e.pointerType === "touch" || e.pointerType === "pen";
+    if(!isTouch){ beginDrag(jobEl, job, fromTray, e); e.preventDefault(); return; }
+    // Touch: arm a long-press. Don't grab the block or block scrolling yet.
+    const pid = e.pointerId, sx = e.clientX, sy = e.clientY;
+    let timer = 0;
+    const done = () => {
+      clearTimeout(timer);
+      jobEl.classList.remove("lp-arming");
+      jobEl.removeEventListener("pointermove", pm);
+      jobEl.removeEventListener("pointerup", pu);
+      jobEl.removeEventListener("pointercancel", pu);
+    };
+    const pm = (ev) => {
+      if(ev.pointerId !== pid) return;
+      // Finger moved before the hold completed → it's a scroll: stand down.
+      if(Math.abs(ev.clientX - sx) > LP_MOVE_CANCEL || Math.abs(ev.clientY - sy) > LP_MOVE_CANCEL) done();
+    };
+    const pu = () => done();   // lifted early → a tap: the click handler opens the job
+    jobEl.classList.add("lp-arming");
+    jobEl.addEventListener("pointermove", pm, {passive:true});
+    jobEl.addEventListener("pointerup", pu, {passive:true});
+    jobEl.addEventListener("pointercancel", pu, {passive:true});
+    timer = setTimeout(() => {
+      done();
+      jobEl.classList.add("lp-lifted");
+      try{ navigator.vibrate && navigator.vibrate(18); }catch{}   // haptic "picked up" cue
+      beginDrag(jobEl, job, fromTray, e);
+    }, LP_HOLD_MS);
+    // NB: no preventDefault here — the page/track must stay free to scroll.
+  });
+}
+
+// Start an actual drag from the given pointerdown event (mouse now, or a promoted
+// touch long-press). Everything below is the original immediate-drag body.
+function beginDrag(jobEl, job, fromTray, e){
     dragState = {
       active:true, jobId:job.id, fromTray, moved:false, pointerId:e.pointerId,
       offsetX: e.clientX - jobEl.getBoundingClientRect().left,
@@ -1287,8 +1332,6 @@ function attachPointerDrag(jobEl, job, fromTray){
     document.addEventListener("pointermove", onPointerMove, {passive:false});
     document.addEventListener("pointerup", onPointerUp, {passive:false});
     document.addEventListener("pointercancel", onPointerUp, {passive:false});
-    e.preventDefault();
-  });
 }
 
 function getTrackUnderPointer(clientY){
@@ -1338,7 +1381,7 @@ async function onPointerUp(e){
   const { jobId, moved, fromTray, targetEngineer, targetMins } = dragState;
   dragState.active = false; dragState.ghost = null; dragState.pointerId = null;
 
-  document.querySelectorAll(".day-job.dragging,.tray-job.dragging").forEach(el => el.classList.remove("dragging"));
+  document.querySelectorAll(".day-job.dragging,.tray-job.dragging,.lp-lifted,.lp-arming").forEach(el => el.classList.remove("dragging","lp-lifted","lp-arming"));
   if(!moved) return;
   setTimeout(() => { dragState.moved = false; }, 50);
 
