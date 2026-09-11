@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -17287,9 +17292,11 @@ function quoteMissing(job, patch, photoCount) {
   if (job && job.investigateOnly) return [];
   const q = patch.quote && typeof patch.quote === "object" ? patch.quote : job.quote || {};
   const miss = [];
-  if (!String(q.description || "").trim()) miss.push("the works description");
-  if (!String(q.reason || "").trim()) miss.push("why it needs quoting");
+  const hasAccess = Array.isArray(q.accessEquipment) ? q.accessEquipment.length > 0 : !!String(q.access || "").trim();
   if (!String(q.materials || "").trim()) miss.push("the materials");
+  if (!String(q.timeRestrictions || "").trim()) miss.push("time restrictions (put \u2018none\u2019 if there are none)");
+  if (!(parseFloat(q.estDurationHours) > 0)) miss.push("the estimated duration");
+  if (!hasAccess) miss.push("the access equipment");
   if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
@@ -35668,9 +35675,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now, kind: "travel", mins: back });
