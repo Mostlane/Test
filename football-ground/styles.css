@@ -119,9 +119,25 @@ a{color:inherit}
 .hero-stats .stat strong{display:block;font-family:var(--display);font-weight:400;font-size:26px;color:var(--accent);letter-spacing:.02em}
 .hero-stats .stat span{font-size:13px;color:rgba(238,241,245,.72)}
 @media(max-width:720px){
-  .hero{justify-content:flex-start}
-  .hero-stats{grid-template-columns:repeat(2,1fr);margin-top:40px}
-  .hero-content{padding-top:calc(96px + env(safe-area-inset-top,0px))}
+  /* Mobile hero = the WHOLE photo as a banner (full width of the ground visible,
+     nothing cropped), with the headline + buttons on solid charcoal beneath it.
+     A wide landscape photo physically can't fill a tall phone screen AND show its
+     full width, so on mobile we stop trying to — banner on top, copy below. */
+  .hero{display:block;min-height:0}
+  .hero-bg{position:relative;inset:auto;height:auto;z-index:0}
+  .hero-grad,.hero-pitch{display:none}
+  .hero-photo{position:relative;inset:auto;width:100%;aspect-ratio:4/3;
+    background-position:center;background-color:var(--ink-800)}
+  /* Keep only a short top scrim so the logo/menu stay readable over the sky. */
+  .hero-scrim{position:absolute;inset:0;background:
+    linear-gradient(180deg, rgba(15,18,22,.62) 0%, rgba(15,18,22,.18) 24%, rgba(15,18,22,0) 46%)}
+  .hero-content{position:relative;z-index:2;padding:30px 20px 0}
+  .eyebrow{margin-bottom:14px}
+  .hero h1{font-size:clamp(40px,12vw,66px)}
+  .hero-sub{font-size:16px;margin:18px 0 26px}
+  .hero-cta{flex-direction:column}
+  .hero-cta .btn{width:100%;justify-content:center}
+  .hero-stats{grid-template-columns:repeat(2,1fr);margin-top:30px;padding-bottom:4px}
 }
 
 /* ---------- Section headings ---------- */
