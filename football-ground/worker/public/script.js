@@ -8,7 +8,7 @@ const CONFIG = {
   siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
   address:   "Coal Park Lane, Swanwick, SO31 7GW",
-  email:     "bookings@coalparklane.co.uk",  // FALLBACK/DELIVERY ONLY — never shown on the site.
+  email:     "bookings@coalparklane.com",  // FALLBACK/DELIVERY ONLY — never shown on the site.
                                              // Used only if the booking backend is unreachable (opens the
                                              // visitor's email app). A Coal Park Lane address, not a personal one.
                                              // Real enquiries arrive via the booking backend + its own
@@ -36,7 +36,7 @@ const CONFIG = {
      an enquiry is never lost. Leave blank to disable and use
      deliveryMode above instead.
      ------------------------------------------------------- */
-  bookingEndpoint: "https://coalparklane-api.jamie-def.workers.dev/enquiry"
+  bookingEndpoint: "/enquiry"   // same-origin — the site + API are one Cloudflare worker
 };
 
 /* ---------- Apply config to the page ---------- */

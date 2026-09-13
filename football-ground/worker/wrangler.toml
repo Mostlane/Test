@@ -1,13 +1,18 @@
-# Coal Park Lane — standalone booking worker
-# Deploys independently of the Mostlane portal (its own service, its own D1).
+# Coal Park Lane — standalone site + booking worker
+# Serves the WHOLE thing from one Cloudflare Worker, independent of Mostlane:
+#   • the public marketing site (static files in ./public) on coalparklane.com
+#   • the admin panel (public/admin.html) on admin.coalparklane.com
+#   • the enquiry + bookings API (/enquiry, /admin/*)
 #
 # One-time setup in the Cloudflare dashboard (see ../SETUP.md):
 #   1. Create a Worker named "coalparklane-api", connect Workers Builds to this
-#      repo (Mostlane/Test) with root directory: football-ground/worker
+#      repo with root directory: football-ground/worker
 #   2. Bind the D1 database "coalparklane" as DB (already created)
-#   3. Add the secrets ADMIN_PASSWORD (and optionally RESEND_API_KEY)
+#   3. Add Custom Domains: coalparklane.com (+ www) and admin.coalparklane.com
+#   4. Add the secret ADMIN_PASSWORD (and optionally RESEND_API_KEY)
+#   5. Put BOTH hostnames behind Cloudflare Access (Zero Trust)
 #
-# Non-secret vars live here; SECRETS are set in the dashboard and must never be committed.
+# Non-secret vars live here; SECRETS are set in the dashboard and never committed.
 
 name = "coalparklane-api"
 main = "src/index.js"
@@ -16,20 +21,31 @@ compatibility_date = "2026-01-01"
 [placement]
 mode = "smart"
 
+# Static site: Cloudflare serves ./public, but the Worker runs first on every
+# request so it can route by hostname (public site vs admin) and keep the admin
+# panel off the public domain.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "coalparklane"
 database_id = "ef6053f3-762d-4997-8c88-e029d4567556"
 
 [vars]
-# The website origin allowed to POST enquiries (CORS). Set to your live domain.
-ALLOWED_ORIGIN = "https://mostlane-portal.com"
+# The hostname that serves the admin panel. Everything else = the public site.
+ADMIN_HOST = "admin.coalparklane.com"
+# The website origin allowed to POST enquiries (CORS). Same-origin needs no CORS;
+# this is a belt-and-braces allow value for the live public domain.
+ALLOWED_ORIGIN = "https://coalparklane.com"
 # Where enquiry notifications are emailed (only used if RESEND_API_KEY is set).
 NOTIFY_EMAIL = ""
 # The From address for notification emails (must be a Resend-verified sender).
-EMAIL_FROM = "bookings@coalparklane.co.uk"
+EMAIL_FROM = "bookings@coalparklane.com"
 
 # SECRETS (set in the dashboard, NOT here):
-#   ADMIN_PASSWORD   – the password for admin.html
+#   ADMIN_PASSWORD   – the password for the admin panel
 #   ADMIN_SECRET     – (optional) token-signing key; falls back to ADMIN_PASSWORD
 #   RESEND_API_KEY   – (optional) to email you when an enquiry lands

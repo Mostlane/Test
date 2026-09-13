@@ -190,11 +190,11 @@
 
 <script>
 /* ============================================================
-   CONFIG — set this to your deployed worker URL.
-   After you create the "coalparklane-api" Worker in Cloudflare,
-   put its address here (see ../SETUP.md).
+   CONFIG — the admin panel is served by the SAME worker as the API
+   (on admin.coalparklane.com), so calls are same-origin. Leave API_BASE
+   empty. Only set an absolute URL if you host this page elsewhere.
    ============================================================ */
-const API_BASE = "https://coalparklane-api.jamie-def.workers.dev";
+const API_BASE = "";
 
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];

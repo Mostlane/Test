@@ -154,16 +154,29 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const cors = corsHeaders(env, request);
+    // Which face are we serving? The admin host shows the admin panel; every
+    // other host (coalparklane.com) shows the public marketing site.
+    const isAdminHost = !!env.ADMIN_HOST && url.hostname === env.ADMIN_HOST;
+    const serveAsset = (pathname) => {
+      if (!env.ASSETS) return json({ error: "Not found." }, 404, cors);
+      const u = new URL(url.toString());
+      u.pathname = pathname;
+      return env.ASSETS.fetch(new Request(u.toString(), { method: "GET", headers: request.headers }));
+    };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
     try {
       await ensureSchema(env);
 
-      /* ---- health ---- */
-      if (path === "/" || path === "/health") {
+      /* ---- health (either host) ---- */
+      if (path === "/health") {
         return json({ ok: true, service: "coalparklane-api" }, 200, cors);
       }
+
+      /* ---- the admin API + panel live ONLY on the admin host ---- */
+      const isAdminApi = path === "/admin/login" || path.startsWith("/admin/");
+      if (isAdminApi && !isAdminHost) return json({ error: "Not found." }, 404, cors);
 
       /* ---- public: submit an enquiry ---- */
       if (path === "/enquiry" && request.method === "POST") {
@@ -216,7 +229,7 @@ export default {
       }
 
       /* ---- everything else under /admin needs a valid token ---- */
-      if (path.startsWith("/admin")) {
+      if (path.startsWith("/admin/")) {
         if (!(await requireAdmin(request, env))) {
           return json({ error: "Not authorised." }, 401, cors);
         }
@@ -311,6 +324,22 @@ export default {
         }
 
         return json({ error: "Unknown admin route." }, 404, cors);
+      }
+
+      /* ---- admin panel page (admin host only) ---- */
+      if (isAdminHost) {
+        if (request.method === "GET" || request.method === "HEAD") return serveAsset("/admin.html");
+        return json({ error: "Not found." }, 404, cors);
+      }
+
+      /* ---- public site: the admin panel must never be reachable here ---- */
+      if (path === "/admin.html" || path.startsWith("/admin")) {
+        return json({ error: "Not found." }, 404, cors);
+      }
+
+      /* ---- public marketing site (static assets from ./public) ---- */
+      if (env.ASSETS && (request.method === "GET" || request.method === "HEAD")) {
+        return env.ASSETS.fetch(request);
       }
 
       return json({ error: "Not found." }, 404, cors);

@@ -1,90 +1,105 @@
-# Coal Park Lane — booking system setup (one-time, ~10 minutes)
+# Coal Park Lane — go-live setup (one-time, all dashboard clicks)
 
-The website already talks to a booking backend. You just need to stand that
-backend up once in the Cloudflare dashboard. The database is **already created**
-for you (`coalparklane`) — these steps create the little service that reads and
-writes it, and switch on the admin page.
+The whole thing — public site, admin panel and bookings database — runs from
+**one Cloudflare Worker** (`coalparklane-api`) on your own domain
+**coalparklane.com**. Nothing touches Mostlane or GitHub Pages.
 
-Everything here is dashboard clicking — no coding, no wrangler, same as your
-other Cloudflare bits.
+- `coalparklane.com` → the public marketing site + enquiry form
+- `admin.coalparklane.com` → the admin panel (bookings)
+- Both sit **behind Cloudflare Access**, so nothing is visible to the public until
+  you deliberately open it, and the admin stays locked forever.
+
+Do these once, in order, after Cloudflare shows the domain as **Active**.
 
 ---
 
-## 1. Create the Worker (the booking service)
+## 1. Create the Worker
 
-1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Worker**.
-2. Name it exactly **`coalparklane-api`** → **Deploy** (a placeholder deploy is fine).
-3. Open the new worker → **Settings** → **Build** (Workers Builds) → **Connect**:
+1. Cloudflare → **Workers & Pages** → **Create** → **Worker**.
+2. Name it exactly **`coalparklane-api`** → **Deploy** (the placeholder is fine).
+3. Open it → **Settings** → **Build** → **Connect** to Git:
    - Repository: **Mostlane/Test**
    - Production branch: **main**
    - **Root directory: `football-ground/worker`**
-   - Build command: *(leave blank)*
-   - Deploy command: *(leave the default — `npx wrangler deploy`)*
-4. Save. It will build and deploy from `football-ground/worker/` on every push to
-   `main`, exactly like `mostlane-api`. The database binding (`DB` →
-   `coalparklane`) is set automatically from `wrangler.toml`, so you don't bind it
-   by hand.
+   - Build/deploy commands: leave the defaults.
+4. Save. From now on it rebuilds on every push to `main`. The database
+   (`DB` → `coalparklane`) and the static site (`./public`) bind automatically
+   from `wrangler.toml` — nothing to wire by hand.
 
-## 2. Set the admin password (required)
+## 2. Set the admin password
 
 Worker → **Settings** → **Variables and Secrets** → **Add**:
 
-| Name             | Type   | Value                                  |
-|------------------|--------|----------------------------------------|
-| `ADMIN_PASSWORD` | Secret | *(a password only you know)*           |
+| Name             | Type   | Value                         |
+|------------------|--------|-------------------------------|
+| `ADMIN_PASSWORD` | Secret | *(a strong password only you know)* |
 
-Click **Deploy** after adding it.
+Click **Deploy**. This is what you type on the admin page.
 
-That password is what you type on the admin page. Change it any time here.
+## 3. Put BOTH addresses behind Cloudflare Access (this is what hides it)
 
-## 3. (Optional) Get an email when an enquiry lands
+Cloudflare → **Zero Trust** → **Access** → **Applications** → **Add an application**
+→ **Self-hosted**. Do this **twice**:
 
-If you want an email every time someone enquires, add:
+**a) The whole public site — private during the build**
+- Application name: `Coal Park Lane (site)`
+- Domains: `coalparklane.com` **and** `www.coalparklane.com`
+- Policy → **Allow**, Include → **Emails** → *your email address(es)*
+- Accept method: **One-time PIN** (Cloudflare emails you a code).
+- Save. → *This is the "keep it hidden" gate. You DELETE this one app at launch;
+  everything else stays.*
 
-| Name             | Type   | Value                                  |
-|------------------|--------|----------------------------------------|
-| `RESEND_API_KEY` | Secret | *(a Resend API key)*                   |
+**b) The admin — locked forever**
+- Application name: `Coal Park Lane admin`
+- Domain: `admin.coalparklane.com`
+- Same **Allow / your emails / One-time PIN** policy.
+- Save.
 
-…and set the **`NOTIFY_EMAIL`** variable (already listed in the worker's
-variables, currently blank) to the address you want notified, and
-**`EMAIL_FROM`** to a Resend-verified sender. Without these, enquiries still save
-fine — you just check the admin page instead of getting an email.
+## 4. Point the domain at the worker (custom domains)
 
----
+Back on the worker → **Settings** → **Domains & Routes** → **Add** → **Custom Domain**,
+add each of these (Cloudflare creates the DNS records for you):
+- `coalparklane.com`
+- `www.coalparklane.com`
+- `admin.coalparklane.com`
 
-## 4. Check the address matches
+Because Access (step 3) is already in front of these hostnames, the very first
+moment they resolve they already ask for your email + PIN — there is no public
+window.
 
-The worker's address will be shown at the top of its page, something like:
+## 5. Flip the site live (Claude does this)
 
-```
-https://coalparklane-api.jamie-def.workers.dev
-```
-
-The website and admin page are already pointed at **exactly that**. If your
-account's `*.workers.dev` subdomain is NOT `jamie-def`, tell me the real address
-and I'll update two lines (the `API_BASE` in `admin.html` and the
-`bookingEndpoint` in `script.js`).
-
----
-
-## 5. Use it
-
-- **Admin page:** `https://mostlane-portal.com/football-ground/admin.html`
-  → sign in with your `ADMIN_PASSWORD`.
-- **Enquiries** from the website appear here automatically as **New**. Set each to
-  Contacted / Confirmed / Declined, add private notes, and they show on the
-  **Calendar** once Confirmed.
-- **Add your regular club slots** with **+ Add a booking** so the calendar shows
-  everything the ground is being used for — your at-a-glance guard against
-  double-booking.
+Tell Claude the domains + Access are set up. Claude merges the site code so the
+worker serves the full site. Visit `coalparklane.com` → you'll get the Cloudflare
+PIN prompt → then the site. Visit `admin.coalparklane.com` → PIN → the admin
+panel → sign in with your `ADMIN_PASSWORD`.
 
 ---
 
-## What this deliberately does NOT do yet (Phase 2)
+## 6. (Optional) Get an email when an enquiry lands
 
-- No online payment, no self-service slot picking, no live public availability.
-- The data model is already payment-ready. When you're ready to take money
-  online we add Stripe on top of this — it's an addition, not a rebuild. Before
-  that, you'll need: a Stripe account for the ground's company, a domain
-  (e.g. coalparklane.co.uk), and a written cancellation/refund policy to show
-  before payment.
+Add secret `RESEND_API_KEY`, set the `NOTIFY_EMAIL` variable to where you want it,
+and `EMAIL_FROM` to a Resend-verified sender on `coalparklane.com`. Without this,
+enquiries still save — you just read them in the admin panel.
+
+## 7. Launching to the public (later, when you're ready)
+
+Delete **only** the `Coal Park Lane (site)` Access application (step 3a). The
+public site is then live to everyone. The `Coal Park Lane admin` app stays, so the
+admin remains locked. That's the whole launch — one deletion.
+
+---
+
+## Using it
+
+- **Enquiries** from the site appear in the admin as **New**. Set each to
+  Contacted / Confirmed / Declined, add private notes; Confirmed ones show on the
+  **Calendar**.
+- **Add your regular club slots** with **+ Add a booking** so the calendar is your
+  at-a-glance guard against double-booking.
+
+## Not yet (Phase 2)
+
+No online payment / self-service booking yet — the data model is already
+payment-ready, so Stripe is an addition later, not a rebuild. Before that you'll
+need: a Stripe account for the ground, and a written cancellation/refund policy.
