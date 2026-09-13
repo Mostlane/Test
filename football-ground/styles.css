@@ -197,6 +197,31 @@ h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
 .fhr p strong{color:#fff}
 @media(max-width:560px){.fhr{gap:14px}.fhr img{width:170px}}
 
+/* ---------- Kitchen menu: trigger + modal ---------- */
+.fac-menu{margin-top:11px;background:none;border:0;padding:0;cursor:pointer;
+  font:700 13.5px var(--font);color:var(--accent);letter-spacing:.01em}
+.fac-menu:hover{text-decoration:underline}
+.menu-modal{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:20px;
+  background:rgba(8,10,13,.72);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.menu-modal[hidden]{display:none}
+.menu-card{position:relative;width:min(520px,100%);max-height:88vh;overflow:auto;
+  background:var(--ink-900);color:var(--text-on-dark);border:1px solid rgba(255,255,255,.1);
+  border-radius:var(--radius-lg);padding:34px 28px;box-shadow:var(--shadow)}
+.menu-card .kicker{color:var(--accent)}
+.menu-card h2{color:#fff;margin:0 0 22px;font-size:clamp(28px,6vw,40px)}
+.menu-close{position:absolute;top:14px;right:14px;width:38px;height:38px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#fff;font-size:15px;cursor:pointer;
+  display:grid;place-items:center;line-height:1}
+.menu-close:hover{border-color:var(--accent);color:var(--accent)}
+.menu-cols{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+@media(max-width:460px){.menu-cols{grid-template-columns:1fr;gap:18px}}
+.menu-group h3{color:var(--accent);font-size:12.5px;letter-spacing:.13em;text-transform:uppercase;margin:0 0 8px}
+.menu-list{list-style:none;margin:0;padding:0}
+.menu-list li{display:flex;justify-content:space-between;gap:16px;align-items:baseline;
+  padding:10px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:15px}
+.menu-list li b{font-family:var(--display);font-weight:400;color:var(--accent);font-size:17px;white-space:nowrap}
+.menu-foot{margin:22px 0 0;color:rgba(238,241,245,.55);font-size:13px}
+
 /* ---------- Uses ---------- */
 .uses{background:var(--ink-900);color:var(--text-on-dark)}
 .uses .kicker{color:var(--accent)}

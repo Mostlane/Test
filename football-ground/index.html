@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=6" />
+<link rel="stylesheet" href="styles.css?v=7" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2312161b'/%3E%3Ctext x='50' y='64' font-size='40' text-anchor='middle' fill='%23e8b02e' font-family='Arial' font-weight='bold'%3ECPL%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -74,7 +74,7 @@
   <div class="wrap">
     <p class="kicker reveal">Our history</p>
     <h2 class="reveal">Home to local football in the community for over 50 years.</h2>
-    <p class="lead reveal">Coal Park Lane has been at the heart of grassroots football in the community for over half a century — generations have played their football on this ground. From under 7s mini soccer right up to 11-a-side, it is a home for junior clubs, youth teams, academies and school sides, who train and play here across 5, 7, 9 and 11-a-side pitches, with a kitchen for half time snacks and match day teas, and plenty of free parking for the parents. Send us your preferred date and we will confirm availability and pricing straight back to you.</p>
+    <p class="lead reveal">Coal Park Lane has been at the heart of grassroots football here for over half a century. Generations of local players have learned the game, pulled on a shirt and played their first fixtures on this ground — and it is still doing exactly that today, a home for the clubs, teams and academies that make up grassroots football in the area.</p>
   </div>
 </section>
 
@@ -84,7 +84,7 @@
     <div class="trust-grid">
       <div class="trust-item reveal">
         <h3>Over 50 years in the community</h3>
-        <p>Generations have played their local football on this ground.</p>
+        <p>A long-established local ground that clubs already know and trust.</p>
       </div>
       <div class="trust-item reveal">
         <h3>Kept to a high standard</h3>
@@ -134,7 +134,8 @@
         <div class="fac-cell">
           <div class="fac-top"><svg class="ic"><use href="#i-kit"/></svg><span class="fac-q">5★</span></div>
           <h3>Kitchen</h3>
-          <p>Food Hygiene Rating 5. Match-day teas, snacks and refreshments.</p>
+          <p>Burgers, hot dogs, sweets and hot &amp; cold drinks. Food Hygiene Rating 5.</p>
+          <button type="button" class="fac-menu" id="menuBtn">View the menu →</button>
         </div>
         <div class="fac-cell">
           <div class="fac-top"><svg class="ic"><use href="#i-park"/></svg></div>
@@ -227,10 +228,10 @@
     <h2 class="reveal">Make Coal Park Lane your home ground</h2>
     <p class="lead reveal">Looking for a home for your grassroots club? Base your junior and youth teams at Coal Park Lane for the season and give your players, coaches and parents a proper place to call home.</p>
     <ul class="hg-points reveal">
-      <li>Pitches for every age and format: 5, 7, 9 and 11-a-side</li>
-      <li>On site kitchen for match day teas and half time snacks</li>
-      <li>Free parking for players, coaches and parents</li>
-      <li>Regular home slots on one simple, season long arrangement</li>
+      <li>Regular, guaranteed home slots for your fixtures and training</li>
+      <li>One simple arrangement for the whole season — sorted once</li>
+      <li>Priority on your preferred dates and kick-off times</li>
+      <li>A settled base your players, coaches and parents get to know</li>
     </ul>
     <a href="#enquire" class="btn btn-accent btn-lg reveal">Enquire about a season</a>
   </div>
@@ -382,6 +383,33 @@
   </div>
 </footer>
 
-<script src="script.js"></script>
+<!-- ============ KITCHEN MENU (opened from the Kitchen facility) ============ -->
+<div class="menu-modal" id="menuModal" hidden>
+  <div class="menu-card" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
+    <button class="menu-close" id="menuClose" type="button" aria-label="Close menu">✕</button>
+    <p class="kicker">Coal Park Lane kitchen</p>
+    <h2 id="menuTitle">Match-day menu</h2>
+    <div class="menu-cols">
+      <div class="menu-group">
+        <h3>Food</h3>
+        <ul class="menu-list">
+          <li><span>Burger</span><b>£—</b></li>
+          <li><span>Hot dog</span><b>£—</b></li>
+          <li><span>Sweets</span><b>£—</b></li>
+        </ul>
+      </div>
+      <div class="menu-group">
+        <h3>Drinks</h3>
+        <ul class="menu-list">
+          <li><span>Hot drinks</span><b>£—</b></li>
+          <li><span>Cold drinks</span><b>£—</b></li>
+        </ul>
+      </div>
+    </div>
+    <p class="menu-foot">Served on match days · 5★ food hygiene rating</p>
+  </div>
+</div>
+
+<script src="script.js?v=2"></script>
 </body>
 </html>
