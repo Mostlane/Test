@@ -95,7 +95,14 @@ a{color:inherit}
 /* Real ground photo: drop a file at assets/hero.jpg and it appears here.
    If the file is absent the layer is simply invisible and the gradient above shows. */
 .hero-photo{position:absolute;inset:0;background-image:url("assets/hero.jpg");
-  background-size:cover;background-position:center 42%}
+  background-size:cover;background-position:center 42%;
+  will-change:transform;animation:heroKen 30s ease-in-out infinite alternate}
+/* Slow, subtle "Ken Burns" drift — only the photo moves; the scrim + text stay put. */
+@keyframes heroKen{
+  from{transform:scale(1) translate3d(0,0,0)}
+  to{transform:scale(1.07) translate3d(-1%,-0.6%,0)}
+}
+@media(prefers-reduced-motion:reduce){.hero-photo{animation:none;transform:none}}
 /* Darkening scrim so the headline stays readable over the photo (and gives the
    gradient-only hero a touch more depth when there is no photo). */
 .hero-scrim{position:absolute;inset:0;background:
