@@ -163,6 +163,29 @@ h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
   background:linear-gradient(140deg,var(--ink-700),var(--ink-900));margin-bottom:18px}
 .card p{color:var(--muted);margin:0}
 
+/* ---------- Facilities: dark grid panel + line icons ---------- */
+.facilities .fac-panel{background:var(--ink-900);color:var(--text-on-dark);border-radius:var(--radius-lg);
+  padding:40px 26px;box-shadow:var(--shadow)}
+.facilities .fac-panel .kicker{color:var(--accent)}
+.facilities .fac-panel h2{color:#fff;margin:0 0 28px}
+.ic{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.fac-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.09);border-radius:14px;overflow:hidden}
+@media(min-width:820px){.fac-grid{grid-template-columns:repeat(4,1fr)}}
+.fac-cell{background:var(--ink-900);padding:20px 18px}
+.fac-top{display:flex;align-items:center;gap:8px;margin-bottom:12px;min-height:26px}
+.fac-top svg{width:26px;height:26px}
+.fac-q{margin-left:auto;font-family:var(--display);font-size:20px;color:var(--accent);line-height:1}
+.fac-cell h3{font-size:16px;color:#fff;margin:0 0 5px}
+.fac-cell p{color:rgba(238,241,245,.6);font-size:13.5px;line-height:1.5;margin:0}
+/* Food Standards Agency hygiene-rating badge */
+.fhr{display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-top:26px;padding-top:24px;
+  border-top:1px solid rgba(255,255,255,.1)}
+.fhr img{width:200px;height:auto;border-radius:8px;flex:0 0 auto}
+.fhr p{margin:0;color:rgba(238,241,245,.82);font-size:15px;line-height:1.55;max-width:36ch}
+.fhr p strong{color:#fff}
+@media(max-width:560px){.fhr{gap:14px}.fhr img{width:170px}}
+
 /* ---------- Uses ---------- */
 .uses{background:var(--ink-900);color:var(--text-on-dark)}
 .uses .kicker{color:var(--accent)}

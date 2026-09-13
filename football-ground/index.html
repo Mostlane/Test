@@ -101,51 +101,68 @@
 <!-- ============ FACILITIES ============ -->
 <section class="section facilities" id="facilities">
   <div class="wrap">
-    <div class="section-head">
-      <p class="kicker reveal">Facilities</p>
-      <h2 class="reveal">A proper setup, well looked after</h2>
-    </div>
-    <div class="grid grid-3">
-      <article class="card reveal">
-        <div class="card-ico">🥅</div>
-        <h3>3× 5-a-side pitches</h3>
-        <p>Three 5-a-side pitches, perfect for mini soccer, junior training and small sided games.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">🥅</div>
-        <h3>3× 7-a-side pitches</h3>
-        <p>Three 7-a-side pitches, ideal for youth teams stepping up from mini soccer.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">⚽</div>
-        <h3>9 &amp; 11-a-side pitch</h3>
-        <p>A full size pitch marked for both 9-a-side and 11-a-side, for older youth teams and club fixtures.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">🍽️</div>
-        <h3>Kitchen, 5★ hygiene</h3>
-        <p>An on site kitchen with a 5 star food hygiene rating for match day teas, half time snacks and refreshments.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">🅿️</div>
-        <h3>Free parking</h3>
-        <p>Ample free parking on site, so players, coaches and parents can turn up, park and play with no hassle.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">🚻</div>
-        <h3>Toilets &amp; baby changing</h3>
-        <p>Toilets on site including an accessible disabled WC and baby changing facilities.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">❤️</div>
-        <h3>Defibrillator on site</h3>
-        <p>A publicly accessible defibrillator (AED) on site — there if it is ever needed.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">📹</div>
-        <h3>CCTV</h3>
-        <p>CCTV in operation on site.</p>
-      </article>
+    <!-- Line-icon set (defined once, reused below) -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <symbol id="i-pitch" viewBox="0 0 24 24"><rect class="ic" x="3" y="5" width="18" height="14" rx="1.5"/><path class="ic" d="M12 5v14"/><circle class="ic" cx="12" cy="12" r="2.3"/><path class="ic" d="M3 9.2h2.3v5.6H3M21 9.2h-2.3v5.6H21"/></symbol>
+      <symbol id="i-kit" viewBox="0 0 24 24"><path class="ic" d="M7 3v6.2a2 2 0 0 1-4 0V3M5 9.2V21"/><path class="ic" d="M17.5 3c-1.6 1.8-1.6 5.4 0 7.2V21"/></symbol>
+      <symbol id="i-park" viewBox="0 0 24 24"><rect class="ic" x="4" y="4" width="16" height="16" rx="4"/><path class="ic" d="M9.4 16.5V7.5h3.3a2.6 2.6 0 0 1 0 5.2H9.4"/></symbol>
+      <symbol id="i-wc" viewBox="0 0 24 24"><circle class="ic" cx="12" cy="5.8" r="2.3"/><path class="ic" d="M12 8.1v7.4M8.5 11h7M9.2 21l2.8-5 2.8 5"/></symbol>
+      <symbol id="i-aed" viewBox="0 0 24 24"><rect class="ic" x="4" y="4" width="16" height="16" rx="4"/><path class="ic" d="M12 8.4v7.2M8.4 12h7.2"/></symbol>
+      <symbol id="i-cctv" viewBox="0 0 24 24"><rect class="ic" x="3" y="8" width="12" height="7.5" rx="2"/><path class="ic" d="M15 10.8l5.5-2.8v7.5L15 12.7M8 15.5v3M6 18.5h4"/></symbol>
+    </defs></svg>
+
+    <div class="fac-panel reveal">
+      <p class="kicker">Facilities</p>
+      <h2>A proper setup, well looked after</h2>
+
+      <div class="fac-grid">
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-pitch"/></svg><span class="fac-q">×3</span></div>
+          <h3>5-a-side pitches</h3>
+          <p>Mini soccer, junior training and small-sided games.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-pitch"/></svg><span class="fac-q">×3</span></div>
+          <h3>7-a-side pitches</h3>
+          <p>For youth teams stepping up from mini soccer.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-pitch"/></svg><span class="fac-q">×1</span></div>
+          <h3>9 &amp; 11-a-side pitch</h3>
+          <p>Full size, marked for both — older youth and club fixtures.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-kit"/></svg><span class="fac-q">5★</span></div>
+          <h3>Kitchen</h3>
+          <p>Food Hygiene Rating 5. Match-day teas, snacks and refreshments.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-park"/></svg></div>
+          <h3>Free parking</h3>
+          <p>Plenty of it — turn up, park and play.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-wc"/></svg></div>
+          <h3>Toilets &amp; baby changing</h3>
+          <p>Including an accessible disabled WC.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-aed"/></svg></div>
+          <h3>Defibrillator (AED)</h3>
+          <p>Publicly accessible — there if it's ever needed.</p>
+        </div>
+        <div class="fac-cell">
+          <div class="fac-top"><svg class="ic"><use href="#i-cctv"/></svg></div>
+          <h3>Site CCTV</h3>
+          <p>In operation across the site.</p>
+        </div>
+      </div>
+
+      <div class="fhr">
+        <img src="assets/food-hygiene-rating-5.jpg" width="482" height="241" loading="lazy"
+             alt="Food Hygiene Rating 5 — Very Good, awarded by the Food Standards Agency" />
+        <p><strong>Food Hygiene Rating 5 — Very Good.</strong><br />Our on-site kitchen holds the Food Standards Agency's top rating.</p>
+      </div>
     </div>
   </div>
 </section>
