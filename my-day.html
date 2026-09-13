@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=36"></script>
+  <script src="day-timesheet.js?v=1"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>My Day — Mostlane</title>
@@ -318,8 +319,15 @@ async function endDay(){
   try{
     const m = $("endMiles").value;
     const gps = await getGps();
-    await authFetch(`${API}/sla/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
+    const res = await authFetch(`${API}/sla/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ engineer:getEngineer(), gps, endMileage: m && !isNaN(+m) ? Math.round(+m) : null, fuel: $("fuel").value.trim(), date: todayLocal() }) });
+    if(res && res.ok===false){
+      const d = await res.json().catch(()=>({}));
+      const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
+      msg.className="msg err"; msg.textContent = (d.error||"You can't end your day yet.")+(list?"\n\n"+list:""); $("endBtn").disabled=false; return;
+    }
+    // Clocked off — the day-sheet while it's fresh.
+    try{ if(window.MLDaySheet) await MLDaySheet.open({date:todayLocal()}); }catch(e){}
     await refresh();
   }catch(e){ msg.className="msg err"; msg.textContent = "Couldn't clock off — try again."; $("endBtn").disabled = false; }
 }
@@ -569,7 +577,15 @@ function renderSummary(){
       <div class="summary-line"><span>Miles driven</span><b>${miles != null ? miles : "—"}</b></div>
       <div class="summary-line"><span>Fuel</span><b>${esc(shift.fuel || "—")}</b></div>
       ${done.map(j => `<div class="summary-line"><span>${esc(j.helpdeskRef || j.id)}</span><span class="pill act">${esc(j.status)}</span></div>`).join("")}
+      <button class="bigbtn" id="tsBtn" style="margin-top:14px;background:#eef2f6;color:#0e2438;">✏️ Today's timesheet</button>
     </div>`;
+  const tb = $("tsBtn");
+  if(tb){
+    tb.onclick = ()=>{ if(window.MLDaySheet) MLDaySheet.open({date:todayLocal()}); };
+    if(window.MLDaySheet && MLDaySheet.isConfirmed){ MLDaySheet.isConfirmed(todayLocal()).then(ok=>{
+      if(!ok && tb){ tb.textContent="⚠️ Finish today's timesheet"; tb.style.background="#fff7e6"; tb.style.color="#a6710b"; }
+    }); }
+  }
 }
 
 refresh();

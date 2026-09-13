@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=36"></script>
+  <script src="day-timesheet.js?v=1"></script>
   <meta charset="UTF-8">
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -841,8 +842,9 @@ async function clockOff(){
       return;
     }
   }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
+  // Clocked off — day-sheet while it's fresh, then refresh the bar.
+  try{ if(window.MLDaySheet) await MLDaySheet.open({date:todayLocal()}); }catch(e){}
   await loadShift(); renderDayBar(); applyDayGate();
-  alert("Clocked off — have a good evening 👋");
 }
 async function resumeDay(){
   const sure = window.MLUI
@@ -853,6 +855,8 @@ async function resumeDay(){
     const res = await fetch(`${SLA_API}/shift/resume`, { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ engineer: getEngineer(), date: todayLocal() }) });
     if(!res.ok) throw 0;
+    // Day re-opened — un-confirm today so the next clock-off re-prompts.
+    try{ if(window.MLDaySheet) await MLDaySheet.reopen(todayLocal()); }catch(e){}
   }catch(e){ alert("Couldn't resume your day — no signal? Try again."); return; }
   await loadShift(); renderDayBar(); applyDayGate();
   alert("Back on the clock 💪");
@@ -894,10 +898,19 @@ function renderDayBar(){
            <div style="font-weight:700;">✔ Day ended ${fmtTime(s.clock_off_at)}</div>
            <div style="font-size:13px;opacity:.9;margin-top:2px;">On ${fmtTime(s.clock_on_at)} → Off ${fmtTime(s.clock_off_at)}${mi!=null?` · ${mi} miles`:""}${s.fuel?` · fuel ${escH(s.fuel)}`:""}</div>
          </div>
-         <button class="btn" style="background:#fff;color:#374151;font-weight:700;" onclick="resumeDay()">▶ Resume my day</button>
+         <div style="display:flex;gap:8px;flex-wrap:wrap;">
+           <button class="btn" id="tsDayBtn" style="background:#fff;color:#374151;font-weight:700;" onclick="openDaySheet()">✏️ Timesheet</button>
+           <button class="btn" style="background:#fff;color:#374151;font-weight:700;" onclick="resumeDay()">▶ Resume my day</button>
+         </div>
        </div>`;
+    // Nudge the timesheet button amber until today's sheet is confirmed.
+    const tb = document.getElementById("tsDayBtn");
+    if(tb && window.MLDaySheet && MLDaySheet.isConfirmed){
+      MLDaySheet.isConfirmed(todayLocal()).then(ok=>{ if(!ok && tb){ tb.textContent="⚠️ Finish timesheet"; tb.style.color="#a6710b"; } });
+    }
   }
 }
+function openDaySheet(){ if(window.MLDaySheet) MLDaySheet.open({date:todayLocal()}); }
 function applyDayGate(){
   if(!isStoryMode()) return;            // normal users: no gating
   const onShift = !!(todayShift && todayShift.clock_on_at);
