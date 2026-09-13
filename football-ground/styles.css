@@ -95,16 +95,18 @@ a{color:inherit}
 /* Real ground photo: drop a file at assets/hero.jpg and it appears here.
    If the file is absent the layer is simply invisible and the gradient above shows. */
 .hero-photo{position:absolute;inset:0;background-image:url("assets/hero.jpg");
-  background-size:cover;background-position:center 42%;
-  will-change:background-position;animation:heroPan 18s ease-in-out infinite alternate}
-/* Slow pan across the FULL width of the ground — on a tall phone this sweeps from
-   the pitch across to the patio, so the whole image is seen over time. Only the
-   photo moves; the scrim + text stay put. */
+  background-size:cover;background-position:center 42%}
+/* Slow pan across the FULL width of the ground — MOBILE ONLY. On a tall phone this
+   sweeps from the pitch across to the patio so the whole image is seen over time;
+   desktop already shows the wide image at once, so it stays static there. Off for
+   reduce-motion users. Only the photo moves; the scrim + text stay put. */
 @keyframes heroPan{
   from{background-position:2% 45%}
   to{background-position:98% 45%}
 }
-@media(prefers-reduced-motion:reduce){.hero-photo{animation:none}}
+@media(max-width:720px) and (prefers-reduced-motion:no-preference){
+  .hero-photo{will-change:background-position;animation:heroPan 18s ease-in-out infinite alternate}
+}
 /* Darkening scrim so the headline stays readable over the photo (and gives the
    gradient-only hero a touch more depth when there is no photo). */
 .hero-scrim{position:absolute;inset:0;background:
