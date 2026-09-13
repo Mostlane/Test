@@ -96,13 +96,15 @@ a{color:inherit}
    If the file is absent the layer is simply invisible and the gradient above shows. */
 .hero-photo{position:absolute;inset:0;background-image:url("assets/hero.jpg");
   background-size:cover;background-position:center 42%;
-  will-change:transform;animation:heroKen 16s ease-in-out infinite alternate}
-/* Slow, subtle "Ken Burns" drift — only the photo moves; the scrim + text stay put. */
-@keyframes heroKen{
-  from{transform:scale(1) translate3d(0,0,0)}
-  to{transform:scale(1.12) translate3d(-1.8%,-1.1%,0)}
+  will-change:background-position;animation:heroPan 18s ease-in-out infinite alternate}
+/* Slow pan across the FULL width of the ground — on a tall phone this sweeps from
+   the pitch across to the patio, so the whole image is seen over time. Only the
+   photo moves; the scrim + text stay put. */
+@keyframes heroPan{
+  from{background-position:2% 45%}
+  to{background-position:98% 45%}
 }
-@media(prefers-reduced-motion:reduce){.hero-photo{animation:none;transform:none}}
+@media(prefers-reduced-motion:reduce){.hero-photo{animation:none}}
 /* Darkening scrim so the headline stays readable over the photo (and gives the
    gradient-only hero a touch more depth when there is no photo). */
 .hero-scrim{position:absolute;inset:0;background:
