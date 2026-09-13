@@ -3,6 +3,7 @@
 <head>
   <script src="/portal-config.js?v=36"></script>
   <script src="ml-offline.js"></script>
+  <script src="day-timesheet.js?v=1"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Route — Mostlane</title>
@@ -295,10 +296,18 @@
       +(shift.start_mileage!=null?'<div class="miniline" style="margin-top:12px">Start '+shift.start_mileage.toLocaleString()+(shift.end_mileage!=null?' → end '+shift.end_mileage.toLocaleString():'')+' mi</div>':'')
       +(shift.fuel?'<div class="miniline">Fuel: '+esc(shift.fuel)+'</div>':'')
       +'<div class="miniline">On '+fmtTime(shift.clock_on_at)+' → Off '+fmtTime(shift.clock_off_at)+'</div>'
-      +'<button class="btn primary wide" style="margin-top:12px" id="resumeBtn">▶ Resume my day</button>'
+      +'<button class="btn wide" style="margin-top:12px" id="tsBtn">✏️ Today\'s timesheet</button>'
+      +'<button class="btn primary wide" style="margin-top:8px" id="resumeBtn">▶ Resume my day</button>'
       +'<div class="miniline" style="justify-content:center;margin-top:6px">Emergency job come in? Restart the clock and carry on.</div></div>'
       +historyCard();
     var rb=$("resumeBtn"); if(rb) rb.onclick=function(){ resumeDay(); };
+    var tb=$("tsBtn"); if(tb){
+      tb.onclick=function(){ if(window.MLDaySheet) MLDaySheet.open({date:todayLocal()}); };
+      // Nudge in amber until today's sheet is confirmed.
+      if(window.MLDaySheet&&MLDaySheet.isConfirmed){ MLDaySheet.isConfirmed(todayLocal()).then(function(ok){
+        if(!ok){ tb.textContent="⚠️ Finish today's timesheet"; tb.style.background="#fff7e6"; tb.style.color="#a6710b"; tb.style.fontWeight="700"; }
+      }); }
+    }
   }
   function hoursOnShift(){ if(!shift||!shift.clock_on_at||!shift.clock_off_at) return "—"; var h=(new Date(shift.clock_off_at)-new Date(shift.clock_on_at))/3600000; return (Math.round(h*10)/10)+"h"; }
 
@@ -394,6 +403,8 @@
         return;
       }
     }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
+    // Clocked off — now the day-sheet, while it's fresh in their mind.
+    try{ if(window.MLDaySheet) await MLDaySheet.open({date:todayLocal()}); }catch(e){}
     await loadAll(); render(); toast("Clocked off — have a good evening");
   }
   async function resumeDay(){
@@ -404,6 +415,8 @@
     try{
       var r=await jfetch("/shift/resume",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,date:todayLocal(),opId:opId()})});
       if(!r.ok) throw 0;
+      // Day re-opened — un-confirm today's sheet so the next clock-off re-prompts.
+      try{ if(window.MLDaySheet) await MLDaySheet.reopen(todayLocal()); }catch(e){}
     }catch(e){ alert("Couldn't resume your day — no signal? Try again."); return; }
     // Back on the clock — the mid-shift world is the jobs list.
     location.replace("engineer-jobs.html");

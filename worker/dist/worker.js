@@ -1785,6 +1785,106 @@ async function jobMetaFor(env, tid, days) {
   }
   return meta;
 }
+async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
+  const monday = mondayOf(date);
+  const r2q = (n) => Math.round(n * 4) / 4;
+  const cap2 = {};
+  try {
+    const capWeek = await capturedMinsWeek(env, tid, who, monday);
+    for (const [k, mins] of Object.entries(capWeek)) {
+      const i = k.lastIndexOf("|");
+      if (i > 0 && k.slice(i + 1) === date) cap2[k.slice(0, i)] = (cap2[k.slice(0, i)] || 0) + mins;
+    }
+  } catch {
+  }
+  const booked = /* @__PURE__ */ new Set();
+  const bookMeta = {};
+  try {
+    const nextD = /* @__PURE__ */ new Date(date + "T12:00:00Z");
+    nextD.setUTCDate(nextD.getUTCDate() + 1);
+    const next = nextD.toISOString().slice(0, 10);
+    const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    try {
+      const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of users || []) {
+        map[normId2(u.username)] = u.username;
+        const f = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+        if (f) map[normId2(f)] = u.username;
+      }
+    } catch {
+    }
+    const meN = norm(who);
+    const isMe = (e) => {
+      const r = map[normId2(e)];
+      if (r != null) return r === who;
+      const n = norm(e);
+      return !!n && (n === meN || n.includes(meN) || meN.includes(n));
+    };
+    const londonDate4 = (iso) => {
+      try {
+        return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      } catch {
+        return String(iso).slice(0, 10);
+      }
+    };
+    const { results } = await env.DB.prepare(
+      "SELECT id, helpdesk_ref, site_code, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, date, next + "T23:59:59Z").all();
+    for (const r of results || []) {
+      if (londonDate4(r.scheduled_at) !== date) continue;
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+        continue;
+      }
+      const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+      if (!engs.some(isMe)) continue;
+      booked.add(r.id);
+      bookMeta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "" };
+    }
+  } catch {
+  }
+  const ids = /* @__PURE__ */ new Set([...Object.keys(cap2), ...booked, ...Object.keys(savedJobHours || {})]);
+  if (!ids.size) return { jobs: [], notAttended: [] };
+  const normIdSelf = String(who || "").toLowerCase().replace(/\s+/g, ".").trim();
+  const meta = {};
+  try {
+    const arr = [...ids].slice(0, 200);
+    const ph = arr.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(`SELECT id, helpdesk_ref, site_code, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...arr).all();
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const es = d.engStatus && d.engStatus[normIdSelf];
+      const status = String(es && es.status || d.status || "");
+      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "", status };
+    }
+  } catch {
+  }
+  const NOT_ATTENDED = /* @__PURE__ */ new Set(["scheduled", "pending", "cancelled", "new", ""]);
+  const jobs = [], notAttended = [];
+  for (const id of ids) {
+    const m = meta[id] || bookMeta[id] || { ref: id, site: "", status: "" };
+    const capturedMins = Math.round(cap2[id] || 0);
+    const saved = savedJobHours && savedJobHours[id] != null ? Number(savedJobHours[id]) : null;
+    const attended = saved != null || capturedMins > 0 || !NOT_ATTENDED.has(String(m.status || "").toLowerCase());
+    if (!attended) {
+      notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status });
+      continue;
+    }
+    const hours = saved != null ? saved : capturedMins > 0 ? r2q(capturedMins / 60) : 0;
+    jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " \u2014 " + m.site : ""), capturedMins, hours, status: m.status });
+  }
+  jobs.sort((a, b) => b.capturedMins - a.capturedMins || String(a.ref).localeCompare(String(b.ref)));
+  notAttended.sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+  return { jobs, notAttended };
+}
 async function materialiseTimesheet(env, tid, username, monday, days) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -1987,8 +2087,11 @@ function cleanDays(monday, days) {
       if (isFinite(lh) && lh >= 0) leaveHours = Math.min(24, round1(lh));
     }
     const hasLeave = leaveHours !== null;
-    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave)
-      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {} };
+    let confirmed = null;
+    if (d.confirmed && typeof d.confirmed === "object" && d.confirmed.at)
+      confirmed = { at: String(d.confirmed.at).slice(0, 40), by: String(d.confirmed.by || "").slice(0, 80) };
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
+      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {} };
   }
   return out;
 }
@@ -2998,6 +3101,97 @@ async function handle5(request, env, ctx, url, sess) {
     await materialiseTimesheet(env, tid, me, monday, days);
     const amSave = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
     return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
+  }
+  if (sub === "/day" && method === "GET") {
+    const who = await viewUser();
+    const date = isDateStr(q.get("date")) ? q.get("date") : (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    const monday = mondayOf(date);
+    const u = await userRow(env, tid, who);
+    const eff = effectiveCfg(cfg, u);
+    const { days, approval } = await loadWeek(env, tid, who, monday);
+    const saved = days[date] || {};
+    const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
+    const a = auto[date] || {};
+    const { jobs, notAttended } = await dayJobRows(env, tid, who, date, saved.jobHours || {});
+    const start = saved.start || a.start || "";
+    const finish = saved.finish || a.finish || "";
+    if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
+      const s = toMin(start), f = toMin(finish);
+      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+    }
+    const inv = await invoiceFor(env, tid, who, monday);
+    return json({
+      ok: true,
+      date,
+      week: monday,
+      start,
+      finish,
+      autoStart: a.start || "",
+      autoFinish: a.finish || "",
+      travelHome: !!a.travelHome,
+      note: saved.note || "",
+      jobs,
+      notAttended,
+      confirmed: saved.confirmed || null,
+      locked: !!approval || !!inv,
+      lockReason: inv ? "invoiced" : approval ? "approved" : "",
+      rateType: eff.rateType,
+      name: displayName(u),
+      viewingUser: who !== me ? who : null
+    }, {}, env, request);
+  }
+  if (sub === "/confirm-day" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.date)) return error("date (YYYY-MM-DD) required", 400, env, request);
+    const date = b.date;
+    const monday = mondayOf(date);
+    if (await invoiceFor(env, tid, me, monday))
+      return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
+    const { days, approval } = await loadWeek(env, tid, me, monday);
+    if (approval) return error("This week has been approved by the office and is locked \u2014 ask the office to re-open it if something needs changing.", 423, env, request);
+    const cur = days[date] || {};
+    if (b.reopen) {
+      const { confirmed, ...rest } = cur;
+      days[date] = rest;
+    } else {
+      const jobHours = {};
+      if (b.jobHours && typeof b.jobHours === "object")
+        for (const [jid, hrs] of Object.entries(b.jobHours)) {
+          const h = Math.max(0, Math.min(24, round1(parseFloat(hrs) || 0)));
+          if (h > 0 && jid) jobHours[String(jid).slice(0, 80)] = h;
+        }
+      days[date] = {
+        ...cur,
+        start: b.start != null && toMin(b.start) != null ? String(b.start) : cur.start || "",
+        finish: b.finish != null && toMin(b.finish) != null ? String(b.finish) : cur.finish || "",
+        note: b.note != null ? String(b.note).slice(0, 400) : cur.note || "",
+        jobs: b.jobs != null ? String(b.jobs).slice(0, 400) : cur.jobs || "",
+        jobHours,
+        confirmed: { at: (/* @__PURE__ */ new Date()).toISOString(), by: me }
+      };
+    }
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
+    const cleaned = cleanDays(monday, days);
+    await env.DB.prepare(
+      "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+    ).bind(tid, monday, me, JSON.stringify({ days: cleaned }), (/* @__PURE__ */ new Date()).toISOString()).run();
+    await materialiseTimesheet(env, tid, me, monday, cleaned);
+    if (b.reopen) return json({ ok: true, date, reopened: true }, {}, env, request);
+    const day = cleaned[date] || {};
+    const dc = dayCalc(day, eff);
+    const jh = day.jobHours || {};
+    const jobHoursTotal = round1(Object.values(jh).reduce((a, h) => a + (Number(h) || 0), 0));
+    return json({ ok: true, date, confirmed: true, summary: {
+      start: day.start || "",
+      finish: day.finish || "",
+      spanHours: round1(dc.span / 60),
+      paidHours: round1(dc.paid / 60),
+      jobs: Object.keys(jh).length,
+      jobHoursTotal,
+      miles: dc.miles,
+      rateType: eff.rateType
+    } }, {}, env, request);
   }
   if (sub === "/assigned" && method === "GET") {
     const who = await viewUser();
