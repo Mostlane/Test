@@ -228,3 +228,17 @@ form.addEventListener("submit", async (e) => {
   note.textContent = "Opening your email app to send the enquiry.";
   note.classList.add("ok");
 });
+
+/* ---------- Kitchen menu modal ---------- */
+(function setupMenu(){
+  const modal = document.getElementById("menuModal");
+  const openBtn = document.getElementById("menuBtn");
+  const closeBtn = document.getElementById("menuClose");
+  if (!modal || !openBtn) return;
+  const open = () => { modal.hidden = false; document.body.style.overflow = "hidden"; if (closeBtn) closeBtn.focus(); };
+  const close = () => { modal.hidden = true; document.body.style.overflow = ""; openBtn.focus(); };
+  openBtn.addEventListener("click", open);
+  if (closeBtn) closeBtn.addEventListener("click", close);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
+})();
