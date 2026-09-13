@@ -29,10 +29,11 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser } from "./push.js";
 import { buildProgrammePdf } from "../lib/progpdf.js";
+import { onceMigration } from "../lib/once.js";
 
 const MAX_DATA_BYTES = 400 * 1024;      // a programme JSON should never be near this
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -53,6 +54,7 @@ async function ensureTables(env) {
   try { await env.DB.prepare("ALTER TABLE programme_suggestions ADD COLUMN contractor TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE job_programmes ADD COLUMN updated_by TEXT").run(); } catch {}
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 // Company bank holidays (the Holidays admin's GOV.UK-imported list, stored per
 // year in app_config `holiday:bankholidays:<year>`) — flattened to ISO dates

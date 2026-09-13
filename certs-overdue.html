@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Certificates Overdue</title>
+  <script src="/portal-config.js?v=36"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root{--brand:#003468;--bad:#b00020;--warn:#b45309;--line:#e2e8f0;}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:900px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .head{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+    .head .big{font-size:38px;font-weight:800;color:var(--bad);line-height:1;}
+    .head .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+    .chip{border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:999px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;}
+    .chip.on{background:var(--brand);border-color:var(--brand);color:#fff;}
+    .chip .c{opacity:.7;font-weight:700;margin-left:4px;}
+    #search{width:100%;padding:10px 12px;border:1px solid #ccd5dd;border-radius:10px;font-size:14px;margin-bottom:10px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:6px 12px;margin-bottom:12px;}
+    table{width:100%;border-collapse:collapse;}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;text-align:left;padding:8px;border-bottom:2px solid #eef2f6;}
+    td{padding:9px 8px;border-bottom:1px solid #f2f5f8;vertical-align:middle;font-size:14px;}
+    tr.row{cursor:pointer;} tr.row:hover{background:#f8fafc;}
+    .site{font-weight:600;} .site small{color:#6b7a90;font-weight:400;}
+    .type{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;white-space:nowrap;}
+    .sch{font-size:12px;color:#475569;white-space:nowrap;}
+    .od{color:var(--bad);font-weight:700;white-space:nowrap;}
+    .due{white-space:nowrap;color:#334;}
+    .empty{color:#6b7a90;text-align:center;padding:24px;font-size:14px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/main.html" style="text-decoration:none;">‹ Back</a>
+    <h1>📄 Certificates overdue</h1>
+    <a class="chip" href="compliance.html" style="background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.4);">Compliance charts</a>
+  </header>
+  <div class="wrap">
+    <div class="head" id="head"><div class="muted">Loading…</div></div>
+    <div class="chips" id="chips"></div>
+    <input type="text" id="search" placeholder="Search a site, code or type…">
+    <div class="card"><table><thead><tr><th>Site</th><th>Type</th><th>Scheme</th><th>Due</th><th>Overdue</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></div>
+  </div>
+  <script>
+    const API = window.MOSTLANE_API, g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    const af = (p,o={}) => { o.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},o.headers||{}); return fetch((p.startsWith("http")?p:API+p),o); };
+    const SCHEMES = [
+      { key:"coop", label:"Southern Co-op", page:"eicr-portal.html" },
+      { key:"fareham", label:"Fareham", page:"fareham.html" },
+      { key:"chapplins", label:"Chapplins", page:"chapplins-compliance.html" },
+      { key:"projects", label:"Projects", page:"compliance-projects.html" },
+    ];
+    const TYPE_LABEL = { fiveYear:"5-Year (EICR)", pat:"PAT", em:"EM", emMonthly:"EM Monthly", emYearly:"EM Yearly", pv:"PV", ev:"EV", forecourt:"Forecourt", pump:"Pump", asbestos:"Asbestos", elec:"Electrical", gas:"Gas", bldg:"Building Control", epc:"EPC", alarms:"Alarms", fire:"Fire", legionella:"Legionella", other:"Other" };
+    function daysUntil(d){ if(!d) return null; const t=new Date(String(d)+"T00:00:00"); if(isNaN(t)) return null; return Math.round((t - new Date(new Date().toISOString().slice(0,10)+"T00:00:00"))/86400000); }
+    function fmtDate(d){ try{ const t=new Date(String(d)+"T00:00:00"); return isNaN(t)?String(d):t.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); }catch(e){ return String(d); } }
+    let ALL = [], filter = "all";
+
+    (async () => {
+      try { const me = await af("/auth/me").then(r=>r.json());
+        if(!me.ok || !(me.user.FullAccess==="Yes"||me.user.Compliance==="Yes")){ alert("This page needs Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      g("search").addEventListener("input", render);
+      const initial = new URLSearchParams(location.search).get("scheme");
+      if(initial) filter = initial;
+      await loadAll();
+    })();
+
+    async function loadAll(){
+      ALL = [];
+      await Promise.all(SCHEMES.map(async sc => {
+        let d=null; try{ d = await af("/compliance/stores?scheme="+sc.key).then(r=>r.json()); }catch{}
+        if(!d || !d.ok) return;
+        (d.stores||[]).forEach(s => {
+          if(s.active === 0) return;
+          const due = s.due || {};
+          Object.keys(due).forEach(t => {
+            const n = daysUntil(due[t]);
+            if(n != null && n < 0) ALL.push({ scheme:sc.key, schemeLabel:sc.label, page:sc.page, code:s.code, name:s.name||"", type:t, due:due[t], days:-n });
+          });
+        });
+      }));
+      ALL.sort((a,b) => b.days - a.days);
+      renderHead(); renderChips(); render();
+    }
+    function renderHead(){
+      g("head").innerHTML = ALL.length
+        ? '<div><div class="lbl">Certificates overdue</div><div class="big">'+ALL.length+'</div></div><div class="muted">across '+SCHEMES.filter(sc=>ALL.some(r=>r.scheme===sc.key)).length+' scheme(s) · most overdue first</div>'
+        : '<div style="color:#0a7d33;font-weight:700;">✓ No certificates overdue.</div>';
+    }
+    function renderChips(){
+      const counts = {}; ALL.forEach(r => counts[r.scheme]=(counts[r.scheme]||0)+1);
+      let h = '<button class="chip'+(filter==="all"?" on":"")+'" data-f="all">All <span class="c">'+ALL.length+'</span></button>';
+      SCHEMES.forEach(sc => { if(counts[sc.key]) h += '<button class="chip'+(filter===sc.key?" on":"")+'" data-f="'+sc.key+'">'+esc(sc.label)+' <span class="c">'+counts[sc.key]+'</span></button>'; });
+      g("chips").innerHTML = h;
+      [].forEach.call(g("chips").querySelectorAll(".chip"), b => b.onclick = () => { filter = b.dataset.f; renderChips(); render(); });
+    }
+    function render(){
+      const q = g("search").value.trim().toLowerCase();
+      const rows = ALL.filter(r => (filter==="all"||r.scheme===filter) && (!q || (r.code+" "+r.name+" "+(TYPE_LABEL[r.type]||r.type)+" "+r.schemeLabel).toLowerCase().indexOf(q)>=0));
+      if(!rows.length){ g("rows").innerHTML='<tr><td colspan="5" class="empty">'+(ALL.length?"No matches.":"Nothing overdue. 🎉")+'</td></tr>'; return; }
+      g("rows").innerHTML = rows.map(r =>
+        '<tr class="row" data-page="'+esc(r.page)+'" data-code="'+esc(r.code)+'">'
+        + '<td class="site">'+esc(r.name||r.code)+' <small>'+esc(r.code)+'</small></td>'
+        + '<td><span class="type">'+esc(TYPE_LABEL[r.type]||r.type)+'</span></td>'
+        + '<td class="sch">'+esc(r.schemeLabel)+'</td>'
+        + '<td class="due">'+esc(fmtDate(r.due))+'</td>'
+        + '<td class="od">'+r.days+' day'+(r.days===1?"":"s")+'</td></tr>'
+      ).join("");
+      [].forEach.call(g("rows").querySelectorAll("tr.row"), tr => tr.onclick = () => { location.href = tr.dataset.page + "?code=" + encodeURIComponent(tr.dataset.code); });
+    }
+  </script>
+</body>
+</html>

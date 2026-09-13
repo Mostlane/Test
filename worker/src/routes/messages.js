@@ -11,9 +11,10 @@ import { resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { permissionsFor } from "../lib/auth.js";
+import { onceMigration } from "../lib/once.js";
 
 let READY = false;
-async function ensure(env) {
+async function ensure__raw(env) {
   if (READY) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +54,7 @@ async function ensure(env) {
   )`).run();
   READY = true;
 }
+const ensure = onceMigration(ensure__raw); // once per isolate — see lib/once.js
 // Everyday reads hide soft-deleted rows; only Chat History sees them.
 const LIVE = "COALESCE(deleted,0)=0";
 function isOwner(env, me) { return lc(me) === lc(env.OWNER_USERNAME || "Jamie Line"); }

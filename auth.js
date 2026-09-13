@@ -45,6 +45,8 @@ if (
     localStorage.removeItem("mostlaneLoggedIn");
     localStorage.removeItem("mostlaneUser");
     localStorage.removeItem("mostlaneExpiry");
+    localStorage.removeItem("mostlaneToken");
+    localStorage.removeItem("mostlaneBypassUntil");
 
     sessionStorage.clear();
 

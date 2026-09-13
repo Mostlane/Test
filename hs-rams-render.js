@@ -12,9 +12,10 @@
 // as appendix pages; other files are listed as links; and any remotely-signed
 // sign-off requests fold into the Operative sign-off section.
 (function () {
-  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+  function safeUrl(u){u=String(u==null?"":u).trim();return /^(https?:|mailto:|tel:|blob:|data:image\/|\/|\.\/|\?|#|[A-Za-z0-9_.-]+(\.html|\?|#|$))/i.test(u)&&!/^javascript:/i.test(u)?u:"#";}
   const fmtDate = s => { if (!s) return ""; const d = new Date(s); return isNaN(d) ? s : d.toLocaleDateString("en-GB"); };
-  const sigImg = s => s ? `<img src="${s}" alt="signature" style="max-height:70px;border-bottom:1px solid #333;">` : `<span style="color:#889;">(not signed)</span>`;
+  const sigImg = s => s ? `<img src="${esc(safeUrl(s))}" alt="signature" style="max-height:70px;border-bottom:1px solid #333;">` : `<span style="color:#889;">(not signed)</span>`;
   const bandCol = b => b === "High" ? "#b00020" : b === "Medium" ? "#b26b00" : "#0a7d33";
   const bandBg = b => b === "High" ? "#fdecea" : b === "Medium" ? "#fff6e5" : "#e6f6ec";
 

@@ -10,6 +10,15 @@ name = "mostlane-api"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+# Smart Placement: run the Worker next to the D1 database instead of wherever
+# the phone's request happens to land. Every request makes many sequential D1
+# round trips (session, permissions, then the handler's own queries); measured
+# 9 Sep 2026 at ~200 ms per trip from a far colo vs ~2 ms of actual SQL, so
+# placement dominates response time. Cloudflare picks the location from
+# observed traffic — it takes a day or so of requests to settle, not instant.
+[placement]
+mode = "smart"
+
 # Keep the van-check reminder cron (hourly; self-gates to Mon 07:00 + the
 # pre-deadline chase). Declaring it here restores it automatically on deploy.
 [triggers]

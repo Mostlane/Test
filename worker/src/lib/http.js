@@ -9,7 +9,7 @@ export function corsHeaders(env, request) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Device-Id",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
@@ -20,6 +20,10 @@ export function json(data, init = {}, env, request) {
     status: init.status || 200,
     headers: {
       "Content-Type": "application/json",
+      // API JSON is per-user and often personal: never let the browser (or a
+      // proxy) keep a copy on disk. The pages fetch live every time anyway.
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
       ...corsHeaders(env, request),
       ...(init.headers || {}),
     },

@@ -22,6 +22,11 @@ export const COMPLIANCE_SCHEMES = [
 ];
 export const COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
 
+// A CLIENT login (staffType "client") is tied to one client org and may only
+// ever see that org's compliance chart, read-only + download. This maps a client
+// org key → its compliance scheme. Extend as more clients get a portal login.
+export const ORG_SCHEME = { fbc: "fareham" };
+
 function parseProfile(profile) {
   if (!profile) return {};
   if (typeof profile === "string") { try { return JSON.parse(profile) || {}; } catch { return {}; } }
@@ -44,6 +49,14 @@ export function sanitizeComplianceAccess(input) {
 export function resolveComplianceAccess(profile, perms) {
   const p = parseProfile(profile);
   const pr = perms || {};
+  // A CLIENT login gets read+download on ITS org's scheme ONLY — never any other
+  // scheme, never edit. This is the hard rule regardless of any stored levels.
+  if (p.staffType === "client") {
+    const scheme = ORG_SCHEME[String(p.clientOrg || "").toLowerCase()] || null;
+    const out = {};
+    for (const s of COMPLIANCE_SCHEMES) out[s.key] = (scheme && s.key === scheme) ? "download" : "none";
+    return out;
+  }
   const stored = (p.complianceAccess && typeof p.complianceAccess === "object") ? p.complianceAccess : null;
   const full = yes(pr.FullAccess);
   const office = p.staffType === "office";

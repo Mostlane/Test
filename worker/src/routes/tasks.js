@@ -21,6 +21,8 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
+import { resolveTenantId } from "../lib/tenantdb.js";
+import { onceMigration } from "../lib/once.js";
 
 // Areas a task can be linked to = a permission the assignee needs, plus the
 // audit path fragment that means "they did the job" (for auto-completion).
@@ -46,7 +48,7 @@ const AREA_BY_KEY = {}; for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 
 const RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
 
-async function ensureTables(env) {
+async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -55,7 +57,16 @@ async function ensureTables(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
+  // Machine-to-machine intake bookkeeping: which external system created a task and
+  // its stable external id (dedupe key, e.g. an Outlook message-id). `category`
+  // groups tasks by type (Emails / Compliance / …) for filtering; `ref_date` is the
+  // task's "as of" date (e.g. an email's received date) so age + the >7-day warning
+  // are accurate and self-updating rather than frozen in the title.
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
+    try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
+  }
 }
+const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
 
 // ── London-time helpers (deadlines are UK wall-clock) ────────────────────────
 function lonYMD(d) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
@@ -139,10 +150,113 @@ function shapeTask(t) {
     areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
     areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || "",
+    category: t.category || "", refDate: t.ref_date || "", createdAt: t.created_at || "", link: t.link || "",
   };
 }
 
 export async function handle(request, env, ctx, url, sess) {
+  const methodTop = request.method.toUpperCase();
+  const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
+
+  // ── Machine-to-machine INBOUND (PUBLIC_ROUTES; token verified in-handler) ────
+  // An external scanner (e.g. an Outlook "emails I need to reply to" bot) POSTs a
+  // one-off task into someone's portal task list. Token = TASKS_INBOUND_TOKEN if
+  // set, else the shared JOBS_INBOUND_TOKEN. GET = a no-secret connection check.
+  if (subTop === "/inbound") {
+    const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    if (methodTop === "GET") {
+      let fp = null;
+      if (secret) { const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)); fp = [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8); }
+      return json({ ok: true, configured: !!secret, tokenFingerprint: fp, tokenVar: env.TASKS_INBOUND_TOKEN ? "TASKS_INBOUND_TOKEN" : (env.JOBS_INBOUND_TOKEN ? "JOBS_INBOUND_TOKEN" : null), use: "POST JSON (Authorization: Bearer <token>). Create: {title, externalId, ...}. Close: {externalId, action:'done'} or {externalId, action:'delete'}." }, {}, env, request);
+    }
+    if (methodTop === "POST") {
+      if (!secret) return json({ ok: false, error: "Task intake isn't configured (set TASKS_INBOUND_TOKEN or JOBS_INBOUND_TOKEN)" }, { status: 503 }, env, request);
+      const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+      let diff = tok.length === secret.length ? 0 : 1;
+      for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+      if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
+
+      const tid = await resolveTenantId(env, request);
+      await ensureTables(env);
+      const b = await request.json().catch(() => ({}));
+      const action = String(b.action || "").toLowerCase();
+      const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+
+      // ── Close the loop: mark DONE or DELETE an existing task (matched by the
+      // email's externalId) once I've replied. Idempotent — a no-match is a
+      // success (already gone / never created). ──────────────────────────────
+      const isDone = action === "done" || action === "complete" || b.done === true || b.resolve === true;
+      const isDelete = action === "delete" || action === "remove" || b.delete === true;
+      if (isDone || isDelete) {
+        if (!extKey0) return json({ ok: false, error: "externalId is required to mark done / delete a task" }, { status: 400 }, env, request);
+        const row = await env.DB.prepare("SELECT id, assignees FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey0).first().catch(() => null);
+        if (!row) return json({ ok: true, found: false, note: "No task with that externalId (already removed, or never created)." }, {}, env, request);
+        if (isDelete) {
+          await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
+          await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, row.id).run();
+          return json({ ok: true, found: true, removed: true, id: row.id }, {}, env, request);
+        }
+        // Mark done for each assignee in the one-off ("once") period.
+        let who = []; try { who = JSON.parse(row.assignees || "[]"); } catch {}
+        const nowD = new Date().toISOString();
+        for (const u of who) {
+          await env.DB.prepare("INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at")
+            .bind(tid, row.id, u, "once", nowD, "inbound").run();
+        }
+        return json({ ok: true, found: true, done: true, id: row.id }, {}, env, request);
+      }
+
+      const title = String(b.title || "").trim().slice(0, 300);
+      if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
+      const owner = String(env.OWNER_USERNAME || "Jamie Line");
+      // Resolve each assignee to a real portal username (exact → case-insensitive →
+      // first name), so "jamie", "Jamie Line" etc. all land on the right person.
+      let want = Array.isArray(b.assignees) ? b.assignees : (b.assignee ? [b.assignee] : []);
+      want = want.map(s => String(s || "").trim()).filter(Boolean);
+      if (!want.length) want = [owner];
+      const assignees = [];
+      for (const w of want) {
+        let u = null;
+        try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
+        assignees.push(u || w);
+      }
+      // Keep the detail clean — the email link is stored SEPARATELY (rendered as a
+      // tidy "Open email" button), never glued into the summary text. Strip any URL
+      // a bot pastes into the detail, and capture it as the link if none was given.
+      let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
+      const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
+      const link = String(b.link || urlInDetail || "").slice(0, 800);
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : lonYMD(new Date());
+      const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+      const extKey = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
+      // Type for filtering (Emails / Compliance / …) — defaults to Emails for the
+      // email intake. `date` = the email's RECEIVED date, so the portal shows the
+      // real age + the >7-day warning (self-updating, not frozen in the title).
+      const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
+      const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
+      const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
+      const now = new Date().toISOString();
+      // Dedupe by external id — re-scanning the same email UPDATES the task, never
+      // creates a duplicate.
+      let id = null, created = true;
+      if (extKey) {
+        try { const ex = await env.DB.prepare("SELECT id FROM admin_tasks WHERE tenant_id=? AND ext_key=? LIMIT 1").bind(tid, extKey).first(); if (ex) { id = ex.id; created = false; } } catch {}
+      }
+      if (!id) id = "email-" + crypto.randomUUID();
+      await env.DB.prepare(`INSERT INTO admin_tasks
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+          due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`)
+        .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
+          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null).run();
+      if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
+        sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
+      return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
+    }
+  }
+
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
@@ -242,18 +356,19 @@ export async function handle(request, env, ctx, url, sess) {
     const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
     const id = String(b.id || "") || crypto.randomUUID();
     const existing = b.id ? await env.DB.prepare("SELECT created_at, created_by FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
+    const category = b.category != null ? String(b.category).trim().slice(0, 40) : "";
     await env.DB.prepare(`INSERT INTO admin_tasks
-      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, category)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
         recurrence=excluded.recurrence, due_time=excluded.due_time, due_dow=excluded.due_dow, due_dom=excluded.due_dom,
         due_month=excluded.due_month, due_date=excluded.due_date, area=excluded.area, auto_match=excluded.auto_match,
-        active=excluded.active, updated_at=excluded.updated_at`)
+        active=excluded.active, updated_at=excluded.updated_at, category=excluded.category`)
       .bind(id, tid, title, String(b.detail || "").slice(0, 2000), JSON.stringify(assignees), recurrence, dueTime,
         b.dueDow != null ? Number(b.dueDow) : null, b.dueDom != null ? Number(b.dueDom) : null,
         b.dueMonth != null ? Number(b.dueMonth) : null, b.dueDate ? String(b.dueDate).slice(0, 10) : null,
         area, autoMatch, b.active === false ? 0 : 1,
-        (existing && existing.created_by) || me, (existing && existing.created_at) || now, now).run();
+        (existing && existing.created_by) || me, (existing && existing.created_at) || now, now, category).run();
     // Notify newly-assigned people (best effort).
     if (ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
       sendToUser(env, tid, u, { title: "New task assigned", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));

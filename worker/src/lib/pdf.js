@@ -47,6 +47,8 @@ const ASCIIFY = {
   "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
   "\u2713": "v", "\u2714": "v", "\u2715": "x", "\u2717": "x", "\u221A": "v",
   "\u00A0": " ", "\u2009": " ", "\u202F": " ", "\u200B": "",
+  "\u03A9": "ohm", "\u2126": "ohm",       // Greek omega / ohm sign -> "ohm" (no base-14 glyph)
+  "\u00B5": "u", "\u03BC": "u",           // micro sign / Greek mu -> u
 };
 // Fold a string to what the base-14 WinAnsi fonts can actually draw. Anything
 // still unrepresentable (emoji, CJK…) is DROPPED rather than turned into "?" —
@@ -126,9 +128,11 @@ export class PdfDoc {
   // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
   // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
   // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
-  imageRGB(rgb, iw, ih, x, yTop, w, h) {
+  // opt.deflated=true → `rgb` is the zlib-deflated sample stream (FlateDecode),
+  // which keeps a photo page to a fraction of the raw size.
+  imageRGB(rgb, iw, ih, x, yTop, w, h, opt = {}) {
     const idx = this.images.length;
-    this.images.push({ rgb, w: iw, h: ih });
+    this.images.push({ rgb, w: iw, h: ih, flate: !!opt.deflated });
     const y = this._page.h - yTop - h;
     this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
     return this;
@@ -241,7 +245,7 @@ export class PdfDoc {
     const enc = new TextEncoder();
     const nImg = this.images.length;
     const imgMeta = this.images.map((im) => {
-      if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+      if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: im.flate ? "/FlateDecode" : null };
       const b = im && im.jpeg ? im.jpeg : im;   // back-compat if a bare buffer slipped in
       const d = jpegInfo(b);
       const cs = d.comps === 1 ? "/DeviceGray" : (d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB");

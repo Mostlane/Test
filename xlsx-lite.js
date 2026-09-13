@@ -102,6 +102,13 @@
   }
 
   global.XLSXLite = {
+    // Generic: read one entry's text out of ANY zip (xlsx, docx, …). Returns ""
+    // when the entry is missing. Reuses the same central-directory + deflate-raw
+    // path as the spreadsheet reader.
+    async readZipEntryText(arrayBuffer, name) {
+      try { return await readEntryText(readCentralDirectory(arrayBuffer), name); }
+      catch (e) { return ""; }
+    },
     async parse(arrayBuffer) {
       const zip = readCentralDirectory(arrayBuffer);
       // Worksheet name can vary; default to sheet1 but fall back to the first.

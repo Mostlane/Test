@@ -883,19 +883,34 @@ function openCompoundModal(){
       if(state.compoundRect && state.compoundRect.length>1)
         attachPoly(new google.maps.Polygon({paths:state.compoundRect.map(p=>({lat:p.lat,lng:p.lng}))}));
 
-      const dm=new google.maps.drawing.DrawingManager({drawingControl:false,
-        polylineOptions:{strokeColor:"#e02020",strokeWeight:4,strokeOpacity:.95}});
-      dm.setMap(map);
-      dm.addListener("polylinecomplete",line=>{ dm.setDrawingMode(null); attachRoute(line); });
-      map.addListener("click",e=>{ if(pinMode) setMarker({lat:e.latLng.lat(),lng:e.latLng.lng()}); });
+      // Route drawing prefers the DrawingManager (freehand polyline). If the
+      // drawing library didn't load, we DON'T let that kill the rest of the modal
+      // (buttons + Insert) — the route falls back to tap-to-add-points instead.
+      let dm=null, routeMode=false;
+      try{
+        dm=new google.maps.drawing.DrawingManager({drawingControl:false,
+          polylineOptions:{strokeColor:"#e02020",strokeWeight:4,strokeOpacity:.95}});
+        dm.setMap(map);
+        dm.addListener("polylinecomplete",line=>{ dm.setDrawingMode(null); attachRoute(line); });
+      }catch(e){ dm=null; }
+      map.addListener("click",e=>{
+        const ll={lat:e.latLng.lat(),lng:e.latLng.lng()};
+        if(pinMode){ setMarker(ll); return; }
+        if(routeMode){
+          if(!routeLine) attachRoute(new google.maps.Polyline({path:[ll],strokeColor:"#e02020",strokeWeight:4,strokeOpacity:.95}));
+          else routeLine.getPath().push(new google.maps.LatLng(ll.lat,ll.lng));
+        }
+      });
 
       body.querySelector('[data-areacolor]').addEventListener("input",e=>{
         areaColor=e.target.value; state.compoundBoxColor=areaColor; persist();
         if(poly) poly.setOptions({fillColor:areaColor,strokeColor:areaColor}); });
-      body.querySelector('[data-act="pin"]').onclick  =()=>{ pinMode=true;  dm.setDrawingMode(null); };
-      body.querySelector('[data-act="area"]').onclick =()=>{ pinMode=false; dm.setDrawingMode(null);
+      body.querySelector('[data-act="pin"]').onclick  =()=>{ pinMode=true;  routeMode=false; if(dm)dm.setDrawingMode(null); };
+      body.querySelector('[data-act="area"]').onclick =()=>{ pinMode=false; routeMode=false; if(dm)dm.setDrawingMode(null);
         if(!poly) attachPoly(new google.maps.Polygon({paths:defaultSquare()})); };
-      body.querySelector('[data-act="route"]').onclick=()=>{ pinMode=false; dm.setDrawingMode(google.maps.drawing.OverlayType.POLYLINE); };
+      body.querySelector('[data-act="route"]').onclick=()=>{ pinMode=false;
+        if(dm){ routeMode=false; dm.setDrawingMode(google.maps.drawing.OverlayType.POLYLINE); }
+        else { routeMode=true; alert("Tap the map to add each point of the access route. Drag the points to fine-tune, then Insert image."); } };
       body.querySelector('[data-act="clear"]').onclick=()=>{
         if(marker){marker.setMap(null);marker=null;} if(poly){poly.setMap(null);poly=null;} if(routeLine){routeLine.setMap(null);routeLine=null;}
         state.compoundPin=null; state.compoundRect=null; state.compoundRoute=null; persist(); };

@@ -21,9 +21,17 @@ export async function handle(request, env, ctx, url, sess) {
   // no registration, no caps. (Matches the View As owner account.)
   const OWNER = env.OWNER_USERNAME || "Jamie Line";
 
+  // Both self-service routes act for the LOGGED-IN user only — the username in
+  // the body used to be trusted, which let any caller claim to be the owner
+  // (exempt) or register a device against someone else's account.
+  const me = sess && sess.user ? sess.user.username : null;
+
   if (path === "/device/check-device" && request.method === "POST") {
-    const { username, deviceId } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    const { username: bodyUser, deviceId } = await request.json().catch(() => ({}));
+    if (!me) return error("Not authenticated", 401, env, request);
+    const username = me;
+    if (bodyUser && bodyUser !== me) return error("You can only check your own device", 403, env, request);
+    if (!deviceId) return error("deviceId required", 400, env, request);
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);
 
     const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?")
@@ -40,8 +48,11 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   if (path === "/device/register-device" && request.method === "POST") {
-    const { username, deviceId, label } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    const { username: bodyUser, deviceId, label } = await request.json().catch(() => ({}));
+    if (!me) return error("Not authenticated", 401, env, request);
+    const username = me;
+    if (bodyUser && bodyUser !== me) return error("You can only register your own device", 403, env, request);
+    if (!deviceId) return error("deviceId required", 400, env, request);
     // Owner devices are never tracked — nothing to register, and no row that
     // could later block someone else logging in on the same machine.
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);

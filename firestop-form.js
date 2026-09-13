@@ -12,7 +12,7 @@
    Endpoints (all under /sla/firestop/*): record (GET/POST), materials (GET),
    photo (POST multipart), photo-delete, pdf (GET), bundle (GET).                */
 (function () {
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   const rid = () => "s-" + Math.random().toString(36).slice(2, 8);
 
   function shrink(file, max = 1600) {

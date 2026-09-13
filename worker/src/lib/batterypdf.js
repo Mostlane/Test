@@ -39,11 +39,25 @@ function header(doc, meta) {
   return y + 16;
 }
 
+// A photo arrives as raw JPEG bytes, {jpeg}, {rgb,w,h[,deflated]} or {why} (a
+// reason it couldn't be embedded, printed so a taken photo never silently vanishes).
+function prepPhotos(list) {
+  const draw = [], skipped = [];
+  for (const p of (list || [])) {
+    if (!p) continue;
+    if (p.why) { skipped.push(p.why); continue; }
+    if (p.rgb && p.w && p.h) { draw.push({ rgb: p, w: p.w, h: p.h }); continue; }
+    const b = p.jpeg || p;
+    try { const g = jpegInfo(b); draw.push({ b, w: g.w, h: g.h }); } catch { skipped.push("photo isn't a readable JPEG/PNG"); }
+  }
+  return { draw, skipped };
+}
 function itemBlock(doc, it, idx, y) {
-  const photos = (it.photos || []).map(b => { try { return { b, g: jpegInfo(b) }; } catch { return null; } }).filter(Boolean);
+  const { draw: photos, skipped } = prepPhotos(it.photos);
   const photoH = photos.length ? 96 : 0;
   const noteLines = it.note ? wrapLines(it.note, 8.5, W - M * 2 - 24, 2) : [];
-  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + 14;
+  const skipLine = skipped.length ? (skipped.length + " photo" + (skipped.length > 1 ? "s" : "") + " on file not embedded: " + skipped.join("; ")) : "";
+  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + (skipLine ? 11 : 0) + 14;
   if (y + blockH > H - M) { doc.newPage(W, H); y = M + 6; }
 
   doc.rect(M, y, W - M * 2, blockH, { fill: CARD, stroke: HAIR, lw: 0.8 });
@@ -59,12 +73,17 @@ function itemBlock(doc, it, idx, y) {
   if (photos.length) {
     ty += 4; let cx = px;
     for (const p of photos) {
-      const w = Math.min(150, photoH * (p.g.w / p.g.h));
+      const w = Math.min(150, photoH * (p.w / p.h));
       if (cx + w > W - M - 8) break;
-      try { doc.image(p.b, cx, ty, w, photoH); } catch {}
+      try {
+        if (p.rgb) doc.imageRGB(p.rgb.rgb, p.rgb.w, p.rgb.h, cx, ty, w, photoH, { deflated: !!p.rgb.deflated });
+        else doc.image(p.b, cx, ty, w, photoH);
+      } catch {}
       cx += w + 8;
     }
+    ty += photoH + 8;
   }
+  if (skipLine) { doc.text(px, ty, fit(skipLine, 8, W - M * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] }); }
   return y + blockH + 12;
 }
 

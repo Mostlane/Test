@@ -28,7 +28,7 @@ export async function issuePasswordToken(env, tenantId, username, ttlHours = 1) 
 }
 
 // Send one email. Returns { ok, via } on success, or { ok:false, skipped|error }.
-export async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
+export async function sendEmail(env, { to, subject, html, text, replyTo, attachments, cc }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
 
@@ -38,6 +38,7 @@ export async function sendEmail(env, { to, subject, html, text, replyTo, attachm
     try {
       const payload = { from, to, subject, html, text: body };
       if (replyTo) payload.reply_to = replyTo;
+      if (cc) payload.cc = Array.isArray(cc) ? cc : String(cc).split(/[,;]/).map(s => s.trim()).filter(Boolean);
       // attachments: [{ filename, content: base64String }]
       if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
       const res = await fetch("https://api.resend.com/emails", {

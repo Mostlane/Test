@@ -18,9 +18,10 @@ import { sendToUser } from "./push.js";
 import { PdfDoc, textWidth, jpegInfo } from "../lib/pdf.js";
 import { signedFileUrl } from "../lib/filesign.js";
 import { logoBytes, MOSTLANE_LOGO_W, MOSTLANE_LOGO_H } from "../lib/logo.js";
+import { onceMigration } from "../lib/once.js";
 
 let READY = false;
-async function ensure(env) {
+async function ensure__raw(env) {
   if (READY) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +46,7 @@ async function ensure(env) {
   )`).run();
   READY = true;
 }
+const ensure = onceMigration(ensure__raw); // once per isolate — see lib/once.js
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(r) { try { return await r.json(); } catch { return {}; } }

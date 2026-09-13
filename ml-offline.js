@@ -36,10 +36,19 @@
     var out = {};
     try {
       if (!h) return out;
-      if (typeof h.forEach === "function" && !(h instanceof Array)) { h.forEach(function (v, k) { out[k] = v; }); return out; }
-      Object.keys(h).forEach(function (k) { out[k] = h[k]; });
+      if (typeof h.forEach === "function" && !(h instanceof Array)) { h.forEach(function (v, k) { out[k] = v; }); }
+      else Object.keys(h).forEach(function (k) { out[k] = h[k]; });
     } catch (e) {}
+    // Never keep the session token on disk: the live one is re-attached when
+    // the queue is replayed (a token that has since been revoked simply fails).
+    Object.keys(out).forEach(function (k) { if (/^(authorization|x-device-id)$/i.test(k)) delete out[k]; });
     return out;
+  }
+  function liveAuth(h) {
+    h = Object.assign({}, h || {});
+    try { var t = localStorage.getItem("mostlaneToken"); if (t) h["Authorization"] = "Bearer " + t; } catch (e) {}
+    try { var d = localStorage.getItem("deviceID"); if (d) h["X-Device-Id"] = d; } catch (e) {}
+    return h;
   }
   function count() { return load().length; }
   function emit() { try { window.dispatchEvent(new CustomEvent("ml-offline-change", { detail: { queued: count() } })); } catch (e) {} }
@@ -70,7 +79,7 @@
     for (var i = 0; i < q.length; i++) {
       var it = q[i];
       try {
-        var r = await nativeFetch(it.url, { method: it.method, headers: it.headers, body: it.body });
+        var r = await nativeFetch(it.url, { method: it.method, headers: liveAuth(it.headers), body: it.body });
         // 2xx = applied (idempotency makes a duplicate a no-op). 4xx = the write
         // is invalid on replay (e.g. now fails enforcement) — drop it, don't loop
         // forever. 5xx / network error = keep and retry later.

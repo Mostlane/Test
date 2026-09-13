@@ -96,6 +96,19 @@ export async function handle(request, env, ctx, url, sess) {
 
     // Renamed site number: drop the old row.
     const oldNum = q.get("oldSiteNumber");
+
+    // Guard against duplicate / reserved site numbers. A collision — e.g. a
+    // generic "site" (office/yard) typed with a project's P-number — makes jobs
+    // booked there cross-link into that project (an office-meet job showed under
+    // a live project this way). P#### is reserved for projects; every site
+    // number must be unique. Checked when a number is being SET or CHANGED.
+    if (client !== "projects" && /^p\d/i.test(siteNumber))
+      return error(`"${siteNumber}" uses the project number format (P####), reserved for projects. Give this ${client} site a different number.`, 400, env, request);
+    if (path === "/add-site" || (oldNum && oldNum !== siteNumber)) {
+      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1")
+        .bind(db.tenantId, siteNumber).first();
+      if (dup) return error(`Site number ${siteNumber} is already used by "${dup.site_name}"${dup.client && dup.client !== client ? " (" + dup.client + ")" : ""}. Site numbers must be unique.`, 400, env, request);
+    }
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
@@ -444,13 +457,19 @@ export async function setPOSiteActive(env, name, active) {
 
 async function nextProjectNumber(env, tenantId) {
   const db = tenantDB(env, tenantId);
+  // Scan EVERY site's number (job_number AND site_number, any client) for a
+  // P#### — not just client='projects' — so a new project number can never
+  // collide with a generic site that was typed with a P-number (e.g. the office
+  // or yard). A collision cross-links jobs into the wrong project.
   const { results } = await db.prepare(
-    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
+    "SELECT job_number, site_number FROM sites WHERE tenant_id=?"
   ).bind(db.tenantId).all();
   let max = 0;
   for (const r of results || []) {
-    const m = String(r.job_number).match(/(\d+)\s*$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+    for (const v of [r.job_number, r.site_number]) {
+      const m = String(v || "").match(/^P0*(\d+)$/i);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
   }
   return "P" + String(max + 1).padStart(4, "0");
 }

@@ -56,6 +56,14 @@ await expect("holidays: real admin still admin", call(holidays, "admin", "GET", 
 await expect("holidays: engineer own summary still works", call(holidays, "eng", "GET", "/holiday/summary"), r => r.status === 200);
 await expect("sla: engineer cannot POST /sla/jobs", call(sla, "eng", "POST", "/sla/jobs", { id: "J1", status: "Complete" }), r => r.status === 403);
 await expect("sla: admin can POST /sla/jobs", call(sla, "admin", "POST", "/sla/jobs", { id: "J1", description: "x" }), r => r.status !== 403);
+// Schedule-date sanity: a mistyped year (2006 for 2026) must be refused on every
+// path a client can send a date through, and a real year must still go through.
+const Y = new Date().getUTCFullYear();
+await expect("sla: PATCH with year 2006 refused (400)", call(sla, "admin", "PATCH", "/sla/jobs/J1", { scheduledAt: "2006-09-16T09:00:00.000Z" }), r => r.status === 400 && /2006/.test(String(r.body && r.body.error)));
+await expect("sla: PATCH per-engineer slice with bad year refused", call(sla, "admin", "PATCH", "/sla/jobs/J1", { engSchedule: { eng: { scheduledAt: "2006-09-16T09:00:00.000Z" } } }), r => r.status === 400);
+await expect("sla: PATCH with a real year accepted", call(sla, "admin", "PATCH", "/sla/jobs/J1", { scheduledAt: Y + "-09-16T09:00:00.000Z" }), r => r.status === 200 && r.body && r.body.scheduledAt === Y + "-09-16T09:00:00.000Z");
+await expect("sla: POST /sla/jobs with bad year refused", call(sla, "admin", "POST", "/sla/jobs", { id: "J9", description: "x", scheduledAt: "2036-01-01T09:00:00.000Z" }), r => r.status === 400);
+await expect("sla: PUT /sla/job/{id} with bad year refused", call(sla, "admin", "PUT", "/sla/job/J1", { scheduledStart: "2006-09-16T09:00:00.000Z" }), r => r.status === 400);
 await expect("sla: engineer cannot POST /sla/config", call(sla, "eng", "POST", "/sla/config", { x: 1 }), r => r.status === 403);
 await expect("sla: unassigned engineer cannot PATCH", call(sla, "other", "PATCH", "/sla/jobs/J1", { note: "hi" }), r => r.status === 403);
 await expect("sla: gate-flip + Complete refused (422)", call(sla, "eng", "PATCH", "/sla/jobs/J1", { requiresRA: false, requiresPhoto: false, requiresSignature: false, requiresNote: false, status: "Complete" }), r => r.status === 422);

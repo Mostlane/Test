@@ -10,6 +10,7 @@
 // responses live in the self-migrating `job_reschedule_requests` table.
 
 import { sendEmail, appBase } from "./email.js";
+import { onceMigration } from "./once.js";
 
 const CFG_KEY = "sla_status_emails";
 
@@ -95,13 +96,14 @@ export async function saveStatusEmailConfig(env, tid, cfg) {
 }
 
 // ── reschedule requests table ──────────────────────────────────────────────
-export async function ensureReschedTable(env) {
+async function ensureReschedTable__raw(env) {
   await tdb(env).prepare(`CREATE TABLE IF NOT EXISTS job_reschedule_requests (
     id TEXT PRIMARY KEY, tenant_id TEXT, job_id TEXT, job_ref TEXT, site_name TEXT,
     note TEXT, suggestions TEXT, created_at TEXT, status TEXT DEFAULT 'open',
     resolved_at TEXT, resolved_by TEXT, ip TEXT
   )`).run();
 }
+export const ensureReschedTable = onceMigration(ensureReschedTable__raw); // once per isolate — see lib/once.js
 
 // ── recipient resolution ───────────────────────────────────────────────────
 // Site contact email (by the job's site code / name) then the customer email

@@ -18,7 +18,7 @@ import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { trackJobTime } from "./timesheets.js";
-import { permissionsFor } from "../lib/auth.js";
+import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermission } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
@@ -28,6 +28,44 @@ import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
 import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
 import { onStatusTransition } from "../lib/statusemail.js";
+
+// ── Schedule-date sanity ───────────────────────────────────────────────
+// A job scheduled with a mistyped year (2006 typed for 2026, 8 Sep 2026) was
+// accepted verbatim, so it sat in the DB dated twenty years ago and fell
+// outside every dated view — the scheduler, the engineer's day, the live
+// board. A schedule date must land within a plausible window of NOW; anything
+// else is a typo and is refused with a message naming the year it got.
+const SCHED_YEARS_BACK = 1, SCHED_YEARS_FWD = 3;
+export function badScheduleDate(iso, label = "Scheduled date") {
+  if (iso === undefined || iso === null || iso === "") return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return `${label} isn't a valid date/time.`;
+  const y = new Date(t).getUTCFullYear(), now = new Date().getUTCFullYear();
+  if (y < now - SCHED_YEARS_BACK || y > now + SCHED_YEARS_FWD)
+    return `${label} has the year ${y} — check the date (expected ${now - SCHED_YEARS_BACK}–${now + SCHED_YEARS_FWD}).`;
+  return null;
+}
+// Every schedule field a client can send on a job body, in one check.
+export function badScheduleIn(body) {
+  if (!body || typeof body !== "object") return null;
+  let e = badScheduleDate(body.scheduledAt, "Scheduled start")
+    || badScheduleDate(body.scheduledStart, "Scheduled start")
+    || badScheduleDate(body.scheduledEnd, "Scheduled finish");
+  if (e) return e;
+  const sfe = body.scheduleForEngineer;
+  if (sfe && typeof sfe === "object") {
+    e = badScheduleDate(sfe.scheduledAt, "Engineer's start") || badScheduleDate(sfe.scheduledEnd, "Engineer's finish");
+    if (e) return e;
+  }
+  if (body.engSchedule && typeof body.engSchedule === "object") {
+    for (const [k, v] of Object.entries(body.engSchedule)) {
+      if (!v || typeof v !== "object") continue;
+      e = badScheduleDate(v.scheduledAt, `${k}'s start`) || badScheduleDate(v.scheduledEnd, `${k}'s finish`);
+      if (e) return e;
+    }
+  }
+  return null;
+}
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -330,6 +368,20 @@ export async function handle(request, env, ctx, url, sess) {
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
+        // Re-sign every photo URL from its stored key — the URL saved on the
+        // record at UPLOAD time is only valid 24h, so a record opened later
+        // (office review, PDF, next day) showed broken thumbnails. Always hand
+        // back fresh signed URLs.
+        try {
+          const fresh = async (arr) => Promise.all((arr || []).map(async p => (
+            (p && p.key) ? { ...p, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", p.key, 86400) } : p
+          )));
+          for (const s of (rec.seals || [])) {
+            if (!s) continue;
+            s.beforePhotos = await fresh(s.beforePhotos);
+            s.afterPhotos = await fresh(s.afterPhotos);
+          }
+        } catch {}
         // Sensible header defaults the engineer can override.
         const installer = rec.installer || (job.assignedTo || (sess.user && sess.user.username) || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
@@ -386,8 +438,8 @@ export async function handle(request, env, ctx, url, sess) {
       const seals = await Promise.all((rec.seals || []).map(async s => ({
         sealRef: s.sealRef || rec.ref, date: s.date, by: s.by, location: s.location, aperture: s.aperture,
         frp: s.frp, manufacturer: s.manufacturer, componentName: s.componentName, comments: s.comments,
-        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
-        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean),
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map(p => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map(p => r2Bytes(p && p.key ? p.key : p)))).filter(Boolean),
       })));
       const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
       let logo = null; try { logo = logoBytes(); } catch {}
@@ -541,6 +593,14 @@ export async function handle(request, env, ctx, url, sess) {
     if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
 
     const b = await readJson(request);
+    // ── action:"cancel" — the client cancelled a job (Concerto "Cancelled Job" /
+    // "Quote … Cancel request" emails). Finds the incident's job(s) and marks the
+    // OPEN one Cancelled with a timestamp + the client's reason; a job we've
+    // already finished only gets the cancellation NOTED on it (never un-completed).
+    if (b && String(b.action || "").toLowerCase() === "cancel") {
+      const r = await cancelIncidentJobs(env, tenantId, ctx, b);
+      return jsonResponse(r, headers, r.ok ? 200 : (r.notFound ? 404 : 400));
+    }
     if (!b || (!String(b.reference || "").trim() && !String(b.description || "").trim()))
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
 
@@ -558,6 +618,7 @@ export async function handle(request, env, ctx, url, sess) {
       .replace(/\s+/g, " ").trim();
     const payload = {
       reference: cleanRef || undefined,
+      dedupeByRef: true,   // machine intake: a re-sent email UPDATES the same job (dedupe by reference)
       description: String(b.description || "").trim() || undefined,
       priority, raisedAt,
       status: b.status || undefined,
@@ -575,8 +636,35 @@ export async function handle(request, env, ctx, url, sess) {
       durationMinutes: b.durationMinutes || undefined,
       changedBy: "zapier"
     };
+    // ── The SAME INCIDENT again (Concerto re-assigns / re-opens an incident) ──
+    // Jobs from this path are keyed by reference, so a repeat used to either
+    // silently REWRITE a finished job (same reference back again — a re-opened
+    // incident) or create an unrelated second job ("00028541/2" after we attended
+    // "00028541/1", quoted, and the client ordered the works). Now: a repeat of an
+    // OPEN job still updates it; a repeat of a FINISHED job, or a new suffix of an
+    // incident we already hold, becomes a NEW VISIT linked to the earlier job
+    // (revisitOf / visitGroupId — the same chain the office 🔁 Re-visit makes), so
+    // the board shows the ×N badge and the history is in one place.
+    let before = null, sameIncident = null;
+    try { sameIncident = await matchSameIncident(env, tenantId, payload.reference); } catch {}
+    if (sameIncident && sameIncident.open) {
+      payload.id = sameIncident.open.id;                 // genuine re-send → update the open job
+      before = sameIncident.open;
+    } else if (sameIncident && sameIncident.prev) {
+      const prev = sameIncident.prev;
+      payload.id = crypto.randomUUID();                   // a fresh visit, never an overwrite
+      delete payload.dedupeByRef;
+      payload.revisitOf = prev.id;
+      payload.visitGroupId = prev.visitGroupId || prev.id;
+      const when = String(prev.closedAt || prev.updatedAt || prev.createdAt || "").slice(0, 10);
+      const why = sameIncident.kind === "reopened"
+        ? `↩ Same incident sent again by the client — previous visit ${prev.helpdeskRef || prev.id} was ${prev.status}${when ? " (" + when + ")" : ""}.`
+        : `↩ Re-assigned incident — follows our earlier visit ${prev.helpdeskRef || prev.id} (${prev.status}${when ? ", " + when : ""}); usually the ordered works after a quote.`;
+      payload.description = [payload.description || "", why].filter(Boolean).join("\n\n");
+    } else if (!sameIncident) {
+      before = payload.reference ? await d1Retry(() => getJob(env, tenantId, payload.reference)) : null;
+    }
     const beforeId = payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     // Auto-assign a NEW incoming job to the engineer set in SLA Settings, when the
     // sender (Zap) didn't set one — so P1s (or all, per config) land on someone
     // automatically without a Zap step. Only on first intake; a re-sent email
@@ -597,11 +685,16 @@ export async function handle(request, env, ctx, url, sess) {
         payload.status = "Scheduled";
       }
     }
-    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
+    // A client order for this reference may already be waiting → stamp its value on.
+    try { if (await applyOrderToJob(env, tenantId, job)) job = (await getJob(env, tenantId, job.id)) || job; } catch {}
     // reconcileRelease is the single per-engineer push path (it pushes each newly
     // assigned / newly-visible engineer, so notifyNewlyAssigned is no longer needed).
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
-    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+    const linked = sameIncident && sameIncident.prev && !sameIncident.open ? sameIncident : null;
+    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt,
+      ...(linked ? { linkedVisit: true, visitKind: linked.kind, previousRef: linked.prev.helpdeskRef || "", previousId: linked.prev.id, previousStatus: linked.prev.status, visitGroupId: payload.visitGroupId } : {}) }, headers, before ? 200 : 201);
 
     /* fallthrough guard (never reached) */
   }
@@ -644,6 +737,7 @@ export async function handle(request, env, ctx, url, sess) {
     // below); machine intake uses /sla/inbound.
     if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson(request);
+    { const bad = badScheduleIn(payload); if (bad) return jsonResponse({ error: bad }, headers, 400); }
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
@@ -653,7 +747,15 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* GET /sla/jobs (with filters) */
   if (subpath === "/jobs" && method === "GET") {
-    let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
+    const allList = await listJobs(env, tenantId);
+    // releaseView.hidden = the engineer can't see it RIGHT NOW (gated time not
+    // reached / queued behind an earlier job / skipped) — the office 🙈 marker.
+    let jobs = allList.map(j => {
+      const d = decorateJobWithLiveSla(j);
+      if (d.releaseView) d.releaseView.hidden = !releaseVisibleNow(j, allList);
+      return d;
+    });
+    if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -733,7 +835,7 @@ export async function handle(request, env, ctx, url, sess) {
       const terms = q.split(/\s+/).map(t => t.replace(/[%_\\]/g, "")).filter(Boolean).slice(0, 8);
       if (terms.length) {
         const where = terms.map(() => "search LIKE ?").join(" AND ");
-        const likes = terms.map(t => "%" + t + "%");
+        const likes = terms.map(t => "%" + likeKey(t, 40) + "%");   // D1: LIKE pattern ≤ 50 bytes
         total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
         ({ results: rows } = await db.prepare(`SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
@@ -788,7 +890,10 @@ export async function handle(request, env, ctx, url, sess) {
       // the caller can offer to open it instead. (This is exactly the David Molloy
       // 0107 "wall above the sink" case.)
       if (!body.force) {
-        const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
+        // D1 caps a LIKE pattern at 50 BYTES ("LIKE or GLOB pattern too complex"
+        // otherwise), so the SQL pre-filter uses only a short byte-safe prefix;
+        // the exact 80-char comparison below is done in JS on the candidates.
+        const dkey = likeKey(desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, ""), 40);
         if (dkey) {
           const { results } = await db.prepare(
             "SELECT id, helpdesk_ref, status, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id<>? AND lower(data) LIKE ? LIMIT 30"
@@ -1059,8 +1164,123 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(jobs.map(j => {
       const ms = effStatus(j, engineer);
       const es = effSchedule(j, engineer);
-      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
+      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
+  }
+
+  /* GET /sla/live — a live "where's everyone" board for the office. For each field
+     engineer it works out: the job they're ON NOW (Travelling / In Progress), and
+     what they SHOULD BE on next (their next unfinished scheduled job today, incl. a
+     project/fallback day). Uses each engineer's OWN per-engineer status + schedule
+     (effStatus/effSchedule), NOT the release-gated for-engineer view, so the office
+     sees the true plan. Returns the whole planned day per engineer for the modal.
+     Office view (FullAccess | SLAAdmin | WhereEveryone — the dedicated toggle in Users Admin). */
+  if (subpath === "/live" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const permSet = await userPerms(env, tenantId, sess);
+    if (!(permSet.has("FullAccess") || permSet.has("SLAAdmin") || permSet.has("WhereEveryone")))
+      return jsonResponse({ error: "Needs the Where's everyone permission" }, headers, 403);
+    const today = londonNow().date;
+    const londonDay = (iso) => { try { const d = new Date(iso); return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); } catch { return ""; } };
+    const allJobs = (await listJobs(env, tenantId)).filter(j => j && String(j.status || "").toLowerCase() !== "cancelled");
+    const { results: users } = await env.DB.prepare(
+      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')"
+    ).bind(tenantId).all();
+    const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office"; });
+    let leave = {};
+    try { const { approvedLeaveInRange } = await import("./holidays.js"); leave = await approvedLeaveInRange(env, tenantId, today, today); } catch {}
+    const isDone = s => DONE_STATES.has(String(s || "").toLowerCase());
+    const isActive = s => s === "In Progress" || s === "Travelling";
+    const shape = (a) => a ? ({
+      jobId: a.job.id, ref: a.job.helpdeskRef || a.job.reference || "",
+      site: a.job.siteName || a.job.helpdeskRef || a.job.reference || "", siteCode: a.job.siteCode || "",
+      status: a.status, priority: a.job.priority || "", scheduledAt: a.scheduledAt || "", scheduledEnd: a.scheduledEnd || "",
+      since: a.since || "", projectId: a.job.projectId || null, isProject: !!a.job.projectId, isFallback: !!a.job.fallback,
+    }) : null;
+    const engineers = fieldUsers.map(u => {
+      const norm = normId(u.username);
+      const name = (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username;
+      const onLeave = !!((leave[u.username] || leave[norm] || {})[today]);
+      const mine = allJobs.filter(j => assignedList(j).some(a => normId(a) === norm)).map(j => {
+        const st = effStatus(j, norm), sc = effSchedule(j, norm);
+        const es = (j.engStatus && j.engStatus[norm]) || null;
+        return { job: j, status: st, scheduledAt: sc.scheduledAt, scheduledEnd: sc.scheduledEnd, day: sc.scheduledAt ? londonDay(sc.scheduledAt) : "", since: es ? es.at : (isActive(st) ? j.updatedAt : "") };
+      });
+      // Today = scheduled today OR currently active (a job left running from before).
+      const todays = mine.filter(a => a.day === today || isActive(a.status));
+      const active = todays.filter(a => isActive(a.status)).sort((x, y) => String(y.since || "").localeCompare(String(x.since || "")));
+      const current = active[0] || null;
+      const upcoming = todays.filter(a => !isDone(a.status) && !isActive(a.status)).sort((x, y) => String(x.scheduledAt || "9").localeCompare(String(y.scheduledAt || "9")));
+      const next = upcoming[0] || null;
+      const planned = todays.slice().sort((x, y) => String(x.scheduledAt || "~").localeCompare(String(y.scheduledAt || "~")));
+      const category = current ? "on_job" : (next ? "should_be" : (onLeave ? "off" : "idle"));
+      return { username: u.username, name, onLeave, category, current: shape(current), next: shape(next), planned: planned.map(shape), count: todays.length };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return jsonResponse({ ok: true, date: today, engineers }, headers);
+  }
+
+  /* GET /sla/not-attended?days=N — the "following-day" warning: reactive SLA jobs
+     that were ALLOCATED to an engineer and BOOKED for a day now in the PAST, but
+     were never finished. So the office can chase / reschedule them the next
+     morning. SLA jobs ONLY — projects (incl. the Yard/Office project sites),
+     fleet MOT/service renewals and standby/fallback jobs are excluded, because a
+     planned/internal job "not done on the day" is normal, not a miss.
+     Office view (FullAccess | SLA | SLAAdmin). */
+  if (subpath === "/not-attended" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const permSet = await userPerms(env, tenantId, sess);
+    if (!(permSet.has("FullAccess") || permSet.has("SLA") || permSet.has("SLAAdmin")))
+      return jsonResponse({ error: "Needs the SLA permission" }, headers, 403);
+    const today = londonNow().date;                          // YYYY-MM-DD (Europe/London)
+    const daysBack = Math.max(1, Math.min(365, parseInt(url.searchParams.get("days") || "14", 10) || 14));
+    const cutoff = new Date(Date.now() - daysBack * 864e5).toISOString().slice(0, 10);
+    const londonDay = (iso) => { try { const d = new Date(iso); return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); } catch { return ""; } };
+    const doneNames = new Set((await getCategories(env, tenantId)).filter(c => c.done).map(c => String(c.name).toLowerCase()));
+    const finished = s => { const v = String(s || "").toLowerCase(); return DONE_STATES.has(v) || doneNames.has(v); };
+    const parked = s => { const v = String(s || "").toLowerCase(); return v === "on hold" || v === "quote" || v === "order"; };
+    // A genuine reactive SLA job: NOT a project, NOT a fleet renewal, NOT a
+    // standby/fallback. (Dormant templates are already dropped by listJobs.)
+    const isSlaReactive = j => !jobIsProject(j) && !j.projectId
+      && !j.fleetRenewal && !j.renewalType && String(j.storeType || "").toLowerCase() !== "fleet"
+      && !j.fallback;
+    const all = await listJobs(env, tenantId);
+    // Engineer display names for the list.
+    let nameByNorm = {};
+    try {
+      const { results: us } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tenantId).all();
+      for (const u of (us || [])) nameByNorm[normId(u.username)] = (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username;
+    } catch {}
+    const jobs = [];
+    for (const j of all) {
+      if (!isSlaReactive(j)) continue;
+      const missed = [];
+      let earliest = "";
+      for (const a of assignedList(j)) {
+        const norm = normId(a);
+        const sc = effSchedule(j, norm);
+        if (!sc.scheduledAt) continue;                       // never booked to a day → not a "missed" day
+        const day = londonDay(sc.scheduledAt);
+        if (!day || day >= today) continue;                  // today or future → the day isn't over
+        if (day < cutoff) continue;                          // older than the window
+        const st = String(effStatus(j, norm) || "");
+        if (finished(st) || parked(st)) continue;            // done or legitimately parked
+        missed.push({ engineer: nameByNorm[norm] || a, status: st, day });
+        if (!earliest || day < earliest) earliest = day;
+      }
+      if (!missed.length) continue;
+      const daysAgo = earliest ? Math.round((Date.parse(today) - Date.parse(earliest)) / 864e5) : 0;
+      jobs.push({
+        id: j.id, ref: j.helpdeskRef || j.reference || j.id,
+        site: j.siteName || j.helpdeskRef || j.reference || "", siteCode: j.siteCode || "",
+        priority: j.priority || "", storeType: j.storeType || "",
+        scheduledDay: earliest, daysAgo,
+        engineers: missed
+      });
+    }
+    // Most-recently-missed first; a P1 floats above same-day others.
+    const pr = p => { const m = String(p || "").match(/(\d)/); return m ? parseInt(m[1], 10) : 9; };
+    jobs.sort((a, b) => (b.scheduledDay || "").localeCompare(a.scheduledDay || "") || pr(a.priority) - pr(b.priority));
+    return jsonResponse({ ok: true, date: today, days: daysBack, count: jobs.length, jobs }, headers);
   }
 
   /* POST /sla/route-optimize — order ONE engineer's jobs for a day into the most
@@ -1317,9 +1537,12 @@ export async function handle(request, env, ctx, url, sess) {
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
     // ── Day-end protection ──────────────────────────────────────────────────
-    // An engineer can't finish their day while jobs are still outstanding:
-    //   • any job they've actively started (Travelling / In Progress), any date;
-    //   • any job booked for TODAY they haven't started (Scheduled/Pending).
+    // An engineer can finish their day AT ANY POINT. The ONLY thing that blocks
+    // is a job they've actively STARTED and not finished (Travelling / In
+    // Progress, any date) — leaving a job running mid-visit is the real risk
+    // (its evidence/packs, and the timesheet segment). A job merely booked for
+    // today that they never got to does NOT block: running out of time on a
+    // scheduled visit is normal, it just rolls forward still assigned.
     // Parked jobs (On Hold / Quote — which already required their packs to set)
     // and finished ones (Complete / Closed / done-categories) don't block.
     // An office admin can pass force:true to close a stuck day.
@@ -1342,12 +1565,11 @@ export async function handle(request, env, ctx, url, sess) {
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
-          const today = j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
-          if (active || today) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+          if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
         }
         if (outstanding.length) {
           return jsonResponse({
-            error: "You still have " + outstanding.length + " unfinished job" + (outstanding.length === 1 ? "" : "s") + " today — finish them before ending your day.",
+            error: "You still have " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " in progress — finish or park " + (outstanding.length === 1 ? "it" : "them") + " before ending your day.",
             outstanding
           }, headers, 409);
         }
@@ -1436,6 +1658,7 @@ export async function handle(request, env, ctx, url, sess) {
     const id = safeDecode(subpath.split("/").filter(Boolean)[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     const body = await readJson(request);
+    { const bad = badScheduleIn(body); if (bad) return jsonResponse({ error: bad }, headers, 400); }
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
       scheduledEnd: body.scheduledEnd,
@@ -1450,6 +1673,7 @@ export async function handle(request, env, ctx, url, sess) {
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+    if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -1694,6 +1918,26 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(out, headers);
     }
 
+    // DELETE /sla/jobs/{id}/files?key=  (or ?filename=)  -> remove a job photo.
+    // FULL ACCESS ONLY — office/admins clean up photos an engineer added; the real
+    // actor is recorded in audit_log even though the office can attribute notes to
+    // others. Only ever deletes within THIS job's own photo folder.
+    if (parts[2] === "files" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Only Full Access can delete photos." }, headers, 403);
+      let key = searchParams.get("key") || "";
+      if (!key) { const fn = searchParams.get("filename"); if (fn) key = `jobs/${id}/photos/${fn}`; }
+      if (!key.startsWith(`jobs/${id}/photos/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try { await env.JOB_FILES.delete(key); await env.JOB_FILES.delete(key + ".thumb"); } catch {}
+      // Drop any admin photo-stage override that pointed at the removed file.
+      try {
+        const j = await getJob(env, tenantId, id);
+        const name = key.split("/").pop();
+        if (j && j.photoStages && name in j.photoStages) { delete j.photoStages[name]; j.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, j); }
+      } catch {}
+      return jsonResponse({ ok: true, key }, headers);
+    }
+
     // POST /sla/jobs/{id}/audit-photo  -> attach a photo to a site-audit checklist
     // item. stage=ref (office reference/before) OR stage=done (engineer completion,
     // which marks the item complete). Multipart: file, thumb?, itemId, stage.
@@ -1828,8 +2072,9 @@ export async function handle(request, env, ctx, url, sess) {
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
             const dstKey = `jobs/${newId}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
-            try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata }); } catch {}
+            const bytes = await obj.arrayBuffer();
+            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+            try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata }); } catch {}
             refPhotos.push(dstKey);
           } catch {}
         }
@@ -1881,7 +2126,6 @@ export async function handle(request, env, ctx, url, sess) {
       const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : (src.durationMinutes || undefined);
       const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean)
         : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
-      const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
       // Optional re-visit note (e.g. the snag): when given it becomes the PRIMARY
       // description, with the original visit's description kept below as secondary.
       const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4000);
@@ -1889,67 +2133,8 @@ export async function handle(request, env, ctx, url, sess) {
       const description = rvNote
         ? (rvNote + (oldDesc ? "\n\n— Original job —\n" + oldDesc : ""))
         : oldDesc;
-      const payload = {
-        id: crypto.randomUUID(),
-        reference: src.helpdeskRef || src.siteName || src.siteCode,
-        description,
-        siteCode: src.siteCode, siteName: src.siteName,
-        address: src.address, postcode: src.postcode, telephone: src.telephone,
-        storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
-        priority: src.priority || "",
-        requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
-        requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
-        firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
-        workArea: src.workArea || undefined, projectId: src.projectId || undefined,
-        assignedEngineers: engineers,
-        scheduledAt, durationMinutes,
-        revisitOf: src.id, visitGroupId: groupId,
-        changedBy: (sess.user && sess.user.username) || "system",
-      };
-      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-      // Carry the original visit's FILES across (all photos, signatures, audit +
-      // remedial photos) by copying the whole R2 prefix to the new job id.
-      const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
-      if (env.JOB_FILES) {
-        try {
-          let cursor;
-          do {
-            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
-            for (const o of (listed.objects || [])) {
-              try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
-            }
-            cursor = listed.truncated ? listed.cursor : null;
-          } while (cursor);
-        } catch {}
-      }
-      // Carry the evidence FIELDS onto the new job (notes, RA, signature, photo tags,
-      // audit/remedial items) with their file keys re-pathed to the new id.
-      try {
-        const nj = await getJob(env, tenantId, job.id);
-        if (nj) {
-          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
-          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
-          if (src.photoStages) nj.photoStages = { ...src.photoStages };
-          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
-            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
-          }
-          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
-            refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
-          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
-          nj.updatedAt = new Date().toISOString();
-          await saveJob(env, tenantId, nj);
-        }
-      } catch {}
-      // Stamp the ROOT job with the group id too, so the whole chain shares one key.
-      if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
-      // Stamp every job in the group with the current visit count (for the board /
-      // scheduler "×N" badge) — accurate regardless of which are filtered per view.
-      try {
-        const all = await listJobs(env, tenantId, { includeDormant: true });
-        const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
-        const cnt = members.length;
-        for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
-      } catch {}
+      const job = await cloneJobAsVisit(env, tenantId, src, { description, scheduledAt, durationMinutes, assignedEngineers: engineers, changedBy: (sess.user && sess.user.username) || "system" });
+      const groupId = job.visitGroupId || src.id;
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
     }
@@ -1962,13 +2147,32 @@ export async function handle(request, env, ctx, url, sess) {
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
+      const money = await canSeeMoney(env, tenantId, sess.user.username);
       const visits = all.filter(j => j && (((j.visitGroupId || j.id) === groupId) || j.revisitOf === groupId))
         .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "",
           scheduledAt: j.scheduledAt || null, raisedAt: j.raisedAt || null, closedAt: j.closedAt || null,
           isRoot: j.id === groupId, current: j.id === src.id,
+          orderNumber: j.orderNumber || null, ...(money ? { orderValue: j.orderValue ?? null } : {}),
           engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [] }))
         .sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
       return jsonResponse({ ok: true, groupId, visits }, headers);
+    }
+
+    // GET /sla/jobs/{id}/series — the other days in this job's recurring series
+    // (same seriesId). Powers the "delete just this day / the whole series?"
+    // prompt so the office can see how many days it would affect. Empty when the
+    // job isn't part of a series.
+    if (parts[2] === "series" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
+      const all = await listJobs(env, tenantId, { includeDormant: true });
+      const jobs = all.filter(j => j && j.seriesId === src.seriesId)
+        .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "",
+          status: j.status || "", scheduledAt: j.scheduledAt || null, current: j.id === src.id }))
+        .sort((a, b) => new Date(a.scheduledAt || 0) - new Date(b.scheduledAt || 0));
+      return jsonResponse({ ok: true, seriesId: src.seriesId, jobs }, headers);
     }
 
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
@@ -2122,6 +2326,32 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
+    // POST /sla/jobs/{id}/undo-schedule — one-tap revert of the last schedule
+    // change (the common "I nudged it on my phone" fumble). Restores the times
+    // snapshotted on the job by patchJob; running through patchJob again snapshots
+    // the reverted-from times, so pressing it a second time redoes.
+    if (parts[2] === "undo-schedule" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const before = await getJob(env, tenantId, id);
+      if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
+      const ps = before.prevSchedule;
+      if (!ps) return jsonResponse({ error: "Nothing to undo — no earlier schedule on file for this job." }, headers, 400);
+      const patch = {
+        scheduledAt: ps.scheduledAt || null,
+        scheduledEnd: ps.scheduledEnd || null,
+        engSchedule: ps.engSchedule || {},   // {} clears the per-engineer map back to none
+        changedBy: sess.user.username
+      };
+      if (ps.durationMinutes) patch.durationMinutes = ps.durationMinutes;
+      const updated = await patchJob(env, tenantId, id, patch, ctx);
+      if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
+      if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      return updated
+        ? jsonResponse(decorateJobWithLiveSla(updated), headers)
+        : jsonResponse({ error: "Not found" }, headers, 404);
+    }
+
     // POST /sla/jobs/{id}/ra-resolve — an admin clears a safety flag (controls
     // now in place / reassigned / rescheduled). Releases + notifies the engineer.
     if (parts[2] === "ra-resolve" && method === "POST") {
@@ -2150,10 +2380,11 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const d = decorateJobWithLiveSla(job);
+      let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));   // this viewer's own slice
       if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);   // add viewable photo URLs
       if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);        // electrical-test remedials
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) d = stripMoney(d);
       return jsonResponse(d, headers);
     }
 
@@ -2167,22 +2398,39 @@ export async function handle(request, env, ctx, url, sess) {
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).run();
-      // Purge the job's uploads (photos, signatures, files) from R2.
-      try {
-        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
-        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
-      } catch {}
-      // Remove any unverified (draft/submitted) EM/PAT certificates this job made;
-      // finalised ones stay filed on the compliance chart.
-      await purgeUnverifiedCertsForJob(env, tenantId, id);
-      return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
+      // scope=series → delete EVERY day in this job's recurring series (same
+      // seriesId), not just this one. Default (no scope) deletes only this job,
+      // so cancelling Thursday never knocks off Mon/Tue/Wed of the same series.
+      const delScope = searchParams.get("scope");
+      let targets = [job];
+      if (delScope === "series" && job.seriesId) {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const sibs = all.filter(j => j && j.seriesId === job.seriesId);
+        if (sibs.length) targets = sibs;
+      }
+      let deletedCount = 0;
+      for (const t of targets) {
+        const res = await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, t.id).run();
+        if (res.meta?.changes) deletedCount++;
+        // Purge the job's uploads (photos, signatures, files) from R2.
+        try {
+          const listed = await env.JOB_FILES.list({ prefix: `jobs/${t.id}/` });
+          for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+        } catch {}
+        // Remove any unverified (draft/submitted) EM/PAT certificates this job made;
+        // finalised ones stay filed on the compliance chart.
+        await purgeUnverifiedCertsForJob(env, tenantId, t.id);
+      }
+      return jsonResponse({ ok: true, deleted: id, count: deletedCount,
+        series: (delScope === "series" && job.seriesId) ? job.seriesId : null,
+        reference: job.helpdeskRef || id }, headers);
     }
 
     // PATCH /sla/jobs/{id}  — status changes, packs, scheduler assign/drag-drop.
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
       const body = await readJson(request);
+      { const bad = badScheduleIn(body); if (bad) return jsonResponse({ error: bad }, headers, 400); }
 
       // Offline replay guard: if this exact op already landed, return the job
       // as-is instead of re-applying (no duplicate history/notifications).
@@ -2250,7 +2498,7 @@ export async function handle(request, env, ctx, url, sess) {
         // Cross-job guard — but EM/PAT jobs are exempt (they're meant to overlap):
         // starting one is never blocked, and one mid-drain-down never blocks others.
         if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress") && !(before && (before.emTest || before.pat))) {
-          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
+          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id, before);
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first — ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
@@ -2291,6 +2539,7 @@ export async function handle(request, env, ctx, url, sess) {
         })());
       }
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
       if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       // Tell every office/admin when a job has just been parked pending approval.
       if (updated && updated.hold?.approval?.state === "pending"
@@ -2301,11 +2550,117 @@ export async function handle(request, env, ctx, url, sess) {
           url: "/inbox.html", tag: "hold-approve:" + id, actionable: true
         }, updated.hold.approval.requestedBy));
       }
+      // Engineer completed a "To Quote" → push the configured reviewer(s)
+      // (default Greg Line, editable on the Quotes page) so it's picked up.
+      if (updated && updated.status === "Quote" && (!before || before.status !== "Quote")) {
+        ctx?.waitUntil((async () => {
+          const to = await getQuoteNotify(env, tenantId);
+          const ref = updated.helpdeskRef || id;
+          const site = updated.siteName || updated.siteCode || "";
+          for (const u of to) await sendToUser(env, tenantId, u, {
+            title: "Quote to send",
+            body: `${sess?.user?.username || "An engineer"} completed a quote for ${ref}${site ? " — " + site : ""}`,
+            url: "/quotes.html?job=" + encodeURIComponent(id), tag: "quote-done:" + id, actionable: true
+          }).catch(() => {});
+        })());
+      }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
-      const dOut = decorateJobWithLiveSla(updated);
+      let dOut = decorateJobWithLiveSla(updated);
       if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));   // actor's own slice, for the field app
+      if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
+  }
+
+  /* ===== Quote pipeline (office): list awaiting / sent, mark sent, make works job ===== */
+  if (subpath === "/quotes" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const all = await listJobs(env, tenantId);
+    const quotes = all.filter(j => j.status === "Quote" || (j.quoteSent && j.quoteSent.at));
+    const awaiting = quotes.filter(j => !(j.quoteSent && j.quoteSent.at));
+    const sent = quotes.filter(j => j.quoteSent && j.quoteSent.at);
+    if (searchParams.get("count")) return jsonResponse({ ok: true, count: awaiting.length, sent: sent.length }, headers);
+    const money = await canSeeMoney(env, tenantId, sess.user.username);
+    const which = (searchParams.get("status") || "awaiting").toLowerCase();
+    const pick = which === "sent" ? sent : which === "all" ? quotes : awaiting;
+    const rows = pick.map(j => quoteRow(j, money)).sort((a, b) => String(b.sortAt || "").localeCompare(String(a.sortAt || "")));
+    return jsonResponse({ ok: true, rows, awaiting: awaiting.length, sent: sent.length, money, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/sent" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const j = await getJob(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+    j.quoteSent = {
+      at: new Date().toISOString(), by: sess.user.username,
+      quoteNumber: String(b.quoteNumber || "").trim(),
+      amountExVat: num(b.amountExVat), amountIncVat: num(b.amountIncVat),
+      labourCost: num(b.labourCost), materialsCost: num(b.materialsCost)
+    };
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "quote-done:" + j.id, { title: "Quote sent", body: (j.helpdeskRef || j.id) }).catch(() => {}));
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/reopen" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const j = await getJob(env, tenantId, b.jobId);
+    if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
+    delete j.quoteSent;
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/quotes/make-job" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const src = await getJob(env, tenantId, b.jobId);
+    if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+    if (src.quoteWorksJobId) {
+      const ex = await getJob(env, tenantId, src.quoteWorksJobId);
+      if (ex) return jsonResponse({ ok: true, jobId: ex.id, already: true }, headers);
+    }
+    const qs = src.quoteSent || {};
+    const original = String(src.description || "").trim();
+    const description = buildQuoteWorksDescription(src) + (original ? "\n\n— Original job —\n" + original : "");
+    const job = await cloneJobAsVisit(env, tenantId, src, {
+      description,
+      assignedEngineers: [],   // unallocated — office schedules it
+      scheduledAt: undefined, durationMinutes: undefined,
+      changedBy: (sess.user && sess.user.username) || "system",
+      // orderValue carries the quoted amount (hidden from engineers by stripMoney);
+      // revisitOf/visitGroupId (set by cloneJobAsVisit) link it back to the quote job.
+      extra: { orderValue: (qs.amountExVat != null ? qs.amountExVat : undefined) }
+    });
+    src.quoteWorksJobId = job.id; src.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, src);
+    return jsonResponse({ ok: true, jobId: job.id }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "GET") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    return jsonResponse({ ok: true, notify: await getQuoteNotify(env, tenantId) }, headers);
+  }
+  if (subpath === "/quotes/config" && method === "POST") {
+    if (!sess || !(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    return jsonResponse({ ok: true, notify: await setQuoteNotify(env, tenantId, b.notify) }, headers);
+  }
+
+  /* ===== Co-op (Concerto) job stats ===== */
+  if (subpath === "/stats/concerto" && method === "GET") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const stats = await getConcertoStats(env, tenantId, { rebuild: searchParams.get("rebuild") === "1" });
+    return jsonResponse({ ok: true, stats, aiConfigured: !!env.ANTHROPIC_API_KEY }, headers);
+  }
+  if (subpath === "/stats/concerto/ai-refine" && method === "POST") {
+    if (!sess || !(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const r = await aiRefineTrades(env, tenantId, ctx, 300);
+    if (!r.ok) return jsonResponse({ error: r.error || "AI refine failed", classified: r.classified || 0 }, headers, 400);
+    const stats = await getConcertoStats(env, tenantId, {});   // fresh (just rebuilt)
+    return jsonResponse({ ok: true, classified: r.classified, remaining: r.remaining, stats }, headers);
   }
 
   /* ===== Site folder: per-site jobs, photos and documents ===== */
@@ -2760,6 +3115,10 @@ function completionMissing(job, patch, afterPhotoCount) {
   // Electrical-test jobs: the remedials list is the deliverable (a clean test has
   // none), so completion is relaxed — the engineer taps Complete when finished.
   if (isElecTest(job)) return [];
+  // Pump maintenance jobs are completed by the portal pump record (checklist +
+  // photos/video + signatures, submitted for office review) — like EM/PAT, the
+  // job auto-completes server-side when the record is submitted (maybeCompletePumpJob).
+  if (job && job.pumpMaintenance) return [];
   // Site-audit jobs complete when every checklist item has its completion photo.
   if (isAuditJob(job)) return auditMissing(job);
   // Investigate-only jobs have relaxed gates — Connor sets Quote/Complete freely.
@@ -2777,12 +3136,93 @@ function quoteMissing(job, patch, photoCount) {
   if (job && job.investigateOnly) return [];
   const q = (patch.quote && typeof patch.quote === "object") ? patch.quote : (job.quote || {});
   const miss = [];
-  if (!String(q.description || "").trim()) miss.push("the works description");
-  if (!String(q.reason || "").trim())      miss.push("why it needs quoting");
-  if (!String(q.materials || "").trim())   miss.push("the materials");
+  // Match the engineer's on-site quote panel (engineer-job.html collectQuote):
+  // materials, time restrictions, estimated duration, access equipment. The old
+  // free-text description/reason fields were replaced by these structured ones —
+  // requiring them here (with no field to fill) is what blocked engineers.
+  const hasAccess = Array.isArray(q.accessEquipment) ? q.accessEquipment.length > 0 : !!String(q.access || "").trim();
+  if (!String(q.materials || "").trim())        miss.push("the materials");
+  if (!String(q.timeRestrictions || "").trim()) miss.push("time restrictions (put ‘none’ if there are none)");
+  if (!(parseFloat(q.estDurationHours) > 0))    miss.push("the estimated duration");
+  if (!hasAccess)                               miss.push("the access equipment");
   if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
+}
+
+/* ── Quote pipeline helpers (engineer "To Quote" → office sends → order → works job) ──
+   A job with status "Quote" IS the record; job.quote is the engineer's pack.
+   The office stamps job.quoteSent when the quote is sent to the client, and
+   job.quoteWorksJobId links the works job raised once the order lands. */
+function quoteCapturedAt(j) {
+  const h = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+  for (let i = h.length - 1; i >= 0; i--) if (h[i] && h[i].status === "Quote") return h[i].at;
+  return j.updatedAt || null;
+}
+function quoteRow(j, money) {
+  const q = j.quote || {};
+  const qs = j.quoteSent || null;
+  return {
+    id: j.id,
+    ref: j.helpdeskRef || j.id,
+    siteName: j.siteName || "", siteCode: j.siteCode || "",
+    engineers: assignedList(j),
+    description: j.description || "",
+    scheduledAt: j.scheduledAt || null,
+    quotedAt: quoteCapturedAt(j),
+    quote: {
+      materials: q.materials || "", timeRestrictions: q.timeRestrictions || "",
+      estDurationHours: (q.estDurationHours != null ? q.estDurationHours : ""),
+      engineersRequired: q.engineersRequired || 1,
+      accessEquipment: Array.isArray(q.accessEquipment) ? q.accessEquipment : (q.access ? [q.access] : []),
+      barriersRequired: q.barriersRequired, disruptionToClient: q.disruptionToClient,
+      disruptionNote: q.disruptionNote || "", description: q.description || "",
+      reason: q.reason || "", notes: q.notes || "", capturedBy: q.capturedBy || ""
+    },
+    sent: qs ? {
+      at: qs.at, by: qs.by, quoteNumber: qs.quoteNumber || "",
+      amountExVat: money ? (qs.amountExVat ?? null) : null,
+      amountIncVat: money ? (qs.amountIncVat ?? null) : null,
+      labourCost: money ? (qs.labourCost ?? null) : null,
+      materialsCost: money ? (qs.materialsCost ?? null) : null
+    } : null,
+    worksJobId: j.quoteWorksJobId || null,
+    sortAt: (qs && qs.at) || quoteCapturedAt(j) || j.updatedAt || ""
+  };
+}
+// The works-job description: quote scope PRIMARY (no £ — engineer-visible), the
+// original job text kept below as secondary.
+function buildQuoteWorksDescription(src) {
+  const q = src.quote || {};
+  const L = ["🧾 QUOTED WORKS — ordered, now to be carried out"];
+  if (q.description) L.push(q.description);
+  if (q.materials) L.push("Materials: " + q.materials);
+  const dur = (q.estDurationHours != null && q.estDurationHours !== "")
+    ? (q.estDurationHours + " hr" + ((q.engineersRequired > 1) ? " × " + q.engineersRequired + " engineers" : "")) : "";
+  if (dur) L.push("Estimated duration: " + dur);
+  if (q.timeRestrictions) L.push("Time restrictions: " + q.timeRestrictions);
+  const acc = Array.isArray(q.accessEquipment) ? q.accessEquipment.join(", ") : (q.access || "");
+  if (acc) L.push("Access equipment: " + acc);
+  if (q.barriersRequired != null) L.push("Barriers required: " + (q.barriersRequired ? "Yes" : "No"));
+  if (q.disruptionToClient != null) L.push("Disruption to client: " + (q.disruptionToClient ? ("Yes" + (q.disruptionNote ? " — " + q.disruptionNote : "")) : "No"));
+  if (q.notes) L.push("Notes: " + q.notes);
+  return L.join("\n");
+}
+async function getQuoteNotify(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:quoteNotify:" + tenantId).first();
+    if (row) { const v = JSON.parse(row.value); const a = Array.isArray(v) ? v : (v && v.users); if (Array.isArray(a) && a.length) return a; }
+  } catch {}
+  return ["Greg Line"];   // default recipient (editable on the Quotes page)
+}
+async function setQuoteNotify(env, tenantId, notify) {
+  let users = Array.isArray(notify) ? notify : String(notify || "").split(",");
+  users = users.map(s => String(s).trim()).filter(Boolean);
+  if (!users.length) users = ["Greg Line"];
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:quoteNotify:" + tenantId, JSON.stringify(users)).run();
+  return users;
 }
 
 // On Hold = a reason and what's needed to resume (approval is handled separately).
@@ -2820,7 +3260,22 @@ async function ensureClockOn(env, tenantId, username, gps, localDate) {
   } catch (e) { /* non-fatal */ }
 }
 
-async function findBlockingJob(env, tenantId, username, exceptId) {
+// Two jobs are "at the same site" when their store codes match numerically
+// (0125 = 125), else when their site names match once punctuation/case are
+// stripped. Used so an engineer with several jobs at one store can have them
+// ALL In Progress at once (Sep 2026 — before this, only the first could be
+// started, so the other blocks sat amber on the scheduler all visit and were
+// "completed" as paperwork at the end).
+export function sameSiteJob(a, b) {
+  if (!a || !b) return false;
+  const ka = siteKeyOf(a.siteCode), kb = siteKeyOf(b.siteCode);
+  if (ka && kb) return ka === kb;
+  const na = String(a.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nb = String(b.siteName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return !!na && na === nb;
+}
+
+export async function findBlockingJob(env, tenantId, username, exceptId, exceptJob = null) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
   for (const j of jobs) {
@@ -2830,6 +3285,13 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
     // ~3h battery drain-down and a PAT runs alongside, so one in progress must never
     // block the engineer starting another job.
     if (j.emTest || j.pat) continue;
+    // Jobs at the SAME SITE run together (one visit, several job numbers) — an
+    // active job at this store never blocks starting another job at the store.
+    // A pending on-hold / safety flag there still does.
+    if (exceptJob && sameSiteJob(j, exceptJob)) {
+      const stHere = effStatus(j, uNorm);
+      if (stHere === "In Progress" || stHere === "Travelling") continue;
+    }
     // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
     // must never block them.
     const st = effStatus(j, uNorm);
@@ -2848,6 +3310,18 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
 
 async function readJson(r) { const t = await r.text(); return t ? JSON.parse(t) : {}; }
 
+// Trim a string to at most `maxBytes` UTF-8 bytes (never splitting a character)
+// for use inside a LIKE pattern — D1 rejects patterns over 50 bytes.
+function likeKey(str, maxBytes = 40) {
+  let out = ""; let bytes = 0;
+  for (const ch of String(str || "")) {
+    const b = new TextEncoder().encode(ch).length;
+    if (bytes + b > maxBytes) break;
+    out += ch; bytes += b;
+  }
+  return out;
+}
+
 function jsonResponse(data, headers, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status, headers: { "Content-Type": "application/json", ...headers }
@@ -2858,7 +3332,7 @@ function jsonResponse(data, headers, status = 200) {
 
 const CANONICAL_STATUSES = [
   "Pending","Scheduled","Travelling","In Progress",
-  "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote"
+  "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote","Cancelled"
 ];
 
 // `extra` = the tenant's custom category NAMES (strings). A job explicitly set
@@ -2871,7 +3345,10 @@ function normalizeStatus(status, extra) {
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
-  if (s === "closed" || s === "cancelled") return "Closed Jobs";
+  if (s === "closed") return "Closed Jobs";
+  // "Cancelled" is its OWN status (Sep 2026) — it used to collapse into Closed
+  // Jobs, so a client cancellation was indistinguishable from an invoiced job.
+  if (s === "cancelled" || s === "canceled" || s === "cancel") return "Cancelled";
   const all = (Array.isArray(extra) && extra.length) ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
   return all.find(x => x.toLowerCase() === s) || "Pending";
 }
@@ -2906,6 +3383,23 @@ function assignedList(job) {
    statuses so filters/badges still work. */
 function isMultiEng(job) { return assignedList(job).length >= 2; }
 const DONE_STATES = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+/* ── Cancellation stamps (Sep 2026) ──
+   A job that moves INTO "Cancelled" carries WHEN it happened, WHO did it and WHY
+   (cancelledAt / cancelledBy / cancelReason / cancelSource) — the board pill and
+   the job card show them. Moving back OUT of Cancelled (reinstated) clears the
+   stamps; the statusHistory keeps the full trail either way. `opts` may carry
+   {by, reason, source:"office"|"client"|"email", at}. */
+function stampCancelled(job, opts = {}) {
+  const now = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : new Date().toISOString();
+  job.cancelledAt = now;
+  job.cancelledBy = String(opts.by || "").slice(0, 80) || "office";
+  job.cancelReason = String(opts.reason || "").slice(0, 500);
+  job.cancelSource = opts.source || "office";
+}
+function clearCancelled(job) {
+  delete job.cancelledAt; delete job.cancelledBy; delete job.cancelReason; delete job.cancelSource;
+}
+const isCancelledStatus = s => String(s || "").toLowerCase() === "cancelled";
 // One engineer's status on a job (their own slice, else the shared status —
 // which also covers legacy jobs and an engineer not yet diverged).
 function effStatus(job, engNorm) {
@@ -3021,6 +3515,10 @@ function sameSchedDay(a, b) {
   return new Date(a.scheduledAt).toISOString().slice(0, 10) === new Date(b.scheduledAt).toISOString().slice(0, 10);
 }
 // afterPrev: is there an earlier same-day job for any of these engineers still open?
+// An earlier job at the SAME SITE never holds this one back (Jamie, 10 Sep 2026):
+// when the queue reveals a job and the next one is at the same store, both
+// appear together — one visit, several job numbers — and the same-site guard
+// lets them run In Progress together.
 function hasEarlierOpenJob(job, engineers, allJobs) {
   if (!job.scheduledAt) return false;
   const engSet = new Set(engineers.map(normId));
@@ -3029,10 +3527,11 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   // co-worker still working an earlier shared job doesn't hold this one back.
   return allJobs.some(o => o.id !== job.id && sameSchedDay(o, job)
     && Date.parse(o.scheduledAt) < myStart
+    && !sameSiteJob(o, job)
     && assignedList(o).some(a => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 // Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
-function releaseVisibleNow(job, allJobs) {
+export function releaseVisibleNow(job, allJobs) {
   if (job && job.seriesSkipped) return false;   // dropped project day / fallback — never shown
   // A project series day OR a fallback day yields to any other job that day.
   if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
@@ -3277,6 +3776,362 @@ async function getJob(env, tenantId, id) {
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
 }
+/* Is this job finished (built-in done states or a custom "done" category)? */
+async function jobFinishedFor(env, tenantId) {
+  let done = new Set();
+  try { done = new Set((await getCategories(env, tenantId)).filter(c => c && c.done).map(c => String(c.name || "").toLowerCase())); } catch {}
+  return j => { const st = String((j && j.status) || "").toLowerCase(); return DONE_STATES.has(st) || done.has(st); };
+}
+/* Machine intake: does this reference belong to an incident we already hold?
+   Returns null (brand new), {open} (an OPEN job with the same reference — update
+   it), or {prev, kind:"reopened"|"reassigned"} (a FINISHED job with the same
+   reference, or a sibling suffix of the same Concerto incident "NNNNNNNN/n" —
+   the caller creates a NEW linked visit). Concerto refs are "<incident>/<n>":
+   /1 the first assignment, /2 the re-assignment after our quote is ordered. */
+async function matchSameIncident(env, tenantId, reference) {
+  const ref = String(reference || "").trim();
+  if (!ref) return null;
+  const db = tenantDB(env, tenantId);
+  const finished = await jobFinishedFor(env, tenantId);
+  const parse = rows => (rows || []).map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate);
+  const newest = list => list.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  let same = [];
+  try { same = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results); } catch {}
+  if (!same.length) { try { const j = await getJob(env, tenantId, ref); if (j && !j.fallbackTemplate) same = [j]; } catch {} }
+  if (same.length) {
+    const open = newest(same.filter(j => !finished(j)));
+    if (open) return { open };
+    return { prev: newest(same), kind: "reopened" };
+  }
+  const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
+  if (!m) return null;
+  let sibs = [];
+  try { sibs = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? AND helpdesk_ref<>?").bind(tenantId, m[1] + "/%", ref).all()).results); } catch {}
+  sibs = sibs.filter(j => new RegExp("^" + m[1] + "/\\d{1,3}$").test(String(j.helpdeskRef || "")));
+  if (!sibs.length) return null;
+  return { prev: newest(sibs), kind: "reassigned" };
+}
+/* Stamp the root's visitGroupId + every member's visitCount for a re-visit chain
+   (the board/scheduler ×N badge). Best-effort. */
+async function stampVisitGroup(env, tenantId, groupId) {
+  if (!groupId) return;
+  try { const root = await getJob(env, tenantId, groupId); if (root && !root.visitGroupId) { root.visitGroupId = groupId; root.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, root); } } catch {}
+  const all = await listJobs(env, tenantId, { includeDormant: true });
+  const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+  const cnt = members.length;
+  for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
+}
+/* Clone `src` into a NEW linked visit (the office 🔁 Re-visit and "make the job
+   for this order" both use this): fresh id, same site/requirements/job type, the
+   original's FILES copied + re-pathed (photos, signature, audit/remedial photos)
+   and its evidence FIELDS carried (notes/events, RA, signature, photo tags,
+   audit items, remedials), linked by revisitOf/visitGroupId and the ×N count
+   re-stamped across the chain. `opts`: description, scheduledAt, durationMinutes,
+   assignedEngineers, changedBy, copyFiles (default true), extra (payload fields
+   merged last — e.g. reference/priority/orderNumber for an order). */
+export async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
+  const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
+  const engineers = Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers.filter(Boolean)
+    : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
+  const payload = {
+    id: crypto.randomUUID(),
+    reference: src.helpdeskRef || src.siteName || src.siteCode,
+    description: opts.description !== undefined ? opts.description : String(src.description || "").trim(),
+    siteCode: src.siteCode, siteName: src.siteName,
+    address: src.address, postcode: src.postcode, telephone: src.telephone,
+    storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
+    priority: src.priority || "",
+    requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
+    requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
+    firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
+    pumpMaintenance: src.pumpMaintenance, pumpStore: src.pumpStore,
+    workArea: src.workArea || undefined, projectId: src.projectId || undefined,
+    assignedEngineers: engineers,
+    scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes !== undefined ? opts.durationMinutes : (src.durationMinutes || undefined),
+    revisitOf: src.id, visitGroupId: groupId,
+    changedBy: opts.changedBy || "system",
+    ...(opts.extra || {}),
+  };
+  const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+  const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
+  if (opts.copyFiles !== false && env.JOB_FILES) {
+    try {
+      let cursor;
+      do {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+        for (const o of (listed.objects || [])) {
+          try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
+        }
+        cursor = listed.truncated ? listed.cursor : null;
+      } while (cursor);
+    } catch {}
+  }
+  try {
+    const nj = await getJob(env, tenantId, job.id);
+    if (nj) {
+      if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+      if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+      if (src.photoStages) nj.photoStages = { ...src.photoStages };
+      if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+        nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+      }
+      if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
+        refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
+      if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
+      nj.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, nj);
+    }
+  } catch {}
+  if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
+  try { await stampVisitGroup(env, tenantId, groupId); } catch {}
+  return (await getJob(env, tenantId, job.id)) || job;
+}
+/* ── Client orders ↔ jobs (Sep 2026) ──
+   A Concerto order ("Order number 00028541/2", £439) is for an incident we
+   usually already attended ("00028541/1"). Three ways it meets a job:
+   1. the order arrives and a job with EXACTLY that reference already exists (the
+      "New Job Alert: …/2" came first) → the value is stamped on it;
+   2. a job with that reference is created LATER (/sla/inbound) → stamped then;
+   3. neither — the office presses "Make the job" on the orders board →
+      raiseJobForOrder clones the incident's newest job as a linked visit
+      (notes + photos carried) with the order's text, reference and value.
+   `stampOrderOnJob` is the one writer of the job-side fields. */
+const orderRefIncident = ref => (/^(\d{5,12})\/\d{1,3}$/.exec(String(ref || "").trim()) || [])[1] || "";
+/* Money never reaches an engineer-visible field (Jamie's rule). Concerto order
+   text ends with a price breakdown — "Labour - 150.00", "Materials: £622.50",
+   "Materials / Specialist Equipment – £143.00", "Total: 2 fittings - £100", and
+   per-fitting "Fitting 16 - Light replacement - £50" — so before an order's text
+   becomes a job description every priced line is dropped, a trailing " - £50" is
+   cut off, and any stray £ amount is removed. The value itself lives ONLY on
+   `job.orderValue`, which stripMoney hides from the field. */
+export function stripPricing(text) {
+  const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
+  const money = /(?:£\s?[\d,]+(?:\.\d{1,2})?|\b\d[\d,]*\.\d{2}\b)/;   // "1151.00" (no thousands comma) counts too
+  const out = [];
+  for (let l of String(text || "").split(/\r?\n/)) {
+    if (labelled.test(l) && money.test(l)) continue;
+    l = l.replace(/\s*[-–—:]\s*£\s?[\d,]+(?:\.\d{1,2})?\s*$/, "");
+    l = l.replace(/£\s?[\d,]+(?:\.\d{1,2})?/g, "").replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/\s+$/, "");
+    out.push(l);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function orderText(o) {
+  const d = String(o.description || o.detail || "").trim();
+  return stripPricing(d || String(o.title || "").trim());
+}
+async function stampOrderOnJob(env, tenantId, job, o) {
+  if (!job || !o) return job;
+  const changed = job.orderNumber !== (o.orderNumber || null) || job.orderValue !== (o.orderValue ?? null) || job.clientOrderId !== (o.id || null);
+  if (!changed) return job;
+  job.orderNumber = o.orderNumber || null;
+  job.orderValue = (o.orderValue != null && Number.isFinite(Number(o.orderValue))) ? Number(o.orderValue) : null;
+  job.clientOrderId = o.id || null;
+  // No £ in the note — the timeline is engineer-visible; the value sits on orderValue.
+  (job.events ||= []).push({ at: new Date().toISOString(), by: "system", type: "note", note: "Client order " + (o.orderNumber || "") + " linked to this job" });
+  job.updatedAt = new Date().toISOString();
+  await saveJob(env, tenantId, job);
+  return job;
+}
+async function markOrderLinked(env, tenantId, orderId, jobId, kind) {
+  const k = kind === "em" || kind === "elec" ? kind : "job";
+  try { await env.DB.prepare("UPDATE client_orders SET matched_kind=?, matched_job_id=?, status=CASE WHEN status IN ('dismissed','actioned') THEN status ELSE 'linked' END, updated_at=? WHERE tenant_id=? AND id=?").bind(k, jobId, new Date().toISOString(), tenantId, orderId).run(); } catch {}
+}
+const shapeOrderRow = r => r ? ({ id: r.id, orderNumber: r.order_number || "", orderValue: r.order_value, client: r.client || "", priority: r.priority, title: r.title || "", detail: r.detail || "", description: r.description || "", storeCode: r.store_code || "", siteName: r.site_name || "", srRef: r.sr_ref || "", status: r.status || "new", unlinkedJobId: r.unlinked_job_id || "" }) : null;
+/* The office pressed Unlink on an order: the job forgets the order (number, value,
+   link — an event notes who did it), and the order goes back to "new" with the
+   job remembered as `unlinked_job_id` so no automatic path re-attaches the pair
+   (a re-sent email, the job arriving again, Make the job). */
+export async function unlinkOrderFromJob(env, tenantId, o, by) {
+  if (!o || !o.id) return null;
+  const jobId = String(o.matchedJobId || "").trim();
+  let job = null;
+  if (jobId) {
+    job = await getJob(env, tenantId, jobId);
+    if (job && (job.clientOrderId === o.id || (o.orderNumber && job.orderNumber === o.orderNumber))) {
+      delete job.orderNumber; delete job.orderValue; delete job.clientOrderId;
+      (job.events ||= []).push({ at: new Date().toISOString(), by: by || "office", type: "note", note: "Client order " + (o.orderNumber || "") + " unlinked from this job" + (by ? " by " + by : "") });
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+    }
+  }
+  try {
+    await env.DB.prepare("UPDATE client_orders SET matched_job_id=NULL, matched_kind=NULL, matched_cert_id=NULL, match_note=NULL, unlinked_job_id=?, status='new', actioned_at=NULL, actioned_by=NULL, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(jobId || null, new Date().toISOString(), tenantId, o.id).run();
+  } catch {}
+  return job;
+}
+/* A job was created/updated with reference X — is there an unlinked client order
+   for X? Stamp it on. Best-effort (the orders table may not exist yet). */
+export async function applyOrderToJob(env, tenantId, job) {
+  const ref = String((job && job.helpdeskRef) || "").trim();
+  if (!ref || !job) return null;
+  let row = null;
+  try { row = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND order_number=? AND status<>'dismissed' ORDER BY created_at DESC LIMIT 1").bind(tenantId, ref).first(); } catch { return null; }
+  if (!row) return null;
+  const o = shapeOrderRow(row);
+  if (o.unlinkedJobId && o.unlinkedJobId === job.id) return null;
+  await stampOrderOnJob(env, tenantId, job, o);
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return o;
+}
+/* An order arrived — is a job with exactly its reference already on the board?
+   Returns the job it linked to, else null. */
+export async function linkOrderToExistingJob(env, tenantId, o) {
+  const ref = String((o && o.orderNumber) || "").trim();
+  if (!ref) return null;
+  const skip = String((o && o.unlinkedJobId) || "");
+  let jobs = (await findIncidentJobs(env, tenantId, { reference: ref })).filter(j => String(j.helpdeskRef || "") === ref || j.id === ref);
+  if (!jobs.length) jobs = await jobsWithRefContaining(env, tenantId, ref);
+  jobs = jobs.filter(j => j.id !== skip);
+  if (!jobs.length) return null;
+  const finished = await jobFinishedFor(env, tenantId);
+  const open = jobs.filter(j => !finished(j));
+  const pick = (open.length ? open : jobs).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  await stampOrderOnJob(env, tenantId, pick, o);
+  await markOrderLinked(env, tenantId, o.id, pick.id);
+  return pick;
+}
+/* Jobs whose reference CONTAINS the order number as a whole token — the office
+   often types it into a hand-made job's reference ("R29051- EM remedial — 0622").
+   Word-bounded so R2905 never claims R29051. Open jobs first, newest first. */
+async function jobsWithRefContaining(env, tenantId, ref) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try { rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ? LIMIT 50").bind(tenantId, "%" + ref + "%").all()).results || []; } catch { return []; }
+  const re = new RegExp("(^|[^A-Za-z0-9])" + ref.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&") + "([^A-Za-z0-9]|$)");
+  return rows.map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate && re.test(String(j.helpdeskRef || "")));
+}
+/* Office hand-link (or a certificate match): order → a specific job id.
+   opts.kind keeps "em"/"elec" on the order so the remedials tracker still knows
+   which certificate it belongs to; default "job". */
+export async function linkOrderToJobById(env, tenantId, o, jobId, by, opts = {}) {
+  const job = await getJob(env, tenantId, jobId);
+  if (!job) return null;
+  await stampOrderOnJob(env, tenantId, job, o);
+  if (by) { try { const j2 = await getJob(env, tenantId, jobId); if (j2) { (j2.events ||= []).push({ at: new Date().toISOString(), by, type: "note", note: "Order linked by " + by }); await saveJob(env, tenantId, j2); } } catch {} }
+  await markOrderLinked(env, tenantId, o.id, jobId, opts.kind);
+  return job;
+}
+/* The office pressed "Make the job" on an order. Returns {job, how, from}:
+   how = "linked" (a job with that reference already existed), "cloned" (a new
+   visit cloned from the incident's newest job — notes + photos carried) or
+   "created" (no earlier job: a fresh job at the order's store). */
+export async function raiseJobForOrder(env, tenantId, o, opts = {}) {
+  const ref = String((o && o.orderNumber) || "").trim();
+  const by = opts.changedBy || "office";
+  const pr = Number(o.priority) >= 1 && Number(o.priority) <= 4 ? "Priority " + Number(o.priority) : undefined;
+  const linked = await linkOrderToExistingJob(env, tenantId, o);
+  if (linked) return { job: linked, how: "linked" };
+  const inc = orderRefIncident(ref);
+  const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
+  const text = orderText(o);   // priced lines already stripped; the value never goes in the description
+  if (sibs.length) {
+    const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    const oldDesc = String(src.description || "").trim();
+    const description = ["🧾 Client order " + ref + (text ? " — " + text : ""),
+      "↩ Ordered works following our visit " + (src.helpdeskRef || src.id) + " (" + (src.status || "") + ") — that visit's notes and photos are carried onto this job.",
+      oldDesc ? "— Original job —\n" + oldDesc : ""].filter(Boolean).join("\n\n");
+    const job = await cloneJobAsVisit(env, tenantId, src, {
+      description, scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes, assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [],
+      changedBy: by, extra: { reference: ref || undefined, priority: pr || src.priority || "", status: "Pending", orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order" } });
+    await markOrderLinked(env, tenantId, o.id, job.id);
+    return { job, how: "cloned", from: { id: src.id, ref: src.helpdeskRef || src.id, status: src.status || "" } };
+  }
+  // No earlier job for this incident — a fresh job at the order's store.
+  let siteName = o.siteName || "", postcode = "", address = "";
+  const code = String(o.storeCode || "").trim();
+  if (code) {
+    try {
+      const row = await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND (site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) ORDER BY LENGTH(site_number) LIMIT 1").bind(tenantId, code, code).first();
+      if (row) { siteName = row.site_name || siteName; postcode = row.postcode || ""; try { address = (JSON.parse(row.data || "{}") || {}).address || ""; } catch {} }
+    } catch {}
+  }
+  const payload = { id: crypto.randomUUID(), reference: ref || undefined, description: ("🧾 Client order " + ref + (text ? " — " + text : "")).trim(),
+    priority: pr, siteCode: code || undefined, siteName: siteName || undefined, postcode: postcode || undefined, address: address || undefined,
+    assignedEngineers: Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers : [], scheduledAt: opts.scheduledAt, durationMinutes: opts.durationMinutes,
+    orderNumber: ref || null, orderValue: o.orderValue ?? null, clientOrderId: o.id || null, originator: "client-order", changedBy: by };
+  const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+  await markOrderLinked(env, tenantId, o.id, job.id);
+  return { job, how: "created" };
+}
+/* Every live job belonging to a Concerto incident: by exact reference ("NNNNNNNN/1"),
+   by the incident number's suffixes ("NNNNNNNN/%"), or by id. Dormant fallback
+   templates are never matched. */
+async function findIncidentJobs(env, tenantId, { reference, incident }) {
+  const db = tenantDB(env, tenantId);
+  const ref = String(reference || "").trim();
+  const inc = String(incident || "").trim() || ((/^(\d{5,12})\/\d{1,3}$/.exec(ref) || [])[1] || "");
+  const parse = rows => (rows || []).map(r => { try { return JSON.parse(r.data); } catch { return null; } }).filter(j => j && !j.fallbackTemplate);
+  const seen = new Map();
+  const add = list => { for (const j of list) if (j && !seen.has(j.id)) seen.set(j.id, j); };
+  if (ref) {
+    try { add(parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref=?").bind(tenantId, ref).all()).results)); } catch {}
+    try { const j = await getJob(env, tenantId, ref); if (j && !j.fallbackTemplate) add([j]); } catch {}
+  }
+  if (inc) {
+    let sibs = [];
+    try { sibs = parse((await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, inc + "/%").all()).results); } catch {}
+    add(sibs.filter(j => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
+    try { const j = await getJob(env, tenantId, inc); if (j && !j.fallbackTemplate) add([j]); } catch {}
+  }
+  return [...seen.values()];
+}
+/* The client cancelled an incident. `b` = {reference?, incident?, reason?, by?,
+   kind:"job"|"quote", at?}. Rules:
+   - an OPEN job for the incident → status Cancelled + stamps (cancelledAt = the
+     email's time, cancelledBy = the client, cancelReason = their comment); its
+     engineers + the SLA admins are pushed so nobody drives to a cancelled job;
+   - kind "quote" (the client withdrew a QUOTE REQUEST) only cancels a job that is
+     still WAITING (Pending / Quote / On Hold / Order) — a job already Scheduled
+     or being worked is returned as `held` for the office to decide, because a
+     withdrawn quote doesn't always mean "don't attend";
+   - every job for the incident already FINISHED → nothing is un-completed: the
+     newest one gets `clientCancelled` noted (shown on the card) and `noted:true`;
+   - no job at all → {ok:false, notFound:true}. */
+async function cancelIncidentJobs(env, tenantId, ctx, b) {
+  const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const reason = String(b.reason || "").trim().slice(0, 500);
+  const by = String(b.by || "client").trim().slice(0, 80);
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : new Date().toISOString();
+  const open = jobs.filter(j => !finished(j));
+  const newest = list => list.slice().sort((a, b2) => String(b2.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  if (!open.length) {
+    const j = newest(jobs);
+    j.clientCancelled = { at, by, reason, reference: String(b.reference || b.incident || ""), kind };
+    (j.events ||= []).push({ at, by, type: "note", note: "Client cancelled " + (kind === "quote" ? "the quote request" : "this job") + " after it was " + j.status + (reason ? " — " + reason : "") });
+    j.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, j);
+    return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status, kind };
+  }
+  const WAITING = new Set(["pending", "quote", "on hold", "order"]);
+  const held = kind === "quote" ? open.filter(j => !WAITING.has(String(j.status || "").toLowerCase())) : [];
+  const targets = open.filter(j => !held.includes(j));
+  const cancelled = [];
+  const now = new Date().toISOString();
+  for (const j of targets) {
+    const prevStatus = j.status;
+    j.status = "Cancelled";
+    (j.statusHistory ||= []).push({ status: "Cancelled", at: now, by, note: reason || undefined });
+    stampCancelled(j, { by, reason, source: "client", at });
+    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now, by };
+    (j.events ||= []).push({ at: now, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " — " + reason : "") });
+    j.updatedAt = now;
+    await saveJob(env, tenantId, j);
+    const engs = assignedList(j);
+    cancelled.push({ id: j.id, reference: j.helpdeskRef || j.id, previousStatus: prevStatus, engineers: engs, scheduledAt: j.scheduledAt || null });
+    // Tell the engineer(s) on it + the office. Not actionable: nothing to do but not go.
+    const title = "❌ Job cancelled — " + (j.helpdeskRef || j.id);
+    const body = (j.siteName || j.siteCode || "") + (reason ? " · " + reason : "") + (prevStatus ? " · was " + prevStatus : "");
+    for (const e of engs) ctx?.waitUntil?.(sendToUser(env, tenantId, e, { title, body: body.slice(0, 180), url: "/engineer-job.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {}));
+    ctx?.waitUntil?.(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], { title, body: (body + (engs.length ? " · " + engs.join(", ") : " · unassigned")).slice(0, 180), url: "/job-view.html?jobId=" + encodeURIComponent(j.id), tag: "job-cancelled:" + j.id }).catch(() => {}));
+    try { await resolveNotificationsByTag(env, tenantId, "hold-approve:" + j.id, { title: "Job cancelled", body: (j.helpdeskRef || j.id) + " — cancelled by the client" }); } catch {}
+  }
+  return { ok: true, kind, cancelled, ...(held.length ? { held: held.map(j => ({ id: j.id, reference: j.helpdeskRef || j.id, status: j.status, engineers: assignedList(j) })) } : {}) };
+}
 // Deleting a job removes the DRAFT / submitted (unverified) certificates it made,
 // but NEVER one the office has finalised (status='final') — those are filed on the
 // compliance chart and their PDF must survive. Draft/review certs hold no separate
@@ -3292,6 +4147,24 @@ async function getShift(env, tenantId, username, date) {
   if (!username) return null;
   const db = tenantDB(env, tenantId);
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
+}
+
+// When an EM remedial SLA job (id "emrem:<certId>:L|:B") is COMPLETED, the final
+// step of the remedial process is to reissue a clean certificate (failures → Pass,
+// "(Replaced)"). certs.js owns that; we call it via a dynamic import so there's no
+// static circular dependency (certs.js already imports from this module). Fires only
+// on the transition INTO a finished state so it can't re-run on every later save.
+async function maybeReissueAfterRemedial(env, tid, before, updated) {
+  try {
+    if (!updated) return;
+    const id = String(updated.id || "");
+    if (!(id.startsWith("emrem:") || updated.originator === "em-remedial")) return;
+    const fin = s => /complete|closed|invoiced/i.test(String(s || ""));
+    if (!fin(updated.status)) return;
+    if (before && fin(before.status)) return;   // was already finished — nothing new
+    const certs = await import("./certs.js");
+    if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
+  } catch {}
 }
 
 export async function listJobs(env, tenantId, opts) {
@@ -3358,7 +4231,14 @@ async function saveJob(env, tenantId, job) {
 
 export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
-  const id = body.id || body.reference || crypto.randomUUID();
+  // The job id is an explicit id (stable-id callers: series, fleet, reopen, …),
+  // else the REFERENCE only when the caller explicitly wants dedupe-by-reference
+  // (the email/Zapier intake, so a re-sent email updates the same job), else a
+  // fresh UUID. NEVER derive the id from the reference for a normal create — the
+  // reference is a display label and two jobs at the SAME site share it, so that
+  // silently upserted (overwrote) an existing job (e.g. a second job at Frome
+  // wiping the electrical-test job).
+  const id = body.id || ((body.dedupeByRef || body.upsertByRef) && body.reference) || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now = new Date().toISOString();
 
@@ -3382,7 +4262,23 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // named, or the site was renamed afterwards. Falls back to the site code.
   let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
   const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
-  if (!siteNameResolved && siteCodeVal) {
+  // A purely-NUMERIC store code is authoritative: resolve the REAL portal site
+  // name (numeric-tolerant, so "85" matches "0085") and let it WIN over whatever
+  // siteName the intake supplied. This fixes Concerto/Zapier jobs that were named
+  // off the ADDRESS ("Car Park, The Parade") instead of the store ("East
+  // Wittering, Cakeham Road"). Projects (P-numbers) and other non-numeric codes
+  // keep the supplied/typed name (only filled in when it's blank).
+  if (/^\d+$/.test(siteCodeVal)) {
+    try {
+      const forms = [...new Set([siteCodeVal, String(Number(siteCodeVal)), siteCodeVal.padStart(4, "0")])].filter(Boolean);
+      const ph = forms.map(() => "?").join(",");
+      const srow = await tenantDB(env, tenantId).prepare(
+        `SELECT site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph}) ORDER BY LENGTH(site_number) DESC LIMIT 1`
+      ).bind(tenantId, ...forms).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && !/^\d+$/.test(nm)) siteNameResolved = nm;
+    } catch {}
+  } else if (!siteNameResolved && siteCodeVal) {
     try {
       const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
       const nm = srow && String(srow.site_name || "").trim();
@@ -3500,12 +4396,35 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // works job (photos carried, duration/cost stripped). Preserved across re-saves.
     elecTest: body.elecTest !== undefined ? !!body.elecTest : (existing?.elecTest || false),
     remedials: normRemedials(body.remedials, existing),
+    // Pump (sump-pump) monthly maintenance job: produces a per-store checklist
+    // record (pump_records table) + photos/video + engineer & store-DM signatures,
+    // completed on the job then submitted for office review → branded PDF filed to
+    // the site. `pumpStore` = the chosen store's id in the pump config. Preserved.
+    pumpMaintenance: body.pumpMaintenance !== undefined ? !!body.pumpMaintenance : (existing?.pumpMaintenance || false),
+    pumpStore: body.pumpStore !== undefined ? String(body.pumpStore || "") : (existing?.pumpStore || ""),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
+    // Client ORDER link (Sep 2026): the client's order number + its VALUE (£, ex VAT)
+    // + the client_orders row it came from — so job costing can show profit. The
+    // value is MONEY: stripped from every job response for anyone who isn't Full
+    // Access / office staff (stripMoney). Preserved across re-saves.
+    orderNumber: body.orderNumber !== undefined ? (String(body.orderNumber || "") || null) : (existing?.orderNumber || null),
+    orderValue: body.orderValue !== undefined ? (body.orderValue === null || body.orderValue === "" ? null : (Number.isFinite(Number(body.orderValue)) ? Number(body.orderValue) : (existing?.orderValue ?? null))) : (existing?.orderValue ?? null),
+    clientOrderId: body.clientOrderId !== undefined ? (String(body.clientOrderId || "") || null) : (existing?.clientOrderId || null),
+    // Where the job came from ("client" = raised by a client portal login, "zapier",
+    // "email", "client-order", …). Preserved across re-saves.
+    originator: body.originator !== undefined ? (String(body.originator || "") || null) : (existing?.originator || null),
+    // Client-portal fields: the client org it belongs to (so the client's job log
+    // finds it even if the site match is fuzzy), whether a client raised it, the
+    // urgency the client flagged, and an office "hide from the client view" flag.
+    clientOrg: body.clientOrg !== undefined ? (String(body.clientOrg || "").toLowerCase() || null) : (existing?.clientOrg || null),
+    raisedByClient: body.raisedByClient !== undefined ? !!body.raisedByClient : (existing?.raisedByClient || false),
+    clientUrgency: body.clientUrgency !== undefined ? (String(body.clientUrgency || "") || null) : (existing?.clientUrgency || null),
+    hiddenFromClient: body.hiddenFromClient !== undefined ? !!body.hiddenFromClient : (existing?.hiddenFromClient || false),
     // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
     // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
     // the chain, so all visits against one job are easy to find + cost together.
@@ -3555,6 +4474,10 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Cancellation stamps survive a re-save (set/cleared below on the transition).
+    cancelledAt: existing?.cancelledAt, cancelledBy: existing?.cancelledBy, cancelReason: existing?.cancelReason, cancelSource: existing?.cancelSource,
+    // A client's cancellation that arrived AFTER we finished the job (noted, no status change).
+    clientCancelled: existing?.clientCancelled,
     // Engineer-captured packs survive an office re-save.
     quote: existing?.quote, riskAssessment: existing?.riskAssessment,
     hold: existing?.hold, order: existing?.order, signature: existing?.signature,
@@ -3573,6 +4496,8 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   };
 
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now });
+  else if (!isCancelledStatus(status) && isCancelledStatus(existing?.status)) clearCancelled(job);
   // Seed a slice for any newly-added engineer (existing engineers keep theirs).
   seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
   pruneEngSchedule(job);   // drop per-engineer times for anyone no longer on the job
@@ -3590,6 +4515,20 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   const hadEngineers = assignedList(job).length > 0;
   const prevEngs = assignedList(job);            // roster before this patch
   const prevStatus = job.status;
+
+  // Undo for accidental schedule changes (a common mobile fumble). Snapshot the
+  // schedule BEFORE this patch touches it; if the patch actually moves the job we
+  // stash it on `job.prevSchedule` so a one-tap undo can restore it. Because the
+  // undo itself runs through here, undoing snapshots the reverted-from times too —
+  // so the button toggles undo↔redo.
+  const scheduleTouched = ["scheduledAt", "scheduledEnd", "durationMinutes", "engSchedule", "scheduleForEngineer"]
+    .some(k => patch[k] !== undefined);
+  const schedBefore = {
+    scheduledAt: job.scheduledAt || null,
+    scheduledEnd: job.scheduledEnd || null,
+    durationMinutes: job.durationMinutes || null,
+    engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+  };
 
   if (patch.assignedEngineers !== undefined) {
     job.assignedEngineers = patch.assignedEngineers;
@@ -3683,6 +4622,20 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 60000).toISOString();
     }
   }
+  // Record the pre-patch schedule for one-tap undo, but only if the schedule
+  // genuinely moved (so an unrelated edit — status, note — never overwrites it).
+  if (scheduleTouched && !patch.__noSchedSnapshot) {
+    const schedAfter = {
+      scheduledAt: job.scheduledAt || null,
+      scheduledEnd: job.scheduledEnd || null,
+      durationMinutes: job.durationMinutes || null,
+      engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
+    };
+    if (JSON.stringify(schedAfter) !== JSON.stringify(schedBefore)) {
+      job.prevSchedule = { ...schedBefore, at: now, by: patch.changedBy || "office" };
+    }
+  }
+
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
   if (patch.requiresRA !== undefined) job.requiresRA = !!patch.requiresRA;
   if (patch.requiresSignature !== undefined) job.requiresSignature = !!patch.requiresSignature;
@@ -3696,9 +4649,14 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emTimer !== undefined) job.emTimer = patch.emTimer || null;   // 3h drain-down countdown
   if (patch.elecTest !== undefined) job.elecTest = !!patch.elecTest;
   if (patch.remedials !== undefined) job.remedials = normRemedials(patch.remedials, job);
+  if (patch.pumpMaintenance !== undefined) job.pumpMaintenance = !!patch.pumpMaintenance;
+  if (patch.pumpStore !== undefined) job.pumpStore = String(patch.pumpStore || "");
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== undefined) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.orderNumber !== undefined) job.orderNumber = String(patch.orderNumber || "") || null;
+  if (patch.orderValue !== undefined) job.orderValue = (patch.orderValue === null || patch.orderValue === "") ? null : (Number.isFinite(Number(patch.orderValue)) ? Number(patch.orderValue) : job.orderValue ?? null);
+  if (patch.clientOrderId !== undefined) job.clientOrderId = String(patch.clientOrderId || "") || null;
   if (patch.visitGroupId !== undefined) job.visitGroupId = String(patch.visitGroupId || "") || null;
   if (patch.visitCount !== undefined) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
@@ -3765,8 +4723,11 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
     }
+    const wasCancelled = isCancelledStatus(job.status);
     job.status = rollupStatus(job);
     if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now });
+    else if (!isCancelledStatus(job.status) && wasCancelled) clearCancelled(job);
   } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map(c => c.name);
     const s = normalizeStatus(patch.status, catNames);
@@ -3779,6 +4740,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now });
+      else if (job.cancelledAt) clearCancelled(job);
+    } else if (isCancelledStatus(s) && patch.cancelReason !== undefined && !job.cancelReason) {
+      job.cancelReason = String(patch.cancelReason || "").slice(0, 500);   // reason added after the fact
     }
     // Office override on a multi-engineer job: keep every engineer's slice in step
     // so the board rollup matches what the office set.
@@ -3802,6 +4767,10 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
   }
+
+  // Office "hide from the client view" toggle (only reaches here from an admin —
+  // it's not in the non-admin field whitelist).
+  if (patch.hiddenFromClient !== undefined) job.hiddenFromClient = !!patch.hiddenFromClient;
 
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
@@ -4921,9 +5890,17 @@ function computeSlaTarget(raisedAt, priority, cfg) {
   return new Date(new Date(raisedAt).getTime() + hrs * 3600000).toISOString();
 }
 
+/* MONEY fields a non-money viewer must never receive (Jamie's rule: only Full
+   Access / office staff see financials). Applied to every job response for
+   anyone else — the field app never sees an order value. */
+export function stripMoney(job) {
+  if (!job || typeof job !== "object") return job;
+  const { orderValue, ...rest } = job;
+  return rest;
+}
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
-  const state = (job.status === "Closed Jobs" || job.status === "Complete")
+  const state = (job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled")
     ? "OK" : (Date.now() > target ? "BREACHED" : "OK");
   // Release info for the office board (engineers never receive hidden jobs, so
   // this only surfaces on the admin views): mode, computed instant, label.
@@ -5411,6 +6388,187 @@ async function setWorkAreas(env, tenantId, list) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_work_areas', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
+}
+
+/* ── Co-op / Concerto job stats (jobs page → 🛠 Tools → 📊 Co-op stats) ────────
+   Aggregates every Co-op reactive job (live board + the imported archive) into
+   counts by week / month / weekday / hour, by priority, and by trade. Trade is
+   a keyword classifier by default; the office can "Refine with AI" the unknowns
+   (cached per job in app_config sla:jobtrade). The whole aggregate is cached in
+   app_config sla:concertostats and rebuilt on demand / when >6h stale. */
+const CONCERTO_TRADES = [
+  ["Glazing", /glaz|\bglass\b|window ?pane|\bpane\b|shopfront|shatter|toughened|perspex/i],
+  ["Doors & shutters", /\bdoor\b|shutter|roller|hinge|door ?closer|mortice|cylinder|\block(s|ed|ing)?\b|barrel|\blatch\b|automatic door|fob\b/i],
+  ["Groundworks & external", /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|trip hazard|drain cover|manhole|external area|grounds/i],
+  ["Refrigeration & HVAC", /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\ba\/c\b|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i],
+  ["Plumbing & drainage", /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|drain|drainage|blocked|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock|sewage/i],
+  ["Electrical", /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|distribution board|consumer unit|emergency light|\bpat\b|\bfault\b.*power/i],
+  ["Fire & safety", /fire ?alarm|extinguisher|sprinkler|firestop|fire ?stop|smoke detector|fire door|\bems\b/i],
+  ["Building fabric", /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|leak.*roof|masonry/i],
+  ["Joinery", /timber|worktop|shelv|cabinet|joinery|carpentry|counter|kiosk|\bwood\b/i],
+  ["Cleaning & signage", /\bclean|graffiti|\bsign\b|signage|jet ?wash|pressure wash/i],
+  ["Pest control", /\bpest|rodent|vermin|\bwasp|\brat\b|\bmice\b|\bmouse\b|infest|\bbird/i],
+];
+const CONCERTO_TRADE_NAMES = CONCERTO_TRADES.map(t => t[0]).concat("General / other");
+function classifyTradeKw(text) {
+  const s = String(text || "");
+  for (const [name, re] of CONCERTO_TRADES) if (re.test(s)) return name;
+  return "";   // unknown → "General / other" at rollup (and an AI-refine candidate)
+}
+// A Co-op reactive job = anything that ISN'T a project / Chapplins / Fareham job.
+function isCoopJob(j) {
+  const st = String((j && j.storeType) || "").toLowerCase();
+  const cl = String((j && j.client) || "").toLowerCase();
+  const code = String((j && j.siteCode) || "");
+  if (/^p\d/i.test(code)) return false;                         // project (P-number)
+  if (["chapplins", "fbc", "fareham", "projects"].includes(st)) return false;
+  if (/chapplin|fareham|fbc|project/.test(cl)) return false;
+  return true;
+}
+async function getJobTradeOverrides(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:jobtrade:" + tid).first();
+    if (row) { const v = JSON.parse(row.value); if (v && typeof v === "object") return v; }
+  } catch {}
+  return {};
+}
+async function setJobTradeOverrides(env, tid, map) {
+  // cap the map so the config row can't grow unbounded (keep the newest ~4000)
+  const keys = Object.keys(map);
+  if (keys.length > 4000) { const drop = keys.slice(0, keys.length - 4000); for (const k of drop) delete map[k]; }
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, "sla:jobtrade:" + tid, JSON.stringify(map)).run();
+}
+// London wall-clock parts for one ISO instant (correct across BST/GMT).
+const _londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
+function londonParts(iso) {
+  const d = new Date(iso); if (isNaN(d)) return null;
+  const p = {}; for (const x of _londonFmt.formatToParts(d)) p[x.type] = x.value;
+  const hour = p.hour === "24" ? 0 : Number(p.hour);
+  const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  return { y: Number(p.year), m: Number(p.month), d: Number(p.day), hour, dow: dowMap[p.weekday] ?? 0 };
+}
+// Monday-of-week key (YYYY-MM-DD) for a London date.
+function weekKey(y, m, d) {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const wd = (dt.getUTCDay() + 6) % 7;           // 0 = Monday
+  dt.setUTCDate(dt.getUTCDate() - wd);
+  return dt.toISOString().slice(0, 10);
+}
+function accStats(acc, iso, priorityRaw, trade, reliablePri) {
+  const lp = londonParts(iso); if (!lp) return;
+  acc.total++;
+  const mk = lp.y + "-" + String(lp.m).padStart(2, "0");
+  const wk = weekKey(lp.y, lp.m, lp.d);
+  acc.byMonth[mk] = (acc.byMonth[mk] || 0) + 1;
+  acc.byWeek[wk] = (acc.byWeek[wk] || 0) + 1;
+  acc.byDow[lp.dow]++;
+  acc.byHour[lp.hour]++;
+  acc.trades[trade] = (acc.trades[trade] || 0) + 1;
+  // Priority is only counted where it's genuinely recorded. The imported
+  // Commusoft archive stamped "Priority 4" on ~every job (a default, not the
+  // real Concerto P1-P4), so counting it would swamp the split with fake P4s.
+  // Only reliable-priority jobs (the live board / real intake) feed the
+  // priority + trades-by-priority views.
+  if (reliablePri) {
+    const pm = /([1-4])/.exec(String(priorityRaw || "")); const pri = pm ? pm[1] : "0";
+    acc.priTotal++;
+    acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
+    (acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {});
+    acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  }
+  if (!acc.spanFrom || iso < acc.spanFrom) acc.spanFrom = iso;
+  if (!acc.spanTo || iso > acc.spanTo) acc.spanTo = iso;
+}
+async function buildConcertoStats(env, tid) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const acc = { total: 0, priTotal: 0, byMonth: {}, byWeek: {}, byDow: [0, 0, 0, 0, 0, 0, 0], byHour: new Array(24).fill(0),
+    byPriority: {}, trades: {}, tradesByPriority: {}, spanFrom: "", spanTo: "" };
+  let unknown = 0;
+  const tradeFor = (id, descr) => overrides[id] || classifyTradeKw(descr) || (unknown++, "General / other");
+  // LIVE board jobs
+  const live = await db.prepare("SELECT id, priority, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
+  for (const r of (live.results || [])) {
+    let j = {}; try { j = JSON.parse(r.data) || {}; } catch {}
+    if (!isCoopJob(j)) continue;
+    const iso = j.raisedAt || j.createdAt || null; if (!iso) continue;
+    const pr = r.priority || j.priority;
+    accStats(acc, iso, pr, tradeFor(r.id, j.description), String(pr || "").trim() !== "");
+  }
+  // ARCHIVE (paginated so 23k rows never load at once; Chapplins excluded)
+  let offset = 0; const PAGE = 3000;
+  for (;;) {
+    const pg = await db.prepare(
+      "SELECT id, created_at, completed_at, json_extract(data,'$.priority') AS priority, json_extract(data,'$.description') AS descr, json_extract(data,'$.siteCode') AS site_code FROM sla_jobs_archive WHERE tenant_id=? AND id NOT LIKE 'CHAP-%' LIMIT ? OFFSET ?"
+    ).bind(tid, PAGE, offset).all();
+    const rowsP = pg.results || [];
+    for (const r of rowsP) {
+      if (/^p\d/i.test(String(r.site_code || ""))) continue;   // stray project
+      const iso = r.created_at || r.completed_at || null; if (!iso) continue;
+      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr), false);   // archive priority is a Commusoft default — not counted
+    }
+    if (rowsP.length < PAGE) break;
+    offset += PAGE;
+    if (offset > 60000) break;   // safety
+  }
+  const stats = { ...acc, tradeNames: CONCERTO_TRADE_NAMES, unknownTrade: unknown, builtAt: new Date().toISOString(), overrideCount: Object.keys(overrides).length };
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, "sla:concertostats:" + tid, JSON.stringify(stats)).run();
+  return stats;
+}
+async function getConcertoStats(env, tid, { rebuild } = {}) {
+  if (!rebuild) {
+    try {
+      const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:concertostats:" + tid).first();
+      if (row) {
+        const s = JSON.parse(row.value);
+        const ageH = (Date.now() - Date.parse(s.builtAt || 0)) / 3.6e6;
+        if (s && Number.isFinite(ageH) && ageH < 6) return s;   // fresh enough
+      }
+    } catch {}
+  }
+  return buildConcertoStats(env, tid);
+}
+// AI-refine: classify Co-op jobs whose trade is still unknown into the taxonomy,
+// newest first, capped. Stores overrides + rebuilds. Batches to Claude.
+async function aiRefineTrades(env, tid, ctx, cap = 300) {
+  const db = tenantDB(env, tid);
+  const overrides = await getJobTradeOverrides(env, tid);
+  const todo = [];   // {id, descr}
+  const consider = (id, descr) => {
+    if (todo.length >= cap) return;
+    if (overrides[id]) return;
+    if (classifyTradeKw(descr)) return;            // keyword already knows it
+    const d = String(descr || "").trim(); if (d.length < 6) return;
+    todo.push({ id, descr: d.slice(0, 400) });
+  };
+  const live = await db.prepare("SELECT id, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
+  for (const r of (live.results || [])) { let j = {}; try { j = JSON.parse(r.data) || {}; } catch {} if (isCoopJob(j)) consider(r.id, j.description); }
+  if (todo.length < cap) {
+    const arch = await db.prepare("SELECT id, json_extract(data,'$.description') AS descr FROM sla_jobs_archive WHERE tenant_id=? AND id NOT LIKE 'CHAP-%' ORDER BY created_at DESC LIMIT 4000").bind(tid).all();
+    for (const r of (arch.results || [])) consider(r.id, r.descr);
+  }
+  if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
+  const names = CONCERTO_TRADES.map(t => t[0]);
+  const schema = { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, trade: { type: "string", enum: names.concat("General / other") } }, required: ["i", "trade"] } } }, required: ["results"] };
+  let classified = 0; const CH = 40;
+  for (let k = 0; k < todo.length; k += CH) {
+    const batch = todo.slice(k, k + CH);
+    const user = "Classify each UK Co-op shop maintenance job into ONE trade from this list:\n" + names.join(", ") + ", General / other.\n\nJobs:\n" +
+      batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
+    const r = await anthropicTool(env, { system: "You classify building/shop maintenance jobs into a single trade. Use only the provided trade names.", user, toolName: "set_trades", schema, maxTokens: 1500 });
+    if (!r.ok) return { ok: false, error: r.error, classified };
+    for (const item of (r.input.results || [])) {
+      const b = batch[item.i]; if (!b) continue;
+      const t = names.concat("General / other").includes(item.trade) ? item.trade : "General / other";
+      if (t && t !== "General / other") { overrides[b.id] = t; classified++; }
+    }
+    ctx?.waitUntil?.(bumpAiUsage(env, tid, "trade-classify"));
+  }
+  await setJobTradeOverrides(env, tid, overrides);
+  await buildConcertoStats(env, tid);
+  return { ok: true, classified, remaining: Math.max(0, todo.length - classified) };
 }
 
 async function getEngSkills(env, tenantId) {

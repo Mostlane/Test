@@ -24,7 +24,7 @@
     if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"] = "application/json";
     return fetch(API + path, opts);
   }
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",'\'':"&#39;" })[c]; }); }
   function opId() { return (ME || "u") + "-" + (window.performance ? Math.round(performance.now() * 1000) : "") + "-" + (window.__mlOp = (window.__mlOp || 0) + 1); }
   function fmtWhen(v) { try { var d = new Date(v); var t = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); var today = new Date(); if (d.toDateString() === today.toDateString()) return t; return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " " + t; } catch (e) { return ""; } }
 
@@ -242,7 +242,7 @@
       var row = document.createElement("div");
       row.className = "mlc-row " + (m.mine ? "me" : "them");
       if (m.id) row.setAttribute("data-mid", m.id);
-      var del = (IS_ADMIN && m.id) ? '<button class="mlc-del" data-del="' + m.id + '" title="Delete message">🗑</button>' : '';
+      var del = (IS_ADMIN && m.id) ? '<button class="mlc-del" data-del="' + esc(m.id) + '" title="Delete message">🗑</button>' : '';
       var fromLbl = (curGroup && !m.mine) ? '<div class="mlc-from">' + esc(m.from || "") + '</div>' : '';
       row.innerHTML = '<div class="mlc-line"><div class="mlc-bub">' + fromLbl + esc(m.body) + '</div>' + del + '</div>' +
         '<div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div>';
