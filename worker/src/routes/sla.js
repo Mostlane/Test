@@ -6455,27 +6455,35 @@ function weekKey(y, m, d) {
   dt.setUTCDate(dt.getUTCDate() - wd);
   return dt.toISOString().slice(0, 10);
 }
-function accStats(acc, iso, priorityRaw, trade) {
+function accStats(acc, iso, priorityRaw, trade, reliablePri) {
   const lp = londonParts(iso); if (!lp) return;
   acc.total++;
-  const pm = /([1-4])/.exec(String(priorityRaw || "")); const pri = pm ? pm[1] : "0";
   const mk = lp.y + "-" + String(lp.m).padStart(2, "0");
   const wk = weekKey(lp.y, lp.m, lp.d);
   acc.byMonth[mk] = (acc.byMonth[mk] || 0) + 1;
   acc.byWeek[wk] = (acc.byWeek[wk] || 0) + 1;
   acc.byDow[lp.dow]++;
   acc.byHour[lp.hour]++;
-  acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
   acc.trades[trade] = (acc.trades[trade] || 0) + 1;
-  (acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {});
-  acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  // Priority is only counted where it's genuinely recorded. The imported
+  // Commusoft archive stamped "Priority 4" on ~every job (a default, not the
+  // real Concerto P1-P4), so counting it would swamp the split with fake P4s.
+  // Only reliable-priority jobs (the live board / real intake) feed the
+  // priority + trades-by-priority views.
+  if (reliablePri) {
+    const pm = /([1-4])/.exec(String(priorityRaw || "")); const pri = pm ? pm[1] : "0";
+    acc.priTotal++;
+    acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
+    (acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {});
+    acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  }
   if (!acc.spanFrom || iso < acc.spanFrom) acc.spanFrom = iso;
   if (!acc.spanTo || iso > acc.spanTo) acc.spanTo = iso;
 }
 async function buildConcertoStats(env, tid) {
   const db = tenantDB(env, tid);
   const overrides = await getJobTradeOverrides(env, tid);
-  const acc = { total: 0, byMonth: {}, byWeek: {}, byDow: [0, 0, 0, 0, 0, 0, 0], byHour: new Array(24).fill(0),
+  const acc = { total: 0, priTotal: 0, byMonth: {}, byWeek: {}, byDow: [0, 0, 0, 0, 0, 0, 0], byHour: new Array(24).fill(0),
     byPriority: {}, trades: {}, tradesByPriority: {}, spanFrom: "", spanTo: "" };
   let unknown = 0;
   const tradeFor = (id, descr) => overrides[id] || classifyTradeKw(descr) || (unknown++, "General / other");
@@ -6485,7 +6493,8 @@ async function buildConcertoStats(env, tid) {
     let j = {}; try { j = JSON.parse(r.data) || {}; } catch {}
     if (!isCoopJob(j)) continue;
     const iso = j.raisedAt || j.createdAt || null; if (!iso) continue;
-    accStats(acc, iso, r.priority || j.priority, tradeFor(r.id, j.description));
+    const pr = r.priority || j.priority;
+    accStats(acc, iso, pr, tradeFor(r.id, j.description), String(pr || "").trim() !== "");
   }
   // ARCHIVE (paginated so 23k rows never load at once; Chapplins excluded)
   let offset = 0; const PAGE = 3000;
@@ -6497,7 +6506,7 @@ async function buildConcertoStats(env, tid) {
     for (const r of rowsP) {
       if (/^p\d/i.test(String(r.site_code || ""))) continue;   // stray project
       const iso = r.created_at || r.completed_at || null; if (!iso) continue;
-      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr));
+      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr), false);   // archive priority is a Commusoft default — not counted
     }
     if (rowsP.length < PAGE) break;
     offset += PAGE;

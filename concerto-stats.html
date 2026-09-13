@@ -89,7 +89,7 @@
           <div class="vbars" id="hour" style="height:130px;"></div>
         </div>
         <div class="card">
-          <h2>By priority</h2><div class="sub">All time.</div>
+          <h2>By priority</h2><div class="sub" id="prioSub">All time.</div>
           <div class="seg" id="prioSeg"></div>
           <div class="legend" id="prioLegend"></div>
           <div id="prioRows" style="margin-top:12px;"></div>
@@ -99,7 +99,7 @@
           <div id="tradeRows"></div>
         </div>
         <div class="card">
-          <h2>Trades by priority</h2><div class="sub">% of each priority that needs each trade (columns add to ~100%).</div>
+          <h2>Trades by priority</h2><div class="sub" id="tbpSub">% of each priority that needs each trade (columns add to ~100%).</div>
           <div style="overflow-x:auto;"><table class="tt" id="tbp"></table></div>
         </div>
       </div>
@@ -164,6 +164,11 @@
       g("prioLegend").innerHTML = pcounts.map(x=>'<span><i style="background:'+PRI[x.k].c+'"></i>'+PRI[x.k].l+' — '+x.v+' ('+Math.round(x.v/ptot*100)+'%)</span>').join("");
       const pmax=Math.max(...pcounts.map(x=>x.v),1);
       g("prioRows").innerHTML = pcounts.map(x=>hrow(PRI[x.k].l, x.v, pmax, PRI[x.k].c, Math.round(x.v/ptot*100)+"%")).join("");
+      // Priority is only trustworthy on real intake — the imported Commusoft
+      // history defaulted almost every job to "Priority 4", so it's excluded here.
+      const pn = s.priTotal||0, priNote = "Based on "+pn.toLocaleString()+" job"+(pn===1?"":"s")+" with a recorded priority. Historical (Commusoft) jobs didn't capture priority, so they're not counted here.";
+      if(g("prioSub")) g("prioSub").textContent = priNote;
+      if(g("tbpSub")) g("tbpSub").textContent = "% of each priority that needs each trade (columns add to ~100%). "+priNote;
       // ---- trades overall
       const trades = Object.entries(s.trades).sort((a,b)=>b[1]-a[1]);
       const ttot = trades.reduce((a,b)=>a+b[1],0)||1;
