@@ -6480,7 +6480,7 @@ async function buildConcertoStats(env, tid) {
   let unknown = 0;
   const tradeFor = (id, descr) => overrides[id] || classifyTradeKw(descr) || (unknown++, "General / other");
   // LIVE board jobs
-  const live = await db.prepare("SELECT id, priority, data FROM sla_jobs").all();
+  const live = await db.prepare("SELECT id, priority, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
   for (const r of (live.results || [])) {
     let j = {}; try { j = JSON.parse(r.data) || {}; } catch {}
     if (!isCoopJob(j)) continue;
@@ -6491,8 +6491,8 @@ async function buildConcertoStats(env, tid) {
   let offset = 0; const PAGE = 3000;
   for (;;) {
     const pg = await db.prepare(
-      "SELECT id, created_at, completed_at, json_extract(data,'$.priority') AS priority, json_extract(data,'$.description') AS descr, json_extract(data,'$.siteCode') AS site_code FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' LIMIT ? OFFSET ?"
-    ).bind(PAGE, offset).all();
+      "SELECT id, created_at, completed_at, json_extract(data,'$.priority') AS priority, json_extract(data,'$.description') AS descr, json_extract(data,'$.siteCode') AS site_code FROM sla_jobs_archive WHERE tenant_id=? AND id NOT LIKE 'CHAP-%' LIMIT ? OFFSET ?"
+    ).bind(tid, PAGE, offset).all();
     const rowsP = pg.results || [];
     for (const r of rowsP) {
       if (/^p\d/i.test(String(r.site_code || ""))) continue;   // stray project
@@ -6534,10 +6534,10 @@ async function aiRefineTrades(env, tid, ctx, cap = 300) {
     const d = String(descr || "").trim(); if (d.length < 6) return;
     todo.push({ id, descr: d.slice(0, 400) });
   };
-  const live = await db.prepare("SELECT id, data FROM sla_jobs").all();
+  const live = await db.prepare("SELECT id, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
   for (const r of (live.results || [])) { let j = {}; try { j = JSON.parse(r.data) || {}; } catch {} if (isCoopJob(j)) consider(r.id, j.description); }
   if (todo.length < cap) {
-    const arch = await db.prepare("SELECT id, json_extract(data,'$.description') AS descr FROM sla_jobs_archive WHERE id NOT LIKE 'CHAP-%' ORDER BY created_at DESC LIMIT 4000").all();
+    const arch = await db.prepare("SELECT id, json_extract(data,'$.description') AS descr FROM sla_jobs_archive WHERE tenant_id=? AND id NOT LIKE 'CHAP-%' ORDER BY created_at DESC LIMIT 4000").bind(tid).all();
     for (const r of (arch.results || [])) consider(r.id, r.descr);
   }
   if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
