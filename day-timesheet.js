@@ -69,6 +69,7 @@
       ".mlds-later{display:block;width:100%;text-align:center;background:none;border:none;color:#7a8794;font-size:13px;padding:12px 0 2px;cursor:pointer;text-decoration:underline}" +
       ".mlds-empty{color:#5b6b7b;font-size:14px;background:#f6f9fc;border-radius:12px;padding:14px;text-align:center}" +
       ".mlds-na{color:#8794a2;font-size:12.5px;margin-top:4px;padding:2px 2px 0;line-height:1.4}" +
+      ".mlds-one{color:#334;font-size:14px;background:#f6f9fc;border-radius:12px;padding:13px 14px;line-height:1.45}" +
       ".mlds-locked{background:#f6f9fc;border-radius:12px;padding:16px;color:#334;font-size:14.5px;text-align:center}" +
       ".mlds-sum{text-align:center;padding:22px 6px 6px}" +
       ".mlds-sum .tick{width:64px;height:64px;border-radius:50%;background:#e7f6ed;color:#1e9e5a;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 12px}" +
@@ -153,11 +154,14 @@
         }
         var rows = Array.isArray(d.jobs) ? d.jobs : [];
         var na = Array.isArray(d.notAttended) ? d.notAttended : [];
-        var jobLab = rows.length > 1 ? "Time on each job" : "Time on site";
+        // Per-job time only earns its place with MULTIPLE jobs. One job (or a
+        // project/site day) = the whole day belongs to that one thing, so we just
+        // confirm start/finish — no per-job split to fill in.
+        var showSplit = rows.length >= 2;
         var naHtml = na.length
           ? '<div class="mlds-na">Not reached today (no time needed): ' + na.map(function (j) { return esc(j.ref); }).join(", ") + '</div>'
           : "";
-        var jobsHtml = rows.length ? rows.map(function (j, i) {
+        var jobsHtml = showSplit ? rows.map(function (j, i) {
           var capH = j.capturedMins > 0 ? q1(j.capturedMins / 60) : 0;
           return '<div class="mlds-job" data-jid="' + esc(j.jobId) + '">' +
             '<div class="r"><div class="nm"><div class="ref">' + esc(j.ref) + '</div>' + (j.site ? '<div class="site">' + esc(j.site) + '</div>' : '') + '</div>' +
@@ -165,7 +169,18 @@
             (j.capturedMins > 0 ? '<div class="mlds-cap">Recorded on site: <b>' + capH + 'h</b> (' + j.capturedMins + ' min) — adjust if that\'s not right</div>' : '<div class="mlds-cap">No time was recorded automatically — enter how long you were on site</div>') +
             '<div class="mlds-quick">' + [0.5, 1, 1.5, 2, 3].map(function (v) { return '<button type="button" data-v="' + v + '">' + (v === 0.5 ? '½' : (v === 1.5 ? '1½' : v)) + 'h</button>'; }).join("") + '</div>' +
             '</div>';
-        }).join("") : '<div class="mlds-empty">No jobs to log for today — just check your start and finish, then confirm.</div>';
+        }).join("") : "";
+
+        // The job block adapts to how many jobs there were.
+        var jobSection;
+        if (showSplit) {
+          jobSection = '<div class="mlds-sec"><div class="mlds-lab">Time on each job</div>' + jobsHtml + naHtml + '</div>';
+        } else {
+          var line = rows.length === 1
+            ? 'All of today\'s time goes to <b>' + esc(rows[0].ref) + '</b>' + (rows[0].site ? ' — ' + esc(rows[0].site) : '') + '.'
+            : 'No jobs to split today — just confirm your hours.';
+          jobSection = '<div class="mlds-sec"><div class="mlds-one">' + line + '</div>' + naHtml + '</div>';
+        }
 
         var startHint = d.autoStart && (d.autoStart === d.start) ? '<div class="mlds-hint">⏱ Filled in from your day — check it\'s right</div>' : '';
         var finishHint = d.travelHome ? '<div class="mlds-hint">Includes your drive home — adjust if needed</div>' : '';
@@ -176,7 +191,7 @@
           '<div><input class="mlds-in" id="mlds-start" type="time" step="300" value="' + esc(d.start || "") + '" aria-label="Start time"></div>' +
           '<div><input class="mlds-in" id="mlds-finish" type="time" step="300" value="' + esc(d.finish || "") + '" aria-label="Finish time"></div>' +
           '</div>' + startHint + finishHint + '</div>' +
-          '<div class="mlds-sec"><div class="mlds-lab">' + jobLab + '</div>' + jobsHtml + naHtml + '</div>' +
+          jobSection +
           '<div class="mlds-sec mlds-note"><div class="mlds-lab">Anything to add? (optional)</div><textarea id="mlds-note" placeholder="Notes about today…">' + esc(d.note || "") + '</textarea></div>' +
           '<div class="mlds-foot"><button class="mlds-btn primary" id="mlds-confirm">✓ Confirm &amp; finish day</button>' +
           '<button class="mlds-later" id="mlds-later">I\'ll finish this later</button></div>';
@@ -206,15 +221,23 @@
         if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
         var jobHours = {};
         var jobLabels = [];
-        sheet.querySelectorAll(".mlds-job").forEach(function (jobEl) {
-          var jid = jobEl.getAttribute("data-jid");
-          var h = parseFloat(jobEl.querySelector("input").value);
-          if (jid && isFinite(h) && h > 0) {
-            jobHours[jid] = Math.min(24, Math.round(h * 4) / 4);
-            var ref = (rows.find(function (r) { return r.jobId === jid; }) || {}).ref || jid;
-            jobLabels.push(ref);
-          }
-        });
+        var showSplit = rows.length >= 2;
+        if (showSplit) {
+          sheet.querySelectorAll(".mlds-job").forEach(function (jobEl) {
+            var jid = jobEl.getAttribute("data-jid");
+            var h = parseFloat(jobEl.querySelector("input").value);
+            if (jid && isFinite(h) && h > 0) {
+              jobHours[jid] = Math.min(24, Math.round(h * 4) / 4);
+              var ref = (rows.find(function (r) { return r.jobId === jid; }) || {}).ref || jid;
+              jobLabels.push(ref);
+            }
+          });
+        } else if (rows.length === 1) {
+          // Single job / project day: the whole day's time goes to that one job
+          // (pre-filled from the shift span server-side).
+          var only = rows[0], h1 = parseFloat(only.hours);
+          if (only.jobId && isFinite(h1) && h1 > 0) { jobHours[only.jobId] = Math.min(24, Math.round(h1 * 4) / 4); jobLabels.push(only.ref); }
+        }
         var payload = {
           date: date,
           start: (sheet.querySelector("#mlds-start") || {}).value || "",
