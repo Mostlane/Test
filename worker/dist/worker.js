@@ -20691,22 +20691,25 @@ function weekKey(y, m, d) {
   dt.setUTCDate(dt.getUTCDate() - wd);
   return dt.toISOString().slice(0, 10);
 }
-function accStats(acc, iso, priorityRaw, trade) {
+function accStats(acc, iso, priorityRaw, trade, reliablePri) {
   const lp = londonParts(iso);
   if (!lp) return;
   acc.total++;
-  const pm = /([1-4])/.exec(String(priorityRaw || ""));
-  const pri = pm ? pm[1] : "0";
   const mk = lp.y + "-" + String(lp.m).padStart(2, "0");
   const wk = weekKey(lp.y, lp.m, lp.d);
   acc.byMonth[mk] = (acc.byMonth[mk] || 0) + 1;
   acc.byWeek[wk] = (acc.byWeek[wk] || 0) + 1;
   acc.byDow[lp.dow]++;
   acc.byHour[lp.hour]++;
-  acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
   acc.trades[trade] = (acc.trades[trade] || 0) + 1;
-  acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {};
-  acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  if (reliablePri) {
+    const pm = /([1-4])/.exec(String(priorityRaw || ""));
+    const pri = pm ? pm[1] : "0";
+    acc.priTotal++;
+    acc.byPriority[pri] = (acc.byPriority[pri] || 0) + 1;
+    acc.tradesByPriority[pri] = acc.tradesByPriority[pri] || {};
+    acc.tradesByPriority[pri][trade] = (acc.tradesByPriority[pri][trade] || 0) + 1;
+  }
   if (!acc.spanFrom || iso < acc.spanFrom) acc.spanFrom = iso;
   if (!acc.spanTo || iso > acc.spanTo) acc.spanTo = iso;
 }
@@ -20715,6 +20718,7 @@ async function buildConcertoStats(env, tid) {
   const overrides = await getJobTradeOverrides(env, tid);
   const acc = {
     total: 0,
+    priTotal: 0,
     byMonth: {},
     byWeek: {},
     byDow: [0, 0, 0, 0, 0, 0, 0],
@@ -20737,7 +20741,8 @@ async function buildConcertoStats(env, tid) {
     if (!isCoopJob(j)) continue;
     const iso = j.raisedAt || j.createdAt || null;
     if (!iso) continue;
-    accStats(acc, iso, r.priority || j.priority, tradeFor(r.id, j.description));
+    const pr = r.priority || j.priority;
+    accStats(acc, iso, pr, tradeFor(r.id, j.description), String(pr || "").trim() !== "");
   }
   let offset = 0;
   const PAGE = 3e3;
@@ -20750,7 +20755,7 @@ async function buildConcertoStats(env, tid) {
       if (/^p\d/i.test(String(r.site_code || ""))) continue;
       const iso = r.created_at || r.completed_at || null;
       if (!iso) continue;
-      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr));
+      accStats(acc, iso, r.priority, tradeFor(r.id, r.descr), false);
     }
     if (rowsP.length < PAGE) break;
     offset += PAGE;
