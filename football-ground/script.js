@@ -117,8 +117,8 @@ const clearError = (name) => {
   if (err) err.textContent = "";
 };
 
-// clear a field's error as the user fixes it
-form.querySelectorAll("input,select,textarea").forEach(el =>
+// clear a field's error as the user fixes it (only when the form is on the page)
+if (form) form.querySelectorAll("input,select,textarea").forEach(el =>
   el.addEventListener("input", () => clearError(el.name))
 );
 
@@ -153,7 +153,7 @@ function buildBody(d){
   );
 }
 
-form.addEventListener("submit", async (e) => {
+if (form) form.addEventListener("submit", async (e) => {
   e.preventDefault();
   note.textContent = ""; note.className = "form-note";
 
