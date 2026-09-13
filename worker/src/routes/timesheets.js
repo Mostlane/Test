@@ -394,24 +394,41 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
     }
   } catch {}
   const ids = new Set([...Object.keys(cap), ...booked, ...Object.keys(savedJobHours || {})]);
-  if (!ids.size) return [];
+  if (!ids.size) return { jobs: [], notAttended: [] };
+  const normIdSelf = String(who || "").toLowerCase().replace(/\s+/g, ".").trim();
   const meta = {};
   try {
     const arr = [...ids].slice(0, 200);
     const ph = arr.map(() => "?").join(",");
     const { results } = await env.DB.prepare(`SELECT id, helpdesk_ref, site_code, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...arr).all();
-    for (const r of results || []) { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "" }; }
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      // The engineer's OWN status (multi-engineer jobs carry a slice each) else
+      // the shared/top-level status.
+      const es = d.engStatus && d.engStatus[normIdSelf];
+      const status = String((es && es.status) || d.status || "");
+      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "", status };
+    }
   } catch {}
-  const rows = [];
+  // A job counts as ATTENDED (gets a time box) if the engineer tapped it (captured
+  // minutes), already logged hours, or its status shows they went — INCLUDING the
+  // parked outcomes On Hold / Quote / Order. Only Scheduled/Pending/Cancelled with
+  // no time is "not reached today" — no time box, just a note, so they never have
+  // to put hours against a job they didn't get to.
+  const NOT_ATTENDED = new Set(["scheduled", "pending", "cancelled", "new", ""]);
+  const jobs = [], notAttended = [];
   for (const id of ids) {
-    const m = meta[id] || bookMeta[id] || { ref: id, site: "" };
+    const m = meta[id] || bookMeta[id] || { ref: id, site: "", status: "" };
     const capturedMins = Math.round(cap[id] || 0);
     const saved = savedJobHours && savedJobHours[id] != null ? Number(savedJobHours[id]) : null;
+    const attended = saved != null || capturedMins > 0 || !NOT_ATTENDED.has(String(m.status || "").toLowerCase());
+    if (!attended) { notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status }); continue; }
     const hours = saved != null ? saved : (capturedMins > 0 ? r2q(capturedMins / 60) : 0);
-    rows.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " — " + m.site : ""), capturedMins, hours });
+    jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " — " + m.site : ""), capturedMins, hours, status: m.status });
   }
-  rows.sort((a, b) => (b.capturedMins - a.capturedMins) || String(a.ref).localeCompare(String(b.ref)));
-  return rows;
+  jobs.sort((a, b) => (b.capturedMins - a.capturedMins) || String(a.ref).localeCompare(String(b.ref)));
+  notAttended.sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+  return { jobs, notAttended };
 }
 
 // Materialise submitted per-job hours into the labour ledger. Each (day, job)
@@ -1523,14 +1540,22 @@ export async function handle(request, env, ctx, url, sess) {
     const saved = days[date] || {};
     const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
     const a = auto[date] || {};
-    const rows = await dayJobRows(env, tid, who, date, saved.jobHours || {});
+    const { jobs, notAttended } = await dayJobRows(env, tid, who, date, saved.jobHours || {});
+    const start = saved.start || a.start || "";
+    const finish = saved.finish || a.finish || "";
+    // Single-site / project day: one job all day → default its hours to the whole
+    // shift so it's a one-tap confirm, not a fiddly split. Only when nothing was
+    // captured or already saved for it.
+    if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
+      const s = toMin(start), f = toMin(finish);
+      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+    }
     const inv = await invoiceFor(env, tid, who, monday);
     return json({ ok: true, date, week: monday,
-      start: saved.start || a.start || "",
-      finish: saved.finish || a.finish || "",
+      start, finish,
       autoStart: a.start || "", autoFinish: a.finish || "", travelHome: !!a.travelHome,
       note: saved.note || "",
-      jobs: rows,
+      jobs, notAttended,
       confirmed: saved.confirmed || null,
       locked: !!approval || !!inv,
       lockReason: inv ? "invoiced" : (approval ? "approved" : ""),

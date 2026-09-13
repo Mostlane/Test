@@ -1848,7 +1848,8 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
   } catch {
   }
   const ids = /* @__PURE__ */ new Set([...Object.keys(cap2), ...booked, ...Object.keys(savedJobHours || {})]);
-  if (!ids.size) return [];
+  if (!ids.size) return { jobs: [], notAttended: [] };
+  const normIdSelf = String(who || "").toLowerCase().replace(/\s+/g, ".").trim();
   const meta = {};
   try {
     const arr = [...ids].slice(0, 200);
@@ -1860,20 +1861,29 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
         d = JSON.parse(r.data || "{}");
       } catch {
       }
-      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "" };
+      const es = d.engStatus && d.engStatus[normIdSelf];
+      const status = String(es && es.status || d.status || "");
+      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "", status };
     }
   } catch {
   }
-  const rows = [];
+  const NOT_ATTENDED = /* @__PURE__ */ new Set(["scheduled", "pending", "cancelled", "new", ""]);
+  const jobs = [], notAttended = [];
   for (const id of ids) {
-    const m = meta[id] || bookMeta[id] || { ref: id, site: "" };
+    const m = meta[id] || bookMeta[id] || { ref: id, site: "", status: "" };
     const capturedMins = Math.round(cap2[id] || 0);
     const saved = savedJobHours && savedJobHours[id] != null ? Number(savedJobHours[id]) : null;
+    const attended = saved != null || capturedMins > 0 || !NOT_ATTENDED.has(String(m.status || "").toLowerCase());
+    if (!attended) {
+      notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status });
+      continue;
+    }
     const hours = saved != null ? saved : capturedMins > 0 ? r2q(capturedMins / 60) : 0;
-    rows.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " \u2014 " + m.site : ""), capturedMins, hours });
+    jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " \u2014 " + m.site : ""), capturedMins, hours, status: m.status });
   }
-  rows.sort((a, b) => b.capturedMins - a.capturedMins || String(a.ref).localeCompare(String(b.ref)));
-  return rows;
+  jobs.sort((a, b) => b.capturedMins - a.capturedMins || String(a.ref).localeCompare(String(b.ref)));
+  notAttended.sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+  return { jobs, notAttended };
 }
 async function materialiseTimesheet(env, tid, username, monday, days) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
@@ -3102,19 +3112,26 @@ async function handle5(request, env, ctx, url, sess) {
     const saved = days[date] || {};
     const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
     const a = auto[date] || {};
-    const rows = await dayJobRows(env, tid, who, date, saved.jobHours || {});
+    const { jobs, notAttended } = await dayJobRows(env, tid, who, date, saved.jobHours || {});
+    const start = saved.start || a.start || "";
+    const finish = saved.finish || a.finish || "";
+    if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
+      const s = toMin(start), f = toMin(finish);
+      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+    }
     const inv = await invoiceFor(env, tid, who, monday);
     return json({
       ok: true,
       date,
       week: monday,
-      start: saved.start || a.start || "",
-      finish: saved.finish || a.finish || "",
+      start,
+      finish,
       autoStart: a.start || "",
       autoFinish: a.finish || "",
       travelHome: !!a.travelHome,
       note: saved.note || "",
-      jobs: rows,
+      jobs,
+      notAttended,
       confirmed: saved.confirmed || null,
       locked: !!approval || !!inv,
       lockReason: inv ? "invoiced" : approval ? "approved" : "",
