@@ -123,6 +123,8 @@ a{color:inherit}
      scrim + gradient over it (as on desktop). The one mobile fix is the headline size
      so "GRASSROOTS" fits and never clips off the edge. */
   .hero{justify-content:flex-start}
+  /* Shift the crop toward the right so the patio table & chairs stay in view. */
+  .hero-photo{background-position:82% 45%}
   .hero-content{padding-top:calc(96px + env(safe-area-inset-top,0px))}
   .hero h1{font-size:clamp(40px,12vw,66px)}
   .hero-stats{grid-template-columns:repeat(2,1fr);margin-top:40px}
