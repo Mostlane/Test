@@ -3360,6 +3360,48 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
   and **🛠 Create works job** (portal remedials rows). The board self-heals cases; the old
   MLUI.confirm quote (which showed literal `<br>`) is gone. **TODO/next:** fold £ into job
   costing; match late client orders; a Help guide.
+- **five-year-remedials.html RE-SCOPED to the FULL YEAR EICR SCHEDULE (14 Sep 2026, Jamie:
+  "the full EICR schedule Jan 26 → Dec 26… look like the compliance page, thin lines, a
+  traffic-light system of stages (filterable) with a dropdown at the end of the row to
+  change status… check the 5-year document for each site and tell me the current status
+  (out of date / unsatisfactory / in date but unsatisfactory / missing)… all areas of
+  5-year synced — remedial orders the portal knows set the status originally, I'll manually
+  update for orders going forward").** The page no longer reads `/certs/five-year/schedule`
+  (that completed-this-year view + endpoints STAY for the "Certificates to review" flow and
+  the eicr-portal amber "tested — cert to file" marker); it now reads **GET
+  /concerto/schedule?type=fiveYear&status=all** (routes/concerto.js) — the **Concerto PPM
+  5-year list** (Jamie's official list), one row per site, each already carrying the derived
+  pipeline **case** (`deriveCase` reads the elec-test job, the certificate, the compliance
+  check + any client order — so "remedial orders set the status originally" for free) plus
+  reconcile flags + cert history. Rows are filtered to the selected YEAR **client-side** by
+  `nextDate` year OR the tested-step date's year (Concerto rolls the date forward after a
+  test, so a completed-this-year site still shows). Presented as a **thin compliance-style
+  table** (sticky store column, horizontal scroll) with: **Certificate status** column (the
+  new server-computed **`docStatus`** — In date / No cert filed yet / In date but
+  unsatisfactory / Out of date / Out of date + unsatisfactory / Missing, traffic-lit),
+  **Next due**, **Tested by**, a traffic-light **Stage**, and a per-row **status dropdown**.
+  - **12-stage single-status set** (Jamie's, replacing the 7-stage FYR_STAGES *for this
+    page only*): **`FY_STAGES`** in concerto.js (exported) = needs_booking · scheduled ·
+    awaiting_review · complete_satisfactory · remedials_required · remedials_to_quote ·
+    remedials_quoted · orders_received · remedials_scheduled · remedials_complete ·
+    certificate_updated · invoiced, each with a red/amber/green `light`. It is a SINGLE
+    status, NOT the CASE_STEPS checklist — **`fyStage12Auto(caseView)`** (exported) collapses
+    the checklist steps + outcome + works-job-scheduled into ONE of the 12. The concerto-ppm
+    5-Year tab keeps the full CASE_STEPS checklist; both read the same case, so they agree.
+  - **Manual override**: `concerto_cases.stage12` (+ `stage12_at`/`stage12_by`, self-migrating).
+    Blank = the derived `fyStage12Auto` shows; a set value WINS until cleared (mirrors the
+    `outcome`/`engineer` override precedent — Jamie's "I'll manually update going forward").
+    `deriveCase` returns `stage12`/`stage12Auto`/`stage12Source`; **POST /concerto/case
+    {ppmId, stage12}** sets it (logged), clears with `""`, and sets the checklist `outcome`
+    coherently (any remedials_* stage ⇒ unsatisfactory; complete_satisfactory ⇒ satisfactory)
+    so the pipeline page stays consistent. `stats.pipeline.byStage12` + `stages12` feed the
+    filter chips; buildSchedule adds `docStatus` per pipeline row.
+  - Filter chips per stage (traffic-lit, counts) + 🚩-flagged toggle + search; each row
+    expands to the read-only step strip + outcome + links (test job / ➕ raise test job /
+    works job / certificate / compliance check / client orders / site folder / full case on
+    concerto-ppm) + log. Test: `node --no-warnings worker/tools/test-concerto.mjs` (the
+    "12-stage single status + document status" block). **TODO/next:** fold remedial £ into
+    job costing; a Help guide for the schedule.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

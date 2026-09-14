@@ -305,5 +305,46 @@ const ROWS = [
   sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
   ok("chart catches up → gap gone, automatic flag clears itself, row drops back to not due", by["0777"].flag === "due" && !by["0777"].case.autoFlag && !by["0777"].case.flagged && by["0777"].case.stage === "not_due" && sc.body.stats.gap === 0, JSON.stringify({ flag: by["0777"].flag, stage: by["0777"].case.stage }));
 }
+// ── 12-stage single status (five-year-remedials.html) + document status ─────
+{
+  const { env, db } = makeEnv();
+  const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
+  // 0500: in date (chart 2027) but the test came back UNSATISFACTORY, nothing quoted yet.
+  // 0501: chart is out of date (2024) and nothing booked. 0502: no chart, no cert (missing).
+  ins("sla_jobs", ["tenant_id","id","data","status"], [
+    [1,"F1",JSON.stringify({ id:"F1", siteCode:"0500", elecTest:true, description:"5 year test", status:"Complete", scheduledAt:"2026-02-01T08:00:00.000Z", statusHistory:[{status:"Complete",at:"2026-02-01T15:00:00Z"}], assignedEngineers:["Connor"], remedials:[{id:"r1",code:"C2",description:"x"}] }),"Complete"],
+  ]);
+  ins("compliance_files", ["tenant_id","scheme","code","type","doc_date","filename","r2_key"], [[1,"coop","0500","fiveYear","2026-02-05","0500 EICR.pdf","kf1"]]);
+  const cid = db.prepare("SELECT id FROM compliance_files WHERE code='0500'").get().id;
+  ins("compliance_review", ["tenant_id","scheme","code","type","status","outcome","attention","file_id","doc_at","checked_at"], [[1,"coop","0500","fiveYear","open","UNSATISFACTORY",1,cid,"2026-02-05T10:00:00Z","2026-02-06T09:00:00Z"]]);
+  ins("compliance_stores", ["tenant_id","scheme","code","category","name","due","active"], [
+    [1,"coop","0500","Retail","Alpha",'{"fiveYear":"2027-01-01"}',1],
+    [1,"coop","0501","Retail","Beta",'{"fiveYear":"2024-01-01"}',1],
+  ]);
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: [
+    { uprn:"SR00500", site:"0500 - Alpha", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2026-06-30", status:"Live", orderNr:"" },
+    { uprn:"SR00501", site:"0501 - Beta", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2026-08-31", status:"Live", orderNr:"" },
+    { uprn:"SR00502", site:"0502 - Gamma", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2026-09-30", status:"Live", orderNr:"" },
+  ], fileName: "ppm_schedule_stage12.xlsx" });
+  let sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); let by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("stage12: 12 stages advertised + byStage12 present", sc.body.stats.pipeline.stages12.length === 12 && sc.body.stats.pipeline.byStage12 && sc.body.rows.every(r => r.case.stage12 && r.docStatus), JSON.stringify(sc.body.stats.pipeline.byStage12));
+  ok("0500 auto stage12 = remedials_required (unsat, reviewed, not quoted); source auto", by["0500"].case.stage12 === "remedials_required" && by["0500"].case.stage12Source === "auto" && by["0500"].case.stage12Auto === "remedials_required", JSON.stringify({ s: by["0500"].case.stage12, src: by["0500"].case.stage12Source }));
+  ok("0500 document status = in date but unsatisfactory (amber)", by["0500"].docStatus.key === "in_unsat" && by["0500"].docStatus.light === "amber");
+  ok("0501 out of date (expired chart, nothing booked) → doc expired, stage needs_booking", by["0501"].docStatus.key === "expired" && by["0501"].docStatus.light === "red" && by["0501"].case.stage12 === "needs_booking");
+  ok("0502 no chart + no cert → document status missing", by["0502"].docStatus.key === "missing" && by["0502"].docStatus.light === "red" && by["0502"].case.stage12 === "needs_booking");
+  // Manual override wins; unsat-path stage keeps the outcome unsatisfactory; a bad stage is refused
+  const badS = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00500:fiveYear", stage12: "banana" });
+  const setS = await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00500:fiveYear", stage12: "remedials_quoted" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("bad stage refused; manual stage12 wins (source manual, by whom) and keeps outcome unsatisfactory", badS.status === 400 && setS.status === 200 && by["0500"].case.stage12 === "remedials_quoted" && by["0500"].case.stage12Source === "manual" && by["0500"].case.stage12By === "Tanya" && by["0500"].case.outcome === "unsatisfactory" && sc.body.stats.pipeline.byStage12.remedials_quoted === 1, JSON.stringify({ s: by["0500"].case.stage12, src: by["0500"].case.stage12Source }));
+  // Clearing the override → back to the automatic reading
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00500:fiveYear", stage12: "" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("clear the override → back to auto (remedials_required)", by["0500"].case.stage12 === "remedials_required" && by["0500"].case.stage12Source === "auto");
+  // Picking the satisfactory stage sets the outcome satisfactory (both pages agree)
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00501:fiveYear", stage12: "complete_satisfactory" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("picking Complete — satisfactory sets outcome satisfactory", by["0501"].case.stage12 === "complete_satisfactory" && by["0501"].case.outcome === "satisfactory");
+}
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
