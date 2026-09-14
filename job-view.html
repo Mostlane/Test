@@ -11,6 +11,7 @@
   <script src="cert-form.js?v=23"></script>
   <script src="pump-form.js?v=4"></script>
   <script src="remedials-form.js?v=6"></script>
+  <script src="docviewer.js?v=7"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -724,6 +725,14 @@
         <span id="adminNoteStatus" style="font-size:12px;color:#64748b;"></span>
       </div>
     </div>
+    <!-- Documents on this job (PDFs etc.) — attached to THIS JOB ONLY, not the site. -->
+    <div id="jobDocsBox" style="margin-top:14px;border-top:1px dashed #d7dee6;padding-top:12px;">
+      <div class="field-label">📎 Documents on this job <span class="status-hint">(PDFs etc. — stays on the job, not the site)</span></div>
+      <div id="jobDocsList" class="panel-light" style="margin:6px 0;">No documents attached.</div>
+      <label for="jobDocInput" class="btn" style="cursor:pointer;display:inline-block;">📎 Attach a PDF / document</label>
+      <input type="file" id="jobDocInput" accept="application/pdf,.pdf,image/*,.doc,.docx,.xls,.xlsx" hidden>
+      <span id="jobDocStatus" style="font-size:12px;color:#64748b;margin-left:8px;"></span>
+    </div>
   </div>
 
   <!-- PHOTOS -->
@@ -1004,6 +1013,7 @@ function renderJob(){
   renderCapture();
   renderNotes();
   renderTimeline();
+  loadJobDocs();
 
   const statusSelect = $("statusSelect");
   let matched = false;
@@ -1721,6 +1731,63 @@ async function addAdminNote(){
   }finally{
     if(btn){ btn.disabled = false; }
   }
+}
+
+/* ---- 📎 Documents on this job (PDFs etc.) — stored under jobs/<id>/docs/,
+   attached to THIS JOB ONLY (never surfaced against the site). ---- */
+function fmtBytes(n){ n=+n||0; if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(0)+" KB"; return (n/1048576).toFixed(1)+" MB"; }
+async function loadJobDocs(){
+  const box = $("jobDocsList"); if(!box || !job?.id) return;
+  let files = [];
+  try{
+    const r = await mApi("/sla/jobs/" + encodeURIComponent(job.id) + "/docs");
+    const d = r.ok ? await r.json() : {};
+    files = d.files || [];
+  }catch(e){ box.textContent = "Couldn't load documents."; return; }
+  if(!files.length){ box.textContent = "No documents attached."; return; }
+  const full = isFullAccess();
+  box.innerHTML = files.map(f => {
+    const meta = [f.by ? "added by " + esc(f.by) : "", f.size ? fmtBytes(f.size) : ""].filter(Boolean).join(" · ");
+    const del = full ? ' <button type="button" class="linkbtn danger" data-deldoc="'+esc(f.key)+'" title="Remove this document" style="background:none;border:none;color:#b91c1c;cursor:pointer;font:inherit;">✕</button>' : "";
+    return '<div class="jd-row" style="display:flex;align-items:baseline;gap:8px;padding:6px 2px;border-top:1px solid rgba(0,0,0,.06);">'
+      + '<span style="font-size:16px;">📄</span>'
+      + '<a href="#" class="opendoc" data-doc="'+esc(f.url)+'" data-name="'+esc(f.name)+'" style="font-weight:600;">'+esc(f.name)+'</a>'
+      + (meta ? ' <span style="font-size:12px;color:#64748b;">· '+meta+'</span>' : '')
+      + del + '</div>';
+  }).join("");
+  box.querySelectorAll("[data-doc]").forEach(a => a.onclick = e => {
+    e.preventDefault();
+    const url = a.dataset.doc, name = a.dataset.name || "Document";
+    if(window.MLDocViewer && MLDocViewer.open) MLDocViewer.open({ url, fetchUrl:url, name, downloadUrl:url });
+    else window.open(url, "_blank");
+  });
+  box.querySelectorAll("[data-deldoc]").forEach(b => b.onclick = () => delJobDoc(b.dataset.deldoc));
+}
+async function uploadJobDoc(){
+  const inp = $("jobDocInput"), st = $("jobDocStatus");
+  if(!inp || !inp.files || !inp.files[0] || !job?.id) return;
+  const file = inp.files[0];
+  if(st){ st.textContent = "Uploading " + file.name + "…"; }
+  try{
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    fd.append("filename", file.name);
+    const r = await mApi("/sla/jobs/" + encodeURIComponent(job.id) + "/docs", { method:"POST", body: fd });
+    if(!r.ok) throw new Error(r.status);
+    if(st){ st.textContent = "✅ Attached."; setTimeout(()=>{ if(st) st.textContent=""; }, 3000); }
+    await loadJobDocs();
+  }catch(e){ if(st){ st.textContent = "❌ Upload failed — try again."; } }
+  finally{ inp.value = ""; }
+}
+async function delJobDoc(key){
+  if(!key || !job?.id) return;
+  const ok = window.MLUI ? await MLUI.confirm("Remove this document from the job?", { danger:true, okLabel:"Remove" }) : confirm("Remove this document from the job?");
+  if(!ok) return;
+  try{
+    const r = await mApi("/sla/jobs/" + encodeURIComponent(job.id) + "/docs?key=" + encodeURIComponent(key), { method:"DELETE" });
+    if(!r.ok) throw new Error(r.status);
+    await loadJobDocs();
+  }catch(e){ if(window.MLUI) MLUI.toast ? MLUI.toast("Couldn't remove it.") : alert("Couldn't remove it."); else alert("Couldn't remove it."); }
 }
 
 /* ---- 🧾 Client order card (Sep 2026): the order this job is the works for.
@@ -2484,6 +2551,10 @@ $("saveSig").addEventListener("click", saveSignature);
 
   // Full-Access: reveal the "add a note as another user" box + load the picker.
   setupAdminNote();
+
+  // Job documents (PDFs etc.) — attach + list.
+  const jdi = $("jobDocInput");
+  if(jdi) jdi.addEventListener("change", uploadJobDoc);
 
   // Load job details
   loadJob();

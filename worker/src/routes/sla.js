@@ -1939,6 +1939,62 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, key }, headers);
     }
 
+    // ---- Job DOCUMENTS (PDFs etc.) attached to THIS JOB ONLY ----------------
+    // Stored under jobs/<id>/docs/ — deliberately NOT the sitedocs/ prefix and
+    // never injected into /sla/site/docs, so a document added here stays on the
+    // job and does NOT appear against the site. Any logged-in user may add/list;
+    // Full Access deletes. Served (inline, CORS) through the signed /sla/site/doc
+    // route, which already streams jobs/ keys.
+    // POST /sla/jobs/{id}/docs  (multipart: file, filename?, label?)
+    if (parts[2] === "docs" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try { form = await request.formData(); }
+      catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
+      const file = form.get("file");
+      if (!file || typeof file.stream !== "function") return jsonResponse({ error: "Missing file" }, headers, 400);
+      const raw = String(form.get("filename") || file.name || "document");
+      const base = (raw.replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 120)) || "document";
+      const label = String(form.get("label") || base).slice(0, 200);
+      const key = `jobs/${id}/docs/${Date.now()}-${base}`;
+      await env.JOB_FILES.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type || "application/octet-stream" },
+        customMetadata: { label, by: (sess.user && sess.user.username) || "" }
+      });
+      return jsonResponse({ ok: true, key }, headers, 201);
+    }
+
+    // GET /sla/jobs/{id}/docs  -> list the job's attached documents (signed URLs)
+    if (parts[2] === "docs" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/docs/`, include: ["customMetadata", "httpMetadata"] });
+      const files = [];
+      for (const o of (listed.objects || [])) {
+        const nm = o.key.split("/").pop().replace(/^\d+-/, "");
+        files.push({
+          key: o.key,
+          name: (o.customMetadata && o.customMetadata.label) || nm,
+          by: (o.customMetadata && o.customMetadata.by) || "",
+          size: o.size,
+          uploaded: o.uploaded ? new Date(o.uploaded).toISOString() : "",
+          type: (o.httpMetadata && o.httpMetadata.contentType) || "",
+          url: await signedFileUrl(env, url.origin, "/sla/site/doc", o.key)
+        });
+      }
+      files.sort((a, b) => String(b.uploaded).localeCompare(String(a.uploaded)));
+      return jsonResponse({ files }, headers);
+    }
+
+    // DELETE /sla/jobs/{id}/docs?key=  -> remove a job document (Full Access only)
+    if (parts[2] === "docs" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Only Full Access can delete job documents." }, headers, 403);
+      const key = searchParams.get("key") || "";
+      if (!key.startsWith(`jobs/${id}/docs/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try { await env.JOB_FILES.delete(key); } catch {}
+      return jsonResponse({ ok: true, key }, headers);
+    }
+
     // POST /sla/jobs/{id}/audit-photo  -> attach a photo to a site-audit checklist
     // item. stage=ref (office reference/before) OR stage=done (engineer completion,
     // which marks the item complete). Multipart: file, thumb?, itemId, stage.

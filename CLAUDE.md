@@ -923,6 +923,16 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `backfillThumbs()` self-heals older photos with no thumb (fetch→shrink→POST
   /site/thumb, 2 lanes) — normally a no-op since new uploads carry their thumb.
   (job-view.html office view still uses full-res; same treatment could be applied there.)
+  **Job DOCUMENTS (PDFs etc.) — attached to a JOB ONLY, not the site (Sep 2026):**
+  a "📎 Documents on this job" box in the Engineer's-notes card on **job-view.html**
+  (office) lets you attach PDFs/docs to the job. Stored at R2 **`jobs/<id>/docs/`**
+  (deliberately NOT the `sitedocs/` prefix and NEVER injected into `/sla/site/docs`,
+  so they don't surface against the site). Endpoints in sla.js: **POST /sla/jobs/{id}/docs**
+  (multipart file+filename?+label?, any session), **GET /sla/jobs/{id}/docs** (list with
+  signed URLs), **DELETE /sla/jobs/{id}/docs?key=** (Full Access; key must be under
+  `jobs/<id>/docs/`). Served inline+CORS through the existing signed **/sla/site/doc**
+  route (which already streams `jobs/` keys), opened in **docviewer.js**. job-view calls
+  these on MOSTLANE_API via `mApi` (the page still loads over the legacy SLA host).
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
