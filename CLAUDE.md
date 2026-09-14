@@ -933,6 +933,12 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `jobs/<id>/docs/`). Served inline+CORS through the existing signed **/sla/site/doc**
   route (which already streams `jobs/` keys), opened in **docviewer.js**. job-view calls
   these on MOSTLANE_API via `mApi` (the page still loads over the legacy SLA host).
+  **The ENGINEER sees them too (read-only):** engineer-job.html renders a
+  "📎 Documents on this job" card (shown only when docs exist) for EVERY job type —
+  vital on pump/EM/PAT/firestop/elec jobs where the standard notes/photo card is
+  replaced, so the office-attached PDF is otherwise invisible. It lists each doc as a
+  tap-to-open link (opens the signed URL in a new tab) via `loadJobDocs()`, reaching
+  `/sla/jobs/{id}/docs` through the bridged `SLA_API` host (`jfetch`).
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,

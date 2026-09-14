@@ -397,6 +397,9 @@
       if(dirDest) h+='<a class="tool" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dirDest)+'">🗺️ Directions</a>';
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
+    // Documents the OFFICE attached to THIS job (PDFs etc.) — read-only, shown for
+    // every job type incl. pump/EM/PAT/firestop/elec where the notes card is replaced.
+    h+='<div class="card" id="jobDocsCard" style="display:none"><div class="sec-h"><span class="t">📎 Documents on this job</span></div><div id="jobDocsList"></div></div>';
     var fs = !!(job && job.firestopping);
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
@@ -477,6 +480,24 @@
     // Belt-and-braces: neutralise any leftover edit controls inside the cert/firestop
     // panels for a closed job (they're already submitted/final).
     ["certHost","firestopHost","panelHost"].forEach(function(id){ var el=$(id); if(el) el.style.pointerEvents="none"; });
+  }
+
+  // Read-only: PDFs / documents the office attached to THIS job (jobs/<id>/docs/).
+  // Shown for every job type — on a pump/EM/PAT job the notes card is replaced, so
+  // this is the only place the engineer sees an attached document. Opens in a new
+  // tab via the signed URL (no popup — a real anchor).
+  function loadJobDocs(){
+    var card=$("jobDocsCard"), list=$("jobDocsList"); if(!card||!list||!job||!job.id) return;
+    jfetch("/jobs/"+encodeURIComponent(job.id)+"/docs").then(function(r){ return r.ok?r.json():{}; }).then(function(d){
+      var files=(d&&d.files)||[];
+      if(!files.length){ card.style.display="none"; return; }
+      list.innerHTML=files.map(function(f){
+        return '<a class="ln" href="'+esc(f.url)+'" target="_blank" rel="noopener" '
+          + 'style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;padding:7px 0;border-top:1px solid #eef1f5">'
+          + '<span class="ic">📄</span><span style="font-weight:600;color:#0b57d0;word-break:break-word">'+esc(f.name)+'</span></a>';
+      }).join("");
+      card.style.display="block";
+    }).catch(function(){});
   }
 
   function drawPhotos(){
@@ -629,6 +650,7 @@
     // revolving cycle. backTo is only the cold-start fallback.
     $("backBtn").onclick=function(){ if(window.mlBack) window.mlBack(backTo); else location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
+    loadJobDocs();
     // #fileInput is present on EVERY job type (it backs the RA work-area photo),
     // so wire its change handler unconditionally — otherwise the RA photo does
     // nothing on an audit/remedial/cert job.
