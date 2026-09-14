@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>5-Year Remedials</title>
-  <script src="/portal-config.js?v=31"></script>
+  <title>5-Year EICR Schedule</title>
+  <script src="/portal-config.js?v=36"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
@@ -13,75 +13,75 @@
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
     header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
     header.page h1{font-size:18px;margin:0;flex:1;}
-    .wrap{max-width:880px;margin:14px auto 90px;padding:0 12px;}
+    header.page select{padding:6px 8px;border-radius:8px;border:0;font:inherit;font-size:14px;}
+    .wrap{max-width:1180px;margin:14px auto 90px;padding:0 12px;}
     .muted{color:#6b7a90;font-size:13px;}
     .infobox{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:12px;font-size:13px;}
     .sumrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
-    .stat{flex:1 1 120px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;}
+    .stat{flex:1 1 130px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;}
     .stat .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1;}
     .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;margin-top:4px;}
-    .stat.warn .n{color:var(--warn);}
-    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+    .stat.red .n{color:var(--bad);} .stat.amber .n{color:var(--warn);} .stat.green .n{color:var(--ok);}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+    .toolbar input{padding:8px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;min-width:180px;flex:1;}
+    .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
     .chip{border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;color:#334;cursor:pointer;}
     .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
     .chip .n{background:rgba(0,0,0,.08);border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;}
     .chip.on .n{background:rgba(255,255,255,.25);}
-    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:10px;}
-    .rhead{display:flex;align-items:flex-start;gap:10px;}
-    .code{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;background:#eef3f9;border-radius:8px;padding:2px 8px;font-size:13px;white-space:nowrap;}
-    .site{font-weight:700;flex:1;min-width:0;}
-    .sub{font-size:12.5px;color:#6b7a90;margin-top:2px;}
-    .badge{border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800;white-space:nowrap;}
-    .b-quoted{background:#fef3c7;color:#92400e;} .b-ordered{background:#dcfce7;color:#166534;}
-    .b-works{background:#dbeafe;color:#1e40af;} .b-done{background:#e2e8f0;color:#475569;}
-    .b-review{background:#fee2e2;color:#991b1b;}
-    .b-tested{background:#dcfce7;color:#166534;}
-    .mlc-code{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:800;color:#fff;vertical-align:middle;}
-    .mlc-code.cC1{background:#b91c1c;} .mlc-code.cC2{background:#ea580c;} .mlc-code.cC3{background:#0891b2;} .mlc-code.cFI{background:#7c3aed;}
-    .src-eng{display:inline-block;background:#eef4fb;color:#274b73;border:1px solid #cfe0f2;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px;}
-    .phchip{color:#475569;font-size:12px;font-weight:600;}
-    .ordrow{margin-top:8px;font-size:13px;}
-    .ord-yes{color:#166534;font-weight:700;} .ord-no{color:var(--warn);font-weight:700;}
-    .lines{margin-top:8px;}
-    .lines summary{cursor:pointer;font-size:13px;color:var(--brand);font-weight:600;}
-    .lines ul{margin:8px 0 0;padding-left:18px;} .lines li{font-size:13px;margin-bottom:6px;white-space:pre-wrap;}
-    .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #f0f3f7;}
-    .ctl select{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:13px;font-family:inherit;}
-    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
-    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
-    .btn.link{background:none;color:var(--brand);border:none;text-decoration:underline;padding:6px 4px;}
+    .chip.tl-red{border-color:#f5b5b5;} .chip.tl-amber{border-color:#f0d28a;} .chip.tl-green{border-color:#a7d9b6;}
+    .tblwrap{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);overflow-x:auto;}
+    table{border-collapse:collapse;width:100%;font-size:13px;}
+    thead th{background:#f5f8fb;color:#54627a;font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;z-index:2;}
+    tbody td{padding:8px 10px;border-bottom:1px solid #eef2f6;vertical-align:middle;}
+    tbody tr:hover{background:#f9fbfd;}
+    td.store{position:sticky;left:0;background:#fff;z-index:1;min-width:150px;}
+    tbody tr:hover td.store{background:#f9fbfd;}
+    .code{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;}
+    .site{font-weight:600;} .sub{font-size:11.5px;color:#6b7a90;margin-top:1px;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:800;white-space:nowrap;border:1px solid transparent;}
+    .tl-red{background:#fee2e2;color:#991b1b;border-color:#fca5a5;}
+    .tl-amber{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+    .tl-green{background:#dcfce7;color:#166534;border-color:#86efac;}
+    .tl-grey{background:#eef2f6;color:#5a6b80;border-color:#d7dee6;}
+    select.stagesel{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:12.5px;font-family:inherit;max-width:200px;}
+    select.stagesel.tl-red{background:#fef2f2;} select.stagesel.tl-amber{background:#fffbeb;} select.stagesel.tl-green{background:#f0fdf4;}
+    .rowlinks a,.rowlinks button{color:var(--brand);font-size:12px;text-decoration:none;background:none;border:none;cursor:pointer;padding:2px 4px;font-family:inherit;white-space:nowrap;}
+    .rowlinks a:hover,.rowlinks button:hover{text-decoration:underline;}
+    .flagtag{color:#9b1c1c;font-size:11.5px;font-weight:700;margin-top:2px;}
+    .holdtag{color:#7a5b00;font-size:11.5px;font-weight:700;margin-top:2px;}
+    .autoreset{color:#6b7a90;font-size:11px;background:none;border:none;cursor:pointer;text-decoration:underline;padding:0 0 0 4px;}
+    .srcnote{font-size:10.5px;color:#8a97a8;}
+    .detail td{background:#f7fafd;padding:12px 14px;}
+    .steps{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0;}
+    .st{border:1px solid #d7dee6;border-radius:999px;padding:2px 9px;font-size:11px;color:#54627a;background:#fff;}
+    .st.done{background:#dcfce7;color:#166534;border-color:#86efac;} .st.next{border-color:var(--brand);color:var(--brand);font-weight:700;}
+    .dlinks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .dlinks a,.dlinks button{background:#fff;border:1px solid var(--brand);color:var(--brand);border-radius:8px;padding:5px 10px;font-size:12px;text-decoration:none;cursor:pointer;font-family:inherit;}
+    .log{margin-top:8px;font-size:12px;color:#54627a;}
+    .log div{margin-bottom:2px;}
     .saved{color:var(--ok);font-size:12px;}
+    @media(max-width:640px){ td.store{position:static;} }
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
-    <h1>⚡ 5-Year electrical tests</h1>
-    <select id="yearSel" style="padding:6px 8px;border-radius:8px;border:0;font:inherit;font-size:14px;"></select>
+    <h1>⚡ 5-Year EICR schedule</h1>
+    <select id="yearSel" title="Which year's schedule"></select>
   </header>
 
   <div class="wrap">
     <div class="infobox">
-      Every 5-year electrical (EICR) test completed this year — from the portal or the Workever archive. Set each site's <b>stage</b> and filter by it to keep track. When a portal test has remedials you can send the client a <b>📋 Quote</b> (with the time &amp; cost captured on site, C1/C2/FI only or including C3), then <b>🛠 Create works job</b> to raise the works — it moves to Done once the engineer finishes.
+      The full 5-Year EICR schedule for every Southern&nbsp;Co-op site on Concerto's PPM list this year. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
     </div>
     <div class="sumrow" id="sumrow"></div>
-    <div class="chips" id="chips"></div>
-    <div id="list"><div class="muted" style="padding:16px;">Loading…</div></div>
-  </div>
-
-  <!-- Quote modal -->
-  <div id="qOv" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100000;align-items:center;justify-content:center;padding:16px;">
-    <div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;">
-      <div style="font-weight:800;font-size:16px;color:var(--brand);padding:15px 16px 4px;" id="qTitle">Quote</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 16px 10px;font-size:14px;color:#334;cursor:pointer;">
-        <input type="checkbox" id="qC3" style="width:17px;height:17px;"> Include C3 (recommendations)
-      </label>
-      <div id="qBody" style="overflow:auto;padding:0 16px 8px;flex:1;"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e9ef;">
-        <button class="btn ghost" id="qClose">Close</button>
-        <button class="btn" id="qCopy">📋 Copy</button>
-      </div>
+    <div class="toolbar">
+      <input id="q" placeholder="Search store, site, engineer, order…">
+      <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
     </div>
+    <div class="chips" id="chips"></div>
+    <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted" style="padding:16px;">Loading…</td></tr></tbody></table></div>
   </div>
 
   <script>
@@ -89,173 +89,161 @@
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    let ROWS = [], FILTER = "all", YEAR = new Date().getFullYear();
-    const STAGE_ORDER = ["tested","to_review","quoted","ordered","in_works","done","invoiced"];
-    const STAGE_LABELS = { tested:"Tested", to_review:"To review", quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
-    const STAGE_BADGE = { tested:"b-tested", to_review:"b-review", quoted:"b-quoted", ordered:"b-ordered", in_works:"b-works", done:"b-done", invoiced:"b-done" };
+    const fmtD = s => { s=String(s||"").trim(); if(!s) return ""; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m? m[3]+"/"+m[2]+"/"+m[1] : s; };
+    const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
-    function fmtDate(s){ s=String(s||"").trim(); if(!s) return ""; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m? m[3]+"/"+m[2]+"/"+m[1] : s; }
-    function fmtMin(m){ m=Math.round(Number(m)||0); if(!m) return ""; const h=Math.floor(m/60), mm=m%60; return h? (h+"h"+(mm?" "+mm+"m":"")) : (mm+"m"); }
-    function keyOf(r){ return r.key || r.id; }
+    let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
+    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false;
+    const EXPANDED = new Set();
+    // The current 5-year document status (server-computed) → label + light.
+    const DOC_LIGHT = { in_date:"tl-green", due:"tl-amber", in_unsat:"tl-amber", expired:"tl-red", expired_unsat:"tl-red", missing:"tl-red" };
 
-    // Populate the year selector (this year + 3 back) and boot.
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r=>r.json());
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
-      const ys = g("yearSel"); const now = new Date().getFullYear();
-      ys.innerHTML = [0,1,2,3].map(d => '<option value="'+(now-d)+'">'+(now-d)+'</option>').join("");
-      ys.value = String(YEAR);
-      ys.onchange = () => { YEAR = +ys.value; load(); };
+      const now = new Date().getFullYear();
+      g("yearSel").innerHTML = [1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
+      g("yearSel").value = String(YEAR);
+      g("yearSel").onchange = () => { YEAR = +g("yearSel").value; render(); };
+      g("q").oninput = () => render();
+      g("fFlag").onchange = () => render();
       load();
     })();
 
     async function load(){
-      g("list").innerHTML='<div class="muted" style="padding:16px;">Loading…</div>';
-      let d=null;
-      try { d = await authFetch("/certs/five-year/schedule?year="+YEAR).then(r=>r.json()); } catch {}
-      if(!d || !d.ok){ g("list").innerHTML='<div class="muted" style="padding:16px;color:#b00020">Couldn\'t load the schedule.</div>'; return; }
-      ROWS = d.rows || [];
-      renderSummary(); renderChips(); render();
+      g("tbl").querySelector("tbody").innerHTML = '<tr><td class="muted" style="padding:16px;">Loading the schedule…</td></tr>';
+      let d = null;
+      try { d = await authFetch("/concerto/schedule?type=fiveYear&status=all").then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td style="padding:16px;color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
+      MONEY = !!d.money;
+      const P = (d.stats && d.stats.pipeline) || {};
+      STAGES = P.stages12 || [];
+      STAGE_LABEL = {}; STAGE_LIGHT = {};
+      STAGES.forEach(s => { STAGE_LABEL[s.key] = s.label; STAGE_LIGHT[s.key] = s.light; });
+      ROWS = (d.rows || []).filter(r => r.case);   // fiveYear pipeline rows carry a case
+      render();
     }
 
-    function counts(){
-      const c = { all:ROWS.length }; STAGE_ORDER.forEach(s => c[s]=0);
-      ROWS.forEach(r => { if(c[r.stage]!=null) c[r.stage]++; });
-      return c;
-    }
-    function renderSummary(){
-      const c = counts();
-      const outstanding = c.to_review + c.quoted + c.ordered + c.in_works;
-      g("sumrow").innerHTML =
-        '<div class="stat"><div class="n">'+c.all+'</div><div class="l">Tests in '+YEAR+'</div></div>'
-        + '<div class="stat warn"><div class="n">'+c.to_review+'</div><div class="l">To review</div></div>'
-        + '<div class="stat"><div class="n">'+outstanding+'</div><div class="l">In progress</div></div>'
-        + '<div class="stat"><div class="n">'+(c.done+c.invoiced)+'</div><div class="l">Done</div></div>';
-    }
-    function renderChips(){
-      const c = counts();
-      const defs = [["all","All",c.all]].concat(STAGE_ORDER.filter(s=>c[s]>0 || FILTER===s).map(s=>[s,STAGE_LABELS[s],c[s]]));
-      g("chips").innerHTML = defs.map(([k,l,n]) =>
-        '<button class="chip'+(FILTER===k?" on":"")+'" data-f="'+k+'">'+l+' <span class="n">'+n+'</span></button>').join("");
-      g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; renderChips(); render(); });
+    // A row belongs to YEAR if its Concerto next date is in that year OR the test was
+    // carried out in that year (Concerto sometimes rolls the date forward after a test).
+    function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
+    function inYear(r){ const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
+    function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
+
+    function yearRows(){ return ROWS.filter(inYear); }
+    function visible(){
+      const q = g("q").value.trim().toLowerCase(), flagOnly = g("fFlag").checked;
+      return yearRows().filter(r => {
+        if (FILTER!=="all" && stageOf(r)!==FILTER) return false;
+        if (flagOnly && !(r.case.flagged)) return false;
+        if (q && ![r.storeCode, r.siteName, r.orderNr, r.srRef, r.case.engineer, r.case.flagNote].join(" ").toLowerCase().includes(q)) return false;
+        return true;
+      }).sort((a,b) => (b.case.flagged - a.case.flagged) || String(a.nextDate||"").localeCompare(String(b.nextDate||"")) || String(a.storeCode||"").localeCompare(String(b.storeCode||"")));
     }
 
     function render(){
-      const rows = ROWS.filter(r => FILTER==="all" || r.stage===FILTER)
-        .sort((a,b)=> String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
-      if(!rows.length){ g("list").innerHTML='<div class="muted" style="padding:16px;">Nothing in this view.</div>'; return; }
-      g("list").innerHTML = rows.map(cardHtml).join("");
-      g("list").querySelectorAll("select[data-stage]").forEach(sel => sel.onchange = () => setStage(sel.dataset.stage, sel.value, sel));
-      g("list").querySelectorAll("button[data-quote]").forEach(b => b.onclick = () => openQuote(b.dataset.quote));
-      g("list").querySelectorAll("button[data-works]").forEach(b => b.onclick = () => createWorks(b.dataset.works, b));
+      const rows = yearRows();
+      // Summary tiles
+      const cnt = k => rows.filter(r => stageOf(r)===k).length;
+      const needsBooking = cnt("needs_booking");
+      const inProgress = rows.filter(r => { const s=stageOf(r); return s!=="needs_booking" && s!=="complete_satisfactory" && s!=="certificate_updated" && s!=="invoiced"; }).length;
+      const done = cnt("complete_satisfactory") + cnt("certificate_updated") + cnt("invoiced");
+      const docBad = rows.filter(r => r.docStatus && (r.docStatus.light==="tl-red" || /unsat/.test(r.docStatus.key||"") || r.docStatus.light==="red")).length;
+      g("sumrow").innerHTML =
+        stat(rows.length, "Sites in "+YEAR, "") +
+        stat(needsBooking, "Needs booking", needsBooking?"red":"") +
+        stat(inProgress, "In progress", inProgress?"amber":"") +
+        stat(done, "Complete", done?"green":"") +
+        stat(docBad, "Certificate needs attention", docBad?"red":"");
+      renderChips(rows);
+      renderTable();
+    }
+    function stat(n, l, tone){ return '<div class="stat '+(tone||"")+'"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'; }
+
+    function renderChips(rows){
+      const by = {}; rows.forEach(r => { const s=stageOf(r); by[s]=(by[s]||0)+1; });
+      const flagged = rows.filter(r=>r.case.flagged).length;
+      let h = '<button class="chip'+(FILTER==="all"?" on":"")+'" data-f="all">All <span class="n">'+rows.length+'</span></button>';
+      STAGES.forEach(s => { if (by[s.key] || FILTER===s.key) h += '<button class="chip tl-'+s.light+(FILTER===s.key?" on":"")+'" data-f="'+esc(s.key)+'">'+esc(s.label)+' <span class="n">'+(by[s.key]||0)+'</span></button>'; });
+      g("chips").innerHTML = h;
+      g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; render(); });
     }
 
-    function cardHtml(r){
-      const key = keyOf(r);
-      const badge = '<span class="badge '+(STAGE_BADGE[r.stage]||"b-tested")+'">'+(STAGE_LABELS[r.stage]||"Tested")+'</span>';
-      const isPortal = r.source==="portal";
-      const srcTag = r.source==="archive" ? '<span class="src-eng">🗄 Workever</span>' : (isPortal ? '<span class="src-eng">⚡ portal</span>' : '');
-      const lines = (r.lines||[]).filter(l=>String(l.action||"").trim());
-      const totMin = lines.reduce((a,l)=>a+(Number(l.minutes)||0),0);
-      const totMat = lines.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
-      const totBits = []; if(totMin) totBits.push(fmtMin(totMin)); if(totMat) totBits.push("£"+totMat.toFixed(2));
-      const linesHtml = lines.length
-        ? '<details class="lines"'+(r.stage==="to_review"?" open":"")+'><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+(totBits.length?' · '+totBits.join(" · "):"")+'</summary><ul>'
-            + lines.map(l=>{ const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2)); if(l.photos&&l.photos.length) m.push("📷"+l.photos.length);
-                return '<li>'+esc(l.action)+(m.length?' <span class="phchip">· '+m.join(" · ")+'</span>':'')+'</li>'; }).join("")
-            + '</ul></details>'
-        : (isPortal ? '<div class="ordrow" style="color:#166534;font-weight:600;margin-top:8px;">✓ Satisfactory — no remedials</div>' : '');
-      const ord = r.order ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>' : '';
-      const opts = STAGE_ORDER.map(s => '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
-      let actions = '';
-      if(lines.length) actions += '<button class="btn link" data-quote="'+esc(key)+'">📋 Quote</button>';
-      if(isPortal && lines.length && !r.worksJobId && r.stage!=="done" && r.stage!=="invoiced")
-        actions += '<button class="btn" data-works="'+esc(key)+'">🛠 Create works job</button>';
-      if(r.worksJobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Works job ↗</a>';
-      if(isPortal && r.jobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job ↗</a>';
-      const sub = 'Completed '+esc(fmtDate(r.completedAt))+(r.engineer?' · '+esc(r.engineer):'');
-      return '<div class="card">'
-        + '<div class="rhead"><span class="code">'+esc(r.storeCode||"—")+'</span>'
-          + '<div class="site">'+esc(r.siteName||"")+srcTag+'<div class="sub">'+sub+'</div></div>'
-          + badge + '</div>'
-        + ord + linesHtml
-        + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(key)+'">'+opts+'</select>'
-          + '<span class="saved" id="sv-'+esc(key)+'"></span>'
-          + '<span style="flex:1"></span>'
-          + actions
-          + (r.storeCode?'<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">Open site ↗</a>':'')
-          + '</div>'
-        + '</div>';
+    function stageOptions(cur){
+      return STAGES.map(s => '<option value="'+esc(s.key)+'"'+(cur===s.key?" selected":"")+'>'+esc(s.label)+'</option>').join("");
+    }
+    function renderTable(){
+      const rows = visible();
+      g("tbl").querySelector("thead").innerHTML =
+        '<tr><th>Store</th><th>Certificate status</th><th>Next due</th><th>Tested by</th><th>Stage</th><th>Change status</th><th></th></tr>';
+      const tb = g("tbl").querySelector("tbody");
+      if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="muted" style="padding:16px;">No sites for this filter.</td></tr>'; return; }
+      tb.innerHTML = rows.map(rowHtml).join("");
+      tb.querySelectorAll("select[data-ppm]").forEach(sel => sel.onchange = () => setStage(sel.dataset.ppm, sel.value, sel));
+      tb.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { const id=b.dataset.toggle; if(EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderTable(); });
+      tb.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => setStage(b.dataset.reset, "", b));
+      tb.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
     }
 
-    // ── Quote modal (clean, filterable by code, copy to clipboard) ──────────────
-    let QROW = null;
-    function openQuote(key){ QROW = ROWS.find(r=>keyOf(r)===key); if(!QROW) return; g("qC3").checked=false; renderQuote(); g("qOv").style.display="flex"; }
-    function quoteItems(){
-      const inc3 = g("qC3").checked;
-      return (QROW.lines||[]).filter(l=>String(l.action||"").trim()).filter(l=>{
-        const c=(l.code||"").toUpperCase();
-        if(c==="C3") return inc3;   // C3 only when the box is ticked
-        return true;                // C1/C2/FI and uncoded always included
-      });
+    function rowHtml(r){
+      const c = r.case, key = r.id;
+      const st = stageOf(r), light = STAGE_LIGHT[st] || "grey";
+      const doc = r.docStatus || { label:"—", light:"tl-grey", note:"" };
+      const docCls = (doc.light && doc.light.indexOf("tl-")===0) ? doc.light : (DOC_LIGHT[doc.key] || "tl-grey");
+      const rel = r.released ? '<div class="sub" style="color:#166534;font-weight:700">Released'+(r.orderNr?" · "+esc(r.orderNr):"")+(MONEY&&r.orderedValue!=null?" · £"+Math.round(r.orderedValue):"")+'</div>' : '';
+      const testedBy = c.engineer ? esc(c.engineer) : '<span class="muted">—</span>';
+      const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>' : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
+      const flag = c.flagged ? '<div class="flagtag">🚩 '+esc(c.flagNote || (c.autoFlag&&"No certificate cover") || "Flagged")+'</div>' : '';
+      const hold = c.held ? '<div class="holdtag">⏸ '+esc(c.holdReason||"On hold")+'</div>' : '';
+      const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="7">'+detailHtml(r)+'</td></tr>' : '';
+      return '<tr>'
+        + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span> <span class="site">'+esc(r.siteName||"")+'</span>'
+          + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + '</td>'
+        + '<td><span class="pill '+docCls+'">'+esc(doc.label)+'</span>'+(doc.note?'<div class="sub">'+esc(doc.note)+'</div>':'')+'</td>'
+        + '<td>'+(r.nextDate?'<b>'+esc(fmtD(r.nextDate))+'</b>':'<span class="muted">—</span>')+rel+'</td>'
+        + '<td>'+testedBy+'</td>'
+        + '<td><span class="pill tl-'+light+'">'+esc(STAGE_LABEL[st]||st)+'</span></td>'
+        + '<td><select class="stagesel tl-'+light+'" data-ppm="'+esc(key)+'">'+stageOptions(st)+'</select><div>'+src+' <span class="saved" id="sv-'+esc(key)+'"></span></div></td>'
+        + '<td class="rowlinks"><button data-toggle="'+esc(key)+'">'+(EXPANDED.has(key)?"▾ Close":"▸ Details")+'</button></td>'
+        + '</tr>' + detail;
     }
-    function quoteText(){
-      const items = quoteItems();
-      const head = "Remedial works following the fixed-wire inspection at "+(QROW.siteName||QROW.storeCode||"site")+(QROW.storeCode?" (store "+QROW.storeCode+")":"")+":";
-      const body = items.map((l,i)=>{ const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2)); return (i+1)+". "+(l.action||"")+(m.length?" — "+m.join(" · "):""); }).join("\n");
-      const tMin=items.reduce((a,l)=>a+(Number(l.minutes)||0),0), tMat=items.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
-      const tot=[]; tot.push(items.length+" item"+(items.length===1?"":"s")); if(tMin) tot.push(fmtMin(tMin)); if(tMat) tot.push("£"+tMat.toFixed(2)+" materials");
-      return head+"\n\n"+body+"\n\nTotal: "+tot.join(" · ");
-    }
-    function renderQuote(){
-      g("qTitle").textContent = "Quote — "+(QROW.siteName||QROW.storeCode||"");
-      const items = quoteItems();
-      const tMin=items.reduce((a,l)=>a+(Number(l.minutes)||0),0), tMat=items.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
-      let h = '<div style="font-size:13px;color:#475569;margin:2px 0 10px;">Remedial works following the fixed-wire inspection at <b>'+esc(QROW.siteName||QROW.storeCode||"site")+'</b>'+(QROW.storeCode?' (store '+esc(QROW.storeCode)+')':'')+':</div>';
-      if(!items.length){ h += '<div class="muted">No items in this selection.</div>'; }
-      else h += '<ol style="margin:0;padding-left:20px;">'+items.map(l=>{
-        const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2));
-        const codePill = l.code ? '<span class="mlc-code c'+esc(l.code)+'">'+esc(l.code)+'</span> ' : '';
-        const desc = String(l.action||"").replace(/^\[[^\]]+\]\s*/,"");   // strip the [CODE] prefix (shown as a pill)
-        return '<li style="margin-bottom:8px;font-size:14px;line-height:1.4;">'+codePill+esc(desc)+(m.length?' <span style="color:#64748b;">— '+m.join(" · ")+'</span>':'')+'</li>';
-      }).join("")+'</ol>';
-      const tot=[]; tot.push(items.length+" item"+(items.length===1?"":"s")); if(tMin) tot.push(fmtMin(tMin)); if(tMat) tot.push("£"+tMat.toFixed(2)+" materials");
-      h += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef2f6;font-weight:700;color:var(--brand);">Total: '+esc(tot.join(" · "))+'</div>';
-      g("qBody").innerHTML = h;
-    }
-    g("qC3").onchange = renderQuote;
-    g("qClose").onclick = () => { g("qOv").style.display="none"; };
-    g("qOv").addEventListener("click", e => { if(e.target===g("qOv")) g("qOv").style.display="none"; });
-    g("qCopy").onclick = async () => {
-      try { await navigator.clipboard.writeText(quoteText()); (window.MLUI?MLUI.toast:function(){})("Quote copied"); g("qCopy").textContent="✓ Copied"; setTimeout(()=>{g("qCopy").textContent="📋 Copy";},1500); }
-      catch { (window.MLUI?MLUI.toast:alert)("Couldn't copy — select the text manually."); }
-    };
 
-    async function createWorks(key, btn){
-      const ok = window.MLUI ? await MLUI.confirm("Create the works job from these remedials? It lands unassigned, ready to allocate.",{title:"Create works job"}) : confirm("Create the works job?");
-      if(!ok) return;
-      btn.disabled = true; btn.textContent = "Creating…";
+    function detailHtml(r){
+      const c = r.case;
+      const shown = (c.steps||[]).filter(s => s.applicable);
+      const strip = '<div class="steps">'+shown.map(s => '<span class="st '+(s.done?"done":(s.key===c.next?"next":""))+'" title="'+esc(s.label)+(s.at?" · "+fmtD(s.at):"")+(s.by?" · "+esc(s.by):"")+'">'+(s.done?"✓ ":"")+esc(s.short)+'</span>').join("")+'</div>';
+      const outLbl = { satisfactory:"Satisfactory", unsatisfactory:"Unsatisfactory", remedied:"Remedied", "":"Outcome not set" };
+      const out = '<div class="sub" style="margin-top:4px">Certificate outcome: <b>'+esc(outLbl[c.outcome]||c.outcome||"not set")+'</b>'+(c.review&&c.review.attention?' · ⚠ flagged by the compliance check':'')+(c.cert?' · cert filed '+fmtD(c.cert.date):'')+(c.certUpdated?' · re-issued '+fmtD(c.certUpdated.date):'')+'</div>';
+      const links = [];
+      if (c.testJob) links.push('<a href="/job-view.html?jobId='+encodeURIComponent(c.testJob.id)+'">⚡ Test job ('+esc(c.testJob.status)+')</a>');
+      else if (r.storeCode) links.push('<a href="/add-job.html?site='+encodeURIComponent(r.storeCode)+'&elecTest=1&name='+encodeURIComponent((r.storeCode||"")+" 5 Year Electrical Test"+(r.orderNr?" "+r.orderNr:""))+'&desc='+encodeURIComponent("5 year fixed wire test (EICR)"+(r.orderNr?" — Concerto "+r.orderNr:"")+(r.nextDate?" · due "+r.nextDate:""))+'">➕ Raise the test job</a>');
+      if (c.worksJob) links.push('<a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">🔧 Works job ('+esc(c.worksJob.status)+')</a>');
+      if (c.cert) links.push('<button data-cert="'+esc(r.storeCode)+'">📄 Certificate</button>');
+      links.push('<a href="/compliance-review.html">🔍 Compliance check</a>', '<a href="/client-orders.html">📥 Client orders</a>');
+      if (r.storeCode) links.push('<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">🗂 Site folder</a>');
+      links.push('<a href="/concerto-ppm.html?tab=schedule">🗂 Full case &amp; checklist</a>');
+      const log = (c.log||[]).slice(0,6).map(l => '<div><span class="muted">'+fmtD(l.at)+'</span> · '+esc(l.by)+' · '+esc(l.text)+'</div>').join("") || '<div class="muted">Nothing logged yet.</div>';
+      return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
+        + out + strip
+        + '<div class="dlinks">'+links.join("")+'</div>'
+        + '<div class="log">'+log+'</div>';
+    }
+
+    async function openCert(code){
+      try { const d = await authFetch("/compliance/file-url?scheme=coop&code="+encodeURIComponent(code)+"&type=fiveYear").then(r=>r.json()); if (d && d.url) window.open(safeUrl(d.url), "_blank"); else (window.MLUI?MLUI.toast:alert)("No 5-year certificate is filed for "+code); }
+      catch { (window.MLUI?MLUI.toast:alert)("Couldn't open the certificate"); }
+    }
+
+    async function setStage(ppmId, stage12, el){
+      if (el) el.disabled = true;
+      const sv = g("sv-"+ppmId);
       try {
-        const d = await authFetch("/certs/five-year/create-works",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:key})}).then(r=>r.json());
-        if(d && d.ok){
-          const r = ROWS.find(x=>keyOf(x)===key); if(r){ r.worksJobId=d.worksJobId; r.stage=d.stage||"in_works"; }
-          (window.MLUI?MLUI.toast:function(){})("Works job created");
-          renderSummary(); renderChips(); render();
-        } else { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't create the works job."); }
-      } catch { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); }
-    }
-
-    async function setStage(key, stage, sel){
-      sel.disabled = true;
-      const r = ROWS.find(x=>keyOf(x)===key);
-      const meta = r ? { source:r.source, jobId:r.jobId||"", storeCode:r.storeCode||"", siteName:r.siteName||"", completedAt:r.completedAt||"" } : {};
-      try {
-        const res = await authFetch("/certs/five-year/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:key,stage,meta})}).then(r=>r.json());
-        if(res && res.ok){ if(r) r.stage=stage; const e=g("sv-"+key); if(e){ e.textContent="Saved ✓"; setTimeout(()=>{e.textContent="";},1500); } renderSummary(); renderChips(); }
-      } catch {}
-      sel.disabled = false;
+        const res = await authFetch("/concerto/case", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ppmId, stage12 }) }).then(r=>r.json());
+        if (res && res.ok) { if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); } await load(); }
+        else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the status."); if (el) el.disabled=false; }
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the status."); if (el) el.disabled=false; }
     }
   </script>
 </body>

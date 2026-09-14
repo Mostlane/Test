@@ -9752,6 +9752,12 @@ async function ensureTables__raw(env) {
     } catch {
     }
   }
+  for (const col of ["stage12 TEXT", "stage12_at TEXT", "stage12_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -10237,6 +10243,34 @@ async function historyIndex(env, tid, type, preloadedJobs) {
   for (const list of byCode.values()) list.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
   return byCode;
 }
+function fyStage12Auto(c) {
+  if (!c) return "needs_booking";
+  const done = (k) => (c.steps || []).some((s) => s.key === k && s.done);
+  const sat = c.outcome === "satisfactory", unsat = c.outcome === "unsatisfactory";
+  if (!done("scheduled")) return "needs_booking";
+  if (!done("tested")) return "scheduled";
+  if (!done("reviewed") || !sat && !unsat) return "awaiting_review";
+  if (sat) return done("invoiced") ? "invoiced" : "complete_satisfactory";
+  if (done("invoiced") && done("rem_closed")) return "invoiced";
+  if (done("cert_updated")) return "certificate_updated";
+  if (done("works_done")) return "remedials_complete";
+  if (done("ordered")) return c.worksJob && c.worksJob.scheduledAt ? "remedials_scheduled" : "orders_received";
+  if (done("quoted")) return "remedials_quoted";
+  return "remedials_required";
+}
+function fyDocStatus(chartDue, c, lastDone, today) {
+  const outcome = c ? c.outcome || "" : "";
+  const remedied = !!(c && (c.certUpdated || c.outcomeAuto === "remedied" || (c.steps || []).some((s) => s.key === "cert_updated" && s.done)));
+  const unsat = outcome === "unsatisfactory" && !remedied;
+  const hasCert = !!(c && c.cert) || !!lastDone;
+  const expired = !!(chartDue && chartDue < today);
+  if (!chartDue && !hasCert) return { key: "missing", label: "Missing", light: "red", note: "No 5-year certificate on file" };
+  if (expired && unsat) return { key: "expired_unsat", label: "Out of date + unsatisfactory", light: "red", note: "expired " + chartDue };
+  if (expired) return { key: "expired", label: "Out of date", light: "red", note: chartDue ? "expired " + chartDue : "" };
+  if (unsat) return { key: "in_unsat", label: "In date, unsatisfactory", light: "amber", note: chartDue ? "valid to " + chartDue : "" };
+  if (!hasCert) return { key: "due", label: "No cert filed yet", light: "amber", note: chartDue ? "chart due " + chartDue : "" };
+  return { key: "in_date", label: "In date", light: "green", note: chartDue ? "valid to " + chartDue : "" };
+}
 async function caseContext(env, tid, type, jobs) {
   const ctx = { testJobs: /* @__PURE__ */ new Map(), jobsById: /* @__PURE__ */ new Map(), certs: /* @__PURE__ */ new Map(), reviews: /* @__PURE__ */ new Map(), orders: /* @__PURE__ */ new Map(), cases: /* @__PURE__ */ new Map(), log: /* @__PURE__ */ new Map() };
   const push = (m, k, v) => {
@@ -10382,6 +10416,9 @@ function deriveCase(r, ctx, today, money2, rec) {
   const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched || !!autoFlag);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
+  const stage12Auto = fyStage12Auto({ steps, outcome, worksJob: wj ? { scheduledAt: wj.scheduledAt } : null });
+  const stage12Manual = c && c.stage12 && FY_STAGE_KEYS.has(c.stage12) ? c.stage12 : "";
+  const stage12 = stage12Manual || stage12Auto;
   return {
     id: c ? c.id : caseId(r.id, cycleDue),
     stored: !!c,
@@ -10390,6 +10427,11 @@ function deriveCase(r, ctx, today, money2, rec) {
     closed,
     closedAt: c && c.closed_at || null,
     closedBy: c && c.closed_by || "",
+    stage12,
+    stage12Auto,
+    stage12Source: stage12Manual ? "manual" : "auto",
+    stage12At: c && c.stage12_at || null,
+    stage12By: c && c.stage12_by || "",
     held,
     holdReason: held ? c.hold_reason : "",
     heldBy: held ? c.held_by || "" : "",
@@ -10442,6 +10484,8 @@ async function buildSchedule(env, tid, opts) {
     const done = h.filter((x) => x.source === "cert" || x.done);
     const lastDone = done[0] || null;
     const job = r.store_code ? booked.get(r.store_code + "|" + type) : null;
+    const chartDue = store && store.due[type] || null;
+    const caseView = cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : void 0;
     return {
       id: r.id,
       type,
@@ -10462,13 +10506,14 @@ async function buildSchedule(env, tid, opts) {
       status: r.status,
       note: r.note || "",
       lastSeenAt: r.last_seen_at,
-      chartDue: store && store.due[type] || null,
+      chartDue,
       flag: rec.flag,
       flagText: rec.text,
       lastDone,
       history: h.slice(0, 6),
       job: job || null,
-      case: cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : void 0
+      case: caseView,
+      docStatus: pipeline ? fyDocStatus(chartDue, caseView, lastDone, today) : void 0
     };
   });
   const from = opts.from || "", to = opts.to || "";
@@ -10511,11 +10556,12 @@ async function buildSchedule(env, tid, opts) {
   stats.byMonth = byMonth;
   stats.dueSoonNotReleased = rows.filter((r) => !r.released && r.nextDate && r.nextDate <= addDays(today, 90) && r.status === "open").length;
   if (pipeline) {
-    const byStage = {}, byEngineer = {};
+    const byStage = {}, byEngineer = {}, byStage12 = {};
     for (const r of rows) {
       const c = r.case;
       if (!c) continue;
       byStage[c.stage] = (byStage[c.stage] || 0) + 1;
+      byStage12[c.stage12] = (byStage12[c.stage12] || 0) + 1;
       const tj = c.testJob;
       if (tj && tj.engineer) {
         const e = byEngineer[tj.engineer] = byEngineer[tj.engineer] || { tested: 0, scheduled: 0, byYear: {} };
@@ -10526,7 +10572,7 @@ async function buildSchedule(env, tid, opts) {
         } else e.scheduled++;
       }
     }
-    stats.pipeline = { byStage, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, flagged: rows.filter((r) => r.case && r.case.flagged).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
+    stats.pipeline = { byStage, byStage12, stages12: FY_STAGES, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, flagged: rows.filter((r) => r.case && r.case.flagged).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
     stats.byEngineer = byEngineer;
   }
   return { type, rows: filtered, total: rows.length, stats, today };
@@ -10615,6 +10661,17 @@ async function handle9(request, env, ctx, url, sess) {
       c.engineer = String(b.engineer || "").slice(0, 80);
       events.push({ action: "engineer", engineer: c.engineer, text: c.engineer ? "Tested by: " + c.engineer : "Engineer cleared (back to the job's engineer)" });
     }
+    if (b.stage12 !== void 0) {
+      const s = String(b.stage12 || "");
+      if (s && !FY_STAGE_KEYS.has(s)) return error("Unknown stage", 400, env, request);
+      c.stage12 = s || null;
+      c.stage12_at = s ? now : null;
+      c.stage12_by = s ? me : null;
+      const lbl = (FY_STAGES.find((x) => x.key === s) || {}).label || s;
+      events.push({ action: "stage12", stage12: s, text: s ? "Status set: " + lbl : "Status cleared (back to what the portal sees)" });
+      if (s && FY_UNSAT_STAGES.has(s) && c.outcome !== "unsatisfactory") c.outcome = "unsatisfactory";
+      else if (s === "complete_satisfactory" && c.outcome !== "satisfactory") c.outcome = "satisfactory";
+    }
     if (b.hold !== void 0) {
       const reason = String(b.hold || "").slice(0, 200);
       if (reason) {
@@ -10655,7 +10712,7 @@ async function handle9(request, env, ctx, url, sess) {
       c.closed_by = null;
       events.push({ action: "reopen", text: "Case reopened" });
     }
-    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }
@@ -10710,7 +10767,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -10747,6 +10804,22 @@ var init_concerto = __esm({
       { key: "rem_closed", label: "Remedials closed & invoiced on Concerto", short: "Rem. inv.", todo: "Remedials to close", unsat: true }
     ];
     STEP_KEYS = new Set(CASE_STEPS.map((s) => s.key));
+    FY_STAGES = [
+      { key: "needs_booking", label: "Needs booking", light: "red" },
+      { key: "scheduled", label: "Scheduled", light: "amber" },
+      { key: "awaiting_review", label: "Test complete \u2014 awaiting review", light: "amber" },
+      { key: "complete_satisfactory", label: "Complete \u2014 satisfactory", light: "green" },
+      { key: "remedials_required", label: "Complete \u2014 remedials required", light: "red" },
+      { key: "remedials_to_quote", label: "Remedials to quote", light: "red" },
+      { key: "remedials_quoted", label: "Remedials quoted", light: "amber" },
+      { key: "orders_received", label: "Remedial orders received", light: "amber" },
+      { key: "remedials_scheduled", label: "Remedials scheduled", light: "amber" },
+      { key: "remedials_complete", label: "Remedials complete", light: "amber" },
+      { key: "certificate_updated", label: "Certificate updated", light: "green" },
+      { key: "invoiced", label: "Invoiced", light: "green" }
+    ];
+    FY_STAGE_KEYS = new Set(FY_STAGES.map((s) => s.key));
+    FY_UNSAT_STAGES = /* @__PURE__ */ new Set(["remedials_required", "remedials_to_quote", "remedials_quoted", "orders_received", "remedials_scheduled", "remedials_complete", "certificate_updated"]);
     caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
     REMEDIAL_ORDER = /eicr|5\s*-?\s*y(ea)?r|five\s*year|fixed\s*wire|electrical|remedial|\bC[123]\b/i;
   }
