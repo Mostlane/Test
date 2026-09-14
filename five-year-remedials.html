@@ -47,6 +47,11 @@
     .pilllink{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
     .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
     .pilllink:hover .opendoc{text-decoration:underline;}
+    .viewtabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+    .viewtab{padding:8px 14px;border-radius:999px;border:1px solid #d7dee6;background:#fff;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;color:#5a6b80;}
+    .viewtab.on{background:var(--brand,#003366);border-color:var(--brand,#003366);color:#fff;}
+    .viewtab .n{opacity:.75;font-weight:600;}
+    .pill.inactive-pill{background:#eef2f6;color:#5a6b80;border:1px solid #d7dee6;font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;margin-left:6px;}
     .auditbtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
     .auditbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:999px;border:1px solid;background:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;}
     .auditbtn .n{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;font-size:12px;color:#fff;}
@@ -97,6 +102,7 @@
     <div class="infobox">
       The 5-Year EICR schedule for Southern&nbsp;Co-op sites on Concerto's PPM list — pick a year at the top, or <b>All years (whole list)</b> to see every site Concerto tracks. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
     </div>
+    <div class="viewtabs" id="viewtabs"></div>
     <div class="sumrow" id="sumrow"></div>
     <div id="audit"></div>
     <div class="toolbar">
@@ -132,7 +138,7 @@
     const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
-    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false;
+    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active";
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
@@ -175,6 +181,7 @@
     // Off-list tests (tested this year, not on the Concerto list) + early re-tests.
     async function loadAudit(){
       const box = g("audit");
+      if (VIEW==="inactive") { box.innerHTML = ""; return; }   // audit is about active-site tests
       if (YEAR==="all") { box.innerHTML = ""; return; }   // the audit is year-specific
       let d = null;
       try { d = await authFetch("/concerto/audit?year="+YEAR).then(r=>r.json()); } catch {}
@@ -234,7 +241,18 @@
       return STAGE_LIGHT[s] || "amber";   // awaiting review + all remedial stages are real to-dos
     }
 
-    function yearRows(){ return ROWS.filter(inYear); }
+    // Inactive/closed sites live under their own tab; the schedule excludes them.
+    // The Inactive tab ignores the year filter (shows every closed site Concerto still lists).
+    function yearRows(){
+      if (VIEW==="inactive") return ROWS.filter(r => r.inactive);
+      return ROWS.filter(r => !r.inactive && inYear(r));
+    }
+    function renderViewTabs(){
+      const inact = ROWS.filter(r => r.inactive).length;
+      const t = (v,label,n) => '<button class="viewtab'+(VIEW===v?" on":"")+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
+      g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("inactive","🚫 Inactive sites", inact);
+      g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => { if(VIEW===b.dataset.v) return; VIEW=b.dataset.v; FILTER="all"; EXPANDED.clear(); render(); loadAudit(); });
+    }
     // Sort comparators. "code" (store number) is the Concerto order — the default.
     function codeCmp(a,b){ return String(a.storeCode||"~~~~").localeCompare(String(b.storeCode||"~~~~"), undefined, { numeric:true }); }
     function docRank(r){ const l=(r.docStatus&&r.docStatus.light)||""; return l==="red"?0:l==="amber"?1:l==="green"?2:3; }
@@ -258,19 +276,24 @@
     }
 
     function render(){
+      renderViewTabs();
       const rows = yearRows();
       // Summary tiles
-      const cnt = k => rows.filter(r => stageOf(r)===k).length;
-      const needsBooking = cnt("needs_booking");
-      const done = cnt("complete_satisfactory") + cnt("certificate_updated") + cnt("invoiced");
-      const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
-      const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
-      g("sumrow").innerHTML =
-        stat(rows.length, YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR, "") +
-        stat(needsBooking, "Needs booking", "") +
-        stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
-        stat(overdue, "Out of date / no cert", overdue?"red":"") +
-        stat(done, "Complete", done?"green":"");
+      if (VIEW==="inactive") {
+        g("sumrow").innerHTML = stat(rows.length, "Inactive sites", "");
+      } else {
+        const cnt = k => rows.filter(r => stageOf(r)===k).length;
+        const needsBooking = cnt("needs_booking");
+        const done = cnt("complete_satisfactory") + cnt("certificate_updated") + cnt("invoiced");
+        const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
+        const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
+        g("sumrow").innerHTML =
+          stat(rows.length, YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR, "") +
+          stat(needsBooking, "Needs booking", "") +
+          stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
+          stat(overdue, "Out of date / no cert", overdue?"red":"") +
+          stat(done, "Complete", done?"green":"");
+      }
       renderChips(rows);
       renderTable();
     }
@@ -328,6 +351,7 @@
       const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="8">'+detailHtml(r)+'</td></tr>' : '';
       return '<tr>'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span> <span class="site">'+esc(r.siteName||"")+'</span>'
+          + (r.inactive?'<span class="pill inactive-pill">🚫 Inactive</span>':'')
           + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + '</td>'
         + '<td>'+docCell+'</td>'
         + '<td>'+(r.nextDate?'<b>'+esc(fmtD(r.nextDate))+'</b>':'<span class="muted">—</span>')+rel+'</td>'

@@ -667,6 +667,7 @@ async function buildSchedule(env, tid, opts) {
     const chartDue = (store && store.due[type]) || null;
     const caseView = cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : undefined;
     return { id: r.id, type, typeLabel: TYPE_LABEL[type] || type, srRef: r.sr_ref, storeCode: r.store_code || "", siteName: (store && store.name) || r.site_name || "", block: r.block || "", category: store ? store.category : "",
+      inactive: !!(store && store.closed),
       nextDate: r.next_date || r.planned_date || null, lastDate: r.last_date || null, released: !!r.order_nr, orderNr: r.order_nr || "", orderedValue: opts.money ? r.ordered_value : undefined, releasedAt: r.released_at || null,
       concertoStatus: r.concerto_status || "", monthMarker: r.month_marker || "", status: r.status, note: r.note || "", lastSeenAt: r.last_seen_at,
       chartDue, flag: rec.flag, flagText: rec.text,
@@ -677,7 +678,7 @@ async function buildSchedule(env, tid, opts) {
   const filtered = rows.filter(r => (!from || (r.nextDate || "") >= from) && (!to || (r.nextDate || "") <= to) && (opts.released === "yes" ? r.released : opts.released === "no" ? !r.released : true));
   const byYear = {};
   for (const r of rows) { const y = (r.nextDate || "").slice(0, 4) || "none"; byYear[y] = byYear[y] || { total: 0, released: 0, done: 0 }; byYear[y].total++; if (r.released) byYear[y].released++; if (r.flag === "done") byYear[y].done++; }
-  const stats = { sites: rows.length, released: rows.filter(r => r.released).length, notReleased: rows.filter(r => !r.released).length, done: rows.filter(r => r.flag === "done").length, overdue: rows.filter(r => r.flag === "overdue").length, mismatch: rows.filter(r => r.flag === "mismatch").length, gap: rows.filter(r => r.flag === "gap").length, noStore: rows.filter(r => r.flag === "no_store").length, notOnChart: rows.filter(r => r.flag === "not_on_chart").length, withHistory: rows.filter(r => r.lastDone).length, byYear };
+  const stats = { sites: rows.length, released: rows.filter(r => r.released).length, notReleased: rows.filter(r => !r.released).length, done: rows.filter(r => r.flag === "done").length, overdue: rows.filter(r => r.flag === "overdue").length, mismatch: rows.filter(r => r.flag === "mismatch").length, gap: rows.filter(r => r.flag === "gap").length, noStore: rows.filter(r => r.flag === "no_store").length, notOnChart: rows.filter(r => r.flag === "not_on_chart").length, withHistory: rows.filter(r => r.lastDone).length, inactive: rows.filter(r => r.inactive).length, byYear };
   let releaseLog = [];
   try { const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all(); releaseLog = (lg || []).map(x => { let d = {}; try { d = JSON.parse(x.detail || "{}"); } catch {} return { id: x.ppm_id, at: x.at, ...d }; }); } catch {}
   const lead = releaseLog.map(x => x.daysBeforeDue).filter(n => Number.isFinite(n));
