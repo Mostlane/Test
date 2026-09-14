@@ -10577,6 +10577,46 @@ async function buildSchedule(env, tid, opts) {
   }
   return { type, rows: filtered, total: rows.length, stats, today };
 }
+async function fiveYearAudit(env, tid, year) {
+  await ensureTables2(env);
+  year = String(year || todayIso().slice(0, 4)).slice(0, 4);
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  const hist = await historyIndex(env, tid, "fiveYear", jobs);
+  const stores = await chartStores(env, tid);
+  const onList = /* @__PURE__ */ new Set();
+  try {
+    const { results } = await env.DB.prepare("SELECT DISTINCT store_code FROM concerto_ppm WHERE tenant_id=? AND ppm_type=? AND COALESCE(store_code,'')<>''").bind(tid, "fiveYear").all();
+    for (const r of results || []) {
+      const c = padCode(r.store_code);
+      if (c) onList.add(c);
+    }
+  } catch {
+  }
+  const EARLY_DAYS = 4 * 365;
+  const SAME_VISIT_DAYS = 180;
+  const isTest = (e) => !!(e && e.date && (e.source === "cert" || e.done === true));
+  const offList = [], earlyRetest = [];
+  for (const [code, list] of hist.entries()) {
+    const tests = list.filter(isTest).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const thisYear = tests.find((e) => String(e.date).slice(0, 4) === year);
+    if (!thisYear) continue;
+    const store = stores.get(code) || null;
+    const base = { storeCode: code, siteName: store && store.name || "", testedAt: thisYear.date, source: thisYear.source, jobId: thisYear.source !== "cert" ? thisYear.id || null : null, ref: thisYear.title || "" };
+    if (!onList.has(code)) offList.push(base);
+    const prev = tests.find((e) => (Date.parse(thisYear.date) - Date.parse(e.date)) / 864e5 > SAME_VISIT_DAYS);
+    if (prev) {
+      const gap = (Date.parse(thisYear.date) - Date.parse(prev.date)) / 864e5;
+      if (gap < EARLY_DAYS) earlyRetest.push({ ...base, prevAt: prev.date, prevSource: prev.source, prevJobId: prev.source !== "cert" ? prev.id || null : null, gapMonths: Math.round(gap / 30.44) });
+    }
+  }
+  offList.sort((a, b) => String(a.storeCode).localeCompare(String(b.storeCode)));
+  earlyRetest.sort((a, b) => a.gapMonths - b.gapMonths);
+  return { year, offList, earlyRetest };
+}
 async function handle9(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
@@ -10600,6 +10640,10 @@ async function handle9(request, env, ctx, url, sess) {
     const q = url.searchParams;
     const out = await buildSchedule(env, tid, { type: q.get("type") || "fiveYear", from: q.get("from") || "", to: q.get("to") || "", released: q.get("released") || "all", status: q.get("status") || "open", money: money2 });
     return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/audit" && method === "GET") {
+    const out = await fiveYearAudit(env, tid, url.searchParams.get("year") || "");
+    return json({ ok: true, ...out }, {}, env, request);
   }
   if (path === "/concerto/case" && method === "POST") {
     const b = await body();

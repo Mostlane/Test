@@ -3402,6 +3402,32 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
     concerto-ppm) + log. Test: `node --no-warnings worker/tools/test-concerto.mjs` (the
     "12-stage single status + document status" block). **TODO/next:** fold remedial £ into
     job costing; a Help guide for the schedule.
+  - **Mobile tile + sidebar + sort + urgency colour + both due dates + friendly dates
+    (14 Sep 2026):** main.html gained a **⚡ 5-Year EICR tile** (id `FiveYear`, MAP
+    `["Compliance","SLAAdmin"]`) + a portal-config sidebar item "5-Year EICR" (same perms;
+    portal-config bumped `?v=37`, SW `mostlane-v126`). The stage traffic-light is no longer
+    a blanket red for "needs booking" — `stageLight(r)` colours the pre-test stages by when
+    our cert runs out (the Mostlane/compliance `chartDue`): out of date / no cert → red,
+    within 60 days → amber, else green; a booked job → green; remedial stages keep their own
+    lights. Summary tiles: Needs booking NEUTRAL + separate amber "Due within 60 days" + red
+    "Out of date / no cert". The Certificate-status pill is **clickable** (📄 open →
+    /compliance/file-url). Due column split into **Concerto due** + **Mostlane due** (with a
+    runs-out hint). **Sort dropdown** (localStorage `mlFyrSort`): Store number (Concerto
+    order, default) / Next due / Stage / Certificate status / Site name. Dates render
+    "11th Dec 26" (`fmtD`).
+  - **5-year test AUDIT (14 Sep 2026, Jamie: "tests with no matching Concerto item —
+    highlight + list; and duplicates where we re-test a site done a year or two ago"):**
+    **GET /concerto/audit?year=YYYY** (concerto.js `fiveYearAudit`, office) reads the same
+    test evidence as the schedule (`historyIndex`: filed 5-year cert / finished elecTest job
+    / Workever archive) and returns two lists for the year: **`offList`** = a 5-year test
+    carried out that year for a store NOT on the Concerto fiveYear list (`concerto_ppm`
+    store set), and **`earlyRetest`** = a test that year whose PREVIOUS genuine test (>180
+    days earlier, to skip the same visit's cert+job pair) was **< 4 years** before — re-tested
+    with over a year of the 5-year cert still to run (`gapMonths`). five-year-remedials.html
+    shows them as two highlighted cards above the table (red "⚠ Tested in YEAR but NOT on the
+    Concerto list", amber "🔁 Re-tested early — last EICR still in date"), each row linking
+    the test job / certificate / site; `loadAudit` re-fetches on year change. Covered by
+    test-concerto.mjs ("5-year test audit" block). dist rebuilt.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
