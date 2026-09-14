@@ -95,7 +95,7 @@
 
   <div class="wrap">
     <div class="infobox">
-      The full 5-Year EICR schedule for every Southern&nbsp;Co-op site on Concerto's PPM list this year. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
+      The 5-Year EICR schedule for Southern&nbsp;Co-op sites on Concerto's PPM list — pick a year at the top, or <b>All years (whole list)</b> to see every site Concerto tracks. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
     </div>
     <div class="sumrow" id="sumrow"></div>
     <div id="audit"></div>
@@ -144,9 +144,10 @@
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
       const now = new Date().getFullYear();
-      g("yearSel").innerHTML = [1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
+      g("yearSel").innerHTML = '<option value="all">All years (whole list)</option>'
+        + [5,4,3,2,1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
       g("yearSel").value = String(YEAR);
-      g("yearSel").onchange = () => { YEAR = +g("yearSel").value; render(); loadAudit(); };
+      g("yearSel").onchange = () => { const v=g("yearSel").value; YEAR = v==="all" ? "all" : +v; render(); loadAudit(); };
       g("q").oninput = () => render();
       g("fFlag").onchange = () => render();
       g("sortSel").value = SORT;
@@ -172,9 +173,10 @@
 
     // Off-list tests (tested this year, not on the Concerto list) + early re-tests.
     async function loadAudit(){
+      const box = g("audit");
+      if (YEAR==="all") { box.innerHTML = ""; return; }   // the audit is year-specific
       let d = null;
       try { d = await authFetch("/concerto/audit?year="+YEAR).then(r=>r.json()); } catch {}
-      const box = g("audit");
       if (!d || !d.ok) { box.innerHTML = ""; return; }
       const testLink = r => r.jobId ? ' — <a href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">open test job ↗</a>'
         : (r.source==="cert" ? ' — <a href="#" data-cert="'+esc(r.storeCode)+'">open certificate ↗</a>' : '');
@@ -214,7 +216,7 @@
     // A row belongs to YEAR if its Concerto next date is in that year OR the test was
     // carried out in that year (Concerto sometimes rolls the date forward after a test).
     function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
-    function inYear(r){ const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
+    function inYear(r){ if (YEAR==="all") return true; const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
     function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
     // Days until the MOSTLANE (compliance chart) due date — when our certificate runs out.
     function daysTo(s){ if(!s) return null; const t=Date.parse(String(s).slice(0,10)+"T00:00:00Z"); if(isNaN(t)) return null; return Math.round((t - Date.parse(TODAY+"T00:00:00Z"))/864e5); }
@@ -262,7 +264,7 @@
       const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
       const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
       g("sumrow").innerHTML =
-        stat(rows.length, "Sites in "+YEAR, "") +
+        stat(rows.length, YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR, "") +
         stat(needsBooking, "Needs booking", "") +
         stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
         stat(overdue, "Out of date / no cert", overdue?"red":"") +
