@@ -34,6 +34,9 @@
     .badge{border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800;white-space:nowrap;}
     .b-quoted{background:#fef3c7;color:#92400e;} .b-ordered{background:#dcfce7;color:#166534;}
     .b-works{background:#dbeafe;color:#1e40af;} .b-done{background:#e2e8f0;color:#475569;}
+    .b-review{background:#fee2e2;color:#991b1b;}
+    .src-eng{display:inline-block;background:#eef4fb;color:#274b73;border:1px solid #cfe0f2;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px;}
+    .phchip{color:#475569;font-size:12px;font-weight:600;}
     .ordrow{margin-top:8px;font-size:13px;}
     .ord-yes{color:#166534;font-weight:700;} .ord-no{color:var(--warn);font-weight:700;}
     .lines{margin-top:8px;}
@@ -55,7 +58,7 @@
 
   <div class="wrap">
     <div class="infobox">
-      A row here means the EICR <b>test was carried out</b> (you can't quote remedials without inspecting), so each of these stores now shows amber <b>“✅ tested — cert to file”</b> on the 5-year schedule instead of red “no cover”. Order status updates itself as client orders arrive.
+      When an engineer completes an electrical (EICR) test with remedials it lands here as <b>To review</b> — work through it: send the client the quote (📋 Quote text), mark it quoted, then once the order arrives press <b>🛠 Create works job</b> to raise the works for an engineer; it moves to Done when they finish. A row here also means the test was carried out, so the store shows amber <b>“✅ tested — cert to file”</b> on the 5-year schedule instead of red “no cover”.
     </div>
     <div class="sumrow" id="sumrow"></div>
     <div class="chips" id="chips"></div>
@@ -65,10 +68,10 @@
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
-    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
     let ROWS = [], FILTER = "all";
-    const STAGE_LABELS = { quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
+    const STAGE_LABELS = { to_review:"To review", quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
 
     function fmtDate(s){
       s = String(s||"").trim(); if(!s) return "";
@@ -78,8 +81,9 @@
     // Effective bucket for the filter chips — an order present counts as "ordered"
     // even if the stage still reads quoted.
     function bucket(r){
-      const ordered = !!r.order || r.stage==="ordered" || r.stage==="in_works";
+      if(r.stage==="to_review") return "review";
       if(r.stage==="done"||r.stage==="invoiced") return "done";
+      const ordered = !!r.order || r.stage==="ordered" || r.stage==="in_works";
       if(ordered) return "ordered";
       return "needs";
     }
@@ -103,20 +107,20 @@
     }
 
     function counts(){
-      const c = { all:ROWS.length, needs:0, ordered:0, done:0 };
+      const c = { all:ROWS.length, review:0, needs:0, ordered:0, done:0 };
       ROWS.forEach(r => { c[bucket(r)]++; });
       return c;
     }
     function renderSummary(){
       const c = counts();
       g("sumrow").innerHTML =
-        '<div class="stat"><div class="n">'+c.all+'</div><div class="l">Tested — cert to file</div></div>'
-        + '<div class="stat warn"><div class="n">'+c.needs+'</div><div class="l">Awaiting order</div></div>'
+        '<div class="stat warn"><div class="n">'+c.review+'</div><div class="l">To review</div></div>'
+        + '<div class="stat"><div class="n">'+c.needs+'</div><div class="l">Awaiting order</div></div>'
         + '<div class="stat"><div class="n">'+c.ordered+'</div><div class="l">Ordered</div></div>';
     }
     function renderChips(){
       const c = counts();
-      const defs = [["all","All",c.all],["needs","Awaiting order",c.needs],["ordered","Ordered",c.ordered],["done","Done",c.done]];
+      const defs = [["all","All",c.all],["review","To review",c.review],["needs","Awaiting order",c.needs],["ordered","Ordered",c.ordered],["done","Done",c.done]];
       g("chips").innerHTML = defs.map(([k,l,n]) =>
         '<button class="chip'+(FILTER===k?" on":"")+'" data-f="'+k+'">'+l+' <span class="n">'+n+'</span></button>').join("");
       g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; renderChips(); render(); });
@@ -129,35 +133,73 @@
       g("list").innerHTML = rows.map(cardHtml).join("");
       g("list").querySelectorAll("select[data-stage]").forEach(sel => sel.onchange = () => setStage(sel.dataset.stage, sel.value, sel));
       g("list").querySelectorAll("button[data-del]").forEach(b => b.onclick = () => del(b.dataset.del));
+      g("list").querySelectorAll("button[data-quote]").forEach(b => b.onclick = () => showQuote(b.dataset.quote));
+      g("list").querySelectorAll("button[data-works]").forEach(b => b.onclick = () => createWorks(b.dataset.works, b));
     }
 
     function cardHtml(r){
       const bk = bucket(r);
-      const badge = bk==="done" ? '<span class="badge b-done">Done</span>'
+      const badge = bk==="review" ? '<span class="badge b-review">To review</span>'
+        : bk==="done" ? '<span class="badge b-done">Done</span>'
         : bk==="ordered" ? '<span class="badge b-ordered">Ordered</span>'
         : '<span class="badge b-quoted">Quoted</span>';
       const cost = (r.budgetCost>0) ? (" · £"+Math.round(r.budgetCost)) : "";
+      const isJob = r.source==="job";
+      const ph = (r.photoCount||0) ? ' · <span class="phchip">📷 '+r.photoCount+'</span>' : "";
+      const dateLbl = isJob ? "Completed " : "Quoted ";
       const ord = r.order
         ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>'
-        : '<div class="ordrow ord-no">⚠ No order yet — needs review</div>';
+        : (bk==="review" ? '' : '<div class="ordrow ord-no">⚠ No order yet — needs review</div>');
       const lines = (r.lines||[]).filter(l=>String(l.action||"").trim());
       const linesHtml = lines.length
-        ? '<details class="lines"><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+'</summary><ul>'
-            + lines.map(l=>'<li>'+esc(l.action)+'</li>').join("") + '</ul></details>'
+        ? '<details class="lines"'+(bk==="review"?" open":"")+'><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+ph+'</summary><ul>'
+            + lines.map(l=>'<li>'+esc(l.action)+((l.photos&&l.photos.length)?' <span class="phchip">📷'+l.photos.length+'</span>':'')+'</li>').join("") + '</ul></details>'
         : '';
-      const opts = ["quoted","ordered","in_works","done","invoiced"].map(s =>
+      const opts = ["to_review","quoted","ordered","in_works","done","invoiced"].map(s =>
         '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
+      // Actions: quote text (copy), create the works job (job cases without one yet), job links.
+      let actions = '';
+      if(isJob) actions += '<button class="btn link" data-quote="'+esc(r.id)+'">📋 Quote text</button>';
+      if(isJob && !r.worksJobId && r.stage!=="done" && r.stage!=="invoiced")
+        actions += '<button class="btn" data-works="'+esc(r.id)+'">🛠 Create works job</button>';
+      if(r.worksJobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Works job ↗</a>';
+      if(isJob && r.jobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job ↗</a>';
       return '<div class="card">'
         + '<div class="rhead"><span class="code">'+esc(r.storeCode||"")+'</span>'
-          + '<div class="site">'+esc(r.siteName||"")+'<div class="sub">'+esc(r.sr||"")+' · Quoted '+esc(fmtDate(r.quoteDate))+cost+'</div></div>'
+          + '<div class="site">'+esc(r.siteName||"")+(isJob?'<span class="src-eng">⚡ from test</span>':'')+'<div class="sub">'+esc(r.sr||"")+(r.sr?' · ':'')+dateLbl+esc(fmtDate(r.quoteDate))+cost+'</div></div>'
           + badge + '</div>'
         + ord + linesHtml
         + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(r.id)+'">'+opts+'</select>'
           + '<span class="saved" id="sv-'+esc(r.id)+'"></span>'
           + '<span style="flex:1"></span>'
+          + actions
           + '<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode||"")+'">Open site ↗</a>'
           + '<button class="btn ghost" data-del="'+esc(r.id)+'">Remove</button></div>'
         + '</div>';
+    }
+
+    // Quote text — fetch the server-built body and copy it for the client email.
+    async function showQuote(id){
+      let text = "";
+      try { const d = await authFetch("/certs/five-year/quote-text?id="+encodeURIComponent(id)).then(r=>r.json()); if(d&&d.ok) text=d.text||""; } catch {}
+      if(!text){ (window.MLUI?MLUI.toast:alert)("Couldn't build the quote text."); return; }
+      try { await navigator.clipboard.writeText(text); } catch {}
+      if(window.MLUI && MLUI.confirm){ MLUI.confirm(text.replace(/\n/g,"<br>"),{title:"Quote text (copied to clipboard)",okLabel:"Done"}); }
+      else { alert(text); }
+    }
+    // Create the audit works job from a case's linked test job, then move to In works.
+    async function createWorks(id, btn){
+      const ok = window.MLUI ? await MLUI.confirm("Create the works job from these remedials? It lands unassigned, ready to allocate.",{title:"Create works job"}) : confirm("Create the works job?");
+      if(!ok) return;
+      btn.disabled = true; btn.textContent = "Creating…";
+      try {
+        const d = await authFetch("/certs/five-year/create-works",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
+        if(d && d.ok){
+          const r = ROWS.find(x=>x.id===id); if(r){ r.worksJobId=d.worksJobId; r.stage=d.stage||"in_works"; }
+          (window.MLUI?MLUI.toast:function(){})("Works job created");
+          renderSummary(); renderChips(); render();
+        } else { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't create the works job."); }
+      } catch { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); }
     }
 
     async function setStage(id, stage, sel){
