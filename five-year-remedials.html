@@ -47,14 +47,21 @@
     .pilllink{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
     .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
     .pilllink:hover .opendoc{text-decoration:underline;}
+    .auditbtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+    .auditbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:999px;border:1px solid;background:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;}
+    .auditbtn .n{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;font-size:12px;color:#fff;}
+    .auditbtn .caret{font-size:10px;opacity:.7;transition:transform .15s;}
+    .auditbtn[aria-expanded="true"] .caret{transform:rotate(180deg);}
+    .auditbtn.red{border-color:#f5c6c6;color:#991b1b;} .auditbtn.red .n{background:#dc2626;}
+    .auditbtn.red[aria-expanded="true"]{background:#fdf2f2;}
+    .auditbtn.amber{border-color:#f6e0b5;color:#92400e;} .auditbtn.amber .n{background:#d97706;}
+    .auditbtn.amber[aria-expanded="true"]{background:#fffaf0;}
     .auditcard{border-radius:14px;padding:12px 14px;margin-bottom:12px;border:1px solid;}
     .auditcard.red{background:#fdf2f2;border-color:#f5c6c6;}
     .auditcard.amber{background:#fffaf0;border-color:#f6e0b5;}
     .auditcard h3{margin:0 0 2px;font-size:15px;}
     .auditcard.red h3{color:#991b1b;} .auditcard.amber h3{color:#92400e;}
     .auditcard .why{font-size:12.5px;color:#6b7a90;margin:0 0 8px;}
-    .auditcard details{margin-top:6px;}
-    .auditcard summary{cursor:pointer;font-weight:700;font-size:13px;}
     .arow{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:7px 2px;border-top:1px solid rgba(0,0,0,.06);font-size:13px;}
     .arow .code{font-weight:800;color:var(--brand);}
     .arow .ago{color:#991b1b;font-weight:700;}
@@ -172,26 +179,35 @@
       const testLink = r => r.jobId ? ' — <a href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">open test job ↗</a>'
         : (r.source==="cert" ? ' — <a href="#" data-cert="'+esc(r.storeCode)+'">open certificate ↗</a>' : '');
       const siteLink = r => r.storeCode ? '<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">site ↗</a>' : '';
-      let h = "";
-      if ((d.offList||[]).length){
-        h += '<div class="auditcard red"><h3>⚠ Tested in '+YEAR+' but NOT on the Concerto list ('+d.offList.length+')</h3>'
+      const off = d.offList||[], early = d.earlyRetest||[];
+      let btns = "", panels = "";
+      if (off.length){
+        btns += '<button type="button" class="auditbtn red" data-panel="auditOffList" aria-expanded="false">'
+          + '<span class="n">'+off.length+'</span> ⚠ Tested not on the Concerto list <span class="caret">▾</span></button>';
+        panels += '<div id="auditOffList" class="auditcard red" hidden><h3>⚠ Tested in '+YEAR+' but NOT on the Concerto list ('+off.length+')</h3>'
           + '<p class="why">A 5-year test was carried out this year for a store the Concerto PPM schedule doesn\'t list — check it was ordered / chase the paperwork.</p>'
-          + '<details open>'+d.offList.map(r =>
+          + off.map(r =>
               '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
               + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'+testLink(r)+' '+siteLink(r)+'</div>').join("")
-          + '</details></div>';
+          + '</div>';
       }
-      if ((d.earlyRetest||[]).length){
-        h += '<div class="auditcard amber"><h3>🔁 Re-tested early — last EICR still in date ('+d.earlyRetest.length+')</h3>'
+      if (early.length){
+        btns += '<button type="button" class="auditbtn amber" data-panel="auditEarly" aria-expanded="false">'
+          + '<span class="n">'+early.length+'</span> 🔁 Re-tested early <span class="caret">▾</span></button>';
+        panels += '<div id="auditEarly" class="auditcard amber" hidden><h3>🔁 Re-tested early — last EICR still in date ('+early.length+')</h3>'
           + '<p class="why">Concerto sent (and paid for) a test at a store whose previous 5-year certificate wasn\'t due yet — worth flagging with them.</p>'
-          + '<details open>'+d.earlyRetest.map(r =>
+          + early.map(r =>
               '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
               + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'
               + '<span class="ago">· last tested '+esc(fmtD(r.prevAt))+' ('+r.gapMonths+' months earlier)</span>'
               + testLink(r)+' '+siteLink(r)+'</div>').join("")
-          + '</details></div>';
+          + '</div>';
       }
-      box.innerHTML = h;
+      box.innerHTML = btns ? ('<div class="auditbtns">'+btns+'</div>'+panels) : "";
+      box.querySelectorAll(".auditbtn").forEach(b => b.onclick = () => {
+        const p = g(b.dataset.panel); if (!p) return;
+        const open = p.hidden; p.hidden = !open; b.setAttribute("aria-expanded", open ? "true" : "false");
+      });
       box.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
     }
 
