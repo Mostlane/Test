@@ -47,17 +47,28 @@
   function uid() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
   // Shrink an image File to a JPEG blob at a max dimension.
+  // MUST always settle: on iOS an <img> can silently stall decoding a photo
+  // (HEIC, or a big image under memory pressure) and toBlob can fail to call
+  // back — neither onload nor onerror fires. Without the hard timeout the
+  // Promise never resolves, uploadPhoto's Promise.all hangs on "Uploading…",
+  // and the photo never attaches (the remedial saves with photos:[]).
   function shrink(file, max, quality) {
     return new Promise(function (resolve) {
+      var done = false, url = null;
+      function finish(v) { if (done) return; done = true; if (url) { try { URL.revokeObjectURL(url); } catch (e) {} } resolve(v); }
+      var t = setTimeout(function () { finish(null); }, 8000);  // fall back to the original file
       var img = new Image();
       img.onload = function () {
-        var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
-        var c = document.createElement("canvas"); c.width = Math.round(w * s); c.height = Math.round(h * s);
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        c.toBlob(function (b) { resolve(b); }, "image/jpeg", quality || 0.82);
+        try {
+          var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+          var c = document.createElement("canvas"); c.width = Math.round(w * s); c.height = Math.round(h * s);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob(function (b) { clearTimeout(t); finish(b); }, "image/jpeg", quality || 0.82);
+        } catch (e) { clearTimeout(t); finish(null); }
       };
-      img.onerror = function () { resolve(null); };
-      img.src = URL.createObjectURL(file);
+      img.onerror = function () { clearTimeout(t); finish(null); };
+      url = URL.createObjectURL(file);
+      img.src = url;
     });
   }
 

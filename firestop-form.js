@@ -15,18 +15,27 @@
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   const rid = () => "s-" + Math.random().toString(36).slice(2, 8);
 
+  // MUST always settle — an <img> can silently stall decoding on iOS and
+  // toBlob can fail to call back, so guard with a hard timeout (fall back to
+  // the original file) or the photo upload hangs forever and is lost.
   function shrink(file, max = 1600) {
     return new Promise(resolve => {
+      let done = false, url = null;
+      const fin = v => { if (done) return; done = true; if (url) { try { URL.revokeObjectURL(url); } catch (e) {} } resolve(v); };
+      const t = setTimeout(() => fin(file), 8000);
       const img = new Image();
       img.onload = () => {
-        let w = img.width, h = img.height;
-        if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
-        const c = document.createElement("canvas"); c.width = w; c.height = h;
-        c.getContext("2d").drawImage(img, 0, 0, w, h);
-        c.toBlob(b => resolve(b || file), "image/jpeg", 0.82);
+        try {
+          let w = img.width, h = img.height;
+          if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
+          const c = document.createElement("canvas"); c.width = w; c.height = h;
+          c.getContext("2d").drawImage(img, 0, 0, w, h);
+          c.toBlob(b => { clearTimeout(t); fin(b || file); }, "image/jpeg", 0.82);
+        } catch (e) { clearTimeout(t); fin(file); }
       };
-      img.onerror = () => resolve(file);
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => { clearTimeout(t); fin(file); };
+      url = URL.createObjectURL(file);
+      img.src = url;
     });
   }
 
