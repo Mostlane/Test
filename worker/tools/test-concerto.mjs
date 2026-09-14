@@ -24,7 +24,7 @@ function makeEnv() {
     CREATE TABLE compliance_stores (tenant_id INTEGER, scheme TEXT, code TEXT, category TEXT, name TEXT, postcode TEXT, due TEXT, active INTEGER DEFAULT 1, meta TEXT, updated_at TEXT);
     CREATE TABLE sites (tenant_id INTEGER, client TEXT, site_number TEXT, site_name TEXT, postcode TEXT, active INTEGER, job_number TEXT, data TEXT, updated_at TEXT);
     CREATE TABLE sla_jobs (tenant_id, id TEXT, data TEXT, status TEXT, helpdesk_ref TEXT, site_code TEXT);
-    CREATE TABLE app_config (tenant_id, key, value);
+    CREATE TABLE app_config (tenant_id, key TEXT UNIQUE, value);
     CREATE TABLE sla_jobs_archive (tenant_id INTEGER, id TEXT PRIMARY KEY, ref TEXT, status TEXT, assigned_to TEXT, site_name TEXT, postcode TEXT, created_at TEXT, completed_at TEXT, search TEXT, data TEXT, site_code TEXT);
     CREATE TABLE compliance_review (tenant_id INTEGER, scheme TEXT, code TEXT, type TEXT, status TEXT, outcome TEXT, attention INTEGER, summary TEXT, flags TEXT, file_id INTEGER, doc_at TEXT, checked_at TEXT, notes TEXT, updated_by TEXT, updated_at TEXT);
     CREATE TABLE client_orders (id TEXT PRIMARY KEY, tenant_id TEXT, order_number TEXT, order_value REAL, title TEXT, description TEXT, detail TEXT, store_code TEXT, status TEXT, matched_kind TEXT, matched_job_id TEXT, created_at TEXT, notified_at TEXT);
@@ -94,6 +94,10 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   const gap2 = reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2027-03-31" }, st({ fiveYear: "2026-06-01" }), T);
   ok("gap (already expired): NO valid certificate right now, DD/MM/YY", gap2.flag === "gap" && /ran out on 01\/06\/26 but Concerto has the next test planned for 31\/03\/27/.test(gap2.text) && /NO valid certificate right now/.test(gap2.text), gap2.text);
   ok("small difference inside the slack still reads as due (no false gap)", reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2027-01-20" }, st({ fiveYear: "2026-12-15" }), T).flag === "due");
+  // In-date cert filed for the current cycle (valid years out) + Concerto scheduled LATER
+  // → NOT a live "no cover" gap; it's a date to correct (Emsworth 0079 bug).
+  const farCovered = reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2031-06-30" }, st({ fiveYear: "2030-06-19" }), T);
+  ok("cert valid for years, Concerto later → mismatch (not a red gap)", farCovered.flag === "mismatch" && /We hold a certificate to 19\/06\/30/.test(farCovered.text), farCovered.text);
   ok("other texts carry DD/MM/YY too", /Due 05\/10\/26 \(Concerto Oct 26\)/.test(reconcileRow({ store_code: "0001", ppm_type: "em", period: "2026-10" }, st({ em: "2026-10-05" }), T).text));
   ok("pump monthly done", reconcileRow({ store_code: "0001", ppm_type: "pump", period: "2026-08" }, st({ pump: "2026-09-20" }), T).flag === "done");
   ok("schedule row planned date drives it", reconcileRow({ store_code: "0001", ppm_type: "fiveYear", planned_date: "2026-06-30" }, st({ fiveYear: "2031-06-25" }), T).flag === "done");
@@ -377,6 +381,34 @@ const ROWS = [
   await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00501:fiveYear", stage12: "complete_satisfactory" });
   sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
   ok("picking Complete — satisfactory sets outcome satisfactory", by["0501"].case.stage12 === "complete_satisfactory" && by["0501"].case.outcome === "satisfactory");
+}
+// ── Per-job note + Alex list ────────────────────────────────────────────────
+{
+  const { env, db } = makeEnv();
+  const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
+  ins("compliance_stores", ["tenant_id","scheme","code","category","name","due","active"], [[1,"coop","0900","Retail","Noteville",'{"fiveYear":"2027-01-01"}',1]]);
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: [
+    { uprn:"SR00900", site:"0900 - Noteville", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2026-10-31", status:"Live", orderNr:"" },
+  ], fileName: "ppm_notes.xlsx" });
+  // Per-job note round-trips and shows on the row's case
+  await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "SCH:SR00900:fiveYear", caseNote: "Waiting on Alex to confirm access" });
+  let sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); let by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("per-job note saved + returned on the case (with who)", by["0900"].case.note === "Waiting on Alex to confirm access" && by["0900"].case.noteBy === "Tanya", JSON.stringify({ note: by["0900"].case.note, by: by["0900"].case.noteBy }));
+  await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00900:fiveYear", caseNote: "" });
+  sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
+  ok("clearing the note empties it", by["0900"].case.note === "");
+  // Alex list add / tick / delete
+  const empty = await call(env, "Jamie Line", "GET", "/concerto/alex-list");
+  ok("alex list starts empty", empty.status === 200 && Array.isArray(empty.body.items) && empty.body.items.length === 0);
+  const added = await call(env, "Tanya", "POST", "/concerto/alex-list", { add: "Chase the 0900 order", storeCode: "0900" });
+  ok("alex list: add an item (newest first, not done, records who)", added.status === 200 && added.body.items.length === 1 && added.body.items[0].text === "Chase the 0900 order" && added.body.items[0].done === false && added.body.items[0].addedBy === "Tanya" && added.body.items[0].storeCode === "0900", JSON.stringify(added.body.items[0]));
+  const id = added.body.items[0].id;
+  const ticked = await call(env, "Jamie Line", "POST", "/concerto/alex-list", { id, done: true });
+  ok("alex list: tick it off (done, who)", ticked.body.items[0].done === true && ticked.body.items[0].doneBy === "Jamie Line");
+  const del = await call(env, "Jamie Line", "POST", "/concerto/alex-list", { id, delete: true });
+  ok("alex list: remove it", del.body.items.length === 0);
+  ok("alex list: non-office 403", (await call(env, "Nobody", "GET", "/concerto/alex-list")).status === 403);
+  ok("alex list: bad payload 400", (await call(env, "Jamie Line", "POST", "/concerto/alex-list", {})).status === 400);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

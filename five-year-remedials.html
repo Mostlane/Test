@@ -89,14 +89,49 @@
     .log div{margin-bottom:2px;}
     .saved{color:var(--ok);font-size:12px;}
     @media(max-width:640px){ td.store{position:static;} }
+    .hbtn{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:7px 13px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+    .hbtn .n{background:#fff;color:var(--brand);border-radius:999px;padding:0 7px;font-size:12px;font-weight:800;}
+    .notebox{margin-top:10px;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:9px 10px;}
+    .notebox .lbl{font-size:12px;font-weight:700;color:#54627a;margin-bottom:5px;}
+    .jobnote{width:100%;box-sizing:border-box;min-height:52px;border:1px solid #ccd5dd;border-radius:9px;padding:8px;font:inherit;font-size:13px;color:#0f2438;resize:vertical;}
+    .notesave{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+    .mback{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:24px 14px;overflow:auto;}
+    .mback.on{display:flex;}
+    .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;box-shadow:0 12px 44px rgba(6,24,54,.32);}
+    .mcard h2{margin:0 0 4px;font-size:19px;color:var(--brand);}
+    .mcard .mx{float:right;background:none;border:0;font-size:22px;line-height:1;cursor:pointer;color:#6b7a90;}
+    .axadd{display:flex;gap:8px;margin:12px 0;}
+    .axadd input{flex:1;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;}
+    .axadd button{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+    .axitem{display:flex;align-items:flex-start;gap:9px;padding:9px 2px;border-top:1px solid rgba(0,0,0,.07);}
+    .axitem input[type=checkbox]{width:19px;height:19px;margin-top:1px;flex:0 0 auto;cursor:pointer;}
+    .axitem .txt{flex:1;font-size:14px;line-height:1.35;}
+    .axitem.done .txt{text-decoration:line-through;color:#8a97a8;}
+    .axitem .meta{font-size:11px;color:#8a97a8;display:block;margin-top:2px;}
+    .axitem .del{background:none;border:0;color:#b91c1c;font-size:16px;cursor:pointer;padding:0 2px;flex:0 0 auto;}
+    .axempty{color:#6b7a90;font-size:14px;padding:14px 2px;}
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
     <h1>⚡ 5-Year EICR schedule</h1>
+    <button id="alexBtn" class="hbtn" title="Items to discuss with Alex">📋 Alex list<span class="n" id="alexCount" hidden></span></button>
     <select id="yearSel" title="Which year's schedule"></select>
   </header>
+
+  <div class="mback" id="alexBack">
+    <div class="mcard">
+      <button class="mx" id="alexClose" title="Close">×</button>
+      <h2>📋 Alex list</h2>
+      <div class="muted">Items to discuss with Alex — tick them off as he sorts them.</div>
+      <div class="axadd">
+        <input id="alexInput" placeholder="Add an item to discuss…" maxlength="500">
+        <button id="alexAdd">Add</button>
+      </div>
+      <div id="alexList"></div>
+    </div>
+  </div>
 
   <div class="wrap">
     <div class="infobox">
@@ -159,7 +194,14 @@
       g("fFlag").onchange = () => render();
       g("sortSel").value = SORT;
       g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
+      g("alexBtn").onclick = openAlex;
+      g("alexClose").onclick = closeAlex;
+      g("alexBack").onclick = e => { if (e.target === g("alexBack")) closeAlex(); };
+      const alexSubmit = () => { const v = g("alexInput").value.trim(); if (!v) return; g("alexInput").value=""; alexPost({ add: v }); };
+      g("alexAdd").onclick = alexSubmit;
+      g("alexInput").addEventListener("keydown", e => { if (e.key==="Enter"){ e.preventDefault(); alexSubmit(); } });
       load();
+      loadAlex();
     })();
 
     async function load(){
@@ -322,6 +364,7 @@
       tb.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { const id=b.dataset.toggle; if(EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderTable(); });
       tb.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => setStage(b.dataset.reset, "", b));
       tb.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
+      tb.querySelectorAll("[data-note]").forEach(b => b.onclick = () => saveNote(b.dataset.note, b.closest(".notebox").querySelector(".jobnote"), b));
     }
 
     function rowHtml(r){
@@ -378,8 +421,15 @@
       if (r.storeCode) links.push('<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">🗂 Site folder</a>');
       links.push('<a href="/concerto-ppm.html?tab=schedule">🗂 Full case &amp; checklist</a>');
       const log = (c.log||[]).slice(0,6).map(l => '<div><span class="muted">'+fmtD(l.at)+'</span> · '+esc(l.by)+' · '+esc(l.text)+'</div>').join("") || '<div class="muted">Nothing logged yet.</div>';
+      const noteMeta = c.note ? '<span class="muted" style="font-size:11px;margin-left:6px">last edited'+(c.noteBy?" by "+esc(c.noteBy):"")+(c.noteAt?" "+fmtD(c.noteAt):"")+'</span>' : '';
+      const noteBox = '<div class="notebox">'
+        + '<div class="lbl">📝 Notes on this job'+noteMeta+'</div>'
+        + '<textarea class="jobnote" placeholder="Leave a note on this job/site…">'+esc(c.note||"")+'</textarea>'
+        + '<div style="margin-top:6px"><button class="notesave" data-note="'+esc(r.id)+'">💾 Save note</button> <span class="saved" id="nsv-'+esc(r.id)+'"></span></div>'
+        + '</div>';
       return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
         + out + strip
+        + noteBox
         + '<div class="dlinks">'+links.join("")+'</div>'
         + '<div class="log">'+log+'</div>';
     }
@@ -398,6 +448,58 @@
         else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the status."); if (el) el.disabled=false; }
       } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the status."); if (el) el.disabled=false; }
     }
+
+    async function saveNote(ppmId, ta, btn){
+      if (!ta) return;
+      const sv = g("nsv-"+ppmId), text = ta.value;
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch("/concerto/case", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ppmId, caseNote: text }) }).then(r=>r.json());
+        if (res && res.ok) {
+          if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); }
+          const row = ROWS.find(x => x.id===ppmId);   // keep it through a re-render, no full reload
+          if (row && row.case){ row.case.note = text.trim(); row.case.noteAt = new Date().toISOString(); }
+        } else (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the note.");
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the note."); }
+      if (btn) btn.disabled = false;
+    }
+
+    /* ── Alex list — page-level checklist of items to discuss with Alex ── */
+    let ALEX = [];
+    async function loadAlex(){
+      try { const d = await authFetch("/concerto/alex-list").then(r=>r.json()); if (d && d.ok) { ALEX = d.items || []; renderAlex(); } } catch {}
+    }
+    function alexOutstanding(){ return ALEX.filter(i => !i.done).length; }
+    function updateAlexCount(){
+      const n = alexOutstanding(), b = g("alexCount");
+      if (n){ b.textContent = n; b.hidden = false; } else { b.hidden = true; }
+    }
+    function renderAlex(){
+      updateAlexCount();
+      const box = g("alexList");
+      if (!ALEX.length){ box.innerHTML = '<div class="axempty">Nothing on the list yet. Add anything you need to raise with Alex.</div>'; return; }
+      const items = ALEX.slice().sort((a,b) => (a.done?1:0)-(b.done?1:0));   // outstanding first
+      box.innerHTML = items.map(i => {
+        const meta = i.done
+          ? (i.doneBy?"done by "+esc(i.doneBy):"done")+(i.doneAt?" · "+fmtD(i.doneAt):"")
+          : "added"+(i.addedBy?" by "+esc(i.addedBy):"")+(i.addedAt?" · "+fmtD(i.addedAt):"")+(i.storeCode||i.siteName?" · "+esc([i.storeCode,i.siteName].filter(Boolean).join(" ")):"");
+        return '<div class="axitem'+(i.done?" done":"")+'" data-id="'+esc(i.id)+'">'
+          + '<input type="checkbox" data-ax-toggle="'+esc(i.id)+'"'+(i.done?" checked":"")+'>'
+          + '<span class="txt">'+esc(i.text)+'<span class="meta">'+meta+'</span></span>'
+          + '<button class="del" data-ax-del="'+esc(i.id)+'" title="Remove">🗑</button>'
+          + '</div>';
+      }).join("");
+      box.querySelectorAll("[data-ax-toggle]").forEach(cb => cb.onchange = () => alexPost({ id: cb.dataset.axToggle, done: cb.checked }));
+      box.querySelectorAll("[data-ax-del]").forEach(b => b.onclick = async () => { const ok = window.MLUI ? await MLUI.confirm("Remove this item?",{danger:true}) : confirm("Remove this item?"); if (ok) alexPost({ id: b.dataset.axDel, delete: true }); });
+    }
+    async function alexPost(payload){
+      try {
+        const d = await authFetch("/concerto/alex-list", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) }).then(r=>r.json());
+        if (d && d.ok){ ALEX = d.items || []; renderAlex(); } else (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't update the list.");
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't update the list."); }
+    }
+    function openAlex(){ g("alexBack").classList.add("on"); if (!ALEX.length) loadAlex(); g("alexInput").focus(); }
+    function closeAlex(){ g("alexBack").classList.remove("on"); }
   </script>
 </body>
 </html>
