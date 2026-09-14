@@ -3444,6 +3444,14 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
     Concerto list", amber "🔁 Re-tested early — last EICR still in date"), each row linking
     the test job / certificate / site; `loadAudit` re-fetches on year change. Covered by
     test-concerto.mjs ("5-year test audit" block). dist rebuilt.
+  - **Inactive sites tab (14 Sep 2026):** buildSchedule now sets **`row.inactive`** =
+    `!!(store && store.closed)` (chartStores' `closed` = `sites.active===0` or a
+    "closed" name/due) + `stats.inactive`. five-year-remedials.html has two view tabs
+    above the tiles — **⚡ Schedule** (default; EXCLUDES inactive sites, so a closed
+    store never sits red "needs booking") and **🚫 Inactive sites (N)** (every closed
+    site Concerto still lists, ignoring the year filter). An inactive row carries a
+    grey "🚫 Inactive" pill in the store cell; the audit cards are hidden in the
+    inactive view. Front-end tab state `VIEW` ("active"|"inactive"); no `?v=` bump.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

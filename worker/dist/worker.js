@@ -10495,6 +10495,7 @@ async function buildSchedule(env, tid, opts) {
       siteName: store && store.name || r.site_name || "",
       block: r.block || "",
       category: store ? store.category : "",
+      inactive: !!(store && store.closed),
       nextDate: r.next_date || r.planned_date || null,
       lastDate: r.last_date || null,
       released: !!r.order_nr,
@@ -10526,7 +10527,7 @@ async function buildSchedule(env, tid, opts) {
     if (r.released) byYear[y].released++;
     if (r.flag === "done") byYear[y].done++;
   }
-  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, gap: rows.filter((r) => r.flag === "gap").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, byYear };
+  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, gap: rows.filter((r) => r.flag === "gap").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, inactive: rows.filter((r) => r.inactive).length, byYear };
   let releaseLog = [];
   try {
     const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all();
