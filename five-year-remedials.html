@@ -78,6 +78,15 @@
     <div class="sumrow" id="sumrow"></div>
     <div class="toolbar">
       <input id="q" placeholder="Search store, site, engineer, order…">
+      <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
+        <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
+          <option value="code">Store number (Concerto order)</option>
+          <option value="due">Next due date</option>
+          <option value="stage">Stage</option>
+          <option value="doc">Certificate status (attention first)</option>
+          <option value="site">Site name</option>
+        </select>
+      </label>
       <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
     </div>
     <div class="chips" id="chips"></div>
@@ -94,6 +103,7 @@
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
     let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false;
+    let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     const EXPANDED = new Set();
     // The current 5-year document status (server-computed) → label + light.
     const DOC_LIGHT = { in_date:"tl-green", due:"tl-amber", in_unsat:"tl-amber", expired:"tl-red", expired_unsat:"tl-red", missing:"tl-red" };
@@ -109,6 +119,8 @@
       g("yearSel").onchange = () => { YEAR = +g("yearSel").value; render(); };
       g("q").oninput = () => render();
       g("fFlag").onchange = () => render();
+      g("sortSel").value = SORT;
+      g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
       load();
     })();
 
@@ -133,6 +145,17 @@
     function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
 
     function yearRows(){ return ROWS.filter(inYear); }
+    // Sort comparators. "code" (store number) is the Concerto order — the default.
+    function codeCmp(a,b){ return String(a.storeCode||"~~~~").localeCompare(String(b.storeCode||"~~~~"), undefined, { numeric:true }); }
+    function docRank(r){ const l=(r.docStatus&&r.docStatus.light)||""; return l==="red"?0:l==="amber"?1:l==="green"?2:3; }
+    function stageIdx(r){ const i=STAGES.findIndex(s=>s.key===stageOf(r)); return i<0?99:i; }
+    function cmpRows(a,b){
+      if (SORT==="due")   return String(a.nextDate||"9999-99-99").localeCompare(String(b.nextDate||"9999-99-99")) || codeCmp(a,b);
+      if (SORT==="stage") return (stageIdx(a)-stageIdx(b)) || codeCmp(a,b);
+      if (SORT==="doc")   return (docRank(a)-docRank(b)) || codeCmp(a,b);
+      if (SORT==="site")  return String(a.siteName||"~~~~").localeCompare(String(b.siteName||"~~~~")) || codeCmp(a,b);
+      return codeCmp(a,b);   // "code" — Concerto order
+    }
     function visible(){
       const q = g("q").value.trim().toLowerCase(), flagOnly = g("fFlag").checked;
       return yearRows().filter(r => {
@@ -140,7 +163,7 @@
         if (flagOnly && !(r.case.flagged)) return false;
         if (q && ![r.storeCode, r.siteName, r.orderNr, r.srRef, r.case.engineer, r.case.flagNote].join(" ").toLowerCase().includes(q)) return false;
         return true;
-      }).sort((a,b) => (b.case.flagged - a.case.flagged) || String(a.nextDate||"").localeCompare(String(b.nextDate||"")) || String(a.storeCode||"").localeCompare(String(b.storeCode||"")));
+      }).sort(cmpRows);
     }
 
     function render(){
