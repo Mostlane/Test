@@ -508,17 +508,31 @@
       }));
     }
     // Shrink a chosen image to a JPEG data-URL (max dimension), then upload to R2.
+    // MUST always settle — an <img> can silently stall decoding on iOS (HEIC /
+    // memory pressure) with neither onload nor onerror firing; without the hard
+    // timeout the await hangs on "Uploading…" and the photo is lost. On a stall
+    // fall back to the ORIGINAL file as a data URL so the upload still goes through.
     function shrinkImage(file, maxDim) {
       return new Promise((resolve, reject) => {
-        const img = new Image(); const url = URL.createObjectURL(file);
-        img.onload = () => {
-          let w = img.width, h = img.height; const m = maxDim || 1400;
-          if (w > h && w > m) { h = Math.round(h * m / w); w = m; } else if (h > m) { w = Math.round(w * m / h); h = m; }
-          const c = document.createElement("canvas"); c.width = w; c.height = h;
-          c.getContext("2d").drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
-          resolve(c.toDataURL("image/jpeg", 0.82));
+        let done = false; const img = new Image(); const url = URL.createObjectURL(file);
+        const cleanup = () => { try { URL.revokeObjectURL(url); } catch (e) {} };
+        const fallback = () => {
+          if (done) return;
+          try { const fr = new FileReader(); fr.onload = () => { if (done) return; done = true; cleanup(); resolve(fr.result); }; fr.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error("image")); }; fr.readAsDataURL(file); }
+          catch (e) { if (!done) { done = true; cleanup(); reject(new Error("image")); } }
         };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image")); };
+        const t = setTimeout(fallback, 8000);
+        img.onload = () => {
+          if (done) return;
+          try {
+            let w = img.width, h = img.height; const m = maxDim || 1400;
+            if (w > h && w > m) { h = Math.round(h * m / w); w = m; } else if (h > m) { w = Math.round(w * m / h); h = m; }
+            const c = document.createElement("canvas"); c.width = w; c.height = h;
+            c.getContext("2d").drawImage(img, 0, 0, w, h);
+            clearTimeout(t); done = true; cleanup(); resolve(c.toDataURL("image/jpeg", 0.82));
+          } catch (e) { clearTimeout(t); fallback(); }
+        };
+        img.onerror = () => { clearTimeout(t); fallback(); };
         img.src = url;
       });
     }
