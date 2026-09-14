@@ -35,6 +35,9 @@
     .b-quoted{background:#fef3c7;color:#92400e;} .b-ordered{background:#dcfce7;color:#166534;}
     .b-works{background:#dbeafe;color:#1e40af;} .b-done{background:#e2e8f0;color:#475569;}
     .b-review{background:#fee2e2;color:#991b1b;}
+    .b-tested{background:#dcfce7;color:#166534;}
+    .mlc-code{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:800;color:#fff;vertical-align:middle;}
+    .mlc-code.cC1{background:#b91c1c;} .mlc-code.cC2{background:#ea580c;} .mlc-code.cC3{background:#0891b2;} .mlc-code.cFI{background:#7c3aed;}
     .src-eng{display:inline-block;background:#eef4fb;color:#274b73;border:1px solid #cfe0f2;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px;}
     .phchip{color:#475569;font-size:12px;font-weight:600;}
     .ordrow{margin-top:8px;font-size:13px;}
@@ -53,16 +56,32 @@
 <body>
   <header class="page">
     <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
-    <h1>🔌 5-Year remedials</h1>
+    <h1>⚡ 5-Year electrical tests</h1>
+    <select id="yearSel" style="padding:6px 8px;border-radius:8px;border:0;font:inherit;font-size:14px;"></select>
   </header>
 
   <div class="wrap">
     <div class="infobox">
-      When an engineer completes an electrical (EICR) test with remedials it lands here as <b>To review</b> — work through it: send the client the quote (📋 Quote text), mark it quoted, then once the order arrives press <b>🛠 Create works job</b> to raise the works for an engineer; it moves to Done when they finish. A row here also means the test was carried out, so the store shows amber <b>“✅ tested — cert to file”</b> on the 5-year schedule instead of red “no cover”.
+      Every 5-year electrical (EICR) test completed this year — from the portal or the Workever archive. Set each site's <b>stage</b> and filter by it to keep track. When a portal test has remedials you can send the client a <b>📋 Quote</b> (with the time &amp; cost captured on site, C1/C2/FI only or including C3), then <b>🛠 Create works job</b> to raise the works — it moves to Done once the engineer finishes.
     </div>
     <div class="sumrow" id="sumrow"></div>
     <div class="chips" id="chips"></div>
     <div id="list"><div class="muted" style="padding:16px;">Loading…</div></div>
+  </div>
+
+  <!-- Quote modal -->
+  <div id="qOv" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100000;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;">
+      <div style="font-weight:800;font-size:16px;color:var(--brand);padding:15px 16px 4px;" id="qTitle">Quote</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 16px 10px;font-size:14px;color:#334;cursor:pointer;">
+        <input type="checkbox" id="qC3" style="width:17px;height:17px;"> Include C3 (recommendations)
+      </label>
+      <div id="qBody" style="overflow:auto;padding:0 16px 8px;flex:1;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e9ef;">
+        <button class="btn ghost" id="qClose">Close</button>
+        <button class="btn" id="qCopy">📋 Copy</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -70,151 +89,173 @@
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    let ROWS = [], FILTER = "all";
-    const STAGE_LABELS = { to_review:"To review", quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
+    let ROWS = [], FILTER = "all", YEAR = new Date().getFullYear();
+    const STAGE_ORDER = ["tested","to_review","quoted","ordered","in_works","done","invoiced"];
+    const STAGE_LABELS = { tested:"Tested", to_review:"To review", quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
+    const STAGE_BADGE = { tested:"b-tested", to_review:"b-review", quoted:"b-quoted", ordered:"b-ordered", in_works:"b-works", done:"b-done", invoiced:"b-done" };
 
-    function fmtDate(s){
-      s = String(s||"").trim(); if(!s) return "";
-      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(m) return m[3]+"/"+m[2]+"/"+m[1];
-      return s;
-    }
-    // Effective bucket for the filter chips — an order present counts as "ordered"
-    // even if the stage still reads quoted.
-    function bucket(r){
-      if(r.stage==="to_review") return "review";
-      if(r.stage==="done"||r.stage==="invoiced") return "done";
-      const ordered = !!r.order || r.stage==="ordered" || r.stage==="in_works";
-      if(ordered) return "ordered";
-      return "needs";
-    }
+    function fmtDate(s){ s=String(s||"").trim(); if(!s) return ""; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m? m[3]+"/"+m[2]+"/"+m[1] : s; }
+    function fmtMin(m){ m=Math.round(Number(m)||0); if(!m) return ""; const h=Math.floor(m/60), mm=m%60; return h? (h+"h"+(mm?" "+mm+"m":"")) : (mm+"m"); }
+    function keyOf(r){ return r.key || r.id; }
 
+    // Populate the year selector (this year + 3 back) and boot.
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r=>r.json());
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
+      const ys = g("yearSel"); const now = new Date().getFullYear();
+      ys.innerHTML = [0,1,2,3].map(d => '<option value="'+(now-d)+'">'+(now-d)+'</option>').join("");
+      ys.value = String(YEAR);
+      ys.onchange = () => { YEAR = +ys.value; load(); };
       load();
     })();
 
     async function load(){
+      g("list").innerHTML='<div class="muted" style="padding:16px;">Loading…</div>';
       let d=null;
-      try { d = await authFetch("/certs/five-year/board").then(r=>r.json()); } catch {}
-      if(!d || !d.ok){ g("list").innerHTML='<div class="muted" style="padding:16px;color:#b00020">Couldn\'t load the remedials.</div>'; return; }
+      try { d = await authFetch("/certs/five-year/schedule?year="+YEAR).then(r=>r.json()); } catch {}
+      if(!d || !d.ok){ g("list").innerHTML='<div class="muted" style="padding:16px;color:#b00020">Couldn\'t load the schedule.</div>'; return; }
       ROWS = d.rows || [];
-      renderSummary();
-      renderChips();
-      render();
+      renderSummary(); renderChips(); render();
     }
 
     function counts(){
-      const c = { all:ROWS.length, review:0, needs:0, ordered:0, done:0 };
-      ROWS.forEach(r => { c[bucket(r)]++; });
+      const c = { all:ROWS.length }; STAGE_ORDER.forEach(s => c[s]=0);
+      ROWS.forEach(r => { if(c[r.stage]!=null) c[r.stage]++; });
       return c;
     }
     function renderSummary(){
       const c = counts();
+      const outstanding = c.to_review + c.quoted + c.ordered + c.in_works;
       g("sumrow").innerHTML =
-        '<div class="stat warn"><div class="n">'+c.review+'</div><div class="l">To review</div></div>'
-        + '<div class="stat"><div class="n">'+c.needs+'</div><div class="l">Awaiting order</div></div>'
-        + '<div class="stat"><div class="n">'+c.ordered+'</div><div class="l">Ordered</div></div>';
+        '<div class="stat"><div class="n">'+c.all+'</div><div class="l">Tests in '+YEAR+'</div></div>'
+        + '<div class="stat warn"><div class="n">'+c.to_review+'</div><div class="l">To review</div></div>'
+        + '<div class="stat"><div class="n">'+outstanding+'</div><div class="l">In progress</div></div>'
+        + '<div class="stat"><div class="n">'+(c.done+c.invoiced)+'</div><div class="l">Done</div></div>';
     }
     function renderChips(){
       const c = counts();
-      const defs = [["all","All",c.all],["review","To review",c.review],["needs","Awaiting order",c.needs],["ordered","Ordered",c.ordered],["done","Done",c.done]];
+      const defs = [["all","All",c.all]].concat(STAGE_ORDER.filter(s=>c[s]>0 || FILTER===s).map(s=>[s,STAGE_LABELS[s],c[s]]));
       g("chips").innerHTML = defs.map(([k,l,n]) =>
         '<button class="chip'+(FILTER===k?" on":"")+'" data-f="'+k+'">'+l+' <span class="n">'+n+'</span></button>').join("");
       g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; renderChips(); render(); });
     }
 
     function render(){
-      const rows = ROWS.filter(r => FILTER==="all" || bucket(r)===FILTER)
-        .sort((a,b)=> String(b.quoteDate||"").localeCompare(String(a.quoteDate||"")));
+      const rows = ROWS.filter(r => FILTER==="all" || r.stage===FILTER)
+        .sort((a,b)=> String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
       if(!rows.length){ g("list").innerHTML='<div class="muted" style="padding:16px;">Nothing in this view.</div>'; return; }
       g("list").innerHTML = rows.map(cardHtml).join("");
       g("list").querySelectorAll("select[data-stage]").forEach(sel => sel.onchange = () => setStage(sel.dataset.stage, sel.value, sel));
-      g("list").querySelectorAll("button[data-del]").forEach(b => b.onclick = () => del(b.dataset.del));
-      g("list").querySelectorAll("button[data-quote]").forEach(b => b.onclick = () => showQuote(b.dataset.quote));
+      g("list").querySelectorAll("button[data-quote]").forEach(b => b.onclick = () => openQuote(b.dataset.quote));
       g("list").querySelectorAll("button[data-works]").forEach(b => b.onclick = () => createWorks(b.dataset.works, b));
     }
 
     function cardHtml(r){
-      const bk = bucket(r);
-      const badge = bk==="review" ? '<span class="badge b-review">To review</span>'
-        : bk==="done" ? '<span class="badge b-done">Done</span>'
-        : bk==="ordered" ? '<span class="badge b-ordered">Ordered</span>'
-        : '<span class="badge b-quoted">Quoted</span>';
-      const cost = (r.budgetCost>0) ? (" · £"+Math.round(r.budgetCost)) : "";
-      const isJob = r.source==="job";
-      const ph = (r.photoCount||0) ? ' · <span class="phchip">📷 '+r.photoCount+'</span>' : "";
-      const dateLbl = isJob ? "Completed " : "Quoted ";
-      const ord = r.order
-        ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>'
-        : (bk==="review" ? '' : '<div class="ordrow ord-no">⚠ No order yet — needs review</div>');
+      const key = keyOf(r);
+      const badge = '<span class="badge '+(STAGE_BADGE[r.stage]||"b-tested")+'">'+(STAGE_LABELS[r.stage]||"Tested")+'</span>';
+      const isPortal = r.source==="portal";
+      const srcTag = r.source==="archive" ? '<span class="src-eng">🗄 Workever</span>' : (isPortal ? '<span class="src-eng">⚡ portal</span>' : '');
       const lines = (r.lines||[]).filter(l=>String(l.action||"").trim());
+      const totMin = lines.reduce((a,l)=>a+(Number(l.minutes)||0),0);
+      const totMat = lines.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
+      const totBits = []; if(totMin) totBits.push(fmtMin(totMin)); if(totMat) totBits.push("£"+totMat.toFixed(2));
       const linesHtml = lines.length
-        ? '<details class="lines"'+(bk==="review"?" open":"")+'><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+ph+'</summary><ul>'
-            + lines.map(l=>'<li>'+esc(l.action)+((l.photos&&l.photos.length)?' <span class="phchip">📷'+l.photos.length+'</span>':'')+'</li>').join("") + '</ul></details>'
-        : '';
-      const opts = ["to_review","quoted","ordered","in_works","done","invoiced"].map(s =>
-        '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
-      // Actions: quote text (copy), create the works job (job cases without one yet), job links.
+        ? '<details class="lines"'+(r.stage==="to_review"?" open":"")+'><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+(totBits.length?' · '+totBits.join(" · "):"")+'</summary><ul>'
+            + lines.map(l=>{ const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2)); if(l.photos&&l.photos.length) m.push("📷"+l.photos.length);
+                return '<li>'+esc(l.action)+(m.length?' <span class="phchip">· '+m.join(" · ")+'</span>':'')+'</li>'; }).join("")
+            + '</ul></details>'
+        : (isPortal ? '<div class="ordrow" style="color:#166534;font-weight:600;margin-top:8px;">✓ Satisfactory — no remedials</div>' : '');
+      const ord = r.order ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>' : '';
+      const opts = STAGE_ORDER.map(s => '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
       let actions = '';
-      if(isJob) actions += '<button class="btn link" data-quote="'+esc(r.id)+'">📋 Quote text</button>';
-      if(isJob && !r.worksJobId && r.stage!=="done" && r.stage!=="invoiced")
-        actions += '<button class="btn" data-works="'+esc(r.id)+'">🛠 Create works job</button>';
+      if(lines.length) actions += '<button class="btn link" data-quote="'+esc(key)+'">📋 Quote</button>';
+      if(isPortal && lines.length && !r.worksJobId && r.stage!=="done" && r.stage!=="invoiced")
+        actions += '<button class="btn" data-works="'+esc(key)+'">🛠 Create works job</button>';
       if(r.worksJobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Works job ↗</a>';
-      if(isJob && r.jobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job ↗</a>';
+      if(isPortal && r.jobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job ↗</a>';
+      const sub = 'Completed '+esc(fmtDate(r.completedAt))+(r.engineer?' · '+esc(r.engineer):'');
       return '<div class="card">'
-        + '<div class="rhead"><span class="code">'+esc(r.storeCode||"")+'</span>'
-          + '<div class="site">'+esc(r.siteName||"")+(isJob?'<span class="src-eng">⚡ from test</span>':'')+'<div class="sub">'+esc(r.sr||"")+(r.sr?' · ':'')+dateLbl+esc(fmtDate(r.quoteDate))+cost+'</div></div>'
+        + '<div class="rhead"><span class="code">'+esc(r.storeCode||"—")+'</span>'
+          + '<div class="site">'+esc(r.siteName||"")+srcTag+'<div class="sub">'+sub+'</div></div>'
           + badge + '</div>'
         + ord + linesHtml
-        + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(r.id)+'">'+opts+'</select>'
-          + '<span class="saved" id="sv-'+esc(r.id)+'"></span>'
+        + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(key)+'">'+opts+'</select>'
+          + '<span class="saved" id="sv-'+esc(key)+'"></span>'
           + '<span style="flex:1"></span>'
           + actions
-          + '<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode||"")+'">Open site ↗</a>'
-          + '<button class="btn ghost" data-del="'+esc(r.id)+'">Remove</button></div>'
+          + (r.storeCode?'<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">Open site ↗</a>':'')
+          + '</div>'
         + '</div>';
     }
 
-    // Quote text — fetch the server-built body and copy it for the client email.
-    async function showQuote(id){
-      let text = "";
-      try { const d = await authFetch("/certs/five-year/quote-text?id="+encodeURIComponent(id)).then(r=>r.json()); if(d&&d.ok) text=d.text||""; } catch {}
-      if(!text){ (window.MLUI?MLUI.toast:alert)("Couldn't build the quote text."); return; }
-      try { await navigator.clipboard.writeText(text); } catch {}
-      if(window.MLUI && MLUI.confirm){ MLUI.confirm(text.replace(/\n/g,"<br>"),{title:"Quote text (copied to clipboard)",okLabel:"Done"}); }
-      else { alert(text); }
+    // ── Quote modal (clean, filterable by code, copy to clipboard) ──────────────
+    let QROW = null;
+    function openQuote(key){ QROW = ROWS.find(r=>keyOf(r)===key); if(!QROW) return; g("qC3").checked=false; renderQuote(); g("qOv").style.display="flex"; }
+    function quoteItems(){
+      const inc3 = g("qC3").checked;
+      return (QROW.lines||[]).filter(l=>String(l.action||"").trim()).filter(l=>{
+        const c=(l.code||"").toUpperCase();
+        if(c==="C3") return inc3;   // C3 only when the box is ticked
+        return true;                // C1/C2/FI and uncoded always included
+      });
     }
-    // Create the audit works job from a case's linked test job, then move to In works.
-    async function createWorks(id, btn){
+    function quoteText(){
+      const items = quoteItems();
+      const head = "Remedial works following the fixed-wire inspection at "+(QROW.siteName||QROW.storeCode||"site")+(QROW.storeCode?" (store "+QROW.storeCode+")":"")+":";
+      const body = items.map((l,i)=>{ const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2)); return (i+1)+". "+(l.action||"")+(m.length?" — "+m.join(" · "):""); }).join("\n");
+      const tMin=items.reduce((a,l)=>a+(Number(l.minutes)||0),0), tMat=items.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
+      const tot=[]; tot.push(items.length+" item"+(items.length===1?"":"s")); if(tMin) tot.push(fmtMin(tMin)); if(tMat) tot.push("£"+tMat.toFixed(2)+" materials");
+      return head+"\n\n"+body+"\n\nTotal: "+tot.join(" · ");
+    }
+    function renderQuote(){
+      g("qTitle").textContent = "Quote — "+(QROW.siteName||QROW.storeCode||"");
+      const items = quoteItems();
+      const tMin=items.reduce((a,l)=>a+(Number(l.minutes)||0),0), tMat=items.reduce((a,l)=>a+(Number(l.materialCost)||0),0);
+      let h = '<div style="font-size:13px;color:#475569;margin:2px 0 10px;">Remedial works following the fixed-wire inspection at <b>'+esc(QROW.siteName||QROW.storeCode||"site")+'</b>'+(QROW.storeCode?' (store '+esc(QROW.storeCode)+')':'')+':</div>';
+      if(!items.length){ h += '<div class="muted">No items in this selection.</div>'; }
+      else h += '<ol style="margin:0;padding-left:20px;">'+items.map(l=>{
+        const m=[]; if(l.minutes) m.push(fmtMin(l.minutes)); if(l.materialCost) m.push("£"+Number(l.materialCost).toFixed(2));
+        const codePill = l.code ? '<span class="mlc-code c'+esc(l.code)+'">'+esc(l.code)+'</span> ' : '';
+        const desc = String(l.action||"").replace(/^\[[^\]]+\]\s*/,"");   // strip the [CODE] prefix (shown as a pill)
+        return '<li style="margin-bottom:8px;font-size:14px;line-height:1.4;">'+codePill+esc(desc)+(m.length?' <span style="color:#64748b;">— '+m.join(" · ")+'</span>':'')+'</li>';
+      }).join("")+'</ol>';
+      const tot=[]; tot.push(items.length+" item"+(items.length===1?"":"s")); if(tMin) tot.push(fmtMin(tMin)); if(tMat) tot.push("£"+tMat.toFixed(2)+" materials");
+      h += '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #eef2f6;font-weight:700;color:var(--brand);">Total: '+esc(tot.join(" · "))+'</div>';
+      g("qBody").innerHTML = h;
+    }
+    g("qC3").onchange = renderQuote;
+    g("qClose").onclick = () => { g("qOv").style.display="none"; };
+    g("qOv").addEventListener("click", e => { if(e.target===g("qOv")) g("qOv").style.display="none"; });
+    g("qCopy").onclick = async () => {
+      try { await navigator.clipboard.writeText(quoteText()); (window.MLUI?MLUI.toast:function(){})("Quote copied"); g("qCopy").textContent="✓ Copied"; setTimeout(()=>{g("qCopy").textContent="📋 Copy";},1500); }
+      catch { (window.MLUI?MLUI.toast:alert)("Couldn't copy — select the text manually."); }
+    };
+
+    async function createWorks(key, btn){
       const ok = window.MLUI ? await MLUI.confirm("Create the works job from these remedials? It lands unassigned, ready to allocate.",{title:"Create works job"}) : confirm("Create the works job?");
       if(!ok) return;
       btn.disabled = true; btn.textContent = "Creating…";
       try {
-        const d = await authFetch("/certs/five-year/create-works",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
+        const d = await authFetch("/certs/five-year/create-works",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:key})}).then(r=>r.json());
         if(d && d.ok){
-          const r = ROWS.find(x=>x.id===id); if(r){ r.worksJobId=d.worksJobId; r.stage=d.stage||"in_works"; }
+          const r = ROWS.find(x=>keyOf(x)===key); if(r){ r.worksJobId=d.worksJobId; r.stage=d.stage||"in_works"; }
           (window.MLUI?MLUI.toast:function(){})("Works job created");
           renderSummary(); renderChips(); render();
         } else { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't create the works job."); }
       } catch { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); }
     }
 
-    async function setStage(id, stage, sel){
+    async function setStage(key, stage, sel){
       sel.disabled = true;
+      const r = ROWS.find(x=>keyOf(x)===key);
+      const meta = r ? { source:r.source, jobId:r.jobId||"", storeCode:r.storeCode||"", siteName:r.siteName||"", completedAt:r.completedAt||"" } : {};
       try {
-        const res = await authFetch("/certs/five-year/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,stage})}).then(r=>r.json());
-        if(res && res.ok){ const r = ROWS.find(x=>x.id===id); if(r) r.stage=stage; g("sv-"+id).textContent="Saved ✓"; setTimeout(()=>{const e=g("sv-"+id);if(e)e.textContent="";},1500); renderSummary(); renderChips(); }
+        const res = await authFetch("/certs/five-year/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:key,stage,meta})}).then(r=>r.json());
+        if(res && res.ok){ if(r) r.stage=stage; const e=g("sv-"+key); if(e){ e.textContent="Saved ✓"; setTimeout(()=>{e.textContent="";},1500); } renderSummary(); renderChips(); }
       } catch {}
       sel.disabled = false;
-    }
-    async function del(id){
-      const ok = window.MLUI ? await MLUI.confirm("Remove this remedial from the register?",{title:"Remove",danger:true}) : confirm("Remove this remedial?");
-      if(!ok) return;
-      try { await authFetch("/certs/five-year/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); } catch {}
-      ROWS = ROWS.filter(r=>r.id!==id); renderSummary(); renderChips(); render();
     }
   </script>
 </body>

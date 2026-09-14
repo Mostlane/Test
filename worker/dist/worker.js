@@ -13021,6 +13021,139 @@ async function fiveYearWorksCompleted(env, tid, worksJob) {
     }
   }
 }
+function completedDay(j) {
+  let latest = "";
+  for (const h of Array.isArray(j.statusHistory) ? j.statusHistory : []) {
+    if (h && /complete|closed|invoiced/i.test(String(h.status || ""))) {
+      const at = String(h.at || "");
+      if (at > latest) latest = at;
+    }
+  }
+  return String(latest || j.completedAt || j.updatedAt || j.scheduledAt || "").slice(0, 10);
+}
+async function fiveYearSchedule(env, tid, year) {
+  const y = String(year || (/* @__PURE__ */ new Date()).getFullYear());
+  const rows = [];
+  const seen = /* @__PURE__ */ new Set();
+  const caseRows = (await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }))).results || [];
+  const caseByKey = {};
+  for (const c of caseRows) {
+    let d = {};
+    try {
+      d = JSON.parse(c.data || "{}");
+    } catch {
+    }
+    let lines = [];
+    try {
+      lines = JSON.parse(c.lines || "[]");
+    } catch {
+    }
+    caseByKey[c.id] = { row: c, data: d, lines };
+  }
+  const jobs = await listJobs(env, tid);
+  for (const j of jobs) {
+    if (j && j.elecTest && Array.isArray(j.remedials) && j.remedials.some((r) => r && (r.description || (r.photos || []).length)) && /complete|closed|invoiced/i.test(String(j.status || "")) && completedDay(j).slice(0, 4) === y && !caseByKey["JOB-" + j.id]) {
+      try {
+        await upsertFiveYearFromJob(env, tid, j, { silent: true });
+      } catch {
+      }
+    }
+  }
+  const caseRows2 = (await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }))).results || [];
+  const caseByKey2 = {};
+  for (const c of caseRows2) {
+    let d = {};
+    try {
+      d = JSON.parse(c.data || "{}");
+    } catch {
+    }
+    let lines = [];
+    try {
+      lines = JSON.parse(c.lines || "[]");
+    } catch {
+    }
+    caseByKey2[c.id] = { row: c, data: d, lines };
+  }
+  for (const j of jobs) {
+    if (!j || !j.elecTest) continue;
+    if (!/complete|closed|invoiced/i.test(String(j.status || ""))) continue;
+    const day = completedDay(j);
+    if (day.slice(0, 4) !== y) continue;
+    const key = "JOB-" + j.id;
+    const c = caseByKey2[key];
+    const rems = (Array.isArray(j.remedials) ? j.remedials : []).filter((r) => r && (r.description || (r.photos || []).length));
+    const lines = c ? c.lines : rems.map((r) => ({ action: (r.code ? `[${r.code}] ` : "") + String(r.description || "").trim(), code: r.code || "", minutes: Number(r.minutes) || 0, materialCost: Number(r.materialCost) || 0, photos: (r.photos || []).slice(0, 12) }));
+    rows.push({
+      key,
+      source: "portal",
+      jobId: j.id,
+      store_code: fyrCode(j.siteCode) || String(j.siteCode || "").trim(),
+      siteName: j.siteName || j.helpdeskRef || j.reference || "",
+      engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers[0] : "") || "",
+      completedAt: day,
+      remCount: rems.length,
+      lines,
+      worksJobId: c && c.data.worksJobId || j.remedialsWorksJobId || "",
+      stage: c && c.row.stage || (rems.length ? "to_review" : "tested")
+    });
+    seen.add(key);
+  }
+  const arch = (await env.DB.prepare(
+    "SELECT id, ref, site_code, status, completed_at, json_extract(data,'$.jobName') AS jobName, json_extract(data,'$.siteName') AS siteName, json_extract(data,'$.customerName') AS customerName FROM sla_jobs_archive WHERE tenant_id=? AND completed_at>=? AND completed_at<? AND id NOT LIKE 'CHAP-%' AND (lower(search) LIKE '%5 year%' OR lower(search) LIKE '%fixed wire%' OR lower(search) LIKE '%eicr%' OR lower(search) LIKE '%electrical install% condition%')"
+  ).bind(tid, y + "-01-01", Number(y) + 1 + "-01-01").all().catch(() => ({ results: [] }))).results || [];
+  for (const r of arch) {
+    if (!/complete|closed|invoiced/i.test(String(r.status || ""))) continue;
+    if (/chapplins/i.test(String(r.jobName || ""))) continue;
+    const key = "ARCH-" + r.id;
+    if (seen.has(key)) continue;
+    const c = caseByKey2[key];
+    let nm = r.siteName || r.customerName || "";
+    if (!nm && r.jobName) {
+      const p = String(r.jobName).split(" - ").map((s) => s.trim()).filter(Boolean);
+      nm = p.length >= 2 ? p[1] : p[0] || "";
+    }
+    rows.push({
+      key,
+      source: "archive",
+      jobId: "",
+      archiveId: r.id,
+      store_code: fyrCode(r.site_code) || "",
+      siteName: String(nm || "").slice(0, 200) || "Store " + (r.site_code || ""),
+      engineer: "",
+      completedAt: String(r.completed_at || "").slice(0, 10),
+      remCount: c ? c.lines.length : 0,
+      lines: c ? c.lines : [],
+      worksJobId: c && c.data.worksJobId || "",
+      stage: c && c.row.stage || "tested"
+    });
+    seen.add(key);
+  }
+  for (const c of caseRows2) {
+    if (seen.has(c.id)) continue;
+    if (String(c.data && c.data.source) === "job") continue;
+    const day = String(c.row.quote_date || c.row.updated_at || "").slice(0, 10);
+    if (day.slice(0, 4) !== y) continue;
+    rows.push({
+      key: c.id,
+      source: "concerto",
+      jobId: "",
+      store_code: c.row.store_code || "",
+      siteName: c.row.site_name || "",
+      engineer: "",
+      completedAt: day,
+      remCount: c.lines.length,
+      lines: c.lines,
+      worksJobId: c.data && c.data.worksJobId || "",
+      stage: c.row.stage || "quoted",
+      sr: c.row.sr || ""
+    });
+    seen.add(c.id);
+  }
+  await attachRemedialOrders(env, tid, rows);
+  for (const r of rows) r.storeCode = r.store_code;
+  rows.sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
+  return rows;
+}
 async function fiveYearTestedMap(env, tid) {
   const now = Date.now();
   if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now - _fyrTestedCache.at < 5 * 60 * 1e3)
@@ -14689,13 +14822,45 @@ ${con.tradingTitle || "Mostlane"}`;
       ordered: rows.filter((r) => r.order).length
     }, {}, env, request);
   }
+  if (sub === "/five-year/schedule" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const year = parseInt(q.get("year"), 10) || (/* @__PURE__ */ new Date()).getFullYear();
+    const rows = await fiveYearSchedule(env, tid, year);
+    const stages = {};
+    for (const s of FYR_STAGES) stages[s] = rows.filter((r) => r.stage === s).length;
+    return json({ ok: true, year, rows, stages, count: rows.length }, {}, env, request);
+  }
   if (sub === "/five-year/stage" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const id = String(b.id || "");
     const stage = FYR_STAGES.includes(b.stage) ? b.stage : null;
     if (!id || !stage) return error("id and a valid stage are required", 400, env, request);
-    await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const upd = await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, now, tid, id).run();
+    if (!upd.meta || !upd.meta.changes) {
+      const m = b.meta || {};
+      const data = { source: m.source || "", jobId: m.jobId || "" };
+      await env.DB.prepare(
+        "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stage=excluded.stage, updated_at=excluded.updated_at"
+      ).bind(
+        id,
+        tid,
+        "",
+        fyrCode(m.storeCode) || String(m.storeCode || ""),
+        String(m.siteName || "").slice(0, 200),
+        "5-year electrical test",
+        String(m.completedAt || now).slice(0, 10),
+        0,
+        "",
+        "",
+        stage,
+        "[]",
+        JSON.stringify(data),
+        now,
+        now
+      ).run();
+    }
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
   }
@@ -14852,7 +15017,7 @@ var init_certs = __esm({
       // optional CC on the battery enquiry email (remembered)
     };
     ensureTables4 = onceMigration(ensureTables__raw3);
-    FYR_STAGES = ["to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
+    FYR_STAGES = ["tested", "to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
     _fyrTestedCache = { tid: null, at: 0, map: null };
     ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
