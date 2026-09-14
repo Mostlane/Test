@@ -9752,6 +9752,12 @@ async function ensureTables__raw(env) {
     } catch {
     }
   }
+  for (const col of ["note TEXT", "note_at TEXT", "note_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
   for (const col of ["stage12 TEXT", "stage12_at TEXT", "stage12_by TEXT"]) {
     try {
       await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
@@ -10107,6 +10113,11 @@ function reconcileRow(row, store, today) {
   if (chartDue < pStart) {
     const gapDays = Math.round((Date.parse(pStart + "T00:00:00Z") - Date.parse(chartDue + "T00:00:00Z")) / 864e5);
     const span = gapDays >= 60 ? `about ${Math.round(gapDays / 30)} months` : `${gapDays} days`;
+    const coverEndsInDays = Math.round((Date.parse(chartDue + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5);
+    const lookahead = freq >= 12 ? 365 : 45;
+    if (Number.isFinite(coverEndsInDays) && coverEndsInDays > lookahead) {
+      return { flag: "mismatch", text: `We hold a certificate to ${cDue}; Concerto has the next test planned for ${cPer}, later than our expiry \u2014 Concerto's date should be corrected (otherwise ${span} uncovered from ${cDue}).`, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
+    }
     const text = chartDue < today ? `Our certificate ran out on ${cDue} but Concerto has the next test planned for ${cPer}. The site has NO valid certificate right now and will not have one until it is tested \u2014 ${span} uncovered if we wait for Concerto's date. Get it tested and get Concerto's date corrected.` : `Our certificate runs out on ${cDue} but Concerto has the next test planned for ${cPer}. If we wait for Concerto's date the site would have no valid certificate for ${span}. Test it by ${cDue} and get Concerto's date corrected.`;
     return { flag: "gap", text, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
   }
@@ -10410,7 +10421,7 @@ function deriveCase(r, ctx, today, money2, rec) {
   const allDone = applicable.length > 0 && !nextStep;
   const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
   const closed = !!(c && c.closed_at);
-  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note));
+  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note || c.note));
   const autoFlag = !closed && rec && rec.flag === "gap" ? { reason: "gap", note: "\u26D4 No certificate cover: " + rec.text } : null;
   const flagged = !closed && (!!(c && c.flag_note) || !!autoFlag);
   const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched || !!autoFlag);
@@ -10440,6 +10451,9 @@ function deriveCase(r, ctx, today, money2, rec) {
     flagNote: !closed && c && c.flag_note ? c.flag_note : "",
     flaggedBy: !closed && c && c.flag_note ? c.flagged_by || "" : "",
     flaggedAt: !closed && c && c.flag_note ? c.flagged_at || null : null,
+    note: c && c.note || "",
+    noteBy: c && c.note_by || "",
+    noteAt: c && c.note_at || null,
     autoFlag,
     outcome,
     outcomeAuto,
@@ -10745,6 +10759,20 @@ async function handle9(request, env, ctx, url, sess) {
         events.push({ action: "unflag", text: "Flag cleared" });
       }
     }
+    if (b.caseNote !== void 0) {
+      const note = String(b.caseNote || "").slice(0, 1e3);
+      if (note) {
+        c.note = note;
+        c.note_at = now;
+        c.note_by = me;
+        events.push({ action: "note", note, text: "\u{1F4DD} Note: " + note });
+      } else {
+        c.note = null;
+        c.note_at = null;
+        c.note_by = null;
+        events.push({ action: "note-clear", text: "Note cleared" });
+      }
+    }
     if (b.close) {
       c.closed_at = now;
       c.closed_by = me;
@@ -10757,9 +10785,47 @@ async function handle9(request, env, ctx, url, sess) {
       c.closed_by = null;
       events.push({ action: "reopen", text: "Case reopened" });
     }
-    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, note=?, note_at=?, note_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.note || null, c.note_at || null, c.note_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
+  }
+  if (path === "/concerto/alex-list") {
+    const key = "fyr:alexlist:" + tid;
+    const load = async () => {
+      const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      try {
+        const v = JSON.parse(r && r.value || "{}");
+        return Array.isArray(v.items) ? v.items : [];
+      } catch {
+        return [];
+      }
+    };
+    const save = async (items) => {
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify({ items })).run();
+    };
+    if (method === "GET") return json({ ok: true, items: await load() }, {}, env, request);
+    if (method === "POST") {
+      const b = await body();
+      let items = await load();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      if (typeof b.add === "string" && b.add.trim()) {
+        items.unshift({ id: "ax" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: b.add.trim().slice(0, 500), done: false, addedAt: now, addedBy: me, storeCode: String(b.storeCode || "").slice(0, 12), siteName: String(b.siteName || "").slice(0, 120) });
+      } else if (b.id) {
+        const it = items.find((x) => x.id === b.id);
+        if (!it) return error("Item not found", 404, env, request);
+        if (b.delete) items = items.filter((x) => x.id !== b.id);
+        else {
+          if (typeof b.done === "boolean") {
+            it.done = b.done;
+            it.doneAt = b.done ? now : null;
+            it.doneBy = b.done ? me : "";
+          }
+          if (typeof b.text === "string") it.text = b.text.trim().slice(0, 500);
+        }
+      } else return error("Nothing to do", 400, env, request);
+      await save(items);
+      return json({ ok: true, items }, {}, env, request);
+    }
   }
   if (path === "/concerto/log" && method === "GET") {
     await ensureTables2(env);

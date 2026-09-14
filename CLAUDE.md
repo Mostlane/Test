@@ -3452,6 +3452,37 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
     site Concerto still lists, ignoring the year filter). An inactive row carries a
     grey "🚫 Inactive" pill in the store cell; the audit cards are hidden in the
     inactive view. Front-end tab state `VIEW` ("active"|"inactive"); no `?v=` bump.
+  - **Stuck red flag once a certificate is filed — FIXED (14 Sep 2026, Jamie:
+    "the 5-year page is keeping items flagged when I have uploaded a certificate…
+    example is Emsworth").** A `reconcileRow` "gap" (our chart due earlier than
+    Concerto's planned next test) was raised as a red `case.autoFlag` "⛔ No
+    certificate cover" WHENEVER the chart date was earlier than Concerto's — even
+    when we hold an in-date certificate for years (Emsworth 0079: cert filed dated
+    2025-06, chart rolled to 2030-06-19, Concerto's next test 2031-06-30 → the site
+    is comfortably covered, but it stayed red). Now the gap is only a LIVE "no
+    cover" flag when our cover has run out OR ends within a lookahead window
+    (`freq>=12 ? 365 : 45` days from `today`); a cover date further out returns
+    **flag `mismatch`** ("We hold a certificate to <date>; Concerto has the next
+    test planned for <date>, later than our expiry — Concerto's date should be
+    corrected") which raises NO autoFlag, so a freshly-certified site drops back to
+    green/not-due. Near-term gaps (cover ending soon, or already expired) still flag
+    red exactly as before (0777 test: 5.5 months out → still gap). `chartStores`
+    already normalises `due` to ISO via `toIsoDate`, so DD/MM/YYYY stored dates
+    reconcile correctly (an unparseable date is guarded by `Number.isFinite`).
+  - **Per-job notes (14 Sep 2026, Jamie: "leave notes on each job"):** each row's
+    ▸ Details has a **📝 Notes on this job** free-text box, autosaved via **POST
+    /concerto/case `{ppmId, caseNote}`** to a new **`concerto_cases.note`** column
+    (+ `note_at`/`note_by`, self-migrating; distinct from the 🚩 flag note and the
+    per-step notes). `deriveCase` returns `note`/`noteBy`/`noteAt`; a noted case
+    counts as `touched` (stays active).
+  - **"📋 Alex list" (14 Sep 2026, Jamie: "an Alex List button… items to discuss
+    with Alex and tick off when he sorts them"):** a header button (with an
+    outstanding-count badge) opens a modal — a shared page-level checklist stored
+    in app_config **`fyr:alexlist:<tid>`** = `{items:[{id,text,done,addedAt/By,
+    doneAt/By,storeCode,siteName}]}`. **GET/POST /concerto/alex-list** (office):
+    POST `{add}` prepends an item, `{id,done}` ticks it off, `{id,text}` edits,
+    `{id,delete}` removes; outstanding-first ordering. Test:
+    `node --no-warnings worker/tools/test-concerto.mjs` ("Per-job note + Alex list").
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
