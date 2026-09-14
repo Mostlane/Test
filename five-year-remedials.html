@@ -104,7 +104,8 @@
       <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
         <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
           <option value="code">Store number (Concerto order)</option>
-          <option value="due">Next due date</option>
+          <option value="due">Concerto due date</option>
+          <option value="mdue">Mostlane due date (cert runs out)</option>
           <option value="stage">Stage</option>
           <option value="doc">Certificate status (attention first)</option>
           <option value="site">Site name</option>
@@ -240,6 +241,7 @@
     function stageIdx(r){ const i=STAGES.findIndex(s=>s.key===stageOf(r)); return i<0?99:i; }
     function cmpRows(a,b){
       if (SORT==="due")   return String(a.nextDate||"9999-99-99").localeCompare(String(b.nextDate||"9999-99-99")) || codeCmp(a,b);
+      if (SORT==="mdue")  return String(a.chartDue||"9999-99-99").localeCompare(String(b.chartDue||"9999-99-99")) || codeCmp(a,b);
       if (SORT==="stage") return (stageIdx(a)-stageIdx(b)) || codeCmp(a,b);
       if (SORT==="doc")   return (docRank(a)-docRank(b)) || codeCmp(a,b);
       if (SORT==="site")  return String(a.siteName||"~~~~").localeCompare(String(b.siteName||"~~~~")) || codeCmp(a,b);
