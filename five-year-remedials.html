@@ -44,6 +44,9 @@
     .tl-amber{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
     .tl-green{background:#dcfce7;color:#166534;border-color:#86efac;}
     .tl-grey{background:#eef2f6;color:#5a6b80;border-color:#d7dee6;}
+    .pilllink{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
+    .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
+    .pilllink:hover .opendoc{text-decoration:underline;}
     select.stagesel{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:12.5px;font-family:inherit;max-width:200px;}
     select.stagesel.tl-red{background:#fef2f2;} select.stagesel.tl-amber{background:#fffbeb;} select.stagesel.tl-green{background:#f0fdf4;}
     .rowlinks a,.rowlinks button{color:var(--brand);font-size:12px;text-decoration:none;background:none;border:none;cursor:pointer;padding:2px 4px;font-family:inherit;white-space:nowrap;}
@@ -104,6 +107,7 @@
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
     let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false;
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
+    let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
     // The current 5-year document status (server-computed) → label + light.
     const DOC_LIGHT = { in_date:"tl-green", due:"tl-amber", in_unsat:"tl-amber", expired:"tl-red", expired_unsat:"tl-red", missing:"tl-red" };
@@ -130,6 +134,7 @@
       try { d = await authFetch("/concerto/schedule?type=fiveYear&status=all").then(r=>r.json()); } catch {}
       if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td style="padding:16px;color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
       MONEY = !!d.money;
+      TODAY = d.today || TODAY;
       const P = (d.stats && d.stats.pipeline) || {};
       STAGES = P.stages12 || [];
       STAGE_LABEL = {}; STAGE_LIGHT = {};
@@ -143,6 +148,20 @@
     function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
     function inYear(r){ const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
     function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
+    // Days until the MOSTLANE (compliance chart) due date — when our certificate runs out.
+    function daysTo(s){ if(!s) return null; const t=Date.parse(String(s).slice(0,10)+"T00:00:00Z"); if(isNaN(t)) return null; return Math.round((t - Date.parse(TODAY+"T00:00:00Z"))/864e5); }
+    // Urgency from when our cert runs out: red = out of date / no cert; amber = within 60 days; green = plenty of time.
+    function dueUrgency(r){ const d = daysTo(r.chartDue); if (d==null) return "red"; if (d < 0) return "red"; if (d <= 60) return "amber"; return "green"; }
+    function notDone(r){ const s=stageOf(r); return s!=="complete_satisfactory" && s!=="certificate_updated" && s!=="invoiced"; }
+    // The traffic-light for the STAGE — a site that "needs booking" is only red when its
+    // certificate is actually running out (overdue / within 60 days / missing); otherwise green.
+    function stageLight(r){
+      const s = stageOf(r);
+      if (s==="complete_satisfactory" || s==="certificate_updated" || s==="invoiced") return "green";
+      if (s==="needs_booking") return dueUrgency(r);
+      if (s==="scheduled") return dueUrgency(r)==="red" ? "amber" : "green";   // booked = in hand
+      return STAGE_LIGHT[s] || "amber";   // awaiting review + all remedial stages are real to-dos
+    }
 
     function yearRows(){ return ROWS.filter(inYear); }
     // Sort comparators. "code" (store number) is the Concerto order — the default.
@@ -171,15 +190,15 @@
       // Summary tiles
       const cnt = k => rows.filter(r => stageOf(r)===k).length;
       const needsBooking = cnt("needs_booking");
-      const inProgress = rows.filter(r => { const s=stageOf(r); return s!=="needs_booking" && s!=="complete_satisfactory" && s!=="certificate_updated" && s!=="invoiced"; }).length;
       const done = cnt("complete_satisfactory") + cnt("certificate_updated") + cnt("invoiced");
-      const docBad = rows.filter(r => r.docStatus && (r.docStatus.light==="tl-red" || /unsat/.test(r.docStatus.key||"") || r.docStatus.light==="red")).length;
+      const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
+      const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
       g("sumrow").innerHTML =
         stat(rows.length, "Sites in "+YEAR, "") +
-        stat(needsBooking, "Needs booking", needsBooking?"red":"") +
-        stat(inProgress, "In progress", inProgress?"amber":"") +
-        stat(done, "Complete", done?"green":"") +
-        stat(docBad, "Certificate needs attention", docBad?"red":"");
+        stat(needsBooking, "Needs booking", "") +
+        stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
+        stat(overdue, "Out of date / no cert", overdue?"red":"") +
+        stat(done, "Complete", done?"green":"");
       renderChips(rows);
       renderTable();
     }
@@ -189,7 +208,7 @@
       const by = {}; rows.forEach(r => { const s=stageOf(r); by[s]=(by[s]||0)+1; });
       const flagged = rows.filter(r=>r.case.flagged).length;
       let h = '<button class="chip'+(FILTER==="all"?" on":"")+'" data-f="all">All <span class="n">'+rows.length+'</span></button>';
-      STAGES.forEach(s => { if (by[s.key] || FILTER===s.key) h += '<button class="chip tl-'+s.light+(FILTER===s.key?" on":"")+'" data-f="'+esc(s.key)+'">'+esc(s.label)+' <span class="n">'+(by[s.key]||0)+'</span></button>'; });
+      STAGES.forEach(s => { if (by[s.key] || FILTER===s.key) { const cl = s.key==="needs_booking" ? "" : "tl-"+s.light; h += '<button class="chip '+cl+(FILTER===s.key?" on":"")+'" data-f="'+esc(s.key)+'">'+esc(s.label)+' <span class="n">'+(by[s.key]||0)+'</span></button>'; } });
       g("chips").innerHTML = h;
       g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; render(); });
     }
@@ -200,9 +219,9 @@
     function renderTable(){
       const rows = visible();
       g("tbl").querySelector("thead").innerHTML =
-        '<tr><th>Store</th><th>Certificate status</th><th>Next due</th><th>Tested by</th><th>Stage</th><th>Change status</th><th></th></tr>';
+        '<tr><th>Store</th><th>Certificate status</th><th>Concerto due</th><th>Mostlane due</th><th>Tested by</th><th>Stage</th><th>Change status</th><th></th></tr>';
       const tb = g("tbl").querySelector("tbody");
-      if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="muted" style="padding:16px;">No sites for this filter.</td></tr>'; return; }
+      if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="muted" style="padding:16px;">No sites for this filter.</td></tr>'; return; }
       tb.innerHTML = rows.map(rowHtml).join("");
       tb.querySelectorAll("select[data-ppm]").forEach(sel => sel.onchange = () => setStage(sel.dataset.ppm, sel.value, sel));
       tb.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { const id=b.dataset.toggle; if(EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderTable(); });
@@ -212,20 +231,35 @@
 
     function rowHtml(r){
       const c = r.case, key = r.id;
-      const st = stageOf(r), light = STAGE_LIGHT[st] || "grey";
+      const st = stageOf(r), light = stageLight(r);
       const doc = r.docStatus || { label:"—", light:"tl-grey", note:"" };
       const docCls = (doc.light && doc.light.indexOf("tl-")===0) ? doc.light : (DOC_LIGHT[doc.key] || "tl-grey");
+      // The certificate status pill is clickable when a 5-year document is on file → opens it.
+      const hasCert = !!(c.cert || r.lastDone);
+      const docInner = '<span class="pill '+docCls+'">'+esc(doc.label)+'</span>';
+      const docCell = hasCert
+        ? '<button class="pilllink" data-cert="'+esc(r.storeCode)+'" title="Open the current 5-year certificate">'+docInner+' <span class="opendoc">📄 open</span></button>'
+        : docInner;
       const rel = r.released ? '<div class="sub" style="color:#166534;font-weight:700">Released'+(r.orderNr?" · "+esc(r.orderNr):"")+(MONEY&&r.orderedValue!=null?" · £"+Math.round(r.orderedValue):"")+'</div>' : '';
       const testedBy = c.engineer ? esc(c.engineer) : '<span class="muted">—</span>';
       const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>' : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
       const flag = c.flagged ? '<div class="flagtag">🚩 '+esc(c.flagNote || (c.autoFlag&&"No certificate cover") || "Flagged")+'</div>' : '';
       const hold = c.held ? '<div class="holdtag">⏸ '+esc(c.holdReason||"On hold")+'</div>' : '';
-      const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="7">'+detailHtml(r)+'</td></tr>' : '';
+      // Mostlane due (compliance chart) with a plain-English "runs out" hint.
+      let mdCell = '<span class="muted">—</span>';
+      if (r.chartDue) { const d = daysTo(r.chartDue);
+        const hint = d==null ? "" : d<0 ? '<div class="sub" style="color:#991b1b;font-weight:700">out of date ('+(-d)+'d)</div>'
+          : d<=60 ? '<div class="sub" style="color:#92400e;font-weight:700">runs out in '+d+' days</div>'
+          : '<div class="sub">in '+Math.round(d/30)+' months</div>';
+        mdCell = '<b>'+esc(fmtD(r.chartDue))+'</b>'+hint;
+      }
+      const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="8">'+detailHtml(r)+'</td></tr>' : '';
       return '<tr>'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span> <span class="site">'+esc(r.siteName||"")+'</span>'
           + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + '</td>'
-        + '<td><span class="pill '+docCls+'">'+esc(doc.label)+'</span>'+(doc.note?'<div class="sub">'+esc(doc.note)+'</div>':'')+'</td>'
+        + '<td>'+docCell+'</td>'
         + '<td>'+(r.nextDate?'<b>'+esc(fmtD(r.nextDate))+'</b>':'<span class="muted">—</span>')+rel+'</td>'
+        + '<td>'+mdCell+'</td>'
         + '<td>'+testedBy+'</td>'
         + '<td><span class="pill tl-'+light+'">'+esc(STAGE_LABEL[st]||st)+'</span></td>'
         + '<td><select class="stagesel tl-'+light+'" data-ppm="'+esc(key)+'">'+stageOptions(st)+'</select><div>'+src+' <span class="saved" id="sv-'+esc(key)+'"></span></div></td>'
