@@ -5360,6 +5360,20 @@ files to this public repo.
   `uploadPhotos` fires **`ml-rapic` up-front the instant a file is chosen** (not
   after the shrink), so the RA is satisfiable immediately regardless of encode
   speed or signal. Any image-shrink Promise in the portal must always resolve.
+  **remedials-form.js had the SAME bug (14 Sep 2026) — fixed (`?v=6`).** Its
+  `shrink()` (electrical-remedial photo uploader, mounted in engineer-job.html +
+  job-view.html) only resolved from `img.onload`/`img.onerror` + `toBlob`, so on an
+  iPhone photo it could hang → `Promise.all([shrink,shrink])` in `uploadPhoto`
+  never settled → the upload never fired and no error showed. This is why Dan
+  Walker's remedial photos "kept failing" (the attempts that hung never reached the
+  server — every upload the SERVER saw returned 201 and attached; the failures were
+  invisible to the health watchdog, which only sees server 500s/dead dependencies,
+  NOT a phone-side stall). Fixed with the same hard 8s timeout + fallback to the
+  original file + object-URL revoke. **TODO/next: cert-form.js, firestop-form.js,
+  pump-form.js share the same shrink pattern — harden them the same way.** Broader
+  gap: an engineer failing in the field is invisible to server monitoring — a
+  client-side error beacon (report repeated upload failures to the office) would
+  close it.
 - **van-check.html answer buttons must read CFG LIVE, never a captured array.**
   The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
   at load — but `CFG` is fetched async, so at bind time it was null → an empty

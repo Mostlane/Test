@@ -48,16 +48,27 @@
 
   // Shrink an image File to a JPEG blob at a max dimension.
   function shrink(file, max, quality) {
+    // MUST always resolve. On iOS an <img> can silently stall decoding a HEIC
+    // (neither onload nor onerror fires) and toBlob can fail to call back under
+    // memory pressure — so without a hard timeout this Promise hangs, the
+    // Promise.all in uploadPhoto never settles, the upload never fires and the
+    // photo silently "fails" with no error. Timeout → resolve(null) → the
+    // caller falls back to the original file (uploads bigger, but it goes up).
     return new Promise(function (resolve) {
+      var settled = false, url = null;
+      function done(v) { if (settled) return; settled = true; if (url) { try { URL.revokeObjectURL(url); } catch (e) {} } resolve(v); }
+      var timer = setTimeout(function () { done(null); }, 8000);
       var img = new Image();
       img.onload = function () {
-        var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
-        var c = document.createElement("canvas"); c.width = Math.round(w * s); c.height = Math.round(h * s);
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        c.toBlob(function (b) { resolve(b); }, "image/jpeg", quality || 0.82);
+        try {
+          var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+          var c = document.createElement("canvas"); c.width = Math.round(w * s); c.height = Math.round(h * s);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob(function (b) { clearTimeout(timer); done(b); }, "image/jpeg", quality || 0.82);
+        } catch (e) { clearTimeout(timer); done(null); }
       };
-      img.onerror = function () { resolve(null); };
-      img.src = URL.createObjectURL(file);
+      img.onerror = function () { clearTimeout(timer); done(null); };
+      url = URL.createObjectURL(file); img.src = url;
     });
   }
 
