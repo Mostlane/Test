@@ -47,6 +47,18 @@
     .pilllink{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
     .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
     .pilllink:hover .opendoc{text-decoration:underline;}
+    .auditcard{border-radius:14px;padding:12px 14px;margin-bottom:12px;border:1px solid;}
+    .auditcard.red{background:#fdf2f2;border-color:#f5c6c6;}
+    .auditcard.amber{background:#fffaf0;border-color:#f6e0b5;}
+    .auditcard h3{margin:0 0 2px;font-size:15px;}
+    .auditcard.red h3{color:#991b1b;} .auditcard.amber h3{color:#92400e;}
+    .auditcard .why{font-size:12.5px;color:#6b7a90;margin:0 0 8px;}
+    .auditcard details{margin-top:6px;}
+    .auditcard summary{cursor:pointer;font-weight:700;font-size:13px;}
+    .arow{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:7px 2px;border-top:1px solid rgba(0,0,0,.06);font-size:13px;}
+    .arow .code{font-weight:800;color:var(--brand);}
+    .arow .ago{color:#991b1b;font-weight:700;}
+    .arow a{color:var(--brand);text-decoration:none;font-weight:600;} .arow a:hover{text-decoration:underline;}
     select.stagesel{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:12.5px;font-family:inherit;max-width:200px;}
     select.stagesel.tl-red{background:#fef2f2;} select.stagesel.tl-amber{background:#fffbeb;} select.stagesel.tl-green{background:#f0fdf4;}
     .rowlinks a,.rowlinks button{color:var(--brand);font-size:12px;text-decoration:none;background:none;border:none;cursor:pointer;padding:2px 4px;font-family:inherit;white-space:nowrap;}
@@ -79,6 +91,7 @@
       The full 5-Year EICR schedule for every Southern&nbsp;Co-op site on Concerto's PPM list this year. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
     </div>
     <div class="sumrow" id="sumrow"></div>
+    <div id="audit"></div>
     <div class="toolbar">
       <input id="q" placeholder="Search store, site, engineer, order…">
       <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
@@ -126,7 +139,7 @@
       const now = new Date().getFullYear();
       g("yearSel").innerHTML = [1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
       g("yearSel").value = String(YEAR);
-      g("yearSel").onchange = () => { YEAR = +g("yearSel").value; render(); };
+      g("yearSel").onchange = () => { YEAR = +g("yearSel").value; render(); loadAudit(); };
       g("q").oninput = () => render();
       g("fFlag").onchange = () => render();
       g("sortSel").value = SORT;
@@ -147,6 +160,39 @@
       STAGES.forEach(s => { STAGE_LABEL[s.key] = s.label; STAGE_LIGHT[s.key] = s.light; });
       ROWS = (d.rows || []).filter(r => r.case);   // fiveYear pipeline rows carry a case
       render();
+      loadAudit();
+    }
+
+    // Off-list tests (tested this year, not on the Concerto list) + early re-tests.
+    async function loadAudit(){
+      let d = null;
+      try { d = await authFetch("/concerto/audit?year="+YEAR).then(r=>r.json()); } catch {}
+      const box = g("audit");
+      if (!d || !d.ok) { box.innerHTML = ""; return; }
+      const testLink = r => r.jobId ? ' — <a href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">open test job ↗</a>'
+        : (r.source==="cert" ? ' — <a href="#" data-cert="'+esc(r.storeCode)+'">open certificate ↗</a>' : '');
+      const siteLink = r => r.storeCode ? '<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">site ↗</a>' : '';
+      let h = "";
+      if ((d.offList||[]).length){
+        h += '<div class="auditcard red"><h3>⚠ Tested in '+YEAR+' but NOT on the Concerto list ('+d.offList.length+')</h3>'
+          + '<p class="why">A 5-year test was carried out this year for a store the Concerto PPM schedule doesn\'t list — check it was ordered / chase the paperwork.</p>'
+          + '<details open>'+d.offList.map(r =>
+              '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
+              + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'+testLink(r)+' '+siteLink(r)+'</div>').join("")
+          + '</details></div>';
+      }
+      if ((d.earlyRetest||[]).length){
+        h += '<div class="auditcard amber"><h3>🔁 Re-tested early — last EICR still in date ('+d.earlyRetest.length+')</h3>'
+          + '<p class="why">Concerto sent (and paid for) a test at a store whose previous 5-year certificate wasn\'t due yet — worth flagging with them.</p>'
+          + '<details open>'+d.earlyRetest.map(r =>
+              '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
+              + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'
+              + '<span class="ago">· last tested '+esc(fmtD(r.prevAt))+' ('+r.gapMonths+' months earlier)</span>'
+              + testLink(r)+' '+siteLink(r)+'</div>').join("")
+          + '</details></div>';
+      }
+      box.innerHTML = h;
+      box.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
     }
 
     // A row belongs to YEAR if its Concerto next date is in that year OR the test was

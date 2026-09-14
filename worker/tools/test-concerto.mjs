@@ -305,6 +305,38 @@ const ROWS = [
   sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
   ok("chart catches up → gap gone, automatic flag clears itself, row drops back to not due", by["0777"].flag === "due" && !by["0777"].case.autoFlag && !by["0777"].case.flagged && by["0777"].case.stage === "not_due" && sc.body.stats.gap === 0, JSON.stringify({ flag: by["0777"].flag, stage: by["0777"].case.stage }));
 }
+// ── 5-year test audit: off-list tests + early re-tests ──────────────────────
+{
+  const { env, db } = makeEnv();
+  const ins = (t, cols, rows) => { const st = db.prepare(`INSERT INTO ${t} (${cols.join(",")}) VALUES (${cols.map(() => "?").join(",")})`); for (const r of rows) st.run(...r); };
+  // 0700: elec test completed THIS year (2026), NOT on the Concerto list → off-list.
+  ins("sla_jobs", ["tenant_id","id","data","status"], [
+    [1,"A1",JSON.stringify({ id:"A1", siteCode:"0700", elecTest:true, description:"5 year test", status:"Complete", scheduledAt:"2026-04-01T08:00:00.000Z", statusHistory:[{status:"Complete",at:"2026-04-01T15:00:00Z"}], assignedEngineers:["Connor"] }),"Complete"],
+  ]);
+  // 0701: cert filed this year, previous cert ~17 months earlier → early re-test. On the list.
+  // 0702: cert this year, previous 5 years earlier → a legitimate cycle, NOT flagged. On the list.
+  ins("compliance_files", ["tenant_id","scheme","code","type","doc_date","filename","r2_key"], [
+    [1,"coop","0701","fiveYear","2026-06-01","0701 EICR.pdf","ka1"],
+    [1,"coop","0701","fiveYear","2025-01-01","0701 EICR old.pdf","ka0"],
+    [1,"coop","0702","fiveYear","2026-05-01","0702 EICR.pdf","kb1"],
+    [1,"coop","0702","fiveYear","2021-05-01","0702 EICR old.pdf","kb0"],
+  ]);
+  ins("compliance_stores", ["tenant_id","scheme","code","category","name","due","active"], [
+    [1,"coop","0701","Retail","Beta",'{"fiveYear":"2031-06-01"}',1],
+    [1,"coop","0702","Retail","Gamma",'{"fiveYear":"2031-05-01"}',1],
+  ]);
+  await call(env, "Jamie Line", "POST", "/concerto/import", { layout: "schedule", rows: [
+    { uprn:"SR00701", site:"0701 - Beta", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2031-06-01", status:"Live", orderNr:"" },
+    { uprn:"SR00702", site:"0702 - Gamma", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2031-05-01", status:"Live", orderNr:"" },
+  ], fileName: "ppm_audit.xlsx" });
+  const au = await call(env, "Jamie Line", "GET", "/concerto/audit?year=2026");
+  const off = au.body.offList.map(r => r.storeCode), early = au.body.earlyRetest.map(r => r.storeCode);
+  ok("audit: 0700 tested this year but not on the Concerto list → off-list; 0701/0702 (on list) are not", au.status === 200 && off.includes("0700") && !off.includes("0701") && !off.includes("0702"), JSON.stringify(off));
+  ok("audit: 0701 re-tested ~17mo after the last EICR → early; 0702 (5-year gap) NOT early", early.includes("0701") && !early.includes("0702") && (au.body.earlyRetest.find(r=>r.storeCode==="0701")||{}).gapMonths >= 15, JSON.stringify(au.body.earlyRetest.map(r=>r.storeCode+":"+r.gapMonths)));
+  const auNone = await call(env, "Jamie Line", "GET", "/concerto/audit?year=2020");
+  ok("audit: a year with no tests is empty", auNone.body.offList.length === 0 && auNone.body.earlyRetest.length === 0);
+  ok("audit: non-office 403", (await call(env, "Nobody", "GET", "/concerto/audit?year=2026")).status === 403);
+}
 // ── 12-stage single status (five-year-remedials.html) + document status ─────
 {
   const { env, db } = makeEnv();
