@@ -101,7 +101,13 @@
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    const fmtD = s => { s=String(s||"").trim(); if(!s) return ""; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m? m[3]+"/"+m[2]+"/"+m[1] : s; };
+    const MON3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const fmtD = s => {   // 2026-12-11 → "11th Dec 26"
+      s=String(s||"").trim(); if(!s) return "";
+      const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(!m) return s;
+      const day=+m[3], ord=(day%10===1&&day!==11)?"st":(day%10===2&&day!==12)?"nd":(day%10===3&&day!==13)?"rd":"th";
+      return day+ord+" "+(MON3[+m[2]-1]||"")+" "+m[1].slice(2);
+    };
     const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
