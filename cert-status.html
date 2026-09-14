@@ -97,6 +97,9 @@
     // How the status reads, per role (what the office needs to know at a glance).
     function statusLabel(it) {
       const who = it.engineer ? (" — " + esc(it.engineer)) : "";
+      if (it.type === "elec") return it.status === "final"
+        ? { badge: "Works raised", cls: "final" }
+        : { badge: "Remedials to review", cls: "review" };
       if (it.status === "final")   return { badge: "Uploaded ✓" + (it.certNumber ? " " + esc(it.certNumber) : ""), cls: "final" };
       if (it.status === "review")  return { badge: "Awaiting review", cls: "review" };
       if (it.status === "draft")   return { badge: "With engineer" + who, cls: "draft" };
@@ -125,20 +128,22 @@
       if (!items.length) { g("list").innerHTML = '<p class="muted" style="padding:8px 4px;">No EM/PAT certificates in this period.</p>'; return; }
       let h = '<div class="muted" style="margin-bottom:4px;padding:0 4px;">' + items.length + ' certificate' + (items.length===1?"":"s") + ' — tap to open.</div>';
       items.forEach(it => {
-        const em = it.type === "pump" ? "🚰" : (it.type === "pat" ? "🔌" : "💡");
+        const em = it.type === "pump" ? "🚰" : (it.type === "elec" ? "⚡" : (it.type === "pat" ? "🔌" : "💡"));
+        const typeLbl = it.type==="pump"?"Pump":(it.type==="elec"?"Electrical":(it.type==="pat"?"PAT":"EM"));
         const site = it.site || it.siteCode || "—";
         const st = statusLabel(it);
         const when = it.finalisedAt || it.submittedAt || it.activityAt || it.scheduledAt;
         h += '<div class="item" data-cert="'+esc(it.certId)+'" data-job="'+esc(it.jobId)+'" data-status="'+esc(it.status)+'" data-type="'+esc(it.type)+'">'
           + '<div class="em">'+em+'</div>'
-          + '<div class="m"><div class="t">'+esc(site)+' <span class="muted">· '+(it.type==="pump"?"Pump":(it.type==="pat"?"PAT":"EM"))+'</span></div>'
+          + '<div class="m"><div class="t">'+esc(site)+' <span class="muted">· '+typeLbl+'</span></div>'
           + '<div class="s">'+(it.siteCode?esc(it.siteCode)+' · ':'')+(when?fmtDT(when):'')+'</div></div>'
           + '<span class="badge '+st.cls+'">'+st.badge+'</span></div>';
       });
       g("list").innerHTML = h;
       [].forEach.call(g("list").querySelectorAll(".item"), el => el.onclick = () => {
         const cert = el.dataset.cert, job = el.dataset.job, status = el.dataset.status, type = el.dataset.type;
-        if (cert && status !== "notstarted") location.href = "cert-review.html?" + (type === "pump" ? "pump=" : "open=") + encodeURIComponent(cert);
+        if (type === "elec") location.href = "five-year-remedials.html";
+        else if (cert && status !== "notstarted") location.href = "cert-review.html?" + (type === "pump" ? "pump=" : "open=") + encodeURIComponent(cert);
         else if (job) location.href = "job-view.html?jobId=" + encodeURIComponent(job);
       });
     }

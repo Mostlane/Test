@@ -1674,6 +1674,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
+    if (updated) ctx?.waitUntil(maybeOpenFiveYearRemedial(env, tenantId, before, updated).catch(() => {}));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -2053,62 +2054,11 @@ export async function handle(request, env, ctx, url, sess) {
       // client-side). `itemIds` limits the set; absent = all with content.
       const wbody = await readJson(request).catch(() => ({}));
       const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
-      let rem = Array.isArray(src.remedials) ? src.remedials.filter(r => r && (r.description || (r.photos || []).length)) : [];
-      if (pickIds && pickIds.length) rem = rem.filter(r => pickIds.includes(String(r.id)));
-      if (!rem.length) return jsonResponse({ error: "Pick at least one remedial to turn into works." }, headers, 400);
-      // Idempotent: if a works job was already created and still exists, return it.
-      if (src.remedialsWorksJobId) {
-        const ex = await getJob(env, tenantId, src.remedialsWorksJobId).catch(() => null);
-        if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
-      }
-      const newId = crypto.randomUUID();
-      const auditItems = [];
-      for (const r of rem) {
-        const itemId = crypto.randomUUID();
-        const refPhotos = [];
-        for (const srcKey of (r.photos || [])) {
-          try {
-            const obj = await env.JOB_FILES.get(srcKey);
-            if (!obj) continue;
-            const fn = String(srcKey).split("/").pop();
-            const dstKey = `jobs/${newId}/audit/${itemId}/${fn}`;
-            const bytes = await obj.arrayBuffer();
-            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
-            try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata }); } catch {}
-            refPhotos.push(dstKey);
-          } catch {}
-        }
-        auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
-      }
-      // Resolve the real site name (the source test job can carry an empty siteName,
-      // which made the works job read "0657 - 0657"); the reference defaults to the
-      // source ref else the site name.
-      let siteName = (src.siteName || "").trim();
-      try { const meta = await resolveSiteMeta(env, tenantId, src); if (meta && meta.siteName) siteName = meta.siteName; } catch {}
-      const payload = {
-        id: newId,
-        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
-        description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} — see checklist.`,
-        siteCode: src.siteCode, siteName,
-        address: src.address, postcode: src.postcode, telephone: src.telephone,
-        storeType: src.storeType, client: src.client,
-        lat: src.lat, lon: src.lon,
-        auditItems,                      // a SITE-AUDIT job — one checklist item per remedial
-        // Gates suited to an audit job: prompt the RA before work starts (electrical
-        // remedials), but completion is the CHECKLIST — each item photographed — NOT a
-        // separate signature/note/After-photo (auditMissing enforces that both sides).
-        requiresRA: true, requiresSignature: false, requiresPhoto: false, requiresNote: false,
-        assignedEngineers: [],           // unassigned — the office allocates it
-        priority: src.priority || "",
-        changedBy: (sess.user && sess.user.username) || "system",
-      };
-      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-      // Link both ways so the office can hop between the test job and its works job.
-      src.remedialsWorksJobId = job.id;
-      src.updatedAt = new Date().toISOString();
-      await saveJob(env, tenantId, src);
-      try { const nj = await getJob(env, tenantId, job.id); if (nj) { nj.fromRemedialsOf = id; await saveJob(env, tenantId, nj); } } catch {}
-      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+      const res = await createWorksJobFromRemedials(env, tenantId, src, { pickIds, by: (sess.user && sess.user.username) || "system" });
+      if (res.error) return jsonResponse({ error: res.error }, headers, res.status || 400);
+      return jsonResponse(res.existing
+        ? { ok: true, existing: true, id: res.id, ref: res.ref }
+        : { ok: true, id: res.id, ref: res.ref, items: res.items }, headers, res.existing ? 200 : 201);
     }
 
     // POST /sla/jobs/{id}/revisit — clone a completed/closed job into a NEW job for a
@@ -2540,6 +2490,7 @@ export async function handle(request, env, ctx, url, sess) {
       }
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
       if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {}));
+    if (updated) ctx?.waitUntil(maybeOpenFiveYearRemedial(env, tenantId, before, updated).catch(() => {}));
       if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       // Tell every office/admin when a job has just been parked pending approval.
       if (updated && updated.hold?.approval?.state === "pending"
@@ -3771,7 +3722,7 @@ export async function notifyNewlyAssigned(env, tid, before, after) {
 
 /* ================= STORAGE (D1) ================= */
 
-async function getJob(env, tenantId, id) {
+export async function getJob(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
@@ -4165,6 +4116,91 @@ async function maybeReissueAfterRemedial(env, tid, before, updated) {
     const certs = await import("./certs.js");
     if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
   } catch {}
+}
+
+// When an electrical-test (5-year EICR) job with remedials is COMPLETED, open (or
+// refresh) a case on the 5-Year Remedials tracker so the office picks it up —
+// quote → order → create the works job → done → invoiced. Also fires the reverse:
+// when the audit WORKS job raised from a case completes, the case advances to done.
+async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
+  try {
+    if (!updated) return;
+    const fin = s => /complete|closed|invoiced/i.test(String(s || ""));
+    const certs = await import("./certs.js");
+    // (a) the electrical test itself just finished → open/refresh the case.
+    if (updated.elecTest && Array.isArray(updated.remedials) &&
+        updated.remedials.some(r => r && (r.description || (r.photos || []).length))) {
+      if (fin(updated.status) && !(before && fin(before.status))) {
+        if (certs.upsertFiveYearFromJob) await certs.upsertFiveYearFromJob(env, tid, updated);
+      }
+    }
+    // (b) the works job raised from a case just finished → advance the case to done.
+    if (updated.fromRemedialsOf && fin(updated.status) && !(before && fin(before.status))) {
+      if (certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+    }
+  } catch {}
+}
+
+// Spin an electrical-test job's remedials into a NEW unassigned site-audit works
+// job (each remedial → a checklist item, the engineer's photos copied in as
+// reference photos; duration/cost stripped — that's pricing). Idempotent via
+// src.remedialsWorksJobId. Shared by POST /sla/jobs/{id}/create-works-job and the
+// 5-Year Remedials "Create works job" action. Returns {id,ref,items} | {existing,id,ref} | {error,status}.
+export async function createWorksJobFromRemedials(env, tenantId, src, opts) {
+  opts = opts || {};
+  const pickIds = Array.isArray(opts.pickIds) ? opts.pickIds.map(String) : null;
+  let rem = Array.isArray(src.remedials) ? src.remedials.filter(r => r && (r.description || (r.photos || []).length)) : [];
+  if (pickIds && pickIds.length) rem = rem.filter(r => pickIds.includes(String(r.id)));
+  if (!rem.length) return { error: "Pick at least one remedial to turn into works.", status: 400 };
+  // Idempotent: if a works job was already created and still exists, return it.
+  if (src.remedialsWorksJobId) {
+    const ex = await getJob(env, tenantId, src.remedialsWorksJobId).catch(() => null);
+    if (ex) return { existing: true, id: ex.id, ref: ex.helpdeskRef };
+  }
+  const newId = crypto.randomUUID();
+  const auditItems = [];
+  for (const r of rem) {
+    const itemId = crypto.randomUUID();
+    const refPhotos = [];
+    for (const srcKey of (r.photos || [])) {
+      try {
+        const obj = await env.JOB_FILES.get(srcKey);
+        if (!obj) continue;
+        const fn = String(srcKey).split("/").pop();
+        const dstKey = `jobs/${newId}/audit/${itemId}/${fn}`;
+        const bytes = await obj.arrayBuffer();
+        await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+        try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata }); } catch {}
+        refPhotos.push(dstKey);
+      } catch {}
+    }
+    auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
+  }
+  // Resolve the real site name (the source test job can carry an empty siteName,
+  // which made the works job read "0657 - 0657"); the reference defaults to the
+  // source ref else the site name.
+  let siteName = (src.siteName || "").trim();
+  try { const meta = await resolveSiteMeta(env, tenantId, src); if (meta && meta.siteName) siteName = meta.siteName; } catch {}
+  const payload = {
+    id: newId,
+    reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+    description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} — see checklist.`,
+    siteCode: src.siteCode, siteName,
+    address: src.address, postcode: src.postcode, telephone: src.telephone,
+    storeType: src.storeType, client: src.client,
+    lat: src.lat, lon: src.lon,
+    auditItems,                      // a SITE-AUDIT job — one checklist item per remedial
+    requiresRA: true, requiresSignature: false, requiresPhoto: false, requiresNote: false,
+    assignedEngineers: [],           // unassigned — the office allocates it
+    priority: src.priority || "",
+    changedBy: opts.by || "system",
+  };
+  const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+  src.remedialsWorksJobId = job.id;
+  src.updatedAt = new Date().toISOString();
+  await saveJob(env, tenantId, src);
+  try { const nj = await getJob(env, tenantId, job.id); if (nj) { nj.fromRemedialsOf = src.id; await saveJob(env, tenantId, nj); } } catch {}
+  return { id: job.id, ref: job.helpdeskRef, items: auditItems.length };
 }
 
 export async function listJobs(env, tenantId, opts) {

@@ -11862,8 +11862,10 @@ var init_pump = __esm({
 // src/routes/certs.js
 var certs_exports = {};
 __export(certs_exports, {
+  fiveYearWorksCompleted: () => fiveYearWorksCompleted,
   handle: () => handle11,
-  reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob
+  reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob,
+  upsertFiveYearFromJob: () => upsertFiveYearFromJob
 });
 function clientForSiteClient(sc) {
   sc = String(sc || "").toLowerCase().trim();
@@ -12952,6 +12954,73 @@ async function attachRemedialOrders(env, tid, rows) {
   }
   return rows;
 }
+async function upsertFiveYearFromJob(env, tid, job, opts) {
+  opts = opts || {};
+  await ensureTables4(env);
+  if (!job || !job.elecTest) return;
+  const rems = (Array.isArray(job.remedials) ? job.remedials : []).filter((r) => r && (r.description || (r.photos || []).length));
+  if (!rems.length) return;
+  const id = "JOB-" + job.id;
+  const store = fyrCode(job.siteCode) || String(job.siteCode || "").trim();
+  const siteName = String(job.siteName || job.helpdeskRef || job.reference || "").slice(0, 200);
+  const lines = rems.map((r) => ({
+    action: (r.code ? `[${r.code}] ` : "") + String(r.description || "").trim(),
+    code: r.code || "",
+    minutes: Number(r.minutes) || 0,
+    materialCost: Number(r.materialCost) || 0,
+    photos: (r.photos || []).slice(0, 12),
+    workStatus: ""
+  }));
+  const budget = rems.reduce((a, r) => a + (Number(r.materialCost) || 0), 0);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const existing = await env.DB.prepare("SELECT stage, quote_date, data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first().catch(() => null);
+  let data = {};
+  try {
+    data = existing && existing.data ? JSON.parse(existing.data) : {};
+  } catch {
+  }
+  data.source = "job";
+  data.jobId = job.id;
+  if (job.remedialsWorksJobId) data.worksJobId = job.remedialsWorksJobId;
+  const stage = existing && existing.stage ? existing.stage : "to_review";
+  const quoteDate = existing && existing.quote_date ? existing.quote_date : now.slice(0, 10);
+  await env.DB.prepare(
+    "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET store_code=excluded.store_code, site_name=excluded.site_name, budget_cost=excluded.budget_cost, lines=excluded.lines, data=excluded.data, updated_at=excluded.updated_at"
+  ).bind(id, tid, "", store, siteName, "Electrical remedials", quoteDate, budget, job.priority || "", "", stage, JSON.stringify(lines), JSON.stringify(data), now, now).run();
+  _fyrTestedCache = { tid: null, at: 0, map: null };
+  if (existing || opts.silent) return;
+  try {
+    const body = `${siteName || store}: ${rems.length} remedial${rems.length === 1 ? "" : "s"} to review \u2014 quote the client.`;
+    await sendToPermission(
+      env,
+      tid,
+      ["FullAccess", "SLAAdmin", "Compliance"],
+      { title: "\u26A1 5-Year remedials to review", body, url: "/five-year-remedials.html", tag: "fyr-review:" + id },
+      null,
+      true
+    );
+  } catch {
+  }
+}
+async function fiveYearWorksCompleted(env, tid, worksJob) {
+  await ensureTables4(env);
+  const wid = String(worksJob && worksJob.id || "");
+  if (!wid) return;
+  const { results } = await env.DB.prepare("SELECT id, stage, data FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }));
+  for (const r of results || []) {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+    }
+    if (d.worksJobId === wid) {
+      if (r.stage === "done" || r.stage === "invoiced") return;
+      await env.DB.prepare("UPDATE five_year_remedials SET stage='done', updated_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, r.id).run();
+      _fyrTestedCache = { tid: null, at: 0, map: null };
+      return;
+    }
+  }
+}
 async function fiveYearTestedMap(env, tid) {
   const now = Date.now();
   if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now - _fyrTestedCache.at < 5 * 60 * 1e3)
@@ -13521,7 +13590,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     if (range === "7d") from = daysAgo(6);
     else if (range === "30d") from = daysAgo(29);
     else if (range !== "all") from = today;
-    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat || j.pumpMaintenance));
+    const allJobs = await listJobs(env, tid);
+    const jobs = allJobs.filter((j) => j && (j.emTest || j.pat || j.pumpMaintenance));
     const certByKey = {};
     const jobIds = jobs.map((j) => String(j.id));
     for (let i = 0; i < jobIds.length; i += 100) {
@@ -13569,6 +13639,36 @@ PAT: Import certificate number ${num2}-${yr}`;
           activityAt: activity || ""
         });
       }
+    }
+    const isFin = (s) => /complete|closed|invoiced/i.test(String(s || "")) && !isCancelled(s);
+    for (const j of allJobs) {
+      if (!j || !j.elecTest) continue;
+      const rem = Array.isArray(j.remedials) ? j.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+      if (!rem.length) continue;
+      if (!isFin(j.status) && !j.remedialsWorksJobId) continue;
+      const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean) : j.assignedTo ? [j.assignedTo] : [];
+      const activity = j.updatedAt || j.scheduledAt || j.createdAt || "";
+      const day = londonDay(activity);
+      if (day && day > today) continue;
+      if (from && (!day || day < from)) continue;
+      items.push({
+        jobId: j.id,
+        type: "elec",
+        site: j.siteName || j.helpdeskRef || j.reference || "",
+        siteCode: j.siteCode || "",
+        engineers: engs,
+        engineer: engs[0] || "",
+        status: j.remedialsWorksJobId ? "final" : "review",
+        // review = office to raise works
+        remCount: rem.length,
+        worksJobId: j.remedialsWorksJobId || "",
+        certId: "",
+        certNumber: "",
+        scheduledAt: j.scheduledAt || "",
+        submittedAt: "",
+        finalisedAt: "",
+        activityAt: activity
+      });
     }
     items.sort((a, b) => String(b.activityAt || "").localeCompare(String(a.activityAt || "")));
     const counts = {
@@ -14536,31 +14636,58 @@ ${con.tradingTitle || "Mostlane"}`;
   }
   if (sub === "/five-year/board" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
+    try {
+      const jobs = await listJobs(env, tid);
+      for (const j of jobs) {
+        if (j && j.elecTest && Array.isArray(j.remedials) && j.remedials.some((r) => r && (r.description || (r.photos || []).length)) && /complete|closed|invoiced/i.test(String(j.status || ""))) {
+          await upsertFiveYearFromJob(env, tid, j, { silent: true });
+        }
+      }
+    } catch {
+    }
     let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
     results = await attachRemedialOrders(env, tid, results || []);
-    const rows = results.map((r) => ({
-      id: r.id,
-      sr: r.sr,
-      storeCode: r.store_code,
-      siteName: r.site_name,
-      element: r.element,
-      quoteDate: r.quote_date,
-      budgetCost: r.budget_cost,
-      priority: r.priority,
-      workStatus: r.work_status,
-      stage: r.stage || "quoted",
-      lines: (() => {
+    const rows = results.map((r) => {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const lines = (() => {
         try {
           return JSON.parse(r.lines || "[]");
         } catch {
           return [];
         }
-      })(),
-      order: r.order
-    }));
+      })();
+      return {
+        id: r.id,
+        sr: r.sr,
+        storeCode: r.store_code,
+        siteName: r.site_name,
+        element: r.element,
+        quoteDate: r.quote_date,
+        budgetCost: r.budget_cost,
+        priority: r.priority,
+        workStatus: r.work_status,
+        stage: r.stage || "quoted",
+        lines,
+        source: d.source || "concerto",
+        jobId: d.jobId || "",
+        worksJobId: d.worksJobId || "",
+        photoCount: lines.reduce((a, l) => a + (l.photos || []).length, 0),
+        order: r.order
+      };
+    });
     const wantStatus = (q.get("status") || "").trim();
     const filtered = wantStatus ? rows.filter((r) => (r.stage || "quoted") === wantStatus) : rows;
-    return json({ ok: true, rows: filtered, count: rows.length, ordered: rows.filter((r) => r.order).length }, {}, env, request);
+    return json({
+      ok: true,
+      rows: filtered,
+      count: rows.length,
+      toReview: rows.filter((r) => r.stage === "to_review").length,
+      ordered: rows.filter((r) => r.order).length
+    }, {}, env, request);
   }
   if (sub === "/five-year/stage" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -14571,6 +14698,46 @@ ${con.tradingTitle || "Mostlane"}`;
     await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
+  }
+  if (sub === "/five-year/quote-text" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const id = String(q.get("id") || "");
+    const row = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let lines = [];
+    try {
+      lines = JSON.parse(row.lines || "[]");
+    } catch {
+    }
+    const head = `Remedial works following the fixed-wire inspection at ${row.site_name || row.store_code || "site"}${row.store_code ? " (store " + row.store_code + ")" : ""}:`;
+    const body = lines.map((l, i) => `${i + 1}. ${l.action || l.code || ""}`).join("\n");
+    const mat = Number(row.budget_cost) || 0;
+    const foot = `
+Total: ${lines.length} item${lines.length === 1 ? "" : "s"}` + (mat ? ` \xB7 estimated materials \xA3${mat.toFixed(2)}` : "");
+    return json({ ok: true, text: head + "\n\n" + body + foot }, {}, env, request);
+  }
+  if (sub === "/five-year/create-works" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const row = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let d = {};
+    try {
+      d = JSON.parse(row.data || "{}");
+    } catch {
+    }
+    if (!d.jobId) return error("This case isn't linked to a test job \u2014 create the works job from the job card.", 400, env, request);
+    const src = await getJob2(env, tid, d.jobId);
+    if (!src) return error("The linked test job no longer exists.", 404, env, request);
+    const pickIds = Array.isArray(b.itemIds) ? b.itemIds.map(String) : null;
+    const res = await createWorksJobFromRemedials(env, tid, src, { pickIds, by: me || "office" });
+    if (res.error) return error(res.error, res.status || 400, env, request);
+    d.worksJobId = res.id;
+    const stage = row.stage === "done" || row.stage === "invoiced" ? row.stage : "in_works";
+    await env.DB.prepare("UPDATE five_year_remedials SET data=?, stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), stage, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, worksJobId: res.id, ref: res.ref, existing: !!res.existing, stage }, {}, env, request);
   }
   if (sub === "/five-year/delete" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -14685,7 +14852,7 @@ var init_certs = __esm({
       // optional CC on the battery enquiry email (remembered)
     };
     ensureTables4 = onceMigration(ensureTables__raw3);
-    FYR_STAGES = ["quoted", "ordered", "in_works", "done", "invoiced"];
+    FYR_STAGES = ["to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
     _fyrTestedCache = { tid: null, at: 0, map: null };
     ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
@@ -14717,7 +14884,9 @@ __export(sla_exports, {
   bumpAiUsage: () => bumpAiUsage,
   cloneJobAsVisit: () => cloneJobAsVisit,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
+  createWorksJobFromRemedials: () => createWorksJobFromRemedials,
   findBlockingJob: () => findBlockingJob,
+  getJob: () => getJob3,
   handle: () => handle12,
   linkOrderToExistingJob: () => linkOrderToExistingJob,
   linkOrderToJobById: () => linkOrderToJobById,
@@ -16271,6 +16440,8 @@ async function handle12(request, env, ctx, url, sess) {
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {
     }));
+    if (updated) ctx?.waitUntil(maybeOpenFiveYearRemedial(env, tenantId, before, updated).catch(() => {
+    }));
     return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
   }
   if (subpath.startsWith("/jobs/")) {
@@ -16673,83 +16844,9 @@ async function handle12(request, env, ctx, url, sess) {
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const wbody = await readJson2(request).catch(() => ({}));
       const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
-      let rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
-      if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
-      if (!rem.length) return jsonResponse({ error: "Pick at least one remedial to turn into works." }, headers, 400);
-      if (src.remedialsWorksJobId) {
-        const ex = await getJob3(env, tenantId, src.remedialsWorksJobId).catch(() => null);
-        if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
-      }
-      const newId4 = crypto.randomUUID();
-      const auditItems = [];
-      for (const r of rem) {
-        const itemId = crypto.randomUUID();
-        const refPhotos = [];
-        for (const srcKey of r.photos || []) {
-          try {
-            const obj = await env.JOB_FILES.get(srcKey);
-            if (!obj) continue;
-            const fn = String(srcKey).split("/").pop();
-            const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
-            const bytes = await obj.arrayBuffer();
-            await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
-            try {
-              const t = await env.JOB_FILES.get(srcKey + ".thumb");
-              await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata });
-            } catch {
-            }
-            refPhotos.push(dstKey);
-          } catch {
-          }
-        }
-        auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
-      }
-      let siteName = (src.siteName || "").trim();
-      try {
-        const meta = await resolveSiteMeta(env, tenantId, src);
-        if (meta && meta.siteName) siteName = meta.siteName;
-      } catch {
-      }
-      const payload = {
-        id: newId4,
-        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
-        description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} \u2014 see checklist.`,
-        siteCode: src.siteCode,
-        siteName,
-        address: src.address,
-        postcode: src.postcode,
-        telephone: src.telephone,
-        storeType: src.storeType,
-        client: src.client,
-        lat: src.lat,
-        lon: src.lon,
-        auditItems,
-        // a SITE-AUDIT job — one checklist item per remedial
-        // Gates suited to an audit job: prompt the RA before work starts (electrical
-        // remedials), but completion is the CHECKLIST — each item photographed — NOT a
-        // separate signature/note/After-photo (auditMissing enforces that both sides).
-        requiresRA: true,
-        requiresSignature: false,
-        requiresPhoto: false,
-        requiresNote: false,
-        assignedEngineers: [],
-        // unassigned — the office allocates it
-        priority: src.priority || "",
-        changedBy: sess.user && sess.user.username || "system"
-      };
-      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-      src.remedialsWorksJobId = job.id;
-      src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-      await saveJob(env, tenantId, src);
-      try {
-        const nj = await getJob3(env, tenantId, job.id);
-        if (nj) {
-          nj.fromRemedialsOf = id;
-          await saveJob(env, tenantId, nj);
-        }
-      } catch {
-      }
-      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+      const res = await createWorksJobFromRemedials(env, tenantId, src, { pickIds, by: sess.user && sess.user.username || "system" });
+      if (res.error) return jsonResponse({ error: res.error }, headers, res.status || 400);
+      return jsonResponse(res.existing ? { ok: true, existing: true, id: res.id, ref: res.ref } : { ok: true, id: res.id, ref: res.ref, items: res.items }, headers, res.existing ? 200 : 201);
     }
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -17122,6 +17219,8 @@ async function handle12(request, env, ctx, url, sess) {
       }
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
       if (updated) ctx?.waitUntil(maybeReissueAfterRemedial(env, tenantId, before, updated).catch(() => {
+      }));
+      if (updated) ctx?.waitUntil(maybeOpenFiveYearRemedial(env, tenantId, before, updated).catch(() => {
       }));
       if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       if (updated && updated.hold?.approval?.state === "pending" && before?.hold?.approval?.state !== "pending") {
@@ -18676,6 +18775,100 @@ async function maybeReissueAfterRemedial(env, tid, before, updated) {
     if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
   } catch {
   }
+}
+async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
+  try {
+    if (!updated) return;
+    const fin = (s) => /complete|closed|invoiced/i.test(String(s || ""));
+    const certs = await Promise.resolve().then(() => (init_certs(), certs_exports));
+    if (updated.elecTest && Array.isArray(updated.remedials) && updated.remedials.some((r) => r && (r.description || (r.photos || []).length))) {
+      if (fin(updated.status) && !(before && fin(before.status))) {
+        if (certs.upsertFiveYearFromJob) await certs.upsertFiveYearFromJob(env, tid, updated);
+      }
+    }
+    if (updated.fromRemedialsOf && fin(updated.status) && !(before && fin(before.status))) {
+      if (certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+    }
+  } catch {
+  }
+}
+async function createWorksJobFromRemedials(env, tenantId, src, opts) {
+  opts = opts || {};
+  const pickIds = Array.isArray(opts.pickIds) ? opts.pickIds.map(String) : null;
+  let rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+  if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
+  if (!rem.length) return { error: "Pick at least one remedial to turn into works.", status: 400 };
+  if (src.remedialsWorksJobId) {
+    const ex = await getJob3(env, tenantId, src.remedialsWorksJobId).catch(() => null);
+    if (ex) return { existing: true, id: ex.id, ref: ex.helpdeskRef };
+  }
+  const newId4 = crypto.randomUUID();
+  const auditItems = [];
+  for (const r of rem) {
+    const itemId = crypto.randomUUID();
+    const refPhotos = [];
+    for (const srcKey of r.photos || []) {
+      try {
+        const obj = await env.JOB_FILES.get(srcKey);
+        if (!obj) continue;
+        const fn = String(srcKey).split("/").pop();
+        const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
+        const bytes = await obj.arrayBuffer();
+        await env.JOB_FILES.put(dstKey, bytes, { httpMetadata: obj.httpMetadata });
+        try {
+          const t = await env.JOB_FILES.get(srcKey + ".thumb");
+          await env.JOB_FILES.put(dstKey + ".thumb", t ? t.body : bytes, { httpMetadata: t ? t.httpMetadata : obj.httpMetadata });
+        } catch {
+        }
+        refPhotos.push(dstKey);
+      } catch {
+      }
+    }
+    auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
+  }
+  let siteName = (src.siteName || "").trim();
+  try {
+    const meta = await resolveSiteMeta(env, tenantId, src);
+    if (meta && meta.siteName) siteName = meta.siteName;
+  } catch {
+  }
+  const payload = {
+    id: newId4,
+    reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+    description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} \u2014 see checklist.`,
+    siteCode: src.siteCode,
+    siteName,
+    address: src.address,
+    postcode: src.postcode,
+    telephone: src.telephone,
+    storeType: src.storeType,
+    client: src.client,
+    lat: src.lat,
+    lon: src.lon,
+    auditItems,
+    // a SITE-AUDIT job — one checklist item per remedial
+    requiresRA: true,
+    requiresSignature: false,
+    requiresPhoto: false,
+    requiresNote: false,
+    assignedEngineers: [],
+    // unassigned — the office allocates it
+    priority: src.priority || "",
+    changedBy: opts.by || "system"
+  };
+  const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+  src.remedialsWorksJobId = job.id;
+  src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  await saveJob(env, tenantId, src);
+  try {
+    const nj = await getJob3(env, tenantId, job.id);
+    if (nj) {
+      nj.fromRemedialsOf = src.id;
+      await saveJob(env, tenantId, nj);
+    }
+  } catch {
+  }
+  return { id: job.id, ref: job.helpdeskRef, items: auditItems.length };
 }
 async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);

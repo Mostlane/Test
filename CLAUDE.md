@@ -3313,6 +3313,36 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
 `remedialHost`, slim Travelling/In Progress/Complete status set) + job-view.html
 (office `remedialCard`). NB the electrical engineer must be ADDED to the portal
 (Users Admin) before he can be assigned these jobs.
+- **Elec-test remedials → the 5-Year Remedials pipeline (14 Sep 2026, Jamie: "should
+  come up in Certificates to review… and under 5-Year Remedials as To Review, and the
+  whole quote/order/create-job process from here").** Every ⚡ electrical test is treated
+  as a 5-year EICR. When such a job is COMPLETED with remedials, sla.js
+  `maybeOpenFiveYearRemedial` (both patch paths, ctx.waitUntil) dynamic-imports
+  `certs.upsertFiveYearFromJob` → opens/refreshes a `five_year_remedials` **case**
+  `JOB-<jobId>` at a NEW first stage **`to_review`** (FYR_STAGES = to_review → quoted →
+  ordered → in_works → done → invoiced), storing the remedial lines (code/desc/minutes/
+  materialCost/photos) + `data.{source:"job",jobId,worksJobId}`; idempotent, NEVER resets
+  an advanced stage. On first open it pushes FullAccess/SLAAdmin/Compliance (office-only)
+  a `fyr-review:<id>` alert. The photo-upload hang that lost Daniel Walker's remedial
+  photos was fixed first (see remedials-form shrink note). **Where it surfaces:**
+  (a) **Certificates to review** — `/certs/status` now adds `type:"elec"` items for
+  completed elecTest jobs with remedials (status `review` until a works job exists, then
+  `final`); the home hub card + cert-status.html count them (⚡, "Remedials to review",
+  row → five-year-remedials.html). (b) **five-year-remedials.html** — a **To review**
+  chip/summary + stage; job cases show a "⚡ from test" tag, photo counts, the remedial
+  list open, **📋 Quote text** (GET `/certs/five-year/quote-text?id=` → client quote body,
+  copied to clipboard), a stage dropdown, **🛠 Create works job** (POST
+  `/certs/five-year/create-works {id}` → reuses the EXPORTED `sla.createWorksJobFromRemedials`
+  to build the unassigned audit works job, links `worksJobId`, moves the case to
+  `in_works`), and Test-job / Works-job / Open-site links. The board GET **self-heals**
+  (silently upserts a case for any completed elec test missing one — covers jobs finished
+  before the hook). When the audit works job COMPLETES, sla.js `maybeOpenFiveYearRemedial`
+  branch (b) → `certs.fiveYearWorksCompleted` advances the case to **done**. New exports:
+  sla.js `getJob`, `createWorksJobFromRemedials`; certs.js `upsertFiveYearFromJob`,
+  `fiveYearWorksCompleted`. `remedials-form.js?v=6`, `cert-form.js?v=23`,
+  `firestop-form.js?v=3`, SW `mostlane-v125`. **TODO/next:** match a client order to a
+  job case (attachRemedialOrders keys on store code — works once an order for that store
+  arrives); fold the £ into job costing; a Help guide.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

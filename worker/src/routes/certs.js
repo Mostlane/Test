@@ -27,7 +27,7 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
-import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById, unlinkOrderFromJob } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, raiseJobForOrder, linkOrderToExistingJob, linkOrderToJobById, unlinkOrderFromJob, createWorksJobFromRemedials } from "./sla.js";
 import { canSeeMoney } from "../lib/auth.js";
 import { learnConcertoRef } from "./concerto.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
@@ -188,8 +188,11 @@ async function ensureTables__raw(env) {
     created_at TEXT, updated_at TEXT)`).run();
 }
 const ensureTables = onceMigration(ensureTables__raw); // once per isolate — see lib/once.js
-// Fixed-wire remedial pipeline stages.
-const FYR_STAGES = ["quoted", "ordered", "in_works", "done", "invoiced"];
+// Fixed-wire remedial pipeline stages. `to_review` is the entry stage for a case
+// opened automatically when an engineer completes an electrical (EICR) test with
+// remedials — the office reviews it, then quote → ordered → create the works job
+// (in_works) → done → invoiced. Concerto-imported rows start at `quoted`.
+const FYR_STAGES = ["to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
 // Store code → 4-digit padded, ONLY when it's purely numeric (a real store code).
 // Site NAMES and blanks ("-", "Botley Road…") return "" so they never key a store.
 function fyrCode(v) {
@@ -1084,6 +1087,62 @@ async function attachRemedialOrders(env, tid, rows) {
   }
   return rows;
 }
+
+// Open (or refresh) a 5-Year Remedials case from a COMPLETED electrical-test job's
+// remedials. Called from sla.js when the test is finished. Idempotent per job
+// (id = "JOB-<jobId>"); a re-completion refreshes the lines/costs but NEVER resets
+// the pipeline stage or quote date once the office has advanced them.
+export async function upsertFiveYearFromJob(env, tid, job, opts) {
+  opts = opts || {};
+  await ensureTables(env);
+  if (!job || !job.elecTest) return;
+  const rems = (Array.isArray(job.remedials) ? job.remedials : []).filter(r => r && (r.description || (r.photos || []).length));
+  if (!rems.length) return;
+  const id = "JOB-" + job.id;
+  const store = fyrCode(job.siteCode) || String(job.siteCode || "").trim();
+  const siteName = String(job.siteName || job.helpdeskRef || job.reference || "").slice(0, 200);
+  const lines = rems.map(r => ({
+    action: (r.code ? `[${r.code}] ` : "") + String(r.description || "").trim(),
+    code: r.code || "", minutes: Number(r.minutes) || 0, materialCost: Number(r.materialCost) || 0,
+    photos: (r.photos || []).slice(0, 12), workStatus: "",
+  }));
+  const budget = rems.reduce((a, r) => a + (Number(r.materialCost) || 0), 0);
+  const now = new Date().toISOString();
+  const existing = await env.DB.prepare("SELECT stage, quote_date, data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first().catch(() => null);
+  let data = {}; try { data = existing && existing.data ? JSON.parse(existing.data) : {}; } catch {}
+  data.source = "job"; data.jobId = job.id;
+  if (job.remedialsWorksJobId) data.worksJobId = job.remedialsWorksJobId;
+  const stage = existing && existing.stage ? existing.stage : "to_review";
+  const quoteDate = (existing && existing.quote_date) ? existing.quote_date : now.slice(0, 10);
+  await env.DB.prepare(
+    "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+    "ON CONFLICT(id) DO UPDATE SET store_code=excluded.store_code, site_name=excluded.site_name, budget_cost=excluded.budget_cost, lines=excluded.lines, data=excluded.data, updated_at=excluded.updated_at"
+  ).bind(id, tid, "", store, siteName, "Electrical remedials", quoteDate, budget, job.priority || "", "", stage, JSON.stringify(lines), JSON.stringify(data), now, now).run();
+  _fyrTestedCache = { tid: null, at: 0, map: null };
+  // Alert the office that a new remedial set needs reviewing (deep-links the tracker).
+  if (existing || opts.silent) return;   // only on first open, not a re-completion or a self-heal backfill
+  try {
+    const body = `${siteName || store}: ${rems.length} remedial${rems.length === 1 ? "" : "s"} to review — quote the client.`;
+    await sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
+      { title: "⚡ 5-Year remedials to review", body, url: "/five-year-remedials.html", tag: "fyr-review:" + id }, null, true);
+  } catch {}
+}
+
+// The audit WORKS job raised from a case has completed → advance the case to done.
+export async function fiveYearWorksCompleted(env, tid, worksJob) {
+  await ensureTables(env);
+  const wid = String((worksJob && worksJob.id) || ""); if (!wid) return;
+  const { results } = await env.DB.prepare("SELECT id, stage, data FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }));
+  for (const r of (results || [])) {
+    let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+    if (d.worksJobId === wid) {
+      if (r.stage === "done" || r.stage === "invoiced") return;
+      await env.DB.prepare("UPDATE five_year_remedials SET stage='done', updated_at=? WHERE tenant_id=? AND id=?").bind(new Date().toISOString(), tid, r.id).run();
+      _fyrTestedCache = { tid: null, at: 0, map: null };
+      return;
+    }
+  }
+}
 // Build the per-store "the 5-year test has been done" map used to soften a red
 // "no cover" cell to amber "tested — cert to file". Sources, best signal first:
 //   remedial  — a five_year_remedials record (proof of inspection; carries stage+order)
@@ -1650,7 +1709,8 @@ export async function handle(request, env, ctx, url, sess) {
     else if (range !== "all") from = today;   // default = today
 
     // Every live EM/PAT/pump job (dormant fallback templates + archive already excluded).
-    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat || j.pumpMaintenance));
+    const allJobs = await listJobs(env, tid);
+    const jobs = allJobs.filter(j => j && (j.emTest || j.pat || j.pumpMaintenance));
     // Certificate rows for those jobs, keyed job_id::type.
     const certByKey = {};
     const jobIds = jobs.map(j => String(j.id));
@@ -1707,6 +1767,29 @@ export async function handle(request, env, ctx, url, sess) {
           activityAt: activity || "",
         });
       }
+    }
+    // Electrical-test (EICR) jobs completed WITH remedials but no works job yet →
+    // an office review item (raise the works job / run the 5-year remedials flow).
+    const isFin = s => /complete|closed|invoiced/i.test(String(s || "")) && !isCancelled(s);
+    for (const j of allJobs) {
+      if (!j || !j.elecTest) continue;
+      const rem = Array.isArray(j.remedials) ? j.remedials.filter(r => r && (r.description || (r.photos || []).length)) : [];
+      if (!rem.length) continue;                       // clean test — nothing to review
+      if (!isFin(j.status) && !j.remedialsWorksJobId) continue;   // not completed yet
+      const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean) : (j.assignedTo ? [j.assignedTo] : []);
+      const activity = j.updatedAt || j.scheduledAt || j.createdAt || "";
+      const day = londonDay(activity);
+      if (day && day > today) continue;
+      if (from && (!day || day < from)) continue;
+      items.push({
+        jobId: j.id, type: "elec",
+        site: j.siteName || j.helpdeskRef || j.reference || "",
+        siteCode: j.siteCode || "", engineers: engs, engineer: engs[0] || "",
+        status: j.remedialsWorksJobId ? "final" : "review",   // review = office to raise works
+        remCount: rem.length, worksJobId: j.remedialsWorksJobId || "",
+        certId: "", certNumber: "", scheduledAt: j.scheduledAt || "",
+        submittedAt: "", finalisedAt: "", activityAt: activity,
+      });
     }
     items.sort((a, b) => String(b.activityAt || "").localeCompare(String(a.activityAt || "")));
     const counts = {
@@ -2591,18 +2674,38 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /certs/five-year/board — the remedials register (+ live order match + stage).
   if (sub === "/five-year/board" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
+    // Self-heal: every completed electrical (EICR) test with remedials should have a
+    // case here — covers jobs finished before the auto-open hook + any missed one.
+    try {
+      const jobs = await listJobs(env, tid);
+      for (const j of jobs) {
+        if (j && j.elecTest && Array.isArray(j.remedials) &&
+            j.remedials.some(r => r && (r.description || (r.photos || []).length)) &&
+            /complete|closed|invoiced/i.test(String(j.status || ""))) {
+          await upsertFiveYearFromJob(env, tid, j, { silent: true });
+        }
+      }
+    } catch {}
     let { results } = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? ORDER BY quote_date DESC, store_code").bind(tid).all();
     results = await attachRemedialOrders(env, tid, results || []);
-    const rows = results.map(r => ({
-      id: r.id, sr: r.sr, storeCode: r.store_code, siteName: r.site_name,
-      element: r.element, quoteDate: r.quote_date, budgetCost: r.budget_cost,
-      priority: r.priority, workStatus: r.work_status, stage: r.stage || "quoted",
-      lines: (() => { try { return JSON.parse(r.lines || "[]"); } catch { return []; } })(),
-      order: r.order,
-    }));
+    const rows = results.map(r => {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      const lines = (() => { try { return JSON.parse(r.lines || "[]"); } catch { return []; } })();
+      return {
+        id: r.id, sr: r.sr, storeCode: r.store_code, siteName: r.site_name,
+        element: r.element, quoteDate: r.quote_date, budgetCost: r.budget_cost,
+        priority: r.priority, workStatus: r.work_status, stage: r.stage || "quoted",
+        lines,
+        source: d.source || "concerto", jobId: d.jobId || "", worksJobId: d.worksJobId || "",
+        photoCount: lines.reduce((a, l) => a + ((l.photos || []).length), 0),
+        order: r.order,
+      };
+    });
     const wantStatus = (q.get("status") || "").trim();
     const filtered = wantStatus ? rows.filter(r => (r.stage || "quoted") === wantStatus) : rows;
-    return json({ ok: true, rows: filtered, count: rows.length, ordered: rows.filter(r => r.order).length }, {}, env, request);
+    return json({ ok: true, rows: filtered, count: rows.length,
+      toReview: rows.filter(r => r.stage === "to_review").length,
+      ordered: rows.filter(r => r.order).length }, {}, env, request);
   }
   // POST /certs/five-year/stage {id, stage} — move a remedial along the pipeline.
   if (sub === "/five-year/stage" && method === "POST") {
@@ -2615,6 +2718,43 @@ export async function handle(request, env, ctx, url, sess) {
       .bind(stage, new Date().toISOString(), tid, id).run();
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
+  }
+  // GET /certs/five-year/quote-text?id= — a client-facing quote body built from the
+  // engineer's remedial list (code + description, one per line + a materials guide).
+  if (sub === "/five-year/quote-text" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const id = String(q.get("id") || "");
+    const row = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let lines = []; try { lines = JSON.parse(row.lines || "[]"); } catch {}
+    const head = `Remedial works following the fixed-wire inspection at ${row.site_name || row.store_code || "site"}${row.store_code ? " (store " + row.store_code + ")" : ""}:`;
+    const body = lines.map((l, i) => `${i + 1}. ${l.action || l.code || ""}`).join("\n");
+    const mat = Number(row.budget_cost) || 0;
+    const foot = `\nTotal: ${lines.length} item${lines.length === 1 ? "" : "s"}` + (mat ? ` · estimated materials £${mat.toFixed(2)}` : "");
+    return json({ ok: true, text: head + "\n\n" + body + foot }, {}, env, request);
+  }
+  // POST /certs/five-year/create-works {id} — turn a case's linked test job into the
+  // audit works job (reuses the same builder as the job card), links it, moves the
+  // case to `in_works`.
+  if (sub === "/five-year/create-works" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const row = await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return error("Not found", 404, env, request);
+    let d = {}; try { d = JSON.parse(row.data || "{}"); } catch {}
+    if (!d.jobId) return error("This case isn't linked to a test job — create the works job from the job card.", 400, env, request);
+    const src = await getJob(env, tid, d.jobId);
+    if (!src) return error("The linked test job no longer exists.", 404, env, request);
+    const pickIds = Array.isArray(b.itemIds) ? b.itemIds.map(String) : null;
+    const res = await createWorksJobFromRemedials(env, tid, src, { pickIds, by: me || "office" });
+    if (res.error) return error(res.error, res.status || 400, env, request);
+    d.worksJobId = res.id;
+    const stage = (row.stage === "done" || row.stage === "invoiced") ? row.stage : "in_works";
+    await env.DB.prepare("UPDATE five_year_remedials SET data=?, stage=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(d), stage, new Date().toISOString(), tid, id).run();
+    _fyrTestedCache = { tid: null, at: 0, map: null };
+    return json({ ok: true, worksJobId: res.id, ref: res.ref, existing: !!res.existing, stage }, {}, env, request);
   }
   // POST /certs/five-year/delete {id}
   if (sub === "/five-year/delete" && method === "POST") {
