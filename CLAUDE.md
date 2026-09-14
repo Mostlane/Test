@@ -3340,9 +3340,26 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
   branch (b) → `certs.fiveYearWorksCompleted` advances the case to **done**. New exports:
   sla.js `getJob`, `createWorksJobFromRemedials`; certs.js `upsertFiveYearFromJob`,
   `fiveYearWorksCompleted`. `remedials-form.js?v=6`, `cert-form.js?v=23`,
-  `firestop-form.js?v=3`, SW `mostlane-v125`. **TODO/next:** match a client order to a
-  job case (attachRemedialOrders keys on store code — works once an order for that store
-  arrives); fold the £ into job costing; a Help guide.
+  `firestop-form.js?v=3`, SW `mostlane-v125`.
+- **five-year-remedials.html is now the "5-Year electrical tests" SCHEDULE (14 Sep 2026,
+  Jamie: "a full schedule of all 5-year tests completed this year — portal or Workever
+  archive — settable stage, filterable; create the works job from the remedials; send the
+  remedials as a quote showing the time & costs, filter C1/C2/FI or include C3").** **GET
+  /certs/five-year/schedule?year=** (`fiveYearSchedule`, office) returns one row per
+  completed test in the year: **portal** elecTest jobs finished that year (completion day
+  from statusHistory) + the **Workever archive** (sla_jobs_archive 5-year/EICR keyword,
+  finished, Chapplins excluded — noisy, best-effort) + any Concerto-imported case dated
+  that year; each enriched with its remedials case (stage/lines/order). Stages
+  `FYR_STAGES = tested → to_review → quoted → ordered → in_works → done → invoiced`.
+  **POST /certs/five-year/stage {id,stage,meta}** now UPSERTS a stage-only row when the
+  id isn't an existing case (so a satisfactory/archive test can hold a stage). The page:
+  a **year selector**, per-stage **filter chips** with counts, a stage `<select>` per row,
+  source tags (⚡ portal / 🗄 Workever), remedial lines showing **time + £ per item**,
+  **📋 Quote** → a clean in-page modal (no `<br>` — real list; an **"Include C3"
+  tickbox**, default C1/C2/FI + uncoded only; per-item time·£; **📋 Copy** to clipboard),
+  and **🛠 Create works job** (portal remedials rows). The board self-heals cases; the old
+  MLUI.confirm quote (which showed literal `<br>`) is gone. **TODO/next:** fold £ into job
+  costing; match late client orders; a Help guide.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
