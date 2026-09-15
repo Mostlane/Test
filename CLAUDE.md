@@ -923,6 +923,22 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `backfillThumbs()` self-heals older photos with no thumb (fetch→shrink→POST
   /site/thumb, 2 lanes) — normally a no-op since new uploads carry their thumb.
   (job-view.html office view still uses full-res; same treatment could be applied there.)
+  **Job DOCUMENTS (PDFs etc.) — attached to a JOB ONLY, not the site (Sep 2026):**
+  a "📎 Documents on this job" box in the Engineer's-notes card on **job-view.html**
+  (office) lets you attach PDFs/docs to the job. Stored at R2 **`jobs/<id>/docs/`**
+  (deliberately NOT the `sitedocs/` prefix and NEVER injected into `/sla/site/docs`,
+  so they don't surface against the site). Endpoints in sla.js: **POST /sla/jobs/{id}/docs**
+  (multipart file+filename?+label?, any session), **GET /sla/jobs/{id}/docs** (list with
+  signed URLs), **DELETE /sla/jobs/{id}/docs?key=** (Full Access; key must be under
+  `jobs/<id>/docs/`). Served inline+CORS through the existing signed **/sla/site/doc**
+  route (which already streams `jobs/` keys), opened in **docviewer.js**. job-view calls
+  these on MOSTLANE_API via `mApi` (the page still loads over the legacy SLA host).
+  **The ENGINEER sees them too (read-only):** engineer-job.html renders a
+  "📎 Documents on this job" card (shown only when docs exist) for EVERY job type —
+  vital on pump/EM/PAT/firestop/elec jobs where the standard notes/photo card is
+  replaced, so the office-attached PDF is otherwise invisible. It lists each doc as a
+  tap-to-open link (opens the signed URL in a new tab) via `loadJobDocs()`, reaching
+  `/sla/jobs/{id}/docs` through the bridged `SLA_API` host (`jfetch`).
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
@@ -3340,9 +3356,133 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
   branch (b) → `certs.fiveYearWorksCompleted` advances the case to **done**. New exports:
   sla.js `getJob`, `createWorksJobFromRemedials`; certs.js `upsertFiveYearFromJob`,
   `fiveYearWorksCompleted`. `remedials-form.js?v=6`, `cert-form.js?v=23`,
-  `firestop-form.js?v=3`, SW `mostlane-v125`. **TODO/next:** match a client order to a
-  job case (attachRemedialOrders keys on store code — works once an order for that store
-  arrives); fold the £ into job costing; a Help guide.
+  `firestop-form.js?v=3`, SW `mostlane-v125`.
+- **five-year-remedials.html is now the "5-Year electrical tests" SCHEDULE (14 Sep 2026,
+  Jamie: "a full schedule of all 5-year tests completed this year — portal or Workever
+  archive — settable stage, filterable; create the works job from the remedials; send the
+  remedials as a quote showing the time & costs, filter C1/C2/FI or include C3").** **GET
+  /certs/five-year/schedule?year=** (`fiveYearSchedule`, office) returns one row per
+  completed test in the year: **portal** elecTest jobs finished that year (completion day
+  from statusHistory) + the **Workever archive** (sla_jobs_archive 5-year/EICR keyword,
+  finished, Chapplins excluded — noisy, best-effort) + any Concerto-imported case dated
+  that year; each enriched with its remedials case (stage/lines/order). Stages
+  `FYR_STAGES = tested → to_review → quoted → ordered → in_works → done → invoiced`.
+  **POST /certs/five-year/stage {id,stage,meta}** now UPSERTS a stage-only row when the
+  id isn't an existing case (so a satisfactory/archive test can hold a stage). The page:
+  a **year selector**, per-stage **filter chips** with counts, a stage `<select>` per row,
+  source tags (⚡ portal / 🗄 Workever), remedial lines showing **time + £ per item**,
+  **📋 Quote** → a clean in-page modal (no `<br>` — real list; an **"Include C3"
+  tickbox**, default C1/C2/FI + uncoded only; per-item time·£; **📋 Copy** to clipboard),
+  and **🛠 Create works job** (portal remedials rows). The board self-heals cases; the old
+  MLUI.confirm quote (which showed literal `<br>`) is gone. **TODO/next:** fold £ into job
+  costing; match late client orders; a Help guide.
+- **five-year-remedials.html RE-SCOPED to the FULL YEAR EICR SCHEDULE (14 Sep 2026, Jamie:
+  "the full EICR schedule Jan 26 → Dec 26… look like the compliance page, thin lines, a
+  traffic-light system of stages (filterable) with a dropdown at the end of the row to
+  change status… check the 5-year document for each site and tell me the current status
+  (out of date / unsatisfactory / in date but unsatisfactory / missing)… all areas of
+  5-year synced — remedial orders the portal knows set the status originally, I'll manually
+  update for orders going forward").** The page no longer reads `/certs/five-year/schedule`
+  (that completed-this-year view + endpoints STAY for the "Certificates to review" flow and
+  the eicr-portal amber "tested — cert to file" marker); it now reads **GET
+  /concerto/schedule?type=fiveYear&status=all** (routes/concerto.js) — the **Concerto PPM
+  5-year list** (Jamie's official list), one row per site, each already carrying the derived
+  pipeline **case** (`deriveCase` reads the elec-test job, the certificate, the compliance
+  check + any client order — so "remedial orders set the status originally" for free) plus
+  reconcile flags + cert history. Rows are filtered to the selected YEAR **client-side** by
+  `nextDate` year OR the tested-step date's year (Concerto rolls the date forward after a
+  test, so a completed-this-year site still shows). Presented as a **thin compliance-style
+  table** (sticky store column, horizontal scroll) with: **Certificate status** column (the
+  new server-computed **`docStatus`** — In date / No cert filed yet / In date but
+  unsatisfactory / Out of date / Out of date + unsatisfactory / Missing, traffic-lit),
+  **Next due**, **Tested by**, a traffic-light **Stage**, and a per-row **status dropdown**.
+  - **12-stage single-status set** (Jamie's, replacing the 7-stage FYR_STAGES *for this
+    page only*): **`FY_STAGES`** in concerto.js (exported) = needs_booking · scheduled ·
+    awaiting_review · complete_satisfactory · remedials_required · remedials_to_quote ·
+    remedials_quoted · orders_received · remedials_scheduled · remedials_complete ·
+    certificate_updated · invoiced, each with a red/amber/green `light`. It is a SINGLE
+    status, NOT the CASE_STEPS checklist — **`fyStage12Auto(caseView)`** (exported) collapses
+    the checklist steps + outcome + works-job-scheduled into ONE of the 12. The concerto-ppm
+    5-Year tab keeps the full CASE_STEPS checklist; both read the same case, so they agree.
+  - **Manual override**: `concerto_cases.stage12` (+ `stage12_at`/`stage12_by`, self-migrating).
+    Blank = the derived `fyStage12Auto` shows; a set value WINS until cleared (mirrors the
+    `outcome`/`engineer` override precedent — Jamie's "I'll manually update going forward").
+    `deriveCase` returns `stage12`/`stage12Auto`/`stage12Source`; **POST /concerto/case
+    {ppmId, stage12}** sets it (logged), clears with `""`, and sets the checklist `outcome`
+    coherently (any remedials_* stage ⇒ unsatisfactory; complete_satisfactory ⇒ satisfactory)
+    so the pipeline page stays consistent. `stats.pipeline.byStage12` + `stages12` feed the
+    filter chips; buildSchedule adds `docStatus` per pipeline row.
+  - Filter chips per stage (traffic-lit, counts) + 🚩-flagged toggle + search; each row
+    expands to the read-only step strip + outcome + links (test job / ➕ raise test job /
+    works job / certificate / compliance check / client orders / site folder / full case on
+    concerto-ppm) + log. Test: `node --no-warnings worker/tools/test-concerto.mjs` (the
+    "12-stage single status + document status" block). **TODO/next:** fold remedial £ into
+    job costing; a Help guide for the schedule.
+  - **Mobile tile + sidebar + sort + urgency colour + both due dates + friendly dates
+    (14 Sep 2026):** main.html gained a **⚡ 5-Year EICR tile** (id `FiveYear`, MAP
+    `["Compliance","SLAAdmin"]`) + a portal-config sidebar item "5-Year EICR" (same perms;
+    portal-config bumped `?v=37`, SW `mostlane-v126`). The stage traffic-light is no longer
+    a blanket red for "needs booking" — `stageLight(r)` colours the pre-test stages by when
+    our cert runs out (the Mostlane/compliance `chartDue`): out of date / no cert → red,
+    within 60 days → amber, else green; a booked job → green; remedial stages keep their own
+    lights. Summary tiles: Needs booking NEUTRAL + separate amber "Due within 60 days" + red
+    "Out of date / no cert". The Certificate-status pill is **clickable** (📄 open →
+    /compliance/file-url). Due column split into **Concerto due** + **Mostlane due** (with a
+    runs-out hint). **Sort dropdown** (localStorage `mlFyrSort`): Store number (Concerto
+    order, default) / Next due / Stage / Certificate status / Site name. Dates render
+    "11th Dec 26" (`fmtD`).
+  - **5-year test AUDIT (14 Sep 2026, Jamie: "tests with no matching Concerto item —
+    highlight + list; and duplicates where we re-test a site done a year or two ago"):**
+    **GET /concerto/audit?year=YYYY** (concerto.js `fiveYearAudit`, office) reads the same
+    test evidence as the schedule (`historyIndex`: filed 5-year cert / finished elecTest job
+    / Workever archive) and returns two lists for the year: **`offList`** = a 5-year test
+    carried out that year for a store NOT on the Concerto fiveYear list (`concerto_ppm`
+    store set), and **`earlyRetest`** = a test that year whose PREVIOUS genuine test (>180
+    days earlier, to skip the same visit's cert+job pair) was **< 4 years** before — re-tested
+    with over a year of the 5-year cert still to run (`gapMonths`). five-year-remedials.html
+    shows them as two highlighted cards above the table (red "⚠ Tested in YEAR but NOT on the
+    Concerto list", amber "🔁 Re-tested early — last EICR still in date"), each row linking
+    the test job / certificate / site; `loadAudit` re-fetches on year change. Covered by
+    test-concerto.mjs ("5-year test audit" block). dist rebuilt.
+  - **Inactive sites tab (14 Sep 2026):** buildSchedule now sets **`row.inactive`** =
+    `!!(store && store.closed)` (chartStores' `closed` = `sites.active===0` or a
+    "closed" name/due) + `stats.inactive`. five-year-remedials.html has two view tabs
+    above the tiles — **⚡ Schedule** (default; EXCLUDES inactive sites, so a closed
+    store never sits red "needs booking") and **🚫 Inactive sites (N)** (every closed
+    site Concerto still lists, ignoring the year filter). An inactive row carries a
+    grey "🚫 Inactive" pill in the store cell; the audit cards are hidden in the
+    inactive view. Front-end tab state `VIEW` ("active"|"inactive"); no `?v=` bump.
+  - **Stuck red flag once a certificate is filed — FIXED (14 Sep 2026, Jamie:
+    "the 5-year page is keeping items flagged when I have uploaded a certificate…
+    example is Emsworth").** A `reconcileRow` "gap" (our chart due earlier than
+    Concerto's planned next test) was raised as a red `case.autoFlag` "⛔ No
+    certificate cover" WHENEVER the chart date was earlier than Concerto's — even
+    when we hold an in-date certificate for years (Emsworth 0079: cert filed dated
+    2025-06, chart rolled to 2030-06-19, Concerto's next test 2031-06-30 → the site
+    is comfortably covered, but it stayed red). Now the gap is only a LIVE "no
+    cover" flag when our cover has run out OR ends within a lookahead window
+    (`freq>=12 ? 365 : 45` days from `today`); a cover date further out returns
+    **flag `mismatch`** ("We hold a certificate to <date>; Concerto has the next
+    test planned for <date>, later than our expiry — Concerto's date should be
+    corrected") which raises NO autoFlag, so a freshly-certified site drops back to
+    green/not-due. Near-term gaps (cover ending soon, or already expired) still flag
+    red exactly as before (0777 test: 5.5 months out → still gap). `chartStores`
+    already normalises `due` to ISO via `toIsoDate`, so DD/MM/YYYY stored dates
+    reconcile correctly (an unparseable date is guarded by `Number.isFinite`).
+  - **Per-job notes (14 Sep 2026, Jamie: "leave notes on each job"):** each row's
+    ▸ Details has a **📝 Notes on this job** free-text box, autosaved via **POST
+    /concerto/case `{ppmId, caseNote}`** to a new **`concerto_cases.note`** column
+    (+ `note_at`/`note_by`, self-migrating; distinct from the 🚩 flag note and the
+    per-step notes). `deriveCase` returns `note`/`noteBy`/`noteAt`; a noted case
+    counts as `touched` (stays active).
+  - **"📋 Alex list" (14 Sep 2026, Jamie: "an Alex List button… items to discuss
+    with Alex and tick off when he sorts them"):** a header button (with an
+    outstanding-count badge) opens a modal — a shared page-level checklist stored
+    in app_config **`fyr:alexlist:<tid>`** = `{items:[{id,text,done,addedAt/By,
+    doneAt/By,storeCode,siteName}]}`. **GET/POST /concerto/alex-list** (office):
+    POST `{add}` prepends an item, `{id,done}` ticks it off, `{id,text}` edits,
+    `{id,delete}` removes; outstanding-first ordering. Test:
+    `node --no-warnings worker/tools/test-concerto.mjs` ("Per-job note + Alex list").
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

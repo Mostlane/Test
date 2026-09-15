@@ -9752,6 +9752,18 @@ async function ensureTables__raw(env) {
     } catch {
     }
   }
+  for (const col of ["note TEXT", "note_at TEXT", "note_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
+  for (const col of ["stage12 TEXT", "stage12_at TEXT", "stage12_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run();
+    } catch {
+    }
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -10101,6 +10113,11 @@ function reconcileRow(row, store, today) {
   if (chartDue < pStart) {
     const gapDays = Math.round((Date.parse(pStart + "T00:00:00Z") - Date.parse(chartDue + "T00:00:00Z")) / 864e5);
     const span = gapDays >= 60 ? `about ${Math.round(gapDays / 30)} months` : `${gapDays} days`;
+    const coverEndsInDays = Math.round((Date.parse(chartDue + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5);
+    const lookahead = freq >= 12 ? 365 : 45;
+    if (Number.isFinite(coverEndsInDays) && coverEndsInDays > lookahead) {
+      return { flag: "mismatch", text: `We hold a certificate to ${cDue}; Concerto has the next test planned for ${cPer}, later than our expiry \u2014 Concerto's date should be corrected (otherwise ${span} uncovered from ${cDue}).`, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
+    }
     const text = chartDue < today ? `Our certificate ran out on ${cDue} but Concerto has the next test planned for ${cPer}. The site has NO valid certificate right now and will not have one until it is tested \u2014 ${span} uncovered if we wait for Concerto's date. Get it tested and get Concerto's date corrected.` : `Our certificate runs out on ${cDue} but Concerto has the next test planned for ${cPer}. If we wait for Concerto's date the site would have no valid certificate for ${span}. Test it by ${cDue} and get Concerto's date corrected.`;
     return { flag: "gap", text, chartDue, gapFrom: chartDue, gapTo: pStart, gapDays };
   }
@@ -10236,6 +10253,34 @@ async function historyIndex(env, tid, type, preloadedJobs) {
   }
   for (const list of byCode.values()) list.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
   return byCode;
+}
+function fyStage12Auto(c) {
+  if (!c) return "needs_booking";
+  const done = (k) => (c.steps || []).some((s) => s.key === k && s.done);
+  const sat = c.outcome === "satisfactory", unsat = c.outcome === "unsatisfactory";
+  if (!done("scheduled")) return "needs_booking";
+  if (!done("tested")) return "scheduled";
+  if (!done("reviewed") || !sat && !unsat) return "awaiting_review";
+  if (sat) return done("invoiced") ? "invoiced" : "complete_satisfactory";
+  if (done("invoiced") && done("rem_closed")) return "invoiced";
+  if (done("cert_updated")) return "certificate_updated";
+  if (done("works_done")) return "remedials_complete";
+  if (done("ordered")) return c.worksJob && c.worksJob.scheduledAt ? "remedials_scheduled" : "orders_received";
+  if (done("quoted")) return "remedials_quoted";
+  return "remedials_required";
+}
+function fyDocStatus(chartDue, c, lastDone, today) {
+  const outcome = c ? c.outcome || "" : "";
+  const remedied = !!(c && (c.certUpdated || c.outcomeAuto === "remedied" || (c.steps || []).some((s) => s.key === "cert_updated" && s.done)));
+  const unsat = outcome === "unsatisfactory" && !remedied;
+  const hasCert = !!(c && c.cert) || !!lastDone;
+  const expired = !!(chartDue && chartDue < today);
+  if (!chartDue && !hasCert) return { key: "missing", label: "Missing", light: "red", note: "No 5-year certificate on file" };
+  if (expired && unsat) return { key: "expired_unsat", label: "Out of date + unsatisfactory", light: "red", note: "expired " + chartDue };
+  if (expired) return { key: "expired", label: "Out of date", light: "red", note: chartDue ? "expired " + chartDue : "" };
+  if (unsat) return { key: "in_unsat", label: "In date, unsatisfactory", light: "amber", note: chartDue ? "valid to " + chartDue : "" };
+  if (!hasCert) return { key: "due", label: "No cert filed yet", light: "amber", note: chartDue ? "chart due " + chartDue : "" };
+  return { key: "in_date", label: "In date", light: "green", note: chartDue ? "valid to " + chartDue : "" };
 }
 async function caseContext(env, tid, type, jobs) {
   const ctx = { testJobs: /* @__PURE__ */ new Map(), jobsById: /* @__PURE__ */ new Map(), certs: /* @__PURE__ */ new Map(), reviews: /* @__PURE__ */ new Map(), orders: /* @__PURE__ */ new Map(), cases: /* @__PURE__ */ new Map(), log: /* @__PURE__ */ new Map() };
@@ -10376,12 +10421,15 @@ function deriveCase(r, ctx, today, money2, rec) {
   const allDone = applicable.length > 0 && !nextStep;
   const daysToDue = nextDate ? Math.round((Date.parse(nextDate + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 864e5) : null;
   const closed = !!(c && c.closed_at);
-  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note));
+  const touched = Object.keys(manual).length > 0 || !!(c && (c.outcome || c.engineer || c.hold_reason || c.flag_note || c.note));
   const autoFlag = !closed && rec && rec.flag === "gap" ? { reason: "gap", note: "\u26D4 No certificate cover: " + rec.text } : null;
   const flagged = !closed && (!!(c && c.flag_note) || !!autoFlag);
   const active = !closed && (!!r.order_nr || daysToDue != null && daysToDue <= 365 || !!testJob || touched || !!autoFlag);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
+  const stage12Auto = fyStage12Auto({ steps, outcome, worksJob: wj ? { scheduledAt: wj.scheduledAt } : null });
+  const stage12Manual = c && c.stage12 && FY_STAGE_KEYS.has(c.stage12) ? c.stage12 : "";
+  const stage12 = stage12Manual || stage12Auto;
   return {
     id: c ? c.id : caseId(r.id, cycleDue),
     stored: !!c,
@@ -10390,6 +10438,11 @@ function deriveCase(r, ctx, today, money2, rec) {
     closed,
     closedAt: c && c.closed_at || null,
     closedBy: c && c.closed_by || "",
+    stage12,
+    stage12Auto,
+    stage12Source: stage12Manual ? "manual" : "auto",
+    stage12At: c && c.stage12_at || null,
+    stage12By: c && c.stage12_by || "",
     held,
     holdReason: held ? c.hold_reason : "",
     heldBy: held ? c.held_by || "" : "",
@@ -10398,6 +10451,9 @@ function deriveCase(r, ctx, today, money2, rec) {
     flagNote: !closed && c && c.flag_note ? c.flag_note : "",
     flaggedBy: !closed && c && c.flag_note ? c.flagged_by || "" : "",
     flaggedAt: !closed && c && c.flag_note ? c.flagged_at || null : null,
+    note: c && c.note || "",
+    noteBy: c && c.note_by || "",
+    noteAt: c && c.note_at || null,
     autoFlag,
     outcome,
     outcomeAuto,
@@ -10442,6 +10498,8 @@ async function buildSchedule(env, tid, opts) {
     const done = h.filter((x) => x.source === "cert" || x.done);
     const lastDone = done[0] || null;
     const job = r.store_code ? booked.get(r.store_code + "|" + type) : null;
+    const chartDue = store && store.due[type] || null;
+    const caseView = cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : void 0;
     return {
       id: r.id,
       type,
@@ -10451,6 +10509,7 @@ async function buildSchedule(env, tid, opts) {
       siteName: store && store.name || r.site_name || "",
       block: r.block || "",
       category: store ? store.category : "",
+      inactive: !!(store && store.closed),
       nextDate: r.next_date || r.planned_date || null,
       lastDate: r.last_date || null,
       released: !!r.order_nr,
@@ -10462,13 +10521,14 @@ async function buildSchedule(env, tid, opts) {
       status: r.status,
       note: r.note || "",
       lastSeenAt: r.last_seen_at,
-      chartDue: store && store.due[type] || null,
+      chartDue,
       flag: rec.flag,
       flagText: rec.text,
       lastDone,
       history: h.slice(0, 6),
       job: job || null,
-      case: cctx ? deriveCase(r, cctx, today, !!opts.money, rec) : void 0
+      case: caseView,
+      docStatus: pipeline ? fyDocStatus(chartDue, caseView, lastDone, today) : void 0
     };
   });
   const from = opts.from || "", to = opts.to || "";
@@ -10481,7 +10541,7 @@ async function buildSchedule(env, tid, opts) {
     if (r.released) byYear[y].released++;
     if (r.flag === "done") byYear[y].done++;
   }
-  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, gap: rows.filter((r) => r.flag === "gap").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, byYear };
+  const stats = { sites: rows.length, released: rows.filter((r) => r.released).length, notReleased: rows.filter((r) => !r.released).length, done: rows.filter((r) => r.flag === "done").length, overdue: rows.filter((r) => r.flag === "overdue").length, mismatch: rows.filter((r) => r.flag === "mismatch").length, gap: rows.filter((r) => r.flag === "gap").length, noStore: rows.filter((r) => r.flag === "no_store").length, notOnChart: rows.filter((r) => r.flag === "not_on_chart").length, withHistory: rows.filter((r) => r.lastDone).length, inactive: rows.filter((r) => r.inactive).length, byYear };
   let releaseLog = [];
   try {
     const { results: lg } = await env.DB.prepare("SELECT ppm_id, detail, at FROM concerto_log WHERE tenant_id=? AND event='released' ORDER BY at DESC LIMIT 500").bind(tid).all();
@@ -10511,11 +10571,12 @@ async function buildSchedule(env, tid, opts) {
   stats.byMonth = byMonth;
   stats.dueSoonNotReleased = rows.filter((r) => !r.released && r.nextDate && r.nextDate <= addDays(today, 90) && r.status === "open").length;
   if (pipeline) {
-    const byStage = {}, byEngineer = {};
+    const byStage = {}, byEngineer = {}, byStage12 = {};
     for (const r of rows) {
       const c = r.case;
       if (!c) continue;
       byStage[c.stage] = (byStage[c.stage] || 0) + 1;
+      byStage12[c.stage12] = (byStage12[c.stage12] || 0) + 1;
       const tj = c.testJob;
       if (tj && tj.engineer) {
         const e = byEngineer[tj.engineer] = byEngineer[tj.engineer] || { tested: 0, scheduled: 0, byYear: {} };
@@ -10526,10 +10587,50 @@ async function buildSchedule(env, tid, opts) {
         } else e.scheduled++;
       }
     }
-    stats.pipeline = { byStage, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, flagged: rows.filter((r) => r.case && r.case.flagged).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
+    stats.pipeline = { byStage, byStage12, stages12: FY_STAGES, active: rows.filter((r) => r.case && r.case.active && !r.case.closed).length, flagged: rows.filter((r) => r.case && r.case.flagged).length, held: byStage.held || 0, complete: byStage.complete || 0, notDue: byStage.not_due || 0, closed: byStage.closed || 0, steps: CASE_STEPS };
     stats.byEngineer = byEngineer;
   }
   return { type, rows: filtered, total: rows.length, stats, today };
+}
+async function fiveYearAudit(env, tid, year) {
+  await ensureTables2(env);
+  year = String(year || todayIso().slice(0, 4)).slice(0, 4);
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  const hist = await historyIndex(env, tid, "fiveYear", jobs);
+  const stores = await chartStores(env, tid);
+  const onList = /* @__PURE__ */ new Set();
+  try {
+    const { results } = await env.DB.prepare("SELECT DISTINCT store_code FROM concerto_ppm WHERE tenant_id=? AND ppm_type=? AND COALESCE(store_code,'')<>''").bind(tid, "fiveYear").all();
+    for (const r of results || []) {
+      const c = padCode(r.store_code);
+      if (c) onList.add(c);
+    }
+  } catch {
+  }
+  const EARLY_DAYS = 4 * 365;
+  const SAME_VISIT_DAYS = 180;
+  const isTest = (e) => !!(e && e.date && (e.source === "cert" || e.done === true));
+  const offList = [], earlyRetest = [];
+  for (const [code, list] of hist.entries()) {
+    const tests = list.filter(isTest).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const thisYear = tests.find((e) => String(e.date).slice(0, 4) === year);
+    if (!thisYear) continue;
+    const store = stores.get(code) || null;
+    const base = { storeCode: code, siteName: store && store.name || "", testedAt: thisYear.date, source: thisYear.source, jobId: thisYear.source !== "cert" ? thisYear.id || null : null, ref: thisYear.title || "" };
+    if (!onList.has(code)) offList.push(base);
+    const prev = tests.find((e) => (Date.parse(thisYear.date) - Date.parse(e.date)) / 864e5 > SAME_VISIT_DAYS);
+    if (prev) {
+      const gap = (Date.parse(thisYear.date) - Date.parse(prev.date)) / 864e5;
+      if (gap < EARLY_DAYS) earlyRetest.push({ ...base, prevAt: prev.date, prevSource: prev.source, prevJobId: prev.source !== "cert" ? prev.id || null : null, gapMonths: Math.round(gap / 30.44) });
+    }
+  }
+  offList.sort((a, b) => String(a.storeCode).localeCompare(String(b.storeCode)));
+  earlyRetest.sort((a, b) => a.gapMonths - b.gapMonths);
+  return { year, offList, earlyRetest };
 }
 async function handle9(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
@@ -10554,6 +10655,10 @@ async function handle9(request, env, ctx, url, sess) {
     const q = url.searchParams;
     const out = await buildSchedule(env, tid, { type: q.get("type") || "fiveYear", from: q.get("from") || "", to: q.get("to") || "", released: q.get("released") || "all", status: q.get("status") || "open", money: money2 });
     return json({ ok: true, money: money2, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/audit" && method === "GET") {
+    const out = await fiveYearAudit(env, tid, url.searchParams.get("year") || "");
+    return json({ ok: true, ...out }, {}, env, request);
   }
   if (path === "/concerto/case" && method === "POST") {
     const b = await body();
@@ -10615,6 +10720,17 @@ async function handle9(request, env, ctx, url, sess) {
       c.engineer = String(b.engineer || "").slice(0, 80);
       events.push({ action: "engineer", engineer: c.engineer, text: c.engineer ? "Tested by: " + c.engineer : "Engineer cleared (back to the job's engineer)" });
     }
+    if (b.stage12 !== void 0) {
+      const s = String(b.stage12 || "");
+      if (s && !FY_STAGE_KEYS.has(s)) return error("Unknown stage", 400, env, request);
+      c.stage12 = s || null;
+      c.stage12_at = s ? now : null;
+      c.stage12_by = s ? me : null;
+      const lbl = (FY_STAGES.find((x) => x.key === s) || {}).label || s;
+      events.push({ action: "stage12", stage12: s, text: s ? "Status set: " + lbl : "Status cleared (back to what the portal sees)" });
+      if (s && FY_UNSAT_STAGES.has(s) && c.outcome !== "unsatisfactory") c.outcome = "unsatisfactory";
+      else if (s === "complete_satisfactory" && c.outcome !== "satisfactory") c.outcome = "satisfactory";
+    }
     if (b.hold !== void 0) {
       const reason = String(b.hold || "").slice(0, 200);
       if (reason) {
@@ -10643,6 +10759,20 @@ async function handle9(request, env, ctx, url, sess) {
         events.push({ action: "unflag", text: "Flag cleared" });
       }
     }
+    if (b.caseNote !== void 0) {
+      const note = String(b.caseNote || "").slice(0, 1e3);
+      if (note) {
+        c.note = note;
+        c.note_at = now;
+        c.note_by = me;
+        events.push({ action: "note", note, text: "\u{1F4DD} Note: " + note });
+      } else {
+        c.note = null;
+        c.note_at = null;
+        c.note_by = null;
+        events.push({ action: "note-clear", text: "Note cleared" });
+      }
+    }
     if (b.close) {
       c.closed_at = now;
       c.closed_by = me;
@@ -10655,9 +10785,47 @@ async function handle9(request, env, ctx, url, sess) {
       c.closed_by = null;
       events.push({ action: "reopen", text: "Case reopened" });
     }
-    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, note=?, note_at=?, note_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.note || null, c.note_at || null, c.note_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
+  }
+  if (path === "/concerto/alex-list") {
+    const key = "fyr:alexlist:" + tid;
+    const load = async () => {
+      const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      try {
+        const v = JSON.parse(r && r.value || "{}");
+        return Array.isArray(v.items) ? v.items : [];
+      } catch {
+        return [];
+      }
+    };
+    const save = async (items) => {
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify({ items })).run();
+    };
+    if (method === "GET") return json({ ok: true, items: await load() }, {}, env, request);
+    if (method === "POST") {
+      const b = await body();
+      let items = await load();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      if (typeof b.add === "string" && b.add.trim()) {
+        items.unshift({ id: "ax" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: b.add.trim().slice(0, 500), done: false, addedAt: now, addedBy: me, storeCode: String(b.storeCode || "").slice(0, 12), siteName: String(b.siteName || "").slice(0, 120) });
+      } else if (b.id) {
+        const it = items.find((x) => x.id === b.id);
+        if (!it) return error("Item not found", 404, env, request);
+        if (b.delete) items = items.filter((x) => x.id !== b.id);
+        else {
+          if (typeof b.done === "boolean") {
+            it.done = b.done;
+            it.doneAt = b.done ? now : null;
+            it.doneBy = b.done ? me : "";
+          }
+          if (typeof b.text === "string") it.text = b.text.trim().slice(0, 500);
+        }
+      } else return error("Nothing to do", 400, env, request);
+      await save(items);
+      return json({ ok: true, items }, {}, env, request);
+    }
   }
   if (path === "/concerto/log" && method === "GET") {
     await ensureTables2(env);
@@ -10710,7 +10878,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -10747,6 +10915,22 @@ var init_concerto = __esm({
       { key: "rem_closed", label: "Remedials closed & invoiced on Concerto", short: "Rem. inv.", todo: "Remedials to close", unsat: true }
     ];
     STEP_KEYS = new Set(CASE_STEPS.map((s) => s.key));
+    FY_STAGES = [
+      { key: "needs_booking", label: "Needs booking", light: "red" },
+      { key: "scheduled", label: "Scheduled", light: "amber" },
+      { key: "awaiting_review", label: "Test complete \u2014 awaiting review", light: "amber" },
+      { key: "complete_satisfactory", label: "Complete \u2014 satisfactory", light: "green" },
+      { key: "remedials_required", label: "Complete \u2014 remedials required", light: "red" },
+      { key: "remedials_to_quote", label: "Remedials to quote", light: "red" },
+      { key: "remedials_quoted", label: "Remedials quoted", light: "amber" },
+      { key: "orders_received", label: "Remedial orders received", light: "amber" },
+      { key: "remedials_scheduled", label: "Remedials scheduled", light: "amber" },
+      { key: "remedials_complete", label: "Remedials complete", light: "amber" },
+      { key: "certificate_updated", label: "Certificate updated", light: "green" },
+      { key: "invoiced", label: "Invoiced", light: "green" }
+    ];
+    FY_STAGE_KEYS = new Set(FY_STAGES.map((s) => s.key));
+    FY_UNSAT_STAGES = /* @__PURE__ */ new Set(["remedials_required", "remedials_to_quote", "remedials_quoted", "orders_received", "remedials_scheduled", "remedials_complete", "certificate_updated"]);
     caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
     REMEDIAL_ORDER = /eicr|5\s*-?\s*y(ea)?r|five\s*year|fixed\s*wire|electrical|remedial|\bC[123]\b/i;
   }
@@ -13021,6 +13205,139 @@ async function fiveYearWorksCompleted(env, tid, worksJob) {
     }
   }
 }
+function completedDay(j) {
+  let latest = "";
+  for (const h of Array.isArray(j.statusHistory) ? j.statusHistory : []) {
+    if (h && /complete|closed|invoiced/i.test(String(h.status || ""))) {
+      const at = String(h.at || "");
+      if (at > latest) latest = at;
+    }
+  }
+  return String(latest || j.completedAt || j.updatedAt || j.scheduledAt || "").slice(0, 10);
+}
+async function fiveYearSchedule(env, tid, year) {
+  const y = String(year || (/* @__PURE__ */ new Date()).getFullYear());
+  const rows = [];
+  const seen = /* @__PURE__ */ new Set();
+  const caseRows = (await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }))).results || [];
+  const caseByKey = {};
+  for (const c of caseRows) {
+    let d = {};
+    try {
+      d = JSON.parse(c.data || "{}");
+    } catch {
+    }
+    let lines = [];
+    try {
+      lines = JSON.parse(c.lines || "[]");
+    } catch {
+    }
+    caseByKey[c.id] = { row: c, data: d, lines };
+  }
+  const jobs = await listJobs(env, tid);
+  for (const j of jobs) {
+    if (j && j.elecTest && Array.isArray(j.remedials) && j.remedials.some((r) => r && (r.description || (r.photos || []).length)) && /complete|closed|invoiced/i.test(String(j.status || "")) && completedDay(j).slice(0, 4) === y && !caseByKey["JOB-" + j.id]) {
+      try {
+        await upsertFiveYearFromJob(env, tid, j, { silent: true });
+      } catch {
+      }
+    }
+  }
+  const caseRows2 = (await env.DB.prepare("SELECT * FROM five_year_remedials WHERE tenant_id=?").bind(tid).all().catch(() => ({ results: [] }))).results || [];
+  const caseByKey2 = {};
+  for (const c of caseRows2) {
+    let d = {};
+    try {
+      d = JSON.parse(c.data || "{}");
+    } catch {
+    }
+    let lines = [];
+    try {
+      lines = JSON.parse(c.lines || "[]");
+    } catch {
+    }
+    caseByKey2[c.id] = { row: c, data: d, lines };
+  }
+  for (const j of jobs) {
+    if (!j || !j.elecTest) continue;
+    if (!/complete|closed|invoiced/i.test(String(j.status || ""))) continue;
+    const day = completedDay(j);
+    if (day.slice(0, 4) !== y) continue;
+    const key = "JOB-" + j.id;
+    const c = caseByKey2[key];
+    const rems = (Array.isArray(j.remedials) ? j.remedials : []).filter((r) => r && (r.description || (r.photos || []).length));
+    const lines = c ? c.lines : rems.map((r) => ({ action: (r.code ? `[${r.code}] ` : "") + String(r.description || "").trim(), code: r.code || "", minutes: Number(r.minutes) || 0, materialCost: Number(r.materialCost) || 0, photos: (r.photos || []).slice(0, 12) }));
+    rows.push({
+      key,
+      source: "portal",
+      jobId: j.id,
+      store_code: fyrCode(j.siteCode) || String(j.siteCode || "").trim(),
+      siteName: j.siteName || j.helpdeskRef || j.reference || "",
+      engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers[0] : "") || "",
+      completedAt: day,
+      remCount: rems.length,
+      lines,
+      worksJobId: c && c.data.worksJobId || j.remedialsWorksJobId || "",
+      stage: c && c.row.stage || (rems.length ? "to_review" : "tested")
+    });
+    seen.add(key);
+  }
+  const arch = (await env.DB.prepare(
+    "SELECT id, ref, site_code, status, completed_at, json_extract(data,'$.jobName') AS jobName, json_extract(data,'$.siteName') AS siteName, json_extract(data,'$.customerName') AS customerName FROM sla_jobs_archive WHERE tenant_id=? AND completed_at>=? AND completed_at<? AND id NOT LIKE 'CHAP-%' AND (lower(search) LIKE '%5 year%' OR lower(search) LIKE '%fixed wire%' OR lower(search) LIKE '%eicr%' OR lower(search) LIKE '%electrical install% condition%')"
+  ).bind(tid, y + "-01-01", Number(y) + 1 + "-01-01").all().catch(() => ({ results: [] }))).results || [];
+  for (const r of arch) {
+    if (!/complete|closed|invoiced/i.test(String(r.status || ""))) continue;
+    if (/chapplins/i.test(String(r.jobName || ""))) continue;
+    const key = "ARCH-" + r.id;
+    if (seen.has(key)) continue;
+    const c = caseByKey2[key];
+    let nm = r.siteName || r.customerName || "";
+    if (!nm && r.jobName) {
+      const p = String(r.jobName).split(" - ").map((s) => s.trim()).filter(Boolean);
+      nm = p.length >= 2 ? p[1] : p[0] || "";
+    }
+    rows.push({
+      key,
+      source: "archive",
+      jobId: "",
+      archiveId: r.id,
+      store_code: fyrCode(r.site_code) || "",
+      siteName: String(nm || "").slice(0, 200) || "Store " + (r.site_code || ""),
+      engineer: "",
+      completedAt: String(r.completed_at || "").slice(0, 10),
+      remCount: c ? c.lines.length : 0,
+      lines: c ? c.lines : [],
+      worksJobId: c && c.data.worksJobId || "",
+      stage: c && c.row.stage || "tested"
+    });
+    seen.add(key);
+  }
+  for (const c of caseRows2) {
+    if (seen.has(c.id)) continue;
+    if (String(c.data && c.data.source) === "job") continue;
+    const day = String(c.row.quote_date || c.row.updated_at || "").slice(0, 10);
+    if (day.slice(0, 4) !== y) continue;
+    rows.push({
+      key: c.id,
+      source: "concerto",
+      jobId: "",
+      store_code: c.row.store_code || "",
+      siteName: c.row.site_name || "",
+      engineer: "",
+      completedAt: day,
+      remCount: c.lines.length,
+      lines: c.lines,
+      worksJobId: c.data && c.data.worksJobId || "",
+      stage: c.row.stage || "quoted",
+      sr: c.row.sr || ""
+    });
+    seen.add(c.id);
+  }
+  await attachRemedialOrders(env, tid, rows);
+  for (const r of rows) r.storeCode = r.store_code;
+  rows.sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
+  return rows;
+}
 async function fiveYearTestedMap(env, tid) {
   const now = Date.now();
   if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now - _fyrTestedCache.at < 5 * 60 * 1e3)
@@ -14689,13 +15006,45 @@ ${con.tradingTitle || "Mostlane"}`;
       ordered: rows.filter((r) => r.order).length
     }, {}, env, request);
   }
+  if (sub === "/five-year/schedule" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const year = parseInt(q.get("year"), 10) || (/* @__PURE__ */ new Date()).getFullYear();
+    const rows = await fiveYearSchedule(env, tid, year);
+    const stages = {};
+    for (const s of FYR_STAGES) stages[s] = rows.filter((r) => r.stage === s).length;
+    return json({ ok: true, year, rows, stages, count: rows.length }, {}, env, request);
+  }
   if (sub === "/five-year/stage" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const id = String(b.id || "");
     const stage = FYR_STAGES.includes(b.stage) ? b.stage : null;
     if (!id || !stage) return error("id and a valid stage are required", 400, env, request);
-    await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const upd = await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, now, tid, id).run();
+    if (!upd.meta || !upd.meta.changes) {
+      const m = b.meta || {};
+      const data = { source: m.source || "", jobId: m.jobId || "" };
+      await env.DB.prepare(
+        "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stage=excluded.stage, updated_at=excluded.updated_at"
+      ).bind(
+        id,
+        tid,
+        "",
+        fyrCode(m.storeCode) || String(m.storeCode || ""),
+        String(m.siteName || "").slice(0, 200),
+        "5-year electrical test",
+        String(m.completedAt || now).slice(0, 10),
+        0,
+        "",
+        "",
+        stage,
+        "[]",
+        JSON.stringify(data),
+        now,
+        now
+      ).run();
+    }
     _fyrTestedCache = { tid: null, at: 0, map: null };
     return json({ ok: true, id, stage }, {}, env, request);
   }
@@ -14852,7 +15201,7 @@ var init_certs = __esm({
       // optional CC on the battery enquiry email (remembered)
     };
     ensureTables4 = onceMigration(ensureTables__raw3);
-    FYR_STAGES = ["to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
+    FYR_STAGES = ["tested", "to_review", "quoted", "ordered", "in_works", "done", "invoiced"];
     _fyrTestedCache = { tid: null, at: 0, map: null };
     ORDER_COLS = "id,tenant_id,external_id,order_number,client,priority,order_value,currency,title,detail,description,job_category,observation_codes,already_done,store_code,site_name,sr_ref,site_raw,notified_at,link,source,status,matched_kind,matched_cert_id,matched_job_id,match_note,created_at,updated_at,actioned_at,actioned_by,unlinked_job_id,email_subject,email_from,(CASE WHEN email_text IS NOT NULL AND email_text<>'' THEN 1 ELSE 0 END) AS has_email";
     STAGES = ["to_quote", "quoted", "approved", "in_works", "done", "invoiced"];
@@ -16708,6 +17057,56 @@ async function handle12(request, env, ctx, url, sess) {
           j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
           await saveJob(env, tenantId, j);
         }
+      } catch {
+      }
+      return jsonResponse({ ok: true, key }, headers);
+    }
+    if (parts[2] === "docs" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
+      const file = form.get("file");
+      if (!file || typeof file.stream !== "function") return jsonResponse({ error: "Missing file" }, headers, 400);
+      const raw = String(form.get("filename") || file.name || "document");
+      const base = raw.replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 120) || "document";
+      const label2 = String(form.get("label") || base).slice(0, 200);
+      const key = `jobs/${id}/docs/${Date.now()}-${base}`;
+      await env.JOB_FILES.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type || "application/octet-stream" },
+        customMetadata: { label: label2, by: sess.user && sess.user.username || "" }
+      });
+      return jsonResponse({ ok: true, key }, headers, 201);
+    }
+    if (parts[2] === "docs" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/docs/`, include: ["customMetadata", "httpMetadata"] });
+      const files = [];
+      for (const o of listed.objects || []) {
+        const nm = o.key.split("/").pop().replace(/^\d+-/, "");
+        files.push({
+          key: o.key,
+          name: o.customMetadata && o.customMetadata.label || nm,
+          by: o.customMetadata && o.customMetadata.by || "",
+          size: o.size,
+          uploaded: o.uploaded ? new Date(o.uploaded).toISOString() : "",
+          type: o.httpMetadata && o.httpMetadata.contentType || "",
+          url: await signedFileUrl(env, url.origin, "/sla/site/doc", o.key)
+        });
+      }
+      files.sort((a, b) => String(b.uploaded).localeCompare(String(a.uploaded)));
+      return jsonResponse({ files }, headers);
+    }
+    if (parts[2] === "docs" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Only Full Access can delete job documents." }, headers, 403);
+      const key = searchParams.get("key") || "";
+      if (!key.startsWith(`jobs/${id}/docs/`)) return jsonResponse({ error: "Bad key" }, headers, 400);
+      try {
+        await env.JOB_FILES.delete(key);
       } catch {
       }
       return jsonResponse({ ok: true, key }, headers);

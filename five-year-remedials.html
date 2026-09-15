@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>5-Year Remedials</title>
-  <script src="/portal-config.js?v=31"></script>
+  <title>5-Year EICR Schedule</title>
+  <script src="/portal-config.js?v=37"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
@@ -13,56 +13,149 @@
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
     header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
     header.page h1{font-size:18px;margin:0;flex:1;}
-    .wrap{max-width:880px;margin:14px auto 90px;padding:0 12px;}
+    header.page select{padding:6px 8px;border-radius:8px;border:0;font:inherit;font-size:14px;}
+    .wrap{max-width:1180px;margin:14px auto 90px;padding:0 12px;}
     .muted{color:#6b7a90;font-size:13px;}
     .infobox{background:#eef4fb;border:1px solid #cfe0f2;color:#274b73;border-radius:12px;padding:10px 13px;margin-bottom:12px;font-size:13px;}
     .sumrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
-    .stat{flex:1 1 120px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;}
+    .stat{flex:1 1 130px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;}
     .stat .n{font-size:26px;font-weight:800;color:var(--brand);line-height:1;}
     .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;font-weight:700;margin-top:4px;}
-    .stat.warn .n{color:var(--warn);}
-    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+    .stat.red .n{color:var(--bad);} .stat.amber .n{color:var(--warn);} .stat.green .n{color:var(--ok);}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+    .toolbar input{padding:8px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;min-width:180px;flex:1;}
+    .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
     .chip{border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;color:#334;cursor:pointer;}
     .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
     .chip .n{background:rgba(0,0,0,.08);border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;}
     .chip.on .n{background:rgba(255,255,255,.25);}
-    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:12px 14px;margin-bottom:10px;}
-    .rhead{display:flex;align-items:flex-start;gap:10px;}
-    .code{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;background:#eef3f9;border-radius:8px;padding:2px 8px;font-size:13px;white-space:nowrap;}
-    .site{font-weight:700;flex:1;min-width:0;}
-    .sub{font-size:12.5px;color:#6b7a90;margin-top:2px;}
-    .badge{border-radius:999px;padding:2px 10px;font-size:11px;font-weight:800;white-space:nowrap;}
-    .b-quoted{background:#fef3c7;color:#92400e;} .b-ordered{background:#dcfce7;color:#166534;}
-    .b-works{background:#dbeafe;color:#1e40af;} .b-done{background:#e2e8f0;color:#475569;}
-    .b-review{background:#fee2e2;color:#991b1b;}
-    .src-eng{display:inline-block;background:#eef4fb;color:#274b73;border:1px solid #cfe0f2;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:6px;}
-    .phchip{color:#475569;font-size:12px;font-weight:600;}
-    .ordrow{margin-top:8px;font-size:13px;}
-    .ord-yes{color:#166534;font-weight:700;} .ord-no{color:var(--warn);font-weight:700;}
-    .lines{margin-top:8px;}
-    .lines summary{cursor:pointer;font-size:13px;color:var(--brand);font-weight:600;}
-    .lines ul{margin:8px 0 0;padding-left:18px;} .lines li{font-size:13px;margin-bottom:6px;white-space:pre-wrap;}
-    .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid #f0f3f7;}
-    .ctl select{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:13px;font-family:inherit;}
-    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
-    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
-    .btn.link{background:none;color:var(--brand);border:none;text-decoration:underline;padding:6px 4px;}
+    .chip.tl-red{border-color:#f5b5b5;} .chip.tl-amber{border-color:#f0d28a;} .chip.tl-green{border-color:#a7d9b6;}
+    .tblwrap{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);overflow-x:auto;}
+    table{border-collapse:collapse;width:100%;font-size:13px;}
+    thead th{background:#f5f8fb;color:#54627a;font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;z-index:2;}
+    tbody td{padding:8px 10px;border-bottom:1px solid #eef2f6;vertical-align:middle;}
+    tbody tr:hover{background:#f9fbfd;}
+    td.store{position:sticky;left:0;background:#fff;z-index:1;min-width:150px;}
+    tbody tr:hover td.store{background:#f9fbfd;}
+    .code{font-weight:800;color:var(--brand);font-variant-numeric:tabular-nums;}
+    .site{font-weight:600;} .sub{font-size:11.5px;color:#6b7a90;margin-top:1px;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:800;white-space:nowrap;border:1px solid transparent;}
+    .tl-red{background:#fee2e2;color:#991b1b;border-color:#fca5a5;}
+    .tl-amber{background:#fef3c7;color:#92400e;border-color:#fcd34d;}
+    .tl-green{background:#dcfce7;color:#166534;border-color:#86efac;}
+    .tl-grey{background:#eef2f6;color:#5a6b80;border-color:#d7dee6;}
+    .pilllink{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;}
+    .pilllink .opendoc{font-size:11px;color:var(--brand);font-weight:700;}
+    .pilllink:hover .opendoc{text-decoration:underline;}
+    .viewtabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+    .viewtab{padding:8px 14px;border-radius:999px;border:1px solid #d7dee6;background:#fff;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;color:#5a6b80;}
+    .viewtab.on{background:var(--brand,#003366);border-color:var(--brand,#003366);color:#fff;}
+    .viewtab .n{opacity:.75;font-weight:600;}
+    .pill.inactive-pill{background:#eef2f6;color:#5a6b80;border:1px solid #d7dee6;font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;margin-left:6px;}
+    .auditbtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+    .auditbtn{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:999px;border:1px solid;background:#fff;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;}
+    .auditbtn .n{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;font-size:12px;color:#fff;}
+    .auditbtn .caret{font-size:10px;opacity:.7;transition:transform .15s;}
+    .auditbtn[aria-expanded="true"] .caret{transform:rotate(180deg);}
+    .auditbtn.red{border-color:#f5c6c6;color:#991b1b;} .auditbtn.red .n{background:#dc2626;}
+    .auditbtn.red[aria-expanded="true"]{background:#fdf2f2;}
+    .auditbtn.amber{border-color:#f6e0b5;color:#92400e;} .auditbtn.amber .n{background:#d97706;}
+    .auditbtn.amber[aria-expanded="true"]{background:#fffaf0;}
+    .auditcard{border-radius:14px;padding:12px 14px;margin-bottom:12px;border:1px solid;}
+    .auditcard.red{background:#fdf2f2;border-color:#f5c6c6;}
+    .auditcard.amber{background:#fffaf0;border-color:#f6e0b5;}
+    .auditcard h3{margin:0 0 2px;font-size:15px;}
+    .auditcard.red h3{color:#991b1b;} .auditcard.amber h3{color:#92400e;}
+    .auditcard .why{font-size:12.5px;color:#6b7a90;margin:0 0 8px;}
+    .arow{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:7px 2px;border-top:1px solid rgba(0,0,0,.06);font-size:13px;}
+    .arow .code{font-weight:800;color:var(--brand);}
+    .arow .ago{color:#991b1b;font-weight:700;}
+    .arow a{color:var(--brand);text-decoration:none;font-weight:600;} .arow a:hover{text-decoration:underline;}
+    select.stagesel{padding:6px 8px;border:1px solid #ccd5dd;border-radius:8px;font-size:12.5px;font-family:inherit;max-width:200px;}
+    select.stagesel.tl-red{background:#fef2f2;} select.stagesel.tl-amber{background:#fffbeb;} select.stagesel.tl-green{background:#f0fdf4;}
+    .rowlinks a,.rowlinks button{color:var(--brand);font-size:12px;text-decoration:none;background:none;border:none;cursor:pointer;padding:2px 4px;font-family:inherit;white-space:nowrap;}
+    .rowlinks a:hover,.rowlinks button:hover{text-decoration:underline;}
+    .flagtag{color:#9b1c1c;font-size:11.5px;font-weight:700;margin-top:2px;}
+    .holdtag{color:#7a5b00;font-size:11.5px;font-weight:700;margin-top:2px;}
+    .autoreset{color:#6b7a90;font-size:11px;background:none;border:none;cursor:pointer;text-decoration:underline;padding:0 0 0 4px;}
+    .srcnote{font-size:10.5px;color:#8a97a8;}
+    .detail td{background:#f7fafd;padding:12px 14px;}
+    .steps{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0;}
+    .st{border:1px solid #d7dee6;border-radius:999px;padding:2px 9px;font-size:11px;color:#54627a;background:#fff;}
+    .st.done{background:#dcfce7;color:#166534;border-color:#86efac;} .st.next{border-color:var(--brand);color:var(--brand);font-weight:700;}
+    .dlinks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .dlinks a,.dlinks button{background:#fff;border:1px solid var(--brand);color:var(--brand);border-radius:8px;padding:5px 10px;font-size:12px;text-decoration:none;cursor:pointer;font-family:inherit;}
+    .log{margin-top:8px;font-size:12px;color:#54627a;}
+    .log div{margin-bottom:2px;}
     .saved{color:var(--ok);font-size:12px;}
+    @media(max-width:640px){ td.store{position:static;} }
+    .hbtn{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:7px 13px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+    .hbtn .n{background:#fff;color:var(--brand);border-radius:999px;padding:0 7px;font-size:12px;font-weight:800;}
+    .notebox{margin-top:10px;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:9px 10px;}
+    .notebox .lbl{font-size:12px;font-weight:700;color:#54627a;margin-bottom:5px;}
+    .jobnote{width:100%;box-sizing:border-box;min-height:52px;border:1px solid #ccd5dd;border-radius:9px;padding:8px;font:inherit;font-size:13px;color:#0f2438;resize:vertical;}
+    .notesave{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+    .mback{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:24px 14px;overflow:auto;}
+    .mback.on{display:flex;}
+    .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;box-shadow:0 12px 44px rgba(6,24,54,.32);}
+    .mcard h2{margin:0 0 4px;font-size:19px;color:var(--brand);}
+    .mcard .mx{float:right;background:none;border:0;font-size:22px;line-height:1;cursor:pointer;color:#6b7a90;}
+    .axadd{display:flex;gap:8px;margin:12px 0;}
+    .axadd input{flex:1;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;}
+    .axadd button{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 15px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+    .axitem{display:flex;align-items:flex-start;gap:9px;padding:9px 2px;border-top:1px solid rgba(0,0,0,.07);}
+    .axitem input[type=checkbox]{width:19px;height:19px;margin-top:1px;flex:0 0 auto;cursor:pointer;}
+    .axitem .txt{flex:1;font-size:14px;line-height:1.35;}
+    .axitem.done .txt{text-decoration:line-through;color:#8a97a8;}
+    .axitem .meta{font-size:11px;color:#8a97a8;display:block;margin-top:2px;}
+    .axitem .del{background:none;border:0;color:#b91c1c;font-size:16px;cursor:pointer;padding:0 2px;flex:0 0 auto;}
+    .axempty{color:#6b7a90;font-size:14px;padding:14px 2px;}
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
-    <h1>🔌 5-Year remedials</h1>
+    <h1>⚡ 5-Year EICR schedule</h1>
+    <button id="alexBtn" class="hbtn" title="Items to discuss with Alex">📋 Alex list<span class="n" id="alexCount" hidden></span></button>
+    <select id="yearSel" title="Which year's schedule"></select>
   </header>
+
+  <div class="mback" id="alexBack">
+    <div class="mcard">
+      <button class="mx" id="alexClose" title="Close">×</button>
+      <h2>📋 Alex list</h2>
+      <div class="muted">Items to discuss with Alex — tick them off as he sorts them.</div>
+      <div class="axadd">
+        <input id="alexInput" placeholder="Add an item to discuss…" maxlength="500">
+        <button id="alexAdd">Add</button>
+      </div>
+      <div id="alexList"></div>
+    </div>
+  </div>
 
   <div class="wrap">
     <div class="infobox">
-      When an engineer completes an electrical (EICR) test with remedials it lands here as <b>To review</b> — work through it: send the client the quote (📋 Quote text), mark it quoted, then once the order arrives press <b>🛠 Create works job</b> to raise the works for an engineer; it moves to Done when they finish. A row here also means the test was carried out, so the store shows amber <b>“✅ tested — cert to file”</b> on the 5-year schedule instead of red “no cover”.
+      The 5-Year EICR schedule for Southern&nbsp;Co-op sites on Concerto's PPM list — pick a year at the top, or <b>All years (whole list)</b> to see every site Concerto tracks. Each row shows the site's <b>current certificate status</b> (in date · out of date · unsatisfactory · missing) and the <b>stage</b> it's at. The stage is set from what the portal already knows — the test job, the certificate, the compliance check and any client order — and you can override it any time with the dropdown at the end of the row. Tap a row for the checklist, links and history.
     </div>
+    <div class="viewtabs" id="viewtabs"></div>
     <div class="sumrow" id="sumrow"></div>
+    <div id="audit"></div>
+    <div class="toolbar">
+      <input id="q" placeholder="Search store, site, engineer, order…">
+      <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
+        <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
+          <option value="code">Store number (Concerto order)</option>
+          <option value="due">Concerto due date</option>
+          <option value="mdue">Mostlane due date (cert runs out)</option>
+          <option value="stage">Stage</option>
+          <option value="doc">Certificate status (attention first)</option>
+          <option value="site">Site name</option>
+        </select>
+      </label>
+      <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
+    </div>
     <div class="chips" id="chips"></div>
-    <div id="list"><div class="muted" style="padding:16px;">Loading…</div></div>
+    <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted" style="padding:16px;">Loading…</td></tr></tbody></table></div>
   </div>
 
   <script>
@@ -70,152 +163,343 @@
     const g = id => document.getElementById(id);
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
     const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
-    let ROWS = [], FILTER = "all";
-    const STAGE_LABELS = { to_review:"To review", quoted:"Quoted", ordered:"Ordered", in_works:"In works", done:"Done", invoiced:"Invoiced" };
+    const MON3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const fmtD = s => {   // 2026-12-11 → "11th Dec 26"
+      s=String(s||"").trim(); if(!s) return "";
+      const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(!m) return s;
+      const day=+m[3], ord=(day%10===1&&day!==11)?"st":(day%10===2&&day!==12)?"nd":(day%10===3&&day!==13)?"rd":"th";
+      return day+ord+" "+(MON3[+m[2]-1]||"")+" "+m[1].slice(2);
+    };
+    const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
-    function fmtDate(s){
-      s = String(s||"").trim(); if(!s) return "";
-      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(m) return m[3]+"/"+m[2]+"/"+m[1];
-      return s;
-    }
-    // Effective bucket for the filter chips — an order present counts as "ordered"
-    // even if the stage still reads quoted.
-    function bucket(r){
-      if(r.stage==="to_review") return "review";
-      if(r.stage==="done"||r.stage==="invoiced") return "done";
-      const ordered = !!r.order || r.stage==="ordered" || r.stage==="in_works";
-      if(ordered) return "ordered";
-      return "needs";
-    }
+    let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
+    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active";
+    let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
+    let TODAY = new Date().toISOString().slice(0,10);
+    const EXPANDED = new Set();
+    // The current 5-year document status (server-computed) → label + light.
+    const DOC_LIGHT = { in_date:"tl-green", due:"tl-amber", in_unsat:"tl-amber", expired:"tl-red", expired_unsat:"tl-red", missing:"tl-red" };
 
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r=>r.json());
         if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
       } catch { location.href="/main.html"; return; }
+      const now = new Date().getFullYear();
+      g("yearSel").innerHTML = '<option value="all">All years (whole list)</option>'
+        + [5,4,3,2,1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
+      g("yearSel").value = String(YEAR);
+      g("yearSel").onchange = () => { const v=g("yearSel").value; YEAR = v==="all" ? "all" : +v; render(); loadAudit(); };
+      g("q").oninput = () => render();
+      g("fFlag").onchange = () => render();
+      g("sortSel").value = SORT;
+      g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
+      g("alexBtn").onclick = openAlex;
+      g("alexClose").onclick = closeAlex;
+      g("alexBack").onclick = e => { if (e.target === g("alexBack")) closeAlex(); };
+      const alexSubmit = () => { const v = g("alexInput").value.trim(); if (!v) return; g("alexInput").value=""; alexPost({ add: v }); };
+      g("alexAdd").onclick = alexSubmit;
+      g("alexInput").addEventListener("keydown", e => { if (e.key==="Enter"){ e.preventDefault(); alexSubmit(); } });
       load();
+      loadAlex();
     })();
 
     async function load(){
-      let d=null;
-      try { d = await authFetch("/certs/five-year/board").then(r=>r.json()); } catch {}
-      if(!d || !d.ok){ g("list").innerHTML='<div class="muted" style="padding:16px;color:#b00020">Couldn\'t load the remedials.</div>'; return; }
-      ROWS = d.rows || [];
-      renderSummary();
-      renderChips();
+      g("tbl").querySelector("tbody").innerHTML = '<tr><td class="muted" style="padding:16px;">Loading the schedule…</td></tr>';
+      let d = null;
+      try { d = await authFetch("/concerto/schedule?type=fiveYear&status=all").then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td style="padding:16px;color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
+      MONEY = !!d.money;
+      TODAY = d.today || TODAY;
+      const P = (d.stats && d.stats.pipeline) || {};
+      STAGES = P.stages12 || [];
+      STAGE_LABEL = {}; STAGE_LIGHT = {};
+      STAGES.forEach(s => { STAGE_LABEL[s.key] = s.label; STAGE_LIGHT[s.key] = s.light; });
+      ROWS = (d.rows || []).filter(r => r.case);   // fiveYear pipeline rows carry a case
       render();
+      loadAudit();
     }
 
-    function counts(){
-      const c = { all:ROWS.length, review:0, needs:0, ordered:0, done:0 };
-      ROWS.forEach(r => { c[bucket(r)]++; });
-      return c;
+    // Off-list tests (tested this year, not on the Concerto list) + early re-tests.
+    async function loadAudit(){
+      const box = g("audit");
+      if (VIEW==="inactive") { box.innerHTML = ""; return; }   // audit is about active-site tests
+      if (YEAR==="all") { box.innerHTML = ""; return; }   // the audit is year-specific
+      let d = null;
+      try { d = await authFetch("/concerto/audit?year="+YEAR).then(r=>r.json()); } catch {}
+      if (!d || !d.ok) { box.innerHTML = ""; return; }
+      const testLink = r => r.jobId ? ' — <a href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">open test job ↗</a>'
+        : (r.source==="cert" ? ' — <a href="#" data-cert="'+esc(r.storeCode)+'">open certificate ↗</a>' : '');
+      const siteLink = r => r.storeCode ? '<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">site ↗</a>' : '';
+      const off = d.offList||[], early = d.earlyRetest||[];
+      let btns = "", panels = "";
+      if (off.length){
+        btns += '<button type="button" class="auditbtn red" data-panel="auditOffList" aria-expanded="false">'
+          + '<span class="n">'+off.length+'</span> ⚠ Tested not on the Concerto list <span class="caret">▾</span></button>';
+        panels += '<div id="auditOffList" class="auditcard red" hidden><h3>⚠ Tested in '+YEAR+' but NOT on the Concerto list ('+off.length+')</h3>'
+          + '<p class="why">A 5-year test was carried out this year for a store the Concerto PPM schedule doesn\'t list — check it was ordered / chase the paperwork.</p>'
+          + off.map(r =>
+              '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
+              + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'+testLink(r)+' '+siteLink(r)+'</div>').join("")
+          + '</div>';
+      }
+      if (early.length){
+        btns += '<button type="button" class="auditbtn amber" data-panel="auditEarly" aria-expanded="false">'
+          + '<span class="n">'+early.length+'</span> 🔁 Re-tested early <span class="caret">▾</span></button>';
+        panels += '<div id="auditEarly" class="auditcard amber" hidden><h3>🔁 Re-tested early — last EICR still in date ('+early.length+')</h3>'
+          + '<p class="why">Concerto sent (and paid for) a test at a store whose previous 5-year certificate wasn\'t due yet — worth flagging with them.</p>'
+          + early.map(r =>
+              '<div class="arow"><span class="code">'+esc(r.storeCode||"?")+'</span> <span>'+esc(r.siteName||"")+'</span>'
+              + '<span class="muted">· tested '+esc(fmtD(r.testedAt))+'</span>'
+              + '<span class="ago">· last tested '+esc(fmtD(r.prevAt))+' ('+r.gapMonths+' months earlier)</span>'
+              + testLink(r)+' '+siteLink(r)+'</div>').join("")
+          + '</div>';
+      }
+      box.innerHTML = btns ? ('<div class="auditbtns">'+btns+'</div>'+panels) : "";
+      box.querySelectorAll(".auditbtn").forEach(b => b.onclick = () => {
+        const p = g(b.dataset.panel); if (!p) return;
+        const open = p.hidden; p.hidden = !open; b.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      box.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
     }
-    function renderSummary(){
-      const c = counts();
-      g("sumrow").innerHTML =
-        '<div class="stat warn"><div class="n">'+c.review+'</div><div class="l">To review</div></div>'
-        + '<div class="stat"><div class="n">'+c.needs+'</div><div class="l">Awaiting order</div></div>'
-        + '<div class="stat"><div class="n">'+c.ordered+'</div><div class="l">Ordered</div></div>';
+
+    // A row belongs to YEAR if its Concerto next date is in that year OR the test was
+    // carried out in that year (Concerto sometimes rolls the date forward after a test).
+    function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
+    function inYear(r){ if (YEAR==="all") return true; const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
+    function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
+    // Days until the MOSTLANE (compliance chart) due date — when our certificate runs out.
+    function daysTo(s){ if(!s) return null; const t=Date.parse(String(s).slice(0,10)+"T00:00:00Z"); if(isNaN(t)) return null; return Math.round((t - Date.parse(TODAY+"T00:00:00Z"))/864e5); }
+    // Urgency from when our cert runs out: red = out of date / no cert; amber = within 60 days; green = plenty of time.
+    function dueUrgency(r){ const d = daysTo(r.chartDue); if (d==null) return "red"; if (d < 0) return "red"; if (d <= 60) return "amber"; return "green"; }
+    function notDone(r){ const s=stageOf(r); return s!=="complete_satisfactory" && s!=="certificate_updated" && s!=="invoiced"; }
+    // The traffic-light for the STAGE — a site that "needs booking" is only red when its
+    // certificate is actually running out (overdue / within 60 days / missing); otherwise green.
+    function stageLight(r){
+      const s = stageOf(r);
+      if (s==="complete_satisfactory" || s==="certificate_updated" || s==="invoiced") return "green";
+      if (s==="needs_booking") return dueUrgency(r);
+      if (s==="scheduled") return dueUrgency(r)==="red" ? "amber" : "green";   // booked = in hand
+      return STAGE_LIGHT[s] || "amber";   // awaiting review + all remedial stages are real to-dos
     }
-    function renderChips(){
-      const c = counts();
-      const defs = [["all","All",c.all],["review","To review",c.review],["needs","Awaiting order",c.needs],["ordered","Ordered",c.ordered],["done","Done",c.done]];
-      g("chips").innerHTML = defs.map(([k,l,n]) =>
-        '<button class="chip'+(FILTER===k?" on":"")+'" data-f="'+k+'">'+l+' <span class="n">'+n+'</span></button>').join("");
-      g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; renderChips(); render(); });
+
+    // Inactive/closed sites live under their own tab; the schedule excludes them.
+    // The Inactive tab ignores the year filter (shows every closed site Concerto still lists).
+    function yearRows(){
+      if (VIEW==="inactive") return ROWS.filter(r => r.inactive);
+      return ROWS.filter(r => !r.inactive && inYear(r));
+    }
+    function renderViewTabs(){
+      const inact = ROWS.filter(r => r.inactive).length;
+      const t = (v,label,n) => '<button class="viewtab'+(VIEW===v?" on":"")+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
+      g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("inactive","🚫 Inactive sites", inact);
+      g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => { if(VIEW===b.dataset.v) return; VIEW=b.dataset.v; FILTER="all"; EXPANDED.clear(); render(); loadAudit(); });
+    }
+    // Sort comparators. "code" (store number) is the Concerto order — the default.
+    function codeCmp(a,b){ return String(a.storeCode||"~~~~").localeCompare(String(b.storeCode||"~~~~"), undefined, { numeric:true }); }
+    function docRank(r){ const l=(r.docStatus&&r.docStatus.light)||""; return l==="red"?0:l==="amber"?1:l==="green"?2:3; }
+    function stageIdx(r){ const i=STAGES.findIndex(s=>s.key===stageOf(r)); return i<0?99:i; }
+    function cmpRows(a,b){
+      if (SORT==="due")   return String(a.nextDate||"9999-99-99").localeCompare(String(b.nextDate||"9999-99-99")) || codeCmp(a,b);
+      if (SORT==="mdue")  return String(a.chartDue||"9999-99-99").localeCompare(String(b.chartDue||"9999-99-99")) || codeCmp(a,b);
+      if (SORT==="stage") return (stageIdx(a)-stageIdx(b)) || codeCmp(a,b);
+      if (SORT==="doc")   return (docRank(a)-docRank(b)) || codeCmp(a,b);
+      if (SORT==="site")  return String(a.siteName||"~~~~").localeCompare(String(b.siteName||"~~~~")) || codeCmp(a,b);
+      return codeCmp(a,b);   // "code" — Concerto order
+    }
+    function visible(){
+      const q = g("q").value.trim().toLowerCase(), flagOnly = g("fFlag").checked;
+      return yearRows().filter(r => {
+        if (FILTER!=="all" && stageOf(r)!==FILTER) return false;
+        if (flagOnly && !(r.case.flagged)) return false;
+        if (q && ![r.storeCode, r.siteName, r.orderNr, r.srRef, r.case.engineer, r.case.flagNote].join(" ").toLowerCase().includes(q)) return false;
+        return true;
+      }).sort(cmpRows);
     }
 
     function render(){
-      const rows = ROWS.filter(r => FILTER==="all" || bucket(r)===FILTER)
-        .sort((a,b)=> String(b.quoteDate||"").localeCompare(String(a.quoteDate||"")));
-      if(!rows.length){ g("list").innerHTML='<div class="muted" style="padding:16px;">Nothing in this view.</div>'; return; }
-      g("list").innerHTML = rows.map(cardHtml).join("");
-      g("list").querySelectorAll("select[data-stage]").forEach(sel => sel.onchange = () => setStage(sel.dataset.stage, sel.value, sel));
-      g("list").querySelectorAll("button[data-del]").forEach(b => b.onclick = () => del(b.dataset.del));
-      g("list").querySelectorAll("button[data-quote]").forEach(b => b.onclick = () => showQuote(b.dataset.quote));
-      g("list").querySelectorAll("button[data-works]").forEach(b => b.onclick = () => createWorks(b.dataset.works, b));
+      renderViewTabs();
+      const rows = yearRows();
+      // Summary tiles
+      if (VIEW==="inactive") {
+        g("sumrow").innerHTML = stat(rows.length, "Inactive sites", "");
+      } else {
+        const cnt = k => rows.filter(r => stageOf(r)===k).length;
+        const needsBooking = cnt("needs_booking");
+        const done = cnt("complete_satisfactory") + cnt("certificate_updated") + cnt("invoiced");
+        const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
+        const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
+        g("sumrow").innerHTML =
+          stat(rows.length, YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR, "") +
+          stat(needsBooking, "Needs booking", "") +
+          stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
+          stat(overdue, "Out of date / no cert", overdue?"red":"") +
+          stat(done, "Complete", done?"green":"");
+      }
+      renderChips(rows);
+      renderTable();
+    }
+    function stat(n, l, tone){ return '<div class="stat '+(tone||"")+'"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'; }
+
+    function renderChips(rows){
+      const by = {}; rows.forEach(r => { const s=stageOf(r); by[s]=(by[s]||0)+1; });
+      const flagged = rows.filter(r=>r.case.flagged).length;
+      let h = '<button class="chip'+(FILTER==="all"?" on":"")+'" data-f="all">All <span class="n">'+rows.length+'</span></button>';
+      STAGES.forEach(s => { if (by[s.key] || FILTER===s.key) { const cl = s.key==="needs_booking" ? "" : "tl-"+s.light; h += '<button class="chip '+cl+(FILTER===s.key?" on":"")+'" data-f="'+esc(s.key)+'">'+esc(s.label)+' <span class="n">'+(by[s.key]||0)+'</span></button>'; } });
+      g("chips").innerHTML = h;
+      g("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { FILTER=b.dataset.f; render(); });
     }
 
-    function cardHtml(r){
-      const bk = bucket(r);
-      const badge = bk==="review" ? '<span class="badge b-review">To review</span>'
-        : bk==="done" ? '<span class="badge b-done">Done</span>'
-        : bk==="ordered" ? '<span class="badge b-ordered">Ordered</span>'
-        : '<span class="badge b-quoted">Quoted</span>';
-      const cost = (r.budgetCost>0) ? (" · £"+Math.round(r.budgetCost)) : "";
-      const isJob = r.source==="job";
-      const ph = (r.photoCount||0) ? ' · <span class="phchip">📷 '+r.photoCount+'</span>' : "";
-      const dateLbl = isJob ? "Completed " : "Quoted ";
-      const ord = r.order
-        ? '<div class="ordrow ord-yes">✅ Order '+esc(r.order.number||"")+(r.order.value?(' · £'+Math.round(r.order.value)):'')+'</div>'
-        : (bk==="review" ? '' : '<div class="ordrow ord-no">⚠ No order yet — needs review</div>');
-      const lines = (r.lines||[]).filter(l=>String(l.action||"").trim());
-      const linesHtml = lines.length
-        ? '<details class="lines"'+(bk==="review"?" open":"")+'><summary>'+lines.length+' remedial item'+(lines.length===1?"":"s")+ph+'</summary><ul>'
-            + lines.map(l=>'<li>'+esc(l.action)+((l.photos&&l.photos.length)?' <span class="phchip">📷'+l.photos.length+'</span>':'')+'</li>').join("") + '</ul></details>'
-        : '';
-      const opts = ["to_review","quoted","ordered","in_works","done","invoiced"].map(s =>
-        '<option value="'+s+'"'+(r.stage===s?" selected":"")+'>'+STAGE_LABELS[s]+'</option>').join("");
-      // Actions: quote text (copy), create the works job (job cases without one yet), job links.
-      let actions = '';
-      if(isJob) actions += '<button class="btn link" data-quote="'+esc(r.id)+'">📋 Quote text</button>';
-      if(isJob && !r.worksJobId && r.stage!=="done" && r.stage!=="invoiced")
-        actions += '<button class="btn" data-works="'+esc(r.id)+'">🛠 Create works job</button>';
-      if(r.worksJobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.worksJobId)+'">Works job ↗</a>';
-      if(isJob && r.jobId) actions += '<a class="btn link" href="/job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Test job ↗</a>';
-      return '<div class="card">'
-        + '<div class="rhead"><span class="code">'+esc(r.storeCode||"")+'</span>'
-          + '<div class="site">'+esc(r.siteName||"")+(isJob?'<span class="src-eng">⚡ from test</span>':'')+'<div class="sub">'+esc(r.sr||"")+(r.sr?' · ':'')+dateLbl+esc(fmtDate(r.quoteDate))+cost+'</div></div>'
-          + badge + '</div>'
-        + ord + linesHtml
-        + '<div class="ctl"><label class="muted">Stage</label><select data-stage="'+esc(r.id)+'">'+opts+'</select>'
-          + '<span class="saved" id="sv-'+esc(r.id)+'"></span>'
-          + '<span style="flex:1"></span>'
-          + actions
-          + '<a class="btn link" href="/site-folder.html?site='+encodeURIComponent(r.storeCode||"")+'">Open site ↗</a>'
-          + '<button class="btn ghost" data-del="'+esc(r.id)+'">Remove</button></div>'
+    function stageOptions(cur){
+      return STAGES.map(s => '<option value="'+esc(s.key)+'"'+(cur===s.key?" selected":"")+'>'+esc(s.label)+'</option>').join("");
+    }
+    function renderTable(){
+      const rows = visible();
+      g("tbl").querySelector("thead").innerHTML =
+        '<tr><th>Store</th><th>Certificate status</th><th>Concerto due</th><th>Mostlane due</th><th>Tested by</th><th>Stage</th><th>Change status</th><th></th></tr>';
+      const tb = g("tbl").querySelector("tbody");
+      if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="muted" style="padding:16px;">No sites for this filter.</td></tr>'; return; }
+      tb.innerHTML = rows.map(rowHtml).join("");
+      tb.querySelectorAll("select[data-ppm]").forEach(sel => sel.onchange = () => setStage(sel.dataset.ppm, sel.value, sel));
+      tb.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { const id=b.dataset.toggle; if(EXPANDED.has(id)) EXPANDED.delete(id); else EXPANDED.add(id); renderTable(); });
+      tb.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => setStage(b.dataset.reset, "", b));
+      tb.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
+      tb.querySelectorAll("[data-note]").forEach(b => b.onclick = () => saveNote(b.dataset.note, b.closest(".notebox").querySelector(".jobnote"), b));
+    }
+
+    function rowHtml(r){
+      const c = r.case, key = r.id;
+      const st = stageOf(r), light = stageLight(r);
+      const doc = r.docStatus || { label:"—", light:"tl-grey", note:"" };
+      const docCls = (doc.light && doc.light.indexOf("tl-")===0) ? doc.light : (DOC_LIGHT[doc.key] || "tl-grey");
+      // The certificate status pill is clickable when a 5-year document is on file → opens it.
+      const hasCert = !!(c.cert || r.lastDone);
+      const docInner = '<span class="pill '+docCls+'">'+esc(doc.label)+'</span>';
+      const docCell = hasCert
+        ? '<button class="pilllink" data-cert="'+esc(r.storeCode)+'" title="Open the current 5-year certificate">'+docInner+' <span class="opendoc">📄 open</span></button>'
+        : docInner;
+      const rel = r.released ? '<div class="sub" style="color:#166534;font-weight:700">Released'+(r.orderNr?" · "+esc(r.orderNr):"")+(MONEY&&r.orderedValue!=null?" · £"+Math.round(r.orderedValue):"")+'</div>' : '';
+      const testedBy = c.engineer ? esc(c.engineer) : '<span class="muted">—</span>';
+      const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>' : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
+      const flag = c.flagged ? '<div class="flagtag">🚩 '+esc(c.flagNote || (c.autoFlag&&"No certificate cover") || "Flagged")+'</div>' : '';
+      const hold = c.held ? '<div class="holdtag">⏸ '+esc(c.holdReason||"On hold")+'</div>' : '';
+      // Mostlane due (compliance chart) with a plain-English "runs out" hint.
+      let mdCell = '<span class="muted">—</span>';
+      if (r.chartDue) { const d = daysTo(r.chartDue);
+        const hint = d==null ? "" : d<0 ? '<div class="sub" style="color:#991b1b;font-weight:700">out of date ('+(-d)+'d)</div>'
+          : d<=60 ? '<div class="sub" style="color:#92400e;font-weight:700">runs out in '+d+' days</div>'
+          : '<div class="sub">in '+Math.round(d/30)+' months</div>';
+        mdCell = '<b>'+esc(fmtD(r.chartDue))+'</b>'+hint;
+      }
+      const detail = EXPANDED.has(key) ? '<tr class="detail"><td colspan="8">'+detailHtml(r)+'</td></tr>' : '';
+      return '<tr>'
+        + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span> <span class="site">'+esc(r.siteName||"")+'</span>'
+          + (r.inactive?'<span class="pill inactive-pill">🚫 Inactive</span>':'')
+          + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + '</td>'
+        + '<td>'+docCell+'</td>'
+        + '<td>'+(r.nextDate?'<b>'+esc(fmtD(r.nextDate))+'</b>':'<span class="muted">—</span>')+rel+'</td>'
+        + '<td>'+mdCell+'</td>'
+        + '<td>'+testedBy+'</td>'
+        + '<td><span class="pill tl-'+light+'">'+esc(STAGE_LABEL[st]||st)+'</span></td>'
+        + '<td><select class="stagesel tl-'+light+'" data-ppm="'+esc(key)+'">'+stageOptions(st)+'</select><div>'+src+' <span class="saved" id="sv-'+esc(key)+'"></span></div></td>'
+        + '<td class="rowlinks"><button data-toggle="'+esc(key)+'">'+(EXPANDED.has(key)?"▾ Close":"▸ Details")+'</button></td>'
+        + '</tr>' + detail;
+    }
+
+    function detailHtml(r){
+      const c = r.case;
+      const shown = (c.steps||[]).filter(s => s.applicable);
+      const strip = '<div class="steps">'+shown.map(s => '<span class="st '+(s.done?"done":(s.key===c.next?"next":""))+'" title="'+esc(s.label)+(s.at?" · "+fmtD(s.at):"")+(s.by?" · "+esc(s.by):"")+'">'+(s.done?"✓ ":"")+esc(s.short)+'</span>').join("")+'</div>';
+      const outLbl = { satisfactory:"Satisfactory", unsatisfactory:"Unsatisfactory", remedied:"Remedied", "":"Outcome not set" };
+      const out = '<div class="sub" style="margin-top:4px">Certificate outcome: <b>'+esc(outLbl[c.outcome]||c.outcome||"not set")+'</b>'+(c.review&&c.review.attention?' · ⚠ flagged by the compliance check':'')+(c.cert?' · cert filed '+fmtD(c.cert.date):'')+(c.certUpdated?' · re-issued '+fmtD(c.certUpdated.date):'')+'</div>';
+      const links = [];
+      if (c.testJob) links.push('<a href="/job-view.html?jobId='+encodeURIComponent(c.testJob.id)+'">⚡ Test job ('+esc(c.testJob.status)+')</a>');
+      else if (r.storeCode) links.push('<a href="/add-job.html?site='+encodeURIComponent(r.storeCode)+'&elecTest=1&name='+encodeURIComponent((r.storeCode||"")+" 5 Year Electrical Test"+(r.orderNr?" "+r.orderNr:""))+'&desc='+encodeURIComponent("5 year fixed wire test (EICR)"+(r.orderNr?" — Concerto "+r.orderNr:"")+(r.nextDate?" · due "+r.nextDate:""))+'">➕ Raise the test job</a>');
+      if (c.worksJob) links.push('<a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">🔧 Works job ('+esc(c.worksJob.status)+')</a>');
+      if (c.cert) links.push('<button data-cert="'+esc(r.storeCode)+'">📄 Certificate</button>');
+      links.push('<a href="/compliance-review.html">🔍 Compliance check</a>', '<a href="/client-orders.html">📥 Client orders</a>');
+      if (r.storeCode) links.push('<a href="/site-folder.html?site='+encodeURIComponent(r.storeCode)+'">🗂 Site folder</a>');
+      links.push('<a href="/concerto-ppm.html?tab=schedule">🗂 Full case &amp; checklist</a>');
+      const log = (c.log||[]).slice(0,6).map(l => '<div><span class="muted">'+fmtD(l.at)+'</span> · '+esc(l.by)+' · '+esc(l.text)+'</div>').join("") || '<div class="muted">Nothing logged yet.</div>';
+      const noteMeta = c.note ? '<span class="muted" style="font-size:11px;margin-left:6px">last edited'+(c.noteBy?" by "+esc(c.noteBy):"")+(c.noteAt?" "+fmtD(c.noteAt):"")+'</span>' : '';
+      const noteBox = '<div class="notebox">'
+        + '<div class="lbl">📝 Notes on this job'+noteMeta+'</div>'
+        + '<textarea class="jobnote" placeholder="Leave a note on this job/site…">'+esc(c.note||"")+'</textarea>'
+        + '<div style="margin-top:6px"><button class="notesave" data-note="'+esc(r.id)+'">💾 Save note</button> <span class="saved" id="nsv-'+esc(r.id)+'"></span></div>'
         + '</div>';
+      return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
+        + out + strip
+        + noteBox
+        + '<div class="dlinks">'+links.join("")+'</div>'
+        + '<div class="log">'+log+'</div>';
     }
 
-    // Quote text — fetch the server-built body and copy it for the client email.
-    async function showQuote(id){
-      let text = "";
-      try { const d = await authFetch("/certs/five-year/quote-text?id="+encodeURIComponent(id)).then(r=>r.json()); if(d&&d.ok) text=d.text||""; } catch {}
-      if(!text){ (window.MLUI?MLUI.toast:alert)("Couldn't build the quote text."); return; }
-      try { await navigator.clipboard.writeText(text); } catch {}
-      if(window.MLUI && MLUI.confirm){ MLUI.confirm(text.replace(/\n/g,"<br>"),{title:"Quote text (copied to clipboard)",okLabel:"Done"}); }
-      else { alert(text); }
-    }
-    // Create the audit works job from a case's linked test job, then move to In works.
-    async function createWorks(id, btn){
-      const ok = window.MLUI ? await MLUI.confirm("Create the works job from these remedials? It lands unassigned, ready to allocate.",{title:"Create works job"}) : confirm("Create the works job?");
-      if(!ok) return;
-      btn.disabled = true; btn.textContent = "Creating…";
-      try {
-        const d = await authFetch("/certs/five-year/create-works",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
-        if(d && d.ok){
-          const r = ROWS.find(x=>x.id===id); if(r){ r.worksJobId=d.worksJobId; r.stage=d.stage||"in_works"; }
-          (window.MLUI?MLUI.toast:function(){})("Works job created");
-          renderSummary(); renderChips(); render();
-        } else { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't create the works job."); }
-      } catch { btn.disabled=false; btn.textContent="🛠 Create works job"; (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); }
+    async function openCert(code){
+      try { const d = await authFetch("/compliance/file-url?scheme=coop&code="+encodeURIComponent(code)+"&type=fiveYear").then(r=>r.json()); if (d && d.url) window.open(safeUrl(d.url), "_blank"); else (window.MLUI?MLUI.toast:alert)("No 5-year certificate is filed for "+code); }
+      catch { (window.MLUI?MLUI.toast:alert)("Couldn't open the certificate"); }
     }
 
-    async function setStage(id, stage, sel){
-      sel.disabled = true;
+    async function setStage(ppmId, stage12, el){
+      if (el) el.disabled = true;
+      const sv = g("sv-"+ppmId);
       try {
-        const res = await authFetch("/certs/five-year/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,stage})}).then(r=>r.json());
-        if(res && res.ok){ const r = ROWS.find(x=>x.id===id); if(r) r.stage=stage; g("sv-"+id).textContent="Saved ✓"; setTimeout(()=>{const e=g("sv-"+id);if(e)e.textContent="";},1500); renderSummary(); renderChips(); }
-      } catch {}
-      sel.disabled = false;
+        const res = await authFetch("/concerto/case", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ppmId, stage12 }) }).then(r=>r.json());
+        if (res && res.ok) { if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); } await load(); }
+        else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the status."); if (el) el.disabled=false; }
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the status."); if (el) el.disabled=false; }
     }
-    async function del(id){
-      const ok = window.MLUI ? await MLUI.confirm("Remove this remedial from the register?",{title:"Remove",danger:true}) : confirm("Remove this remedial?");
-      if(!ok) return;
-      try { await authFetch("/certs/five-year/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); } catch {}
-      ROWS = ROWS.filter(r=>r.id!==id); renderSummary(); renderChips(); render();
+
+    async function saveNote(ppmId, ta, btn){
+      if (!ta) return;
+      const sv = g("nsv-"+ppmId), text = ta.value;
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch("/concerto/case", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ppmId, caseNote: text }) }).then(r=>r.json());
+        if (res && res.ok) {
+          if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); }
+          const row = ROWS.find(x => x.id===ppmId);   // keep it through a re-render, no full reload
+          if (row && row.case){ row.case.note = text.trim(); row.case.noteAt = new Date().toISOString(); }
+        } else (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the note.");
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the note."); }
+      if (btn) btn.disabled = false;
     }
+
+    /* ── Alex list — page-level checklist of items to discuss with Alex ── */
+    let ALEX = [];
+    async function loadAlex(){
+      try { const d = await authFetch("/concerto/alex-list").then(r=>r.json()); if (d && d.ok) { ALEX = d.items || []; renderAlex(); } } catch {}
+    }
+    function alexOutstanding(){ return ALEX.filter(i => !i.done).length; }
+    function updateAlexCount(){
+      const n = alexOutstanding(), b = g("alexCount");
+      if (n){ b.textContent = n; b.hidden = false; } else { b.hidden = true; }
+    }
+    function renderAlex(){
+      updateAlexCount();
+      const box = g("alexList");
+      if (!ALEX.length){ box.innerHTML = '<div class="axempty">Nothing on the list yet. Add anything you need to raise with Alex.</div>'; return; }
+      const items = ALEX.slice().sort((a,b) => (a.done?1:0)-(b.done?1:0));   // outstanding first
+      box.innerHTML = items.map(i => {
+        const meta = i.done
+          ? (i.doneBy?"done by "+esc(i.doneBy):"done")+(i.doneAt?" · "+fmtD(i.doneAt):"")
+          : "added"+(i.addedBy?" by "+esc(i.addedBy):"")+(i.addedAt?" · "+fmtD(i.addedAt):"")+(i.storeCode||i.siteName?" · "+esc([i.storeCode,i.siteName].filter(Boolean).join(" ")):"");
+        return '<div class="axitem'+(i.done?" done":"")+'" data-id="'+esc(i.id)+'">'
+          + '<input type="checkbox" data-ax-toggle="'+esc(i.id)+'"'+(i.done?" checked":"")+'>'
+          + '<span class="txt">'+esc(i.text)+'<span class="meta">'+meta+'</span></span>'
+          + '<button class="del" data-ax-del="'+esc(i.id)+'" title="Remove">🗑</button>'
+          + '</div>';
+      }).join("");
+      box.querySelectorAll("[data-ax-toggle]").forEach(cb => cb.onchange = () => alexPost({ id: cb.dataset.axToggle, done: cb.checked }));
+      box.querySelectorAll("[data-ax-del]").forEach(b => b.onclick = async () => { const ok = window.MLUI ? await MLUI.confirm("Remove this item?",{danger:true}) : confirm("Remove this item?"); if (ok) alexPost({ id: b.dataset.axDel, delete: true }); });
+    }
+    async function alexPost(payload){
+      try {
+        const d = await authFetch("/concerto/alex-list", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) }).then(r=>r.json());
+        if (d && d.ok){ ALEX = d.items || []; renderAlex(); } else (window.MLUI?MLUI.toast:alert)((d&&d.error)||"Couldn't update the list.");
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't update the list."); }
+    }
+    function openAlex(){ g("alexBack").classList.add("on"); if (!ALEX.length) loadAlex(); g("alexInput").focus(); }
+    function closeAlex(){ g("alexBack").classList.remove("on"); }
   </script>
 </body>
 </html>
