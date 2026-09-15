@@ -15492,6 +15492,9 @@ async function handle12(request, env, ctx, url, sess) {
         payload.status = "Scheduled";
       }
     }
+    if (!before && !payload.status && !(payload.assignedEngineers && payload.assignedEngineers.length) && String(payload.storeType || "").toLowerCase() !== "chapplins") {
+      payload.status = "Co-op Pending";
+    }
     let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     if (payload.visitGroupId) {
       try {
@@ -18969,7 +18972,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     }
   }
   const assignedEngineers = body.clearEngineers ? [] : Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
-  if (assignedEngineers.length && status === "Pending") status = "Scheduled";
+  if (assignedEngineers.length && (status === "Pending" || status === "Co-op Pending")) status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
   let scheduledEnd = body.scheduledEnd || existing?.scheduledEnd || null;
   if (scheduledAt) {
@@ -19346,11 +19349,11 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     if (isMultiEng(job) && job.engStatus) {
       for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
     }
-  } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
+  } else if (!hadEngineers && assignedList(job).length && (job.status === "Pending" || job.status === "Co-op Pending")) {
     job.status = "Scheduled";
     job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
   }
-  if (assignedList(job).length && String(job.status).toLowerCase() === "pending") {
+  if (assignedList(job).length && /^(?:co-op )?pending$/i.test(String(job.status))) {
     job.status = "Scheduled";
     if (!(job.statusHistory || []).some((h) => h.status === "Scheduled" && h.at === now))
       (job.statusHistory ||= []).push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
