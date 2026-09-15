@@ -636,7 +636,7 @@ let activeStatus = "all";      // default board view (restoreFilters may overrid
 let activePriority = "all";
 // Status chips: only a minimal primary set shows by default (too many on mobile).
 // "More ▾" reveals the rest for the current view; collapsed again on every load.
-const PRIMARY_STATUSES = new Set(["Pending", "Scheduled", "Complete"]);
+const PRIMARY_STATUSES = new Set(["Pending", "Co-op Pending", "Scheduled", "Complete"]);
 let chipsExpanded = false;
 let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
 let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register

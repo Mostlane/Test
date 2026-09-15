@@ -685,6 +685,13 @@ export async function handle(request, env, ctx, url, sess) {
         payload.status = "Scheduled";
       }
     }
+    // New Concerto/Co-op reactive jobs land in the "Co-op Pending" triage bucket
+    // (Jamie's rule) rather than plain Pending — unless the sender set a status,
+    // the job was just auto-assigned/scheduled above, or it's a Chapplins job.
+    if (!before && !payload.status && !(payload.assignedEngineers && payload.assignedEngineers.length)
+        && String(payload.storeType || "").toLowerCase() !== "chapplins") {
+      payload.status = "Co-op Pending";
+    }
     let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
     // A client order for this reference may already be waiting → stamp its value on.
@@ -4331,7 +4338,8 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
           : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []))));
 
   // Assigned + still Pending = it's been sent to someone: mark it Scheduled.
-  if (assignedEngineers.length && status === "Pending") status = "Scheduled";
+  // "Co-op Pending" (the Concerto triage bucket) behaves like Pending here.
+  if (assignedEngineers.length && (status === "Pending" || status === "Co-op Pending")) status = "Scheduled";
 
   // Finish time: explicit end > explicit duration > keep existing > start + 1h.
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
@@ -4786,16 +4794,16 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     if (isMultiEng(job) && job.engStatus) {
       for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
     }
-  } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
-    // Sending a job to someone IS scheduling it — flip Pending → Scheduled.
+  } else if (!hadEngineers && assignedList(job).length && (job.status === "Pending" || job.status === "Co-op Pending")) {
+    // Sending a job to someone IS scheduling it — flip Pending / Co-op Pending → Scheduled.
     job.status = "Scheduled";
     job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
   }
-  // An ALLOCATED job is never "Pending". The editor always re-sends the current
-  // status, so assigning someone via the editor takes the explicit-status branch
-  // above and skips the flip — catch it here: an assigned job left Pending is
-  // promoted to Scheduled (idempotent).
-  if (assignedList(job).length && String(job.status).toLowerCase() === "pending") {
+  // An ALLOCATED job is never "Pending" / "Co-op Pending". The editor always
+  // re-sends the current status, so assigning someone via the editor takes the
+  // explicit-status branch above and skips the flip — catch it here: an assigned
+  // job left in a pending bucket is promoted to Scheduled (idempotent).
+  if (assignedList(job).length && /^(?:co-op )?pending$/i.test(String(job.status))) {
     job.status = "Scheduled";
     if (!(job.statusHistory || []).some(h => h.status === "Scheduled" && h.at === now))
       (job.statusHistory ||= []).push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
