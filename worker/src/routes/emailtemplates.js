@@ -247,6 +247,8 @@ export const TEMPLATES = [
     test: (s, t) => (/^Quote\s*:/i.test(s) && /Cancel request/i.test(s)) || /Quote status\s*:\s*Cancelled/i.test(t), read: concertoQuoteCancel },
   { id: "concerto-helpdesk", label: "Concerto — helpdesk action (dispatch / note)", domains: ["concerto.co.uk"],
     test: (s) => /^Helpdesk action\b/i.test(s) || /^Additional information has been added/i.test(s), read: concertoHelpdesk },
+  { id: "concerto-supplier-portal", label: "Concerto — supplier-portal batch notice", domains: ["concerto.co.uk"],
+    test: (s) => /Supplier Portal/i.test(s), read: () => ({ kind: "notice", reason: "Concerto supplier-portal batch notice (e.g. PPM orders added) — not an individual job" }) },
   { id: "concerto-notice", label: "Concerto — quote notice", domains: ["concerto.co.uk"],
     test: (s) => /^Quote\s*:/i.test(s), read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" }) },
   { id: "chapplins-job", label: "Chapplins Lettings — new job raised", domains: ["chapplins.co.uk"],

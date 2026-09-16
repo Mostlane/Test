@@ -196,6 +196,8 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   ok("our own 'Send N to MetroRod' → dropped", z.outcome === "dropped" && /own outbound/.test(z.reason), z.reason);
   const re = await run(E, rawChap.replace("Subject: P1 - ", "Subject: RE: P1 - ").replace("test-chap1@fpp.local", "test-re@fpp.local"), "ashley@chapplins.co.uk");
   ok("a reply ('RE:') quoting a job email → dropped", re.outcome === "dropped" && /Reply/.test(re.reason), re.reason);
+  const sp = await run(E, mail("noreply@concerto.co.uk", "Orders have been added to the Supplier Portal - from Southern Coop", "test-sp@concerto", "<div>39 PPM orders have been created and added to the Supplier Portal</div>"), "noreply@concerto.co.uk");
+  ok("Concerto supplier-portal batch notice → dropped, never a job/order", sp.outcome === "dropped" && /supplier-portal/i.test(sp.reason), sp.outcome + " / " + sp.reason);
   ok("nothing created from any of them", E.inbound.length === 0 && E.orders.length === 0);
 }
 { // 7. unknown layout from an allowed sender → HELD for review (no AI key); approve creates it with corrections

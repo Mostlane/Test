@@ -24987,6 +24987,13 @@ var TEMPLATES = [
     read: concertoHelpdesk
   },
   {
+    id: "concerto-supplier-portal",
+    label: "Concerto \u2014 supplier-portal batch notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /Supplier Portal/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto supplier-portal batch notice (e.g. PPM orders added) \u2014 not an individual job" })
+  },
+  {
     id: "concerto-notice",
     label: "Concerto \u2014 quote notice",
     domains: ["concerto.co.uk"],
