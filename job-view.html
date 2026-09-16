@@ -1262,10 +1262,10 @@ async function loadVisits(){
     const visits = (d && d.visits) || [];
     if(visits.length < 2){ card.style.display="none"; return; }   // only show once there's a chain
     card.style.display = "";
-    renderVisits(visits);
+    renderVisits(visits, (d && d.history) || []);
   }catch(e){ card.style.display="none"; }
 }
-async function renderVisits(visits){
+async function renderVisits(visits, history){
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
   const fmtD = iso => { if(!iso) return "—"; const dt=new Date(iso); return isNaN(dt)?"—":dt.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); };
@@ -1288,7 +1288,24 @@ async function renderVisits(visits){
   const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined cost across all visits</div><div>' + money(total) + '</div></div>' : "";
   const orderRow = (admin && anyOrder) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #eef1f5;font-weight:700;"><div>Client order value (ex VAT)</div><div>' + money(orderTotal) + '</div></div>'
     + (anyCost ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-weight:800;color:' + (profit >= 0 ? '#166534' : '#b91c1c') + ';"><div>' + (profit >= 0 ? 'Profit' : 'Loss') + ' across the incident</div><div>' + (profit >= 0 ? '' : '−') + money(Math.abs(profit)) + '</div></div>' : '') : "";
-  $("visitsBody").innerHTML = rows + totalRow + orderRow;
+  // Plain-English incident history (milestones across every linked visit)
+  const fmtDT = iso => { if(!iso) return ""; const dt=new Date(iso); return isNaN(dt)?"":dt.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})+" · "+dt.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); };
+  const multi = visits.length > 1;
+  const histRows = (history||[]).map(h =>
+    '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid #f1f4f8;">'
+    + '<div style="font-size:16px;line-height:1.3;width:22px;flex:0 0 22px;text-align:center;">' + esc(h.icon||"•") + '</div>'
+    + '<div style="flex:1;min-width:0;">'
+    + '<div style="font-weight:600;">' + esc(h.text||"") + (multi && h.ref ? ' <span class="sub" style="font-weight:400;">· ' + esc(h.ref) + '</span>' : '') + '</div>'
+    + (h.sub ? '<div class="sub">' + esc(h.sub) + '</div>' : '')
+    + '</div>'
+    + '<div class="sub" style="white-space:nowrap;">' + esc(fmtDT(h.at)) + '</div></div>'
+  ).join("");
+  const histBlock = histRows
+    ? '<div style="margin-top:14px;padding-top:10px;border-top:2px solid #cbd5e1;"><div style="font-weight:700;margin-bottom:2px;">📜 History</div>'
+      + '<div class="sub" style="margin-bottom:4px;">What has happened across all the linked jobs, in order.</div>'
+      + histRows + '</div>'
+    : "";
+  $("visitsBody").innerHTML = rows + totalRow + orderRow + histBlock;
 }
 async function loadJobCost(){
   const card = $("jobCostCard"); if(!card || !job) return;

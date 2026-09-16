@@ -2148,14 +2148,16 @@ export async function handle(request, env, ctx, url, sess) {
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
       const money = await canSeeMoney(env, tenantId, sess.user.username);
-      const visits = all.filter(j => j && (((j.visitGroupId || j.id) === groupId) || j.revisitOf === groupId))
+      const groupJobs = all.filter(j => j && (((j.visitGroupId || j.id) === groupId) || j.revisitOf === groupId));
+      const visits = groupJobs
         .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "",
           scheduledAt: j.scheduledAt || null, raisedAt: j.raisedAt || null, closedAt: j.closedAt || null,
           isRoot: j.id === groupId, current: j.id === src.id,
           orderNumber: j.orderNumber || null, ...(money ? { orderValue: j.orderValue ?? null } : {}),
           engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [] }))
         .sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
-      return jsonResponse({ ok: true, groupId, visits }, headers);
+      const history = buildIncidentHistory(groupJobs, money);
+      return jsonResponse({ ok: true, groupId, visits, history }, headers);
     }
 
     // GET /sla/jobs/{id}/series — the other days in this job's recurring series
@@ -4165,6 +4167,82 @@ async function maybeReissueAfterRemedial(env, tid, before, updated) {
     const certs = await import("./certs.js");
     if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
   } catch {}
+}
+
+/* ---- Plain-English incident history (milestone timeline) --------------------
+   One clean line per KEY event across every job linked in a re-visit / order
+   group — raised, attended, made safe, quoted, order received, cancelled, new
+   visit, completed, invoiced — time-sorted so a chain reads as a story, not a
+   log. Micro status-taps (Scheduled / Travelling / Pending) are skipped. £
+   figures only for money users. Powers the "🔁 Visits" card on job-view. */
+function milestoneForStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "in progress") return { icon: "🔧", text: "Attended — work started on site" };
+  if (s === "awaiting office (safety)") return { icon: "⚠️", text: "Made safe — awaiting office" };
+  if (s === "on hold" || s === "on hold — approved") return { icon: "⏸", text: "Put on hold" };
+  if (s === "quote") return { icon: "📝", text: "Marked for a quote" };
+  if (s === "complete") return { icon: "✅", text: "Completed" };
+  if (s === "closed") return { icon: "📁", text: "Closed" };
+  if (s === "invoiced") return { icon: "🧾", text: "Invoiced" };
+  return null;
+}
+function buildIncidentHistory(jobs, money) {
+  const money$ = (v) => {
+    const n = Number(v);
+    return (money && Number.isFinite(n) && n > 0) ? " — £" + n.toFixed(2) : "";
+  };
+  const ordered = (jobs || []).slice().sort((a, b) =>
+    new Date(a.raisedAt || a.createdAt || 0) - new Date(b.raisedAt || b.createdAt || 0));
+  const events = [];
+  for (const j of ordered) {
+    if (!j) continue;
+    const ref = j.helpdeskRef || String(j.id || "").slice(0, 8);
+    const hist = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+    const firstAt = hist.length ? hist[0].at : null;
+    const raisedAt = j.raisedAt || j.createdAt || firstAt;
+    // Raised / return-visit created
+    const orig = String(j.originator || "").toLowerCase();
+    let sub = "";
+    if (orig === "email" || orig === "zapier") sub = "from Concerto";
+    else if (orig) sub = "raised in office";
+    events.push({ at: raisedAt, ref,
+      icon: j.revisitOf ? "🔁" : "🆕",
+      text: j.revisitOf ? "New visit raised" : "Job raised", sub });
+    // Key status milestones — first occurrence of each per job
+    const seen = new Set();
+    for (const h of hist) {
+      const m = milestoneForStatus(h && h.status);
+      if (!m || seen.has(m.text)) continue;
+      seen.add(m.text);
+      events.push({ at: h.at || raisedAt, ref, icon: m.icon, text: m.text, sub: h && h.by ? String(h.by) : "" });
+    }
+    // Quote sent to client
+    if (j.quoteSent && j.quoteSent.at) {
+      const qs = j.quoteSent;
+      events.push({ at: qs.at, ref, icon: "💷",
+        text: "Quote sent to client" + money$(qs.amountExVat),
+        sub: qs.quoteNumber ? ("Quote " + qs.quoteNumber) : "" });
+    }
+    // Order received (the client's £ order landing)
+    if (j.orderNumber) {
+      let oAt = null;
+      for (const h of hist) { if (String(h && h.status || "").toLowerCase() === "order") { oAt = h.at; break; } }
+      events.push({ at: oAt || j.updatedAt || raisedAt, ref, icon: "🧾",
+        text: "Order received" + money$(j.orderValue),
+        sub: "Order " + j.orderNumber });
+    }
+    // Cancelled (office/client) — the stamp is more reliable than statusHistory
+    if (j.cancelledAt) {
+      events.push({ at: j.cancelledAt, ref, icon: "❌", text: "Cancelled",
+        sub: [j.cancelReason, j.cancelledBy ? ("by " + j.cancelledBy) : ""].filter(Boolean).join(" · ") });
+    } else if (j.clientCancelled && j.clientCancelled.at) {
+      const cc = j.clientCancelled;
+      events.push({ at: cc.at, ref, icon: "↩", text: "Client cancelled",
+        sub: [cc.reason, cc.by ? ("by " + cc.by) : ""].filter(Boolean).join(" · ") });
+    }
+  }
+  events.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  return events;
 }
 
 export async function listJobs(env, tenantId, opts) {

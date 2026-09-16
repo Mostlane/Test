@@ -16776,7 +16776,8 @@ async function handle12(request, env, ctx, url, sess) {
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
       const money2 = await canSeeMoney(env, tenantId, sess.user.username);
-      const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
+      const groupJobs = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+      const visits = groupJobs.map((j) => ({
         id: j.id,
         ref: j.helpdeskRef || j.id,
         status: j.status || "",
@@ -16789,7 +16790,8 @@ async function handle12(request, env, ctx, url, sess) {
         ...money2 ? { orderValue: j.orderValue ?? null } : {},
         engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
       })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
-      return jsonResponse({ ok: true, groupId, visits }, headers);
+      const history = buildIncidentHistory(groupJobs, money2);
+      return jsonResponse({ ok: true, groupId, visits, history }, headers);
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -18676,6 +18678,96 @@ async function maybeReissueAfterRemedial(env, tid, before, updated) {
     if (certs.reissueCleanCertForRemedialJob) await certs.reissueCleanCertForRemedialJob(env, tid, updated);
   } catch {
   }
+}
+function milestoneForStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "in progress") return { icon: "\u{1F527}", text: "Attended \u2014 work started on site" };
+  if (s === "awaiting office (safety)") return { icon: "\u26A0\uFE0F", text: "Made safe \u2014 awaiting office" };
+  if (s === "on hold" || s === "on hold \u2014 approved") return { icon: "\u23F8", text: "Put on hold" };
+  if (s === "quote") return { icon: "\u{1F4DD}", text: "Marked for a quote" };
+  if (s === "complete") return { icon: "\u2705", text: "Completed" };
+  if (s === "closed") return { icon: "\u{1F4C1}", text: "Closed" };
+  if (s === "invoiced") return { icon: "\u{1F9FE}", text: "Invoiced" };
+  return null;
+}
+function buildIncidentHistory(jobs, money2) {
+  const money$ = (v) => {
+    const n = Number(v);
+    return money2 && Number.isFinite(n) && n > 0 ? " \u2014 \xA3" + n.toFixed(2) : "";
+  };
+  const ordered = (jobs || []).slice().sort((a, b) => new Date(a.raisedAt || a.createdAt || 0) - new Date(b.raisedAt || b.createdAt || 0));
+  const events = [];
+  for (const j of ordered) {
+    if (!j) continue;
+    const ref = j.helpdeskRef || String(j.id || "").slice(0, 8);
+    const hist = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+    const firstAt = hist.length ? hist[0].at : null;
+    const raisedAt = j.raisedAt || j.createdAt || firstAt;
+    const orig = String(j.originator || "").toLowerCase();
+    let sub = "";
+    if (orig === "email" || orig === "zapier") sub = "from Concerto";
+    else if (orig) sub = "raised in office";
+    events.push({
+      at: raisedAt,
+      ref,
+      icon: j.revisitOf ? "\u{1F501}" : "\u{1F195}",
+      text: j.revisitOf ? "New visit raised" : "Job raised",
+      sub
+    });
+    const seen = /* @__PURE__ */ new Set();
+    for (const h of hist) {
+      const m = milestoneForStatus(h && h.status);
+      if (!m || seen.has(m.text)) continue;
+      seen.add(m.text);
+      events.push({ at: h.at || raisedAt, ref, icon: m.icon, text: m.text, sub: h && h.by ? String(h.by) : "" });
+    }
+    if (j.quoteSent && j.quoteSent.at) {
+      const qs = j.quoteSent;
+      events.push({
+        at: qs.at,
+        ref,
+        icon: "\u{1F4B7}",
+        text: "Quote sent to client" + money$(qs.amountExVat),
+        sub: qs.quoteNumber ? "Quote " + qs.quoteNumber : ""
+      });
+    }
+    if (j.orderNumber) {
+      let oAt = null;
+      for (const h of hist) {
+        if (String(h && h.status || "").toLowerCase() === "order") {
+          oAt = h.at;
+          break;
+        }
+      }
+      events.push({
+        at: oAt || j.updatedAt || raisedAt,
+        ref,
+        icon: "\u{1F9FE}",
+        text: "Order received" + money$(j.orderValue),
+        sub: "Order " + j.orderNumber
+      });
+    }
+    if (j.cancelledAt) {
+      events.push({
+        at: j.cancelledAt,
+        ref,
+        icon: "\u274C",
+        text: "Cancelled",
+        sub: [j.cancelReason, j.cancelledBy ? "by " + j.cancelledBy : ""].filter(Boolean).join(" \xB7 ")
+      });
+    } else if (j.clientCancelled && j.clientCancelled.at) {
+      const cc = j.clientCancelled;
+      events.push({
+        at: cc.at,
+        ref,
+        icon: "\u21A9",
+        text: "Client cancelled",
+        sub: [cc.reason, cc.by ? "by " + cc.by : ""].filter(Boolean).join(" \xB7 ")
+      });
+    }
+  }
+  events.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  return events;
 }
 async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);
