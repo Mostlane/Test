@@ -12442,6 +12442,21 @@ async function matchOrderToRemedial(env, tid, o) {
   } catch {
   }
   try {
+    const fc = fyrCode(o.storeCode);
+    const rows = (await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage FROM five_year_remedials WHERE tenant_id=? AND COALESCE(stage,'quoted') IN ('quoted','ordered','') ORDER BY created_at DESC"
+    ).bind(tid).all()).results || [];
+    const sr = String(o.srRef || "").toUpperCase();
+    const cand = sr && rows.find((r) => String(r.sr || "").toUpperCase() === sr) || fc && rows.find((r) => fyrCode(r.store_code) === fc);
+    if (cand) return {
+      kind: "fiveyear",
+      certId: cand.id,
+      stage: cand.stage || "quoted",
+      note: `5-year electrical remedial ${cand.sr || ""} at ${cand.site_name || code} (stage ${cand.stage || "quoted"})`
+    };
+  } catch {
+  }
+  try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
     const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num2);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
@@ -12571,6 +12586,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     emailFrom,
     emailText
   ).run();
+  if (m && m.kind === "fiveyear" && m.certId) {
+    try {
+      await env.DB.prepare(
+        "UPDATE five_year_remedials SET order_number=?, order_value=?, order_id=?, stage=CASE WHEN COALESCE(stage,'quoted') IN ('quoted','') THEN 'ordered' ELSE stage END, updated_at=? WHERE tenant_id=? AND id=?"
+      ).bind(orderNumber || null, b.orderValue != null ? Number(b.orderValue) : null, id, now, tid, m.certId).run();
+    } catch {
+    }
+  }
   const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
   let linkedJob = null;
   if (!m) {
@@ -12586,12 +12609,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const isFy = m && m.kind === "fiveyear";
+    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : isFy ? `Client order ${orderNumber || ""} for ${site} \u2014 matched to a 5-year electrical remedial and marked ordered. Raise the works job from the 5-year remedials list.` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches an EM remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const url = linkedJob ? "/client-orders.html" : isFy ? "/five-year-remedials.html" : m ? "/cert-review.html?orders=1" : "/client-orders.html";
     ctx.waitUntil(sendToPermission(
       env,
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m && !linkedJob ? "Client order \u2014 approve remedial" : "Client order received", body, url: m && !linkedJob ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
+      { title: m && !linkedJob ? "Client order \u2014 remedial" : "Client order received", body, url, tag: "client-order:" + id, actionable: !linkedJob },
       "",
       { officeOnly: true }
     ).catch(() => {
@@ -13849,7 +13874,19 @@ PAT: Import certificate number ${num2}-${yr}`;
     ).bind(tid).all();
     const rows = results || [];
     const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
-    return json({ ok: true, cases: rows.map((r) => shapeCase(r, fit4[r.cert_id])) }, {}, env, request);
+    const ordByCert = {};
+    try {
+      const ids = rows.map((r) => r.cert_id).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 60) {
+        const chunk = ids.slice(i, i + 60);
+        const { results: os } = await env.DB.prepare(
+          `SELECT id, order_number, order_value, matched_cert_id, notified_at, status FROM client_orders WHERE tenant_id=? AND matched_kind='em' AND status<>'dismissed' AND matched_cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY COALESCE(notified_at, created_at) DESC`
+        ).bind(tid, ...chunk).all();
+        for (const o of os || []) if (!ordByCert[o.matched_cert_id]) ordByCert[o.matched_cert_id] = { number: o.order_number || "", value: o.order_value, id: o.id, at: o.notified_at || "", status: o.status || "" };
+      }
+    } catch {
+    }
+    return json({ ok: true, cases: rows.map((r) => ({ ...shapeCase(r, fit4[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
   }
   if (sub === "/orders" && method === "GET") {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
@@ -18506,6 +18543,17 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const inc = orderRefIncident(ref);
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
   const text = orderText(o);
+  if (sibs.length) {
+    const finished = await jobFinishedFor(env, tenantId);
+    const skip = String(o && o.unlinkedJobId || "");
+    const open = sibs.filter((j) => !finished(j) && j.id !== skip).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    if (open.length) {
+      const pick = open[0];
+      await stampOrderOnJob(env, tenantId, pick, o);
+      await markOrderLinked(env, tenantId, o.id, pick.id);
+      return { job: pick, how: "linked", from: { id: pick.id, ref: pick.helpdeskRef || pick.id, status: pick.status || "" } };
+    }
+  }
   if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();

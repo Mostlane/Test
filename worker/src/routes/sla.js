@@ -4028,6 +4028,22 @@ export async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const inc = orderRefIncident(ref);
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
   const text = orderText(o);   // priced lines already stripped; the value never goes in the description
+  // If the incident already has an OPEN visit (e.g. the client sent the bare
+  // re-dispatch seconds before this /N order — both are the SAME ordered works),
+  // attach the order to THAT visit instead of cloning a second one. Only when
+  // every earlier visit is finished do we clone the ordered-works visit.
+  if (sibs.length) {
+    const finished = await jobFinishedFor(env, tenantId);
+    const skip = String((o && o.unlinkedJobId) || "");
+    const open = sibs.filter(j => !finished(j) && j.id !== skip)
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    if (open.length) {
+      const pick = open[0];
+      await stampOrderOnJob(env, tenantId, pick, o);
+      await markOrderLinked(env, tenantId, o.id, pick.id);
+      return { job: pick, how: "linked", from: { id: pick.id, ref: pick.helpdeskRef || pick.id, status: pick.status || "" } };
+    }
+  }
   if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();

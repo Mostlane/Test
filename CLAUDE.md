@@ -4740,7 +4740,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   "linked"`, push says so, not actionable); (2) the job arrives later via
   `/sla/inbound` → `applyOrderToJob` stamps the waiting order; (3) neither → the
   office presses Make the job: `raiseJobForOrder` links a same-ref job if one
-  exists, else **clones the incident's newest earlier job as a linked visit via
+  exists, **else if the incident already has an OPEN visit (e.g. the client sent
+  the bare re-dispatch seconds before the `/N` order — the SAME ordered works)
+  it stamps the order on THAT open visit rather than cloning a second one (16 Sep
+  2026 — the quote→order→re-dispatch double-visit fix; the unlinked job is still
+  excluded)**, else **clones the incident's newest earlier job as a linked visit via
   the shared `cloneJobAsVisit`** (the 🔁 Re-visit handler now uses the same helper:
   R2 `jobs/<old>/` copied to `jobs/<new>/`, events/RA/signature/photo tags/audit
   items/remedials carried, revisitOf/visitGroupId + ×N stamped) with description
@@ -4757,6 +4761,28 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   stripping per role, costing 403, visits, dismissed). NB `client_orders.tenant_id`
   is TEXT and certs.js binds the session's numeric tenant id — sla.js binds the
   same number (never `String(tenantId)`) or the rows are invisible (the '1.0' quirk).
+  - **REM/R orders auto-link to BOTH remedial sections — a self-updating list (16
+    Sep 2026 — Jamie: "REM job orders are for 5-year electrical or EM remedial works…
+    link to the remedial jobs in those two sections and update them so I can see there
+    is an order… a list which auto updates when they are received").** `R#####`/`REM####`
+    orders (no `/N` suffix; verified in the mailbox — e.g. REM0150 "EM20 light failed",
+    R29051) parse fine (order-number regex is `[A-Z0-9\/-]+`) and carry a `For :` store
+    line + SR ref. **`matchOrderToRemedial` now has a 5-year branch** (1b): matches a
+    `five_year_remedials` register row awaiting its order — by the order's **SR ref
+    first**, else store code, at stage quoted/ordered/blank → returns
+    `{kind:"fiveyear", certId:<fyrId>}`. On that match `handleOrderInbound`
+    **auto-stamps `order_number/order_value/order_id` onto the register row AND advances
+    stage quoted→ordered** (never downgrades ordered/in_works/done; the office still
+    raises the works job from the list — NO auto job). The 5-year page
+    (five-year-remedials.html) already renders `r.order` + treats an order as "ordered"
+    (via `attachRemedialOrders`), so no front-end change was needed there. **EM cases**:
+    `/certs/remedials/board` now attaches each case's matched order (client_orders
+    `matched_kind='em' AND matched_cert_id=cert_id`) → `case.order`, and cert-review's EM
+    tracker shows a green **"📦 Order received — <num> £<val>"** line; the case is NOT
+    auto-advanced (PO-received stays the manual button that raises the job). The inbound
+    push points at the right section (fiveyear → five-year-remedials.html; EM →
+    cert-review orders). Test: the 5-year match + auto-advance + no-downgrade + no-job
+    cases are in `worker/tools/test-client-orders.mjs`.
   - **EM remedial orders ↔ the works job, unlink, email copy (9 Sep 2026 — Jamie:
     "why do the REM orders not link to the REM job… I must be able to unlink… a copy
     of the email").** Found live: the Frome R29051 order sat "new" while its works
