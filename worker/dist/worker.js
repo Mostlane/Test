@@ -24771,6 +24771,49 @@ function concertoQuoteCancel(subject, t) {
   if (!reference) missing.push("job reference (order number)");
   return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " \u2014 " + by : "") + ")" } };
 }
+function concertoHelpdesk(subject, t) {
+  const sm = /^\s*Helpdesk action\s*-\s*(.+?)\s*:\s*(\d{5,12})\b/i.exec(subject);
+  const action = (sm ? sm[1] : line(/^\s*Action\s*:\s*([^\n,]+)/im, t)).trim();
+  const incident = (sm ? sm[2] : "") || line(/Helpdesk reference\s*:\s*(\d{5,12})/i, t) || line(/information has been added to\s*(\d{5,12})/i, t) || line(/\bfor\s+(\d{5,12})\b/i, t);
+  const isNote = /add a note|photo or document|additional information/i.test(action) || /^\s*Additional information has been added/i.test(subject);
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+  const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
+  const sr = line(/\b(SR\d{4,6})\b/i, siteLine);
+  const stripped = siteLine.replace(/^\s*SR\d{4,6}\s*/i, "").trim();
+  const code = line(/^\s*(\d{3,5})\b/, stripped);
+  const siteName = stripped.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const address = line(/^\s*Address\s*:\s*([^\n]+)/im, t).replace(/,\s*,+/g, ", ").trim();
+  const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
+  const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
+  const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+  if (isNote) {
+    return { kind: "note", incident, note: { incident, reference: incident, text: desc, action, siteCode: code, siteName } };
+  }
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  if (!desc) missing.push("description");
+  if (!code) missing.push("store number");
+  if (!isDispatch) missing.push("unrecognised Concerto action \u201C" + (action || "?") + "\u201D \u2014 confirm this is a job to attend");
+  return {
+    kind: "job",
+    missing,
+    fields: {
+      isJob: true,
+      reference: incident,
+      priority: pr ? "Priority " + pr : "",
+      siteCode: code,
+      siteName: siteName || (address.split(",")[0] || "").trim(),
+      address: address || siteName,
+      postcode,
+      telephone,
+      description: desc,
+      raisedAt: "",
+      respondBy: "",
+      completeBy: ""
+    }
+  };
+}
 var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
   const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
@@ -24845,11 +24888,18 @@ var TEMPLATES = [
     read: concertoQuoteCancel
   },
   {
-    id: "concerto-notice",
-    label: "Concerto \u2014 helpdesk action / quote notice",
+    id: "concerto-helpdesk",
+    label: "Concerto \u2014 helpdesk action (dispatch / note)",
     domains: ["concerto.co.uk"],
-    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s),
-    read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice \u2014 the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" })
+    test: (s) => /^Helpdesk action\b/i.test(s) || /^Additional information has been added/i.test(s),
+    read: concertoHelpdesk
+  },
+  {
+    id: "concerto-notice",
+    label: "Concerto \u2014 quote notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /^Quote\s*:/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" })
   },
   {
     id: "chapplins-job",
@@ -25257,6 +25307,14 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "note") {
+      return {
+        ...out2,
+        outcome: "dropped",
+        reference: r.incident || "",
+        reason: "Concerto note/update on job " + (r.incident || "?") + " \u2014 logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)"
+      };
+    }
     if (r.kind === "cancel") {
       const c = { ...r.cancel || {}, action: "cancel", isJob: false };
       if (r.missing && r.missing.length) return { ...out2, fields: c, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };

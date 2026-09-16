@@ -132,6 +132,70 @@ function concertoQuoteCancel(subject, t) {
   if (!reference) missing.push("job reference (order number)");
   return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " — " + by : "") + ")" } };
 }
+/* Concerto "Helpdesk action - <ACTION> : <incident>" — the RICH dispatch/update
+   email (this is how most Co-op jobs actually reach us; the New Job Alert doesn't
+   fire for all of them). ONE reader classifies by the Action line:
+     AM01. Approved / FM Approved - Send to Contractor  → a job dispatched to us
+                                                          (create/update the job)
+     G01. Add a note, photo or document / "Additional information has been added"
+                                                          → a note on an EXISTING
+                                                          job (never create) → note
+     anything else                                       → held for a human (review)
+   The reference is the BARE incident (e.g. 00025826); its /N order rounds are
+   linked as re-visits by /sla/inbound's matchSameIncident. Body layout:
+     Helpdesk reference : 00029820
+     Description : … ACCESS TIMES: …
+     Site : SR00455 0414 - Chichester, Lavant Road (PFS)
+     Address : Summersdale Retail Park,, Unit 2, …, PO19 5RD
+     Telephone : 01243 539914
+     Block : Forecourt
+     Raised on : 15 September 2026 at 09:00
+     Action : FM Approved - Send to Contractor, by Ian Blackwell
+     Call status : With Contractor - R
+     Urgency : Priority 2 */
+function concertoHelpdesk(subject, t) {
+  const sm = /^\s*Helpdesk action\s*-\s*(.+?)\s*:\s*(\d{5,12})\b/i.exec(subject);
+  const action = (sm ? sm[1] : (line(/^\s*Action\s*:\s*([^\n,]+)/im, t))).trim();
+  // "Additional information has been added" names the incident in the body only.
+  const incident = (sm ? sm[2] : "")
+    || line(/Helpdesk reference\s*:\s*(\d{5,12})/i, t)
+    || line(/information has been added to\s*(\d{5,12})/i, t)
+    || line(/\bfor\s+(\d{5,12})\b/i, t);
+  const isNote = /add a note|photo or document|additional information/i.test(action)
+    || /^\s*Additional information has been added/i.test(subject);
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+
+  const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
+  const sr = line(/\b(SR\d{4,6})\b/i, siteLine);
+  const stripped = siteLine.replace(/^\s*SR\d{4,6}\s*/i, "").trim();
+  const code = line(/^\s*(\d{3,5})\b/, stripped);
+  const siteName = stripped.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const address = line(/^\s*Address\s*:\s*([^\n]+)/im, t).replace(/,\s*,+/g, ", ").trim();
+  const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
+  const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
+  const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+
+  if (isNote) {
+    // A store's note/chase on an existing job. Update-only downstream — it must
+    // never CREATE a job (that's what the dispatch email is for).
+    return { kind: "note", incident, note: { incident, reference: incident, text: desc, action, siteCode: code, siteName } };
+  }
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  if (!desc) missing.push("description");
+  if (!code) missing.push("store number");
+  if (!isDispatch) missing.push("unrecognised Concerto action “" + (action || "?") + "” — confirm this is a job to attend");
+  return {
+    kind: "job", missing,
+    fields: {
+      isJob: true, reference: incident, priority: pr ? "Priority " + pr : "", siteCode: code,
+      siteName: siteName || (address.split(",")[0] || "").trim(), address: address || siteName, postcode,
+      telephone, description: desc, raisedAt: "", respondBy: "", completeBy: ""
+    }
+  };
+}
+
 /* ── Chapplins Lettings ────────────────────────────────────────────────────── */
 const CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
@@ -181,8 +245,10 @@ export const TEMPLATES = [
     test: (s, t) => /^Cancell?l?ed Job\b/i.test(s) || /The job you logged\s*\d+[\s\S]{0,300}Has been Cancelled/i.test(t), read: concertoCancel },
   { id: "concerto-quote-cancel", label: "Concerto — quote request cancelled by the client", domains: ["concerto.co.uk"],
     test: (s, t) => (/^Quote\s*:/i.test(s) && /Cancel request/i.test(s)) || /Quote status\s*:\s*Cancelled/i.test(t), read: concertoQuoteCancel },
-  { id: "concerto-notice", label: "Concerto — helpdesk action / quote notice", domains: ["concerto.co.uk"],
-    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s), read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice — the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" }) },
+  { id: "concerto-helpdesk", label: "Concerto — helpdesk action (dispatch / note)", domains: ["concerto.co.uk"],
+    test: (s) => /^Helpdesk action\b/i.test(s) || /^Additional information has been added/i.test(s), read: concertoHelpdesk },
+  { id: "concerto-notice", label: "Concerto — quote notice", domains: ["concerto.co.uk"],
+    test: (s) => /^Quote\s*:/i.test(s), read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" }) },
   { id: "chapplins-job", label: "Chapplins Lettings — new job raised", domains: ["chapplins.co.uk"],
     test: (s, t) => /A new job has been raised/i.test(t), read: chapplinsJob },
   { id: "metrorod-report", label: "Metro Rod — job card / quote (supplier paperwork)", domains: ["metrorod.co.uk"],

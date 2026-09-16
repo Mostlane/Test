@@ -4607,7 +4607,24 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Southern Coop" order sheet → orderNumber/priority/£ value/description/"For :"
   store + SR ref → **filed IN-PROCESS to `/certs/remedials/order-inbound`** (the
   client-orders intake, outcome `order`) — no Grok/bot needed for orders any more),
-  **concerto-notice** ("Helpdesk action - …", "Quote :" → dropped), **chapplins-job**
+  **concerto-helpdesk** ("Helpdesk action - <ACTION> : <incident>" — the RICH
+  dispatch email; **16 Sep 2026: reading Jamie's live mailbox proved MOST Co-op
+  jobs arrive THIS way, NOT as a New Job Alert** — e.g. 00029820/00029579 were
+  dispatched to us with no alert. So this is now a **create path**, not dropped.
+  `concertoHelpdesk` reads Helpdesk reference (BARE incident = the reference,
+  keyed by matchSameIncident; /N order rounds link as re-visits), Description,
+  `Site: SR##### <code> - name`, Address→postcode, Telephone, Urgency→priority,
+  Action, Call status, and classifies by ACTION: **AM01. Approved** / **FM
+  Approved - Send to Contractor** → `job` (create/update); **G01. Add a note,
+  photo or document** / **"Additional information has been added"** → `note`
+  (kind:"note" → emailjob logs it, NEVER creates — TODO: append to the open job
+  via an update-only /sla/inbound call); any OTHER action → `job`+missing →
+  review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
+  came back Sep as BARE `00025826` AM01 + `Order 00025826/2` £2,105 seconds
+  apart) is handled by /sla/inbound's existing matchSameIncident: bare dispatch →
+  new linked visit off the finished job; the /N order → client-orders + £ on the
+  visit.), **concerto-notice** ("Quote :" non-cancel notice → dropped),
+  **chapplins-job**
   (ashley@/support@/kerry@chapplins.co.uk "A new job has been raised…": Tenant/Name/
   Property/Home/Mobile/E-mail/Job Number/Date Job Entered/Job Description up to the
   signature; subject variants "P1 - <address>", "Urgent Estimate required - <addr>"
