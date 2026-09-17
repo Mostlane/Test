@@ -21291,12 +21291,27 @@ async function sweepFallbacks(env, tid = 1) {
     const m = leave[uname] || leave[normId(uname)];
     return !!(m && m[target]);
   };
+  let dayBlocks = [];
+  try {
+    dayBlocks = blocksOnDate(await getSlaBlocks(env, tid).catch(() => []), target);
+  } catch {
+  }
+  const fbStartMin = (Number(cfg.startHour) || 8) * 60;
+  const toMin3 = (t) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ""));
+    return m ? +m[1] * 60 + +m[2] : null;
+  };
+  const blockedOut = (uname) => dayBlocks.some((b) => {
+    if (normId(b.username) !== normId(uname)) return false;
+    const s = toMin3(b.start), e = toMin3(b.end);
+    return s != null && e != null && s <= fbStartMin && e > fbStartMin;
+  });
   const excluded = new Set((cfg.exclude || []).map(normId));
   const hasFallbackReady = (uname) => {
     const fb = cfg.byEngineer[normId(uname)];
     return !!(fb && fb.active !== false && fb.jobId);
   };
-  const empties = fieldUsers.filter((u) => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username));
+  const empties = fieldUsers.filter((u) => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username) && !blockedOut(u.username));
   if (slot === "warn1" || slot === "warn2") {
     if (empties.length) {
       const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
