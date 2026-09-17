@@ -6361,11 +6361,27 @@ export async function sweepFallbacks(env, tid = 1) {
   try { const { approvedLeaveInRange } = await import("./holidays.js"); leave = await approvedLeaveInRange(env, tid, target, target); } catch {}
   const onLeave = (uname) => { const m = leave[uname] || leave[normId(uname)]; return !!(m && m[target]); };
 
+  // Skip anyone the office has BLOCKED OUT for that day on the scheduler (e.g. an
+  // exam/appointment). A block isn't a job or approved leave, so without this a
+  // blocked engineer looked "empty" and got a fallback dumped on top of their
+  // reserved day (Ryan Diggens' AM2S block). Skip when a block covers the
+  // fallback's start time; a short block that doesn't touch the start still lets
+  // a fallback fill the rest of the day.
+  let dayBlocks = [];
+  try { dayBlocks = blocksOnDate(await getSlaBlocks(env, tid).catch(() => []), target); } catch {}
+  const fbStartMin = (Number(cfg.startHour) || 8) * 60;
+  const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || "")); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const blockedOut = (uname) => dayBlocks.some(b => {
+    if (normId(b.username) !== normId(uname)) return false;
+    const s = toMin(b.start), e = toMin(b.end);
+    return s != null && e != null && s <= fbStartMin && e > fbStartMin;
+  });
+
   // Engineers the office has OMITTED from the fallback check/alert entirely.
   const excluded = new Set((cfg.exclude || []).map(normId));
   // Does an engineer have an active, configured fallback ready to go?
   const hasFallbackReady = (uname) => { const fb = cfg.byEngineer[normId(uname)]; return !!(fb && fb.active !== false && fb.jobId); };
-  const empties = fieldUsers.filter(u => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username));
+  const empties = fieldUsers.filter(u => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username) && !blockedOut(u.username));
 
   if (slot === "warn1" || slot === "warn2") {
     if (empties.length) {
