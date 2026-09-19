@@ -652,48 +652,40 @@ async function poBrief(db, poNumber) {
   };
 }
 
-// No PO number on the invoice (or it wasn't found) — Jamie's fallback: find
-// UNPRICED POs for the same supplier raised around the invoice's transaction
-// date (the day of purchase ≈ the PO raised day; the invoice arrives a few days
-// later). Ranked by supplier match then date proximity. Amount can't corroborate
-// here — the PO is unpriced, the cost is exactly what we're filling in.
+// No PO number on the invoice (or it wasn't found) — Jamie's rule: offer ONLY the
+// not-yet-costed POs FROM THAT SUPPLIER, closest to the invoice's transaction date
+// first (the day of purchase ≈ the PO raised day; the invoice arrives a few days
+// later). Amount can't corroborate here — the PO is unpriced, the cost is exactly
+// what we're filling in. When the supplier couldn't be read, fall back to any
+// unpriced PO raised close to the transaction date.
 async function matchInvoiceCandidates(db, f) {
   const date = f && f.invoiceDate;
   const supN = normSupplierName(f && f.supplier || "");
-  // Window of PO raised-dates around the transaction date.
-  let where = `deleted = 0 AND cost_ex_vat IS NULL`;
-  const binds = [];
-  if (date) {
-    const d = new Date(date + "T12:00:00Z");
-    const lo = new Date(d); lo.setUTCDate(lo.getUTCDate() - 5);
-    const hi = new Date(d); hi.setUTCDate(hi.getUTCDate() + 2);
-    where += ` AND substr(issued_at,1,10) BETWEEN ? AND ?`;
-    binds.push(lo.toISOString().slice(0, 10), hi.toISOString().slice(0, 10));
-  }
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
   let rows = [];
   try {
     rows = (await db.prepare(
       `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
-         FROM po_log WHERE ${where} ORDER BY issued_at DESC LIMIT 200`
-    ).bind(...binds).all()).results || [];
+         FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
+    ).all()).results || [];
   } catch { rows = []; }
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
   const scored = rows.map(r => {
     const sup = normSupplierName(r.supplier || "");
-    const supMatch = supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup));
-    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 86400000)) : 99;
-    // Supplier match dominates; then closeness in days.
-    const score = (supMatch ? 100 : 0) - days;
+    const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 86400000)) : 9999;
     return {
       po_number: r.po_number, supplier: r.supplier || "", issued_at: r.issued_at,
       who: r.engineer_name || r.office_user_name || "", site: r.site || "", incident_no: r.incident_no || "",
       description: String(r.description || "").slice(0, 200),
-      supplierMatch: !!supMatch, daysApart: days, score,
+      supplierMatch: supMatch, daysApart: days,
     };
-  }).filter(c => c.supplierMatch || c.daysApart <= 3)   // only plausible ones
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 8);
-  return scored;
+  });
+  if (supN) {
+    // Known supplier → ONLY that supplier's uncosted POs, nearest date first.
+    return scored.filter(c => c.supplierMatch).sort((a, b) => a.daysApart - b.daysApart).slice(0, 12);
+  }
+  // Supplier unreadable → any uncosted PO raised near the transaction date.
+  return scored.filter(c => c.daysApart <= 5).sort((a, b) => a.daysApart - b.daysApart).slice(0, 8);
 }
 
 async function getPOs(db, params) {
