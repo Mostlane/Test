@@ -36846,7 +36846,7 @@ async function searchSlaJobs(env, tenantId, qStr) {
   } catch {
     rows = [];
   }
-  return rows.map((r) => {
+  const jobs = rows.map((r) => {
     let d = {};
     try {
       d = JSON.parse(r.data || "{}");
@@ -36854,6 +36854,7 @@ async function searchSlaJobs(env, tenantId, qStr) {
     }
     const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
     return {
+      type: "job",
       job_id: r.id,
       ref: r.helpdesk_ref || d.helpdeskRef || "",
       site: d.siteName || r.site_code || "",
@@ -36865,6 +36866,29 @@ async function searchSlaJobs(env, tenantId, qStr) {
       description: String(r.description || d.description || "").slice(0, 220)
     };
   });
+  let projects = [];
+  try {
+    projects = (await db.prepare(
+      `SELECT number, name, site_client, site_number, status FROM projects
+         WHERE tenant_id IN ('1.0','1',1) AND (status = 'live' OR status IS NULL)
+           AND (lower(COALESCE(name,'')) LIKE ? OR lower(COALESCE(number,'')) LIKE ?)
+         ORDER BY name LIMIT 12`
+    ).bind(like, like).all()).results || [];
+  } catch {
+    projects = [];
+  }
+  const projRows = projects.map((p) => ({
+    type: "project",
+    project_id: p.number || "",
+    ref: p.number || "",
+    number: p.number || "",
+    name: p.name || "",
+    site: p.name || "",
+    site_number: p.site_number || p.number || "",
+    status: p.status || "live",
+    description: ""
+  }));
+  return projRows.concat(jobs);
 }
 async function addInvoiceFlag(env, db, sess, request) {
   const ct = request.headers.get("content-type") || "";
