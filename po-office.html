@@ -1256,15 +1256,19 @@ async function openInvRaise() {
   if (isSub && typeof setMType === 'function') setMType('subcontractor');
   const note = document.createElement('div');
   note.style.cssText = 'margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#eef4ff;border:1px solid #cdddf5;color:#003366;font-size:13px;font-weight:600';
-  note.textContent = (p.job ? '🔗 Raising a PO tied to job ' + (p.job.ref || p.job.site || '') + '. ' : '➕ ')
+  note.textContent = (p.job
+      ? '🔗 Raising a PO tied to ' + (p.job.project ? 'project ' : 'job ') + (p.job.ref || p.job.site || '') + ' — the cost lands on it. '
+      : '➕ ')
     + 'The invoice “' + (p.filename || 'invoice') + '” (' + invMoney(p.cost) + ' net) attaches automatically once you press Issue.';
   body.insertBefore(note, body.firstChild);
-  // Prefill from a picked job (site + the hidden job link that ties costs to it).
+  // Prefill from a picked job/project (the site drives costing; the hidden job
+  // link ties an SLA job's cost precisely — a project rolls up by its site name).
   if (p.job) {
     const siteEl = document.getElementById('m-site'); if (siteEl) siteEl.value = p.job.site || p.job.ref || '';
     const ji = document.getElementById('m-job-id'); if (ji) ji.value = p.job.job_id || '';
     const jr = document.getElementById('m-job-ref'); if (jr) jr.value = p.job.ref || '';
-    const inc = document.getElementById('m-incident'); if (inc && p.job.ref) inc.value = p.job.ref;
+    // Only an SLA job carries an incident number; a project does not.
+    if (!p.job.project) { const inc = document.getElementById('m-incident'); if (inc && p.job.ref) inc.value = p.job.ref; }
   }
   // Supplier / subcontractor prefill.
   if (isSub) {
@@ -1397,7 +1401,7 @@ function openFindJob(src) {
   if (!bk) {
     bk = document.createElement('div'); bk.id = 'findJobBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '210';
     bk.innerHTML = '<div class="modal" style="max-width:600px;border:3px solid #003366">' +
-      '<div class="row-between"><h2 style="margin:0;color:#003366">🔎 Find the job for this PO</h2><button class="ghost small" onclick="closeFindJob()">✕</button></div>' +
+      '<div class="row-between"><h2 style="margin:0;color:#003366">🔎 Find the job or project for this PO</h2><button class="ghost small" onclick="closeFindJob()">✕</button></div>' +
       '<div id="findJobBody" style="margin-top:10px"></div></div>';
     document.body.appendChild(bk);
     bk.addEventListener('mousedown', e => { if (e.target === bk) closeFindJob(); });
@@ -1406,8 +1410,8 @@ function openFindJob(src) {
   document.getElementById('findJobBody').innerHTML =
     poFlowBanner('Purchase Order flow — you’re still in the PO tool. Find the job so the invoice’s cost ties to it.') +
     '<div class="muted" style="font-size:12px;margin-bottom:6px">Invoice: <strong>' + escapeHtml(p.supplier || p.filename || '') + '</strong> · ' + invMoney(p.cost) + ' net</div>' +
-    '<input id="findJobQ" type="text" placeholder="Search job number, incident, site or description…" oninput="findJobSearch()" autocomplete="off" style="width:100%">' +
-    '<div id="findJobResults" style="margin-top:10px"><div class="muted" style="font-size:12px">Type at least 2 characters to search the live jobs.</div></div>' +
+    '<input id="findJobQ" type="text" placeholder="Search job/incident/project number, site or description…" oninput="findJobSearch()" autocomplete="off" style="width:100%">' +
+    '<div id="findJobResults" style="margin-top:10px"><div class="muted" style="font-size:12px">Type at least 2 characters to search live jobs &amp; projects.</div></div>' +
     '<div style="margin-top:12px;border-top:1px solid #eef1f5;padding-top:10px"><a href="sla-main.html" target="_blank" rel="noopener" style="color:#003366;font-weight:600;text-decoration:none">Open the full SLA board ↗</a> <span class="muted" style="font-size:12px">— browse it, then search the job number here.</span></div>';
   bk.classList.add('show');
   setTimeout(() => { const q = document.getElementById('findJobQ'); if (q) q.focus(); }, 60);
@@ -1417,7 +1421,7 @@ function findJobSearch() {
   const q = (document.getElementById('findJobQ') || {}).value || '';
   clearTimeout(findJobTimer);
   const box = document.getElementById('findJobResults');
-  if (q.trim().length < 2) { if (box) box.innerHTML = '<div class="muted" style="font-size:12px">Type at least 2 characters to search the live jobs.</div>'; return; }
+  if (q.trim().length < 2) { if (box) box.innerHTML = '<div class="muted" style="font-size:12px">Type at least 2 characters to search live jobs &amp; projects.</div>'; return; }
   if (box) box.innerHTML = '<div class="muted" style="font-size:12px;padding:8px">Searching…</div>';
   findJobTimer = setTimeout(async () => {
     let rows = [];
@@ -1436,22 +1440,34 @@ function jobStatusPill(s) {
 }
 function renderFindJobResults() {
   const box = document.getElementById('findJobResults'); if (!box) return;
-  if (!findJobResults.length) { box.innerHTML = '<div class="empty" style="padding:12px">No live jobs match. Try the incident/job number, or open the full board.</div>'; return; }
+  if (!findJobResults.length) { box.innerHTML = '<div class="empty" style="padding:12px">No live jobs or projects match. Try the incident/job/project number, or open the full board.</div>'; return; }
   box.innerHTML = findJobResults.map((j, i) => {
+    const isProj = j.type === 'project';
     const engs = (j.engineers || []).join(', ');
-    return '<div class="card" style="padding:12px;margin-bottom:8px;border-left:4px solid #003366">' +
+    const tag = isProj
+      ? '<span style="display:inline-block;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;background:#e7eefc;color:#003366">📁 Project</span>'
+      : jobStatusPill(j.status);
+    const line2 = isProj
+      ? escapeHtml((j.site_number ? j.site_number + ' · ' : '') + (j.name || ''))
+      : escapeHtml(j.site || '') + (j.scheduledAt ? ' · ' + escapeHtml(fmtDate(j.scheduledAt)) : '') + (engs ? ' · ' + escapeHtml(engs) : '');
+    return '<div class="card" style="padding:12px;margin-bottom:8px;border-left:4px solid ' + (isProj ? '#7a4ca0' : '#003366') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
-        '<div><strong style="color:#003366">' + escapeHtml(j.ref || j.site || '(no ref)') + '</strong>' + (j.priority ? ' <span class="muted" style="font-size:12px">· ' + escapeHtml(j.priority) + '</span>' : '') + '</div>' + jobStatusPill(j.status) + '</div>' +
-      '<div class="muted" style="font-size:12px;margin-top:3px">' + escapeHtml(j.site || '') + (j.scheduledAt ? ' · ' + escapeHtml(fmtDate(j.scheduledAt)) : '') + (engs ? ' · ' + escapeHtml(engs) : '') + '</div>' +
+        '<div><strong style="color:#003366">' + escapeHtml(j.ref || j.name || j.site || '(no ref)') + '</strong>' + (j.priority ? ' <span class="muted" style="font-size:12px">· ' + escapeHtml(j.priority) + '</span>' : '') + '</div>' + tag + '</div>' +
+      (line2 ? '<div class="muted" style="font-size:12px;margin-top:3px">' + line2 + '</div>' : '') +
       (j.description ? '<div class="muted" style="font-size:12px;margin-top:3px">' + escapeHtml(j.description) + '</div>' : '') +
-      '<div style="margin-top:8px"><button class="small" onclick="pickFindJob(' + i + ')">➕ Raise PO for this job</button></div>' +
+      '<div style="margin-top:8px"><button class="small" onclick="pickFindJob(' + i + ')">➕ Raise PO for this ' + (isProj ? 'project' : 'job') + '</button></div>' +
     '</div>';
   }).join('');
 }
 function pickFindJob(i) {
   const j = findJobResults[i]; if (!j || !findJobSrc) return;
   invPending = invPendingFromSrc(findJobSrc);
-  invPending.job = { job_id: j.job_id, ref: j.ref, site: j.site };
+  if (j.type === 'project') {
+    // Tie to the project — costing rolls up by the project NAME (the site).
+    invPending.job = { job_id: '', ref: j.ref || j.number || '', site: j.site || j.name || '', project: true };
+  } else {
+    invPending.job = { job_id: j.job_id, ref: j.ref, site: j.site, project: false };
+  }
   closeFindJob();
   openInvRaise();
 }
