@@ -845,7 +845,8 @@ function openInvoiceMatch() {
   invFile = null; invFields = null;
   document.getElementById('modal-title').textContent = '📎 Match a supplier invoice';
   document.getElementById('modal-body').innerHTML =
-    '<p class="muted" style="margin-top:0">Drop a supplier invoice PDF (or pick one). It reads the PO number, cost and date, finds the matching PO and — once you confirm — fills the cost in and attaches the PDF to that PO. Nothing is saved until you press Apply.</p>' +
+    '<div style="margin:0 0 12px"><button class="ghost small" onclick="invStartSweep()">🔎 Sweep the accounts@ inbox for invoices</button></div>' +
+    '<p class="muted" style="margin-top:0">Or drop a supplier invoice PDF (or pick one). It reads the PO number, cost and date, finds the matching PO and — once you confirm — fills the cost in and attaches the PDF to that PO. Nothing is saved until you press Apply.</p>' +
     '<div id="inv-drop" style="border:2px dashed #c9d2dd;border-radius:14px;padding:26px 16px;text-align:center;background:#f8fafd;cursor:pointer">' +
       '<div style="font-size:32px;line-height:1">📄</div>' +
       '<div style="font-weight:600;color:#003366;margin-top:6px">Drop an invoice PDF here</div>' +
@@ -989,6 +990,111 @@ async function viewInvoice(poNumber) {
     if (r && r.url) window.open(r.url, '_blank');
     else alert((r && r.error) || 'No invoice attached');
   } catch (e) { alert('Could not open the invoice: ' + e.message); }
+}
+// ── Sweep the accounts@ inbox: read every invoice PDF and propose matches ─────
+let invSweepItems = [];
+async function invStartSweep() {
+  document.getElementById('modal-title').textContent = '🔎 Sweep the mailbox for invoices';
+  let cfg = {};
+  try { cfg = await authFetch('/po/api/invoice/sweep-config').then(r => r.json()); } catch (e) {}
+  if (!cfg || !cfg.configured) {
+    document.getElementById('modal-body').innerHTML = '<div class="alert warn">The mailbox connection isn’t set up on the server yet (the GRAPH_* secrets). Once those are in, this will read the inbox for you.</div><button class="ghost small" onclick="openInvoiceMatch()">‹ Back</button>';
+    return;
+  }
+  document.getElementById('modal-body').innerHTML =
+    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row.</p>' +
+    '<div class="grid-2">' +
+      '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(cfg.mailbox || '') + '"></div>' +
+      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(cfg.days || 60) + '" min="1" max="365"></div>' +
+    '</div>' +
+    '<div class="row"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button></div>' +
+    '<div id="sw-result" style="margin-top:14px"></div>';
+}
+async function invRunSweep(btn) {
+  const mailbox = (document.getElementById('sw-mailbox') || {}).value || '';
+  const days = Number((document.getElementById('sw-days') || {}).value) || 60;
+  const res = document.getElementById('sw-result');
+  res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">Reading the mailbox and reading each invoice… this can take a minute.</div>';
+  if (btn) btn.disabled = true;
+  let data;
+  try { data = await authFetch('/po/api/invoice/sweep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mailbox, days }) }).then(r => r.json()); }
+  catch (e) { res.innerHTML = '<div class="alert warn">Sweep failed: ' + escapeHtml(e.message) + '</div>'; if (btn) btn.disabled = false; return; }
+  if (btn) btn.disabled = false;
+  if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; return; }
+  invSweepItems = data.proposals || [];
+  const summary = '<div class="muted" style="font-size:13px;margin-bottom:10px">Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox) + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
+  if (!invSweepItems.length) { res.innerHTML = summary + '<div class="empty">Nothing new to match — every invoice found is either already priced or has no matching PO.</div>'; return; }
+  res.innerHTML = summary + invSweepItems.map((it, i) => invSweepCard(it, i)).join('');
+}
+function invSweepCard(it, i) {
+  const f = it.fields || {};
+  const net = f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : '');
+  const rate = (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20;
+  const head =
+    '<div style="font-weight:600;color:#003366">' + escapeHtml(f.supplier || it.from || 'Invoice') + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + escapeHtml(f.invoiceNumber || it.filename || '') + '</span></div>' +
+    '<div class="muted" style="font-size:12px;margin:2px 0 8px">' + escapeHtml(it.subject || '') + (it.receivedDateTime ? ' · ' + escapeHtml(fmtDate(it.receivedDateTime)) : '') + '</div>' +
+    '<div style="font-size:13px;line-height:1.5">Net <strong>' + invMoney(f.net) + '</strong> · VAT ' + invMoney(f.vat) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</div>';
+  let pick = '';
+  if (it.po) {
+    const warn = it.po.priced ? '<div style="color:#b58a00;font-size:12px;margin-top:4px">⚠ already has a cost of ' + invMoney(it.po.cost_ex_vat) + ' — Attach overwrites it</div>' : '';
+    pick = '<div style="margin-top:8px;font-weight:600;color:#1e6c33">✓ PO ' + escapeHtml(it.po.po_number) + '</div>' +
+      '<div class="muted" style="font-size:12px">' + escapeHtml(it.po.site || it.po.incident_no || '') + (it.po.who ? ' · ' + escapeHtml(it.po.who) : '') + '</div>' + warn +
+      '<input type="hidden" id="sw-po-' + i + '" value="' + Number(it.po.po_number) + '">';
+  } else {
+    const opts = (it.candidates || []).map(c => '<option value="' + Number(c.po_number) + '">' + escapeHtml(c.po_number) + ' — ' + escapeHtml(c.supplier || '') + (c.supplierMatch ? ' ✓' : '') + ' · ' + (c.daysApart === 0 ? 'same day' : c.daysApart + 'd') + '</option>').join('');
+    pick = '<div style="margin-top:8px"><label style="font-size:12px">Attach to PO</label>' +
+      (opts ? '<select id="sw-po-' + i + '"><option value="">— pick a candidate —</option>' + opts + '</select>' : '<div class="muted" style="font-size:12px;margin-bottom:4px">No candidate found — type the PO number.</div>') +
+      '<input id="sw-poman-' + i + '" type="number" placeholder="or type a PO number" style="margin-top:6px"></div>';
+  }
+  const confirm =
+    '<div class="grid-2" style="margin-top:8px">' +
+      '<div class="field" style="margin-bottom:6px"><label>Net ex VAT (£)</label><input id="sw-cost-' + i + '" type="number" step="0.01" value="' + escapeAttr(net) + '"></div>' +
+      '<div class="field" style="margin-bottom:6px"><label>VAT %</label><input id="sw-rate-' + i + '" type="number" step="0.01" value="' + escapeAttr(rate) + '"></div>' +
+    '</div>' +
+    '<div class="row"><button class="small" onclick="invSweepApply(' + i + ', this)">✓ Attach &amp; set cost</button>' +
+    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
+  return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
+}
+function invSweepPo(i) {
+  const man = document.getElementById('sw-poman-' + i);
+  if (man && man.value) return Number(man.value);
+  const sel = document.getElementById('sw-po-' + i);
+  return sel ? Number(sel.value) : NaN;
+}
+async function invSweepApply(i, btn) {
+  const it = invSweepItems[i]; if (!it) return;
+  const poNumber = invSweepPo(i);
+  if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
+  const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
+  if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
+  const f = it.fields || {};
+  const body = { mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId,
+    po_number: poNumber, cost_ex_vat: cost, filename: it.filename };
+  if (Number.isFinite(rate)) body.vat_rate = rate;
+  if (f.invoiceNumber) body.invoice_no = f.invoiceNumber;
+  if (f.invoiceDate) body.invoice_date = f.invoiceDate;
+  if (f.vat != null) body.vat = f.vat;
+  if (f.gross != null) body.gross = f.gross;
+  if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
+  let res;
+  try { res = await authFetch('/po/api/invoice/sweep-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); }
+  catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
+  if (!res || res.error) { alert((res && res.error) || 'Could not attach'); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
+  const card = document.getElementById('sw-card-' + i);
+  if (card) card.innerHTML = '<div style="color:#1e6c33;font-weight:600;padding:6px 0">✓ Attached to PO ' + poNumber + ' · £' + cost.toFixed(2) + '</div>';
+  loadPOs(); loadDashboard();
+}
+async function invSweepView(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  try {
+    const r = await authFetch('/po/api/invoice/sweep-view?mailbox=' + encodeURIComponent(it.mailbox) + '&message_id=' + encodeURIComponent(it.messageId) + '&attachment_id=' + encodeURIComponent(it.attachmentId));
+    if (!r.ok) { alert('Could not open the PDF'); return; }
+    const blob = await r.blob();
+    const u = URL.createObjectURL(blob);
+    window.open(u, '_blank');
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e) { alert('Could not open: ' + e.message); }
 }
 function closeModal() { document.getElementById('modal').classList.remove('show'); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

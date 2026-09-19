@@ -36154,7 +36154,8 @@ function bytesToBase64(bytes) {
     return "";
   }
 }
-async function parseInvoice(env, bytes, filename, knownSuppliers) {
+async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
+  const allowVision = !opts || opts.allowVision !== false;
   let text = "";
   try {
     text = await pdfExtractText(bytes);
@@ -36162,7 +36163,7 @@ async function parseInvoice(env, bytes, filename, knownSuppliers) {
   }
   const t1 = extractFields(text, knownSuppliers);
   if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false };
-  const t2 = await aiExtract2(env, bytes, filename);
+  const t2 = allowVision ? await aiExtract2(env, bytes, filename) : null;
   if (t2) {
     const merged = {
       poNumber: t1.poNumber || t2.poNumber || null,
@@ -36179,7 +36180,80 @@ async function parseInvoice(env, bytes, filename, knownSuppliers) {
   return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false };
 }
 
+// src/lib/graphmail.js
+var GRAPH = "https://graph.microsoft.com/v1.0";
+function graphConfigured(env) {
+  return !!(env && env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && env.GRAPH_CLIENT_SECRET);
+}
+var _tok = { value: "", exp: 0 };
+async function getToken(env) {
+  const now = Date.now();
+  if (_tok.value && now < _tok.exp - 6e4) return _tok.value;
+  const url = `https://login.microsoftonline.com/${encodeURIComponent(env.GRAPH_TENANT_ID)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: env.GRAPH_CLIENT_ID,
+    client_secret: env.GRAPH_CLIENT_SECRET,
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials"
+  });
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    const msg = j && (j.error_description || j.error) || "HTTP " + r.status;
+    throw new Error("Graph sign-in failed: " + String(msg).split("\n")[0].slice(0, 200));
+  }
+  _tok = { value: j.access_token, exp: now + Number(j.expires_in || 3600) * 1e3 };
+  return _tok.value;
+}
+async function graphGet(env, path, { raw } = {}) {
+  const token = await getToken(env);
+  const r = await fetch(GRAPH + path, { headers: { authorization: "Bearer " + token } });
+  if (!r.ok) {
+    let d = "";
+    try {
+      d = (await r.json())?.error?.message || "";
+    } catch {
+    }
+    const e = new Error("Graph error " + r.status + (d ? ": " + d : ""));
+    e.status = r.status;
+    throw e;
+  }
+  return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
+}
+async function graphMailboxCheck(env, mailbox) {
+  if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
+  try {
+    await getToken(env);
+    await graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages?$top=1&$select=id`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40 } = {}) {
+  const since = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
+  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(200, top * 4))}`;
+  const j = await graphGet(env, q);
+  return (j && j.value || []).filter((m) => m.hasAttachments).slice(0, top);
+}
+async function listPdfAttachments(env, mailbox, messageId) {
+  const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const j = await graphGet(env, q);
+  const items = j && j.value || [];
+  return items.filter((a) => {
+    const isFile = String(a["@odata.type"] || "").includes("fileAttachment") || a.size != null;
+    const name = String(a.name || "").toLowerCase();
+    const ct = String(a.contentType || "").toLowerCase();
+    const pdfish = ct.includes("pdf") || name.endsWith(".pdf") || ct.includes("octet-stream") && name.endsWith(".pdf");
+    return isFile && pdfish && Number(a.size || 0) < 20 * 1024 * 1024;
+  });
+}
+async function downloadAttachment(env, mailbox, messageId, attachmentId) {
+  return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
+}
+
 // src/routes/po.js
+var DEFAULT_SWEEP_MAILBOX = "accounts@mostlane.com";
 async function ensurePoInvoiceCols__raw(db) {
   for (const ddl of [
     `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
@@ -36371,43 +36445,93 @@ async function handle32(request, env, ctx, url, sess) {
       const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
       if (!target) return jr8({ error: "That PO was not found" }, 400);
       const file = form.get("file");
-      let key = target.invoice_key || null;
+      let bytes = null, filename = null, contentType = null;
       if (file && typeof file.arrayBuffer === "function") {
         const ab = await file.arrayBuffer();
         if (ab.byteLength > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
-        const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-        key = `po-invoices/${sess.tenantId}/${poNumber}/${Date.now()}-${safe}`;
-        await env.JOB_FILES.put(key, ab, { httpMetadata: { contentType: file.type || "application/pdf" } });
+        bytes = ab;
+        filename = file.name;
+        contentType = file.type;
       }
-      const meta = JSON.stringify({
-        no: String(form.get("invoice_no") || "") || null,
-        date: String(form.get("invoice_date") || "") || null,
-        net: cost,
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(form.get("vat_rate")),
+        invoiceNo: form.get("invoice_no"),
+        invoiceDate: form.get("invoice_date"),
         vat: numOrNull2(form.get("vat")),
         gross: numOrNull2(form.get("gross")),
-        filename: file && file.name || null,
-        by: userName(sess),
-        at: (/* @__PURE__ */ new Date()).toISOString()
+        bytes,
+        filename,
+        contentType
       });
-      const now = (/* @__PURE__ */ new Date()).toISOString();
-      const fields = [
-        "cost_ex_vat = ?",
-        "invoice_key = ?",
-        "invoice_meta = ?",
-        "cost_entered_at = ?",
-        "last_edited_by_slug = ?",
-        "last_edited_by_name = ?",
-        "last_edited_at = ?"
-      ];
-      const binds = [cost, key, meta, now, userSlug(sess), userName(sess), now];
-      const vatRate = numOrNull2(form.get("vat_rate"));
-      if (vatRate != null) {
-        fields.push("vat_rate = ?");
-        binds.push(vatRate);
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/sweep-config" && method === "GET") {
+      const cfg = await getConfigMap(db);
+      return jr8({
+        ok: true,
+        configured: graphConfigured(env),
+        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX,
+        days: Number(cfg.invoice_sweep_days) || 60
+      });
+    }
+    if (path === "/api/invoice/sweep" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
+      const out = await runInvoiceSweep(env, db, { mailbox, days });
+      return jr8({ ok: true, mailbox, days, ...out });
+    }
+    if (path === "/api/invoice/sweep-view" && method === "GET") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const mailbox = String(q.get("mailbox") || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      const mid = q.get("message_id"), aid = q.get("attachment_id");
+      if (!mid || !aid) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, mid, aid);
+      } catch (e) {
+        return jr8({ error: String(e && e.message || e) }, 400);
       }
-      binds.push(poNumber);
-      await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
-      const invoiceUrl = key ? await signedFileUrl(env, url.origin, "/po/invoice-file", key) : null;
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30" } });
+    }
+    if (path === "/api/invoice/sweep-apply" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const b = await bodyOf();
+      const poNumber = Number(b.po_number);
+      const cost = Number(b.cost_ex_vat);
+      if (!poNumber) return jr8({ error: "Pick a PO" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, b.message_id, b.attachment_id);
+      } catch (e) {
+        return jr8({ error: "Couldn\u2019t fetch that invoice from the mailbox: " + String(e && e.message || e) }, 400);
+      }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(b.vat_rate),
+        invoiceNo: b.invoice_no,
+        invoiceDate: b.invoice_date,
+        vat: numOrNull2(b.vat),
+        gross: numOrNull2(b.gross),
+        bytes,
+        filename: b.filename || "invoice.pdf",
+        contentType: "application/pdf",
+        graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
+      });
       return jr8({ ok: true, po_number: poNumber, invoiceUrl });
     }
     if (path === "/api/invoice/url" && method === "GET") {
@@ -36594,6 +36718,105 @@ async function serveInvoiceFile(request, env, url) {
   h.set("Cache-Control", "private, max-age=60");
   h.set("Access-Control-Allow-Origin", "*");
   return new Response(obj.body, { headers: h });
+}
+async function writeInvoiceToPo(env, db, sess, origin, o) {
+  let key = o.existingKey || null;
+  if (o.bytes) {
+    const safe = String(o.filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/${sess.tenantId}/${o.poNumber}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, o.bytes, { httpMetadata: { contentType: o.contentType || "application/pdf" } });
+  }
+  const meta = JSON.stringify({
+    no: (o.invoiceNo != null ? String(o.invoiceNo) : "") || null,
+    date: (o.invoiceDate != null ? String(o.invoiceDate) : "") || null,
+    net: o.cost,
+    vat: o.vat != null ? o.vat : null,
+    gross: o.gross != null ? o.gross : null,
+    filename: o.filename || null,
+    by: userName(sess),
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    graph: o.graph || null
+  });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = [
+    "cost_ex_vat = ?",
+    "invoice_key = ?",
+    "invoice_meta = ?",
+    "cost_entered_at = ?",
+    "last_edited_by_slug = ?",
+    "last_edited_by_name = ?",
+    "last_edited_at = ?"
+  ];
+  const binds = [o.cost, key, meta, now, userSlug(sess), userName(sess), now];
+  if (o.vatRate != null) {
+    fields.push("vat_rate = ?");
+    binds.push(o.vatRate);
+  }
+  binds.push(o.poNumber);
+  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+  return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
+}
+async function runInvoiceSweep(env, db, { mailbox, days }) {
+  const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  let msgs = [];
+  try {
+    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 });
+  } catch (e) {
+    return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+  }
+  const proposals = [];
+  let downloads = 0, aiUsed = 0, skipped = 0;
+  for (const m of msgs) {
+    if (downloads >= MAX_DOWNLOADS) break;
+    let atts = [];
+    try {
+      atts = await listPdfAttachments(env, mailbox, m.id);
+    } catch {
+      continue;
+    }
+    for (const a of atts) {
+      if (downloads >= MAX_DOWNLOADS) break;
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+        downloads++;
+      } catch {
+        continue;
+      }
+      let res;
+      try {
+        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+      } catch {
+        continue;
+      }
+      if (res.aiUsed) aiUsed++;
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      const actionable = po && !po.priced || candidates && candidates.length || f.net != null && !!f.supplier;
+      if (po && po.priced && po.has_invoice) {
+        skipped++;
+        continue;
+      }
+      if (!actionable) continue;
+      proposals.push({
+        mailbox,
+        messageId: m.id,
+        attachmentId: a.id,
+        filename: a.name || "invoice.pdf",
+        subject: m.subject || "",
+        from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
+        receivedDateTime: m.receivedDateTime || null,
+        tier: res.tier,
+        fields: f,
+        po,
+        candidates
+      });
+    }
+  }
+  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
 }
 async function poBrief(db, poNumber) {
   const r = await db.prepare(
@@ -42178,7 +42401,7 @@ async function signRequest(accessId, secret, accessToken, method, path, bodyStr,
   const signStr = accessId + (accessToken || "") + t + stringToSign;
   return hmacSha256Hex(secret, signStr);
 }
-async function getToken(env, db, cfg) {
+async function getToken2(env, db, cfg) {
   const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
   if (!accessId || !secret) throw new Error("Tuya not configured (add TUYA_ACCESS_ID / TUYA_ACCESS_SECRET secrets)");
   const cached = await loadKV(db, TOK_KEY);
@@ -42205,7 +42428,7 @@ async function getToken(env, db, cfg) {
 }
 async function api(env, db, cfg, method, path, body) {
   const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
-  const token = await getToken(env, db, cfg);
+  const token = await getToken2(env, db, cfg);
   const base = baseFor(cfg);
   const bodyStr = body != null ? JSON.stringify(body) : "";
   const t = String(Date.now());

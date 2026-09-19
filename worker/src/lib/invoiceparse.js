@@ -210,13 +210,16 @@ function bytesToBase64(bytes) {
 
 // The one entry point: read an invoice's fields from its bytes.
 //   { tier: "text"|"vision"|"none", fields, textLen, aiUsed }
-export async function parseInvoice(env, bytes, filename, knownSuppliers) {
+// opts.allowVision (default true) — a bulk sweep sets it false once its AI budget
+// is spent, so the reader falls back to the free text tier instead of stalling.
+export async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
+  const allowVision = !opts || opts.allowVision !== false;
   let text = "";
   try { text = await pdfExtractText(bytes); } catch {}
   const t1 = extractFields(text, knownSuppliers);
   if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false };
   // Tier 1 fell short — try Claude vision (glyph-encoded / scanned / odd layout).
-  const t2 = await aiExtract(env, bytes, filename);
+  const t2 = allowVision ? await aiExtract(env, bytes, filename) : null;
   if (t2) {
     // Merge: keep the best of each field (a text-layer PO is authoritative; vision
     // fills the money it couldn't reconcile). Supplier from the known list wins.
