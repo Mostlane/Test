@@ -169,7 +169,9 @@ async function aiExtract(env, bytes, filename) {
   const schema = {
     type: "object",
     properties: {
-      supplier: { type: "string", description: "The supplier / merchant name that issued this invoice." },
+      docType: { type: "string", enum: ["invoice", "credit_note", "remittance", "statement", "other"],
+        description: "What kind of document this is. 'invoice' = a supplier's PURCHASE invoice billing Mostlane for goods/works. 'credit_note' = a supplier credit. 'remittance' = a REMITTANCE ADVICE / payment advice (a record that a payment was MADE or received — NOT a bill to pay). 'statement' = a monthly account statement listing several invoices. 'other' = anything else (a delivery note, quote, order acknowledgement, letter)." },
+      supplier: { type: "string", description: "The supplier / merchant name that issued this document." },
       invoiceNumber: { type: "string", description: "The supplier's own invoice number." },
       invoiceDate: { type: "string", description: "The invoice / tax-point / transaction date in YYYY-MM-DD." },
       poNumber: { type: "string", description: "The customer's purchase-order / order number if shown — a 5-digit Mostlane number in the 10000s. Empty if none is printed." },
@@ -177,7 +179,7 @@ async function aiExtract(env, bytes, filename) {
       vat: { type: "number", description: "VAT total in GBP." },
       gross: { type: "number", description: "Invoice total including VAT, in GBP." },
     },
-    required: ["net", "gross"],
+    required: ["docType", "net", "gross"],
   };
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -189,7 +191,7 @@ async function aiExtract(env, bytes, filename) {
         tool_choice: { type: "tool", name: "extract_invoice" },
         messages: [{ role: "user", content: [
           { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-          { type: "text", text: "This is a UK supplier invoice sent to Mostlane Construction. Read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) — it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." },
+          { type: "text", text: "This is a PDF received by Mostlane Construction (a UK building contractor). FIRST decide what kind of document it is (docType) — be careful to distinguish a supplier PURCHASE INVOICE (a bill for us to pay) from a REMITTANCE ADVICE / payment advice (a record that a payment was made — do NOT treat this as an invoice) and from a monthly STATEMENT of account. Then read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) — it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." },
         ] }],
       }),
     });
@@ -201,6 +203,7 @@ async function aiExtract(env, bytes, filename) {
     const poRaw = String(o.poNumber || "").replace(/\D/g, "");
     const poN = Number(poRaw);
     return {
+      docType: String(o.docType || "").toLowerCase() || null,
       supplier: o.supplier ? String(o.supplier).slice(0, 120) : null,
       invoiceNumber: o.invoiceNumber ? String(o.invoiceNumber).slice(0, 40) : "",
       invoiceDate: normIsoLoose(o.invoiceDate),
@@ -234,7 +237,7 @@ export async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
   try { text = await pdfExtractText(bytes); } catch {}
   const remittance = looksLikeRemittance(text);
   const t1 = extractFields(text, knownSuppliers);
-  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance };
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : "invoice", notInvoice: remittance };
   // Tier 1 fell short — try Claude vision (glyph-encoded / scanned / odd layout).
   const t2 = allowVision ? await aiExtract(env, bytes, filename) : null;
   if (t2) {
@@ -250,8 +253,13 @@ export async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
       invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
       supplier: (matchSupplier(text, knownSuppliers)) || t2.supplier || t1.supplier || null,
     };
-    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance };
+    // The AI classified the document — a remittance / statement is NOT a purchase
+    // invoice, so the sweep must drop it (this catches glyph/scanned remittances
+    // like Sienna where the text guard can't read the "remittance" wording).
+    const docType = t2.docType || (remittance ? "remittance" : "invoice");
+    const notInvoice = remittance || docType === "remittance" || docType === "statement";
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance: remittance || notInvoice, docType, notInvoice };
   }
   // No AI available and tier 1 incomplete — return whatever tier 1 got (office fills the rest).
-  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance };
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : null, notInvoice: remittance };
 }

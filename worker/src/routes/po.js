@@ -25,10 +25,54 @@ async function ensurePoInvoiceCols__raw(db) {
     `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
     `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`,
   ]) { try { await db.prepare(ddl).run(); } catch { /* column already exists */ } }
+  // Log of "materials invoice with NO PO from a normal supplier" — someone bought
+  // without raising a PO. Each entry keeps a COPY of the invoice (R2 invoice_key)
+  // and the engineer it's pinned on, so the office can see who isn't raising POs.
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_flags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT,
+      net REAL, vat REAL, gross REAL,
+      engineer_slug TEXT, engineer_name TEXT,
+      job_id TEXT, job_ref TEXT, po_number INTEGER,
+      note TEXT, status TEXT DEFAULT 'open',
+      invoice_key TEXT, filename TEXT,
+      source TEXT, created_by TEXT, created_at TEXT, resolved_at TEXT
+    )`).run();
+  } catch { /* table already exists */ }
 }
 const ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
 
 const numOrNull = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+// Lenient supplier/subcontractor name match (already-clean names, either-way
+// includes) — used to classify a swept invoice. Returns the matched list name.
+function normMatchOne(name, list) {
+  const n = normSupplierName(name || "");
+  if (!n) return null;
+  for (const cand of (list || [])) {
+    const c = normSupplierName(cand);
+    if (!c) continue;
+    if (c === n || c.includes(n) || n.includes(c)) return cand;
+  }
+  return null;
+}
+// Sort a swept invoice into one of the office's working buckets:
+//  confident    — it already matched a real PO (attach + cost, as before)
+//  subcontractor— the supplier is a known SUBCONTRACTOR (Montrose, Metro Rod, L&B…):
+//                 raise a new PO, or tie it to an SLA job, so the cost lands on the job
+//  flag         — a NORMAL supplier but NO PO number: someone bought materials
+//                 without raising a PO → link an engineer + keep a log
+//  other        — supplier not recognised (office decides)
+function classifyProposal(f, po, supNames, subNames) {
+  if (po) return { category: "confident", subName: null, supName: null };
+  const subName = normMatchOne(f && f.supplier, subNames);
+  if (subName) return { category: "subcontractor", subName, supName: null };
+  const supName = normMatchOne(f && f.supplier, supNames);
+  if (supName && !(f && f.poNumber)) return { category: "flag", subName: null, supName };
+  return { category: "other", subName: null, supName: supName || null };
+}
 
 // staffType lives in the user's profile JSON; default "field" (matches auth.js).
 function staffTypeOf(u) {
@@ -206,12 +250,16 @@ export async function handle(request, env, ctx, url, sess) {
       const buf = new Uint8Array(await file.arrayBuffer());
       if (buf.length > 15 * 1024 * 1024) return jr({ error: "That PDF is too big (max 15 MB)" }, 400);
       const known = (await getSuppliers(db)).map(s => s.name);
+      const subNames = (await getSubcontractors(db)).map(s => s.name);
       const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
       if (!po) candidates = await matchInvoiceCandidates(db, f);
+      const cls = classifyProposal(f, po, known, subNames);
       return jr({ ok: true, tier: res.tier, aiUsed: res.aiUsed, textLen: res.textLen, fields: f, po, candidates,
+        docType: res.docType || null, notInvoice: !!res.notInvoice,
+        category: cls.category, subName: cls.subName, supName: cls.supName,
         filename: file.name || "invoice.pdf" });
     }
     // Confirm: attach the PDF to the PO + write the cost. The client re-sends the
@@ -302,6 +350,30 @@ export async function handle(request, env, ctx, url, sess) {
       const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
       if (!r || !r.invoice_key) return jr({ error: "No invoice attached" }, 404);
       return jr({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
+    }
+
+    // ── Find an SLA job to tie an invoice's PO to (the "find a job" flow) ──
+    // Searches the LIVE portal jobs (env.DB sla_jobs) by ref / incident / site /
+    // description, so the office can raise a PO stamped with the job for costing.
+    if (path === "/api/jobs/sla-search" && method === "GET") {
+      return jr(await searchSlaJobs(env, sess.tenantId, q.get("q") || ""));
+    }
+
+    // ── Flagged-invoice log: a materials invoice with NO PO from a normal
+    // supplier, pinned on an engineer, kept with a copy — "who isn't raising POs" ──
+    if (path === "/api/invoice/flag" && method === "POST") {
+      return jr(await addInvoiceFlag(env, db, sess, request));
+    }
+    if (path === "/api/invoice/flags" && method === "GET") {
+      return jr(await listInvoiceFlags(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/invoice/flag-update" && method === "POST") {
+      return jr(await updateInvoiceFlag(db, sess, await bodyOf()));
+    }
+    if (path === "/api/invoice/flag-delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM invoice_flags WHERE id = ?`).bind(Number(b.id)).run();
+      return jr({ ok: true });
     }
 
     // ── Admin: reference-data management ──
@@ -594,12 +666,126 @@ async function writeInvoiceToPo(env, db, sess, origin, o) {
   return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
 }
 
+// Search the LIVE portal jobs (main DB sla_jobs) so the office can tie an
+// invoice's PO to the right incident/job. Bounded to the live board (not the
+// 23k archive), by ref / incident / site code / description / any data field.
+async function searchSlaJobs(env, tenantId, qStr) {
+  const q = String(qStr || "").trim();
+  if (q.length < 2) return [];
+  const db = env.DB;
+  if (!db) return [];
+  const like = "%" + q.toLowerCase() + "%";
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT id, helpdesk_ref, description, priority, status, site_code, scheduled_at, data
+         FROM sla_jobs WHERE tenant_id = ? AND (
+           lower(COALESCE(helpdesk_ref,'')) LIKE ? OR lower(COALESCE(description,'')) LIKE ?
+           OR lower(COALESCE(site_code,'')) LIKE ? OR lower(COALESCE(data,'')) LIKE ?)
+         ORDER BY COALESCE(scheduled_at, raised_at, created_at) DESC LIMIT 20`
+    ).bind(tenantId, like, like, like, like).all()).results || [];
+  } catch { rows = []; }
+  return rows.map(r => {
+    let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+    const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers
+      : (d.assignedTo ? [d.assignedTo] : []);
+    return {
+      job_id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "",
+      site: d.siteName || r.site_code || "", site_code: r.site_code || d.siteCode || "",
+      status: r.status || d.status || "", priority: r.priority || d.priority || "",
+      scheduledAt: r.scheduled_at || d.scheduledAt || null,
+      engineers: engs, description: String(r.description || d.description || "").slice(0, 220),
+    };
+  });
+}
+
+// ── Flagged-invoice log (no PO from a normal supplier) ───────────────────────
+// Accepts a multipart upload (drop-a-file path) OR a JSON body carrying the
+// mailbox reference (sweep path — we re-fetch the PDF to keep a copy).
+async function addInvoiceFlag(env, db, sess, request) {
+  const ct = request.headers.get("content-type") || "";
+  let b = {}, bytes = null, filename = null, contentType = null;
+  if (ct.includes("multipart/form-data")) {
+    const form = await request.formData().catch(() => null);
+    if (form) {
+      for (const k of ["supplier", "invoice_no", "invoice_date", "net", "vat", "gross",
+        "engineer_slug", "engineer_name", "job_id", "job_ref", "po_number", "note",
+        "source", "filename", "mailbox", "message_id", "attachment_id"]) {
+        const v = form.get(k); if (v != null) b[k] = v;
+      }
+      const file = form.get("file");
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength <= 15 * 1024 * 1024) { bytes = ab; filename = file.name; contentType = file.type; }
+      }
+    }
+  } else {
+    try { b = await request.json(); } catch {}
+  }
+  // Sweep source — pull a copy of the invoice from the mailbox to keep with the log.
+  if (!bytes && b.message_id && b.attachment_id) {
+    try {
+      bytes = await downloadAttachment(env, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id);
+      filename = b.filename || "invoice.pdf"; contentType = "application/pdf";
+    } catch { /* keep the log entry even if the copy fetch failed */ }
+  }
+  let key = null;
+  if (bytes) {
+    const safe = String(filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/flags/${sess.tenantId}/${Date.now()}-${safe}`;
+    try { await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: contentType || "application/pdf" } }); }
+    catch { key = null; }
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await db.prepare(`INSERT INTO invoice_flags
+    (tenant_id, supplier, invoice_no, invoice_date, net, vat, gross, engineer_slug, engineer_name,
+     job_id, job_ref, po_number, note, status, invoice_key, filename, source, created_by, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    b.supplier || null, b.invoice_no || null, b.invoice_date || null,
+    numOrNull(b.net), numOrNull(b.vat), numOrNull(b.gross),
+    b.engineer_slug || null, b.engineer_name || null,
+    (b.job_id || "") || null, (b.job_ref || "") || null, numOrNull(b.po_number),
+    (b.note || "") || null, "open", key, filename || null,
+    b.source || "sweep", userName(sess), now
+  ).run();
+  return { ok: true, id: (res && res.meta && res.meta.last_row_id) || null, invoice_key: key };
+}
+
+async function listInvoiceFlags(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM invoice_flags WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const eng = params.get("engineer"); if (eng) { sql += ` AND engineer_slug = ?`; binds.push(eng); }
+  const status = params.get("status"); if (status) { sql += ` AND COALESCE(status,'open') = ?`; binds.push(status); }
+  sql += ` ORDER BY created_at DESC LIMIT 500`;
+  let rows = [];
+  try { rows = (await db.prepare(sql).bind(...binds).all()).results || []; } catch { rows = []; }
+  for (const r of rows) {
+    r.invoiceUrl = r.invoice_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.invoice_key) : null;
+  }
+  return rows;
+}
+
+async function updateInvoiceFlag(db, sess, b) {
+  const id = Number(b && b.id); if (!id) return { error: "No id" };
+  const allowed = ["engineer_slug", "engineer_name", "job_id", "job_ref", "po_number", "note", "status"];
+  const fields = [], binds = [];
+  for (const k of allowed) if (b[k] !== undefined) { fields.push(`${k} = ?`); binds.push(b[k] === "" ? null : b[k]); }
+  if (b.status === "resolved") { fields.push(`resolved_at = ?`); binds.push((/* @__PURE__ */ new Date()).toISOString()); }
+  else if (b.status === "open") { fields.push(`resolved_at = ?`); binds.push(null); }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE invoice_flags SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+
 // Read the mailbox, parse each PDF, and build confirm-first proposals (matched PO
 // or candidates). Bounded: at most MAX downloads, and an AI (vision) budget so a
 // big run can't stall — past the budget the reader uses the free text tier only.
 async function runInvoiceSweep(env, db, { mailbox, days }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map(s => s.name);
+  const subNames = (await getSubcontractors(db)).map(s => s.name);
   let msgs = [];
   try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 }); }
   catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
@@ -617,14 +803,19 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
       try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
       catch { continue; }
       if (res.aiUsed) aiUsed++;
-      if (res.remittance) { skipped++; continue; }   // a remittance/statement is not a purchase invoice
+      // A remittance advice / statement (a payment record, not a bill) is not a
+      // purchase invoice — drop it, however it was read (text OR vision docType).
+      if (res.notInvoice || res.remittance) { skipped++; continue; }
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
       if (!po) candidates = await matchInvoiceCandidates(db, f);
+      const cls = classifyProposal(f, po, known, subNames);
       // Only surface things the office can act on; drop non-invoice PDFs + POs
-      // already priced-and-attached (done on a previous sweep).
-      const actionable = (po && !po.priced) || (candidates && candidates.length) || (f.net != null && !!f.supplier);
+      // already priced-and-attached (done on a previous sweep). A subcontractor /
+      // flag / other invoice with money read is actionable even with no candidate.
+      const actionable = (po && !po.priced) || (candidates && candidates.length)
+        || (f.net != null || f.gross != null);
       if (po && po.priced && po.has_invoice) { skipped++; continue; }
       if (!actionable) continue;
       proposals.push({
@@ -632,6 +823,7 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
         subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
         receivedDateTime: m.receivedDateTime || null,
         tier: res.tier, fields: f, po, candidates,
+        category: cls.category, subName: cls.subName, supName: cls.supName,
       });
     }
   }
