@@ -531,6 +531,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/project/doc"],
   // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
   ["GET", "/fra/quote"],
+  // Supplier invoice PDFs attached to a PO, streamed inline — signed URL, verified in-handler.
+  ["GET", "/po/invoice-file"],
   // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
   ["POST", "/customer/job"],
   ["POST", "/customer/reschedule"],

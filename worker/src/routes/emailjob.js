@@ -338,6 +338,13 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "note") {
+      // A store's note/chase on an EXISTING job (not a new dispatch). Never
+      // creates a job. TODO: append the note to the matching open job via an
+      // update-only /sla/inbound call; for now it's logged against the incident.
+      return { ...out, outcome: "dropped", reference: r.incident || "",
+        reason: "Concerto note/update on job " + (r.incident || "?") + " — logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)" };
+    }
     if (r.kind === "cancel") {
       const c = { ...(r.cancel || {}), action: "cancel", isJob: false };
       if (r.missing && r.missing.length) return { ...out, fields: c, outcome: "review", reason: tm.tpl.label + " — couldn't read: " + r.missing.join(", ") };

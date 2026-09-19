@@ -39,8 +39,20 @@ const ORDER_HTML = `<table><tr><td><div>Concerto</div><div>Notification sent on<
 <div>Return to site to replace the defective door closer.<br /><br />Labour - 150.00<br />Materials - 289.00</div>
 <div><b>For : </b><div style="margin-left:20px">0000 - Test Store - Anytown, High Street SR00999</div></div></div>`;
 const rawOrder = mail("noreply@concerto.co.uk", "Order number 00099999/2 from Southern Coop", "test-order@concerto", ORDER_HTML);
-const rawApproved = mail("noreply@concerto.co.uk", "Helpdesk action - AM01. Approved : 00099999", "test-appr@concerto",
-  `<div><b>Helpdesk reference : </b>00099999</div><div><b>Description : </b>door hinge broken</div><div><b>Site : </b>SR00999 0000 - Test Store</div><div>Contractor assigned : Mostlane.</div>`);
+// Helpdesk-action DISPATCH (real layout): most Co-op jobs arrive this way, NOT as
+// a New Job Alert. AM01. Approved and FM Approved - Send to Contractor = a job to us.
+const HELPDESK = (action, inc) => `<div><b>Helpdesk reference : </b>${inc}</div>` +
+  `<div><b>Description : </b>door hinge broken ACCESS TIMES: 7am-10pm</div>` +
+  `<div><b>Site : </b>SR00999 0414 - Chichester, Lavant Road (PFS)</div>` +
+  `<div><b>Address : </b>Summersdale Retail Park,, Unit 2, Lavant Road, Chichester, West Sussex, PO19 5RD</div>` +
+  `<div><b>Telephone : </b>01243 539914</div><div><b>Block : </b>Forecourt</div>` +
+  `<div><b>Raised on : </b>15 September 2026 at 09:00</div>` +
+  `<div><b>Action : </b>${action}, by Ian Blackwell</div>` +
+  `<div><b>Call status : </b>With Contractor - R</div><div><b>Urgency : </b>Priority 2</div>`;
+const rawApproved = mail("noreply@concerto.co.uk", "Helpdesk action - AM01. Approved : 00099910", "test-appr@concerto", HELPDESK("AM01. Approved", "00099910"));
+const rawSendContractor = mail("noreply@concerto.co.uk", "Helpdesk action - FM Approved - Send to Contractor : 00099911", "test-fm@concerto", HELPDESK("FM Approved - Send to Contractor", "00099911"));
+const rawNote = mail("noreply@concerto.co.uk", "Helpdesk action - G01. Add a note, photo or document : 00099912", "test-note@concerto", HELPDESK("G01. Add a note, photo or document", "00099912"));
+const rawUnknownAction = mail("noreply@concerto.co.uk", "Helpdesk action - ZZ99. Something new : 00099913", "test-unk@concerto", HELPDESK("ZZ99. Something new", "00099913"));
 // Chapplins — ashley@ layout (subject = "P1 - address", body with Tenant/Name/Property…)
 const CHAP_HTML = `Dear All<br /><br />A new job has been raised with the following details:<br /><br />Tenant: TEST01<br />Name: Test Tenant &amp; Partner<br />Property: 159a Fratton Road, Portsmouth, PO1 5ET<br />Home Telephone: <br />Mobile: 07700 900123<br />E-mail: tenant@example.com<br /><br />Tradesman: Mostlane<br />Job Number: 260730999<br />Date Job Entered: 08/09/2026<br />Job Description: <br />Hi All<br /><br />The shop below this flat still reports a leak, can someone please attend asap to rectify the leak and the damaged ceiling below.<br /><br />Ashley Newell<br /><br />Chapplins Lettings Limited<br />62-66 Station Road<br />Liss<br />GU33 7AA<br />01730 774200`;
 const rawChap = mail("ashley@chapplins.co.uk", "P1 - 159a Fratton Road, Portsmouth, PO1 5ET.", "test-chap1@fpp.local", CHAP_HTML);
@@ -150,8 +162,16 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   const r = await run(E, rawOrder, "noreply@concerto.co.uk"); const o = E.orders[0] && E.orders[0].body;
   ok("order sheet → client-orders intake, no job", r.outcome === "order" && E.inbound.length === 0 && E.orders.length === 1 && E.orders[0].auth === "Bearer tok", r.outcome + " / " + r.reason);
   ok("order fields", o && o.orderNumber === "00099999/2" && o.priority === 3 && o.orderValue === 439 && o.storeCode === "0000" && o.srRef === "SR00999" && /door closer/.test(o.description) && o.externalId === "<test-order@concerto>", JSON.stringify(o));
-  const a = await run(E, rawApproved, "noreply@concerto.co.uk");
-  ok("helpdesk 'Approved' notice → dropped", a.outcome === "dropped" && /approval notice/.test(a.reason), a.reason);
+  const a = await run(E, rawApproved, "noreply@concerto.co.uk"); const ap = E.inbound[E.inbound.length - 1] && E.inbound[E.inbound.length - 1].body;
+  ok("helpdesk AM01. Approved → job CREATED (bare incident + real fields)", a.outcome === "created" && ap && ap.reference === "00099910" && ap.siteCode === "0414" && ap.postcode === "PO19 5RD" && ap.telephone === "01243 539914" && ap.priority === "Priority 2" && /door hinge broken/.test(ap.description), a.outcome + " / " + JSON.stringify(ap));
+  { const E2 = makeEnv();
+    const fm = await run(E2, rawSendContractor, "noreply@concerto.co.uk");
+    ok("helpdesk FM Approved - Send to Contractor → job created", fm.outcome === "created" && E2.inbound[0] && E2.inbound[0].body.reference === "00099911", fm.outcome + " / " + fm.reason);
+    const nt = await run(E2, rawNote, "noreply@concerto.co.uk");
+    ok("helpdesk G01. Add a note → dropped, NEVER creates a job", nt.outcome === "dropped" && /note\/update on job 00099912/.test(nt.reason) && E2.inbound.length === 1, nt.outcome + " / " + nt.reason);
+    const uk = await run(E2, rawUnknownAction, "noreply@concerto.co.uk");
+    ok("helpdesk unrecognised action → held for a look (review)", uk.outcome === "review" && /unrecognised Concerto action/.test(uk.reason) && E2.inbound.length === 1, uk.outcome + " / " + uk.reason);
+  }
 }
 { // 5. Chapplins — ashley@ layout, matched to the portal site
   const E = makeEnv();
@@ -176,6 +196,8 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   ok("our own 'Send N to MetroRod' → dropped", z.outcome === "dropped" && /own outbound/.test(z.reason), z.reason);
   const re = await run(E, rawChap.replace("Subject: P1 - ", "Subject: RE: P1 - ").replace("test-chap1@fpp.local", "test-re@fpp.local"), "ashley@chapplins.co.uk");
   ok("a reply ('RE:') quoting a job email → dropped", re.outcome === "dropped" && /Reply/.test(re.reason), re.reason);
+  const sp = await run(E, mail("noreply@concerto.co.uk", "Orders have been added to the Supplier Portal - from Southern Coop", "test-sp@concerto", "<div>39 PPM orders have been created and added to the Supplier Portal</div>"), "noreply@concerto.co.uk");
+  ok("Concerto supplier-portal batch notice → dropped, never a job/order", sp.outcome === "dropped" && /supplier-portal/i.test(sp.reason), sp.outcome + " / " + sp.reason);
   ok("nothing created from any of them", E.inbound.length === 0 && E.orders.length === 0);
 }
 { // 7. unknown layout from an allowed sender → HELD for review (no AI key); approve creates it with corrections

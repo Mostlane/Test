@@ -9407,12 +9407,12 @@ async function handle8(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    const numOrNull = (v) => {
+    const numOrNull3 = (v) => {
       const n = Number(v);
       return isFinite(n) ? n : null;
     };
-    if ("lat" in b) meta.lat = b.lat === null || b.lat === "" ? null : numOrNull(b.lat);
-    if ("lng" in b) meta.lng = b.lng === null || b.lng === "" ? null : numOrNull(b.lng);
+    if ("lat" in b) meta.lat = b.lat === null || b.lat === "" ? null : numOrNull3(b.lat);
+    if ("lng" in b) meta.lng = b.lng === null || b.lng === "" ? null : numOrNull3(b.lng);
     if ("w3w" in b) meta.w3w = String(b.w3w || "").replace(/^\/+/, "").slice(0, 120) || null;
     if ("access" in b) meta.access = String(b.access || "").slice(0, 2e3) || null;
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2e3) || null;
@@ -12628,6 +12628,21 @@ async function matchOrderToRemedial(env, tid, o) {
   } catch {
   }
   try {
+    const fc = fyrCode(o.storeCode);
+    const rows = (await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage FROM five_year_remedials WHERE tenant_id=? AND COALESCE(stage,'quoted') IN ('quoted','ordered','') ORDER BY created_at DESC"
+    ).bind(tid).all()).results || [];
+    const sr = String(o.srRef || "").toUpperCase();
+    const cand = sr && rows.find((r) => String(r.sr || "").toUpperCase() === sr) || fc && rows.find((r) => fyrCode(r.store_code) === fc);
+    if (cand) return {
+      kind: "fiveyear",
+      certId: cand.id,
+      stage: cand.stage || "quoted",
+      note: `5-year electrical remedial ${cand.sr || ""} at ${cand.site_name || code} (stage ${cand.stage || "quoted"})`
+    };
+  } catch {
+  }
+  try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
     const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num2);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
@@ -12757,6 +12772,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     emailFrom,
     emailText
   ).run();
+  if (m && m.kind === "fiveyear" && m.certId) {
+    try {
+      await env.DB.prepare(
+        "UPDATE five_year_remedials SET order_number=?, order_value=?, order_id=?, stage=CASE WHEN COALESCE(stage,'quoted') IN ('quoted','') THEN 'ordered' ELSE stage END, updated_at=? WHERE tenant_id=? AND id=?"
+      ).bind(orderNumber || null, b.orderValue != null ? Number(b.orderValue) : null, id, now, tid, m.certId).run();
+    } catch {
+    }
+  }
   const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
   let linkedJob = null;
   if (!m) {
@@ -12772,12 +12795,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const isFy = m && m.kind === "fiveyear";
+    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : isFy ? `Client order ${orderNumber || ""} for ${site} \u2014 matched to a 5-year electrical remedial and marked ordered. Raise the works job from the 5-year remedials list.` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches an EM remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const url = linkedJob ? "/client-orders.html" : isFy ? "/five-year-remedials.html" : m ? "/cert-review.html?orders=1" : "/client-orders.html";
     ctx.waitUntil(sendToPermission(
       env,
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m && !linkedJob ? "Client order \u2014 approve remedial" : "Client order received", body, url: m && !linkedJob ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
+      { title: m && !linkedJob ? "Client order \u2014 remedial" : "Client order received", body, url, tag: "client-order:" + id, actionable: !linkedJob },
       "",
       { officeOnly: true }
     ).catch(() => {
@@ -14266,7 +14291,19 @@ PAT: Import certificate number ${num2}-${yr}`;
     ).bind(tid).all();
     const rows = results || [];
     const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
-    return json({ ok: true, cases: rows.map((r) => shapeCase(r, fit4[r.cert_id])) }, {}, env, request);
+    const ordByCert = {};
+    try {
+      const ids = rows.map((r) => r.cert_id).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 60) {
+        const chunk = ids.slice(i, i + 60);
+        const { results: os } = await env.DB.prepare(
+          `SELECT id, order_number, order_value, matched_cert_id, notified_at, status FROM client_orders WHERE tenant_id=? AND matched_kind='em' AND status<>'dismissed' AND matched_cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY COALESCE(notified_at, created_at) DESC`
+        ).bind(tid, ...chunk).all();
+        for (const o of os || []) if (!ordByCert[o.matched_cert_id]) ordByCert[o.matched_cert_id] = { number: o.order_number || "", value: o.order_value, id: o.id, at: o.notified_at || "", status: o.status || "" };
+      }
+    } catch {
+    }
+    return json({ ok: true, cases: rows.map((r) => ({ ...shapeCase(r, fit4[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
   }
   if (sub === "/orders" && method === "GET") {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
@@ -17275,7 +17312,8 @@ async function handle12(request, env, ctx, url, sess) {
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
       const money2 = await canSeeMoney(env, tenantId, sess.user.username);
-      const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
+      const groupJobs = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+      const visits = groupJobs.map((j) => ({
         id: j.id,
         ref: j.helpdeskRef || j.id,
         status: j.status || "",
@@ -17288,7 +17326,8 @@ async function handle12(request, env, ctx, url, sess) {
         ...money2 ? { orderValue: j.orderValue ?? null } : {},
         engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
       })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
-      return jsonResponse({ ok: true, groupId, visits }, headers);
+      const history = buildIncidentHistory(groupJobs, money2);
+      return jsonResponse({ ok: true, groupId, visits, history }, headers);
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -19006,6 +19045,17 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
   const text = orderText(o);
   if (sibs.length) {
+    const finished = await jobFinishedFor(env, tenantId);
+    const skip = String(o && o.unlinkedJobId || "");
+    const open = sibs.filter((j) => !finished(j) && j.id !== skip).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    if (open.length) {
+      const pick = open[0];
+      await stampOrderOnJob(env, tenantId, pick, o);
+      await markOrderLinked(env, tenantId, o.id, pick.id);
+      return { job: pick, how: "linked", from: { id: pick.id, ref: pick.helpdeskRef || pick.id, status: pick.status || "" } };
+    }
+  }
+  if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();
     const description = [
@@ -19271,6 +19321,96 @@ async function createWorksJobFromRemedials(env, tenantId, src, opts) {
   } catch {
   }
   return { id: job.id, ref: job.helpdeskRef, items: auditItems.length };
+}
+function milestoneForStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "in progress") return { icon: "\u{1F527}", text: "Attended \u2014 work started on site" };
+  if (s === "awaiting office (safety)") return { icon: "\u26A0\uFE0F", text: "Made safe \u2014 awaiting office" };
+  if (s === "on hold" || s === "on hold \u2014 approved") return { icon: "\u23F8", text: "Put on hold" };
+  if (s === "quote") return { icon: "\u{1F4DD}", text: "Marked for a quote" };
+  if (s === "complete") return { icon: "\u2705", text: "Completed" };
+  if (s === "closed") return { icon: "\u{1F4C1}", text: "Closed" };
+  if (s === "invoiced") return { icon: "\u{1F9FE}", text: "Invoiced" };
+  return null;
+}
+function buildIncidentHistory(jobs, money2) {
+  const money$ = (v) => {
+    const n = Number(v);
+    return money2 && Number.isFinite(n) && n > 0 ? " \u2014 \xA3" + n.toFixed(2) : "";
+  };
+  const ordered = (jobs || []).slice().sort((a, b) => new Date(a.raisedAt || a.createdAt || 0) - new Date(b.raisedAt || b.createdAt || 0));
+  const events = [];
+  for (const j of ordered) {
+    if (!j) continue;
+    const ref = j.helpdeskRef || String(j.id || "").slice(0, 8);
+    const hist = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+    const firstAt = hist.length ? hist[0].at : null;
+    const raisedAt = j.raisedAt || j.createdAt || firstAt;
+    const orig = String(j.originator || "").toLowerCase();
+    let sub = "";
+    if (orig === "email" || orig === "zapier") sub = "from Concerto";
+    else if (orig) sub = "raised in office";
+    events.push({
+      at: raisedAt,
+      ref,
+      icon: j.revisitOf ? "\u{1F501}" : "\u{1F195}",
+      text: j.revisitOf ? "New visit raised" : "Job raised",
+      sub
+    });
+    const seen = /* @__PURE__ */ new Set();
+    for (const h of hist) {
+      const m = milestoneForStatus(h && h.status);
+      if (!m || seen.has(m.text)) continue;
+      seen.add(m.text);
+      events.push({ at: h.at || raisedAt, ref, icon: m.icon, text: m.text, sub: h && h.by ? String(h.by) : "" });
+    }
+    if (j.quoteSent && j.quoteSent.at) {
+      const qs = j.quoteSent;
+      events.push({
+        at: qs.at,
+        ref,
+        icon: "\u{1F4B7}",
+        text: "Quote sent to client" + money$(qs.amountExVat),
+        sub: qs.quoteNumber ? "Quote " + qs.quoteNumber : ""
+      });
+    }
+    if (j.orderNumber) {
+      let oAt = null;
+      for (const h of hist) {
+        if (String(h && h.status || "").toLowerCase() === "order") {
+          oAt = h.at;
+          break;
+        }
+      }
+      events.push({
+        at: oAt || j.updatedAt || raisedAt,
+        ref,
+        icon: "\u{1F9FE}",
+        text: "Order received" + money$(j.orderValue),
+        sub: "Order " + j.orderNumber
+      });
+    }
+    if (j.cancelledAt) {
+      events.push({
+        at: j.cancelledAt,
+        ref,
+        icon: "\u274C",
+        text: "Cancelled",
+        sub: [j.cancelReason, j.cancelledBy ? "by " + j.cancelledBy : ""].filter(Boolean).join(" \xB7 ")
+      });
+    } else if (j.clientCancelled && j.clientCancelled.at) {
+      const cc = j.clientCancelled;
+      events.push({
+        at: cc.at,
+        ref,
+        icon: "\u21A9",
+        text: "Client cancelled",
+        sub: [cc.reason, cc.by ? "by " + cc.by : ""].filter(Boolean).join(" \xB7 ")
+      });
+    }
+  }
+  events.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  return events;
 }
 async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);
@@ -25381,6 +25521,49 @@ function concertoQuoteCancel(subject, t) {
   if (!reference) missing.push("job reference (order number)");
   return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " \u2014 " + by : "") + ")" } };
 }
+function concertoHelpdesk(subject, t) {
+  const sm = /^\s*Helpdesk action\s*-\s*(.+?)\s*:\s*(\d{5,12})\b/i.exec(subject);
+  const action = (sm ? sm[1] : line(/^\s*Action\s*:\s*([^\n,]+)/im, t)).trim();
+  const incident = (sm ? sm[2] : "") || line(/Helpdesk reference\s*:\s*(\d{5,12})/i, t) || line(/information has been added to\s*(\d{5,12})/i, t) || line(/\bfor\s+(\d{5,12})\b/i, t);
+  const isNote = /add a note|photo or document|additional information/i.test(action) || /^\s*Additional information has been added/i.test(subject);
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+  const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
+  const sr = line(/\b(SR\d{4,6})\b/i, siteLine);
+  const stripped = siteLine.replace(/^\s*SR\d{4,6}\s*/i, "").trim();
+  const code = line(/^\s*(\d{3,5})\b/, stripped);
+  const siteName = stripped.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const address = line(/^\s*Address\s*:\s*([^\n]+)/im, t).replace(/,\s*,+/g, ", ").trim();
+  const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
+  const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
+  const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+  if (isNote) {
+    return { kind: "note", incident, note: { incident, reference: incident, text: desc, action, siteCode: code, siteName } };
+  }
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  if (!desc) missing.push("description");
+  if (!code) missing.push("store number");
+  if (!isDispatch) missing.push("unrecognised Concerto action \u201C" + (action || "?") + "\u201D \u2014 confirm this is a job to attend");
+  return {
+    kind: "job",
+    missing,
+    fields: {
+      isJob: true,
+      reference: incident,
+      priority: pr ? "Priority " + pr : "",
+      siteCode: code,
+      siteName: siteName || (address.split(",")[0] || "").trim(),
+      address: address || siteName,
+      postcode,
+      telephone,
+      description: desc,
+      raisedAt: "",
+      respondBy: "",
+      completeBy: ""
+    }
+  };
+}
 var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
   const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
@@ -25455,11 +25638,25 @@ var TEMPLATES = [
     read: concertoQuoteCancel
   },
   {
-    id: "concerto-notice",
-    label: "Concerto \u2014 helpdesk action / quote notice",
+    id: "concerto-helpdesk",
+    label: "Concerto \u2014 helpdesk action (dispatch / note)",
     domains: ["concerto.co.uk"],
-    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s),
-    read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice \u2014 the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" })
+    test: (s) => /^Helpdesk action\b/i.test(s) || /^Additional information has been added/i.test(s),
+    read: concertoHelpdesk
+  },
+  {
+    id: "concerto-supplier-portal",
+    label: "Concerto \u2014 supplier-portal batch notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /Supplier Portal/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto supplier-portal batch notice (e.g. PPM orders added) \u2014 not an individual job" })
+  },
+  {
+    id: "concerto-notice",
+    label: "Concerto \u2014 quote notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /^Quote\s*:/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" })
   },
   {
     id: "chapplins-job",
@@ -25867,6 +26064,14 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "note") {
+      return {
+        ...out2,
+        outcome: "dropped",
+        reference: r.incident || "",
+        reason: "Concerto note/update on job " + (r.incident || "?") + " \u2014 logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)"
+      };
+    }
     if (r.kind === "cancel") {
       const c = { ...r.cancel || {}, action: "cancel", isJob: false };
       if (r.missing && r.missing.length) return { ...out2, fields: c, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
@@ -35750,6 +35955,247 @@ async function handle31(request, env, ctx, url, sess) {
 // src/routes/po.js
 init_http();
 init_auth();
+init_once();
+init_filesign();
+
+// src/lib/invoiceparse.js
+init_pdftext();
+var PO_MIN = 10011;
+var PO_MAX = 99999;
+var MONTHS3 = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+function isoDate2(y, m, d) {
+  y = Number(y);
+  m = Number(m);
+  d = Number(d);
+  if (y < 100) y += 2e3;
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function parseInvoiceDate(text) {
+  const t = String(text || "");
+  const near = t.match(/(?:tax\s*point|invoice\s*date|date\s*of\s*invoice|transaction\s*date|document\s*date|inv(?:oice)?\.?\s*date)[^\n]{0,40}?(\d{1,2}[\/.\- ][A-Za-z0-9]{2,9}[\/.\- ]\d{2,4})/i);
+  const grab = near ? near[1] : null;
+  const dm = (s) => {
+    if (!s) return null;
+    let m = s.match(/(\d{1,2})[\/.\- ]([A-Za-z]{3,9})[\/.\- ](\d{2,4})/);
+    if (m) {
+      const mo = MONTHS3[m[2].toLowerCase().slice(0, 4)] || MONTHS3[m[2].toLowerCase().slice(0, 3)];
+      return isoDate2(m[3], mo, m[1]);
+    }
+    m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+    if (m) return isoDate2(m[3], m[2], m[1]);
+    m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return isoDate2(m[1], m[2], m[3]);
+    return null;
+  };
+  if (grab) {
+    const d = dm(grab);
+    if (d) return d;
+  }
+  const all = t.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}[ \/.\-][A-Za-z]{3,9}[ \/.\-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b/g) || [];
+  for (const s of all) {
+    const d = dm(s);
+    if (d) return d;
+  }
+  return null;
+}
+function parsePoNumbers(text) {
+  const t = String(text || "");
+  const seen = /* @__PURE__ */ new Set(), out = [];
+  const add = (n, score) => {
+    n = Number(n);
+    if (n >= PO_MIN && n <= PO_MAX && !seen.has(n)) {
+      seen.add(n);
+      out.push({ n, score });
+    }
+  };
+  const lab = /(?:order\s*(?:no|number|ref)|purchase\s*order|\bp\.?o\.?\s*(?:no|number|ref)?|your\s*ref(?:erence)?|customer\s*(?:order|ref))[^\d]{0,18}(\d{4,6})/gi;
+  let m;
+  while (m = lab.exec(t)) add(m[1], 2);
+  const any = /\b(1\d{4})\b/g;
+  while (m = any.exec(t)) add(m[1], 1);
+  return out.sort((a, b) => b.score - a.score).map((o) => o.n);
+}
+function amounts(text) {
+  const out = [];
+  const re = /(?:£\s*)?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g;
+  let m;
+  while (m = re.exec(text)) {
+    const v = Number(m[1].replace(/,/g, ""));
+    if (Number.isFinite(v) && v > 0 && v < 1e7) out.push(v);
+  }
+  return out;
+}
+function reconcileTotals(text) {
+  const a = amounts(text);
+  let best = null;
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < a.length; j++) {
+    if (i === j) continue;
+    const net = a[i], vat = a[j];
+    if (vat > net) continue;
+    const gross = net + vat;
+    if (!a.some((x) => Math.abs(x - gross) <= 0.02)) continue;
+    const rate = net ? vat / net : 0;
+    if (rate < 1e-3 || rate > 0.26) continue;
+    if (!best || gross > best.gross + 1e-3) best = { net: round2(net), vat: round2(vat), gross: round2(gross) };
+  }
+  return best;
+}
+var round2 = (n) => Math.round(n * 100) / 100;
+function normSupplierName(s) {
+  return String(s || "").toLowerCase().replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function matchSupplier(text, knownNames) {
+  const t = String(text || "").toLowerCase();
+  let best = null;
+  for (const name of knownNames || []) {
+    const norm = normSupplierName(name);
+    if (!norm || norm.length < 3) continue;
+    const words = norm.split(" ").filter((w) => w.length >= 3);
+    if (!words.length) continue;
+    const hits = words.filter((w) => t.includes(w)).length;
+    const score = hits / words.length;
+    if (score >= 0.6 && (!best || score > best.score)) best = { name, score };
+  }
+  return best ? best.name : null;
+}
+function invoiceNumber(text) {
+  const m = String(text || "").match(/(?:invoice|inv|document)\s*(?:no|number|#|:)?\s*[:#]?\s*([A-Z]{0,4}[\/\-]?\d{4,10})/i);
+  return m ? m[1].trim() : "";
+}
+function extractFields(text, knownSuppliers) {
+  const totals = reconcileTotals(text);
+  const pos = parsePoNumbers(text);
+  return {
+    poNumbers: pos,
+    poNumber: pos[0] || null,
+    net: totals ? totals.net : null,
+    vat: totals ? totals.vat : null,
+    gross: totals ? totals.gross : null,
+    invoiceDate: parseInvoiceDate(text),
+    invoiceNumber: invoiceNumber(text),
+    supplier: matchSupplier(text, knownSuppliers)
+  };
+}
+function tier1Confident(f) {
+  return !!(f && f.poNumber && f.net != null && f.gross != null);
+}
+async function aiExtract2(env, bytes, filename) {
+  const key = env && env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const b64 = bytesToBase64(bytes);
+  if (!b64 || b64.length > 12 * 1024 * 1024) return null;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const schema = {
+    type: "object",
+    properties: {
+      supplier: { type: "string", description: "The supplier / merchant name that issued this invoice." },
+      invoiceNumber: { type: "string", description: "The supplier's own invoice number." },
+      invoiceDate: { type: "string", description: "The invoice / tax-point / transaction date in YYYY-MM-DD." },
+      poNumber: { type: "string", description: "The customer's purchase-order / order number if shown \u2014 a 5-digit Mostlane number in the 10000s. Empty if none is printed." },
+      net: { type: "number", description: "Goods / net total, excluding VAT, in GBP." },
+      vat: { type: "number", description: "VAT total in GBP." },
+      gross: { type: "number", description: "Invoice total including VAT, in GBP." }
+    },
+    required: ["net", "gross"]
+  };
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 900,
+        tools: [{ name: "extract_invoice", description: "Return the invoice's key fields.", input_schema: schema }],
+        tool_choice: { type: "tool", name: "extract_invoice" },
+        messages: [{ role: "user", content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "text", text: "This is a UK supplier invoice sent to Mostlane Construction. Read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) \u2014 it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." }
+        ] }]
+      })
+    });
+    if (!r.ok) return null;
+    const p = await r.json();
+    const block = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use" && c.name === "extract_invoice") : null;
+    const o = block && block.input;
+    if (!o) return null;
+    const poRaw = String(o.poNumber || "").replace(/\D/g, "");
+    const poN = Number(poRaw);
+    return {
+      supplier: o.supplier ? String(o.supplier).slice(0, 120) : null,
+      invoiceNumber: o.invoiceNumber ? String(o.invoiceNumber).slice(0, 40) : "",
+      invoiceDate: normIsoLoose(o.invoiceDate),
+      poNumber: poN >= PO_MIN && poN <= PO_MAX ? poN : null,
+      poNumbers: poN >= PO_MIN && poN <= PO_MAX ? [poN] : [],
+      net: numOrNull(o.net),
+      vat: numOrNull(o.vat),
+      gross: numOrNull(o.gross)
+    };
+  } catch {
+    return null;
+  }
+}
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? round2(n) : null;
+}
+function normIsoLoose(s) {
+  const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? isoDate2(m[1], m[2], m[3]) : null;
+}
+function bytesToBase64(bytes) {
+  try {
+    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let s = "";
+    const CH = 8192;
+    for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+    return btoa(s);
+  } catch {
+    return "";
+  }
+}
+async function parseInvoice(env, bytes, filename, knownSuppliers) {
+  let text = "";
+  try {
+    text = await pdfExtractText(bytes);
+  } catch {
+  }
+  const t1 = extractFields(text, knownSuppliers);
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false };
+  const t2 = await aiExtract2(env, bytes, filename);
+  if (t2) {
+    const merged = {
+      poNumber: t1.poNumber || t2.poNumber || null,
+      poNumbers: (t1.poNumbers && t1.poNumbers.length ? t1.poNumbers : t2.poNumbers) || [],
+      net: t2.net != null ? t2.net : t1.net,
+      vat: t2.vat != null ? t2.vat : t1.vat,
+      gross: t2.gross != null ? t2.gross : t1.gross,
+      invoiceDate: t2.invoiceDate || t1.invoiceDate || null,
+      invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
+      supplier: matchSupplier(text, knownSuppliers) || t2.supplier || t1.supplier || null
+    };
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true };
+  }
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false };
+}
+
+// src/routes/po.js
+async function ensurePoInvoiceCols__raw(db) {
+  for (const ddl of [
+    `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
+    `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`
+  ]) {
+    try {
+      await db.prepare(ddl).run();
+    } catch {
+    }
+  }
+}
+var ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+var numOrNull2 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 function staffTypeOf2(u) {
   try {
     const p = JSON.parse(u.profile || "{}");
@@ -35825,13 +36271,16 @@ async function getRaiseOptions(env, username) {
 async function handle32(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
+  const path = url.pathname.replace(/^\/po/, "") || "/";
+  const method = request.method.toUpperCase();
+  await ensurePoInvoiceCols(db);
+  if (path === "/invoice-file" && method === "GET") return serveInvoiceFile(request, env, url);
+  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const field = staffTypeOf2(sess.user) === "field";
   const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
   if (!office && !field) return error("Not allowed", 403, env, request);
-  const path = url.pathname.replace(/^\/po/, "") || "/";
-  const method = request.method.toUpperCase();
   const q = url.searchParams;
   const jr8 = (d, status) => json(d, status ? { status } : {}, env, request);
   const bodyOf = async () => {
@@ -35889,6 +36338,84 @@ async function handle32(request, env, ctx, url, sess) {
     if (path === "/api/summary" && method === "GET") return jr8(await getSummary(db, q));
     if (path === "/api/jobcost" && method === "GET") return jr8(await getJobCost(db, q));
     if (path === "/api/accounts" && method === "GET") return jr8(await getAccounts(db));
+    if (path === "/api/invoice/parse" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      const file = form && form.get("file");
+      if (!file || typeof file.arrayBuffer !== "function") return jr8({ error: "No file uploaded" }, 400);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (buf.length > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+      const known = (await getSuppliers(db)).map((s) => s.name);
+      const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      return jr8({
+        ok: true,
+        tier: res.tier,
+        aiUsed: res.aiUsed,
+        textLen: res.textLen,
+        fields: f,
+        po,
+        candidates,
+        filename: file.name || "invoice.pdf"
+      });
+    }
+    if (path === "/api/invoice/apply" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      if (!form) return jr8({ error: "Bad request" }, 400);
+      const poNumber = Number(form.get("po_number"));
+      const cost = Number(form.get("cost_ex_vat"));
+      if (!poNumber) return jr8({ error: "Pick a PO to attach this invoice to" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      const file = form.get("file");
+      let key = target.invoice_key || null;
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+        const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+        key = `po-invoices/${sess.tenantId}/${poNumber}/${Date.now()}-${safe}`;
+        await env.JOB_FILES.put(key, ab, { httpMetadata: { contentType: file.type || "application/pdf" } });
+      }
+      const meta = JSON.stringify({
+        no: String(form.get("invoice_no") || "") || null,
+        date: String(form.get("invoice_date") || "") || null,
+        net: cost,
+        vat: numOrNull2(form.get("vat")),
+        gross: numOrNull2(form.get("gross")),
+        filename: file && file.name || null,
+        by: userName(sess),
+        at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const fields = [
+        "cost_ex_vat = ?",
+        "invoice_key = ?",
+        "invoice_meta = ?",
+        "cost_entered_at = ?",
+        "last_edited_by_slug = ?",
+        "last_edited_by_name = ?",
+        "last_edited_at = ?"
+      ];
+      const binds = [cost, key, meta, now, userSlug(sess), userName(sess), now];
+      const vatRate = numOrNull2(form.get("vat_rate"));
+      if (vatRate != null) {
+        fields.push("vat_rate = ?");
+        binds.push(vatRate);
+      }
+      binds.push(poNumber);
+      await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+      const invoiceUrl = key ? await signedFileUrl(env, url.origin, "/po/invoice-file", key) : null;
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/url" && method === "GET") {
+      const n = Number(q.get("po"));
+      const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
+      if (!r || !r.invoice_key) return jr8({ error: "No invoice attached" }, 404);
+      return jr8({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
+    }
     if (path === "/api/config" && method === "POST") return jr8(await updateConfig(db, await bodyOf()));
     if (path === "/api/suppliers" && method === "POST") return jr8(await addSupplier(db, await bodyOf()));
     if (path.startsWith("/api/suppliers/") && method === "PATCH") return jr8(await updateSupplier(db, path.split("/").pop(), await bodyOf()));
@@ -36053,6 +36580,83 @@ async function addClosure(db, body) {
 async function deleteClosure(db, date) {
   await db.prepare(`DELETE FROM closures WHERE date = ?`).bind(date).run();
   return { success: true };
+}
+async function serveInvoiceFile(request, env, url) {
+  const key = url.searchParams.get("key") || "";
+  if (!key.startsWith("po-invoices/")) return error("Bad key", 400, env, request);
+  const ok = await verifyFileSig(env, key, url.searchParams);
+  if (!ok) return error("Link expired or invalid", 403, env, request);
+  const obj = await env.JOB_FILES.get(key);
+  if (!obj) return error("Invoice not found", 404, env, request);
+  const h = new Headers();
+  h.set("Content-Type", obj.httpMetadata && obj.httpMetadata.contentType || "application/pdf");
+  h.set("Content-Disposition", "inline");
+  h.set("Cache-Control", "private, max-age=60");
+  h.set("Access-Control-Allow-Origin", "*");
+  return new Response(obj.body, { headers: h });
+}
+async function poBrief(db, poNumber) {
+  const r = await db.prepare(
+    `SELECT po_number, supplier, issued_at, cost_ex_vat, engineer_name, office_user_name, site, incident_no, description, invoice_key
+       FROM po_log WHERE po_number = ? AND deleted = 0`
+  ).bind(poNumber).first();
+  if (!r) return null;
+  return {
+    po_number: r.po_number,
+    supplier: r.supplier || "",
+    issued_at: r.issued_at,
+    cost_ex_vat: r.cost_ex_vat,
+    priced: r.cost_ex_vat != null,
+    who: r.engineer_name || r.office_user_name || "",
+    site: r.site || "",
+    incident_no: r.incident_no || "",
+    description: String(r.description || "").slice(0, 300),
+    has_invoice: !!r.invoice_key
+  };
+}
+async function matchInvoiceCandidates(db, f) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  let where = `deleted = 0 AND cost_ex_vat IS NULL`;
+  const binds = [];
+  if (date) {
+    const d = /* @__PURE__ */ new Date(date + "T12:00:00Z");
+    const lo = new Date(d);
+    lo.setUTCDate(lo.getUTCDate() - 5);
+    const hi = new Date(d);
+    hi.setUTCDate(hi.getUTCDate() + 2);
+    where += ` AND substr(issued_at,1,10) BETWEEN ? AND ?`;
+    binds.push(lo.toISOString().slice(0, 10), hi.toISOString().slice(0, 10));
+  }
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
+         FROM po_log WHERE ${where} ORDER BY issued_at DESC LIMIT 200`
+    ).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const scored = rows.map((r) => {
+    const sup = normSupplierName(r.supplier || "");
+    const supMatch = supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 99;
+    const score = (supMatch ? 100 : 0) - days;
+    return {
+      po_number: r.po_number,
+      supplier: r.supplier || "",
+      issued_at: r.issued_at,
+      who: r.engineer_name || r.office_user_name || "",
+      site: r.site || "",
+      incident_no: r.incident_no || "",
+      description: String(r.description || "").slice(0, 200),
+      supplierMatch: !!supMatch,
+      daysApart: days,
+      score
+    };
+  }).filter((c) => c.supplierMatch || c.daysApart <= 3).sort((a, b) => b.score - a.score).slice(0, 8);
+  return scored;
 }
 async function getPOs(db, params) {
   let query = `SELECT * FROM po_log WHERE deleted = 0`;
@@ -39061,7 +39665,7 @@ function applyWorksWidth(worksW) {
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
-var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var MONTHS4 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
 var parse = (s) => {
@@ -39286,8 +39890,8 @@ function buildProgrammePdf(data, meta = {}) {
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1;
         if (i === 0 || first2) {
-          const full = MONTHS3[d.getUTCMonth()] + " " + d.getUTCFullYear();
-          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS3[d.getUTCMonth()];
+          const full = MONTHS4[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS4[d.getUTCMonth()];
           if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
             doc.text(x + 1, gridTop + 8, lbl, { size: 6, bold: true, color: [0.28, 0.36, 0.46] });
             lastMonR = x + 1 + textWidth(lbl, 6);
@@ -42470,7 +43074,7 @@ async function handle43(request, env, ctx, url, sess) {
     const jobId = String(b.jobId || "").trim();
     const files = Array.isArray(b.files) ? b.files : [];
     if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
-    const isoDate2 = (s) => s && /^\d{4}-\d{2}-\d{2}/.test(String(s)) ? String(s) : null;
+    const isoDate3 = (s) => s && /^\d{4}-\d{2}-\d{2}/.test(String(s)) ? String(s) : null;
     let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null, sigDate = null;
     for (const f of files) {
       try {
@@ -42484,7 +43088,7 @@ async function handle43(request, env, ctx, url, sess) {
         const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
         if (f.kind === "signature") {
           if (!sigKey) sigKey = key;
-          if (!sigDate) sigDate = isoDate2(f.date);
+          if (!sigDate) sigDate = isoDate3(f.date);
         }
         if (await env.JOB_FILES.head(key)) {
           skipped++;
@@ -42512,7 +43116,7 @@ async function handle43(request, env, ctx, url, sess) {
           } catch {
           }
           if (!d.signature || !d.signature.fileKey) {
-            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate2(b.signedAt) || (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
+            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate3(b.signedAt) || (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
             await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
           }
         }
@@ -43335,6 +43939,8 @@ var PUBLIC_ROUTES = [
   ["GET", "/project/doc"],
   // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
   ["GET", "/fra/quote"],
+  // Supplier invoice PDFs attached to a PO, streamed inline — signed URL, verified in-handler.
+  ["GET", "/po/invoice-file"],
   // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
   ["POST", "/customer/job"],
   ["POST", "/customer/reschedule"]
