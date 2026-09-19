@@ -1039,7 +1039,7 @@ function invSweepCard(it, i) {
   const net = f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : '');
   const rate = (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20;
   const head =
-    '<div style="font-weight:600;color:#003366">' + escapeHtml(f.supplier || it.from || 'Invoice') + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + escapeHtml(f.invoiceNumber || it.filename || '') + '</span></div>' +
+    '<div style="font-weight:600;color:#003366">' + escapeHtml((it.po && it.po.supplier) || f.supplier || it.from || 'Invoice') + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + escapeHtml(f.invoiceNumber || it.filename || '') + '</span></div>' +
     '<div class="muted" style="font-size:12px;margin:2px 0 8px">' + escapeHtml(it.subject || '') + (it.receivedDateTime ? ' · ' + escapeHtml(fmtDate(it.receivedDateTime)) : '') + '</div>' +
     '<div style="font-size:13px;line-height:1.5">Net <strong>' + invMoney(f.net) + '</strong> · VAT ' + invMoney(f.vat) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</div>';
   let pick = '';
@@ -1126,7 +1126,7 @@ function invBulkReview() {
     return '<label style="display:flex;gap:10px;align-items:flex-start;padding:9px;border:1px solid #e3e7ee;border-radius:10px;margin-bottom:7px;cursor:pointer">' +
       '<input type="checkbox" class="inv-bulk-tick" data-i="' + i + '" style="width:auto;margin-top:3px"' + checked + '>' +
       '<span style="flex:1;font-size:13px;line-height:1.5">' +
-        '<strong style="color:#003366">PO ' + escapeHtml(po.po_number) + '</strong> · ' + escapeHtml(f.supplier || it.from || '') + '<br>' +
+        '<strong style="color:#003366">PO ' + escapeHtml(po.po_number) + '</strong> · ' + escapeHtml(po.supplier || f.supplier || it.from || '') + '<br>' +
         '<span class="muted">' + escapeHtml(po.site || po.incident_no || '') + ' · Net ' + invMoney(net) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</span>' + warn +
       '</span>' +
       '<button class="ghost small" style="padding:4px 8px;font-size:12px" onclick="event.preventDefault();invSweepView(' + i + ')">👁</button>' +

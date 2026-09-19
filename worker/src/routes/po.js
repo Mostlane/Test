@@ -617,6 +617,7 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
       try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
       catch { continue; }
       if (res.aiUsed) aiUsed++;
+      if (res.remittance) { skipped++; continue; }   // a remittance/statement is not a purchase invoice
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
