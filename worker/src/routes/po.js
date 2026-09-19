@@ -13,6 +13,9 @@ import { permissionsFor } from "../lib/auth.js";
 import { onceMigration } from "../lib/once.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { parseInvoice, normSupplierName } from "../lib/invoiceparse.js";
+import { graphConfigured, graphMailboxCheck, listRecentWithAttachments, listPdfAttachments, downloadAttachment } from "../lib/graphmail.js";
+
+const DEFAULT_SWEEP_MAILBOX = "accounts@mostlane.com";
 
 // po_log gains two self-migrating columns so an office user can attach the
 // supplier invoice PDF to the PO (invoice_key = R2 key) and keep a little
@@ -223,29 +226,71 @@ export async function handle(request, env, ctx, url, sess) {
       const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
       if (!target) return jr({ error: "That PO was not found" }, 400);
       const file = form.get("file");
-      let key = target.invoice_key || null;
+      let bytes = null, filename = null, contentType = null;
       if (file && typeof file.arrayBuffer === "function") {
         const ab = await file.arrayBuffer();
         if (ab.byteLength > 15 * 1024 * 1024) return jr({ error: "That PDF is too big (max 15 MB)" }, 400);
-        const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-        key = `po-invoices/${sess.tenantId}/${poNumber}/${Date.now()}-${safe}`;
-        await env.JOB_FILES.put(key, ab, { httpMetadata: { contentType: file.type || "application/pdf" } });
+        bytes = ab; filename = file.name; contentType = file.type;
       }
-      const meta = JSON.stringify({
-        no: String(form.get("invoice_no") || "") || null,
-        date: String(form.get("invoice_date") || "") || null,
-        net: cost, vat: numOrNull(form.get("vat")), gross: numOrNull(form.get("gross")),
-        filename: file && file.name || null, by: userName(sess), at: (/* @__PURE__ */ new Date()).toISOString(),
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber, cost, existingKey: target.invoice_key || null,
+        vatRate: numOrNull(form.get("vat_rate")), invoiceNo: form.get("invoice_no"), invoiceDate: form.get("invoice_date"),
+        vat: numOrNull(form.get("vat")), gross: numOrNull(form.get("gross")),
+        bytes, filename, contentType,
       });
-      const now = (/* @__PURE__ */ new Date()).toISOString();
-      const fields = ["cost_ex_vat = ?", "invoice_key = ?", "invoice_meta = ?", "cost_entered_at = ?",
-        "last_edited_by_slug = ?", "last_edited_by_name = ?", "last_edited_at = ?"];
-      const binds = [cost, key, meta, now, userSlug(sess), userName(sess), now];
-      const vatRate = numOrNull(form.get("vat_rate"));
-      if (vatRate != null) { fields.push("vat_rate = ?"); binds.push(vatRate); }
-      binds.push(poNumber);
-      await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
-      const invoiceUrl = key ? await signedFileUrl(env, url.origin, "/po/invoice-file", key) : null;
+      return jr({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    // ── Mailbox sweep: read accounts@ for invoice PDFs and PROPOSE matches ──
+    if (path === "/api/invoice/sweep-config" && method === "GET") {
+      const cfg = await getConfigMap(db);
+      return jr({ ok: true, configured: graphConfigured(env),
+        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX, days: Number(cfg.invoice_sweep_days) || 60 });
+    }
+    if (path === "/api/invoice/sweep" && method === "POST") {
+      if (!graphConfigured(env)) return jr({ error: "The mailbox connection isn’t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      // Remember the mailbox/days for next time.
+      await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr({ error: "Couldn’t open " + mailbox + ": " + chk.error }, 400);
+      const out = await runInvoiceSweep(env, db, { mailbox, days });
+      return jr({ ok: true, mailbox, days, ...out });
+    }
+    // Stream one mailbox attachment inline so the office can eyeball it before
+    // attaching (fetched fresh from Graph; nothing stored).
+    if (path === "/api/invoice/sweep-view" && method === "GET") {
+      if (!graphConfigured(env)) return jr({ error: "Mailbox connection not set up" }, 400);
+      const mailbox = String(q.get("mailbox") || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      const mid = q.get("message_id"), aid = q.get("attachment_id");
+      if (!mid || !aid) return jr({ error: "Missing the mailbox message reference" }, 400);
+      let bytes;
+      try { bytes = await downloadAttachment(env, mailbox, mid, aid); }
+      catch (e) { return jr({ error: String(e && e.message || e) }, 400); }
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30" } });
+    }
+    if (path === "/api/invoice/sweep-apply" && method === "POST") {
+      if (!graphConfigured(env)) return jr({ error: "Mailbox connection not set up" }, 400);
+      const b = await bodyOf();
+      const poNumber = Number(b.po_number);
+      const cost = Number(b.cost_ex_vat);
+      if (!poNumber) return jr({ error: "Pick a PO" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr({ error: "Missing the mailbox message reference" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr({ error: "That PO was not found" }, 400);
+      let bytes;
+      try { bytes = await downloadAttachment(env, mailbox, b.message_id, b.attachment_id); }
+      catch (e) { return jr({ error: "Couldn’t fetch that invoice from the mailbox: " + String(e && e.message || e) }, 400); }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber, cost, existingKey: target.invoice_key || null,
+        vatRate: numOrNull(b.vat_rate), invoiceNo: b.invoice_no, invoiceDate: b.invoice_date,
+        vat: numOrNull(b.vat), gross: numOrNull(b.gross),
+        bytes, filename: b.filename || "invoice.pdf", contentType: "application/pdf",
+        graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id },
+      });
       return jr({ ok: true, po_number: poNumber, invoiceUrl });
     }
     // Signed URL for a PO's already-attached invoice (built on demand — signing
@@ -519,6 +564,75 @@ async function serveInvoiceFile(request, env, url) {
   h.set("Cache-Control", "private, max-age=60");
   h.set("Access-Control-Allow-Origin", "*");   // CORS so the in-app PDF viewer can fetch it
   return new Response(obj.body, { headers: h });
+}
+
+// Shared writer: put the invoice PDF in R2 (when supplied) and write the cost +
+// attachment reference onto the PO. Used by the manual attach + the mailbox sweep.
+async function writeInvoiceToPo(env, db, sess, origin, o) {
+  let key = o.existingKey || null;
+  if (o.bytes) {
+    const safe = String(o.filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/${sess.tenantId}/${o.poNumber}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, o.bytes, { httpMetadata: { contentType: o.contentType || "application/pdf" } });
+  }
+  const meta = JSON.stringify({
+    no: (o.invoiceNo != null ? String(o.invoiceNo) : "") || null,
+    date: (o.invoiceDate != null ? String(o.invoiceDate) : "") || null,
+    net: o.cost, vat: o.vat != null ? o.vat : null, gross: o.gross != null ? o.gross : null,
+    filename: o.filename || null, by: userName(sess), at: (/* @__PURE__ */ new Date()).toISOString(),
+    graph: o.graph || null,
+  });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = ["cost_ex_vat = ?", "invoice_key = ?", "invoice_meta = ?", "cost_entered_at = ?",
+    "last_edited_by_slug = ?", "last_edited_by_name = ?", "last_edited_at = ?"];
+  const binds = [o.cost, key, meta, now, userSlug(sess), userName(sess), now];
+  if (o.vatRate != null) { fields.push("vat_rate = ?"); binds.push(o.vatRate); }
+  binds.push(o.poNumber);
+  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+  return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
+}
+
+// Read the mailbox, parse each PDF, and build confirm-first proposals (matched PO
+// or candidates). Bounded: at most MAX downloads, and an AI (vision) budget so a
+// big run can't stall — past the budget the reader uses the free text tier only.
+async function runInvoiceSweep(env, db, { mailbox, days }) {
+  const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
+  const known = (await getSuppliers(db)).map(s => s.name);
+  let msgs = [];
+  try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 }); }
+  catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
+  const proposals = [];
+  let downloads = 0, aiUsed = 0, skipped = 0;
+  for (const m of msgs) {
+    if (downloads >= MAX_DOWNLOADS) break;
+    let atts = [];
+    try { atts = await listPdfAttachments(env, mailbox, m.id); } catch { continue; }
+    for (const a of atts) {
+      if (downloads >= MAX_DOWNLOADS) break;
+      let bytes;
+      try { bytes = await downloadAttachment(env, mailbox, m.id, a.id); downloads++; } catch { continue; }
+      let res;
+      try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
+      catch { continue; }
+      if (res.aiUsed) aiUsed++;
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      // Only surface things the office can act on; drop non-invoice PDFs + POs
+      // already priced-and-attached (done on a previous sweep).
+      const actionable = (po && !po.priced) || (candidates && candidates.length) || (f.net != null && !!f.supplier);
+      if (po && po.priced && po.has_invoice) { skipped++; continue; }
+      if (!actionable) continue;
+      proposals.push({
+        mailbox, messageId: m.id, attachmentId: a.id, filename: a.name || "invoice.pdf",
+        subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
+        receivedDateTime: m.receivedDateTime || null,
+        tier: res.tier, fields: f, po, candidates,
+      });
+    }
+  }
+  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
 }
 
 // A compact PO record for the invoice-match proposal.
