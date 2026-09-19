@@ -632,7 +632,18 @@ async function submitNewPO(btn) {
   try {
     const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
     if (res.error) { alert(res.error); return; }
-    alert('PO ' + res.po_number + ' issued');
+    if (invPending) {
+      const pCost = Number(invPending.cost) || 0;
+      let attach = null;
+      try { attach = await invAttachToNewPo(res.po_number); } catch (e) { attach = { error: e.message }; }
+      if (invPending.kind === 'sweep' && invPending.it) invPending.it._done = true;
+      invPending = null;
+      alert(attach && attach.error
+        ? 'PO ' + res.po_number + ' raised, but attaching the invoice failed: ' + attach.error
+        : 'PO ' + res.po_number + ' raised and invoice attached · £' + pCost.toFixed(2));
+    } else {
+      alert('PO ' + res.po_number + ' issued');
+    }
     closeModal(); loadPOs(); loadDashboard();
   } catch (e) {
     alert('Error: ' + e.message);
@@ -935,7 +946,8 @@ function invRenderProposal(data) {
 function invManualBox(f) {
   return '<div class="row" style="gap:8px;align-items:flex-end;margin-top:6px">' +
     '<div style="flex:1"><label style="font-size:12px">Attach to PO number</label><input id="inv-manual-po" type="number" placeholder="e.g. 10505" oninput="invManualPo()"></div>' +
-    '</div>';
+    '</div>' +
+    '<div style="margin-top:8px"><button class="ghost small" onclick="invRaisePOManual()">➕ Raise a new PO for this invoice</button></div>';
 }
 function invPickCand(n) { invRenderConfirmInto('inv-cand-confirm', n, invFields); const m = document.getElementById('inv-manual-po'); if (m) m.value = ''; }
 function invManualPo() {
@@ -993,6 +1005,9 @@ async function viewInvoice(poNumber) {
 }
 // ── Sweep the accounts@ inbox: read every invoice PDF and propose matches ─────
 let invSweepItems = [];
+// When a no-PO invoice needs a NEW PO raised for it, this holds the invoice so
+// submitNewPO can attach it (+ its cost) onto the PO it just created.
+let invPending = null;
 async function invStartSweep() {
   document.getElementById('modal-title').textContent = '🔎 Sweep the mailbox for invoices';
   let cfg = {};
@@ -1060,6 +1075,7 @@ function invSweepCard(it, i) {
       '<div class="field" style="margin-bottom:6px"><label>VAT %</label><input id="sw-rate-' + i + '" type="number" step="0.01" value="' + escapeAttr(rate) + '"></div>' +
     '</div>' +
     '<div class="row"><button class="small" onclick="invSweepApply(' + i + ', this)">✓ Attach &amp; set cost</button>' +
+    (it.po ? '' : '<button class="ghost small" onclick="invRaisePO(' + i + ')">➕ Raise a PO</button>') +
     '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
   return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
 }
@@ -1163,6 +1179,48 @@ async function invBulkApply(btn) {
   if (prog) prog.textContent = 'Done — ' + ok + ' attached' + (fail ? ', ' + fail + ' failed' : '') + '.';
   loadPOs(); loadDashboard();
   setTimeout(() => { invBulkClose(); alert(ok + ' invoice' + (ok !== 1 ? 's' : '') + ' attached' + (fail ? ' · ' + fail + ' failed — check those manually' : '')); }, 600);
+}
+// ── Raise a NEW PO for a no-PO invoice (subcontractor / one-off), then attach ──
+function invRaisePO(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  const f = it.fields || {};
+  invPending = { kind: 'sweep', it, fields: f, cost: invNetOf(f), rate: invRateOf(f), filename: it.filename, supplier: f.supplier || '' };
+  openInvRaise();
+}
+function invRaisePOManual() {
+  if (!invFile) { alert('Drop the invoice again'); return; }
+  const f = invFields || {};
+  invPending = { kind: 'manual', file: invFile, fields: f, cost: invNetOf(f), rate: invRateOf(f), filename: invFile.name, supplier: f.supplier || '' };
+  openInvRaise();
+}
+async function openInvRaise() {
+  const p = invPending; if (!p) return;
+  await openNewPO();                          // reuses the New PO form (type toggle, site, trade…)
+  const body = document.getElementById('modal-body'); if (!body) return;
+  document.getElementById('modal-title').textContent = 'Raise a PO for this invoice';
+  const note = document.createElement('div');
+  note.style.cssText = 'margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#eef4ff;border:1px solid #cdddf5;color:#003366;font-size:13px;font-weight:600';
+  note.textContent = '➕ Pick the type + site/project (and trade if it’s a subcontractor). The invoice “' + (p.filename || 'invoice') + '” (' + invMoney(p.cost) + ' net) attaches automatically once you press Issue.';
+  body.insertBefore(note, body.firstChild);
+  const sup = document.getElementById('m-supplier'); if (sup && p.supplier) sup.value = p.supplier;
+  const desc = document.getElementById('m-description');
+  if (desc && !desc.value) desc.value = (p.fields && p.fields.invoiceNumber ? 'Invoice ' + p.fields.invoiceNumber : '') + (p.supplier ? (p.fields && p.fields.invoiceNumber ? ' — ' : '') + p.supplier : '');
+}
+// Attach the pending invoice onto a freshly-created PO number.
+async function invAttachToNewPo(poNumber) {
+  const p = invPending; if (!p) return { ok: true };
+  if (p.kind === 'sweep') return invPostApply(p.it, poNumber, p.cost, p.rate);
+  const fd = new FormData();
+  fd.append('file', p.file, p.file.name);
+  fd.append('po_number', String(poNumber));
+  fd.append('cost_ex_vat', String(p.cost));
+  if (Number.isFinite(p.rate)) fd.append('vat_rate', String(p.rate));
+  const f = p.fields || {};
+  if (f.invoiceNumber) fd.append('invoice_no', f.invoiceNumber);
+  if (f.invoiceDate) fd.append('invoice_date', f.invoiceDate);
+  if (f.vat != null) fd.append('vat', String(f.vat));
+  if (f.gross != null) fd.append('gross', String(f.gross));
+  return authFetch('/po/api/invoice/apply', { method: 'POST', body: fd }).then(r => r.json());
 }
 async function invSweepView(i) {
   const it = invSweepItems[i]; if (!it) return;
