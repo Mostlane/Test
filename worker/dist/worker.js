@@ -36499,7 +36499,7 @@ async function handle32(request, env, ctx, url, sess) {
       } catch (e) {
         return jr8({ error: String(e && e.message || e) }, 400);
       }
-      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30" } });
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30", ...corsHeaders(env, request) } });
     }
     if (path === "/api/invoice/sweep-apply" && method === "POST") {
       if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
