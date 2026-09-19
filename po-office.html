@@ -953,6 +953,7 @@ function invManualBox(f) {
     '<div class="row" style="margin-top:8px;flex-wrap:wrap">' +
       '<button class="ghost small" onclick="invFindJobManual()">🔎 Find a job &amp; raise PO</button>' +
       '<button class="ghost small" onclick="invRaisePOManual()">➕ Raise a new PO</button>' +
+      '<button class="ghost small" onclick="invAddPartyManual()">🏷️ Add supplier/sub</button>' +
       '<button class="ghost small" style="color:#c0392b" onclick="openFlagLogManual()">⚠ Flag &amp; log (no PO)</button>' +
     '</div>';
 }
@@ -1122,6 +1123,7 @@ function invSweepCard(it, i) {
     (it.po ? '' :
       '<button class="ghost small" onclick="invFindJob(' + i + ')">🔎 Find a job &amp; raise PO</button>' +
       '<button class="ghost small" onclick="invRaisePO(' + i + ')">➕ Raise a new PO</button>' +
+      (cat === 'other' ? '<button class="ghost small" onclick="invAddParty(' + i + ')">🏷️ Add supplier/sub</button>' : '') +
       (cat === 'flag' || cat === 'other' ? '<button class="ghost small" style="color:#c0392b" onclick="openFlagLog(' + i + ')">⚠ Flag &amp; log</button>' : '')) +
     '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
   return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
@@ -1320,6 +1322,66 @@ async function ensureEngineers() {
     try { allEngineers = await authFetch('/po/api/engineers').then(r => r.json()); } catch (e) {}
   }
   return allEngineers || [];
+}
+// ── Quick-add an unrecognised name as a Supplier or Subcontractor ─────────────
+// so the same invoice sorts itself next time. Name autofills from the read
+// supplier but is editable. Re-classifies the card in place after saving.
+let addPartySrc = null;
+function invAddParty(i) { openAddParty({ kind: 'sweep', i }); }
+function invAddPartyManual() { if (!invFile) { alert('Drop the invoice again'); return; } openAddParty({ kind: 'manual' }); }
+function openAddParty(src) {
+  addPartySrc = src;
+  const p = invPendingFromSrc(src);
+  let bk = document.getElementById('addPartyBackdrop');
+  if (!bk) {
+    bk = document.createElement('div'); bk.id = 'addPartyBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '211';
+    bk.innerHTML = '<div class="modal" style="max-width:440px"><div class="row-between"><h2 style="margin:0;color:#003366">🏷️ Add to your lists</h2><button class="ghost small" onclick="closeAddParty()">✕</button></div><div id="addPartyBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) closeAddParty(); });
+  }
+  document.getElementById('addPartyBody').innerHTML =
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">Not recognised. Add the name so this invoice (and the next one from them) sorts itself.</p>' +
+    '<div class="field"><label>Name</label><input id="ap-name" type="text" value="' + escapeAttr(p.supplier || '') + '"></div>' +
+    '<div class="field"><label>Add as</label>' +
+      '<label style="display:block;font-weight:400;margin:2px 0"><input type="radio" name="ap-type" value="supplier" checked style="width:auto;margin-right:6px">📦 Supplier (materials)</label>' +
+      '<label style="display:block;font-weight:400;margin:2px 0"><input type="radio" name="ap-type" value="sub" style="width:auto;margin-right:6px">👷 Subcontractor</label>' +
+    '</div>' +
+    '<div class="row-between" style="margin-top:6px"><button class="ghost small" onclick="closeAddParty()">Cancel</button><button onclick="submitAddParty(this)">Save</button></div>';
+  bk.classList.add('show');
+  setTimeout(() => { const n = document.getElementById('ap-name'); if (n) { n.focus(); n.select(); } }, 60);
+}
+function closeAddParty() { const bk = document.getElementById('addPartyBackdrop'); if (bk) bk.classList.remove('show'); }
+async function submitAddParty(btn) {
+  const name = ((document.getElementById('ap-name') || {}).value || '').trim();
+  if (!name) { alert('Enter a name'); return; }
+  const typeEl = document.querySelector('input[name=ap-type]:checked');
+  const asSub = typeEl && typeEl.value === 'sub';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  let res;
+  try {
+    res = await authFetch(asSub ? '/po/api/subcontractors' : '/po/api/suppliers',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(r => r.json());
+  } catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = 'Save'; } return; }
+  if (res && res.error) { alert(res.error); if (btn) { btn.disabled = false; btn.textContent = 'Save'; } return; }
+  // Refresh the cached lists so the New PO pickers + classification see the new name.
+  try { allSuppliers = await authFetch('/po/api/suppliers').then(r => r.json()); } catch (e) {}
+  try { allSubcontractors = await authFetch('/po/api/subcontractors').then(r => r.json()); } catch (e) {}
+  // Re-classify the invoice in place so it jumps to the right bucket.
+  if (addPartySrc && addPartySrc.kind === 'sweep') {
+    const it = invSweepItems[addPartySrc.i]; const f = (it && it.fields) || {};
+    if (it) {
+      if (asSub) { it.category = 'subcontractor'; it.subName = name; }
+      else { it.supName = name; it.category = it.po ? 'confident' : (f.poNumber ? 'other' : 'flag'); }
+      invRenderResults();
+    }
+  } else if (window.invLastParse) {
+    const d = window.invLastParse, f = d.fields || {};
+    if (asSub) { d.category = 'subcontractor'; d.subName = name; }
+    else { d.supName = name; d.category = d.po ? 'confident' : (f.poNumber ? 'other' : 'flag'); }
+    invRenderProposal(d);
+  }
+  closeAddParty();
+  alert(name + ' added as ' + (asSub ? 'a subcontractor' : 'a supplier') + '.');
 }
 // ── "Find a job" — mirrors the SLA board/job card, framed as the PO flow ───────
 let findJobResults = [], findJobSrc = null, findJobTimer = null;
