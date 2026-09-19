@@ -8,7 +8,7 @@
 // server-side from the session — there are no more personal token URLs.
 // The out-of-hours rule is preserved: field engineers can only raise a PO when
 // the office is closed; office staff (PurchaseOrders/FullAccess) any time.
-import { json, error } from "../lib/http.js";
+import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { onceMigration } from "../lib/once.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
@@ -268,7 +268,9 @@ export async function handle(request, env, ctx, url, sess) {
       let bytes;
       try { bytes = await downloadAttachment(env, mailbox, mid, aid); }
       catch (e) { return jr({ error: String(e && e.message || e) }, 400); }
-      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30" } });
+      // CORS headers so the cross-origin fetch-to-blob in the page can read it
+      // (this raw PDF response bypasses the json() helper that adds them).
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30", ...corsHeaders(env, request) } });
     }
     if (path === "/api/invoice/sweep-apply" && method === "POST") {
       if (!graphConfigured(env)) return jr({ error: "Mailbox connection not set up" }, 400);
