@@ -99,20 +99,36 @@ export function normSupplierName(s) {
     .replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ")
     .replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
+// Generic trade words that must NOT stand in for a supplier's identity — a name
+// made only of these (or of a short acronym like N&C / CCF / TLC) is too weak to
+// guess from, so we return null rather than mislabel. The PO's own supplier is
+// the truth on a matched card; a wrong guess here was labelling TP as "N&C" etc.
+const SUPPLIER_STOP = new Set(
+  ("and group building products product electrical electric plumbing heating "
+   + "supplies supply trade uk ltd limited services service hire distribution "
+   + "wholesale centre center direct company holdings maintenance construction "
+   + "contractors contractor mechanical fabrication for the").split(/\s+/));
 export function matchSupplier(text, knownNames) {
   const t = String(text || "").toLowerCase();
   let best = null;
   for (const name of (knownNames || [])) {
     const norm = normSupplierName(name);
-    if (!norm || norm.length < 3) continue;
-    // Match on the supplier's first significant word(s) appearing on the invoice.
-    const words = norm.split(" ").filter(w => w.length >= 3);
-    if (!words.length) continue;
-    const hits = words.filter(w => t.includes(w)).length;
-    const score = hits / words.length;
-    if (score >= 0.6 && (!best || score > best.score)) best = { name, score };
+    if (!norm) continue;
+    // A supplier's DISTINCTIVE words: ≥4 chars and not a generic trade word.
+    const words = norm.split(" ").filter(w => w.length >= 4 && !SUPPLIER_STOP.has(w));
+    if (!words.length) continue;                 // acronym-only / all-generic → don't guess
+    if (!words.every(w => t.includes(w))) continue;  // ALL distinctive words must appear
+    const score = words.join("").length + words.length;   // prefer the fullest, most specific name
+    if (!best || score > best.score) best = { name, score };
   }
   return best ? best.name : null;
+}
+
+// A remittance advice (a payment WE received) / a monthly statement is not a
+// purchase invoice — the sweep must not offer it as one.
+export function looksLikeRemittance(text) {
+  const t = String(text || "").toLowerCase();
+  return /remittance\s*advice|\bremittance\b|statement of account|monthly statement/.test(t);
 }
 
 function invoiceNumber(text) {
@@ -216,8 +232,9 @@ export async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
   const allowVision = !opts || opts.allowVision !== false;
   let text = "";
   try { text = await pdfExtractText(bytes); } catch {}
+  const remittance = looksLikeRemittance(text);
   const t1 = extractFields(text, knownSuppliers);
-  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false };
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance };
   // Tier 1 fell short — try Claude vision (glyph-encoded / scanned / odd layout).
   const t2 = allowVision ? await aiExtract(env, bytes, filename) : null;
   if (t2) {
@@ -233,8 +250,8 @@ export async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
       invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
       supplier: (matchSupplier(text, knownSuppliers)) || t2.supplier || t1.supplier || null,
     };
-    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true };
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance };
   }
   // No AI available and tier 1 incomplete — return whatever tier 1 got (office fills the rest).
-  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false };
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance };
 }

@@ -36045,19 +36045,26 @@ var round2 = (n) => Math.round(n * 100) / 100;
 function normSupplierName(s) {
   return String(s || "").toLowerCase().replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
+var SUPPLIER_STOP = new Set(
+  "and group building products product electrical electric plumbing heating supplies supply trade uk ltd limited services service hire distribution wholesale centre center direct company holdings maintenance construction contractors contractor mechanical fabrication for the".split(/\s+/)
+);
 function matchSupplier(text, knownNames) {
   const t = String(text || "").toLowerCase();
   let best = null;
   for (const name of knownNames || []) {
     const norm = normSupplierName(name);
-    if (!norm || norm.length < 3) continue;
-    const words = norm.split(" ").filter((w) => w.length >= 3);
+    if (!norm) continue;
+    const words = norm.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
     if (!words.length) continue;
-    const hits = words.filter((w) => t.includes(w)).length;
-    const score = hits / words.length;
-    if (score >= 0.6 && (!best || score > best.score)) best = { name, score };
+    if (!words.every((w) => t.includes(w))) continue;
+    const score = words.join("").length + words.length;
+    if (!best || score > best.score) best = { name, score };
   }
   return best ? best.name : null;
+}
+function looksLikeRemittance(text) {
+  const t = String(text || "").toLowerCase();
+  return /remittance\s*advice|\bremittance\b|statement of account|monthly statement/.test(t);
 }
 function invoiceNumber(text) {
   const m = String(text || "").match(/(?:invoice|inv|document)\s*(?:no|number|#|:)?\s*[:#]?\s*([A-Z]{0,4}[\/\-]?\d{4,10})/i);
@@ -36161,8 +36168,9 @@ async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
     text = await pdfExtractText(bytes);
   } catch {
   }
+  const remittance = looksLikeRemittance(text);
   const t1 = extractFields(text, knownSuppliers);
-  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false };
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance };
   const t2 = allowVision ? await aiExtract2(env, bytes, filename) : null;
   if (t2) {
     const merged = {
@@ -36175,9 +36183,9 @@ async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
       invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
       supplier: matchSupplier(text, knownSuppliers) || t2.supplier || t1.supplier || null
     };
-    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true };
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance };
   }
-  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false };
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance };
 }
 
 // src/lib/graphmail.js
@@ -36791,6 +36799,10 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
         continue;
       }
       if (res.aiUsed) aiUsed++;
+      if (res.remittance) {
+        skipped++;
+        continue;
+      }
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
