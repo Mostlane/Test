@@ -36840,32 +36840,20 @@ async function poBrief(db, poNumber) {
 async function matchInvoiceCandidates(db, f) {
   const date = f && f.invoiceDate;
   const supN = normSupplierName(f && f.supplier || "");
-  let where = `deleted = 0 AND cost_ex_vat IS NULL`;
-  const binds = [];
-  if (date) {
-    const d = /* @__PURE__ */ new Date(date + "T12:00:00Z");
-    const lo = new Date(d);
-    lo.setUTCDate(lo.getUTCDate() - 5);
-    const hi = new Date(d);
-    hi.setUTCDate(hi.getUTCDate() + 2);
-    where += ` AND substr(issued_at,1,10) BETWEEN ? AND ?`;
-    binds.push(lo.toISOString().slice(0, 10), hi.toISOString().slice(0, 10));
-  }
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
   let rows = [];
   try {
     rows = (await db.prepare(
       `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
-         FROM po_log WHERE ${where} ORDER BY issued_at DESC LIMIT 200`
-    ).bind(...binds).all()).results || [];
+         FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
+    ).all()).results || [];
   } catch {
     rows = [];
   }
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
   const scored = rows.map((r) => {
     const sup = normSupplierName(r.supplier || "");
-    const supMatch = supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup));
-    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 99;
-    const score = (supMatch ? 100 : 0) - days;
+    const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 9999;
     return {
       po_number: r.po_number,
       supplier: r.supplier || "",
@@ -36874,12 +36862,14 @@ async function matchInvoiceCandidates(db, f) {
       site: r.site || "",
       incident_no: r.incident_no || "",
       description: String(r.description || "").slice(0, 200),
-      supplierMatch: !!supMatch,
-      daysApart: days,
-      score
+      supplierMatch: supMatch,
+      daysApart: days
     };
-  }).filter((c) => c.supplierMatch || c.daysApart <= 3).sort((a, b) => b.score - a.score).slice(0, 8);
-  return scored;
+  });
+  if (supN) {
+    return scored.filter((c) => c.supplierMatch).sort((a, b) => a.daysApart - b.daysApart).slice(0, 12);
+  }
+  return scored.filter((c) => c.daysApart <= 5).sort((a, b) => a.daysApart - b.daysApart).slice(0, 8);
 }
 async function getPOs(db, params) {
   let query = `SELECT * FROM po_log WHERE deleted = 0`;

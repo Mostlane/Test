@@ -1024,7 +1024,15 @@ async function invRunSweep(btn) {
   invSweepItems = data.proposals || [];
   const summary = '<div class="muted" style="font-size:13px;margin-bottom:10px">Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox) + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
   if (!invSweepItems.length) { res.innerHTML = summary + '<div class="empty">Nothing new to match — every invoice found is either already priced or has no matching PO.</div>'; return; }
-  res.innerHTML = summary + invSweepItems.map((it, i) => invSweepCard(it, i)).join('');
+  const nConf = invSweepItems.filter(invIsConfident).length;
+  const bulkBtn = nConf ? '<div style="margin-bottom:12px"><button onclick="invBulkReview()">✅ Attach all confident matches (' + nConf + ')</button></div>' : '';
+  res.innerHTML = summary + bulkBtn + invSweepItems.map((it, i) => invSweepCard(it, i)).join('');
+}
+// "Confident" = the invoice named a PO number that matched a real PO, and the
+// reader got a net + total. (Fuzzy/candidate-only ones are never bulk-applied.)
+function invIsConfident(it) {
+  const f = it.fields || {};
+  return !!(it && !it._done && it.po && it.po.po_number && f.net != null && f.gross != null);
 }
 function invSweepCard(it, i) {
   const f = it.fields || {};
@@ -1061,13 +1069,8 @@ function invSweepPo(i) {
   const sel = document.getElementById('sw-po-' + i);
   return sel ? Number(sel.value) : NaN;
 }
-async function invSweepApply(i, btn) {
-  const it = invSweepItems[i]; if (!it) return;
-  const poNumber = invSweepPo(i);
-  if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
-  const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
-  if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
-  const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
+// Shared apply: POST one sweep item to a PO. Returns the parsed response.
+async function invPostApply(it, poNumber, cost, rate) {
   const f = it.fields || {};
   const body = { mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId,
     po_number: poNumber, cost_ex_vat: cost, filename: it.filename };
@@ -1076,14 +1079,90 @@ async function invSweepApply(i, btn) {
   if (f.invoiceDate) body.invoice_date = f.invoiceDate;
   if (f.vat != null) body.vat = f.vat;
   if (f.gross != null) body.gross = f.gross;
+  return authFetch('/po/api/invoice/sweep-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+}
+function invNetOf(f) { return f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : null); }
+function invRateOf(f) { return (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20; }
+async function invSweepApply(i, btn) {
+  const it = invSweepItems[i]; if (!it) return;
+  const poNumber = invSweepPo(i);
+  if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
+  const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
+  if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
   if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
   let res;
-  try { res = await authFetch('/po/api/invoice/sweep-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()); }
+  try { res = await invPostApply(it, poNumber, cost, rate); }
   catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
   if (!res || res.error) { alert((res && res.error) || 'Could not attach'); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
+  it._done = true;
   const card = document.getElementById('sw-card-' + i);
   if (card) card.innerHTML = '<div style="color:#1e6c33;font-weight:600;padding:6px 0">✓ Attached to PO ' + poNumber + ' · £' + cost.toFixed(2) + '</div>';
   loadPOs(); loadDashboard();
+}
+// ── "Attach all confident matches" → a review modal you flick through ─────────
+function invBulkReview() {
+  const conf = invSweepItems.map((it, i) => ({ it, i })).filter(x => invIsConfident(x.it));
+  if (!conf.length) { alert('No confident matches to attach.'); return; }
+  let bk = document.getElementById('invBulkBackdrop');
+  if (!bk) {
+    bk = document.createElement('div');
+    bk.id = 'invBulkBackdrop';
+    bk.className = 'modal-backdrop';
+    bk.style.zIndex = '200';
+    bk.innerHTML = '<div class="modal" style="max-width:520px"><div class="row-between"><h2 id="invBulkTitle" style="margin:0"></h2><button class="ghost small" onclick="invBulkClose()">✕</button></div><div id="invBulkBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) invBulkClose(); });
+  }
+  document.getElementById('invBulkTitle').textContent = '✅ Confirm ' + conf.length + ' invoice' + (conf.length > 1 ? 's' : '');
+  const rows = conf.map(x => {
+    const it = x.it, i = x.i, f = it.fields || {}, po = it.po;
+    const net = invNetOf(f);
+    const overwriteDiff = po.priced && Math.abs(Number(po.cost_ex_vat) - Number(net)) > 0.02;
+    const checked = overwriteDiff ? '' : ' checked';   // a differing existing cost starts UNticked
+    const warn = po.priced
+      ? '<div style="font-size:11px;color:' + (overwriteDiff ? '#c0392b' : '#b58a00') + ';margin-top:2px">' + (overwriteDiff ? '⚠ PO already £' + invMoney(po.cost_ex_vat) + ' — differs, unticked' : '↻ re-attach (already £' + invMoney(po.cost_ex_vat) + ')') + '</div>'
+      : '';
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:9px;border:1px solid #e3e7ee;border-radius:10px;margin-bottom:7px;cursor:pointer">' +
+      '<input type="checkbox" class="inv-bulk-tick" data-i="' + i + '" style="width:auto;margin-top:3px"' + checked + '>' +
+      '<span style="flex:1;font-size:13px;line-height:1.5">' +
+        '<strong style="color:#003366">PO ' + escapeHtml(po.po_number) + '</strong> · ' + escapeHtml(f.supplier || it.from || '') + '<br>' +
+        '<span class="muted">' + escapeHtml(po.site || po.incident_no || '') + ' · Net ' + invMoney(net) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</span>' + warn +
+      '</span>' +
+      '<button class="ghost small" style="padding:4px 8px;font-size:12px" onclick="event.preventDefault();invSweepView(' + i + ')">👁</button>' +
+    '</label>';
+  }).join('');
+  document.getElementById('invBulkBody').innerHTML =
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">Flick through and untick any you want to skip, then attach. Each files the invoice PDF onto its PO and sets the cost.</p>' +
+    rows +
+    '<div id="invBulkProgress" style="margin:8px 0;font-size:13px;color:#003366"></div>' +
+    '<div class="row-between" style="margin-top:6px"><button class="ghost small" onclick="invBulkClose()">Cancel</button><button id="invBulkGo" onclick="invBulkApply(this)">✓ Attach ticked</button></div>';
+  bk.classList.add('show');
+}
+function invBulkClose() { const bk = document.getElementById('invBulkBackdrop'); if (bk) bk.classList.remove('show'); }
+async function invBulkApply(btn) {
+  const ticks = Array.from(document.querySelectorAll('.inv-bulk-tick:checked')).map(c => Number(c.getAttribute('data-i')));
+  if (!ticks.length) { alert('Nothing ticked'); return; }
+  if (btn) btn.disabled = true;
+  const prog = document.getElementById('invBulkProgress');
+  let ok = 0, fail = 0;
+  for (let n = 0; n < ticks.length; n++) {
+    const i = ticks[n];
+    const it = invSweepItems[i]; if (!it || it._done) continue;
+    const f = it.fields || {}, po = it.po;
+    if (prog) prog.textContent = 'Attaching ' + (n + 1) + ' of ' + ticks.length + '… (PO ' + po.po_number + ')';
+    try {
+      const res = await invPostApply(it, Number(po.po_number), invNetOf(f), invRateOf(f));
+      if (res && !res.error) {
+        ok++; it._done = true;
+        const card = document.getElementById('sw-card-' + i);
+        if (card) card.innerHTML = '<div style="color:#1e6c33;font-weight:600;padding:6px 0">✓ Attached to PO ' + po.po_number + '</div>';
+      } else { fail++; }
+    } catch (e) { fail++; }
+  }
+  if (prog) prog.textContent = 'Done — ' + ok + ' attached' + (fail ? ', ' + fail + ' failed' : '') + '.';
+  loadPOs(); loadDashboard();
+  setTimeout(() => { invBulkClose(); alert(ok + ' invoice' + (ok !== 1 ? 's' : '') + ' attached' + (fail ? ' · ' + fail + ' failed — check those manually' : '')); }, 600);
 }
 async function invSweepView(i) {
   const it = invSweepItems[i]; if (!it) return;
