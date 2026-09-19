@@ -10,6 +10,22 @@
 // the office is closed; office staff (PurchaseOrders/FullAccess) any time.
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
+import { onceMigration } from "../lib/once.js";
+import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { parseInvoice, normSupplierName } from "../lib/invoiceparse.js";
+
+// po_log gains two self-migrating columns so an office user can attach the
+// supplier invoice PDF to the PO (invoice_key = R2 key) and keep a little
+// parsed metadata alongside it (invoice_meta JSON: no/date/net/vat/gross/by/at).
+async function ensurePoInvoiceCols__raw(db) {
+  for (const ddl of [
+    `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
+    `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`,
+  ]) { try { await db.prepare(ddl).run(); } catch { /* column already exists */ } }
+}
+const ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+
+const numOrNull = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 // staffType lives in the user's profile JSON; default "field" (matches auth.js).
 function staffTypeOf(u) {
@@ -95,6 +111,17 @@ async function getRaiseOptions(env, username) {
 export async function handle(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
+  const path = url.pathname.replace(/^\/po/, "") || "/";
+  const method = request.method.toUpperCase();
+  await ensurePoInvoiceCols(db);
+
+  // ── Public: stream an attached invoice PDF via a signed link (no session — an
+  // <a>/viewer link can't send a Bearer). Access is gated by the HMAC signature.
+  if (path === "/invoice-file" && method === "GET") return serveInvoiceFile(request, env, url);
+
+  // Everything else needs a logged-in session (index.js already enforces this for
+  // non-public /po/* paths; the guard is belt-and-braces).
+  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
   // Permissions come from the user_permissions table; office = can manage POs,
   // field engineers = may raise (out of hours) but never see the office surface.
   // A Disabled (blocked) user is cut off from PO server-side, even if a token
@@ -107,8 +134,6 @@ export async function handle(request, env, ctx, url, sess) {
   // Only FullAccess, or PurchaseOrders on a NON-field (office) account, is office.
   const office = perms.FullAccess === "Yes" || (perms.PurchaseOrders === "Yes" && !field);
   if (!office && !field) return error("Not allowed", 403, env, request);
-  const path = url.pathname.replace(/^\/po/, "") || "/";
-  const method = request.method.toUpperCase();
   const q = url.searchParams;
   const jr = (d, status) => json(d, status ? { status } : {}, env, request);
   const bodyOf = async () => { try { return await request.json(); } catch { return {}; } };
@@ -168,6 +193,69 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/summary" && method === "GET") return jr(await getSummary(db, q));
     if (path === "/api/jobcost" && method === "GET") return jr(await getJobCost(db, q));
     if (path === "/api/accounts" && method === "GET") return jr(await getAccounts(db));
+
+    // ── Supplier-invoice reading + attach-to-PO (confirm-first; office only) ──
+    // Read an uploaded invoice PDF and PROPOSE a PO match + cost. Writes nothing.
+    if (path === "/api/invoice/parse" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      const file = form && form.get("file");
+      if (!file || typeof file.arrayBuffer !== "function") return jr({ error: "No file uploaded" }, 400);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (buf.length > 15 * 1024 * 1024) return jr({ error: "That PDF is too big (max 15 MB)" }, 400);
+      const known = (await getSuppliers(db)).map(s => s.name);
+      const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      return jr({ ok: true, tier: res.tier, aiUsed: res.aiUsed, textLen: res.textLen, fields: f, po, candidates,
+        filename: file.name || "invoice.pdf" });
+    }
+    // Confirm: attach the PDF to the PO + write the cost. The client re-sends the
+    // file so nothing is stored until the office taps Apply (no orphan uploads).
+    if (path === "/api/invoice/apply" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      if (!form) return jr({ error: "Bad request" }, 400);
+      const poNumber = Number(form.get("po_number"));
+      const cost = Number(form.get("cost_ex_vat"));
+      if (!poNumber) return jr({ error: "Pick a PO to attach this invoice to" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr({ error: "That PO was not found" }, 400);
+      const file = form.get("file");
+      let key = target.invoice_key || null;
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength > 15 * 1024 * 1024) return jr({ error: "That PDF is too big (max 15 MB)" }, 400);
+        const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+        key = `po-invoices/${sess.tenantId}/${poNumber}/${Date.now()}-${safe}`;
+        await env.JOB_FILES.put(key, ab, { httpMetadata: { contentType: file.type || "application/pdf" } });
+      }
+      const meta = JSON.stringify({
+        no: String(form.get("invoice_no") || "") || null,
+        date: String(form.get("invoice_date") || "") || null,
+        net: cost, vat: numOrNull(form.get("vat")), gross: numOrNull(form.get("gross")),
+        filename: file && file.name || null, by: userName(sess), at: (/* @__PURE__ */ new Date()).toISOString(),
+      });
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const fields = ["cost_ex_vat = ?", "invoice_key = ?", "invoice_meta = ?", "cost_entered_at = ?",
+        "last_edited_by_slug = ?", "last_edited_by_name = ?", "last_edited_at = ?"];
+      const binds = [cost, key, meta, now, userSlug(sess), userName(sess), now];
+      const vatRate = numOrNull(form.get("vat_rate"));
+      if (vatRate != null) { fields.push("vat_rate = ?"); binds.push(vatRate); }
+      binds.push(poNumber);
+      await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+      const invoiceUrl = key ? await signedFileUrl(env, url.origin, "/po/invoice-file", key) : null;
+      return jr({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    // Signed URL for a PO's already-attached invoice (built on demand — signing
+    // needs the server secret, so getPOs returns only the raw key).
+    if (path === "/api/invoice/url" && method === "GET") {
+      const n = Number(q.get("po"));
+      const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
+      if (!r || !r.invoice_key) return jr({ error: "No invoice attached" }, 404);
+      return jr({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
+    }
 
     // ── Admin: reference-data management ──
     if (path === "/api/config" && method === "POST") return jr(await updateConfig(db, await bodyOf()));
@@ -416,6 +504,81 @@ async function deleteClosure(db, date) {
   return { success: true };
 }
 
+
+// ── Invoice attach/serve helpers ────────────────────────────────────────────
+async function serveInvoiceFile(request, env, url) {
+  const key = url.searchParams.get("key") || "";
+  if (!key.startsWith("po-invoices/")) return error("Bad key", 400, env, request);
+  const ok = await verifyFileSig(env, key, url.searchParams);
+  if (!ok) return error("Link expired or invalid", 403, env, request);
+  const obj = await env.JOB_FILES.get(key);
+  if (!obj) return error("Invoice not found", 404, env, request);
+  const h = new Headers();
+  h.set("Content-Type", (obj.httpMetadata && obj.httpMetadata.contentType) || "application/pdf");
+  h.set("Content-Disposition", "inline");
+  h.set("Cache-Control", "private, max-age=60");
+  h.set("Access-Control-Allow-Origin", "*");   // CORS so the in-app PDF viewer can fetch it
+  return new Response(obj.body, { headers: h });
+}
+
+// A compact PO record for the invoice-match proposal.
+async function poBrief(db, poNumber) {
+  const r = await db.prepare(
+    `SELECT po_number, supplier, issued_at, cost_ex_vat, engineer_name, office_user_name, site, incident_no, description, invoice_key
+       FROM po_log WHERE po_number = ? AND deleted = 0`
+  ).bind(poNumber).first();
+  if (!r) return null;
+  return {
+    po_number: r.po_number, supplier: r.supplier || "", issued_at: r.issued_at,
+    cost_ex_vat: r.cost_ex_vat, priced: r.cost_ex_vat != null,
+    who: r.engineer_name || r.office_user_name || "", site: r.site || "", incident_no: r.incident_no || "",
+    description: String(r.description || "").slice(0, 300), has_invoice: !!r.invoice_key,
+  };
+}
+
+// No PO number on the invoice (or it wasn't found) — Jamie's fallback: find
+// UNPRICED POs for the same supplier raised around the invoice's transaction
+// date (the day of purchase ≈ the PO raised day; the invoice arrives a few days
+// later). Ranked by supplier match then date proximity. Amount can't corroborate
+// here — the PO is unpriced, the cost is exactly what we're filling in.
+async function matchInvoiceCandidates(db, f) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  // Window of PO raised-dates around the transaction date.
+  let where = `deleted = 0 AND cost_ex_vat IS NULL`;
+  const binds = [];
+  if (date) {
+    const d = new Date(date + "T12:00:00Z");
+    const lo = new Date(d); lo.setUTCDate(lo.getUTCDate() - 5);
+    const hi = new Date(d); hi.setUTCDate(hi.getUTCDate() + 2);
+    where += ` AND substr(issued_at,1,10) BETWEEN ? AND ?`;
+    binds.push(lo.toISOString().slice(0, 10), hi.toISOString().slice(0, 10));
+  }
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
+         FROM po_log WHERE ${where} ORDER BY issued_at DESC LIMIT 200`
+    ).bind(...binds).all()).results || [];
+  } catch { rows = []; }
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const scored = rows.map(r => {
+    const sup = normSupplierName(r.supplier || "");
+    const supMatch = supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 86400000)) : 99;
+    // Supplier match dominates; then closeness in days.
+    const score = (supMatch ? 100 : 0) - days;
+    return {
+      po_number: r.po_number, supplier: r.supplier || "", issued_at: r.issued_at,
+      who: r.engineer_name || r.office_user_name || "", site: r.site || "", incident_no: r.incident_no || "",
+      description: String(r.description || "").slice(0, 200),
+      supplierMatch: !!supMatch, daysApart: days, score,
+    };
+  }).filter(c => c.supplierMatch || c.daysApart <= 3)   // only plausible ones
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+  return scored;
+}
 
 async function getPOs(db, params) {
   let query = `SELECT * FROM po_log WHERE deleted = 0`;
