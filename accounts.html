@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=37"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Accounts capture — Mostlane Portal</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; background: #e6e8eb; color: #1a1a1a; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .topbar { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; padding: 12px 16px; box-shadow: 0 2px 8px rgba(0,0,0,.15); display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 10; }
+    .topbar .brand { font-weight: 600; font-size: 15px; }
+    .wrap { max-width: 1150px; margin: 0 auto; padding: 14px 16px 60px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 14px; margin-bottom: 14px; }
+    h2 { font-size: 15px; margin: 0 0 8px; color: #003366; }
+    label { font-size: 12px; font-weight: 600; color: #5a6677; display: block; margin-bottom: 3px; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid #cdd5e0; border-radius: 8px; font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; border-radius: 8px; border: 1px solid #003366; background: #003366; color: #fff; padding: 8px 14px; font-weight: 600; font-family: inherit; font-size: 14px; }
+    button.ghost { background: #fff; color: #003366; }
+    button.small { padding: 5px 10px; font-size: 12px; }
+    button:disabled { opacity: .6; cursor: default; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted { color: #5a6677; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tab { border: 1px solid #cdd5e0; background: #fff; color: #003366; border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: 13px; cursor: pointer; }
+    .tab.on { background: #003366; color: #fff; border-color: #003366; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #5a6677; }
+    .table-scroll { overflow-x: auto; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .p-un { background: #fff4e0; color: #b58a00; } .p-ok { background: #e6f5ea; color: #1e6c33; } .p-ex { background: #eef1f5; color: #5a6677; } .p-sub { background: #f1e9fa; color: #7a4ca0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; }
+    .tile { background: #f6f8fb; border-radius: 10px; padding: 10px 12px; text-align: center; }
+    .tile .v { font-size: 20px; font-weight: 700; color: #003366; } .tile .l { font-size: 11px; color: #5a6677; margin-top: 2px; }
+    .empty { text-align: center; color: #5a6677; padding: 20px; }
+    .note { background: #eef4ff; border: 1px solid #cdddf5; color: #003366; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+    .drop { border: 2px dashed #b9c4d4; border-radius: 12px; padding: 18px; text-align: center; color: #5a6677; cursor: pointer; }
+    .drop.hot { border-color: #003366; background: #eef4ff; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
+    .modal-backdrop.show { display: flex; }
+    .modal { background: #fff; border-radius: 14px; padding: 16px; max-width: 720px; width: 100%; max-height: 90vh; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div class="topbar"><div class="brand">🧾 Accounts capture</div><a class="ml-back" href="main.html" title="Back">‹ Back</a></div>
+  <div class="wrap">
+    <div class="note" style="margin-bottom:12px">Upload any document — invoices, credit-card / bank statements, HTML, photos. It keeps the file and, for a statement, reads out the transaction lines to tick off against captured receipts. <strong>A statement isn’t a VAT invoice — this is a completeness/chase list, not VAT reclaim.</strong></div>
+
+    <div class="row" style="margin-bottom:12px">
+      <div style="width:190px"><label>VAT quarter</label><select id="period" onchange="onPeriod()"></select></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" data-tab="docs" onclick="setTab('docs')">📄 Documents</button>
+      <button class="tab" data-tab="lines" onclick="setTab('lines')">📋 Statement lines</button>
+      <button class="tab" data-tab="suppliers" onclick="setTab('suppliers')">✅ Suppliers to chase</button>
+    </div>
+
+    <div id="tab-docs">
+      <div class="card">
+        <h2>Upload a document</h2>
+        <div class="drop" id="drop" onclick="document.getElementById('file').click()">⬆ Drop a file here, or click to choose<br><span class="muted" style="font-size:12px">PDF, statement, HTML, photo — anything. Statements get their lines read out.</span></div>
+        <input id="file" type="file" multiple style="display:none" onchange="pickFiles(this)">
+        <label style="margin-top:8px;font-weight:400"><input type="checkbox" id="noRead" style="width:auto;margin-right:6px">Just store it — don’t read the contents</label>
+        <div id="upStatus" class="muted" style="font-size:13px;margin-top:6px"></div>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">Documents</h2>
+          <div style="width:200px"><input id="docQ" type="text" placeholder="Search supplier / filename" oninput="debounced(loadDocs)"></div></div>
+        <div class="table-scroll" style="margin-top:10px"><table>
+          <thead><tr><th>Document</th><th>Type</th><th>Supplier</th><th>Date</th><th>Lines</th><th></th></tr></thead>
+          <tbody id="docBody"><tr><td colspan="6"><div class="empty">No documents yet.</div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div id="tab-lines" style="display:none">
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">Statement lines</h2>
+          <div class="row"><select id="lineStatus" onchange="loadLines()" style="width:150px"><option value="open">To receipt</option><option value="receipted">Receipted</option><option value="excluded">Excluded</option><option value="">All</option></select>
+          <input id="lineQ" type="text" placeholder="Search" oninput="debounced(loadLines)" style="width:160px"></div></div>
+        <div class="grid" id="lineTiles" style="margin-top:10px"></div>
+        <div class="table-scroll" style="margin-top:10px"><table>
+          <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>From</th><th>Status</th><th></th></tr></thead>
+          <tbody id="lineBody"><tr><td colspan="6"><div class="empty">Upload a statement to list its lines.</div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div id="tab-suppliers" style="display:none">
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">Suppliers &amp; subcontractors to chase</h2>
+          <div class="row"><select id="supKind" onchange="renderSuppliers()" style="width:150px"><option value="">All</option><option value="supplier">Suppliers</option><option value="subcontractor">Subcontractors</option></select>
+          <select id="supShow" onchange="renderSuppliers()" style="width:150px"><option value="">Show all</option><option value="open">Outstanding</option><option value="done">Done</option></select>
+          <input id="supQ" type="text" placeholder="Search" oninput="renderSuppliers()" style="width:150px"></div></div>
+        <div class="grid" id="supTiles" style="margin-top:10px"></div>
+        <div id="supBody" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="docBackdrop"><div class="modal" id="docModal"></div></div>
+
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function escAttr(s){ return String(s==null?"":s).replace(/"/g,"&quot;"); }
+function gbp(n){ return n==null||n===""||isNaN(n)?"—":"£"+Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+function fmtD(v){ if(!v) return "—"; const s=String(v); if(s.length>=10&&s.charAt(4)==="-") return s.slice(8,10)+"/"+s.slice(5,7)+"/"+s.slice(2,4); return s; }
+function curQuarter(){ const d=new Date(); return d.getFullYear()+"-Q"+(Math.floor(d.getMonth()/3)+1); }
+let _t=null; function debounced(fn){ clearTimeout(_t); _t=setTimeout(fn,300); }
+let tab="docs", periods=[], supRows=[];
+
+function setTab(t){ tab=t; document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on", x.dataset.tab===t));
+  document.getElementById("tab-docs").style.display = t==="docs"?"":"none";
+  document.getElementById("tab-lines").style.display = t==="lines"?"":"none";
+  document.getElementById("tab-suppliers").style.display = t==="suppliers"?"":"none";
+  if(t==="docs") loadDocs(); else if(t==="lines") loadLines(); else loadSuppliers();
+}
+function period(){ return document.getElementById("period").value; }
+function onPeriod(){ if(tab==="docs") loadDocs(); else if(tab==="lines") loadLines(); else loadSuppliers(); }
+function renderPeriods(sel){
+  const el=document.getElementById("period"); const cur=el.value||curQuarter();
+  const set=new Set((periods||[]).map(p=>p.p)); set.add(curQuarter()); if(sel) set.add(sel);
+  const list=[...set].filter(Boolean).sort().reverse();
+  el.innerHTML='<option value="">All quarters</option>'+list.map(p=>'<option value="'+escAttr(p)+'">'+esc(p)+'</option>').join("");
+  el.value = (sel!==undefined?sel:cur);
+}
+
+// ── Documents ──
+function pickFiles(input){ const files=[...(input.files||[])]; input.value=""; if(files.length) uploadFiles(files); }
+async function uploadFiles(files){
+  const st=document.getElementById("upStatus"); const noRead=document.getElementById("noRead").checked;
+  let ok=0;
+  for(let i=0;i<files.length;i++){
+    st.textContent="Uploading "+(i+1)+" of "+files.length+" — “"+files[i].name+"”"+(noRead?"":" and reading it")+"…";
+    const fd=new FormData(); fd.append("file", files[i], files[i].name); if(noRead) fd.append("no_read","1");
+    try{ const d=await authFetch("/accounts/upload",{method:"POST",body:fd}).then(r=>r.json());
+      if(d&&d.ok){ ok++; } else { st.textContent="Failed on “"+files[i].name+"”: "+((d&&d.error)||"error"); }
+    }catch(e){ st.textContent="Failed on “"+files[i].name+"”: "+e.message; }
+  }
+  st.textContent="Uploaded "+ok+" of "+files.length+".";
+  loadDocs();
+}
+const drop=document.getElementById("drop");
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
+drop.addEventListener("drop",e=>{ const files=[...(e.dataTransfer.files||[])]; if(files.length) uploadFiles(files); });
+async function loadDocs(){
+  const p=new URLSearchParams(); if(period()) p.set("period",period()); const q=document.getElementById("docQ").value.trim(); if(q) p.set("q",q);
+  let d; try{ d=await authFetch("/accounts/docs?"+p).then(r=>r.json()); }catch(e){ document.getElementById("docBody").innerHTML='<tr><td colspan="6"><div class="empty">Could not load.</div></td></tr>'; return; }
+  if(d&&d.error){ document.getElementById("docBody").innerHTML='<tr><td colspan="6"><div class="empty">'+esc(d.error)+'</div></td></tr>'; return; }
+  periods=d.periods||[]; renderPeriods();
+  const rows=d.rows||[];
+  const tb=document.getElementById("docBody");
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="6"><div class="empty">No documents in this view.</div></td></tr>'; return; }
+  tb.innerHTML=rows.map(r=>{
+    const kindPill = r.kind==="statement" ? '<span class="pill p-sub">Statement</span>' : '<span class="muted">'+esc(r.kind||"—")+'</span>';
+    const lines = r.kind==="statement"||Number(r.line_count)>1 ? '<button class="ghost small" onclick="openDoc('+Number(r.id)+')">'+Number(r.line_count||0)+' lines →</button>' : (Number(r.line_count)||0);
+    return '<tr>'+
+      '<td>'+esc(r.filename||"—")+'</td>'+
+      '<td>'+kindPill+'</td>'+
+      '<td>'+esc(r.supplier||"—")+'</td>'+
+      '<td>'+esc(fmtD(r.doc_date))+'</td>'+
+      '<td>'+lines+'</td>'+
+      '<td><div class="row" style="gap:6px;flex-wrap:nowrap">'+
+        (r.url?'<a class="ghost small" href="'+escAttr(r.url)+'" target="_blank" rel="noopener" style="text-decoration:none">👁</a>':'')+
+        '<button class="ghost small" onclick="openDoc('+Number(r.id)+')">Open</button>'+
+        '<button class="ghost small" style="color:#c0392b" onclick="delDoc('+Number(r.id)+')">🗑</button>'+
+      '</div></td></tr>';
+  }).join("");
+}
+async function openDoc(id){
+  let d; try{ d=await authFetch("/accounts/doc?id="+id).then(r=>r.json()); }catch(e){ alert("Could not open"); return; }
+  if(!d||d.error||!d.doc){ alert((d&&d.error)||"Not found"); return; }
+  const doc=d.doc, lines=d.lines||[];
+  const m=document.getElementById("docModal");
+  m.innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">'+esc(doc.filename||"Document")+'</h2><button class="ghost small" onclick="closeDoc()">✕</button></div>'+
+    '<div class="muted" style="font-size:12px;margin:4px 0 10px">'+esc(doc.kind||"")+(doc.supplier?' · '+esc(doc.supplier):'')+(doc.doc_date?' · '+esc(fmtD(doc.doc_date)):'')+'</div>'+
+    (doc.url?'<div style="margin-bottom:10px"><a class="ghost small" href="'+escAttr(doc.url)+'" target="_blank" rel="noopener" style="text-decoration:none">👁 View the document</a> <button class="ghost small" onclick="reread('+Number(doc.id)+',this)">↻ Re-read lines</button></div>':'')+
+    (lines.length ? '<div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>'+
+      lines.map(l=>lineRow(l,true)).join("")+'</tbody></table></div>'
+      : '<div class="empty">No transaction lines were read from this document.</div>');
+  document.getElementById("docBackdrop").classList.add("show");
+}
+function closeDoc(){ document.getElementById("docBackdrop").classList.remove("show"); }
+async function reread(id,btn){ if(btn){btn.disabled=true;btn.textContent="Reading…";} try{ await authFetch("/accounts/doc-read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); }catch(e){} openDoc(id); loadDocs(); }
+async function delDoc(id){
+  const ok=window.MLUI?await MLUI.confirm("Delete this document and its lines?",{danger:true}):confirm("Delete this document and its lines?");
+  if(!ok) return;
+  try{ await authFetch("/accounts/doc-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}); }catch(e){}
+  loadDocs();
+}
+
+// ── Statement lines (tick-off) ──
+function statusPill(st){ st=st||"open"; if(st==="receipted") return '<span class="pill p-ok">✓ Receipted</span>'; if(st==="excluded") return '<span class="pill p-ex">Excluded</span>'; return '<span class="pill p-un">To receipt</span>'; }
+function lineRow(l, inModal){
+  const st=l.status||"open";
+  return '<tr>'+
+    '<td>'+esc(fmtD(l.line_date))+'</td>'+
+    '<td>'+esc(l.description||"—")+(l.notes?'<div class="muted" style="font-size:11px">📝 '+esc(l.notes)+'</div>':'')+'</td>'+
+    '<td>'+gbp(l.amount)+'</td>'+
+    (inModal?'':'<td>'+esc(l.doc_supplier||l.doc_filename||"—")+'</td>')+
+    '<td>'+statusPill(st)+'</td>'+
+    '<td><div class="row" style="gap:5px;flex-wrap:nowrap">'+
+      (st!=="receipted"?'<button class="small" title="Have the receipt/invoice" onclick="setLine('+Number(l.id)+',\'receipted\')">✓</button>':'<button class="ghost small" onclick="setLine('+Number(l.id)+',\'open\')">↩</button>')+
+      (st!=="excluded"?'<button class="ghost small" title="Not needed" onclick="setLine('+Number(l.id)+',\'excluded\')">✕</button>':'')+
+      '<button class="ghost small" onclick="noteLine('+Number(l.id)+')">📝</button>'+
+    '</div></td></tr>';
+}
+async function loadLines(){
+  const p=new URLSearchParams(); if(period()) p.set("period",period());
+  const s=document.getElementById("lineStatus").value; if(s) p.set("status",s);
+  const q=document.getElementById("lineQ").value.trim(); if(q) p.set("q",q);
+  let d; try{ d=await authFetch("/accounts/lines?"+p).then(r=>r.json()); }catch(e){ return; }
+  const rows=d.rows||[], t=d.totals||{};
+  document.getElementById("lineTiles").innerHTML =
+    tile(t.count||0,"Lines")+tile(t.open||0,"To receipt", t.open?"#b58a00":"#003366")+tile(t.receipted||0,"Receipted","#1e6c33")+tile(gbp(t.outstanding),"Outstanding £", t.outstanding?"#b58a00":"#003366");
+  const tb=document.getElementById("lineBody");
+  tb.innerHTML = rows.length ? rows.map(l=>lineRow(l,false)).join("") : '<tr><td colspan="6"><div class="empty">No lines in this view.</div></td></tr>';
+}
+function tile(v,l,c){ return '<div class="tile"><div class="v"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div><div class="l">'+esc(l)+'</div></div>'; }
+async function setLine(id,status){ try{ await authFetch("/accounts/line-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,status})}); }catch(e){} if(document.getElementById("docBackdrop").classList.contains("show")){} loadLines(); }
+async function noteLine(id){ const note=prompt("Note for this line:"); if(note===null) return; try{ await authFetch("/accounts/line-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,notes:note})}); }catch(e){} loadLines(); }
+
+// ── Suppliers checklist ──
+async function loadSuppliers(){
+  const p=new URLSearchParams(); if(period()) p.set("period",period()||curQuarter());
+  let d; try{ d=await authFetch("/accounts/suppliers?period="+encodeURIComponent(period()||curQuarter())).then(r=>r.json()); }catch(e){ return; }
+  supRows=d.rows||[];
+  document.getElementById("supTiles").innerHTML = tile(d.total||0,"Parties")+tile(d.done||0,"Done","#1e6c33")+tile(d.outstanding||0,"Outstanding", d.outstanding?"#b58a00":"#003366");
+  renderSuppliers();
+}
+function renderSuppliers(){
+  const kind=document.getElementById("supKind").value, show=document.getElementById("supShow").value, q=document.getElementById("supQ").value.trim().toLowerCase();
+  let rows=supRows.filter(r=>(!kind||r.kind===kind)&&(!show||(show==="done"?r.checked:!r.checked))&&(!q||r.name.toLowerCase().includes(q)));
+  const el=document.getElementById("supBody");
+  if(!rows.length){ el.innerHTML='<div class="empty">No parties in this view.</div>'; return; }
+  el.innerHTML=rows.map(r=>{
+    return '<label style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid #eef1f5;border-radius:10px;margin-bottom:6px;cursor:pointer">'+
+      '<input type="checkbox" '+(r.checked?"checked":"")+' style="width:auto" onchange="toggleSup('+esc(JSON.stringify(r.name))+','+esc(JSON.stringify(r.kind))+',this.checked)">'+
+      '<span style="flex:1"><strong style="color:#003366">'+esc(r.name)+'</strong> '+(r.kind==="subcontractor"?'<span class="pill p-sub">👷 Sub</span>':'')+
+      (r.checked&&r.checked_by?'<span class="muted" style="font-size:11px"> · '+esc(r.checked_by)+'</span>':'')+
+      (r.note?'<div class="muted" style="font-size:11px">📝 '+esc(r.note)+'</div>':'')+'</span>'+
+      '<button class="ghost small" onclick="event.preventDefault();noteSup('+esc(JSON.stringify(r.name))+','+esc(JSON.stringify(r.kind))+')">📝</button>'+
+    '</label>';
+  }).join("");
+}
+async function toggleSup(name,kind,checked){
+  try{ await authFetch("/accounts/supplier-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({period:period()||curQuarter(),name,kind,checked:checked?1:0})}); }catch(e){}
+  loadSuppliers();
+}
+async function noteSup(name,kind){
+  const note=prompt("Note for "+name+":"); if(note===null) return;
+  try{ await authFetch("/accounts/supplier-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({period:period()||curQuarter(),name,kind,note})}); }catch(e){}
+  loadSuppliers();
+}
+
+document.getElementById("docBackdrop").addEventListener("mousedown",e=>{ if(e.target.id==="docBackdrop") closeDoc(); });
+renderPeriods(curQuarter());
+loadDocs();
+</script>
+</body>
+</html>

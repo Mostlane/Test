@@ -1131,6 +1131,7 @@
           { label: "Projects", href: "projects-live.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], match: ["projects-live.html", "project-new.html", "project-hub.html", "projects.html", "projects-admin.html"] },
           { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
           { label: "VAT capture", href: "vat.html", icon: "po", perms: ["PurchaseOrders"], match: ["vat.html"] },
+          { label: "Accounts capture", href: "accounts.html", icon: "po", perms: ["PurchaseOrders"], match: ["accounts.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [
