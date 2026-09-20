@@ -41,6 +41,27 @@ async function ensurePoInvoiceCols__raw(db) {
       source TEXT, created_by TEXT, created_at TEXT, resolved_at TEXT
     )`).run();
   } catch { /* table already exists */ }
+  // VAT capture ledger: one row per invoice PDF the system has read, with the
+  // figures it saw (read_*) and the office-verified figures (net/vat/gross),
+  // a copy of the PDF (r2_key), a reverse-charge flag and a verify status —
+  // so accounts can check every invoice for the VAT return. Resumable: the
+  // dedupe_key (message:attachment, or a content hash for drops) is UNIQUE.
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS vat_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      source TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      dedupe_key TEXT UNIQUE,
+      filename TEXT, r2_key TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT, doc_type TEXT,
+      read_net REAL, read_vat REAL, read_gross REAL,
+      net REAL, vat REAL, gross REAL, vat_rate REAL,
+      category TEXT, reverse_charge INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'unverified',
+      po_number INTEGER, vat_period TEXT, notes TEXT,
+      verified_by TEXT, verified_at TEXT, created_at TEXT
+    )`).run();
+  } catch { /* table already exists */ }
 }
 const ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
 
@@ -374,6 +395,31 @@ export async function handle(request, env, ctx, url, sess) {
       const b = await bodyOf();
       await db.prepare(`DELETE FROM invoice_flags WHERE id = ?`).bind(Number(b.id)).run();
       return jr({ ok: true });
+    }
+
+    // ── VAT capture ledger: read every invoice PDF, verify the figures ──
+    if (path === "/api/vat/run" && method === "POST") {
+      if (!graphConfigured(env)) return jr({ error: "The mailbox connection isn’t set up yet (GRAPH_* secrets)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(400, Number(b.days) || 90));
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr({ error: "Couldn’t open " + mailbox + ": " + chk.error }, 400);
+      return jr(await runVatCapture(env, db, sess, url.origin, { mailbox, days }));
+    }
+    if (path === "/api/vat/list" && method === "GET") {
+      return jr(await listVatInvoices(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/vat/save" && method === "POST") {
+      return jr(await saveVatInvoice(db, sess, await bodyOf()));
+    }
+    if (path === "/api/vat/delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM vat_invoices WHERE id = ?`).bind(Number(b.id)).run();
+      return jr({ ok: true });
+    }
+    if (path === "/api/vat/upload" && method === "POST") {
+      return jr(await uploadVatInvoice(env, db, sess, url.origin, request));
     }
 
     // ── Admin: reference-data management ──
@@ -797,6 +843,151 @@ async function updateInvoiceFlag(db, sess, b) {
   binds.push(id);
   await db.prepare(`UPDATE invoice_flags SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
   return { ok: true };
+}
+
+// ── VAT capture ledger ───────────────────────────────────────────────────────
+// The UK VAT quarter a date falls in ("2026-Q3"), for filtering the return.
+function vatQuarter(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})/);
+  if (!m) return "";
+  return m[1] + "-Q" + (Math.floor((Number(m[2]) - 1) / 3) + 1);
+}
+// Read every invoice PDF in the mailbox and persist a ledger row per one, with
+// the figures the reader saw + a copy of the PDF. Resumable + bounded: it skips
+// anything already captured (unique dedupe_key), so re-running chews through more.
+async function runVatCapture(env, db, sess, origin, { mailbox, days }) {
+  const MAX_NEW = 40, AI_BUDGET = 25;
+  const known = (await getSuppliers(db)).map(s => s.name);
+  const subNames = (await getSubcontractors(db)).map(s => s.name);
+  let msgs = [];
+  try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 80 }); }
+  catch (e) { return { error: String(e && e.message || e) }; }
+  let added = 0, scanned = 0, aiUsed = 0, skippedExisting = 0, capped = false;
+  for (const m of msgs) {
+    if (added >= MAX_NEW) { capped = true; break; }
+    let atts = [];
+    try { atts = await listPdfAttachments(env, mailbox, m.id); } catch { continue; }
+    for (const a of atts) {
+      if (added >= MAX_NEW) { capped = true; break; }
+      const key = m.id + ":" + a.id;
+      let exists = null;
+      try { exists = await db.prepare(`SELECT 1 FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first(); } catch {}
+      if (exists) { skippedExisting++; continue; }
+      let bytes;
+      try { bytes = await downloadAttachment(env, mailbox, m.id, a.id); scanned++; } catch { continue; }
+      let res;
+      try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
+      catch { continue; }
+      if (res.aiUsed) aiUsed++;
+      const f = res.fields || {};
+      const safe = String(a.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+      const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+      try { await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: "application/pdf" } }); } catch {}
+      const sub = normMatchOne(f.supplier, subNames);
+      const rate = (f.net && f.vat != null && f.net > 0) ? Math.round((f.vat / f.net) * 100) : null;
+      try {
+        await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+          (tenant_id, source, mailbox, message_id, attachment_id, dedupe_key, filename, r2_key,
+           supplier, invoice_no, invoice_date, doc_type, read_net, read_vat, read_gross,
+           net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+          String(sess.tenantId), "mailbox", mailbox, m.id, a.id, key, a.name || "invoice.pdf", r2key,
+          f.supplier || null, f.invoiceNumber || null, f.invoiceDate || null, res.docType || null,
+          numOrNull(f.net), numOrNull(f.vat), numOrNull(f.gross),
+          numOrNull(f.net), numOrNull(f.vat), numOrNull(f.gross), rate,
+          sub ? "subcontractor" : "materials", sub ? 1 : 0,
+          res.notInvoice ? "excluded" : "unverified", vatQuarter(f.invoiceDate),
+          (/* @__PURE__ */ new Date()).toISOString()
+        ).run();
+        added++;
+      } catch { /* dedupe race — ignore */ }
+    }
+  }
+  return { ok: true, added, scanned, aiUsed, skippedExisting, capped, mailbox, days };
+}
+async function listVatInvoices(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM vat_invoices WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const period = params.get("period"); if (period) { sql += ` AND vat_period = ?`; binds.push(period); }
+  const status = params.get("status"); if (status) { sql += ` AND COALESCE(status,'unverified') = ?`; binds.push(status); }
+  const qstr = (params.get("q") || "").trim();
+  if (qstr) { const l = "%" + qstr.toLowerCase() + "%"; sql += ` AND (lower(COALESCE(supplier,'')) LIKE ? OR lower(COALESCE(invoice_no,'')) LIKE ?)`; binds.push(l, l); }
+  sql += ` ORDER BY COALESCE(invoice_date,'') DESC, id DESC LIMIT 2000`;
+  let rows = [];
+  try { rows = (await db.prepare(sql).bind(...binds).all()).results || []; } catch { rows = []; }
+  for (const r of rows) r.url = r.r2_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.r2_key) : null;
+  let periods = [];
+  try { periods = (await db.prepare(`SELECT vat_period p, COUNT(*) n FROM vat_invoices WHERE tenant_id=? AND vat_period IS NOT NULL AND vat_period<>'' GROUP BY vat_period ORDER BY vat_period DESC`).bind(String(sess.tenantId)).all()).results || []; } catch {}
+  const totals = { count: rows.length, net: 0, vat: 0, gross: 0, unverified: 0, verified: 0, excluded: 0, flagged: 0, reverseCharge: 0 };
+  for (const r of rows) {
+    const st = r.status || "unverified";
+    totals[st === "verified" ? "verified" : st === "excluded" ? "excluded" : "unverified"]++;
+    if (r.reverse_charge) totals.reverseCharge++;
+    if (st !== "excluded") { totals.net += Number(r.net) || 0; totals.vat += Number(r.vat) || 0; totals.gross += Number(r.gross) || 0; }
+    if (st !== "excluded" && (r.net == null || r.gross == null || Number(r.net) === 0)) totals.flagged++;
+  }
+  totals.net = Math.round(totals.net * 100) / 100; totals.vat = Math.round(totals.vat * 100) / 100; totals.gross = Math.round(totals.gross * 100) / 100;
+  return { rows, periods, totals };
+}
+async function saveVatInvoice(db, sess, b) {
+  const id = Number(b && b.id); if (!id) return { error: "No id" };
+  const fields = [], binds = [];
+  const set = (col, val) => { fields.push(col + " = ?"); binds.push(val); };
+  if (b.supplier !== undefined) set("supplier", b.supplier || null);
+  if (b.invoice_no !== undefined) set("invoice_no", b.invoice_no || null);
+  if (b.invoice_date !== undefined) { set("invoice_date", b.invoice_date || null); set("vat_period", vatQuarter(b.invoice_date)); }
+  if (b.net !== undefined) set("net", numOrNull(b.net));
+  if (b.vat !== undefined) set("vat", numOrNull(b.vat));
+  if (b.gross !== undefined) set("gross", numOrNull(b.gross));
+  if (b.vat_rate !== undefined) set("vat_rate", numOrNull(b.vat_rate));
+  if (b.category !== undefined) set("category", b.category || null);
+  if (b.reverse_charge !== undefined) set("reverse_charge", b.reverse_charge ? 1 : 0);
+  if (b.po_number !== undefined) set("po_number", numOrNull(b.po_number));
+  if (b.notes !== undefined) set("notes", b.notes || null);
+  if (b.status !== undefined) {
+    set("status", b.status);
+    if (b.status === "verified") { set("verified_by", userName(sess)); set("verified_at", (/* @__PURE__ */ new Date()).toISOString()); }
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE vat_invoices SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+async function uploadVatInvoice(env, db, sess, origin, request) {
+  const form = await request.formData().catch(() => null);
+  const file = form && form.get("file");
+  if (!file || typeof file.arrayBuffer !== "function") return { error: "No file uploaded" };
+  const ab = await file.arrayBuffer();
+  if (ab.byteLength > 15 * 1024 * 1024) return { error: "That PDF is too big (max 15 MB)" };
+  const bytes = new Uint8Array(ab);
+  let hash = "";
+  try { const h = await crypto.subtle.digest("SHA-256", ab); hash = [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, "0")).join(""); }
+  catch { hash = String(Date.now()); }
+  const key = "drop:" + hash;
+  const exists = await db.prepare(`SELECT id FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
+  if (exists) return { ok: true, duplicate: true, id: exists.id };
+  const known = (await getSuppliers(db)).map(s => s.name);
+  const subNames = (await getSubcontractors(db)).map(s => s.name);
+  const res = await parseInvoice(env, bytes, file.name || "invoice.pdf", known);
+  const f = res.fields || {};
+  const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+  const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+  try { await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: file.type || "application/pdf" } }); } catch {}
+  const sub = normMatchOne(f.supplier, subNames);
+  const rate = (f.net && f.vat != null && f.net > 0) ? Math.round((f.vat / f.net) * 100) : null;
+  const r = await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+    (tenant_id, source, dedupe_key, filename, r2_key, supplier, invoice_no, invoice_date, doc_type,
+     read_net, read_vat, read_gross, net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId), "drop", key, file.name || "invoice.pdf", r2key,
+    f.supplier || null, f.invoiceNumber || null, f.invoiceDate || null, res.docType || null,
+    numOrNull(f.net), numOrNull(f.vat), numOrNull(f.gross),
+    numOrNull(f.net), numOrNull(f.vat), numOrNull(f.gross), rate,
+    sub ? "subcontractor" : "materials", sub ? 1 : 0,
+    res.notInvoice ? "excluded" : "unverified", vatQuarter(f.invoiceDate),
+    (/* @__PURE__ */ new Date()).toISOString()
+  ).run();
+  return { ok: true, id: (r && r.meta && r.meta.last_row_id) || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
 }
 
 // Read the mailbox, parse each PDF, and build confirm-first proposals (matched PO

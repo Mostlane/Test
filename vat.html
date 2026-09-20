@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=37"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>VAT capture — Mostlane Portal</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; background: #e6e8eb; color: #1a1a1a; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .topbar { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; padding: 12px 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 10; }
+    .topbar .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 14px 16px 60px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); padding: 14px; margin-bottom: 14px; }
+    h1 { font-size: 18px; margin: 0; color: #fff; }
+    h2 { font-size: 15px; margin: 0 0 8px; color: #003366; }
+    label { font-size: 12px; font-weight: 600; color: #5a6677; display: block; margin-bottom: 3px; }
+    input, select, textarea, button { font-family: inherit; font-size: 14px; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid #cdd5e0; border-radius: 8px; }
+    button { cursor: pointer; border-radius: 8px; border: 1px solid #003366; background: #003366; color: #fff; padding: 8px 14px; font-weight: 600; }
+    button.ghost { background: #fff; color: #003366; }
+    button.small { padding: 5px 10px; font-size: 12px; }
+    button:disabled { opacity: .6; cursor: default; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .muted { color: #5a6677; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; }
+    .tile { background: #f6f8fb; border-radius: 10px; padding: 10px 12px; text-align: center; }
+    .tile .v { font-size: 20px; font-weight: 700; color: #003366; }
+    .tile .l { font-size: 11px; color: #5a6677; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #5a6677; }
+    .table-scroll { overflow-x: auto; }
+    tr.flagrow td { background: #fdf5e9; }
+    tr.rcrow td { background: #f4eefb; }
+    tr.exrow td { opacity: .55; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .p-un { background: #fff4e0; color: #b58a00; }
+    .p-ok { background: #e6f5ea; color: #1e6c33; }
+    .p-ex { background: #eef1f5; color: #5a6677; }
+    .p-rc { background: #f1e9fa; color: #7a4ca0; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
+    .modal-backdrop.show { display: flex; }
+    .modal { background: #fff; border-radius: 14px; padding: 16px; max-width: 560px; width: 100%; max-height: 90vh; overflow: auto; }
+    .field { margin-bottom: 10px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .empty { text-align: center; color: #5a6677; padding: 20px; }
+    .note { background: #eef4ff; border: 1px solid #cdddf5; color: #003366; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">💷 VAT capture</div>
+    <a class="ml-back" href="po-office.html" title="Back">‹ Back</a>
+  </div>
+  <div class="wrap">
+    <div class="note" style="margin-bottom:14px">Reads every invoice PDF the system can reach, shows the figures it saw, and lets accounts verify each one. <strong>This is a checking aid — Xero stays the book of record and where the return is filed.</strong> It can only see PDFs that reach the mailbox or are dropped in here.</div>
+
+    <div class="card">
+      <h2>Capture invoices</h2>
+      <div class="row">
+        <div style="width:140px"><label>Look back (days)</label><input id="runDays" type="number" value="90" min="1" max="400"></div>
+        <div style="align-self:flex-end"><button id="runBtn" onclick="runCapture(this)">🔎 Read the mailbox</button></div>
+        <div style="align-self:flex-end"><button class="ghost" onclick="document.getElementById('dropFile').click()">⬆ Drop a PDF</button><input id="dropFile" type="file" accept="application/pdf" style="display:none" onchange="uploadDrop(this)"></div>
+        <div id="runStatus" class="muted" style="font-size:13px;flex:1;min-width:160px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Ledger</h2>
+        <div class="row">
+          <button class="ghost small" onclick="openReconcile()">🔗 Reconcile with Xero</button>
+          <button class="ghost small" onclick="exportCsv()">⬇ Export CSV</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div style="width:170px"><label>VAT quarter</label><select id="fPeriod" onchange="load()"></select></div>
+        <div style="width:150px"><label>Status</label><select id="fStatus" onchange="load()">
+          <option value="unverified">To verify</option>
+          <option value="verified">Verified</option>
+          <option value="excluded">Excluded</option>
+          <option value="">All</option>
+        </select></div>
+        <div style="flex:1;min-width:160px"><label>Search supplier / invoice no</label><input id="fSearch" type="text" oninput="debouncedLoad()" placeholder="e.g. CEF or 10485"></div>
+      </div>
+      <div class="grid" id="tiles" style="margin-top:12px"></div>
+      <div class="table-scroll" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Supplier</th><th>Invoice no</th><th>Date</th><th>Net</th><th>VAT</th><th>Gross</th><th>Type</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tbody"><tr><td colspan="9"><div class="empty">Run a capture to list invoices.</div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="editBackdrop"><div class="modal" id="editModal"></div></div>
+  <div class="modal-backdrop" id="recBackdrop"><div class="modal" id="recModal" style="max-width:720px"></div></div>
+
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function escAttr(s){ return String(s==null?"":s).replace(/"/g,"&quot;"); }
+function gbp(n){ return n==null||n===""||isNaN(n) ? "—" : "£"+Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+function num(n){ const x=Number(n); return isNaN(x)?null:x; }
+function fmtD(v){ if(!v) return "—"; const s=String(v); if(s.length>=10&&s.charAt(4)==="-") return s.slice(8,10)+"/"+s.slice(5,7)+"/"+s.slice(2,4); return s; }
+
+let rows = [], totals = {}, periods = [];
+let dt = null;
+function debouncedLoad(){ clearTimeout(dt); dt=setTimeout(load, 300); }
+
+async function runCapture(btn){
+  const days = Number(document.getElementById("runDays").value) || 90;
+  const st = document.getElementById("runStatus");
+  st.textContent = "Reading the mailbox and each invoice… this can take a minute.";
+  if(btn) btn.disabled = true;
+  let d;
+  try { d = await authFetch("/po/api/vat/run", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ days }) }).then(r=>r.json()); }
+  catch(e){ st.textContent = "Failed: "+e.message; if(btn) btn.disabled=false; return; }
+  if(btn) btn.disabled = false;
+  if(!d || d.error){ st.textContent = (d&&d.error) || "Failed"; return; }
+  st.textContent = "Added "+(d.added||0)+" new · "+(d.skippedExisting||0)+" already captured"+(d.aiUsed?" · "+d.aiUsed+" read by AI":"")+(d.capped?" · stopped at the cap — run again for more":"")+".";
+  load();
+}
+async function uploadDrop(input){
+  const f = input.files && input.files[0]; input.value="";
+  if(!f) return;
+  const st = document.getElementById("runStatus");
+  st.textContent = "Reading “"+f.name+"”…";
+  const fd = new FormData(); fd.append("file", f, f.name);
+  let d;
+  try { d = await authFetch("/po/api/vat/upload", { method:"POST", body: fd }).then(r=>r.json()); }
+  catch(e){ st.textContent = "Failed: "+e.message; return; }
+  if(!d || d.error){ st.textContent = (d&&d.error)||"Failed"; return; }
+  st.textContent = d.duplicate ? "Already in the ledger." : "Added “"+f.name+"”.";
+  load();
+}
+
+async function load(){
+  const p = new URLSearchParams();
+  const per = document.getElementById("fPeriod").value; if(per) p.set("period", per);
+  const stt = document.getElementById("fStatus").value; if(stt) p.set("status", stt);
+  const q = document.getElementById("fSearch").value.trim(); if(q) p.set("q", q);
+  let d;
+  try { d = await authFetch("/po/api/vat/list?"+p).then(r=>r.json()); }
+  catch(e){ document.getElementById("tbody").innerHTML = '<tr><td colspan="9"><div class="empty">Could not load: '+esc(e.message)+'</div></td></tr>'; return; }
+  if(d && d.error){ document.getElementById("tbody").innerHTML = '<tr><td colspan="9"><div class="empty">'+esc(d.error)+'</div></td></tr>'; return; }
+  rows = d.rows || []; totals = d.totals || {}; periods = d.periods || [];
+  renderPeriods(); renderTiles(); renderRows();
+}
+function renderPeriods(){
+  const sel = document.getElementById("fPeriod");
+  const cur = sel.value;
+  const opts = ['<option value="">All quarters</option>'].concat((periods||[]).map(p=>'<option value="'+escAttr(p.p)+'">'+esc(p.p)+' ('+p.n+')</option>'));
+  sel.innerHTML = opts.join("");
+  if(cur) sel.value = cur;
+}
+function renderTiles(){
+  const t = totals || {};
+  document.getElementById("tiles").innerHTML =
+    tile(t.count||0, "Showing") +
+    tile(gbp(t.net), "Net (shown)") +
+    tile(gbp(t.vat), "VAT (shown)") +
+    tile(t.unverified||0, "To verify", "#b58a00") +
+    tile(t.verified||0, "Verified", "#1e6c33") +
+    tile(t.flagged||0, "⚠ No figure", t.flagged?"#c0392b":"#003366") +
+    tile(t.reverseCharge||0, "Reverse charge", t.reverseCharge?"#7a4ca0":"#003366");
+}
+function tile(v, l, c){ return '<div class="tile"><div class="v"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div><div class="l">'+esc(l)+'</div></div>'; }
+function typeCell(r){
+  let s = r.category==="subcontractor" ? '<span class="pill p-rc">👷 Sub</span>' : '<span class="muted" style="font-size:12px">Materials</span>';
+  if(r.reverse_charge) s += ' <span class="pill p-rc" title="Likely CIS domestic reverse charge">RC</span>';
+  if(r.doc_type && r.doc_type!=="invoice") s += ' <span class="muted" style="font-size:11px">'+esc(r.doc_type)+'</span>';
+  return s;
+}
+function statusPill(st){ st=st||"unverified"; if(st==="verified") return '<span class="pill p-ok">✓ Verified</span>'; if(st==="excluded") return '<span class="pill p-ex">Excluded</span>'; return '<span class="pill p-un">To verify</span>'; }
+function noFigure(r){ return r.status!=="excluded" && (r.net==null || r.gross==null || Number(r.net)===0); }
+function renderRows(){
+  const tb = document.getElementById("tbody");
+  if(!rows.length){ tb.innerHTML = '<tr><td colspan="9"><div class="empty">No invoices in this view.</div></td></tr>'; return; }
+  tb.innerHTML = rows.map((r,i)=>{
+    const cls = r.status==="excluded" ? "exrow" : (noFigure(r) ? "flagrow" : (r.reverse_charge ? "rcrow" : ""));
+    return '<tr class="'+cls+'">'+
+      '<td>'+esc(r.supplier||"—")+'</td>'+
+      '<td>'+esc(r.invoice_no||"—")+'</td>'+
+      '<td>'+esc(fmtD(r.invoice_date))+'</td>'+
+      '<td>'+gbp(r.net)+'</td>'+
+      '<td>'+gbp(r.vat)+(noFigure(r)?' <span title="No figure read" style="color:#c0392b">⚠</span>':'')+'</td>'+
+      '<td>'+gbp(r.gross)+'</td>'+
+      '<td>'+typeCell(r)+'</td>'+
+      '<td>'+statusPill(r.status)+'</td>'+
+      '<td><div class="row" style="gap:6px;flex-wrap:nowrap">'+
+        (r.status!=="verified"&&r.status!=="excluded" ? '<button class="small" onclick="quickVerify('+i+',this)" title="Mark verified">✓</button>' : '')+
+        '<button class="ghost small" onclick="openEdit('+i+')">Edit</button>'+
+        (r.url ? '<a class="ghost small" href="'+escAttr(r.url)+'" target="_blank" rel="noopener" style="text-decoration:none">👁</a>' : '')+
+      '</div></td>'+
+    '</tr>';
+  }).join("");
+}
+async function quickVerify(i, btn){
+  const r = rows[i]; if(!r) return;
+  if(noFigure(r)){ openEdit(i); return; }  // don't verify a £0/no-figure row blindly
+  if(btn) btn.disabled = true;
+  try { await authFetch("/po/api/vat/save", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id, status:"verified" }) }); } catch(e){}
+  load();
+}
+function openEdit(i){
+  const r = rows[i]; if(!r) return;
+  const m = document.getElementById("editModal");
+  m.innerHTML =
+    '<div class="row" style="justify-content:space-between"><h2 style="margin:0">Verify invoice</h2><button class="ghost small" onclick="closeEdit()">✕</button></div>'+
+    '<div class="muted" style="font-size:12px;margin:4px 0 10px">'+esc(r.filename||"")+(r.doc_type?' · read as '+esc(r.doc_type):'')+'</div>'+
+    (r.url ? '<div style="margin-bottom:10px"><a class="ghost small" href="'+escAttr(r.url)+'" target="_blank" rel="noopener" style="text-decoration:none">👁 View the PDF</a></div>' : '')+
+    (noFigure(r) ? '<div class="note" style="background:#fdecea;border-color:#f5c6cb;color:#c0392b;margin-bottom:10px">⚠ No figures were read — enter them from the PDF.</div>' : '')+
+    '<div class="field"><label>Supplier</label><input id="e-sup" value="'+escAttr(r.supplier||"")+'"></div>'+
+    '<div class="grid-2"><div class="field"><label>Invoice no</label><input id="e-no" value="'+escAttr(r.invoice_no||"")+'"></div>'+
+      '<div class="field"><label>Invoice date (YYYY-MM-DD)</label><input id="e-date" value="'+escAttr(r.invoice_date||"")+'" placeholder="2026-09-18"></div></div>'+
+    '<div class="grid-2"><div class="field"><label>Net £</label><input id="e-net" type="number" step="0.01" value="'+escAttr(r.net!=null?r.net:"")+'"></div>'+
+      '<div class="field"><label>VAT £</label><input id="e-vat" type="number" step="0.01" value="'+escAttr(r.vat!=null?r.vat:"")+'"></div></div>'+
+    '<div class="grid-2"><div class="field"><label>Gross £</label><input id="e-gross" type="number" step="0.01" value="'+escAttr(r.gross!=null?r.gross:"")+'"></div>'+
+      '<div class="field"><label>PO number (optional)</label><input id="e-po" type="number" value="'+escAttr(r.po_number!=null?r.po_number:"")+'"></div></div>'+
+    '<div class="field"><label style="font-weight:600"><input type="checkbox" id="e-rc" style="width:auto;margin-right:6px"'+(r.reverse_charge?" checked":"")+'>CIS domestic reverse charge (subcontractor VAT — not normal reclaimable input VAT)</label></div>'+
+    '<div class="field"><label>Notes</label><textarea id="e-notes">'+esc(r.notes||"")+'</textarea></div>'+
+    '<div class="row" style="justify-content:space-between;margin-top:6px">'+
+      '<button class="ghost small" style="color:#c0392b" onclick="deleteRow('+i+')">🗑 Delete</button>'+
+      '<div class="row">'+
+        '<button class="ghost small" onclick="saveRow('+i+',\'excluded\',this)">Exclude</button>'+
+        '<button class="ghost small" onclick="saveRow('+i+',null,this)">Save</button>'+
+        '<button class="small" onclick="saveRow('+i+',\'verified\',this)">✓ Verify</button>'+
+      '</div>'+
+    '</div>';
+  document.getElementById("editBackdrop").classList.add("show");
+}
+function closeEdit(){ document.getElementById("editBackdrop").classList.remove("show"); }
+function autoVat(){ /* placeholder for future net<->vat helpers */ }
+async function saveRow(i, status, btn){
+  const r = rows[i]; if(!r) return;
+  const body = { id: r.id,
+    supplier: document.getElementById("e-sup").value.trim(),
+    invoice_no: document.getElementById("e-no").value.trim(),
+    invoice_date: document.getElementById("e-date").value.trim(),
+    net: num(document.getElementById("e-net").value),
+    vat: num(document.getElementById("e-vat").value),
+    gross: num(document.getElementById("e-gross").value),
+    po_number: num(document.getElementById("e-po").value),
+    reverse_charge: document.getElementById("e-rc").checked ? 1 : 0,
+    notes: document.getElementById("e-notes").value.trim() };
+  if(status) body.status = status;
+  if(btn) btn.disabled = true;
+  try { await authFetch("/po/api/vat/save", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }); }
+  catch(e){ alert("Error: "+e.message); if(btn) btn.disabled=false; return; }
+  closeEdit(); load();
+}
+async function deleteRow(i){
+  const r = rows[i]; if(!r) return;
+  const ok = window.MLUI ? await MLUI.confirm("Remove this invoice from the VAT ledger?",{danger:true}) : confirm("Remove this invoice from the VAT ledger?");
+  if(!ok) return;
+  try { await authFetch("/po/api/vat/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id:r.id }) }); } catch(e){}
+  closeEdit(); load();
+}
+
+function exportCsv(){
+  if(!rows.length){ alert("Nothing to export in this view."); return; }
+  const cols = ["Supplier","Invoice no","Date","Net","VAT","Gross","VAT rate","Type","Reverse charge","Status","PO","Notes"];
+  const lines = [cols.join(",")];
+  rows.forEach(r=>{
+    const cells = [ r.supplier||"", r.invoice_no||"", r.invoice_date||"", r.net!=null?r.net:"", r.vat!=null?r.vat:"", r.gross!=null?r.gross:"", r.vat_rate!=null?r.vat_rate:"", r.category||"", r.reverse_charge?"YES":"", r.status||"", r.po_number!=null?r.po_number:"", r.notes||"" ];
+    lines.push(cells.map(c=>{ const s=String(c); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }).join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type:"text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  const per = document.getElementById("fPeriod").value || "all";
+  a.download = "vat-capture-"+per+".csv"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 30000);
+}
+
+// ── Reconcile against a Xero bills CSV (parsed in the browser) ────────────────
+function openReconcile(){
+  const m = document.getElementById("recModal");
+  m.innerHTML =
+    '<div class="row" style="justify-content:space-between"><h2 style="margin:0">🔗 Reconcile with Xero</h2><button class="ghost small" onclick="closeReconcile()">✕</button></div>'+
+    '<p class="muted" style="font-size:13px">In Xero: <strong>Business → Bills to pay</strong> (or Purchases) → filter the VAT quarter → <strong>Export</strong>. Drop that CSV here. It matches on invoice number, else supplier + total, and shows what’s in one place but not the other — so nothing slips the return.</p>'+
+    '<input id="recFile" type="file" accept=".csv,text/csv" onchange="doReconcile(this)">'+
+    '<div id="recOut" style="margin-top:12px"></div>';
+  document.getElementById("recBackdrop").classList.add("show");
+}
+function closeReconcile(){ document.getElementById("recBackdrop").classList.remove("show"); }
+function csvParse(text){
+  const rows=[]; let i=0, field="", row=[], inq=false; const s=text.replace(/\r\n?/g,"\n");
+  while(i<s.length){ const c=s[i];
+    if(inq){ if(c==='"'){ if(s[i+1]==='"'){ field+='"'; i+=2; continue; } inq=false; i++; continue; } field+=c; i++; continue; }
+    if(c==='"'){ inq=true; i++; continue; }
+    if(c===","){ row.push(field); field=""; i++; continue; }
+    if(c==="\n"){ row.push(field); rows.push(row); row=[]; field=""; i++; continue; }
+    field+=c; i++;
+  }
+  if(field.length||row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r=>r.some(c=>String(c).trim()!==""));
+}
+function findCol(headers, names){ for(let k=0;k<headers.length;k++){ const h=String(headers[k]||"").toLowerCase().replace(/[^a-z0-9]/g,""); if(names.some(n=>h===n||h.includes(n))) return k; } return -1; }
+function normNo(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+async function doReconcile(input){
+  const f = input.files && input.files[0]; if(!f) return;
+  const out = document.getElementById("recOut");
+  out.innerHTML = '<div class="muted">Reading…</div>';
+  // Make sure we compare against the WHOLE ledger for the chosen period, not just the current status filter.
+  const per = document.getElementById("fPeriod").value;
+  let ledger = [];
+  try { const d = await authFetch("/po/api/vat/list?"+(per?("period="+encodeURIComponent(per)):"")).then(r=>r.json()); ledger = (d&&d.rows)||[]; } catch(e){}
+  const text = await f.text();
+  const grid = csvParse(text);
+  if(grid.length < 2){ out.innerHTML = '<div class="note" style="background:#fdecea;border-color:#f5c6cb;color:#c0392b">That CSV didn’t parse. Export the Bills list from Xero and try again.</div>'; return; }
+  const head = grid[0];
+  const cNo = findCol(head, ["invoicenumber","reference","billnumber","number","ref"]);
+  const cSup = findCol(head, ["contactname","contact","supplier","to","from","name"]);
+  const cTot = findCol(head, ["total","grossamount","amount","totalgbp"]);
+  const cNet = findCol(head, ["subtotal","netamount","net"]);
+  const cVat = findCol(head, ["totaltax","taxamount","vat","tax"]);
+  const xero = grid.slice(1).map(r=>({
+    no: cNo>=0 ? r[cNo] : "", sup: cSup>=0 ? r[cSup] : "", total: cTot>=0 ? Number(String(r[cTot]).replace(/[^0-9.\-]/g,"")) : null,
+    net: cNet>=0 ? Number(String(r[cNet]).replace(/[^0-9.\-]/g,"")) : null, vat: cVat>=0 ? Number(String(r[cVat]).replace(/[^0-9.\-]/g,"")) : null,
+  })).filter(x=> x.no || x.sup || x.total!=null);
+  // Match: invoice number first, else supplier + gross within 1p.
+  const usedX = new Set();
+  const matched=[], portalOnly=[];
+  ledger.forEach(l=>{
+    const ln = normNo(l.invoice_no);
+    let xi = -1;
+    if(ln) xi = xero.findIndex((x,idx)=> !usedX.has(idx) && ln && normNo(x.no)===ln);
+    if(xi<0 && l.gross!=null) xi = xero.findIndex((x,idx)=> !usedX.has(idx) && x.total!=null && Math.abs(x.total-Number(l.gross))<0.02 && normNo(x.sup).slice(0,5)===normNo(l.supplier).slice(0,5));
+    if(xi>=0){ usedX.add(xi); matched.push({l, x:xero[xi]}); } else portalOnly.push(l);
+  });
+  const xeroOnly = xero.filter((x,idx)=>!usedX.has(idx));
+  const box = (title, color, items, render) => '<div class="card" style="padding:10px;margin:8px 0"><div style="font-weight:700;color:'+color+';margin-bottom:6px">'+title+' ('+items.length+')</div>'+ (items.length? items.slice(0,200).map(render).join("") : '<div class="muted" style="font-size:12px">None</div>') +'</div>';
+  out.innerHTML =
+    '<div class="note" style="margin-bottom:8px">Compared '+ledger.length+' captured vs '+xero.length+' Xero rows'+(per?(" for "+esc(per)):"")+'.</div>'+
+    box("⚠ In Xero, NOT captured here", "#c0392b", xeroOnly, x=>'<div style="font-size:13px;border-bottom:1px solid #eef1f5;padding:4px 0">'+esc(x.sup||"—")+' · '+esc(x.no||"")+' · '+gbp(x.total)+'</div>')+
+    box("⚠ Captured here, NOT in Xero", "#b58a00", portalOnly, l=>'<div style="font-size:13px;border-bottom:1px solid #eef1f5;padding:4px 0">'+esc(l.supplier||"—")+' · '+esc(l.invoice_no||"")+' · '+gbp(l.gross)+' · '+statusPill(l.status)+'</div>')+
+    box("✓ Matched", "#1e6c33", matched, o=>'<div style="font-size:13px;border-bottom:1px solid #eef1f5;padding:4px 0">'+esc(o.l.supplier||"—")+' · '+esc(o.l.invoice_no||"")+' · '+gbp(o.l.gross)+(o.x.total!=null&&Math.abs(Number(o.x.total)-Number(o.l.gross))>=0.02?' <span style="color:#c0392b">≠ Xero '+gbp(o.x.total)+'</span>':'')+'</div>');
+}
+
+document.getElementById("editBackdrop").addEventListener("mousedown", e=>{ if(e.target.id==="editBackdrop") closeEdit(); });
+document.getElementById("recBackdrop").addEventListener("mousedown", e=>{ if(e.target.id==="recBackdrop") closeReconcile(); });
+load();
+</script>
+</body>
+</html>
