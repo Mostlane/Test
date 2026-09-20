@@ -49,6 +49,7 @@ import * as costing from "./routes/costing.js";    // DONE  (site register, labo
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
+import * as accounts from "./routes/accounts.js";  // DONE  (standalone Accounts capture: documents/statements store + statement lines + supplier tick-off)
 import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: plain-English → job draft preview → create)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
@@ -128,6 +129,7 @@ const ROUTES = [
   ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
+  ["*", "/accounts",   accounts.handle], // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => emailIntakeApi(req, env, ctx, url, sess, worker.fetch)], // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
@@ -533,6 +535,7 @@ const PUBLIC_ROUTES = [
   ["GET", "/fra/quote"],
   // Supplier invoice PDFs attached to a PO, streamed inline — signed URL, verified in-handler.
   ["GET", "/po/invoice-file"],
+  ["GET", "/accounts/doc-file"],
   // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
   ["POST", "/customer/job"],
   ["POST", "/customer/reschedule"],

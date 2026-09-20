@@ -89,6 +89,8 @@
   Cache-Control: no-cache
 /vat.html
   Cache-Control: no-cache
+/accounts.html
+  Cache-Control: no-cache
 /po-raise.html
   Cache-Control: no-cache
 /po-stats.html
