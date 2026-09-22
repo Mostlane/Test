@@ -180,6 +180,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
         <a href="po-accounts.html">Accounts</a>
         <a href="po-stats.html">Stats</a>
         <a href="po-admin.html">Admin</a>
+        <a href="vat.html">💷 VAT capture</a>
         <button type="button" onclick="exportCSV()">⬇ Export CSV</button>
         <button type="button" onclick="openReport()">🖨 PDF Report</button>
       </div>
@@ -191,6 +192,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
     <div class="row-between">
       <h1 style="margin:0">PO Log</h1>
       <div class="row">
+        <button class="small ghost" onclick="openInvoiceMatch()">📎 Match invoices</button>
         <button class="small" onclick="openNewPO()">+ New PO</button>
       </div>
     </div>
@@ -474,7 +476,8 @@ function renderPOs(pos) {
   const siteNames = new Set(allSites.map(s => s.name));
   tbody.innerHTML = pos.map(p => {
     const dStr = fmtDateTime(p.issued_at);
-    const cost = p.cost_ex_vat != null ? formatMoney(p.cost_ex_vat) : '<span class="muted">—</span>';
+    let cost = p.cost_ex_vat != null ? formatMoney(p.cost_ex_vat) : '<span class="muted">—</span>';
+    if (p.invoice_key) cost += ' <button class="ghost small" style="padding:2px 6px;font-size:11px;margin-left:2px" title="View attached invoice" onclick="viewInvoice(' + Number(p.po_number) + ')">📎</button>';
     const siteUnmatched = p.site && !siteNames.has(p.site);
     let siteCell = (p.site ? escapeHtml(p.site) : (p.incident_no ? '<span class="muted">—</span>' : '—')) + (siteUnmatched ? ' <span title="Site not in master list" style="color:#b58a00">⚠️</span>' : '');
     if (p.incident_no) siteCell += '<div style="font-size:12px;margin-top:2px"><span class="badge engineer" title="Incident number">🎫 ' + escapeHtml(p.incident_no) + '</span></div>';
@@ -630,7 +633,18 @@ async function submitNewPO(btn) {
   try {
     const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
     if (res.error) { alert(res.error); return; }
-    alert('PO ' + res.po_number + ' issued');
+    if (invPending) {
+      const pCost = Number(invPending.cost) || 0;
+      let attach = null;
+      try { attach = await invAttachToNewPo(res.po_number); } catch (e) { attach = { error: e.message }; }
+      if (invPending.kind === 'sweep' && invPending.it) invPending.it._done = true;
+      invPending = null;
+      alert(attach && attach.error
+        ? 'PO ' + res.po_number + ' raised, but attaching the invoice failed: ' + attach.error
+        : 'PO ' + res.po_number + ' raised and invoice attached · £' + pCost.toFixed(2));
+    } else {
+      alert('PO ' + res.po_number + ' issued');
+    }
     closeModal(); loadPOs(); loadDashboard();
   } catch (e) {
     alert('Error: ' + e.message);
@@ -672,6 +686,7 @@ function openEdit(poNumber) {
       <div class="field"><label>VAT rate (%)</label><input id="e-vat-rate" type="number" step="0.01" value="${escapeHtml(vatRate)}" oninput="syncCost('rate')"></div>
     </div>
     <div class="field"><label>Cost inc VAT (£)</label><input id="e-cost-inc" type="number" step="0.01" value="${escapeHtml(costInc)}" oninput="syncCost('inc')"></div>
+    ${p.invoice_key ? '<div class="field" style="margin-top:-4px"><button type="button" class="ghost small" onclick="viewInvoice(' + Number(poNumber) + ')">📎 View attached invoice</button></div>' : '<div class="muted" style="font-size:12px;margin:-4px 0 8px">No invoice attached — use “📎 Match invoices” to attach one.</div>'}
 
     <h3 style="margin-top:18px;margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Status</h3>
     <div class="field"><label>Status</label>
@@ -833,6 +848,769 @@ function openReport() {
   if (document.getElementById('filter-uncosted').checked) params.set('uncosted', '1');
   if (document.getElementById('filter-unmatched-site').checked) params.set('unmatched_site', '1');
   printReport(allPOs);
+}
+// ── Match a supplier invoice → attach the PDF to the PO + fill in the cost ─────
+// Confirm-first: the reader PROPOSES a PO + cost; nothing is written until the
+// office taps Apply. The same File is re-sent on Apply so it's attached to the PO.
+let invFile = null, invFields = null;
+function openInvoiceMatch() {
+  invFile = null; invFields = null;
+  document.getElementById('modal-title').textContent = '📎 Match a supplier invoice';
+  document.getElementById('modal-body').innerHTML =
+    '<div style="margin:0 0 12px"><button class="ghost small" onclick="invStartSweep()">🔎 Sweep the accounts@ inbox for invoices</button></div>' +
+    '<p class="muted" style="margin-top:0">Or drop a supplier invoice PDF (or pick one). It reads the PO number, cost and date, finds the matching PO and — once you confirm — fills the cost in and attaches the PDF to that PO. Nothing is saved until you press Apply.</p>' +
+    '<div id="inv-drop" style="border:2px dashed #c9d2dd;border-radius:14px;padding:26px 16px;text-align:center;background:#f8fafd;cursor:pointer">' +
+      '<div style="font-size:32px;line-height:1">📄</div>' +
+      '<div style="font-weight:600;color:#003366;margin-top:6px">Drop an invoice PDF here</div>' +
+      '<div class="muted" style="font-size:13px;margin-top:2px">or tap to choose a file</div>' +
+      '<input id="inv-file" type="file" accept="application/pdf,.pdf" style="display:none">' +
+    '</div>' +
+    '<div id="inv-result" style="margin-top:14px"></div>';
+  const drop = document.getElementById('inv-drop');
+  const file = document.getElementById('inv-file');
+  drop.onclick = () => file.click();
+  file.onchange = () => { if (file.files && file.files[0]) invParse(file.files[0]); };
+  ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#1A4F8F'; drop.style.background = '#eef4ff'; }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = '#c9d2dd'; drop.style.background = '#f8fafd'; }));
+  drop.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) invParse(f); });
+  document.getElementById('modal').classList.add('show');
+}
+async function invParse(file) {
+  if (file.size > 15 * 1024 * 1024) { alert('That PDF is too big (max 15 MB)'); return; }
+  invFile = file; invFields = null;
+  const res = document.getElementById('inv-result');
+  res.innerHTML = '<div class="muted" style="text-align:center;padding:16px">Reading “' + escapeHtml(file.name) + '”…</div>';
+  let data;
+  try {
+    const fd = new FormData(); fd.append('file', file, file.name);
+    data = await authFetch('/po/api/invoice/parse', { method: 'POST', body: fd }).then(r => r.json());
+  } catch (e) { res.innerHTML = '<div class="alert warn">Couldn’t read that file: ' + escapeHtml(e.message) + '</div>'; return; }
+  if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Could not read the invoice') + '</div>'; return; }
+  invFields = data.fields || {};
+  window.invLastParse = data;
+  invRenderProposal(data);
+}
+function invMoney(n) { return n == null ? '—' : ('£' + Number(n).toFixed(2)); }
+function invRenderProposal(data) {
+  const f = data.fields || {};
+  const tier = data.tier === 'vision' ? '🤖 read by AI (scanned/odd layout)' : (data.tier === 'text' ? '⚡ read instantly' : '⚠ little text found');
+  const notInv = data.notInvoice ? '<div class="alert warn" style="margin-bottom:12px">⚠ This looks like a <strong>' + escapeHtml(data.docType || 'non-invoice') + '</strong> (e.g. a remittance/statement), not a purchase invoice. Attach it only if you’re sure.</div>' : '';
+  const catPill = data.category ? '<span style="margin-left:6px;vertical-align:middle">' + invCatBadge(data.category) + '</span>' : '';
+  const read = notInv +
+    '<div class="card" style="margin-bottom:12px;padding:14px">' +
+      '<div style="font-weight:600;color:#003366;margin-bottom:6px">What the invoice says <span class="muted" style="font-weight:400;font-size:12px">· ' + tier + '</span>' + catPill + '</div>' +
+      '<div style="font-size:14px;line-height:1.7">' +
+        'Supplier: <strong>' + escapeHtml(f.supplier || '—') + '</strong><br>' +
+        'Invoice no: ' + escapeHtml(f.invoiceNumber || '—') + ' · Date: ' + escapeHtml(f.invoiceDate || '—') + '<br>' +
+        'Net: <strong>' + invMoney(f.net) + '</strong> · VAT: ' + invMoney(f.vat) + ' · Total: ' + invMoney(f.gross) +
+        (f.poNumber ? '<br>PO on invoice: <strong>' + escapeHtml(f.poNumber) + '</strong>' : '') +
+      '</div>' +
+    '</div>';
+  let match = '';
+  if (data.po) {
+    const p = data.po;
+    const warn = p.priced ? '<div class="alert warn" style="margin:8px 0">⚠ This PO already has a cost of ' + invMoney(p.cost_ex_vat) + '. Applying will overwrite it.</div>' : '';
+    const dup = p.has_invoice ? '<div class="alert warn" style="margin:8px 0">⚠ An invoice is already attached to this PO. Applying will replace it.</div>' : '';
+    match =
+      '<div class="card" style="padding:14px;border:2px solid #1e6c33">' +
+        '<div style="font-weight:700;color:#1e6c33;margin-bottom:6px">✓ Matches PO ' + escapeHtml(p.po_number) + '</div>' +
+        '<div class="muted" style="font-size:13px;line-height:1.6">' + escapeHtml(p.supplier || '') + ' · raised ' + escapeHtml(fmtDate(p.issued_at)) + (p.who ? ' · ' + escapeHtml(p.who) : '') + '<br>' +
+        escapeHtml(p.site || p.incident_no || '') + (p.description ? '<br>' + escapeHtml(p.description) : '') + '</div>' +
+        warn + dup +
+        invConfirmBlock(p.po_number, f) +
+      '</div>';
+  } else if (data.candidates && data.candidates.length) {
+    match =
+      '<div class="card" style="padding:14px">' +
+        '<div style="font-weight:600;color:#003366;margin-bottom:4px">No PO number on the invoice — best matches by supplier + date</div>' +
+        '<div class="muted" style="font-size:12px;margin-bottom:8px">The transaction date is matched against when each PO was raised. Pick the right one.</div>' +
+        data.candidates.map(c =>
+          '<label style="display:flex;gap:10px;align-items:flex-start;padding:8px;border:1px solid #e3e7ee;border-radius:10px;margin-bottom:6px;cursor:pointer">' +
+            '<input type="radio" name="inv-cand" value="' + Number(c.po_number) + '" style="width:auto;margin-top:3px" onchange="invPickCand(' + Number(c.po_number) + ')">' +
+            '<span style="font-size:13px;line-height:1.5"><strong style="color:#003366">' + escapeHtml(c.po_number) + '</strong> · ' + escapeHtml(c.supplier || '—') +
+            (c.supplierMatch ? ' <span class="badge ok">supplier ✓</span>' : '') +
+            ' <span class="badge office">' + (c.daysApart === 0 ? 'same day' : c.daysApart + 'd apart') + '</span><br>' +
+            '<span class="muted">raised ' + escapeHtml(fmtDate(c.issued_at)) + (c.who ? ' · ' + escapeHtml(c.who) : '') + (c.site ? ' · ' + escapeHtml(c.site) : '') + '</span>' +
+            (c.description ? '<br><span class="muted">' + escapeHtml(c.description) + '</span>' : '') + '</span>' +
+          '</label>'
+        ).join('') +
+        invManualBox(f) +
+        '<div id="inv-cand-confirm" style="margin-top:10px"></div>' +
+      '</div>';
+  } else {
+    match =
+      '<div class="card" style="padding:14px">' +
+        '<div class="alert warn" style="margin:0 0 10px">No matching PO found automatically. Type the PO number to attach it to.</div>' +
+        invManualBox(f) +
+        '<div id="inv-cand-confirm" style="margin-top:10px"></div>' +
+      '</div>';
+  }
+  document.getElementById('inv-result').innerHTML = read + match;
+}
+function invManualBox(f) {
+  return '<div class="row" style="gap:8px;align-items:flex-end;margin-top:6px">' +
+    '<div style="flex:1"><label style="font-size:12px">Attach to PO number</label><input id="inv-manual-po" type="number" placeholder="e.g. 10505" oninput="invManualPo()"></div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:8px;flex-wrap:wrap">' +
+      '<button class="ghost small" onclick="invFindJobManual()">🔎 Find a job &amp; raise PO</button>' +
+      '<button class="ghost small" onclick="invRaisePOManual()">➕ Raise a new PO</button>' +
+      '<button class="ghost small" onclick="invAddPartyManual()">🏷️ Add supplier/sub</button>' +
+      '<button class="ghost small" style="color:#c0392b" onclick="openFlagLogManual()">⚠ Flag &amp; log (no PO)</button>' +
+    '</div>';
+}
+function invPickCand(n) { invRenderConfirmInto('inv-cand-confirm', n, invFields); const m = document.getElementById('inv-manual-po'); if (m) m.value = ''; }
+function invManualPo() {
+  const n = Number((document.getElementById('inv-manual-po') || {}).value);
+  document.querySelectorAll('input[name=inv-cand]').forEach(r => r.checked = false);
+  if (n >= 10011) invRenderConfirmInto('inv-cand-confirm', n, invFields);
+  else { const c = document.getElementById('inv-cand-confirm'); if (c) c.innerHTML = ''; }
+}
+// The cost-confirm block: prefilled from the invoice, editable, Apply button.
+function invConfirmBlock(poNumber, f) {
+  const net = f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : '');
+  const rate = (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20;
+  return '<div style="margin-top:12px;border-top:1px solid #eef1f5;padding-top:12px">' +
+    '<div class="grid-2">' +
+      '<div class="field" style="margin-bottom:8px"><label>Net cost ex VAT (£)</label><input id="inv-cost" type="number" step="0.01" value="' + escapeAttr(net) + '"></div>' +
+      '<div class="field" style="margin-bottom:8px"><label>VAT rate (%)</label><input id="inv-vat-rate" type="number" step="0.01" value="' + escapeAttr(rate) + '"></div>' +
+    '</div>' +
+    '<button onclick="invApply(' + Number(poNumber) + ', this)">✓ Attach invoice &amp; set cost on PO ' + Number(poNumber) + '</button>' +
+  '</div>';
+}
+function invRenderConfirmInto(elId, poNumber, f) {
+  const el = document.getElementById(elId); if (!el) return;
+  el.innerHTML = '<div style="border:1px solid #1e6c33;border-radius:10px;padding:10px"><div style="font-weight:600;color:#1e6c33;margin-bottom:4px">Attach to PO ' + escapeHtml(poNumber) + '</div>' + invConfirmBlock(poNumber, f || {}) + '</div>';
+}
+async function invApply(poNumber, btn) {
+  const costEl = document.getElementById('inv-cost');
+  const rateEl = document.getElementById('inv-vat-rate');
+  const cost = costEl ? parseFloat(costEl.value) : NaN;
+  if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  if (!invFile) { alert('The invoice file was lost — drop it again'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
+  const f = invFields || {};
+  const fd = new FormData();
+  fd.append('file', invFile, invFile.name);
+  fd.append('po_number', String(poNumber));
+  fd.append('cost_ex_vat', String(cost));
+  if (rateEl && rateEl.value !== '') fd.append('vat_rate', String(parseFloat(rateEl.value)));
+  if (f.invoiceNumber) fd.append('invoice_no', f.invoiceNumber);
+  if (f.invoiceDate) fd.append('invoice_date', f.invoiceDate);
+  if (f.vat != null) fd.append('vat', String(f.vat));
+  if (f.gross != null) fd.append('gross', String(f.gross));
+  let res;
+  try { res = await authFetch('/po/api/invoice/apply', { method: 'POST', body: fd }).then(r => r.json()); }
+  catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = 'Apply'; } return; }
+  if (!res || res.error) { alert((res && res.error) || 'Could not attach the invoice'); if (btn) { btn.disabled = false; btn.textContent = 'Apply'; } return; }
+  alert('Invoice attached to PO ' + poNumber + ' and cost set to £' + cost.toFixed(2));
+  closeModal(); loadPOs(); loadDashboard();
+}
+async function viewInvoice(poNumber) {
+  try {
+    const r = await authFetch('/po/api/invoice/url?po=' + Number(poNumber)).then(x => x.json());
+    if (r && r.url) window.open(r.url, '_blank');
+    else alert((r && r.error) || 'No invoice attached');
+  } catch (e) { alert('Could not open the invoice: ' + e.message); }
+}
+// ── Sweep the accounts@ inbox: read every invoice PDF and propose matches ─────
+let invSweepItems = [];
+let invFilter = 'all';
+let invSummaryHtml = '';
+// When a no-PO invoice needs a NEW PO raised for it, this holds the invoice so
+// submitNewPO can attach it (+ its cost) onto the PO it just created.
+let invPending = null;
+// Small coloured pill naming the category on each sweep card.
+function invCatBadge(cat) {
+  const m = {
+    confident: ['✅ Confident match', '#1e6c33', '#e6f5ea'],
+    subcontractor: ['👷 Sub Contractor', '#7a4ca0', '#f1e9fa'],
+    flag: ['⚠ No PO — flag', '#c0392b', '#fdecea'],
+    other: ['❓ Other', '#5a6677', '#eef1f5'],
+  };
+  const [label, fg, bg] = m[cat] || m.other;
+  return '<span style="display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;color:' + fg + ';background:' + bg + '">' + label + '</span>';
+}
+async function invStartSweep() {
+  document.getElementById('modal-title').textContent = '🔎 Sweep the mailbox for invoices';
+  let cfg = {};
+  try { cfg = await authFetch('/po/api/invoice/sweep-config').then(r => r.json()); } catch (e) {}
+  if (!cfg || !cfg.configured) {
+    document.getElementById('modal-body').innerHTML = '<div class="alert warn">The mailbox connection isn’t set up on the server yet (the GRAPH_* secrets). Once those are in, this will read the inbox for you.</div><button class="ghost small" onclick="openInvoiceMatch()">‹ Back</button>';
+    return;
+  }
+  document.getElementById('modal-body').innerHTML =
+    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row.</p>' +
+    '<div class="grid-2">' +
+      '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(cfg.mailbox || '') + '"></div>' +
+      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(cfg.days || 60) + '" min="1" max="365"></div>' +
+    '</div>' +
+    '<div class="row"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log</button></div>' +
+    '<div id="sw-result" style="margin-top:14px"></div>';
+}
+async function invRunSweep(btn) {
+  const mailbox = (document.getElementById('sw-mailbox') || {}).value || '';
+  const days = Number((document.getElementById('sw-days') || {}).value) || 60;
+  const res = document.getElementById('sw-result');
+  res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">Reading the mailbox and reading each invoice… this can take a minute.</div>';
+  if (btn) btn.disabled = true;
+  let data;
+  try { data = await authFetch('/po/api/invoice/sweep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mailbox, days }) }).then(r => r.json()); }
+  catch (e) { res.innerHTML = '<div class="alert warn">Sweep failed: ' + escapeHtml(e.message) + '</div>'; if (btn) btn.disabled = false; return; }
+  if (btn) btn.disabled = false;
+  if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; return; }
+  invSweepItems = data.proposals || [];
+  invFilter = 'all';
+  invSummaryHtml = '<div class="muted" style="font-size:13px;margin-bottom:8px">Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox) + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done / not invoices' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
+  invRenderResults();
+}
+// Category of a swept invoice: the server sets it, with a safe fallback.
+function invCatOf(it) { return (it && it.category) || (it && it.po ? 'confident' : 'other'); }
+function invActive() { return invSweepItems.map((it, i) => ({ it, i })).filter(x => !x.it._done); }
+function invFlagLogBtnHtml() { return '<div style="margin:2px 0 12px"><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log (who isn\'t raising POs)</button></div>'; }
+// Filter chips + the filtered card list. Called after a sweep + whenever the
+// filter changes or an item is handled.
+function invRenderResults() {
+  const res = document.getElementById('sw-result'); if (!res) return;
+  const act = invActive();
+  if (!invSweepItems.length) { res.innerHTML = invSummaryHtml + '<div class="empty">Nothing new to match — every invoice found is either already priced, a remittance/statement, or has no matching PO.</div>' + invFlagLogBtnHtml(); return; }
+  if (!act.length) { res.innerHTML = invSummaryHtml + '<div class="empty">✓ All handled.</div>' + invFlagLogBtnHtml(); return; }
+  const counts = { all: act.length, confident: 0, subcontractor: 0, flag: 0, other: 0 };
+  act.forEach(x => { const c = invCatOf(x.it); counts[c] = (counts[c] || 0) + 1; });
+  const chip = (key, label) => {
+    const on = invFilter === key;
+    return '<button onclick="invSetFilter(\'' + key + '\')" style="border:1px solid ' + (on ? '#003366' : '#cdd5e0') + ';background:' + (on ? '#003366' : '#fff') + ';color:' + (on ? '#fff' : '#003366') + ';border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;margin:0 6px 8px 0">' + label + ' (' + (counts[key] || 0) + ')</button>';
+  };
+  const chips = '<div style="margin:2px 0 10px">' + chip('all', 'All') + chip('confident', '✅ Confident') + chip('subcontractor', '👷 Sub Contractor') + chip('flag', '⚠ No PO – flag') + chip('other', '❓ Other') + '</div>';
+  const shown = act.filter(x => invFilter === 'all' || invCatOf(x.it) === invFilter);
+  const nConf = act.filter(x => invIsConfident(x.it)).length;
+  const bulkBtn = (nConf && (invFilter === 'all' || invFilter === 'confident')) ? '<div style="margin-bottom:12px"><button onclick="invBulkReview()">✅ Attach all confident matches (' + nConf + ')</button></div>' : '';
+  res.innerHTML = invSummaryHtml + invFlagLogBtnHtml() + chips + bulkBtn + (shown.length ? shown.map(x => invSweepCard(x.it, x.i)).join('') : '<div class="empty">None in this filter.</div>');
+}
+function invSetFilter(k) { invFilter = k; invRenderResults(); }
+// "Confident" = the invoice named a PO number that matched a real PO, and the
+// reader got a net + total. (Fuzzy/candidate-only ones are never bulk-applied.)
+function invIsConfident(it) {
+  const f = it.fields || {};
+  return !!(it && !it._done && it.po && it.po.po_number && f.net != null && f.gross != null);
+}
+function invSweepCard(it, i) {
+  const f = it.fields || {};
+  const net = f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : '');
+  const rate = (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20;
+  const cat = invCatOf(it);
+  const head =
+    '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div style="font-weight:600;color:#003366">' + escapeHtml((it.po && it.po.supplier) || f.supplier || it.from || 'Invoice') + ' <span class="muted" style="font-weight:400;font-size:12px">· ' + escapeHtml(f.invoiceNumber || it.filename || '') + '</span></div>' + invCatBadge(cat) + '</div>' +
+    '<div class="muted" style="font-size:12px;margin:2px 0 8px">' + escapeHtml(it.subject || '') + (it.receivedDateTime ? ' · ' + escapeHtml(fmtDate(it.receivedDateTime)) : '') + '</div>' +
+    '<div style="font-size:13px;line-height:1.5">Net <strong>' + invMoney(f.net) + '</strong> · VAT ' + invMoney(f.vat) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</div>';
+  let pick = '';
+  if (it.po) {
+    const warn = it.po.priced ? '<div style="color:#b58a00;font-size:12px;margin-top:4px">⚠ already has a cost of ' + invMoney(it.po.cost_ex_vat) + ' — Attach overwrites it</div>' : '';
+    pick = '<div style="margin-top:8px;font-weight:600;color:#1e6c33">✓ PO ' + escapeHtml(it.po.po_number) + '</div>' +
+      '<div class="muted" style="font-size:12px">' + escapeHtml(it.po.site || it.po.incident_no || '') + (it.po.who ? ' · ' + escapeHtml(it.po.who) : '') + '</div>' + warn +
+      '<input type="hidden" id="sw-po-' + i + '" value="' + Number(it.po.po_number) + '">';
+  } else {
+    const opts = (it.candidates || []).map(c => '<option value="' + Number(c.po_number) + '">' + escapeHtml(c.po_number) + ' — ' + escapeHtml(c.supplier || '') + (c.supplierMatch ? ' ✓' : '') + ' · ' + (c.daysApart === 0 ? 'same day' : c.daysApart + 'd') + '</option>').join('');
+    pick = '<div style="margin-top:8px"><label style="font-size:12px">Attach to PO</label>' +
+      (opts ? '<select id="sw-po-' + i + '"><option value="">— pick a candidate —</option>' + opts + '</select>' : '<div class="muted" style="font-size:12px;margin-bottom:4px">No candidate found — type the PO number.</div>') +
+      '<input id="sw-poman-' + i + '" type="number" placeholder="or type a PO number" style="margin-top:6px"></div>';
+  }
+  const confirm =
+    '<div class="grid-2" style="margin-top:8px">' +
+      '<div class="field" style="margin-bottom:6px"><label>Net ex VAT (£)</label><input id="sw-cost-' + i + '" type="number" step="0.01" value="' + escapeAttr(net) + '"></div>' +
+      '<div class="field" style="margin-bottom:6px"><label>VAT %</label><input id="sw-rate-' + i + '" type="number" step="0.01" value="' + escapeAttr(rate) + '"></div>' +
+    '</div>' +
+    '<div class="row" style="flex-wrap:wrap">' +
+    '<button class="small" onclick="invSweepApply(' + i + ', this)">✓ Attach &amp; set cost</button>' +
+    (it.po ? '' :
+      '<button class="ghost small" onclick="invFindJob(' + i + ')">🔎 Find a job &amp; raise PO</button>' +
+      '<button class="ghost small" onclick="invRaisePO(' + i + ')">➕ Raise a new PO</button>' +
+      (cat === 'other' ? '<button class="ghost small" onclick="invAddParty(' + i + ')">🏷️ Add supplier/sub</button>' : '') +
+      (cat === 'flag' || cat === 'other' ? '<button class="ghost small" style="color:#c0392b" onclick="openFlagLog(' + i + ')">⚠ Flag &amp; log</button>' : '')) +
+    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
+  return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
+}
+function invSweepPo(i) {
+  const man = document.getElementById('sw-poman-' + i);
+  if (man && man.value) return Number(man.value);
+  const sel = document.getElementById('sw-po-' + i);
+  return sel ? Number(sel.value) : NaN;
+}
+// Shared apply: POST one sweep item to a PO. Returns the parsed response.
+async function invPostApply(it, poNumber, cost, rate) {
+  const f = it.fields || {};
+  const body = { mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId,
+    po_number: poNumber, cost_ex_vat: cost, filename: it.filename };
+  if (Number.isFinite(rate)) body.vat_rate = rate;
+  if (f.invoiceNumber) body.invoice_no = f.invoiceNumber;
+  if (f.invoiceDate) body.invoice_date = f.invoiceDate;
+  if (f.vat != null) body.vat = f.vat;
+  if (f.gross != null) body.gross = f.gross;
+  return authFetch('/po/api/invoice/sweep-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+}
+function invNetOf(f) { return f.net != null ? f.net : (f.gross != null ? Math.round((f.gross / 1.2) * 100) / 100 : null); }
+function invRateOf(f) { return (f.net && f.vat) ? Math.round((f.vat / f.net) * 100) : 20; }
+async function invSweepApply(i, btn) {
+  const it = invSweepItems[i]; if (!it) return;
+  const poNumber = invSweepPo(i);
+  if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
+  const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
+  if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
+  if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
+  let res;
+  try { res = await invPostApply(it, poNumber, cost, rate); }
+  catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
+  if (!res || res.error) { alert((res && res.error) || 'Could not attach'); if (btn) { btn.disabled = false; btn.textContent = '✓ Attach & set cost'; } return; }
+  it._done = true;
+  invRenderResults();
+  loadPOs(); loadDashboard();
+}
+// ── "Attach all confident matches" → a review modal you flick through ─────────
+function invBulkReview() {
+  const conf = invSweepItems.map((it, i) => ({ it, i })).filter(x => invIsConfident(x.it));
+  if (!conf.length) { alert('No confident matches to attach.'); return; }
+  let bk = document.getElementById('invBulkBackdrop');
+  if (!bk) {
+    bk = document.createElement('div');
+    bk.id = 'invBulkBackdrop';
+    bk.className = 'modal-backdrop';
+    bk.style.zIndex = '200';
+    bk.innerHTML = '<div class="modal" style="max-width:520px"><div class="row-between"><h2 id="invBulkTitle" style="margin:0"></h2><button class="ghost small" onclick="invBulkClose()">✕</button></div><div id="invBulkBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) invBulkClose(); });
+  }
+  document.getElementById('invBulkTitle').textContent = '✅ Confirm ' + conf.length + ' invoice' + (conf.length > 1 ? 's' : '');
+  const rows = conf.map(x => {
+    const it = x.it, i = x.i, f = it.fields || {}, po = it.po;
+    const net = invNetOf(f);
+    const overwriteDiff = po.priced && Math.abs(Number(po.cost_ex_vat) - Number(net)) > 0.02;
+    const checked = overwriteDiff ? '' : ' checked';   // a differing existing cost starts UNticked
+    const warn = po.priced
+      ? '<div style="font-size:11px;color:' + (overwriteDiff ? '#c0392b' : '#b58a00') + ';margin-top:2px">' + (overwriteDiff ? '⚠ PO already £' + invMoney(po.cost_ex_vat) + ' — differs, unticked' : '↻ re-attach (already £' + invMoney(po.cost_ex_vat) + ')') + '</div>'
+      : '';
+    return '<label style="display:flex;gap:10px;align-items:flex-start;padding:9px;border:1px solid #e3e7ee;border-radius:10px;margin-bottom:7px;cursor:pointer">' +
+      '<input type="checkbox" class="inv-bulk-tick" data-i="' + i + '" style="width:auto;margin-top:3px"' + checked + '>' +
+      '<span style="flex:1;font-size:13px;line-height:1.5">' +
+        '<strong style="color:#003366">PO ' + escapeHtml(po.po_number) + '</strong> · ' + escapeHtml(po.supplier || f.supplier || it.from || '') + '<br>' +
+        '<span class="muted">' + escapeHtml(po.site || po.incident_no || '') + ' · Net ' + invMoney(net) + ' · Total ' + invMoney(f.gross) + (f.invoiceDate ? ' · ' + escapeHtml(f.invoiceDate) : '') + '</span>' + warn +
+      '</span>' +
+      '<button class="ghost small" style="padding:4px 8px;font-size:12px" onclick="event.preventDefault();invSweepView(' + i + ')">👁</button>' +
+    '</label>';
+  }).join('');
+  document.getElementById('invBulkBody').innerHTML =
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">Flick through and untick any you want to skip, then attach. Each files the invoice PDF onto its PO and sets the cost.</p>' +
+    rows +
+    '<div id="invBulkProgress" style="margin:8px 0;font-size:13px;color:#003366"></div>' +
+    '<div class="row-between" style="margin-top:6px"><button class="ghost small" onclick="invBulkClose()">Cancel</button><button id="invBulkGo" onclick="invBulkApply(this)">✓ Attach ticked</button></div>';
+  bk.classList.add('show');
+}
+function invBulkClose() { const bk = document.getElementById('invBulkBackdrop'); if (bk) bk.classList.remove('show'); }
+async function invBulkApply(btn) {
+  const ticks = Array.from(document.querySelectorAll('.inv-bulk-tick:checked')).map(c => Number(c.getAttribute('data-i')));
+  if (!ticks.length) { alert('Nothing ticked'); return; }
+  if (btn) btn.disabled = true;
+  const prog = document.getElementById('invBulkProgress');
+  let ok = 0, fail = 0;
+  for (let n = 0; n < ticks.length; n++) {
+    const i = ticks[n];
+    const it = invSweepItems[i]; if (!it || it._done) continue;
+    const f = it.fields || {}, po = it.po;
+    if (prog) prog.textContent = 'Attaching ' + (n + 1) + ' of ' + ticks.length + '… (PO ' + po.po_number + ')';
+    try {
+      const res = await invPostApply(it, Number(po.po_number), invNetOf(f), invRateOf(f));
+      if (res && !res.error) {
+        ok++; it._done = true;
+        const card = document.getElementById('sw-card-' + i);
+        if (card) card.innerHTML = '<div style="color:#1e6c33;font-weight:600;padding:6px 0">✓ Attached to PO ' + po.po_number + '</div>';
+      } else { fail++; }
+    } catch (e) { fail++; }
+  }
+  if (prog) prog.textContent = 'Done — ' + ok + ' attached' + (fail ? ', ' + fail + ' failed' : '') + '.';
+  loadPOs(); loadDashboard();
+  setTimeout(() => { invBulkClose(); alert(ok + ' invoice' + (ok !== 1 ? 's' : '') + ' attached' + (fail ? ' · ' + fail + ' failed — check those manually' : '')); }, 600);
+}
+// ── Raise a NEW PO for a no-PO invoice (subcontractor / one-off), then attach ──
+function invRaisePO(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  const f = it.fields || {};
+  invPending = { kind: 'sweep', it, fields: f, cost: invNetOf(f), rate: invRateOf(f), filename: it.filename,
+    supplier: (it.po && it.po.supplier) || f.supplier || '', category: invCatOf(it),
+    subName: it.subName || null, job: null };
+  openInvRaise();
+}
+function invRaisePOManual() {
+  if (!invFile) { alert('Drop the invoice again'); return; }
+  const f = invFields || {};
+  invPending = { kind: 'manual', file: invFile, fields: f, cost: invNetOf(f), rate: invRateOf(f), filename: invFile.name,
+    supplier: f.supplier || '', category: (window.invLastParse && window.invLastParse.category) || 'other',
+    subName: (window.invLastParse && window.invLastParse.subName) || null, job: null };
+  openInvRaise();
+}
+async function openInvRaise() {
+  const p = invPending; if (!p) return;
+  await openNewPO();                          // reuses the New PO form (type toggle, site, trade…)
+  const body = document.getElementById('modal-body'); if (!body) return;
+  document.getElementById('modal-title').textContent = 'Raise a PO for this invoice';
+  // A subcontractor invoice defaults to the Subcontractor PO type (needs a job/site
+  // + trade), so the cost ties to the job. Materials stays the default otherwise.
+  const isSub = p.category === 'subcontractor';
+  if (isSub && typeof setMType === 'function') setMType('subcontractor');
+  const note = document.createElement('div');
+  note.style.cssText = 'margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#eef4ff;border:1px solid #cdddf5;color:#003366;font-size:13px;font-weight:600';
+  note.textContent = (p.job
+      ? '🔗 Raising a PO tied to ' + (p.job.project ? 'project ' : 'job ') + (p.job.ref || p.job.site || '') + ' — the cost lands on it. '
+      : '➕ ')
+    + 'The invoice “' + (p.filename || 'invoice') + '” (' + invMoney(p.cost) + ' net) attaches automatically once you press Issue.';
+  body.insertBefore(note, body.firstChild);
+  // Prefill from a picked job/project (the site drives costing; the hidden job
+  // link ties an SLA job's cost precisely — a project rolls up by its site name).
+  if (p.job) {
+    const siteEl = document.getElementById('m-site'); if (siteEl) siteEl.value = p.job.site || p.job.ref || '';
+    const ji = document.getElementById('m-job-id'); if (ji) ji.value = p.job.job_id || '';
+    const jr = document.getElementById('m-job-ref'); if (jr) jr.value = p.job.ref || '';
+    // Only an SLA job carries an incident number; a project does not.
+    if (!p.job.project) { const inc = document.getElementById('m-incident'); if (inc && p.job.ref) inc.value = p.job.ref; }
+  }
+  // Supplier / subcontractor prefill.
+  if (isSub) {
+    const subSel = document.getElementById('m-subcontractor');
+    const want = p.subName || p.supplier || '';
+    if (subSel && want) { const opt = Array.from(subSel.options).find(o => o.value.toLowerCase() === want.toLowerCase()); if (opt) subSel.value = opt.value; }
+  } else {
+    const sup = document.getElementById('m-supplier'); if (sup && p.supplier) sup.value = p.supplier;
+  }
+  const desc = document.getElementById('m-description');
+  if (desc && !desc.value) desc.value = (p.fields && p.fields.invoiceNumber ? 'Invoice ' + p.fields.invoiceNumber : '') + (p.supplier ? (p.fields && p.fields.invoiceNumber ? ' — ' : '') + p.supplier : '');
+}
+// Attach the pending invoice onto a freshly-created PO number.
+async function invAttachToNewPo(poNumber) {
+  const p = invPending; if (!p) return { ok: true };
+  if (p.kind === 'sweep') return invPostApply(p.it, poNumber, p.cost, p.rate);
+  const fd = new FormData();
+  fd.append('file', p.file, p.file.name);
+  fd.append('po_number', String(poNumber));
+  fd.append('cost_ex_vat', String(p.cost));
+  if (Number.isFinite(p.rate)) fd.append('vat_rate', String(p.rate));
+  const f = p.fields || {};
+  if (f.invoiceNumber) fd.append('invoice_no', f.invoiceNumber);
+  if (f.invoiceDate) fd.append('invoice_date', f.invoiceDate);
+  if (f.vat != null) fd.append('vat', String(f.vat));
+  if (f.gross != null) fd.append('gross', String(f.gross));
+  return authFetch('/po/api/invoice/apply', { method: 'POST', body: fd }).then(r => r.json());
+}
+async function invSweepView(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  try {
+    const r = await authFetch('/po/api/invoice/sweep-view?mailbox=' + encodeURIComponent(it.mailbox) + '&message_id=' + encodeURIComponent(it.messageId) + '&attachment_id=' + encodeURIComponent(it.attachmentId));
+    if (!r.ok) { alert('Could not open the PDF'); return; }
+    const blob = await r.blob();
+    const u = URL.createObjectURL(blob);
+    window.open(u, '_blank');
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e) { alert('Could not open: ' + e.message); }
+}
+// ── Build the pending-invoice source (sweep row or dropped file) ──────────────
+function invPendingFromSrc(src) {
+  if (src.kind === 'sweep') {
+    const it = invSweepItems[src.i]; const f = it.fields || {};
+    return { kind: 'sweep', it, fields: f, cost: invNetOf(f), rate: invRateOf(f), filename: it.filename,
+      supplier: (it.po && it.po.supplier) || f.supplier || '', category: invCatOf(it), subName: it.subName || null, job: null };
+  }
+  const f = invFields || {};
+  return { kind: 'manual', file: invFile, fields: f, cost: invNetOf(f), rate: invRateOf(f),
+    filename: invFile ? invFile.name : 'invoice.pdf', supplier: f.supplier || '',
+    category: (window.invLastParse && window.invLastParse.category) || 'other',
+    subName: (window.invLastParse && window.invLastParse.subName) || null, job: null };
+}
+async function ensureEngineers() {
+  if (!allEngineers || !allEngineers.length) {
+    try { allEngineers = await authFetch('/po/api/engineers').then(r => r.json()); } catch (e) {}
+  }
+  return allEngineers || [];
+}
+// ── Quick-add an unrecognised name as a Supplier or Subcontractor ─────────────
+// so the same invoice sorts itself next time. Name autofills from the read
+// supplier but is editable. Re-classifies the card in place after saving.
+let addPartySrc = null;
+function invAddParty(i) { openAddParty({ kind: 'sweep', i }); }
+function invAddPartyManual() { if (!invFile) { alert('Drop the invoice again'); return; } openAddParty({ kind: 'manual' }); }
+function openAddParty(src) {
+  addPartySrc = src;
+  const p = invPendingFromSrc(src);
+  let bk = document.getElementById('addPartyBackdrop');
+  if (!bk) {
+    bk = document.createElement('div'); bk.id = 'addPartyBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '211';
+    bk.innerHTML = '<div class="modal" style="max-width:440px"><div class="row-between"><h2 style="margin:0;color:#003366">🏷️ Add to your lists</h2><button class="ghost small" onclick="closeAddParty()">✕</button></div><div id="addPartyBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) closeAddParty(); });
+  }
+  document.getElementById('addPartyBody').innerHTML =
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">Not recognised. Add the name so this invoice (and the next one from them) sorts itself.</p>' +
+    '<div class="field"><label>Name</label><input id="ap-name" type="text" value="' + escapeAttr(p.supplier || '') + '"></div>' +
+    '<div class="field"><label>Add as</label>' +
+      '<label style="display:block;font-weight:400;margin:2px 0"><input type="radio" name="ap-type" value="supplier" checked style="width:auto;margin-right:6px">📦 Supplier (materials)</label>' +
+      '<label style="display:block;font-weight:400;margin:2px 0"><input type="radio" name="ap-type" value="sub" style="width:auto;margin-right:6px">👷 Subcontractor</label>' +
+    '</div>' +
+    '<div class="row-between" style="margin-top:6px"><button class="ghost small" onclick="closeAddParty()">Cancel</button><button onclick="submitAddParty(this)">Save</button></div>';
+  bk.classList.add('show');
+  setTimeout(() => { const n = document.getElementById('ap-name'); if (n) { n.focus(); n.select(); } }, 60);
+}
+function closeAddParty() { const bk = document.getElementById('addPartyBackdrop'); if (bk) bk.classList.remove('show'); }
+async function submitAddParty(btn) {
+  const name = ((document.getElementById('ap-name') || {}).value || '').trim();
+  if (!name) { alert('Enter a name'); return; }
+  const typeEl = document.querySelector('input[name=ap-type]:checked');
+  const asSub = typeEl && typeEl.value === 'sub';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  let res;
+  try {
+    res = await authFetch(asSub ? '/po/api/subcontractors' : '/po/api/suppliers',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(r => r.json());
+  } catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = 'Save'; } return; }
+  if (res && res.error) { alert(res.error); if (btn) { btn.disabled = false; btn.textContent = 'Save'; } return; }
+  // Refresh the cached lists so the New PO pickers + classification see the new name.
+  try { allSuppliers = await authFetch('/po/api/suppliers').then(r => r.json()); } catch (e) {}
+  try { allSubcontractors = await authFetch('/po/api/subcontractors').then(r => r.json()); } catch (e) {}
+  // Re-classify the invoice in place so it jumps to the right bucket.
+  if (addPartySrc && addPartySrc.kind === 'sweep') {
+    const it = invSweepItems[addPartySrc.i]; const f = (it && it.fields) || {};
+    if (it) {
+      if (asSub) { it.category = 'subcontractor'; it.subName = name; }
+      else { it.supName = name; it.category = it.po ? 'confident' : (f.poNumber ? 'other' : 'flag'); }
+      invRenderResults();
+    }
+  } else if (window.invLastParse) {
+    const d = window.invLastParse, f = d.fields || {};
+    if (asSub) { d.category = 'subcontractor'; d.subName = name; }
+    else { d.supName = name; d.category = d.po ? 'confident' : (f.poNumber ? 'other' : 'flag'); }
+    invRenderProposal(d);
+  }
+  closeAddParty();
+  alert(name + ' added as ' + (asSub ? 'a subcontractor' : 'a supplier') + '.');
+}
+// ── "Find a job" — mirrors the SLA board/job card, framed as the PO flow ───────
+let findJobResults = [], findJobSrc = null, findJobTimer = null;
+function invFindJob(i) { openFindJob({ kind: 'sweep', i }); }
+function invFindJobManual() { if (!invFile) { alert('Drop the invoice again'); return; } openFindJob({ kind: 'manual' }); }
+function poFlowBanner(text) {
+  return '<div style="background:#003366;color:#fff;border-radius:10px;padding:10px 13px;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:center;margin-bottom:12px">' +
+    '<span style="font-size:16px">🧾</span><span>' + text + '</span></div>';
+}
+function openFindJob(src) {
+  findJobSrc = src; findJobResults = [];
+  let bk = document.getElementById('findJobBackdrop');
+  if (!bk) {
+    bk = document.createElement('div'); bk.id = 'findJobBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '210';
+    bk.innerHTML = '<div class="modal" style="max-width:600px;border:3px solid #003366">' +
+      '<div class="row-between"><h2 style="margin:0;color:#003366">🔎 Find the job or project for this PO</h2><button class="ghost small" onclick="closeFindJob()">✕</button></div>' +
+      '<div id="findJobBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) closeFindJob(); });
+  }
+  const p = invPendingFromSrc(src);
+  document.getElementById('findJobBody').innerHTML =
+    poFlowBanner('Purchase Order flow — you’re still in the PO tool. Find the job so the invoice’s cost ties to it.') +
+    '<div class="muted" style="font-size:12px;margin-bottom:6px">Invoice: <strong>' + escapeHtml(p.supplier || p.filename || '') + '</strong> · ' + invMoney(p.cost) + ' net</div>' +
+    '<input id="findJobQ" type="text" placeholder="Search job/incident/project number, site or description…" oninput="findJobSearch()" autocomplete="off" style="width:100%">' +
+    '<div id="findJobResults" style="margin-top:10px"><div class="muted" style="font-size:12px">Type at least 2 characters to search live jobs &amp; projects.</div></div>' +
+    '<div style="margin-top:12px;border-top:1px solid #eef1f5;padding-top:10px"><a href="sla-main.html" target="_blank" rel="noopener" style="color:#003366;font-weight:600;text-decoration:none">Open the full SLA board ↗</a> <span class="muted" style="font-size:12px">— browse it, then search the job number here.</span></div>';
+  bk.classList.add('show');
+  setTimeout(() => { const q = document.getElementById('findJobQ'); if (q) q.focus(); }, 60);
+}
+function closeFindJob() { const bk = document.getElementById('findJobBackdrop'); if (bk) bk.classList.remove('show'); }
+function findJobSearch() {
+  const q = (document.getElementById('findJobQ') || {}).value || '';
+  clearTimeout(findJobTimer);
+  const box = document.getElementById('findJobResults');
+  if (q.trim().length < 2) { if (box) box.innerHTML = '<div class="muted" style="font-size:12px">Type at least 2 characters to search live jobs &amp; projects.</div>'; return; }
+  if (box) box.innerHTML = '<div class="muted" style="font-size:12px;padding:8px">Searching…</div>';
+  findJobTimer = setTimeout(async () => {
+    let rows = [];
+    try { rows = await authFetch('/po/api/jobs/sla-search?q=' + encodeURIComponent(q.trim())).then(r => r.json()); } catch (e) {}
+    findJobResults = Array.isArray(rows) ? rows : [];
+    renderFindJobResults();
+  }, 260);
+}
+function jobStatusPill(s) {
+  const t = String(s || '').toLowerCase();
+  let bg = '#eef1f5', fg = '#5a6677';
+  if (/complete|closed|invoiced|done/.test(t)) { bg = '#e6f5ea'; fg = '#1e6c33'; }
+  else if (/progress|travel/.test(t)) { bg = '#fff4e0'; fg = '#b58a00'; }
+  else if (/hold|quote|order/.test(t)) { bg = '#f1e9fa'; fg = '#7a4ca0'; }
+  return '<span style="display:inline-block;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;background:' + bg + ';color:' + fg + '">' + escapeHtml(s || 'Pending') + '</span>';
+}
+function renderFindJobResults() {
+  const box = document.getElementById('findJobResults'); if (!box) return;
+  if (!findJobResults.length) { box.innerHTML = '<div class="empty" style="padding:12px">No live jobs or projects match. Try the incident/job/project number, or open the full board.</div>'; return; }
+  box.innerHTML = findJobResults.map((j, i) => {
+    const isProj = j.type === 'project';
+    const engs = (j.engineers || []).join(', ');
+    const tag = isProj
+      ? '<span style="display:inline-block;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;background:#e7eefc;color:#003366">📁 Project</span>'
+      : jobStatusPill(j.status);
+    const line2 = isProj
+      ? escapeHtml((j.site_number ? j.site_number + ' · ' : '') + (j.name || ''))
+      : escapeHtml(j.site || '') + (j.scheduledAt ? ' · ' + escapeHtml(fmtDate(j.scheduledAt)) : '') + (engs ? ' · ' + escapeHtml(engs) : '');
+    return '<div class="card" style="padding:12px;margin-bottom:8px;border-left:4px solid ' + (isProj ? '#7a4ca0' : '#003366') + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
+        '<div><strong style="color:#003366">' + escapeHtml(j.ref || j.name || j.site || '(no ref)') + '</strong>' + (j.priority ? ' <span class="muted" style="font-size:12px">· ' + escapeHtml(j.priority) + '</span>' : '') + '</div>' + tag + '</div>' +
+      (line2 ? '<div class="muted" style="font-size:12px;margin-top:3px">' + line2 + '</div>' : '') +
+      (j.description ? '<div class="muted" style="font-size:12px;margin-top:3px">' + escapeHtml(j.description) + '</div>' : '') +
+      '<div style="margin-top:8px"><button class="small" onclick="pickFindJob(' + i + ')">➕ Raise PO for this ' + (isProj ? 'project' : 'job') + '</button></div>' +
+    '</div>';
+  }).join('');
+}
+function pickFindJob(i) {
+  const j = findJobResults[i]; if (!j || !findJobSrc) return;
+  invPending = invPendingFromSrc(findJobSrc);
+  if (j.type === 'project') {
+    // Tie to the project — costing rolls up by the project NAME (the site).
+    invPending.job = { job_id: '', ref: j.ref || j.number || '', site: j.site || j.name || '', project: true };
+  } else {
+    invPending.job = { job_id: j.job_id, ref: j.ref, site: j.site, project: false };
+  }
+  closeFindJob();
+  openInvRaise();
+}
+// ── Flag & log: a materials invoice with NO PO from a normal supplier ─────────
+let flagSrc = null;
+function openFlagLog(i) { openFlagModal({ kind: 'sweep', i }); }
+function openFlagLogManual() { if (!invFile) { alert('Drop the invoice again'); return; } openFlagModal({ kind: 'manual' }); }
+async function openFlagModal(src) {
+  flagSrc = src;
+  await ensureEngineers();
+  const p = invPendingFromSrc(src);
+  let bk = document.getElementById('flagBackdrop');
+  if (!bk) {
+    bk = document.createElement('div'); bk.id = 'flagBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '210';
+    bk.innerHTML = '<div class="modal" style="max-width:480px;border:3px solid #c0392b"><div class="row-between"><h2 style="margin:0;color:#c0392b">⚠ Flag — no PO raised</h2><button class="ghost small" onclick="closeFlagModal()">✕</button></div><div id="flagBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) closeFlagModal(); });
+  }
+  const engOpts = (allEngineers || []).filter(e => Number(e.active) === 1).map(e => '<option value="' + escapeAttr(e.slug) + '">' + escapeHtml(e.name) + '</option>').join('');
+  document.getElementById('flagBody').innerHTML =
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">A materials invoice came in with no PO. Pin it on the engineer who bought it and keep it as a log (a copy of the invoice is saved), so you can see who isn’t raising POs.</p>' +
+    '<div class="card" style="padding:10px;margin-bottom:10px;font-size:13px"><strong>' + escapeHtml(p.supplier || p.filename || '') + '</strong> · ' + invMoney(p.cost) + ' net' + (p.fields && p.fields.invoiceDate ? ' · ' + escapeHtml(p.fields.invoiceDate) : '') + '</div>' +
+    '<div class="field"><label>Engineer who should have raised the PO</label><select id="flag-eng"><option value="">— pick an engineer —</option>' + engOpts + '</select></div>' +
+    '<div class="field"><label>Note (optional)</label><textarea id="flag-note" placeholder="e.g. bought materials at CEF for the Fareham job"></textarea></div>' +
+    '<div class="row-between" style="margin-top:6px"><button class="ghost small" onclick="closeFlagModal()">Cancel</button><button onclick="submitFlag(this)">⚠ Save to log</button></div>';
+  bk.classList.add('show');
+}
+function closeFlagModal() { const bk = document.getElementById('flagBackdrop'); if (bk) bk.classList.remove('show'); }
+async function submitFlag(btn) {
+  if (!flagSrc) return;
+  const engSel = document.getElementById('flag-eng');
+  const engSlug = engSel ? engSel.value : '';
+  const eng = (allEngineers || []).find(e => e.slug === engSlug);
+  const note = (document.getElementById('flag-note') || {}).value || '';
+  const p = invPendingFromSrc(flagSrc), f = p.fields || {};
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  let res;
+  try {
+    if (flagSrc.kind === 'sweep') {
+      const it = p.it;
+      const body = { supplier: p.supplier, invoice_no: f.invoiceNumber || '', invoice_date: f.invoiceDate || '',
+        net: f.net, vat: f.vat, gross: f.gross, filename: it.filename,
+        engineer_slug: engSlug || '', engineer_name: eng ? eng.name : '', note, source: 'sweep',
+        mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId };
+      res = await authFetch('/po/api/invoice/flag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+    } else {
+      const fd = new FormData();
+      if (p.file) fd.append('file', p.file, p.file.name);
+      fd.append('supplier', p.supplier || ''); fd.append('invoice_no', f.invoiceNumber || ''); fd.append('invoice_date', f.invoiceDate || '');
+      if (f.net != null) fd.append('net', String(f.net)); if (f.vat != null) fd.append('vat', String(f.vat)); if (f.gross != null) fd.append('gross', String(f.gross));
+      fd.append('engineer_slug', engSlug || ''); fd.append('engineer_name', eng ? eng.name : ''); fd.append('note', note); fd.append('source', 'manual'); fd.append('filename', p.filename || 'invoice.pdf');
+      res = await authFetch('/po/api/invoice/flag', { method: 'POST', body: fd }).then(r => r.json());
+    }
+  } catch (e) { alert('Error: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = '⚠ Save to log'; } return; }
+  if (!res || res.error) { alert((res && res.error) || 'Could not save the flag'); if (btn) { btn.disabled = false; btn.textContent = '⚠ Save to log'; } return; }
+  if (flagSrc.kind === 'sweep' && invSweepItems[flagSrc.i]) { invSweepItems[flagSrc.i]._done = true; invRenderResults(); }
+  closeFlagModal();
+  alert('Flagged and logged' + (eng ? ' against ' + eng.name : '') + '. A copy of the invoice was saved.');
+}
+// ── The flagged-invoices log (who isn't raising POs) ──────────────────────────
+let flagLogRows = [];
+async function openFlagLogList() {
+  await ensureEngineers();
+  let bk = document.getElementById('flagLogBackdrop');
+  if (!bk) {
+    bk = document.createElement('div'); bk.id = 'flagLogBackdrop'; bk.className = 'modal-backdrop'; bk.style.zIndex = '205';
+    bk.innerHTML = '<div class="modal" style="max-width:680px"><div class="row-between"><h2 style="margin:0;color:#003366">📋 Flagged invoices — no PO raised</h2><button class="ghost small" onclick="closeFlagLog()">✕</button></div><div id="flagLogControls" style="margin-top:10px"></div><div id="flagLogBody" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bk);
+    bk.addEventListener('mousedown', e => { if (e.target === bk) closeFlagLog(); });
+  }
+  const engOpts = (allEngineers || []).filter(e => Number(e.active) === 1).map(e => '<option value="' + escapeAttr(e.slug) + '">' + escapeHtml(e.name) + '</option>').join('');
+  document.getElementById('flagLogControls').innerHTML =
+    '<p class="muted" style="margin:0 0 8px;font-size:13px">Every materials invoice that arrived with no PO from a normal supplier. Filter by engineer to see who keeps missing the PO step.</p>' +
+    '<div class="row" style="gap:8px;flex-wrap:wrap">' +
+      '<select id="flagLogEng" onchange="flagLogLoad()" style="max-width:220px"><option value="">All engineers</option>' + engOpts + '</select>' +
+      '<select id="flagLogStatus" onchange="flagLogLoad()" style="max-width:160px"><option value="open">Open</option><option value="">All</option><option value="resolved">Resolved</option></select>' +
+      '<button class="ghost small" onclick="flagLogLoad()">↻ Refresh</button>' +
+    '</div>';
+  bk.classList.add('show');
+  flagLogLoad();
+}
+function closeFlagLog() { const bk = document.getElementById('flagLogBackdrop'); if (bk) bk.classList.remove('show'); }
+async function flagLogLoad() {
+  const body = document.getElementById('flagLogBody'); if (body) body.innerHTML = '<div class="muted" style="padding:12px">Loading…</div>';
+  const eng = (document.getElementById('flagLogEng') || {}).value || '';
+  const status = (document.getElementById('flagLogStatus') || {}).value;
+  const p = new URLSearchParams();
+  if (eng) p.set('engineer', eng);
+  if (status != null && status !== '') p.set('status', status);
+  try { flagLogRows = await authFetch('/po/api/invoice/flags?' + p).then(r => r.json()); } catch (e) { flagLogRows = []; }
+  if (!Array.isArray(flagLogRows)) flagLogRows = [];
+  renderFlagLog();
+}
+function renderFlagLog() {
+  const body = document.getElementById('flagLogBody'); if (!body) return;
+  if (!flagLogRows.length) { body.innerHTML = '<div class="empty" style="padding:14px">No flagged invoices — everyone’s raising their POs. 🎉</div>'; return; }
+  // Per-engineer tally so "who isn't raising POs" is obvious at a glance.
+  const tally = {};
+  flagLogRows.forEach(r => { const k = r.engineer_name || 'Unassigned'; tally[k] = (tally[k] || 0) + 1; });
+  const tallyHtml = '<div style="margin-bottom:10px;font-size:12px">' + Object.keys(tally).sort((a, b) => tally[b] - tally[a]).map(k => '<span style="display:inline-block;background:#fdecea;color:#c0392b;border-radius:999px;padding:3px 10px;font-weight:600;margin:0 6px 6px 0">' + escapeHtml(k) + ' · ' + tally[k] + '</span>').join('') + '</div>';
+  const rows = flagLogRows.map(r => {
+    const resolved = (r.status || 'open') === 'resolved';
+    return '<div class="card" style="padding:11px;margin-bottom:8px;' + (resolved ? 'opacity:.6' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
+        '<div><strong style="color:#003366">' + escapeHtml(r.supplier || '—') + '</strong> <span class="muted" style="font-size:12px">· ' + escapeHtml(r.invoice_no || '') + (r.invoice_date ? ' · ' + escapeHtml(r.invoice_date) : '') + '</span></div>' +
+        '<div style="font-weight:700;color:#003366;white-space:nowrap">' + invMoney(r.net != null ? r.net : r.gross) + '</div></div>' +
+      '<div class="muted" style="font-size:12px;margin-top:3px">' +
+        '👷 ' + escapeHtml(r.engineer_name || '— not assigned —') +
+        (r.job_ref ? ' · 🎫 ' + escapeHtml(r.job_ref) : '') + (r.po_number ? ' · PO ' + escapeHtml(r.po_number) : '') +
+        ' · logged ' + escapeHtml(fmtDate(r.created_at)) + (r.created_by ? ' by ' + escapeHtml(r.created_by) : '') + '</div>' +
+      (r.note ? '<div class="muted" style="font-size:12px;margin-top:3px">📝 ' + escapeHtml(r.note) + '</div>' : '') +
+      '<div class="row" style="margin-top:8px;flex-wrap:wrap">' +
+        (r.invoiceUrl ? '<a class="ghost small" href="' + escapeAttr(r.invoiceUrl) + '" target="_blank" rel="noopener" style="text-decoration:none">👁 View invoice</a>' : '') +
+        '<button class="ghost small" onclick="flagLogReassign(' + Number(r.id) + ')">👤 Change engineer</button>' +
+        (resolved
+          ? '<button class="ghost small" onclick="flagLogSetStatus(' + Number(r.id) + ',\'open\')">↩ Reopen</button>'
+          : '<button class="ghost small" onclick="flagLogSetStatus(' + Number(r.id) + ',\'resolved\')">✓ Mark resolved</button>') +
+        '<button class="danger small" onclick="flagLogDelete(' + Number(r.id) + ')">🗑</button>' +
+      '</div></div>';
+  }).join('');
+  body.innerHTML = tallyHtml + rows;
+}
+async function flagLogSetStatus(id, status) {
+  try { await authFetch('/po/api/invoice/flag-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status }) }); } catch (e) {}
+  flagLogLoad();
+}
+async function flagLogReassign(id) {
+  await ensureEngineers();
+  const names = (allEngineers || []).filter(e => Number(e.active) === 1);
+  const list = names.map((e, i) => (i + 1) + '. ' + e.name).join('\n');
+  const pick = prompt('Assign this flagged invoice to which engineer?\n\n' + list + '\n\nType the number:');
+  const idx = Number(pick) - 1;
+  if (!(idx >= 0 && idx < names.length)) return;
+  const e = names[idx];
+  try { await authFetch('/po/api/invoice/flag-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, engineer_slug: e.slug, engineer_name: e.name }) }); } catch (err) {}
+  flagLogLoad();
+}
+async function flagLogDelete(id) {
+  const ok = window.MLUI ? await MLUI.confirm('Delete this flagged-invoice log entry?', { danger: true }) : confirm('Delete this flagged-invoice log entry?');
+  if (!ok) return;
+  try { await authFetch('/po/api/invoice/flag-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch (e) {}
+  flagLogLoad();
 }
 function closeModal() { document.getElementById('modal').classList.remove('show'); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

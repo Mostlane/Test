@@ -14,6 +14,7 @@ function makeEnv() {
   const orders = {};     // id → client_orders row
   const acks = [];       // em_remedial_acks rows (cert_id, site_code, site_name, cert_number, stage, job_id)
   const rems = [];       // em_remedials rows (id, cert_id, kind, status, fitting_no, photos, site_code, site_name, cert_number)
+  const fyrs = [];       // five_year_remedials rows (id, sr, store_code, site_name, stage, order_number, order_value, order_id)
   const files = {};      // R2 keys
   const users = {
     "Office Olly": { staffType: "office" },
@@ -48,6 +49,7 @@ function makeEnv() {
       if (/helpdesk_ref=\?/.test(sql)) return { results: rows().filter(j => j.helpdeskRef === binds[1]).map(j => ({ data: JSON.stringify(j) })) };
       if (/helpdesk_ref LIKE \?/.test(sql)) { const re = new RegExp("^" + String(binds[1]).split("%").map(x => x.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&")).join(".*") + "$"); return { results: rows().filter(j => re.test(String(j.helpdeskRef || ""))).map(j => ({ data: JSON.stringify(j) })) }; }
       if (/FROM em_remedial_acks WHERE tenant_id=\? AND COALESCE\(stage/.test(sql)) return { results: acks.filter(a => ["to_quote", "quoted", "approved", "in_works"].includes(a.stage || "to_quote")) };
+      if (/FROM five_year_remedials WHERE tenant_id=\? AND COALESCE\(stage/.test(sql)) return { results: fyrs.filter(r => ["quoted", "ordered", ""].includes(r.stage || "quoted")) };
       if (/FROM em_remedials WHERE tenant_id=\? AND cert_id=\?/.test(sql)) return { results: rems.filter(r => r.cert_id === binds[1] && (!/status='pending'/.test(sql) || r.status === "pending")) };
       if (/FROM client_orders WHERE tenant_id=\? AND matched_cert_id=\?/.test(sql)) return { results: Object.values(orders).filter(o => o.matched_cert_id === binds[1] && ["new", "matched"].includes(o.status)) };
       if (/^SELECT data FROM sla_jobs WHERE tenant_id\s*=\s*\?\s*$/.test(sql.trim())) return { results: rows().map(j => ({ data: JSON.stringify(j) })) };
@@ -80,11 +82,17 @@ function makeEnv() {
         if (/stage='in_works'/.test(sql)) { a.stage = "in_works"; a.job_id = binds[0] || a.job_id; }
         if (/stage='done'/.test(sql)) a.stage = "done";
       }
+      else if (/UPDATE five_year_remedials SET/.test(sql)) {
+        // SET order_number=?, order_value=?, order_id=?, stage=CASE…, updated_at=? WHERE tenant_id=? AND id=?
+        const r = fyrs.find(x => x.id === binds[binds.length - 1]); if (!r) return { meta: {} };
+        r.order_number = binds[0]; r.order_value = binds[1]; r.order_id = binds[2];
+        if (["quoted", "", undefined, null].includes(r.stage)) r.stage = "ordered";
+      }
       return { meta: {} }; },
   }; return st; }, batch(s) { return Promise.all(s.map(x => x.run())); } };
   const r2 = { async list({ prefix }) { return { objects: Object.keys(files).filter(k => k.startsWith(prefix)).map(key => ({ key })), truncated: false }; },
     async get(k) { return files[k] != null ? { body: files[k], httpMetadata: {}, customMetadata: {} } : null; }, async put(k, body) { files[k] = body; }, async delete() {} };
-  return { env: { DB: db, JOB_FILES: r2, ASSET_BUCKET: r2, JOBS_INBOUND_TOKEN: "tok" }, jobs, orders, files, acks, rems };
+  return { env: { DB: db, JOB_FILES: r2, ASSET_BUCKET: r2, JOBS_INBOUND_TOKEN: "tok" }, jobs, orders, files, acks, rems, fyrs };
 }
 const sessOf = u => ({ user: { username: u }, tenantId: 1 });
 const J = async (mod, path, sess, opts = {}) => {
@@ -184,6 +192,21 @@ const inbound = (E, body) => J(certs, "/certs/remedials/order-inbound", null, { 
   ok("order keeps its certificate match (kind em) alongside the job link", o.matched_kind === "em" && o.matched_cert_id === "CERT-A" && o.matched_job_id === "emrem:CERT-A" && o.status === "linked", JSON.stringify({ k: o.matched_kind, c: o.matched_cert_id, j: o.matched_job_id, s: o.status }));
   const b = await J(certs, "/certs/orders", sessOf("Office Olly"), { env: E.env });
   ok("board shows it live on the works job", b.body.orders[0].stage === "live" && b.body.orders[0].job.id === "emrem:CERT-A");
+}
+{ // 6b. a REM order for a 5-YEAR (fixed-wire) remedial → matched by SR, stamped on the register row, auto-advanced quoted→ordered (no job auto-raised)
+  const E = makeEnv();
+  E.fyrs.push({ id: "fyr-1", tenant_id: 1, sr: "SR00321", store_code: "0127", site_name: "Gosport, Forton Road", stage: "quoted" });
+  const r = await inbound(E, { orderNumber: "R29051", client: "Southern Co-op", priority: 2, orderValue: 850, storeCode: "0127", srRef: "SR00321", description: "5-year electrical remedials — replace consumer unit", externalId: "<ord-fyr@concerto>" });
+  const fy = E.fyrs[0], o = Object.values(E.orders).find(x => x.order_number === "R29051");
+  ok("REM order → matched to the 5-year remedial (kind fiveyear)", r.status === 200 && r.body.matched === true && r.body.matchedKind === "fiveyear", JSON.stringify(r.body));
+  ok("5-year remedial auto-advanced quoted→ordered + order stamped", fy.stage === "ordered" && fy.order_number === "R29051" && fy.order_value === 850 && fy.order_id === o.id, JSON.stringify({ stage: fy.stage, num: fy.order_number, val: fy.order_value }));
+  ok("no works job was auto-raised (office still makes it from the list)", Object.keys(E.jobs).filter(id => !["00099999/2", "00099998/1"].includes(id)).length === 0);
+}
+{ // 6c. re-matching an already-ordered 5-year remedial keeps stage "ordered" (the CASE guard never resets a further-along stage) but refreshes the order fields
+  const E = makeEnv();
+  E.fyrs.push({ id: "fyr-2", tenant_id: 1, sr: "SR00400", store_code: "0200", site_name: "Elsewhere", stage: "ordered", order_number: "R29999", order_value: 100 });
+  await inbound(E, { orderNumber: "R30000", client: "Southern Co-op", orderValue: 120, storeCode: "0200", srRef: "SR00400", externalId: "<ord-fyr2@concerto>" });
+  ok("already-ordered 5-year remedial stays ordered; order fields refresh", E.fyrs[0].stage === "ordered" && E.fyrs[0].order_number === "R30000" && E.fyrs[0].order_value === 120);
 }
 { // 7. order arrives while the EM case is still QUOTED → matched; approving from the order raises the works job AND stamps the value on it
   const E = makeEnv();

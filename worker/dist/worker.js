@@ -9407,12 +9407,12 @@ async function handle8(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    const numOrNull = (v) => {
+    const numOrNull4 = (v) => {
       const n = Number(v);
       return isFinite(n) ? n : null;
     };
-    if ("lat" in b) meta.lat = b.lat === null || b.lat === "" ? null : numOrNull(b.lat);
-    if ("lng" in b) meta.lng = b.lng === null || b.lng === "" ? null : numOrNull(b.lng);
+    if ("lat" in b) meta.lat = b.lat === null || b.lat === "" ? null : numOrNull4(b.lat);
+    if ("lng" in b) meta.lng = b.lng === null || b.lng === "" ? null : numOrNull4(b.lng);
     if ("w3w" in b) meta.w3w = String(b.w3w || "").replace(/^\/+/, "").slice(0, 120) || null;
     if ("access" in b) meta.access = String(b.access || "").slice(0, 2e3) || null;
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2e3) || null;
@@ -12628,6 +12628,21 @@ async function matchOrderToRemedial(env, tid, o) {
   } catch {
   }
   try {
+    const fc = fyrCode(o.storeCode);
+    const rows = (await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage FROM five_year_remedials WHERE tenant_id=? AND COALESCE(stage,'quoted') IN ('quoted','ordered','') ORDER BY created_at DESC"
+    ).bind(tid).all()).results || [];
+    const sr = String(o.srRef || "").toUpperCase();
+    const cand = sr && rows.find((r) => String(r.sr || "").toUpperCase() === sr) || fc && rows.find((r) => fyrCode(r.store_code) === fc);
+    if (cand) return {
+      kind: "fiveyear",
+      certId: cand.id,
+      stage: cand.stage || "quoted",
+      note: `5-year electrical remedial ${cand.sr || ""} at ${cand.site_name || code} (stage ${cand.stage || "quoted"})`
+    };
+  } catch {
+  }
+  try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
     const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num2);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
@@ -12757,6 +12772,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     emailFrom,
     emailText
   ).run();
+  if (m && m.kind === "fiveyear" && m.certId) {
+    try {
+      await env.DB.prepare(
+        "UPDATE five_year_remedials SET order_number=?, order_value=?, order_id=?, stage=CASE WHEN COALESCE(stage,'quoted') IN ('quoted','') THEN 'ordered' ELSE stage END, updated_at=? WHERE tenant_id=? AND id=?"
+      ).bind(orderNumber || null, b.orderValue != null ? Number(b.orderValue) : null, id, now, tid, m.certId).run();
+    } catch {
+    }
+  }
   const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
   let linkedJob = null;
   if (!m) {
@@ -12772,12 +12795,14 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
-    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches a remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const isFy = m && m.kind === "fiveyear";
+    const body = linkedJob ? `Client order ${orderNumber || ""} for ${site} \u2014 linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).` : isFy ? `Client order ${orderNumber || ""} for ${site} \u2014 matched to a 5-year electrical remedial and marked ordered. Raise the works job from the 5-year remedials list.` : m ? `Client order ${orderNumber || ""} for ${site} \u2014 matches an EM remedial awaiting approval. Review & raise the works job.` : `Client order ${orderNumber || ""} for ${site} \u2014 open the Client orders board to make the job.`;
+    const url = linkedJob ? "/client-orders.html" : isFy ? "/five-year-remedials.html" : m ? "/cert-review.html?orders=1" : "/client-orders.html";
     ctx.waitUntil(sendToPermission(
       env,
       tid,
       ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: m && !linkedJob ? "Client order \u2014 approve remedial" : "Client order received", body, url: m && !linkedJob ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob },
+      { title: m && !linkedJob ? "Client order \u2014 remedial" : "Client order received", body, url, tag: "client-order:" + id, actionable: !linkedJob },
       "",
       { officeOnly: true }
     ).catch(() => {
@@ -14266,7 +14291,19 @@ PAT: Import certificate number ${num2}-${yr}`;
     ).bind(tid).all();
     const rows = results || [];
     const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
-    return json({ ok: true, cases: rows.map((r) => shapeCase(r, fit4[r.cert_id])) }, {}, env, request);
+    const ordByCert = {};
+    try {
+      const ids = rows.map((r) => r.cert_id).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 60) {
+        const chunk = ids.slice(i, i + 60);
+        const { results: os } = await env.DB.prepare(
+          `SELECT id, order_number, order_value, matched_cert_id, notified_at, status FROM client_orders WHERE tenant_id=? AND matched_kind='em' AND status<>'dismissed' AND matched_cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY COALESCE(notified_at, created_at) DESC`
+        ).bind(tid, ...chunk).all();
+        for (const o of os || []) if (!ordByCert[o.matched_cert_id]) ordByCert[o.matched_cert_id] = { number: o.order_number || "", value: o.order_value, id: o.id, at: o.notified_at || "", status: o.status || "" };
+      }
+    } catch {
+    }
+    return json({ ok: true, cases: rows.map((r) => ({ ...shapeCase(r, fit4[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
   }
   if (sub === "/orders" && method === "GET") {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
@@ -17275,7 +17312,8 @@ async function handle12(request, env, ctx, url, sess) {
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
       const money2 = await canSeeMoney(env, tenantId, sess.user.username);
-      const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
+      const groupJobs = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+      const visits = groupJobs.map((j) => ({
         id: j.id,
         ref: j.helpdeskRef || j.id,
         status: j.status || "",
@@ -17288,7 +17326,8 @@ async function handle12(request, env, ctx, url, sess) {
         ...money2 ? { orderValue: j.orderValue ?? null } : {},
         engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
       })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
-      return jsonResponse({ ok: true, groupId, visits }, headers);
+      const history = buildIncidentHistory(groupJobs, money2);
+      return jsonResponse({ ok: true, groupId, visits, history }, headers);
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -19006,6 +19045,17 @@ async function raiseJobForOrder(env, tenantId, o, opts = {}) {
   const sibs = inc ? await findIncidentJobs(env, tenantId, { incident: inc }) : [];
   const text = orderText(o);
   if (sibs.length) {
+    const finished = await jobFinishedFor(env, tenantId);
+    const skip = String(o && o.unlinkedJobId || "");
+    const open = sibs.filter((j) => !finished(j) && j.id !== skip).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    if (open.length) {
+      const pick = open[0];
+      await stampOrderOnJob(env, tenantId, pick, o);
+      await markOrderLinked(env, tenantId, o.id, pick.id);
+      return { job: pick, how: "linked", from: { id: pick.id, ref: pick.helpdeskRef || pick.id, status: pick.status || "" } };
+    }
+  }
+  if (sibs.length) {
     const src = sibs.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     const oldDesc = String(src.description || "").trim();
     const description = [
@@ -19271,6 +19321,96 @@ async function createWorksJobFromRemedials(env, tenantId, src, opts) {
   } catch {
   }
   return { id: job.id, ref: job.helpdeskRef, items: auditItems.length };
+}
+function milestoneForStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "in progress") return { icon: "\u{1F527}", text: "Attended \u2014 work started on site" };
+  if (s === "awaiting office (safety)") return { icon: "\u26A0\uFE0F", text: "Made safe \u2014 awaiting office" };
+  if (s === "on hold" || s === "on hold \u2014 approved") return { icon: "\u23F8", text: "Put on hold" };
+  if (s === "quote") return { icon: "\u{1F4DD}", text: "Marked for a quote" };
+  if (s === "complete") return { icon: "\u2705", text: "Completed" };
+  if (s === "closed") return { icon: "\u{1F4C1}", text: "Closed" };
+  if (s === "invoiced") return { icon: "\u{1F9FE}", text: "Invoiced" };
+  return null;
+}
+function buildIncidentHistory(jobs, money2) {
+  const money$ = (v) => {
+    const n = Number(v);
+    return money2 && Number.isFinite(n) && n > 0 ? " \u2014 \xA3" + n.toFixed(2) : "";
+  };
+  const ordered = (jobs || []).slice().sort((a, b) => new Date(a.raisedAt || a.createdAt || 0) - new Date(b.raisedAt || b.createdAt || 0));
+  const events = [];
+  for (const j of ordered) {
+    if (!j) continue;
+    const ref = j.helpdeskRef || String(j.id || "").slice(0, 8);
+    const hist = Array.isArray(j.statusHistory) ? j.statusHistory : [];
+    const firstAt = hist.length ? hist[0].at : null;
+    const raisedAt = j.raisedAt || j.createdAt || firstAt;
+    const orig = String(j.originator || "").toLowerCase();
+    let sub = "";
+    if (orig === "email" || orig === "zapier") sub = "from Concerto";
+    else if (orig) sub = "raised in office";
+    events.push({
+      at: raisedAt,
+      ref,
+      icon: j.revisitOf ? "\u{1F501}" : "\u{1F195}",
+      text: j.revisitOf ? "New visit raised" : "Job raised",
+      sub
+    });
+    const seen = /* @__PURE__ */ new Set();
+    for (const h of hist) {
+      const m = milestoneForStatus(h && h.status);
+      if (!m || seen.has(m.text)) continue;
+      seen.add(m.text);
+      events.push({ at: h.at || raisedAt, ref, icon: m.icon, text: m.text, sub: h && h.by ? String(h.by) : "" });
+    }
+    if (j.quoteSent && j.quoteSent.at) {
+      const qs = j.quoteSent;
+      events.push({
+        at: qs.at,
+        ref,
+        icon: "\u{1F4B7}",
+        text: "Quote sent to client" + money$(qs.amountExVat),
+        sub: qs.quoteNumber ? "Quote " + qs.quoteNumber : ""
+      });
+    }
+    if (j.orderNumber) {
+      let oAt = null;
+      for (const h of hist) {
+        if (String(h && h.status || "").toLowerCase() === "order") {
+          oAt = h.at;
+          break;
+        }
+      }
+      events.push({
+        at: oAt || j.updatedAt || raisedAt,
+        ref,
+        icon: "\u{1F9FE}",
+        text: "Order received" + money$(j.orderValue),
+        sub: "Order " + j.orderNumber
+      });
+    }
+    if (j.cancelledAt) {
+      events.push({
+        at: j.cancelledAt,
+        ref,
+        icon: "\u274C",
+        text: "Cancelled",
+        sub: [j.cancelReason, j.cancelledBy ? "by " + j.cancelledBy : ""].filter(Boolean).join(" \xB7 ")
+      });
+    } else if (j.clientCancelled && j.clientCancelled.at) {
+      const cc = j.clientCancelled;
+      events.push({
+        at: cc.at,
+        ref,
+        icon: "\u21A9",
+        text: "Client cancelled",
+        sub: [cc.reason, cc.by ? "by " + cc.by : ""].filter(Boolean).join(" \xB7 ")
+      });
+    }
+  }
+  events.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+  return events;
 }
 async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);
@@ -25381,6 +25521,49 @@ function concertoQuoteCancel(subject, t) {
   if (!reference) missing.push("job reference (order number)");
   return { kind: "cancel", missing, cancel: { kind: "quote", incident: (/^(\d{5,12})\//.exec(reference) || [])[1] || "", reference, quoteRef, siteCode, reason, by: "Southern Co-op (Concerto" + (by ? " \u2014 " + by : "") + ")" } };
 }
+function concertoHelpdesk(subject, t) {
+  const sm = /^\s*Helpdesk action\s*-\s*(.+?)\s*:\s*(\d{5,12})\b/i.exec(subject);
+  const action = (sm ? sm[1] : line(/^\s*Action\s*:\s*([^\n,]+)/im, t)).trim();
+  const incident = (sm ? sm[2] : "") || line(/Helpdesk reference\s*:\s*(\d{5,12})/i, t) || line(/information has been added to\s*(\d{5,12})/i, t) || line(/\bfor\s+(\d{5,12})\b/i, t);
+  const isNote = /add a note|photo or document|additional information/i.test(action) || /^\s*Additional information has been added/i.test(subject);
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+  const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
+  const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
+  const sr = line(/\b(SR\d{4,6})\b/i, siteLine);
+  const stripped = siteLine.replace(/^\s*SR\d{4,6}\s*/i, "").trim();
+  const code = line(/^\s*(\d{3,5})\b/, stripped);
+  const siteName = stripped.replace(/^\s*\d{3,5}\s*-\s*/, "").trim();
+  const address = line(/^\s*Address\s*:\s*([^\n]+)/im, t).replace(/,\s*,+/g, ", ").trim();
+  const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
+  const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
+  const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+  if (isNote) {
+    return { kind: "note", incident, note: { incident, reference: incident, text: desc, action, siteCode: code, siteName } };
+  }
+  const missing = [];
+  if (!incident) missing.push("incident number");
+  if (!desc) missing.push("description");
+  if (!code) missing.push("store number");
+  if (!isDispatch) missing.push("unrecognised Concerto action \u201C" + (action || "?") + "\u201D \u2014 confirm this is a job to attend");
+  return {
+    kind: "job",
+    missing,
+    fields: {
+      isJob: true,
+      reference: incident,
+      priority: pr ? "Priority " + pr : "",
+      siteCode: code,
+      siteName: siteName || (address.split(",")[0] || "").trim(),
+      address: address || siteName,
+      postcode,
+      telephone,
+      description: desc,
+      raisedAt: "",
+      respondBy: "",
+      completeBy: ""
+    }
+  };
+}
 var CHAP_SIG = /\n\s*(?:Many thanks|Kind regards|Regards|Thanks|Thank you)\b|\n\s*Ashley Newell|\n\s*Kerry\b|\n\s*Chapplins (?:Support|Lettings|Residential)|\n\s*\d{2}-\d{2} Station Road/i;
 function chapplinsJob(subject, t) {
   const jobNo = line(/Job Number:\s*(\d{3,12})\b/i, t) || line(/Job Number\s*(\d{3,12})\b/i, subject);
@@ -25455,11 +25638,25 @@ var TEMPLATES = [
     read: concertoQuoteCancel
   },
   {
-    id: "concerto-notice",
-    label: "Concerto \u2014 helpdesk action / quote notice",
+    id: "concerto-helpdesk",
+    label: "Concerto \u2014 helpdesk action (dispatch / note)",
     domains: ["concerto.co.uk"],
-    test: (s) => /^Helpdesk action\b|^Quote\s*:/i.test(s),
-    read: (s) => ({ kind: "notice", reason: /Approved/i.test(s) ? "Concerto approval notice \u2014 the order-sheet email carries the actual order" : "Concerto helpdesk/quote notice, not a job" })
+    test: (s) => /^Helpdesk action\b/i.test(s) || /^Additional information has been added/i.test(s),
+    read: concertoHelpdesk
+  },
+  {
+    id: "concerto-supplier-portal",
+    label: "Concerto \u2014 supplier-portal batch notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /Supplier Portal/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto supplier-portal batch notice (e.g. PPM orders added) \u2014 not an individual job" })
+  },
+  {
+    id: "concerto-notice",
+    label: "Concerto \u2014 quote notice",
+    domains: ["concerto.co.uk"],
+    test: (s) => /^Quote\s*:/i.test(s),
+    read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" })
   },
   {
     id: "chapplins-job",
@@ -25867,6 +26064,14 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   if (tm) {
     const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
+    if (r.kind === "note") {
+      return {
+        ...out2,
+        outcome: "dropped",
+        reference: r.incident || "",
+        reason: "Concerto note/update on job " + (r.incident || "?") + " \u2014 logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)"
+      };
+    }
     if (r.kind === "cancel") {
       const c = { ...r.cancel || {}, action: "cancel", isJob: false };
       if (r.missing && r.missing.length) return { ...out2, fields: c, outcome: "review", reason: tm.tpl.label + " \u2014 couldn't read: " + r.missing.join(", ") };
@@ -28888,7 +29093,7 @@ async function handle24(request, env, ctx, url, sess) {
       (recsByUser[r.username] = recsByUser[r.username] || []).push(r);
     }
     const cfg = await getReqCfg(db);
-    const staffTypeOf3 = (u) => {
+    const staffTypeOf4 = (u) => {
       try {
         return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase();
       } catch {
@@ -28898,7 +29103,7 @@ async function handle24(request, env, ctx, url, sess) {
     const rows = active.map((u) => {
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
       const c = byUser[u.username] || { total: 0, expired: 0, expiring: 0, valid: 0, none: 0 };
-      const st = staffTypeOf3(u);
+      const st = staffTypeOf4(u);
       const required = requiredForUser(cfg, u.username, st).map((it) => {
         const s = reqStatus(it, recsByUser[u.username] || []);
         return { id: it.id, kind: it.kind, title: it.title, status: s.status, expires: s.expires || "" };
@@ -29010,14 +29215,14 @@ async function handle24(request, env, ctx, url, sess) {
       const s = String(u.status || "").trim().toLowerCase();
       return s === "" || s === "active";
     });
-    const staffTypeOf3 = (u) => {
+    const staffTypeOf4 = (u) => {
       try {
         return String(JSON.parse(u.profile || "{}").staffType || "").toLowerCase();
       } catch {
         return "";
       }
     };
-    const people = fieldOnly ? active.filter((u) => staffTypeOf3(u) !== "office") : active;
+    const people = fieldOnly ? active.filter((u) => staffTypeOf4(u) !== "office") : active;
     const { results: recs } = await db.prepare(
       "SELECT username, title, issued, expires, id FROM staff_records WHERE tenant_id=? AND kind=?"
     ).bind(db.tenantId, kind).all();
@@ -35750,6 +35955,386 @@ async function handle31(request, env, ctx, url, sess) {
 // src/routes/po.js
 init_http();
 init_auth();
+init_once();
+init_filesign();
+
+// src/lib/invoiceparse.js
+init_pdftext();
+var PO_MIN = 10011;
+var PO_MAX = 99999;
+var MONTHS3 = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+function isoDate2(y, m, d) {
+  y = Number(y);
+  m = Number(m);
+  d = Number(d);
+  if (y < 100) y += 2e3;
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function parseInvoiceDate(text) {
+  const t = String(text || "");
+  const near = t.match(/(?:tax\s*point|invoice\s*date|date\s*of\s*invoice|transaction\s*date|document\s*date|inv(?:oice)?\.?\s*date)[^\n]{0,40}?(\d{1,2}[\/.\- ][A-Za-z0-9]{2,9}[\/.\- ]\d{2,4})/i);
+  const grab = near ? near[1] : null;
+  const dm = (s) => {
+    if (!s) return null;
+    let m = s.match(/(\d{1,2})[\/.\- ]([A-Za-z]{3,9})[\/.\- ](\d{2,4})/);
+    if (m) {
+      const mo = MONTHS3[m[2].toLowerCase().slice(0, 4)] || MONTHS3[m[2].toLowerCase().slice(0, 3)];
+      return isoDate2(m[3], mo, m[1]);
+    }
+    m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+    if (m) return isoDate2(m[3], m[2], m[1]);
+    m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return isoDate2(m[1], m[2], m[3]);
+    return null;
+  };
+  if (grab) {
+    const d = dm(grab);
+    if (d) return d;
+  }
+  const all = t.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}[ \/.\-][A-Za-z]{3,9}[ \/.\-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b/g) || [];
+  for (const s of all) {
+    const d = dm(s);
+    if (d) return d;
+  }
+  return null;
+}
+function parsePoNumbers(text) {
+  const t = String(text || "");
+  const seen = /* @__PURE__ */ new Set(), out = [];
+  const add = (n, score) => {
+    n = Number(n);
+    if (n >= PO_MIN && n <= PO_MAX && !seen.has(n)) {
+      seen.add(n);
+      out.push({ n, score });
+    }
+  };
+  const lab = /(?:order\s*(?:no|number|ref)|purchase\s*order|\bp\.?o\.?\s*(?:no|number|ref)?|your\s*ref(?:erence)?|customer\s*(?:order|ref))[^\d]{0,18}(\d{4,6})/gi;
+  let m;
+  while (m = lab.exec(t)) add(m[1], 2);
+  const any = /\b(1\d{4})\b/g;
+  while (m = any.exec(t)) add(m[1], 1);
+  return out.sort((a, b) => b.score - a.score).map((o) => o.n);
+}
+function amounts(text) {
+  const out = [];
+  const re = /(?:£\s*)?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g;
+  let m;
+  while (m = re.exec(text)) {
+    const v = Number(m[1].replace(/,/g, ""));
+    if (Number.isFinite(v) && v > 0 && v < 1e7) out.push(v);
+  }
+  return out;
+}
+function reconcileTotals(text) {
+  const a = amounts(text);
+  let best = null;
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < a.length; j++) {
+    if (i === j) continue;
+    const net = a[i], vat = a[j];
+    if (vat > net) continue;
+    const gross = net + vat;
+    if (!a.some((x) => Math.abs(x - gross) <= 0.02)) continue;
+    const rate = net ? vat / net : 0;
+    if (rate < 1e-3 || rate > 0.26) continue;
+    if (!best || gross > best.gross + 1e-3) best = { net: round2(net), vat: round2(vat), gross: round2(gross) };
+  }
+  return best;
+}
+var round2 = (n) => Math.round(n * 100) / 100;
+function normSupplierName(s) {
+  return String(s || "").toLowerCase().replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+var SUPPLIER_STOP = new Set(
+  "and group building products product electrical electric plumbing heating supplies supply trade uk ltd limited services service hire distribution wholesale centre center direct company holdings maintenance construction contractors contractor mechanical fabrication for the".split(/\s+/)
+);
+function matchSupplier(text, knownNames) {
+  const t = String(text || "").toLowerCase();
+  let best = null;
+  for (const name of knownNames || []) {
+    const norm = normSupplierName(name);
+    if (!norm) continue;
+    const words = norm.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
+    if (!words.length) continue;
+    if (!words.every((w) => t.includes(w))) continue;
+    const score = words.join("").length + words.length;
+    if (!best || score > best.score) best = { name, score };
+  }
+  return best ? best.name : null;
+}
+function looksLikeRemittance(text) {
+  const t = String(text || "").toLowerCase();
+  return /remittance\s*advice|\bremittance\b|statement of account|monthly statement/.test(t);
+}
+function invoiceNumber(text) {
+  const m = String(text || "").match(/(?:invoice|inv|document)\s*(?:no|number|#|:)?\s*[:#]?\s*([A-Z]{0,4}[\/\-]?\d{4,10})/i);
+  return m ? m[1].trim() : "";
+}
+function extractFields(text, knownSuppliers) {
+  const totals = reconcileTotals(text);
+  const pos = parsePoNumbers(text);
+  return {
+    poNumbers: pos,
+    poNumber: pos[0] || null,
+    net: totals ? totals.net : null,
+    vat: totals ? totals.vat : null,
+    gross: totals ? totals.gross : null,
+    invoiceDate: parseInvoiceDate(text),
+    invoiceNumber: invoiceNumber(text),
+    supplier: matchSupplier(text, knownSuppliers)
+  };
+}
+function tier1Confident(f) {
+  return !!(f && f.poNumber && f.net != null && f.gross != null);
+}
+async function aiExtract2(env, bytes, filename) {
+  const key = env && env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const b64 = bytesToBase64(bytes);
+  if (!b64 || b64.length > 12 * 1024 * 1024) return null;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const schema = {
+    type: "object",
+    properties: {
+      docType: {
+        type: "string",
+        enum: ["invoice", "credit_note", "remittance", "statement", "other"],
+        description: "What kind of document this is. 'invoice' = a supplier's PURCHASE invoice billing Mostlane for goods/works. 'credit_note' = a supplier credit. 'remittance' = a REMITTANCE ADVICE / payment advice (a record that a payment was MADE or received \u2014 NOT a bill to pay). 'statement' = a monthly account statement listing several invoices. 'other' = anything else (a delivery note, quote, order acknowledgement, letter)."
+      },
+      supplier: { type: "string", description: "The supplier / merchant name that issued this document." },
+      invoiceNumber: { type: "string", description: "The supplier's own invoice number." },
+      invoiceDate: { type: "string", description: "The invoice / tax-point / transaction date in YYYY-MM-DD." },
+      poNumber: { type: "string", description: "The customer's purchase-order / order number if shown \u2014 a 5-digit Mostlane number in the 10000s. Empty if none is printed." },
+      net: { type: "number", description: "Goods / net total, excluding VAT, in GBP." },
+      vat: { type: "number", description: "VAT total in GBP." },
+      gross: { type: "number", description: "Invoice total including VAT, in GBP." }
+    },
+    required: ["docType", "net", "gross"]
+  };
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 900,
+        tools: [{ name: "extract_invoice", description: "Return the invoice's key fields.", input_schema: schema }],
+        tool_choice: { type: "tool", name: "extract_invoice" },
+        messages: [{ role: "user", content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "text", text: "This is a PDF received by Mostlane Construction (a UK building contractor). FIRST decide what kind of document it is (docType) \u2014 be careful to distinguish a supplier PURCHASE INVOICE (a bill for us to pay) from a REMITTANCE ADVICE / payment advice (a record that a payment was made \u2014 do NOT treat this as an invoice) and from a monthly STATEMENT of account. Then read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) \u2014 it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." }
+        ] }]
+      })
+    });
+    if (!r.ok) return null;
+    const p = await r.json();
+    const block = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use" && c.name === "extract_invoice") : null;
+    const o = block && block.input;
+    if (!o) return null;
+    const poRaw = String(o.poNumber || "").replace(/\D/g, "");
+    const poN = Number(poRaw);
+    return {
+      docType: String(o.docType || "").toLowerCase() || null,
+      supplier: o.supplier ? String(o.supplier).slice(0, 120) : null,
+      invoiceNumber: o.invoiceNumber ? String(o.invoiceNumber).slice(0, 40) : "",
+      invoiceDate: normIsoLoose(o.invoiceDate),
+      poNumber: poN >= PO_MIN && poN <= PO_MAX ? poN : null,
+      poNumbers: poN >= PO_MIN && poN <= PO_MAX ? [poN] : [],
+      net: numOrNull(o.net),
+      vat: numOrNull(o.vat),
+      gross: numOrNull(o.gross)
+    };
+  } catch {
+    return null;
+  }
+}
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? round2(n) : null;
+}
+function normIsoLoose(s) {
+  const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? isoDate2(m[1], m[2], m[3]) : null;
+}
+function bytesToBase64(bytes) {
+  try {
+    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let s = "";
+    const CH = 8192;
+    for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+    return btoa(s);
+  } catch {
+    return "";
+  }
+}
+async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
+  const allowVision = !opts || opts.allowVision !== false;
+  let text = "";
+  try {
+    text = await pdfExtractText(bytes);
+  } catch {
+  }
+  const remittance = looksLikeRemittance(text);
+  const t1 = extractFields(text, knownSuppliers);
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : "invoice", notInvoice: remittance };
+  const t2 = allowVision ? await aiExtract2(env, bytes, filename) : null;
+  if (t2) {
+    const merged = {
+      poNumber: t1.poNumber || t2.poNumber || null,
+      poNumbers: (t1.poNumbers && t1.poNumbers.length ? t1.poNumbers : t2.poNumbers) || [],
+      net: t2.net != null ? t2.net : t1.net,
+      vat: t2.vat != null ? t2.vat : t1.vat,
+      gross: t2.gross != null ? t2.gross : t1.gross,
+      invoiceDate: t2.invoiceDate || t1.invoiceDate || null,
+      invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
+      supplier: matchSupplier(text, knownSuppliers) || t2.supplier || t1.supplier || null
+    };
+    const docType = t2.docType || (remittance ? "remittance" : "invoice");
+    const notInvoice = remittance || docType === "remittance" || docType === "statement";
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance: remittance || notInvoice, docType, notInvoice };
+  }
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : null, notInvoice: remittance };
+}
+
+// src/lib/graphmail.js
+var GRAPH = "https://graph.microsoft.com/v1.0";
+function graphConfigured(env) {
+  return !!(env && env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && env.GRAPH_CLIENT_SECRET);
+}
+var _tok = { value: "", exp: 0 };
+async function getToken(env) {
+  const now = Date.now();
+  if (_tok.value && now < _tok.exp - 6e4) return _tok.value;
+  const url = `https://login.microsoftonline.com/${encodeURIComponent(env.GRAPH_TENANT_ID)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: env.GRAPH_CLIENT_ID,
+    client_secret: env.GRAPH_CLIENT_SECRET,
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials"
+  });
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    const msg = j && (j.error_description || j.error) || "HTTP " + r.status;
+    throw new Error("Graph sign-in failed: " + String(msg).split("\n")[0].slice(0, 200));
+  }
+  _tok = { value: j.access_token, exp: now + Number(j.expires_in || 3600) * 1e3 };
+  return _tok.value;
+}
+async function graphGet(env, path, { raw } = {}) {
+  const token = await getToken(env);
+  const r = await fetch(GRAPH + path, { headers: { authorization: "Bearer " + token } });
+  if (!r.ok) {
+    let d = "";
+    try {
+      d = (await r.json())?.error?.message || "";
+    } catch {
+    }
+    const e = new Error("Graph error " + r.status + (d ? ": " + d : ""));
+    e.status = r.status;
+    throw e;
+  }
+  return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
+}
+async function graphMailboxCheck(env, mailbox) {
+  if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
+  try {
+    await getToken(env);
+    await graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages?$top=1&$select=id`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40 } = {}) {
+  const since = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
+  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(200, top * 4))}`;
+  const j = await graphGet(env, q);
+  return (j && j.value || []).filter((m) => m.hasAttachments).slice(0, top);
+}
+async function listPdfAttachments(env, mailbox, messageId) {
+  const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const j = await graphGet(env, q);
+  const items = j && j.value || [];
+  return items.filter((a) => {
+    const isFile = String(a["@odata.type"] || "").includes("fileAttachment") || a.size != null;
+    const name = String(a.name || "").toLowerCase();
+    const ct = String(a.contentType || "").toLowerCase();
+    const pdfish = ct.includes("pdf") || name.endsWith(".pdf") || ct.includes("octet-stream") && name.endsWith(".pdf");
+    return isFile && pdfish && Number(a.size || 0) < 20 * 1024 * 1024;
+  });
+}
+async function downloadAttachment(env, mailbox, messageId, attachmentId) {
+  return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
+}
+
+// src/routes/po.js
+var DEFAULT_SWEEP_MAILBOX = "accounts@mostlane.com";
+async function ensurePoInvoiceCols__raw(db) {
+  for (const ddl of [
+    `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
+    `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`
+  ]) {
+    try {
+      await db.prepare(ddl).run();
+    } catch {
+    }
+  }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_flags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT,
+      net REAL, vat REAL, gross REAL,
+      engineer_slug TEXT, engineer_name TEXT,
+      job_id TEXT, job_ref TEXT, po_number INTEGER,
+      note TEXT, status TEXT DEFAULT 'open',
+      invoice_key TEXT, filename TEXT,
+      source TEXT, created_by TEXT, created_at TEXT, resolved_at TEXT
+    )`).run();
+  } catch {
+  }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS vat_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      source TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      dedupe_key TEXT UNIQUE,
+      filename TEXT, r2_key TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT, doc_type TEXT,
+      read_net REAL, read_vat REAL, read_gross REAL,
+      net REAL, vat REAL, gross REAL, vat_rate REAL,
+      category TEXT, reverse_charge INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'unverified',
+      po_number INTEGER, vat_period TEXT, notes TEXT,
+      verified_by TEXT, verified_at TEXT, created_at TEXT
+    )`).run();
+  } catch {
+  }
+}
+var ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+var numOrNull2 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+function normMatchOne(name, list) {
+  const n = normSupplierName(name || "");
+  if (!n) return null;
+  for (const cand of list || []) {
+    const c = normSupplierName(cand);
+    if (!c) continue;
+    if (c === n || c.includes(n) || n.includes(c)) return cand;
+  }
+  return null;
+}
+function classifyProposal(f, po, supNames, subNames) {
+  if (po) return { category: "confident", subName: null, supName: null };
+  const subName = normMatchOne(f && f.supplier, subNames);
+  if (subName) return { category: "subcontractor", subName, supName: null };
+  const supName = normMatchOne(f && f.supplier, supNames);
+  if (supName && !(f && f.poNumber)) return { category: "flag", subName: null, supName };
+  return { category: "other", subName: null, supName: supName || null };
+}
 function staffTypeOf2(u) {
   try {
     const p = JSON.parse(u.profile || "{}");
@@ -35825,13 +36410,16 @@ async function getRaiseOptions(env, username) {
 async function handle32(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
+  const path = url.pathname.replace(/^\/po/, "") || "/";
+  const method = request.method.toUpperCase();
+  await ensurePoInvoiceCols(db);
+  if (path === "/invoice-file" && method === "GET") return serveInvoiceFile(request, env, url);
+  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const field = staffTypeOf2(sess.user) === "field";
   const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
   if (!office && !field) return error("Not allowed", 403, env, request);
-  const path = url.pathname.replace(/^\/po/, "") || "/";
-  const method = request.method.toUpperCase();
   const q = url.searchParams;
   const jr8 = (d, status) => json(d, status ? { status } : {}, env, request);
   const bodyOf = async () => {
@@ -35889,6 +36477,181 @@ async function handle32(request, env, ctx, url, sess) {
     if (path === "/api/summary" && method === "GET") return jr8(await getSummary(db, q));
     if (path === "/api/jobcost" && method === "GET") return jr8(await getJobCost(db, q));
     if (path === "/api/accounts" && method === "GET") return jr8(await getAccounts(db));
+    if (path === "/api/invoice/parse" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      const file = form && form.get("file");
+      if (!file || typeof file.arrayBuffer !== "function") return jr8({ error: "No file uploaded" }, 400);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (buf.length > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+      const known = (await getSuppliers(db)).map((s) => s.name);
+      const subNames = (await getSubcontractors(db)).map((s) => s.name);
+      const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      const cls = classifyProposal(f, po, known, subNames);
+      return jr8({
+        ok: true,
+        tier: res.tier,
+        aiUsed: res.aiUsed,
+        textLen: res.textLen,
+        fields: f,
+        po,
+        candidates,
+        docType: res.docType || null,
+        notInvoice: !!res.notInvoice,
+        category: cls.category,
+        subName: cls.subName,
+        supName: cls.supName,
+        filename: file.name || "invoice.pdf"
+      });
+    }
+    if (path === "/api/invoice/apply" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      if (!form) return jr8({ error: "Bad request" }, 400);
+      const poNumber = Number(form.get("po_number"));
+      const cost = Number(form.get("cost_ex_vat"));
+      if (!poNumber) return jr8({ error: "Pick a PO to attach this invoice to" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      const file = form.get("file");
+      let bytes = null, filename = null, contentType = null;
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+        bytes = ab;
+        filename = file.name;
+        contentType = file.type;
+      }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(form.get("vat_rate")),
+        invoiceNo: form.get("invoice_no"),
+        invoiceDate: form.get("invoice_date"),
+        vat: numOrNull2(form.get("vat")),
+        gross: numOrNull2(form.get("gross")),
+        bytes,
+        filename,
+        contentType
+      });
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/sweep-config" && method === "GET") {
+      const cfg = await getConfigMap(db);
+      return jr8({
+        ok: true,
+        configured: graphConfigured(env),
+        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX,
+        days: Number(cfg.invoice_sweep_days) || 60
+      });
+    }
+    if (path === "/api/invoice/sweep" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
+      const out = await runInvoiceSweep(env, db, { mailbox, days });
+      return jr8({ ok: true, mailbox, days, ...out });
+    }
+    if (path === "/api/invoice/sweep-view" && method === "GET") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const mailbox = String(q.get("mailbox") || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      const mid = q.get("message_id"), aid = q.get("attachment_id");
+      if (!mid || !aid) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, mid, aid);
+      } catch (e) {
+        return jr8({ error: String(e && e.message || e) }, 400);
+      }
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30", ...corsHeaders(env, request) } });
+    }
+    if (path === "/api/invoice/sweep-apply" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const b = await bodyOf();
+      const poNumber = Number(b.po_number);
+      const cost = Number(b.cost_ex_vat);
+      if (!poNumber) return jr8({ error: "Pick a PO" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, b.message_id, b.attachment_id);
+      } catch (e) {
+        return jr8({ error: "Couldn\u2019t fetch that invoice from the mailbox: " + String(e && e.message || e) }, 400);
+      }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(b.vat_rate),
+        invoiceNo: b.invoice_no,
+        invoiceDate: b.invoice_date,
+        vat: numOrNull2(b.vat),
+        gross: numOrNull2(b.gross),
+        bytes,
+        filename: b.filename || "invoice.pdf",
+        contentType: "application/pdf",
+        graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
+      });
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/url" && method === "GET") {
+      const n = Number(q.get("po"));
+      const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
+      if (!r || !r.invoice_key) return jr8({ error: "No invoice attached" }, 404);
+      return jr8({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
+    }
+    if (path === "/api/jobs/sla-search" && method === "GET") {
+      return jr8(await searchSlaJobs(env, sess.tenantId, q.get("q") || ""));
+    }
+    if (path === "/api/invoice/flag" && method === "POST") {
+      return jr8(await addInvoiceFlag(env, db, sess, request));
+    }
+    if (path === "/api/invoice/flags" && method === "GET") {
+      return jr8(await listInvoiceFlags(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/invoice/flag-update" && method === "POST") {
+      return jr8(await updateInvoiceFlag(db, sess, await bodyOf()));
+    }
+    if (path === "/api/invoice/flag-delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM invoice_flags WHERE id = ?`).bind(Number(b.id)).run();
+      return jr8({ ok: true });
+    }
+    if (path === "/api/vat/run" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(400, Number(b.days) || 90));
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
+      return jr8(await runVatCapture(env, db, sess, url.origin, { mailbox, days }));
+    }
+    if (path === "/api/vat/list" && method === "GET") {
+      return jr8(await listVatInvoices(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/vat/save" && method === "POST") {
+      return jr8(await saveVatInvoice(db, sess, await bodyOf()));
+    }
+    if (path === "/api/vat/delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM vat_invoices WHERE id = ?`).bind(Number(b.id)).run();
+      return jr8({ ok: true });
+    }
+    if (path === "/api/vat/upload" && method === "POST") {
+      return jr8(await uploadVatInvoice(env, db, sess, url.origin, request));
+    }
     if (path === "/api/config" && method === "POST") return jr8(await updateConfig(db, await bodyOf()));
     if (path === "/api/suppliers" && method === "POST") return jr8(await addSupplier(db, await bodyOf()));
     if (path.startsWith("/api/suppliers/") && method === "PATCH") return jr8(await updateSupplier(db, path.split("/").pop(), await bodyOf()));
@@ -36053,6 +36816,621 @@ async function addClosure(db, body) {
 async function deleteClosure(db, date) {
   await db.prepare(`DELETE FROM closures WHERE date = ?`).bind(date).run();
   return { success: true };
+}
+async function serveInvoiceFile(request, env, url) {
+  const key = url.searchParams.get("key") || "";
+  if (!key.startsWith("po-invoices/")) return error("Bad key", 400, env, request);
+  const ok = await verifyFileSig(env, key, url.searchParams);
+  if (!ok) return error("Link expired or invalid", 403, env, request);
+  const obj = await env.JOB_FILES.get(key);
+  if (!obj) return error("Invoice not found", 404, env, request);
+  const h = new Headers();
+  h.set("Content-Type", obj.httpMetadata && obj.httpMetadata.contentType || "application/pdf");
+  h.set("Content-Disposition", "inline");
+  h.set("Cache-Control", "private, max-age=60");
+  h.set("Access-Control-Allow-Origin", "*");
+  return new Response(obj.body, { headers: h });
+}
+async function writeInvoiceToPo(env, db, sess, origin, o) {
+  let key = o.existingKey || null;
+  if (o.bytes) {
+    const safe = String(o.filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/${sess.tenantId}/${o.poNumber}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, o.bytes, { httpMetadata: { contentType: o.contentType || "application/pdf" } });
+  }
+  const meta = JSON.stringify({
+    no: (o.invoiceNo != null ? String(o.invoiceNo) : "") || null,
+    date: (o.invoiceDate != null ? String(o.invoiceDate) : "") || null,
+    net: o.cost,
+    vat: o.vat != null ? o.vat : null,
+    gross: o.gross != null ? o.gross : null,
+    filename: o.filename || null,
+    by: userName(sess),
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    graph: o.graph || null
+  });
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = [
+    "cost_ex_vat = ?",
+    "invoice_key = ?",
+    "invoice_meta = ?",
+    "cost_entered_at = ?",
+    "last_edited_by_slug = ?",
+    "last_edited_by_name = ?",
+    "last_edited_at = ?"
+  ];
+  const binds = [o.cost, key, meta, now, userSlug(sess), userName(sess), now];
+  if (o.vatRate != null) {
+    fields.push("vat_rate = ?");
+    binds.push(o.vatRate);
+  }
+  binds.push(o.poNumber);
+  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+  return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
+}
+async function searchSlaJobs(env, tenantId, qStr) {
+  const q = String(qStr || "").trim();
+  if (q.length < 2) return [];
+  const db = env.DB;
+  if (!db) return [];
+  const like = "%" + q.toLowerCase() + "%";
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT id, helpdesk_ref, description, priority, status, site_code, scheduled_at, data
+         FROM sla_jobs WHERE tenant_id = ? AND (
+           lower(COALESCE(helpdesk_ref,'')) LIKE ? OR lower(COALESCE(description,'')) LIKE ?
+           OR lower(COALESCE(site_code,'')) LIKE ? OR lower(COALESCE(data,'')) LIKE ?)
+         ORDER BY COALESCE(scheduled_at, raised_at, created_at) DESC LIMIT 20`
+    ).bind(tenantId, like, like, like, like).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const jobs = rows.map((r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+    }
+    const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+    return {
+      type: "job",
+      job_id: r.id,
+      ref: r.helpdesk_ref || d.helpdeskRef || "",
+      site: d.siteName || r.site_code || "",
+      site_code: r.site_code || d.siteCode || "",
+      status: r.status || d.status || "",
+      priority: r.priority || d.priority || "",
+      scheduledAt: r.scheduled_at || d.scheduledAt || null,
+      engineers: engs,
+      description: String(r.description || d.description || "").slice(0, 220)
+    };
+  });
+  let projects = [];
+  try {
+    projects = (await db.prepare(
+      `SELECT number, name, site_client, site_number, status FROM projects
+         WHERE tenant_id IN ('1.0','1',1) AND (status = 'live' OR status IS NULL)
+           AND (lower(COALESCE(name,'')) LIKE ? OR lower(COALESCE(number,'')) LIKE ?)
+         ORDER BY name LIMIT 12`
+    ).bind(like, like).all()).results || [];
+  } catch {
+    projects = [];
+  }
+  const projRows = projects.map((p) => ({
+    type: "project",
+    project_id: p.number || "",
+    ref: p.number || "",
+    number: p.number || "",
+    name: p.name || "",
+    site: p.name || "",
+    site_number: p.site_number || p.number || "",
+    status: p.status || "live",
+    description: ""
+  }));
+  return projRows.concat(jobs);
+}
+async function addInvoiceFlag(env, db, sess, request) {
+  const ct = request.headers.get("content-type") || "";
+  let b = {}, bytes = null, filename = null, contentType = null;
+  if (ct.includes("multipart/form-data")) {
+    const form = await request.formData().catch(() => null);
+    if (form) {
+      for (const k of [
+        "supplier",
+        "invoice_no",
+        "invoice_date",
+        "net",
+        "vat",
+        "gross",
+        "engineer_slug",
+        "engineer_name",
+        "job_id",
+        "job_ref",
+        "po_number",
+        "note",
+        "source",
+        "filename",
+        "mailbox",
+        "message_id",
+        "attachment_id"
+      ]) {
+        const v = form.get(k);
+        if (v != null) b[k] = v;
+      }
+      const file = form.get("file");
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength <= 15 * 1024 * 1024) {
+          bytes = ab;
+          filename = file.name;
+          contentType = file.type;
+        }
+      }
+    }
+  } else {
+    try {
+      b = await request.json();
+    } catch {
+    }
+  }
+  if (!bytes && b.message_id && b.attachment_id) {
+    try {
+      bytes = await downloadAttachment(env, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id);
+      filename = b.filename || "invoice.pdf";
+      contentType = "application/pdf";
+    } catch {
+    }
+  }
+  let key = null;
+  if (bytes) {
+    const safe = String(filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/flags/${sess.tenantId}/${Date.now()}-${safe}`;
+    try {
+      await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: contentType || "application/pdf" } });
+    } catch {
+      key = null;
+    }
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await db.prepare(`INSERT INTO invoice_flags
+    (tenant_id, supplier, invoice_no, invoice_date, net, vat, gross, engineer_slug, engineer_name,
+     job_id, job_ref, po_number, note, status, invoice_key, filename, source, created_by, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    b.supplier || null,
+    b.invoice_no || null,
+    b.invoice_date || null,
+    numOrNull2(b.net),
+    numOrNull2(b.vat),
+    numOrNull2(b.gross),
+    b.engineer_slug || null,
+    b.engineer_name || null,
+    b.job_id || "" || null,
+    b.job_ref || "" || null,
+    numOrNull2(b.po_number),
+    b.note || "" || null,
+    "open",
+    key,
+    filename || null,
+    b.source || "sweep",
+    userName(sess),
+    now
+  ).run();
+  return { ok: true, id: res && res.meta && res.meta.last_row_id || null, invoice_key: key };
+}
+async function listInvoiceFlags(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM invoice_flags WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const eng = params.get("engineer");
+  if (eng) {
+    sql += ` AND engineer_slug = ?`;
+    binds.push(eng);
+  }
+  const status = params.get("status");
+  if (status) {
+    sql += ` AND COALESCE(status,'open') = ?`;
+    binds.push(status);
+  }
+  sql += ` ORDER BY created_at DESC LIMIT 500`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  for (const r of rows) {
+    r.invoiceUrl = r.invoice_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.invoice_key) : null;
+  }
+  return rows;
+}
+async function updateInvoiceFlag(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const allowed = ["engineer_slug", "engineer_name", "job_id", "job_ref", "po_number", "note", "status"];
+  const fields = [], binds = [];
+  for (const k of allowed) if (b[k] !== void 0) {
+    fields.push(`${k} = ?`);
+    binds.push(b[k] === "" ? null : b[k]);
+  }
+  if (b.status === "resolved") {
+    fields.push(`resolved_at = ?`);
+    binds.push((/* @__PURE__ */ new Date()).toISOString());
+  } else if (b.status === "open") {
+    fields.push(`resolved_at = ?`);
+    binds.push(null);
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE invoice_flags SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+function vatQuarter(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})/);
+  if (!m) return "";
+  return m[1] + "-Q" + (Math.floor((Number(m[2]) - 1) / 3) + 1);
+}
+async function runVatCapture(env, db, sess, origin, { mailbox, days }) {
+  const MAX_NEW = 40, AI_BUDGET = 25;
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  let msgs = [];
+  try {
+    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 80 });
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+  let added = 0, scanned = 0, aiUsed = 0, skippedExisting = 0, capped = false;
+  for (const m of msgs) {
+    if (added >= MAX_NEW) {
+      capped = true;
+      break;
+    }
+    let atts = [];
+    try {
+      atts = await listPdfAttachments(env, mailbox, m.id);
+    } catch {
+      continue;
+    }
+    for (const a of atts) {
+      if (added >= MAX_NEW) {
+        capped = true;
+        break;
+      }
+      const key = m.id + ":" + a.id;
+      let exists = null;
+      try {
+        exists = await db.prepare(`SELECT 1 FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
+      } catch {
+      }
+      if (exists) {
+        skippedExisting++;
+        continue;
+      }
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+        scanned++;
+      } catch {
+        continue;
+      }
+      let res;
+      try {
+        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+      } catch {
+        continue;
+      }
+      if (res.aiUsed) aiUsed++;
+      const f = res.fields || {};
+      const safe = String(a.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+      const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+      try {
+        await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+      } catch {
+      }
+      const sub = normMatchOne(f.supplier, subNames);
+      const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
+      try {
+        await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+          (tenant_id, source, mailbox, message_id, attachment_id, dedupe_key, filename, r2_key,
+           supplier, invoice_no, invoice_date, doc_type, read_net, read_vat, read_gross,
+           net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+          String(sess.tenantId),
+          "mailbox",
+          mailbox,
+          m.id,
+          a.id,
+          key,
+          a.name || "invoice.pdf",
+          r2key,
+          f.supplier || null,
+          f.invoiceNumber || null,
+          f.invoiceDate || null,
+          res.docType || null,
+          numOrNull2(f.net),
+          numOrNull2(f.vat),
+          numOrNull2(f.gross),
+          numOrNull2(f.net),
+          numOrNull2(f.vat),
+          numOrNull2(f.gross),
+          rate,
+          sub ? "subcontractor" : "materials",
+          sub ? 1 : 0,
+          res.notInvoice ? "excluded" : "unverified",
+          vatQuarter(f.invoiceDate),
+          (/* @__PURE__ */ new Date()).toISOString()
+        ).run();
+        added++;
+      } catch {
+      }
+    }
+  }
+  return { ok: true, added, scanned, aiUsed, skippedExisting, capped, mailbox, days };
+}
+async function listVatInvoices(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM vat_invoices WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const period = params.get("period");
+  if (period) {
+    sql += ` AND vat_period = ?`;
+    binds.push(period);
+  }
+  const status = params.get("status");
+  if (status) {
+    sql += ` AND COALESCE(status,'unverified') = ?`;
+    binds.push(status);
+  }
+  const qstr = (params.get("q") || "").trim();
+  if (qstr) {
+    const l = "%" + qstr.toLowerCase() + "%";
+    sql += ` AND (lower(COALESCE(supplier,'')) LIKE ? OR lower(COALESCE(invoice_no,'')) LIKE ?)`;
+    binds.push(l, l);
+  }
+  sql += ` ORDER BY COALESCE(invoice_date,'') DESC, id DESC LIMIT 2000`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  for (const r of rows) r.url = r.r2_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.r2_key) : null;
+  let periods = [];
+  try {
+    periods = (await db.prepare(`SELECT vat_period p, COUNT(*) n FROM vat_invoices WHERE tenant_id=? AND vat_period IS NOT NULL AND vat_period<>'' GROUP BY vat_period ORDER BY vat_period DESC`).bind(String(sess.tenantId)).all()).results || [];
+  } catch {
+  }
+  const totals = { count: rows.length, net: 0, vat: 0, gross: 0, unverified: 0, verified: 0, excluded: 0, flagged: 0, reverseCharge: 0 };
+  for (const r of rows) {
+    const st = r.status || "unverified";
+    totals[st === "verified" ? "verified" : st === "excluded" ? "excluded" : "unverified"]++;
+    if (r.reverse_charge) totals.reverseCharge++;
+    if (st !== "excluded") {
+      totals.net += Number(r.net) || 0;
+      totals.vat += Number(r.vat) || 0;
+      totals.gross += Number(r.gross) || 0;
+    }
+    if (st !== "excluded" && (r.net == null || r.gross == null || Number(r.net) === 0)) totals.flagged++;
+  }
+  totals.net = Math.round(totals.net * 100) / 100;
+  totals.vat = Math.round(totals.vat * 100) / 100;
+  totals.gross = Math.round(totals.gross * 100) / 100;
+  return { rows, periods, totals };
+}
+async function saveVatInvoice(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const fields = [], binds = [];
+  const set = (col, val2) => {
+    fields.push(col + " = ?");
+    binds.push(val2);
+  };
+  if (b.supplier !== void 0) set("supplier", b.supplier || null);
+  if (b.invoice_no !== void 0) set("invoice_no", b.invoice_no || null);
+  if (b.invoice_date !== void 0) {
+    set("invoice_date", b.invoice_date || null);
+    set("vat_period", vatQuarter(b.invoice_date));
+  }
+  if (b.net !== void 0) set("net", numOrNull2(b.net));
+  if (b.vat !== void 0) set("vat", numOrNull2(b.vat));
+  if (b.gross !== void 0) set("gross", numOrNull2(b.gross));
+  if (b.vat_rate !== void 0) set("vat_rate", numOrNull2(b.vat_rate));
+  if (b.category !== void 0) set("category", b.category || null);
+  if (b.reverse_charge !== void 0) set("reverse_charge", b.reverse_charge ? 1 : 0);
+  if (b.po_number !== void 0) set("po_number", numOrNull2(b.po_number));
+  if (b.notes !== void 0) set("notes", b.notes || null);
+  if (b.status !== void 0) {
+    set("status", b.status);
+    if (b.status === "verified") {
+      set("verified_by", userName(sess));
+      set("verified_at", (/* @__PURE__ */ new Date()).toISOString());
+    }
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE vat_invoices SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+async function uploadVatInvoice(env, db, sess, origin, request) {
+  const form = await request.formData().catch(() => null);
+  const file = form && form.get("file");
+  if (!file || typeof file.arrayBuffer !== "function") return { error: "No file uploaded" };
+  const ab = await file.arrayBuffer();
+  if (ab.byteLength > 15 * 1024 * 1024) return { error: "That PDF is too big (max 15 MB)" };
+  const bytes = new Uint8Array(ab);
+  let hash = "";
+  try {
+    const h = await crypto.subtle.digest("SHA-256", ab);
+    hash = [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  } catch {
+    hash = String(Date.now());
+  }
+  const key = "drop:" + hash;
+  const exists = await db.prepare(`SELECT id FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
+  if (exists) return { ok: true, duplicate: true, id: exists.id };
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  const res = await parseInvoice(env, bytes, file.name || "invoice.pdf", known);
+  const f = res.fields || {};
+  const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+  const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+  try {
+    await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: file.type || "application/pdf" } });
+  } catch {
+  }
+  const sub = normMatchOne(f.supplier, subNames);
+  const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
+  const r = await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+    (tenant_id, source, dedupe_key, filename, r2_key, supplier, invoice_no, invoice_date, doc_type,
+     read_net, read_vat, read_gross, net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    "drop",
+    key,
+    file.name || "invoice.pdf",
+    r2key,
+    f.supplier || null,
+    f.invoiceNumber || null,
+    f.invoiceDate || null,
+    res.docType || null,
+    numOrNull2(f.net),
+    numOrNull2(f.vat),
+    numOrNull2(f.gross),
+    numOrNull2(f.net),
+    numOrNull2(f.vat),
+    numOrNull2(f.gross),
+    rate,
+    sub ? "subcontractor" : "materials",
+    sub ? 1 : 0,
+    res.notInvoice ? "excluded" : "unverified",
+    vatQuarter(f.invoiceDate),
+    (/* @__PURE__ */ new Date()).toISOString()
+  ).run();
+  return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
+}
+async function runInvoiceSweep(env, db, { mailbox, days }) {
+  const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  let msgs = [];
+  try {
+    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 });
+  } catch (e) {
+    return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+  }
+  const proposals = [];
+  let downloads = 0, aiUsed = 0, skipped = 0;
+  for (const m of msgs) {
+    if (downloads >= MAX_DOWNLOADS) break;
+    let atts = [];
+    try {
+      atts = await listPdfAttachments(env, mailbox, m.id);
+    } catch {
+      continue;
+    }
+    for (const a of atts) {
+      if (downloads >= MAX_DOWNLOADS) break;
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+        downloads++;
+      } catch {
+        continue;
+      }
+      let res;
+      try {
+        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+      } catch {
+        continue;
+      }
+      if (res.aiUsed) aiUsed++;
+      if (res.notInvoice || res.remittance) {
+        skipped++;
+        continue;
+      }
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      const cls = classifyProposal(f, po, known, subNames);
+      const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
+      if (po && po.priced && po.has_invoice) {
+        skipped++;
+        continue;
+      }
+      if (!actionable) continue;
+      proposals.push({
+        mailbox,
+        messageId: m.id,
+        attachmentId: a.id,
+        filename: a.name || "invoice.pdf",
+        subject: m.subject || "",
+        from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
+        receivedDateTime: m.receivedDateTime || null,
+        tier: res.tier,
+        fields: f,
+        po,
+        candidates,
+        category: cls.category,
+        subName: cls.subName,
+        supName: cls.supName
+      });
+    }
+  }
+  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
+}
+async function poBrief(db, poNumber) {
+  const r = await db.prepare(
+    `SELECT po_number, supplier, issued_at, cost_ex_vat, engineer_name, office_user_name, site, incident_no, description, invoice_key
+       FROM po_log WHERE po_number = ? AND deleted = 0`
+  ).bind(poNumber).first();
+  if (!r) return null;
+  return {
+    po_number: r.po_number,
+    supplier: r.supplier || "",
+    issued_at: r.issued_at,
+    cost_ex_vat: r.cost_ex_vat,
+    priced: r.cost_ex_vat != null,
+    who: r.engineer_name || r.office_user_name || "",
+    site: r.site || "",
+    incident_no: r.incident_no || "",
+    description: String(r.description || "").slice(0, 300),
+    has_invoice: !!r.invoice_key
+  };
+}
+async function matchInvoiceCandidates(db, f) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
+         FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
+    ).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const scored = rows.map((r) => {
+    const sup = normSupplierName(r.supplier || "");
+    const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 9999;
+    return {
+      po_number: r.po_number,
+      supplier: r.supplier || "",
+      issued_at: r.issued_at,
+      who: r.engineer_name || r.office_user_name || "",
+      site: r.site || "",
+      incident_no: r.incident_no || "",
+      description: String(r.description || "").slice(0, 200),
+      supplierMatch: supMatch,
+      daysApart: days
+    };
+  });
+  if (supN) {
+    return scored.filter((c) => c.supplierMatch).sort((a, b) => a.daysApart - b.daysApart).slice(0, 12);
+  }
+  return scored.filter((c) => c.daysApart <= 5).sort((a, b) => a.daysApart - b.daysApart).slice(0, 8);
 }
 async function getPOs(db, params) {
   let query = `SELECT * FROM po_log WHERE deleted = 0`;
@@ -36394,6 +37772,494 @@ async function getSummary(db, params) {
 }
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+// src/routes/accounts.js
+init_http();
+init_auth();
+init_once();
+init_filesign();
+var numOrNull3 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+function vatQuarter2(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})/);
+  if (!m) return "";
+  return m[1] + "-Q" + (Math.floor((Number(m[2]) - 1) / 3) + 1);
+}
+function staffTypeOf3(u) {
+  try {
+    const p = JSON.parse(u.profile || "{}");
+    return p && p.staffType === "office" ? "office" : "field";
+  } catch {
+    return "field";
+  }
+}
+function userName2(sess) {
+  const u = sess && sess.user || {};
+  return (u.name || ((u.first_name || u.FirstName || "") + " " + (u.last_name || u.LastName || "")).trim() || u.username || "").trim();
+}
+async function ensureTables__raw4(db) {
+  for (const ddl of [
+    `CREATE TABLE IF NOT EXISTS acct_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT,
+      kind TEXT, filename TEXT, r2_key TEXT, content_type TEXT,
+      supplier TEXT, doc_date TEXT, period TEXT, amount REAL,
+      doc_type TEXT, source TEXT, notes TEXT, status TEXT DEFAULT 'open',
+      line_count INTEGER DEFAULT 0, created_by TEXT, created_at TEXT )`,
+    `CREATE TABLE IF NOT EXISTS acct_statement_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, document_id INTEGER,
+      line_date TEXT, description TEXT, amount REAL, supplier_guess TEXT,
+      period TEXT, status TEXT DEFAULT 'open', receipt_document_id INTEGER,
+      notes TEXT, created_at TEXT )`,
+    `CREATE TABLE IF NOT EXISTS acct_supplier_check (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, period TEXT,
+      party_key TEXT, name TEXT, kind TEXT, checked INTEGER DEFAULT 0,
+      checked_by TEXT, checked_at TEXT, note TEXT,
+      UNIQUE(tenant_id, period, party_key) )`
+  ]) {
+    try {
+      await db.prepare(ddl).run();
+    } catch {
+    }
+  }
+}
+var ensureTables6 = onceMigration(ensureTables__raw4);
+function bytesToBase642(bytes) {
+  try {
+    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let s = "";
+    const CH = 8192;
+    for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+    return btoa(s);
+  } catch {
+    return "";
+  }
+}
+function stripHtml3(s) {
+  return String(s || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+}
+function contentBlock(bytes, filename, ct) {
+  const name = String(filename || "").toLowerCase();
+  const c = String(ct || "").toLowerCase();
+  const isPdf = c.includes("pdf") || name.endsWith(".pdf");
+  const isImg = c.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/.test(name);
+  const isHtml = c.includes("html") || c.startsWith("text/") || /\.(html?|txt|csv)$/.test(name);
+  const b64 = () => bytesToBase642(bytes);
+  if (isPdf) {
+    const d = b64();
+    return d ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: d } } : null;
+  }
+  if (isImg) {
+    const mt = c.startsWith("image/") ? c : name.endsWith(".png") ? "image/png" : name.endsWith(".webp") ? "image/webp" : name.endsWith(".gif") ? "image/gif" : "image/jpeg";
+    const d = b64();
+    return d ? { type: "image", source: { type: "base64", media_type: mt, data: d } } : null;
+  }
+  if (isHtml) {
+    let text = "";
+    try {
+      text = new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes));
+    } catch {
+    }
+    text = stripHtml3(text).slice(0, 6e4);
+    return text ? { type: "text", text: "Document text:\n" + text } : null;
+  }
+  return null;
+}
+async function readFinancialDoc(env, bytes, filename, ct) {
+  const key = env && env.ANTHROPIC_API_KEY;
+  const block = contentBlock(bytes, filename, ct);
+  if (!key || !block) return { docType: block ? "other" : "unreadable", supplier: null, total: null, lines: [] };
+  const b64len = block.source && block.source.data ? block.source.data.length : 0;
+  if (b64len > 12 * 1024 * 1024) return { docType: "toobig", supplier: null, total: null, lines: [] };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const schema = {
+    type: "object",
+    properties: {
+      docType: { type: "string", enum: ["statement", "invoice", "receipt", "other"], description: "'statement' = a credit-card or bank statement listing many transactions. 'invoice'/'receipt' = a single purchase. 'other' = anything else." },
+      supplier: { type: "string", description: "The card provider / bank, or (for a single invoice) the merchant." },
+      statementTotal: { type: "number", description: "The total spend / balance if shown." },
+      lines: {
+        type: "array",
+        description: "Every transaction line. For a single invoice/receipt, one line.",
+        items: {
+          type: "object",
+          properties: {
+            date: { type: "string", description: "Transaction date, YYYY-MM-DD." },
+            description: { type: "string", description: "Merchant / narrative." },
+            amount: { type: "number", description: "GBP. POSITIVE for money spent (a charge); NEGATIVE for a refund/credit. Ignore payments to the account." }
+          },
+          required: ["description", "amount"]
+        }
+      }
+    },
+    required: ["docType", "lines"]
+  };
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4e3,
+        tools: [{ name: "read_document", description: "Return the financial document's transaction lines.", input_schema: schema }],
+        tool_choice: { type: "tool", name: "read_document" },
+        messages: [{ role: "user", content: [block, { type: "text", text: "This is a financial document sent to Mostlane Construction (a UK building contractor). If it is a credit-card or bank STATEMENT, list EVERY transaction line \u2014 date, merchant/description, amount in GBP (positive = spent). Skip payments INTO the account. If it is a single invoice or receipt, return it as one line. All amounts in pounds." }] }]
+      })
+    });
+    if (!r.ok) return { docType: "other", supplier: null, total: null, lines: [] };
+    const p = await r.json();
+    const blk = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use" && c.name === "read_document") : null;
+    const o = blk && blk.input;
+    if (!o) return { docType: "other", supplier: null, total: null, lines: [] };
+    const lines = (Array.isArray(o.lines) ? o.lines : []).slice(0, 400).map((l) => ({
+      date: normIso(l.date),
+      description: String(l.description || "").slice(0, 200),
+      amount: numOrNull3(l.amount)
+    })).filter((l) => l.amount != null);
+    return { docType: String(o.docType || "").toLowerCase() || "other", supplier: o.supplier ? String(o.supplier).slice(0, 120) : null, total: numOrNull3(o.statementTotal), lines };
+  } catch {
+    return { docType: "other", supplier: null, total: null, lines: [] };
+  }
+}
+function normIso(s) {
+  const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}` : null;
+}
+async function handle33(request, env, ctx, url, sess) {
+  const db = env.PO_DB;
+  if (!db) return error("Accounts database not bound (PO_DB)", 500, env, request);
+  const path = url.pathname.replace(/^\/accounts/, "") || "/";
+  const method = request.method.toUpperCase();
+  await ensureTables6(db);
+  if (path === "/doc-file" && method === "GET") return serveDocFile(request, env, url);
+  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
+  if (String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const field = staffTypeOf3(sess.user) === "field";
+  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
+  if (!office) return error("Not allowed", 403, env, request);
+  const q = url.searchParams;
+  const jr8 = (d, status) => json(d, status ? { status } : {}, env, request);
+  const bodyOf = async () => {
+    try {
+      return await request.json();
+    } catch {
+      return {};
+    }
+  };
+  try {
+    if (path === "/upload" && method === "POST") return jr8(await uploadDoc(env, db, sess, url.origin, request));
+    if (path === "/docs" && method === "GET") return jr8(await listDocs(env, db, sess, url.origin, q));
+    if (path === "/doc" && method === "GET") return jr8(await getDoc(env, db, sess, url.origin, q));
+    if (path === "/doc-update" && method === "POST") return jr8(await updateDoc(db, sess, await bodyOf()));
+    if (path === "/doc-delete" && method === "POST") return jr8(await deleteDoc(env, db, sess, await bodyOf()));
+    if (path === "/doc-read" && method === "POST") return jr8(await rereadDoc(env, db, sess, await bodyOf()));
+    if (path === "/lines" && method === "GET") return jr8(await listLines(db, sess, q));
+    if (path === "/line-update" && method === "POST") return jr8(await updateLine(db, sess, await bodyOf()));
+    if (path === "/suppliers" && method === "GET") return jr8(await suppliersChecklist(db, sess, q));
+    if (path === "/supplier-check" && method === "POST") return jr8(await setSupplierCheck(db, sess, await bodyOf()));
+    return error("Not found: " + path, 404, env, request);
+  } catch (e) {
+    console.error("Accounts route error:", e && e.message);
+    return error("Accounts error: " + (e && e.message || "unknown"), 500, env, request);
+  }
+}
+async function serveDocFile(request, env, url) {
+  const key = url.searchParams.get("key") || "";
+  if (!key.startsWith("accounts-docs/")) return error("Bad key", 400, env, request);
+  const ok = await verifyFileSig(env, key, url.searchParams);
+  if (!ok) return error("Link expired or invalid", 403, env, request);
+  const obj = await env.JOB_FILES.get(key);
+  if (!obj) return error("Not found", 404, env, request);
+  const h = new Headers();
+  h.set("Content-Type", obj.httpMetadata && obj.httpMetadata.contentType || "application/octet-stream");
+  h.set("Content-Disposition", "inline");
+  h.set("Cache-Control", "private, max-age=60");
+  h.set("Access-Control-Allow-Origin", "*");
+  return new Response(obj.body, { headers: h });
+}
+async function uploadDoc(env, db, sess, origin, request) {
+  const form = await request.formData().catch(() => null);
+  const file = form && form.get("file");
+  if (!file || typeof file.arrayBuffer !== "function") return { error: "No file uploaded" };
+  const ab = await file.arrayBuffer();
+  if (ab.byteLength > 25 * 1024 * 1024) return { error: "That file is too big (max 25 MB)" };
+  const bytes = new Uint8Array(ab);
+  const kindHint = String(form.get("kind") || "").trim();
+  const noRead = String(form.get("no_read") || "") === "1";
+  const filename = file.name || "document";
+  const ct = file.type || "application/octet-stream";
+  const safe = filename.replace(/[^\w.\-]+/g, "_").slice(-90);
+  const r2key = `accounts-docs/${sess.tenantId}/${Date.now()}-${safe}`;
+  try {
+    await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: ct } });
+  } catch (e) {
+    return { error: "Could not store the file: " + (e && e.message) };
+  }
+  const read = noRead ? { docType: "other", supplier: null, total: null, lines: [] } : await readFinancialDoc(env, bytes, filename, ct);
+  const isStatement = kindHint === "statement" || read.docType === "statement" || read.lines.length > 1;
+  const kind = kindHint || (isStatement ? "statement" : read.docType === "invoice" || read.docType === "receipt" ? read.docType : "other");
+  const dates = read.lines.map((l) => l.date).filter(Boolean).sort();
+  const docDate = dates.length ? dates[dates.length - 1] : null;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await db.prepare(`INSERT INTO acct_documents
+    (tenant_id, kind, filename, r2_key, content_type, supplier, doc_date, period, amount, doc_type, source, status, line_count, created_by, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    kind,
+    filename,
+    r2key,
+    ct,
+    read.supplier || null,
+    docDate,
+    vatQuarter2(docDate),
+    read.total,
+    read.docType || null,
+    "upload",
+    "open",
+    read.lines.length,
+    userName2(sess),
+    now
+  ).run();
+  const docId = res && res.meta && res.meta.last_row_id;
+  if (docId && read.lines.length) await insertLines(db, sess, docId, read.lines);
+  return { ok: true, id: docId, kind, docType: read.docType, supplier: read.supplier, lineCount: read.lines.length, unreadable: read.docType === "unreadable" };
+}
+async function insertLines(db, sess, docId, lines) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  for (const l of lines) {
+    try {
+      await db.prepare(`INSERT INTO acct_statement_lines
+        (tenant_id, document_id, line_date, description, amount, period, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?)`).bind(
+        String(sess.tenantId),
+        docId,
+        l.date || null,
+        l.description || "",
+        numOrNull3(l.amount),
+        vatQuarter2(l.date),
+        "open",
+        now
+      ).run();
+    } catch {
+    }
+  }
+}
+async function rereadDoc(env, db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const row = await db.prepare(`SELECT * FROM acct_documents WHERE id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).first();
+  if (!row) return { error: "Not found" };
+  const obj = await env.JOB_FILES.get(row.r2_key);
+  if (!obj) return { error: "Stored file missing" };
+  const bytes = new Uint8Array(await obj.arrayBuffer());
+  const read = await readFinancialDoc(env, bytes, row.filename, row.content_type);
+  await db.prepare(`DELETE FROM acct_statement_lines WHERE document_id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).run();
+  if (read.lines.length) await insertLines(db, sess, id, read.lines);
+  await db.prepare(`UPDATE acct_documents SET line_count=?, supplier=COALESCE(supplier,?), doc_type=? WHERE id=?`).bind(read.lines.length, read.supplier || null, read.docType || null, id).run();
+  return { ok: true, lineCount: read.lines.length };
+}
+async function listDocs(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM acct_documents WHERE tenant_id=?`;
+  const binds = [String(sess.tenantId)];
+  const period = params.get("period");
+  if (period) {
+    sql += ` AND period=?`;
+    binds.push(period);
+  }
+  const kind = params.get("kind");
+  if (kind) {
+    sql += ` AND kind=?`;
+    binds.push(kind);
+  }
+  const qs = (params.get("q") || "").trim();
+  if (qs) {
+    const l = "%" + qs.toLowerCase() + "%";
+    sql += ` AND (lower(COALESCE(supplier,'')) LIKE ? OR lower(COALESCE(filename,'')) LIKE ?)`;
+    binds.push(l, l);
+  }
+  sql += ` ORDER BY COALESCE(doc_date, created_at) DESC, id DESC LIMIT 1000`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  for (const r of rows) r.url = r.r2_key ? await signedFileUrl(env, origin, "/accounts/doc-file", r.r2_key) : null;
+  let periods = [];
+  try {
+    periods = (await db.prepare(`SELECT period p, COUNT(*) n FROM acct_documents WHERE tenant_id=? AND period IS NOT NULL AND period<>'' GROUP BY period ORDER BY period DESC`).bind(String(sess.tenantId)).all()).results || [];
+  } catch {
+  }
+  return { rows, periods };
+}
+async function getDoc(env, db, sess, origin, params) {
+  const id = Number(params.get("id"));
+  if (!id) return { error: "No id" };
+  const row = await db.prepare(`SELECT * FROM acct_documents WHERE id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).first();
+  if (!row) return { error: "Not found" };
+  row.url = row.r2_key ? await signedFileUrl(env, origin, "/accounts/doc-file", row.r2_key) : null;
+  let lines = [];
+  try {
+    lines = (await db.prepare(`SELECT * FROM acct_statement_lines WHERE document_id=? AND tenant_id=? ORDER BY COALESCE(line_date,''), id`).bind(id, String(sess.tenantId)).all()).results || [];
+  } catch {
+  }
+  return { doc: row, lines };
+}
+async function updateDoc(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const fields = [], binds = [];
+  for (const k of ["kind", "supplier", "doc_date", "notes", "status", "amount"]) {
+    if (b[k] !== void 0) {
+      fields.push(`${k} = ?`);
+      binds.push(b[k] === "" ? null : k === "amount" ? numOrNull3(b[k]) : b[k]);
+    }
+  }
+  if (b.doc_date !== void 0) {
+    fields.push(`period = ?`);
+    binds.push(vatQuarter2(b.doc_date));
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id, String(sess.tenantId));
+  await db.prepare(`UPDATE acct_documents SET ${fields.join(", ")} WHERE id=? AND tenant_id=?`).bind(...binds).run();
+  return { ok: true };
+}
+async function deleteDoc(env, db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const row = await db.prepare(`SELECT r2_key FROM acct_documents WHERE id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).first();
+  if (row && row.r2_key) {
+    try {
+      await env.JOB_FILES.delete(row.r2_key);
+    } catch {
+    }
+  }
+  await db.prepare(`DELETE FROM acct_statement_lines WHERE document_id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).run();
+  await db.prepare(`DELETE FROM acct_documents WHERE id=? AND tenant_id=?`).bind(id, String(sess.tenantId)).run();
+  return { ok: true };
+}
+async function listLines(db, sess, params) {
+  let sql = `SELECT l.*, d.filename AS doc_filename, d.supplier AS doc_supplier FROM acct_statement_lines l
+             LEFT JOIN acct_documents d ON d.id = l.document_id
+             WHERE l.tenant_id=?`;
+  const binds = [String(sess.tenantId)];
+  const period = params.get("period");
+  if (period) {
+    sql += ` AND l.period=?`;
+    binds.push(period);
+  }
+  const status = params.get("status");
+  if (status) {
+    sql += ` AND COALESCE(l.status,'open')=?`;
+    binds.push(status);
+  }
+  const docId = params.get("document_id");
+  if (docId) {
+    sql += ` AND l.document_id=?`;
+    binds.push(Number(docId));
+  }
+  const qs = (params.get("q") || "").trim();
+  if (qs) {
+    const l = "%" + qs.toLowerCase() + "%";
+    sql += ` AND lower(COALESCE(l.description,'')) LIKE ?`;
+    binds.push(l);
+  }
+  sql += ` ORDER BY COALESCE(l.line_date,'') DESC, l.id DESC LIMIT 3000`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const totals = { count: rows.length, open: 0, receipted: 0, excluded: 0, amount: 0, outstanding: 0 };
+  for (const r of rows) {
+    const st = r.status || "open";
+    totals[st === "receipted" ? "receipted" : st === "excluded" ? "excluded" : "open"]++;
+    totals.amount += Number(r.amount) || 0;
+    if (st === "open") totals.outstanding += Number(r.amount) || 0;
+  }
+  totals.amount = Math.round(totals.amount * 100) / 100;
+  totals.outstanding = Math.round(totals.outstanding * 100) / 100;
+  return { rows, totals };
+}
+async function updateLine(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const fields = [], binds = [];
+  for (const k of ["status", "notes", "description", "supplier_guess", "receipt_document_id"]) {
+    if (b[k] !== void 0) {
+      fields.push(`${k} = ?`);
+      binds.push(b[k] === "" ? null : k === "receipt_document_id" ? numOrNull3(b[k]) : b[k]);
+    }
+  }
+  if (b.amount !== void 0) {
+    fields.push(`amount = ?`);
+    binds.push(numOrNull3(b.amount));
+  }
+  if (b.line_date !== void 0) {
+    fields.push(`line_date = ?`);
+    fields.push(`period = ?`);
+    binds.push(b.line_date || null, vatQuarter2(b.line_date));
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id, String(sess.tenantId));
+  await db.prepare(`UPDATE acct_statement_lines SET ${fields.join(", ")} WHERE id=? AND tenant_id=?`).bind(...binds).run();
+  return { ok: true };
+}
+var normKey2 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+async function suppliersChecklist(db, sess, params) {
+  const period = (params.get("period") || "").trim() || vatQuarter2((/* @__PURE__ */ new Date()).toISOString());
+  let sups = [], subs = [];
+  try {
+    sups = (await db.prepare(`SELECT name FROM suppliers WHERE active=1 ORDER BY name`).all()).results || [];
+  } catch {
+  }
+  try {
+    subs = (await db.prepare(`SELECT name FROM subcontractors WHERE active=1 ORDER BY name`).all()).results || [];
+  } catch {
+  }
+  const parties = sups.map((s) => ({ name: s.name, kind: "supplier" })).concat(subs.map((s) => ({ name: s.name, kind: "subcontractor" })));
+  let checks = [];
+  try {
+    checks = (await db.prepare(`SELECT party_key, checked, note, checked_by, checked_at FROM acct_supplier_check WHERE tenant_id=? AND period=?`).bind(String(sess.tenantId), period).all()).results || [];
+  } catch {
+  }
+  const map = {};
+  for (const c of checks) map[c.party_key] = c;
+  const rows = parties.map((p) => {
+    const c = map[normKey2(p.name)] || {};
+    return { name: p.name, kind: p.kind, key: normKey2(p.name), checked: !!Number(c.checked), note: c.note || "", checked_by: c.checked_by || "", checked_at: c.checked_at || "" };
+  });
+  const done = rows.filter((r) => r.checked).length;
+  return { period, rows, total: rows.length, done, outstanding: rows.length - done };
+}
+async function setSupplierCheck(db, sess, b) {
+  const period = String(b && b.period || "").trim();
+  if (!period) return { error: "No period" };
+  const name = String(b && b.name || "").trim();
+  if (!name) return { error: "No name" };
+  const key = normKey2(name);
+  const checked = b.checked ? 1 : 0;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  await db.prepare(`INSERT INTO acct_supplier_check (tenant_id, period, party_key, name, kind, checked, checked_by, checked_at, note)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(tenant_id, period, party_key) DO UPDATE SET
+      checked=excluded.checked, checked_by=excluded.checked_by, checked_at=excluded.checked_at,
+      note=COALESCE(excluded.note, acct_supplier_check.note), name=excluded.name, kind=excluded.kind`).bind(
+    String(sess.tenantId),
+    period,
+    key,
+    name,
+    String(b.kind || "supplier"),
+    checked,
+    checked ? userName2(sess) : null,
+    checked ? now : null,
+    b.note !== void 0 ? b.note || null : null
+  ).run();
+  return { ok: true };
 }
 
 // src/routes/aiassist.js
@@ -37291,7 +39157,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -37722,7 +39588,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -38104,7 +39970,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables__raw4(env) {
+async function ensureTables__raw5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -38120,7 +39986,7 @@ async function ensureTables__raw4(env) {
     }
   }
 }
-var ensureTables6 = onceMigration(ensureTables__raw4);
+var ensureTables7 = onceMigration(ensureTables__raw5);
 function lonYMD(d) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -38252,7 +40118,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -38272,7 +40138,7 @@ async function handle35(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const tid2 = await resolveTenantId(env, request);
-      await ensureTables6(env);
+      await ensureTables7(env);
       const b = await request.json().catch(() => ({}));
       const action = String(b.action || "").toLowerCase();
       const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -38375,7 +40241,7 @@ async function handle35(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables6(env);
+  await ensureTables7(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -38785,13 +40651,13 @@ init_logo();
 init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables__raw5(env) {
+async function ensureTables__raw6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
-var ensureTables7 = onceMigration(ensureTables__raw5);
+var ensureTables8 = onceMigration(ensureTables__raw6);
 async function getConfig5(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
@@ -38824,13 +40690,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables7(env);
+  await ensureTables8(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -39061,7 +40927,7 @@ function applyWorksWidth(worksW) {
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
-var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var MONTHS4 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
 var parse = (s) => {
@@ -39286,8 +41152,8 @@ function buildProgrammePdf(data, meta = {}) {
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1;
         if (i === 0 || first2) {
-          const full = MONTHS3[d.getUTCMonth()] + " " + d.getUTCFullYear();
-          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS3[d.getUTCMonth()];
+          const full = MONTHS4[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS4[d.getUTCMonth()];
           if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
             doc.text(x + 1, gridTop + 8, lbl, { size: 6, bold: true, color: [0.28, 0.36, 0.46] });
             lastMonR = x + 1 + textWidth(lbl, 6);
@@ -39416,7 +41282,7 @@ function buildProgrammePdf(data, meta = {}) {
 // src/routes/programmes.js
 init_once();
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables__raw6(env) {
+async function ensureTables__raw7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -39445,7 +41311,7 @@ async function ensureTables__raw6(env) {
   } catch {
   }
 }
-var ensureTables8 = onceMigration(ensureTables__raw6);
+var ensureTables9 = onceMigration(ensureTables__raw7);
 async function bankHolidayDates(db) {
   const y = (/* @__PURE__ */ new Date()).getFullYear();
   const years = [y - 1, y, y + 1, y + 2];
@@ -39567,14 +41433,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle37(request, env, ctx, url) {
+async function handle38(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables8(env);
+  await ensureTables9(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -40172,7 +42038,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables__raw7(env) {
+async function ensureTables__raw8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -40187,7 +42053,7 @@ async function ensureTables__raw7(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
-var ensureTables9 = onceMigration(ensureTables__raw7);
+var ensureTables10 = onceMigration(ensureTables__raw8);
 async function setProjFinValue(env, tid, costingKey, value, name) {
   return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
 }
@@ -40343,7 +42209,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -40367,7 +42233,7 @@ async function handle38(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables9(env);
+  await ensureTables10(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -41440,7 +43306,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -41574,7 +43440,7 @@ async function signRequest(accessId, secret, accessToken, method, path, bodyStr,
   const signStr = accessId + (accessToken || "") + t + stringToSign;
   return hmacSha256Hex(secret, signStr);
 }
-async function getToken(env, db, cfg) {
+async function getToken2(env, db, cfg) {
   const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
   if (!accessId || !secret) throw new Error("Tuya not configured (add TUYA_ACCESS_ID / TUYA_ACCESS_SECRET secrets)");
   const cached = await loadKV(db, TOK_KEY);
@@ -41601,7 +43467,7 @@ async function getToken(env, db, cfg) {
 }
 async function api(env, db, cfg, method, path, body) {
   const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
-  const token = await getToken(env, db, cfg);
+  const token = await getToken2(env, db, cfg);
   const base = baseFor(cfg);
   const bodyStr = body != null ? JSON.stringify(body) : "";
   const t = String(Date.now());
@@ -41692,7 +43558,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -42007,7 +43873,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -42221,7 +44087,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -42410,7 +44276,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -42470,7 +44336,7 @@ async function handle43(request, env, ctx, url, sess) {
     const jobId = String(b.jobId || "").trim();
     const files = Array.isArray(b.files) ? b.files : [];
     if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
-    const isoDate2 = (s) => s && /^\d{4}-\d{2}-\d{2}/.test(String(s)) ? String(s) : null;
+    const isoDate3 = (s) => s && /^\d{4}-\d{2}-\d{2}/.test(String(s)) ? String(s) : null;
     let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null, sigDate = null;
     for (const f of files) {
       try {
@@ -42484,7 +44350,7 @@ async function handle43(request, env, ctx, url, sess) {
         const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
         if (f.kind === "signature") {
           if (!sigKey) sigKey = key;
-          if (!sigDate) sigDate = isoDate2(f.date);
+          if (!sigDate) sigDate = isoDate3(f.date);
         }
         if (await env.JOB_FILES.head(key)) {
           skipped++;
@@ -42512,7 +44378,7 @@ async function handle43(request, env, ctx, url, sess) {
           } catch {
           }
           if (!d.signature || !d.signature.fileKey) {
-            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate2(b.signedAt) || (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
+            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate3(b.signedAt) || (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
             await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
           }
         }
@@ -42729,7 +44595,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -42869,7 +44735,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle14],
   ["*", "/upload-asset-thumb", handle14],
   ["*", "/delete-asset-image", handle14],
-  ["*", "/sla/workever", handle43],
+  ["*", "/sla/workever", handle44],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
   ["*", "/stats", handle22],
@@ -42891,7 +44757,7 @@ var ROUTES = [
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle33],
+  ["*", "/ai", handle34],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -42940,11 +44806,13 @@ var ROUTES = [
   // weekly van checks (form, grid, deadline badges)
   ["*", "/po", handle32],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle34],
+  ["*", "/accounts", handle33],
+  // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
+  ["*", "/cctv", handle35],
   // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
   // office view of the email→job intake (log, test box, re-run, allow-list)
-  ["*", "/tasks", handle35],
+  ["*", "/tasks", handle36],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/concerto", handle9],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
@@ -42952,25 +44820,25 @@ var ROUTES = [
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump", handle10],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle36],
+  ["*", "/cablecalc", handle37],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle37],
+  ["*", "/prog", handle38],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle38],
+  ["*", "/projects", handle39],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle38],
+  ["*", "/project", handle39],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle39],
+  ["*", "/health/", handle40],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle44],
+  ["*", "/comms", handle45],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle44],
+  ["*", "/customer", handle45],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle40],
+  ["*", "/tuya", handle41],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle41],
+  ["*", "/client", handle42],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle42]
+  ["*", "/fra", handle43]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -43335,6 +45203,9 @@ var PUBLIC_ROUTES = [
   ["GET", "/project/doc"],
   // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
   ["GET", "/fra/quote"],
+  // Supplier invoice PDFs attached to a PO, streamed inline — signed URL, verified in-handler.
+  ["GET", "/po/invoice-file"],
+  ["GET", "/accounts/doc-file"],
   // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
   ["POST", "/customer/job"],
   ["POST", "/customer/reschedule"]

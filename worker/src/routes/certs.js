@@ -636,6 +636,20 @@ async function matchOrderToRemedial(env, tid, o) {
         note: (late ? `Late order — EM cert ${r.cert_number || ""} at ${r.site_name || code} already has its works job (stage ${r.stage})` : `EM cert ${r.cert_number || ""} at ${r.site_name || code} (stage ${r.stage || "to_quote"})`) + (cands.length > 1 ? ` +${cands.length - 1} more at this site` : "") };
     }
   } catch {}
+  // 1b) A 5-year (fixed-wire / EICR) remedial in the register awaiting its order —
+  //     matched by the order's SR reference first (most precise), else the store
+  //     code. The caller advances it to "ordered" so the register auto-shows the £.
+  try {
+    const fc = fyrCode(o.storeCode);
+    const rows = (await env.DB.prepare(
+      "SELECT id, sr, store_code, site_name, stage FROM five_year_remedials WHERE tenant_id=? AND COALESCE(stage,'quoted') IN ('quoted','ordered','') ORDER BY created_at DESC"
+    ).bind(tid).all()).results || [];
+    const sr = String(o.srRef || "").toUpperCase();
+    const cand = (sr && rows.find(r => String(r.sr || "").toUpperCase() === sr))
+      || (fc && rows.find(r => fyrCode(r.store_code) === fc));
+    if (cand) return { kind: "fiveyear", certId: cand.id, stage: cand.stage || "quoted",
+      note: `5-year electrical remedial ${cand.sr || ""} at ${cand.site_name || code} (stage ${cand.stage || "quoted"})` };
+  } catch {}
   // 2) Electrical-test job with remedials not yet raised as a works job.
   try {
     const jobs = (await listJobs(env, tid)).filter(j => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
@@ -706,6 +720,16 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
       String(b.notifiedAt || now).slice(0, 40), String(b.link || "").slice(0, 800) || null, String(b.source || "concerto").slice(0, 40),
       status, m ? m.kind : null, m ? (m.certId || null) : null, m ? (m.jobId || null) : null, m ? m.note : null, now, now,
       emailSubject, emailFrom, emailText).run();
+  // A 5-year remedial match: stamp the order onto the register row and auto-advance
+  // quoted → ordered, so the 5-year remedials list shows the order the moment it
+  // lands (the office still raises the works job from that list).
+  if (m && m.kind === "fiveyear" && m.certId) {
+    try {
+      await env.DB.prepare(
+        "UPDATE five_year_remedials SET order_number=?, order_value=?, order_id=?, stage=CASE WHEN COALESCE(stage,'quoted') IN ('quoted','') THEN 'ordered' ELSE stage END, updated_at=? WHERE tenant_id=? AND id=?"
+      ).bind(orderNumber || null, (b.orderValue != null ? Number(b.orderValue) : null), id, now, tid, m.certId).run();
+    } catch {}
+  }
   const oShape = { id, orderNumber, orderValue: b.orderValue != null ? Number(b.orderValue) : null, priority: Number(b.priority) || null, unlinkedJobId };
   // A job with this reference already on the board (the "New Job Alert" came first,
   // or the office typed the order number into a hand-made job's reference)? Stamp
@@ -716,13 +740,17 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   else if (m.jobId) { try { linkedJob = await linkOrderToJobById(env, tid, oShape, m.jobId, "", { kind: "em" }); } catch {} }
   if (ctx && ctx.waitUntil) {
     const site = siteName || storeCode || "a site";
+    const isFy = m && m.kind === "fiveyear";
     const body = linkedJob
       ? `Client order ${orderNumber || ""} for ${site} — linked to job ${linkedJob.helpdeskRef || linkedJob.id} (${linkedJob.status || ""}).`
-      : (m
-        ? `Client order ${orderNumber || ""} for ${site} — matches a remedial awaiting approval. Review & raise the works job.`
-        : `Client order ${orderNumber || ""} for ${site} — open the Client orders board to make the job.`);
+      : isFy
+        ? `Client order ${orderNumber || ""} for ${site} — matched to a 5-year electrical remedial and marked ordered. Raise the works job from the 5-year remedials list.`
+        : (m
+          ? `Client order ${orderNumber || ""} for ${site} — matches an EM remedial awaiting approval. Review & raise the works job.`
+          : `Client order ${orderNumber || ""} for ${site} — open the Client orders board to make the job.`);
+    const url = linkedJob ? "/client-orders.html" : (isFy ? "/five-year-remedials.html" : (m ? "/cert-review.html?orders=1" : "/client-orders.html"));
     ctx.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
-      { title: (m && !linkedJob) ? "Client order — approve remedial" : "Client order received", body, url: (m && !linkedJob) ? "/cert-review.html?orders=1" : "/client-orders.html", tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
+      { title: (m && !linkedJob) ? "Client order — remedial" : "Client order received", body, url, tag: "client-order:" + id, actionable: !linkedJob }, "", { officeOnly: true }).catch(() => {}));
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : (linkedJob ? "job" : null), status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
@@ -2098,7 +2126,21 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid).all();
     const rows = results || [];
     const fit = await fittingsFor(rows.map(r => r.cert_id));
-    return json({ ok: true, cases: rows.map(r => shapeCase(r, fit[r.cert_id])) }, {}, env, request);
+    // Attach any client order that matched each case (matched_cert_id = cert_id),
+    // so the tracker shows "order received" the moment the REM order email lands —
+    // the office still raises the works job from here.
+    const ordByCert = {};
+    try {
+      const ids = rows.map(r => r.cert_id).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 60) {
+        const chunk = ids.slice(i, i + 60);
+        const { results: os } = await env.DB.prepare(
+          `SELECT id, order_number, order_value, matched_cert_id, notified_at, status FROM client_orders WHERE tenant_id=? AND matched_kind='em' AND status<>'dismissed' AND matched_cert_id IN (${chunk.map(() => "?").join(",")}) ORDER BY COALESCE(notified_at, created_at) DESC`
+        ).bind(tid, ...chunk).all();
+        for (const o of (os || [])) if (!ordByCert[o.matched_cert_id]) ordByCert[o.matched_cert_id] = { number: o.order_number || "", value: o.order_value, id: o.id, at: o.notified_at || "", status: o.status || "" };
+      }
+    } catch {}
+    return json({ ok: true, cases: rows.map(r => ({ ...shapeCase(r, fit[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
   }
 
   // ── CLIENT ORDERS BOARD (Sep 2026) — every order the client has sent, with its
