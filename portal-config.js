@@ -1255,7 +1255,7 @@
         var el = document.createElement("aside");
         el.id = "pnav";
         el.innerHTML =
-          '<div class="pn-brand"><div class="pn-logobox">'
+          '<div class="pn-brand"><div class="pn-logobox" id="pnavLogo">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
           + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
           // The gate light is always in the DOM (hidden); initGateLight decides
@@ -1266,7 +1266,7 @@
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
           + '<div class="pn-who"><b>' + esc(name) + "</b><span>" + (yes(perms.FullAccess) ? "Full access" : "Team member") + "</span></div>"
           + '<button class="pn-logout" id="pnavLogout" title="Log out"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg></button></div>'
-          + '<button class="pn-collapse" id="pnavCollapse"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span class="pn-label">Minimise</span></button>';
+          + '<button class="pn-collapse" id="pnavCollapse" title="Minimise menu" aria-label="Minimise menu"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span class="pn-label">Minimise</span></button>';
         document.body.appendChild(el);
         document.body.classList.add("pnav-on");
 
@@ -1277,10 +1277,25 @@
           if (srch) { e.preventDefault(); openPalette(); }
         });
         document.getElementById("pnavLogout").addEventListener("click", function () { window.mlLogout(); });
-        document.getElementById("pnavCollapse").addEventListener("click", function () {
+        function applyPnavToggleLabels() {
+          var col = document.documentElement.classList.contains("pnav-collapsed");
+          var b = document.getElementById("pnavCollapse");
+          if (b) { b.title = col ? "Expand menu" : "Minimise menu"; b.setAttribute("aria-label", b.title); }
+          var lg = document.getElementById("pnavLogo");
+          if (lg) lg.title = col ? "Expand menu" : "";
+        }
+        function togglePnav() {
           var c = document.documentElement.classList.toggle("pnav-collapsed");
           try { localStorage.setItem("pnavCollapsed", c ? "1" : "0"); } catch (e) {}
+          applyPnavToggleLabels();
+        }
+        document.getElementById("pnavCollapse").addEventListener("click", togglePnav);
+        // Clicking the logo also expands a collapsed rail — the intuitive place to look.
+        var pnLogo = document.getElementById("pnavLogo");
+        if (pnLogo) pnLogo.addEventListener("click", function () {
+          if (document.documentElement.classList.contains("pnav-collapsed")) togglePnav();
         });
+        applyPnavToggleLabels();
         try { initOfficeClock(); } catch (e) {}
         try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
         try { initPalette(); } catch (e) {}
@@ -1785,7 +1800,7 @@
           + "#pnav .pn-logout{ background:none; border:none; color:#dbe7f6; cursor:pointer; display:flex; padding:6px; border-radius:8px; } #pnav .pn-logout:hover{ background:rgba(255,255,255,.1); color:#fff; } #pnav .pn-logout svg{ width:19px; height:19px; stroke:currentColor; stroke-width:1.9; fill:none; }"
           + "html.pnav-collapsed #pnav .pn-who, html.pnav-collapsed #pnav .pn-logout{ display:none; } html.pnav-collapsed #pnav .pn-foot{ justify-content:center; }"
           + "#pnav .pn-collapse{ display:flex; align-items:center; gap:10px; color:#9fc0e8; font-size:12px; padding:10px 18px; cursor:pointer; border:none; border-top:1px solid rgba(255,255,255,.08); background:none; width:100%; font-family:inherit; text-align:left; }"
-          + "#pnav .pn-collapse svg{ width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; flex:none; transition:transform .16s ease; } html.pnav-collapsed #pnav .pn-collapse svg{ transform:rotate(180deg); } html.pnav-collapsed #pnav .pn-collapse{ justify-content:center; padding:10px 0; } html.pnav-collapsed #pnav .pn-collapse .pn-label{ display:none; }"
+          + "#pnav .pn-collapse svg{ width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; flex:none; transition:transform .16s ease; } html.pnav-collapsed #pnav .pn-collapse svg{ transform:rotate(180deg); } html.pnav-collapsed #pnav .pn-collapse{ justify-content:center; padding:0; margin:8px auto; width:42px; height:34px; border-top:none; border-radius:9px; background:rgba(255,255,255,.12); } html.pnav-collapsed #pnav .pn-collapse:hover{ background:rgba(255,255,255,.22); } html.pnav-collapsed #pnav .pn-collapse .pn-label{ display:none; } html.pnav-collapsed #pnav .pn-logobox{ cursor:pointer; }"
           // Standard portal back button (data-role='home' returns to the menu and
           // is hidden on desktop where the sidebar replaces it; data-role='up' is
           // a sub-page back and always stays).
