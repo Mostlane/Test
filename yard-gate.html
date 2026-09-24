@@ -61,6 +61,13 @@
       <button id="openBtn" class="gatebtn"><span class="ico">🚪</span><span>Open the gate</span></button>
       <button id="closeBtn" class="gatebtn close"><span class="ico">🔒</span><span>Close the gate</span></button>
       <div id="opMsg" class="msg"></div>
+      <div id="subNote" style="display:none;margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.5">
+        <b>⚠️ This is a Tuya cloud subscription problem, not a portal or gate fault.</b><br>
+        The gate's <b>IoT Core</b> service on Tuya has expired, so Tuya is refusing the open/close command.
+        The gate hardware is fine — <b>use the fob or keypad at the yard meanwhile</b>.<br>
+        <b>Fix:</b> log in to <b>iot.tuya.com</b> → <b>Cloud → Cloud Services → IoT Core</b> and renew / extend the
+        subscription (there's a free extension). Once it shows active, this button works again automatically.
+      </div>
       <div style="text-align:center;margin-top:12px"><button id="refreshBtn" class="btn small">↻ Refresh state</button></div>
       <div id="fixStateRow" style="display:none;text-align:center;margin-top:8px">
         <span class="muted" style="font-size:12px">Status wrong (opened by fob)? Set it: </span>
@@ -275,6 +282,15 @@ async function markState(open){
   try{ await aFetch("/tuya/gate/set-state",{method:"POST",body:JSON.stringify({open})}); }catch(e){}
   loadState(); loadLog();
 }
+function showGateErr(m, msg){
+  var sub = /iot ?core|subscription|not subscrib|has expired/i.test(msg||"");
+  var note=document.getElementById("subNote"); if(note) note.style.display = sub ? "block" : "none";
+  m.className="msg err";
+  m.textContent = sub
+    ? "✕ Gate cloud subscription has expired — see the note below (use the fob/keypad meanwhile)."
+    : ("✕ "+(msg||"Couldn't send the command"));
+}
+function hideGateErrNote(){ var note=document.getElementById("subNote"); if(note) note.style.display="none"; }
 async function openGate(){
   if(busy) return;
   let body;
@@ -286,8 +302,8 @@ async function openGate(){
   b.querySelector("span:last-child").textContent="Opening…";
   try{
     const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
-    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already open.")) : "✓ Open signal sent to the gate."; }
-    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+    if(j.ok){ hideGateErrNote(); m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already open.")) : "✓ Open signal sent to the gate."; }
+    else { showGateErr(m, j.error); }
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
   finally{
     b.querySelector("span:last-child").textContent="Open the gate";
@@ -305,8 +321,8 @@ async function closeGate(){
   b.querySelector("span:last-child").textContent="Closing…";
   try{
     const r=await aFetch("/tuya/gate/close",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
-    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already closed.")) : "✓ Close signal sent to the gate."; }
-    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+    if(j.ok){ hideGateErrNote(); m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already closed.")) : "✓ Close signal sent to the gate."; }
+    else { showGateErr(m, j.error); }
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
   finally{
     b.querySelector("span:last-child").textContent="Close the gate";
