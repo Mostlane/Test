@@ -203,8 +203,24 @@ async function setGateState(db, open, by, device, at) {
 async function pulseGate(env, db, cfg) {
   const code = cfg.openCode || "switch_1";
   const value = (cfg.openValue === undefined) ? true : cfg.openValue;
-  const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
-  return { jr, sent: { code, value } };
+  const rest = (typeof value === "boolean") ? !value : false;
+  const dev = `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`;
+  // PRESS — the rising edge the FAAC reads as a button push.
+  const jr = await api(env, db, cfg, "POST", dev, { commands: [{ code, value }] });
+  // RELEASE after a short hold so the relay ALWAYS returns to rest. This emulates
+  // a physical push-button (press then release = one step) and makes the pulse
+  // independent of the device's own "inching"/momentary setting. Without it, a
+  // relay left latched ON (inching lost or disabled) opens once and then ignores
+  // every later command — sending ON to an already-ON relay is no new edge. We
+  // base success on the PRESS; the release is best-effort.
+  if (jr && jr.success) {
+    const ms = Math.min(3000, Math.max(200, Number(cfg.pulseMs) || 800));
+    try {
+      await new Promise(r => setTimeout(r, ms));
+      await api(env, db, cfg, "POST", dev, { commands: [{ code, value: rest }] });
+    } catch (e) { /* relay will still be reset on the next press */ }
+  }
+  return { jr, sent: { code, value, rest } };
 }
 async function logGate(db, entry) {
   const log = (await loadKV(db, "tuya:openlog")) || [];
