@@ -5167,9 +5167,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   repeatMins:30}`. **closeCode defaults to openCode, closeValue defaults to the
   opposite of openValue** — so a latching gate needs only the open fields set.
 - **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
-  FAAC toggles open↔close on each pulse — `false` does nothing. So **Open and
+  FAAC toggles open↔close on each pulse. So **Open and
   Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
-  only in intent. The relay can't report state, so the portal **TRACKS it** in
+  only in intent. **`pulseGate` now sends an explicit PRESS then RELEASE** (value,
+  wait `cfg.pulseMs`≈800ms, then `!value`) so the relay always returns to rest and
+  the pulse no longer depends on the device's own inching setting — success is
+  based on the PRESS, the release is best-effort. **Why (27 Sep 2026):** the old
+  code sent only `value:true` and relied on the device auto-releasing; when that
+  inching setting was lost/disabled the relay LATCHED ON — the gate opened once
+  (the one OFF→ON edge) then every later ON command (portal AND Tuya app) was a
+  no-op (already ON = no new edge), so the gate "worked to open then wouldn't do
+  anything". The press→release emulates a physical push-button and self-heals a
+  latched relay. NB the portal log records a pulse as "success" whenever Tuya
+  ACCEPTS the command, which doesn't prove the relay physically changed state. The relay can't report state, so the portal **TRACKS it** in
   app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
   flips it. Open pulses only when tracked-closed, Close only when tracked-open
   (so pressing Open twice can't accidentally close it); if already in the target
