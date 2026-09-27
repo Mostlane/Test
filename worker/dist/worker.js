@@ -43561,6 +43561,18 @@ async function pulseGate(env, db, cfg) {
   }
   return { jr: jr8, sent: { code, value, rest } };
 }
+function friendlyGateError(msg) {
+  const m = String(msg || "").toLowerCase();
+  if (/subscrib|expired|iot ?core|no permission|not been authorized|authoriz/.test(m))
+    return "The gate's cloud subscription (Tuya IoT Core) has expired \u2014 renew it at iot.tuya.com. The fob/keypad still work.";
+  if (/offline|not online|device.*online|device not exist|does not exist/.test(m))
+    return "The gate controller looks offline \u2014 no internet or power right now, so it didn't get the command. Check its power and WiFi. The fob/keypad still work.";
+  if (/frequ|rate|too many|qps|limit/.test(m))
+    return "Too many gate commands in a row \u2014 wait a few seconds and try again.";
+  if (/token|sign|secret|client_id|client id/.test(m))
+    return "The gate's Tuya login was rejected \u2014 the access keys may need re-adding on the worker.";
+  return "The gate command failed" + (msg ? " (" + msg + ")" : "") + ". The fob/keypad still work.";
+}
 async function logGate(db, entry) {
   const log = await loadKV(db, "tuya:openlog") || [];
   log.unshift(entry);
@@ -43761,7 +43773,16 @@ async function handle41(request, env, ctx, url, sess) {
     }
     try {
       const { jr: jr8, sent } = await pulseGate(env, db, cfg);
-      if (!jr8.success) return json4({ ok: false, error: jr8.msg || "Tuya rejected the command" }, 502);
+      if (!jr8.success) {
+        let offline = false;
+        try {
+          const info = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}`);
+          if (info && info.success && info.result && info.result.online === false) offline = true;
+        } catch (e) {
+        }
+        const err = offline ? "The gate controller is offline \u2014 no internet or power right now, so it didn't get the command. Check its power and WiFi. The fob/keypad still work." : friendlyGateError(jr8.msg);
+        return json4({ ok: false, error: err, offline, raw: jr8.msg || "" }, 502);
+      }
       const nowIso = (/* @__PURE__ */ new Date()).toISOString();
       await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
       await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
