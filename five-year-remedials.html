@@ -95,6 +95,17 @@
     .notebox .lbl{font-size:12px;font-weight:700;color:#54627a;margin-bottom:5px;}
     .jobnote{width:100%;box-sizing:border-box;min-height:52px;border:1px solid #ccd5dd;border-radius:9px;padding:8px;font:inherit;font-size:13px;color:#0f2438;resize:vertical;}
     .notesave{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+    .remwrap{margin-top:10px;background:#fff7ed;border:1px solid #f3d9b5;border-radius:10px;padding:9px 10px;}
+    .remwrap .lbl{font-size:12px;font-weight:700;color:#9a3412;margin-bottom:6px;}
+    .remtbl{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border-radius:8px;overflow:hidden;}
+    .remtbl th{background:#fde6cf;color:#7c2d12;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.03em;padding:5px 7px;}
+    .remtbl td{border-top:1px solid #f0e2cf;padding:5px 7px;vertical-align:top;}
+    .remtbl .num{text-align:right;white-space:nowrap;}
+    .rembar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:8px;font-size:12.5px;}
+    .rembar input{border:1px solid #ccd5dd;border-radius:7px;padding:5px 7px;font:inherit;font-size:12.5px;}
+    .rembar button{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 11px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
+    .rembar .mkworks{background:#9a3412;}
+    .remsum{color:#3a4658;}
     .mback{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:24px 14px;overflow:auto;}
     .mback.on{display:flex;}
     .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;box-shadow:0 12px 44px rgba(6,24,54,.32);}
@@ -173,7 +184,7 @@
     const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
-    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active";
+    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0;
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
@@ -210,6 +221,7 @@
       try { d = await authFetch("/concerto/schedule?type=fiveYear&status=all").then(r=>r.json()); } catch {}
       if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td style="padding:16px;color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
       MONEY = !!d.money;
+      LRATE = Number(d.labourRate) || 0;
       TODAY = d.today || TODAY;
       const P = (d.stats && d.stats.pipeline) || {};
       STAGES = P.stages12 || [];
@@ -365,6 +377,9 @@
       tb.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => setStage(b.dataset.reset, "", b));
       tb.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
       tb.querySelectorAll("[data-note]").forEach(b => b.onclick = () => saveNote(b.dataset.note, b.closest(".notebox").querySelector(".jobnote"), b));
+      tb.querySelectorAll("[data-setrate]").forEach(b => b.onclick = () => setRate(b.dataset.setrate, b));
+      tb.querySelectorAll("[data-quote]").forEach(b => b.onclick = () => saveQuote(b.dataset.quote, b));
+      tb.querySelectorAll("[data-mkworks]").forEach(b => b.onclick = () => createWorks(b.dataset.mkworks, b.dataset.ppm, b));
     }
 
     function rowHtml(r){
@@ -429,9 +444,47 @@
         + '</div>';
       return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
         + out + strip
+        + remedialsBlock(r)
         + noteBox
         + '<div class="dlinks">'+links.join("")+'</div>'
         + '<div class="log">'+log+'</div>';
+    }
+
+    // The remedial works the engineer logged on the test job — priced up (labour rate ×
+    // hours + materials), a quote box, and a "create the site-audit works job" button.
+    function remedialsBlock(r){
+      const c = r.case, lines = c.remedialLines || [];
+      if (!lines.length) return "";
+      const totalMins = lines.reduce((s,x)=>s+(Number(x.minutes)||0),0);
+      const totalMat  = lines.reduce((s,x)=>s+(Number(x.materialCost)||0),0);
+      const hours = totalMins/60, labour = hours*LRATE, computed = labour+totalMat;
+      const money2 = n => '£'+(Number(n)||0).toFixed(2);
+      const head = '<tr><th>Code</th><th>Remedial work</th><th class="num">Time</th>'+(MONEY?'<th class="num">Materials</th>':'')+'<th class="num">Photos</th></tr>';
+      const body = lines.map(x =>
+        '<tr><td><b>'+esc(x.code||"—")+'</b></td><td>'+esc(x.description||"")+'</td>'
+        + '<td class="num">'+(x.minutes||0)+'m</td>'
+        + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
+        + '<td class="num">'+(x.photos||0)+' 📷</td></tr>').join("");
+      const key = esc(r.id);
+      let priceUi = '';
+      if (MONEY) {
+        priceUi = '<div class="rembar">'
+          + '<span>Labour rate £<input class="rateinp" id="rate-'+key+'" type="number" step="0.01" min="0" value="'+(LRATE||"")+'" style="width:70px">/hr <button data-setrate="'+key+'">Set</button></span>'
+          + '<span class="remsum">Hours <b>'+hours.toFixed(2)+'</b> · Labour <b>'+money2(labour)+'</b> · Materials <b>'+money2(totalMat)+'</b> · Suggested quote <b>'+money2(computed)+'</b></span>'
+          + '</div>';
+        const qv = (c.quote && c.quote.value!=null) ? Number(c.quote.value).toFixed(2) : computed.toFixed(2);
+        const qr = c.quote ? (c.quote.ref||"") : "";
+        const already = c.quote ? '<span class="muted" style="font-size:11px">saved'+(c.quote.by?" by "+esc(c.quote.by):"")+(c.quote.at?" "+fmtD(c.quote.at):"")+'</span>' : '';
+        priceUi += '<div class="rembar"><span>Quote ref <input id="qref-'+key+'" type="text" value="'+esc(qr)+'" placeholder="e.g. Q-1234" style="width:110px"></span>'
+          + '<span>Amount £<input id="qval-'+key+'" type="number" step="0.01" min="0" value="'+esc(qv)+'" style="width:90px"></span>'
+          + '<button data-quote="'+key+'">💷 Save quote</button> '+already+' <span class="saved" id="qsv-'+key+'"></span></div>';
+      }
+      let worksUi = '';
+      if (c.worksJob) worksUi = '<div class="rembar"><span class="muted">🔧 Works job raised — '+esc(c.worksJob.status||"Pending")+'</span> <a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">open ↗</a></div>';
+      else if (c.testJob) worksUi = '<div class="rembar"><button class="mkworks" data-mkworks="'+esc(c.testJob.id)+'" data-ppm="'+key+'">🔧 Create remedial works job</button> <span class="muted" style="font-size:11px">Builds a site-audit job — one photo item per remedial, ready to allocate.</span> <span class="saved" id="mksv-'+key+'"></span></div>';
+      return '<div class="remwrap"><div class="lbl">🔧 Remedial works ('+lines.length+')</div>'
+        + '<table class="remtbl"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+        + priceUi + worksUi + '</div>';
     }
 
     async function openCert(code){
@@ -462,6 +515,39 @@
         } else (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the note.");
       } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the note."); }
       if (btn) btn.disabled = false;
+    }
+
+    async function setRate(key, btn){
+      const inp = g("rate-"+key); if (!inp) return;
+      const rate = Number(inp.value);
+      if (!isFinite(rate) || rate < 0){ (window.MLUI?MLUI.toast:alert)("Enter a labour rate."); return; }
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch("/concerto/fy-rate", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ rate }) }).then(r=>r.json());
+        if (res && res.ok){ LRATE = Number(res.labourRate)||rate; renderTable(); }
+        else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the rate."); if (btn) btn.disabled=false; }
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the rate."); if (btn) btn.disabled=false; }
+    }
+    async function saveQuote(ppmId, btn){
+      const ref = ((g("qref-"+ppmId)||{}).value)||"", val = (g("qval-"+ppmId)||{}).value;
+      const sv = g("qsv-"+ppmId);
+      if (btn) btn.disabled = true;
+      try {
+        const res = await authFetch("/concerto/case", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ ppmId, quote:{ ref, value: Number(val) } }) }).then(r=>r.json());
+        if (res && res.ok){ if (sv){ sv.textContent="Saved ✓"; setTimeout(()=>{sv.textContent="";},1500); } await load(); }
+        else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't save the quote."); if (btn) btn.disabled=false; }
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the quote."); if (btn) btn.disabled=false; }
+    }
+    async function createWorks(jobId, ppmId, btn){
+      const ok = window.MLUI ? await MLUI.confirm("Create the remedial works job (site-audit) from these remedials? It'll be unassigned, ready to allocate.") : confirm("Create the remedial works job from these remedials?");
+      if (!ok) return;
+      const sv = g("mksv-"+ppmId);
+      if (btn){ btn.disabled = true; btn.textContent = "Creating…"; }
+      try {
+        const res = await authFetch("/sla/jobs/"+encodeURIComponent(jobId)+"/create-works-job", { method:"POST", headers:{"Content-Type":"application/json"}, body: "{}" }).then(r=>r.json());
+        if (res && res.ok){ if (sv) sv.textContent = res.existing ? "Already created ✓" : "Created ✓"; await load(); }
+        else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't create the works job."); if (btn){ btn.disabled=false; btn.textContent="🔧 Create remedial works job"; } }
+      } catch { (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); if (btn){ btn.disabled=false; btn.textContent="🔧 Create remedial works job"; } }
     }
 
     /* ── Alex list — page-level checklist of items to discuss with Alex ── */

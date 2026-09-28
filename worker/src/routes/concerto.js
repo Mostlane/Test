@@ -78,6 +78,9 @@ async function ensureTables__raw(env) {
   // five-year-remedials.html). Blank = the derived stage (fyStage12Auto) shows; a set
   // value wins until cleared. See FY_STAGES.
   for (const col of ["stage12 TEXT", "stage12_at TEXT", "stage12_by TEXT"]) { try { await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run(); } catch {} }
+  // The remedials quote the office fills in on the 5-Year schedule (ref + £), which
+  // marks the "quoted" checklist step done. Self-migrating.
+  for (const col of ["quote_ref TEXT", "quote_value REAL", "quote_at TEXT", "quote_by TEXT"]) { try { await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN " + col).run(); } catch {} }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -505,18 +508,24 @@ const FY_UNSAT_STAGES = new Set(["remedials_required", "remedials_to_quote", "re
 export function fyStage12Auto(c) {
   if (!c) return "needs_booking";
   const done = k => (c.steps || []).some(s => s.key === k && s.done);
-  const sat = c.outcome === "satisfactory", unsat = c.outcome === "unsatisfactory";
+  // Remedials added on the test job ARE the "unsatisfactory" signal — the engineer
+  // logged works to do — so we don't wait for a compliance-review outcome to flip
+  // the schedule onto the remedials path (Jamie: test + remedials → "Remedials to quote").
+  const hasRem = (c.remedialCount || 0) > 0;
+  const sat = !hasRem && c.outcome === "satisfactory";
+  const unsat = hasRem || c.outcome === "unsatisfactory";
   if (!done("scheduled")) return "needs_booking";
   if (!done("tested")) return "scheduled";
-  if (!done("reviewed") || (!sat && !unsat)) return "awaiting_review";
+  if (!sat && !unsat) return "awaiting_review";               // tested, no outcome/remedials yet
   if (sat) return done("invoiced") ? "invoiced" : "complete_satisfactory";
-  // unsatisfactory path
+  // unsatisfactory / has-remedials path
   if (done("invoiced") && done("rem_closed")) return "invoiced";
   if (done("cert_updated")) return "certificate_updated";
-  if (done("works_done")) return "remedials_complete";
+  if (done("works_done")) return "remedials_complete";        // the site-audit works job is finished
+  if (c.worksJob && c.worksJob.id) return "remedials_scheduled"; // works job raised, not yet done
   if (done("ordered")) return (c.worksJob && c.worksJob.scheduledAt) ? "remedials_scheduled" : "orders_received";
-  if (done("quoted")) return "remedials_quoted";
-  return "remedials_required";
+  if (done("quoted")) return "remedials_quoted";              // quote recorded, no works job yet
+  return hasRem ? "remedials_to_quote" : "remedials_required";
 }
 // The current 5-year DOCUMENT status per site (Jamie: Out of date / Unsatisfactory /
 // in date but unsatisfactory / missing). chartDue = the compliance chart's 5-year
@@ -551,7 +560,8 @@ async function caseContext(env, tid, type, jobs) {
     const doneDate = done ? (jobDoneDate(j) || (j.scheduledAt || "").slice(0, 10) || null) : null;
     push(ctx.testJobs, code, { id: j.id, ref: j.helpdeskRef || j.siteName || "", status: j.status || "", done, doneDate, scheduledAt: j.scheduledAt || null,
       date: doneDate || (j.scheduledAt || "").slice(0, 10) || null, engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
-      worksJobId: j.remedialsWorksJobId || null, remedials: Array.isArray(j.remedials) ? j.remedials.length : 0 });
+      worksJobId: j.remedialsWorksJobId || null, remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
+      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map(x => ({ code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0 })) });
   }
   try {
     const { results } = await env.DB.prepare("SELECT id, code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
@@ -640,7 +650,7 @@ export function deriveCase(r, ctx, today, money, rec) {
   const active = !closed && (!!r.order_nr || (daysToDue != null && daysToDue <= 365) || !!testJob || touched || !!autoFlag);
   const held = !closed && !!(c && c.hold_reason);
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
-  const stage12Auto = fyStage12Auto({ steps, outcome, worksJob: wj ? { scheduledAt: wj.scheduledAt } : null });
+  const stage12Auto = fyStage12Auto({ steps, outcome, remedialCount: testJob ? testJob.remedials : 0, worksJob: wj ? { id: wj.id, scheduledAt: wj.scheduledAt } : null });
   const stage12Manual = (c && c.stage12 && FY_STAGE_KEYS.has(c.stage12)) ? c.stage12 : "";
   const stage12 = stage12Manual || stage12Auto;
   return { id: c ? c.id : caseId(r.id, cycleDue), stored: !!c, cycleDue, active, closed, closedAt: c && c.closed_at || null, closedBy: c && c.closed_by || "",
@@ -653,6 +663,10 @@ export function deriveCase(r, ctx, today, money, rec) {
     engineer: (c && c.engineer) || (testJob && testJob.engineer) || "", engineerSource: c && c.engineer ? "manual" : testJob && testJob.engineer ? "job" : "",
     stage, next: nextStep ? nextStep.key : null, nextLabel: nextStep ? nextStep.label : (allDone ? "All steps done — close the case" : ""), nextTodo: nextStep ? nextStep.todo : "", allDone, steps, daysToDue,
     testJob: testJob ? { id: testJob.id, ref: testJob.ref, status: testJob.status, date: testJob.date, engineer: testJob.engineer, remedials: testJob.remedials, worksJobId: testJob.worksJobId } : null,
+    // The remedial works the engineer logged — for the schedule's price-up + create-works-job.
+    // Material £ is money-gated; minutes/description are shown to anyone with the page.
+    remedialLines: testJob ? (testJob.remedialsList || []).map(x => ({ code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, materialCost: money ? x.materialCost : undefined })) : [],
+    quote: c && c.quote_value != null ? { ref: c.quote_ref || "", value: money ? c.quote_value : undefined, at: c.quote_at || null, by: c.quote_by || "" } : null,
     worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
     cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null, certUpdated: cert2 ? { id: cert2.id, date: cert2.date, name: cert2.name } : null,
     review: rv && rv.outcome ? { outcome: rv.outcome, attention: !!rv.attention, summary: rv.summary || "", checkedAt: rv.checked_at || null } : null,
@@ -771,7 +785,15 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/concerto/schedule" && method === "GET") {
     const q = url.searchParams;
     const out = await buildSchedule(env, tid, { type: q.get("type") || "fiveYear", from: q.get("from") || "", to: q.get("to") || "", released: q.get("released") || "all", status: q.get("status") || "open", money });
-    return json({ ok: true, money, ...out }, {}, env, request);
+    let labourRate = 0; try { const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first(); labourRate = rr ? Number(rr.value) || 0 : 0; } catch {}
+    return json({ ok: true, money, labourRate, ...out }, {}, env, request);
+  }
+  // The £/hour labour rate used to price up remedials on the 5-Year schedule.
+  if (path === "/concerto/fy-rate" && method === "POST") {
+    const b = await body(); const rate = Number(b.rate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 1000) return error("Enter a labour rate between 0 and 1000", 400, env, request);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "fiveyear:labourrate:" + tid, String(rate)).run();
+    return json({ ok: true, labourRate: rate }, {}, env, request);
   }
   if (path === "/concerto/audit" && method === "GET") {
     const out = await fiveYearAudit(env, tid, url.searchParams.get("year") || "");
@@ -840,10 +862,20 @@ export async function handle(request, env, ctx, url, sess) {
       if (note) { c.note = note; c.note_at = now; c.note_by = me; events.push({ action: "note", note, text: "📝 Note: " + note }); }
       else { c.note = null; c.note_at = null; c.note_by = null; events.push({ action: "note-clear", text: "Note cleared" }); }
     }
+    let quoteChanged = false;
+    if (b.quote !== undefined && b.quote) {
+      const val = Number(b.quote.value);
+      c.quote_ref = String(b.quote.ref || "").slice(0, 60) || null;
+      c.quote_value = Number.isFinite(val) ? val : null;
+      c.quote_at = now; c.quote_by = me; quoteChanged = true;
+      const cur = steps["quoted"] || {}; cur.done = true; cur.at = now; cur.by = me; steps["quoted"] = cur;
+      events.push({ action: "quote", text: "Remedials quoted" + (c.quote_ref ? " " + c.quote_ref : "") + (Number.isFinite(val) ? " £" + val.toFixed(2) : "") });
+    }
     if (b.close) { c.closed_at = now; c.closed_by = me; c.hold_reason = null; c.flag_note = null; events.push({ action: "close", text: "Case closed" }); }
     if (b.reopen && c.closed_at) { c.closed_at = null; c.closed_by = null; events.push({ action: "reopen", text: "Case reopened" }); }
     await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, note=?, note_at=?, note_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?")
       .bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.note || null, c.note_at || null, c.note_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    if (quoteChanged) await env.DB.prepare("UPDATE concerto_cases SET quote_ref=?, quote_value=?, quote_at=?, quote_by=? WHERE tenant_id=? AND id=?").bind(c.quote_ref || null, c.quote_value == null ? null : c.quote_value, c.quote_at || null, c.quote_by || null, tid, c.id).run();
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }

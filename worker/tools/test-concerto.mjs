@@ -364,7 +364,7 @@ const ROWS = [
   ], fileName: "ppm_schedule_stage12.xlsx" });
   let sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); let by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
   ok("stage12: 12 stages advertised + byStage12 present", sc.body.stats.pipeline.stages12.length === 12 && sc.body.stats.pipeline.byStage12 && sc.body.rows.every(r => r.case.stage12 && r.docStatus), JSON.stringify(sc.body.stats.pipeline.byStage12));
-  ok("0500 auto stage12 = remedials_required (unsat, reviewed, not quoted); source auto", by["0500"].case.stage12 === "remedials_required" && by["0500"].case.stage12Source === "auto" && by["0500"].case.stage12Auto === "remedials_required", JSON.stringify({ s: by["0500"].case.stage12, src: by["0500"].case.stage12Source }));
+  ok("0500 auto stage12 = remedials_to_quote (test complete WITH remedials logged); source auto", by["0500"].case.stage12 === "remedials_to_quote" && by["0500"].case.stage12Source === "auto" && by["0500"].case.stage12Auto === "remedials_to_quote", JSON.stringify({ s: by["0500"].case.stage12, src: by["0500"].case.stage12Source }));
   ok("0500 document status = in date but unsatisfactory (amber)", by["0500"].docStatus.key === "in_unsat" && by["0500"].docStatus.light === "amber");
   ok("0501 out of date (expired chart, nothing booked) → doc expired, stage needs_booking", by["0501"].docStatus.key === "expired" && by["0501"].docStatus.light === "red" && by["0501"].case.stage12 === "needs_booking");
   ok("0502 no chart + no cert → document status missing", by["0502"].docStatus.key === "missing" && by["0502"].docStatus.light === "red" && by["0502"].case.stage12 === "needs_booking");
@@ -376,7 +376,7 @@ const ROWS = [
   // Clearing the override → back to the automatic reading
   await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00500:fiveYear", stage12: "" });
   sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
-  ok("clear the override → back to auto (remedials_required)", by["0500"].case.stage12 === "remedials_required" && by["0500"].case.stage12Source === "auto");
+  ok("clear the override → back to auto (remedials_to_quote)", by["0500"].case.stage12 === "remedials_to_quote" && by["0500"].case.stage12Source === "auto");
   // Picking the satisfactory stage sets the outcome satisfactory (both pages agree)
   await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "SCH:SR00501:fiveYear", stage12: "complete_satisfactory" });
   sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
