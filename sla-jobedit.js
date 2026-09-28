@@ -281,9 +281,10 @@
         </details>
       </div>
 
-      <details class="mlje-site mlje-coll">
+      <details class="mlje-site mlje-coll" open>
         <summary><h3>Site</h3></summary>
         <div class="mlje-collbody">
+        <div class="mlje-hint" style="margin-bottom:6px;">To move this job to a different site, pick it below — that repoints the name, address, postcode and store code together.</div>
         <label for="mljeSitePick">Use an existing site</label>
         <input id="mljeSiteFilter" type="text" placeholder="Type to filter sites…" style="margin-bottom:6px;">
         <select id="mljeSitePick"><option value="">— pick a site to fill the boxes below —</option></select>
