@@ -106,6 +106,12 @@
     .rembar button{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 11px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
     .rembar .mkworks{background:#9a3412;}
     .remsum{color:#3a4658;}
+    .c3lab{display:inline-flex;align-items:center;gap:5px;color:#3a4658;font-weight:600;cursor:pointer;user-select:none;}
+    .c3lab input{width:auto;padding:0;margin:0;}
+    .remtbl tr.noevid td{background:#fff4e6;}
+    .evtag{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+    .evno{color:#b45309;font-weight:700;}
+    .evsum{margin-top:7px;font-size:12px;font-weight:600;color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;border-radius:8px;padding:6px 9px;}
     .mback{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:24px 14px;overflow:auto;}
     .mback.on{display:flex;}
     .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;box-shadow:0 12px 44px rgba(6,24,54,.32);}
@@ -380,6 +386,30 @@
       tb.querySelectorAll("[data-setrate]").forEach(b => b.onclick = () => setRate(b.dataset.setrate, b));
       tb.querySelectorAll("[data-quote]").forEach(b => b.onclick = () => saveQuote(b.dataset.quote, b));
       tb.querySelectorAll("[data-mkworks]").forEach(b => b.onclick = () => createWorks(b.dataset.mkworks, b.dataset.ppm, b));
+      tb.querySelectorAll("[data-copyq]").forEach(b => b.onclick = () => copyQuote(b.dataset.copyq));
+    }
+
+    // Which remedial lines to act on: C1/C2/FI + uncoded always; C3 only when its tick is on.
+    function includedLines(key){
+      const row = ROWS.find(x => x.id === key);
+      const lines = (row && row.case && row.case.remedialLines) || [];
+      const cb = g("c3-"+key), withC3 = !!(cb && cb.checked);
+      return lines.filter(x => withC3 || String(x.code||"").toUpperCase() !== "C3");
+    }
+    function fallbackCopy(text, cb){
+      try { const ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); cb&&cb(); }
+      catch { (window.MLUI?MLUI.toast:alert)("Couldn't copy — long-press the list to select it."); }
+    }
+    function copyQuote(key){
+      const lines = includedLines(key), sv = g("cpv-"+key);
+      const text = lines.map(x => { const code=String(x.code||"").toUpperCase(); const d=String(x.description||"").trim(); return d ? (code ? code+" — "+d : d) : ""; }).filter(Boolean).join("\n");
+      if (!text){ (window.MLUI?MLUI.toast:alert)("No observations to copy."); return; }
+      const n = text.split("\n").length;
+      const done = () => { if (sv){ sv.textContent="Copied "+n+" ✓"; setTimeout(()=>{sv.textContent="";},1800); } };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+        else fallbackCopy(text, done);
+      } catch { fallbackCopy(text, done); }
     }
 
     function rowHtml(r){
@@ -454,37 +484,73 @@
     // hours + materials), a quote box, and a "create the site-audit works job" button.
     function remedialsBlock(r){
       const c = r.case, lines = c.remedialLines || [];
-      if (!lines.length) return "";
+      const key = esc(r.id);
+      const st = stageOf(r);
+      const remedialStage = /^remedials_/.test(st) || st==="orders_received" || c.outcome==="unsatisfactory";
+      const money2 = n => '£'+(Number(n)||0).toFixed(2);
+      // Quote box (ref + amount) — reused whether or not portal line items exist.
+      function quoteBox(suggested){
+        if (!MONEY) return '';
+        const qv = (c.quote && c.quote.value!=null) ? Number(c.quote.value).toFixed(2) : (suggested!=null ? Number(suggested).toFixed(2) : "");
+        const qr = c.quote ? (c.quote.ref||"") : "";
+        const already = c.quote ? '<span class="muted" style="font-size:11px">saved'+(c.quote.by?" by "+esc(c.quote.by):"")+(c.quote.at?" "+fmtD(c.quote.at):"")+'</span>' : '';
+        return '<div class="rembar"><span>Quote ref <input id="qref-'+key+'" type="text" value="'+esc(qr)+'" placeholder="e.g. Q-1234" style="width:110px"></span>'
+          + '<span>Amount £<input id="qval-'+key+'" type="number" step="0.01" min="0" value="'+esc(qv)+'" style="width:90px"></span>'
+          + '<button data-quote="'+key+'">💷 Save quote</button> '+already+' <span class="saved" id="qsv-'+key+'"></span></div>';
+      }
+      // No line items were captured on a portal ⚡ electrical-test job — but the case is at a
+      // remedials stage (usually staged by hand). Still let the office record the quote figure.
+      if (!lines.length) {
+        if (!remedialStage) return "";
+        let msg = '<div class="remwrap"><div class="lbl">🔧 Remedial works</div>'
+          + '<div class="sub" style="margin:2px 0 8px">No priced remedial items were captured in the portal for this site. '
+          + 'They appear here <b>automatically</b>, already priced, once the 5-year test is done as an '
+          + '<b>⚡ Electrical test</b> job with the remedials logged on it (use “➕ Raise the test job” below). '
+          + 'This case was staged by hand, so record the quote figure below to keep it on file'
+          + ((c.note||"").toLowerCase().indexOf("google drive")>=0 ? ' — the detail is on Google Drive per the note.' : '.')
+          + '</div>'
+          + quoteBox(null);
+        if (c.worksJob) msg += '<div class="rembar"><span class="muted">🔧 Works job raised — '+esc(c.worksJob.status||"Pending")+'</span> <a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">open ↗</a></div>';
+        return msg + '</div>';
+      }
       const totalMins = lines.reduce((s,x)=>s+(Number(x.minutes)||0),0);
       const totalMat  = lines.reduce((s,x)=>s+(Number(x.materialCost)||0),0);
       const hours = totalMins/60, labour = hours*LRATE, computed = labour+totalMat;
-      const money2 = n => '£'+(Number(n)||0).toFixed(2);
+      // A remedial with NO photo hasn't been captured on site — flag it so the office knows
+      // the engineer still needs to complete it in the portal (e.g. an office-added line).
+      const noPhoto = x => !(Number(x.photos)||0);
+      const bareN = lines.filter(noPhoto).length;
       const head = '<tr><th>Code</th><th>Remedial work</th><th class="num">Time</th>'+(MONEY?'<th class="num">Materials</th>':'')+'<th class="num">Photos</th></tr>';
-      const body = lines.map(x =>
-        '<tr><td><b>'+esc(x.code||"—")+'</b></td><td>'+esc(x.description||"")+'</td>'
-        + '<td class="num">'+(x.minutes||0)+'m</td>'
-        + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
-        + '<td class="num">'+(x.photos||0)+' 📷</td></tr>').join("");
-      const key = esc(r.id);
+      const body = lines.map(x => {
+        const bare = noPhoto(x);
+        return '<tr'+(bare?' class="noevid"':'')+'><td><b>'+esc(x.code||"—")+'</b></td>'
+          + '<td>'+esc(x.description||"")+(bare?' <span class="evtag" title="No photo captured — the engineer still needs to complete this in the portal">⚠ awaiting engineer</span>':'')+'</td>'
+          + '<td class="num">'+(x.minutes||0)+'m</td>'
+          + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
+          + '<td class="num">'+(bare?'<span class="evno">⚠ none</span>':(x.photos+' 📷'))+'</td></tr>';
+      }).join("");
+      const bareNote = bareN ? '<div class="evsum">⚠ '+bareN+' of '+lines.length+' remedial'+(lines.length===1?'':'s')+' '+(bareN===1?'has':'have')+' no photo yet — the engineer still needs to complete '+(bareN===1?'it':'them')+' in the portal.</div>' : '';
       let priceUi = '';
       if (MONEY) {
         priceUi = '<div class="rembar">'
           + '<span>Labour rate £<input class="rateinp" id="rate-'+key+'" type="number" step="0.01" min="0" value="'+(LRATE||"")+'" style="width:70px">/hr <button data-setrate="'+key+'">Set</button></span>'
           + '<span class="remsum">Hours <b>'+hours.toFixed(2)+'</b> · Labour <b>'+money2(labour)+'</b> · Materials <b>'+money2(totalMat)+'</b> · Suggested quote <b>'+money2(computed)+'</b></span>'
           + '</div>';
-        const qv = (c.quote && c.quote.value!=null) ? Number(c.quote.value).toFixed(2) : computed.toFixed(2);
-        const qr = c.quote ? (c.quote.ref||"") : "";
-        const already = c.quote ? '<span class="muted" style="font-size:11px">saved'+(c.quote.by?" by "+esc(c.quote.by):"")+(c.quote.at?" "+fmtD(c.quote.at):"")+'</span>' : '';
-        priceUi += '<div class="rembar"><span>Quote ref <input id="qref-'+key+'" type="text" value="'+esc(qr)+'" placeholder="e.g. Q-1234" style="width:110px"></span>'
-          + '<span>Amount £<input id="qval-'+key+'" type="number" step="0.01" min="0" value="'+esc(qv)+'" style="width:90px"></span>'
-          + '<button data-quote="'+key+'">💷 Save quote</button> '+already+' <span class="saved" id="qsv-'+key+'"></span></div>';
+        priceUi += quoteBox(computed);
       }
+      // Copy the observations + coding for a quote / email. C1/C2/FI by default; C3 opt-in.
+      const c3count = lines.filter(x => String(x.code||"").toUpperCase()==="C3").length;
+      const copyBar = '<div class="rembar">'
+        + '<button data-copyq="'+key+'">📋 Copy quote</button>'
+        + '<label class="c3lab"><input type="checkbox" id="c3-'+key+'"> Include C3'+(c3count?' ('+c3count+')':'')+'</label>'
+        + '<span class="muted" style="font-size:11px">Copies each observation + its code (C1/C2/FI only unless C3 is ticked). The same tick decides what goes on the works job.</span>'
+        + '<span class="saved" id="cpv-'+key+'"></span></div>';
       let worksUi = '';
       if (c.worksJob) worksUi = '<div class="rembar"><span class="muted">🔧 Works job raised — '+esc(c.worksJob.status||"Pending")+'</span> <a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">open ↗</a></div>';
-      else if (c.testJob) worksUi = '<div class="rembar"><button class="mkworks" data-mkworks="'+esc(c.testJob.id)+'" data-ppm="'+key+'">🔧 Create remedial works job</button> <span class="muted" style="font-size:11px">Builds a site-audit job — one photo item per remedial, ready to allocate.</span> <span class="saved" id="mksv-'+key+'"></span></div>';
+      else if (c.testJob) worksUi = '<div class="rembar"><button class="mkworks" data-mkworks="'+esc(c.testJob.id)+'" data-ppm="'+key+'">🔧 Create remedial works job</button> <span class="muted" style="font-size:11px">Builds a site-audit job — one photo item per remedial (C3 excluded unless ticked above), ready to allocate.</span> <span class="saved" id="mksv-'+key+'"></span></div>';
       return '<div class="remwrap"><div class="lbl">🔧 Remedial works ('+lines.length+')</div>'
         + '<table class="remtbl"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
-        + priceUi + worksUi + '</div>';
+        + bareNote + copyBar + priceUi + worksUi + '</div>';
     }
 
     async function openCert(code){
@@ -539,12 +605,21 @@
       } catch { (window.MLUI?MLUI.toast:alert)("Couldn't save the quote."); if (btn) btn.disabled=false; }
     }
     async function createWorks(jobId, ppmId, btn){
-      const ok = window.MLUI ? await MLUI.confirm("Create the remedial works job (site-audit) from these remedials? It'll be unassigned, ready to allocate.") : confirm("Create the remedial works job from these remedials?");
+      const row = ROWS.find(x => x.id === ppmId), all = (row && row.case && row.case.remedialLines) || [];
+      const included = includedLines(ppmId);
+      const c3n = all.filter(x => String(x.code||"").toUpperCase() === "C3").length;
+      const cb = g("c3-"+ppmId), withC3 = !!(cb && cb.checked);
+      const extra = (!withC3 && c3n) ? " (C3 items excluded — tick “Include C3” first to add them.)" : "";
+      const ok = window.MLUI ? await MLUI.confirm("Create the remedial works job (site-audit) from "+included.length+" remedial"+(included.length===1?"":"s")+"?"+extra+" It'll be unassigned, ready to allocate.") : confirm("Create the remedial works job from these remedials?");
       if (!ok) return;
+      // Only send an explicit item list when we're actually excluding some AND every included
+      // line has a real id — else fall back to "all" so nothing is silently dropped.
+      const ids = included.map(x => x.id).filter(Boolean);
+      const filtering = included.length < all.length && ids.length === included.length;
       const sv = g("mksv-"+ppmId);
       if (btn){ btn.disabled = true; btn.textContent = "Creating…"; }
       try {
-        const res = await authFetch("/sla/jobs/"+encodeURIComponent(jobId)+"/create-works-job", { method:"POST", headers:{"Content-Type":"application/json"}, body: "{}" }).then(r=>r.json());
+        const res = await authFetch("/sla/jobs/"+encodeURIComponent(jobId)+"/create-works-job", { method:"POST", headers:{"Content-Type":"application/json"}, body: filtering ? JSON.stringify({ itemIds: ids }) : "{}" }).then(r=>r.json());
         if (res && res.ok){ if (sv) sv.textContent = res.existing ? "Already created ✓" : "Created ✓"; await load(); }
         else { (window.MLUI?MLUI.toast:alert)((res&&res.error)||"Couldn't create the works job."); if (btn){ btn.disabled=false; btn.textContent="🔧 Create remedial works job"; } }
       } catch { (window.MLUI?MLUI.toast:alert)("Couldn't create the works job."); if (btn){ btn.disabled=false; btn.textContent="🔧 Create remedial works job"; } }
