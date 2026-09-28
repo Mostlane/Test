@@ -2113,9 +2113,29 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     as text, £ number format, bold totals): **⬇ Export month** (one sheet) and **⬇
     Export all** (an "All FBC jobs" sheet with a Month column + one sheet per month,
     each with a totals row). `ml-xlsx.js` is reusable for any table→xlsx elsewhere.
+- **Tracking-only records (28 Sep 2026 — 18-month back-fill):** an `fbc_meta` row can
+  now exist with **no live SLA job** (a historical incident logged for the invoicing
+  record, not put on the board). `fbc_meta` gained **`description`** + **`raised_at`**
+  (self-migrating ALTERs) so a meta-only row shows its incident detail and sits in the
+  right invoicing month without an `sla_jobs` row; `shape()` falls back to them, and a
+  row with no linked job derives **`invoiceState:"to_invoice"`** (the actionable bucket)
+  instead of "open". `/fbc/meta` accepts `description`/`raisedAt`/`siteCode`/`siteName`/
+  `reference` edits. NB the `/list` query aliases `j.description AS j_descr` — selecting
+  a bare `j.description` alongside `m.*` clobbered the meta's description on a meta-only
+  row (fixed). **Back-fill:** Jamie's 18 months of "Mostlane New Incident Form" Jotform
+  emails were read from the mailbox (Outlook connector) and **58 tracking records**
+  loaded straight to D1 (`source='backfill'`, `job_id='FBCH-<djb2>'`, customer/officer
+  data D1-only — never the repo). Dedup: 6 incidents that already had a manual portal
+  job (all ≥20 Aug 2026 — the oldest board job) were skipped; 4 form-setup test
+  submissions + duplicate `Fwd:` copies were excluded. 6 records are "Other" sites with
+  no FBC code (Bandstand West St, Innovation Centre, cricket club, leisure centre,
+  Melvin Jones House, Collingwood Court) — full address kept as the site name. To
+  re-run/extend, insert more `fbc_meta` rows the same way (deterministic `FBCH-` id =
+  idempotent); the intake go-live is still the Outlook rule below.
 - **Tests:** `node worker/tools/test-fbc.mjs` (module: recordFbcJob/appendFbcMessage
   round-trip, list grouping + invoiceState, meta updates don't clobber intake, dedupe,
-  access gating) + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest
+  access gating, **tracking-only record: description/raised_at surfaced + to_invoice**)
+  + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest
   dropped, Re: survives, same-ref on redelivery).
 - **GO-LIVE (manual, one-time):** an Outlook rule on the mailbox that receives the
   Jotform incidents → **forward** (not redirect) the "Mostlane New Incident Form"
