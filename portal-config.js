@@ -1157,6 +1157,7 @@
           { label: "Concerto PPM list", href: "concerto-ppm.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["concerto-ppm.html"] },
           { label: "5-Year EICR", href: "five-year-remedials.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["five-year-remedials.html"] },
           { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
+          { label: "FBC Jobs", href: "fbc.html", icon: "compliance", perms: ["FullAccess", "SLAAdmin", "Compliance"], match: ["fbc.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
           { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },

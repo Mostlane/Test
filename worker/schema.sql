@@ -888,3 +888,20 @@ CREATE TABLE IF NOT EXISTS concerto_cases (
   opened_at TEXT, closed_at TEXT, closed_by TEXT, updated_at TEXT, updated_by TEXT,
   PRIMARY KEY (tenant_id, id)
 );
+
+-- FBC (Fareham Borough Council) job tracker (routes/fbc.js). The FBC LAYER over
+-- the normal SLA jobs auto-created from the Jotform "New Incident Form" emails:
+-- quote-required, cost, PO, invoice month/status, and a per-job conversation log.
+CREATE TABLE IF NOT EXISTS fbc_meta (
+  tenant_id INTEGER, job_id TEXT PRIMARY KEY, reference TEXT, site_code TEXT, site_name TEXT,
+  reported_by TEXT, job_title TEXT, w3w TEXT,
+  quote_required INTEGER DEFAULT 0, quote_status TEXT DEFAULT '', quote_amount REAL,
+  cost REAL, po_number TEXT, invoice_month TEXT, invoice_status TEXT DEFAULT '',
+  invoiced_at TEXT, invoice_ref TEXT, source TEXT, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fbc_meta_t ON fbc_meta(tenant_id);
+CREATE TABLE IF NOT EXISTS fbc_messages (
+  id TEXT PRIMARY KEY, tenant_id INTEGER, job_id TEXT, at TEXT, direction TEXT,
+  from_addr TEXT, subject TEXT, body TEXT, message_id TEXT, created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fbc_msg_job ON fbc_messages(tenant_id, job_id);

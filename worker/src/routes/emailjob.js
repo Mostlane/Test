@@ -24,6 +24,7 @@ import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
+import { recordFbcJob, appendFbcMessage } from "./fbc.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 import { onceMigration } from "../lib/once.js";
 
@@ -41,7 +42,7 @@ async function ensureTable__raw(env) {
   } catch {}
 }
 const ensureTable = onceMigration(ensureTable__raw); // once per isolate — see lib/once.js
-const DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
+const DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com", "jotform.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
@@ -323,10 +324,12 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject, template: "", source: "" };
 
   if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
-  // A REPLY in a thread is never a new job (a quoted original would re-read as one).
-  if (/^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread — not a new job", source: "template" };
   // Known layouts come from trusted senders by definition; everything else must be on the allow-list.
   const tm = matchTemplate(sender, subject, text);
+  // A REPLY in a thread is never a new job (a quoted original would re-read as one)
+  // — EXCEPT a template that opts in (replyOk): Jotform sends the FBC form as
+  // "Re: Mostlane New Incident Form". A human "RE:" on any other layout still drops.
+  if (!(tm && tm.tpl.replyOk) && /^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread — not a new job", source: "template" };
   if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
   if (!opts.dryRun && !opts.force && msg.messageId) {
     try {
@@ -363,8 +366,15 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       if (hit) { fields.siteCode = hit.siteCode; fields.siteName = hit.siteName; fields.siteMatched = true; }
       else fields.siteMatched = false;
     }
-    if (opts.dryRun) return { ...out, fields, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job") + (r.siteLookup ? (fields.siteMatched ? " at site " + fields.siteCode : " (property not matched to a site — the office links it)") : ""), reference: fields.reference || "", payload: jobPayload(fields, sender) };
-    return { ...out, fields, ...(await createJob(env, ctx, fetchSelf, fields, sender)) };
+    if (opts.dryRun) return { ...out, fields, outcome: "dryrun", reason: "Would " + (fields.reference ? "create/update job " + fields.reference : "create a job") + (r.siteLookup ? (fields.siteMatched ? " at site " + fields.siteCode : " (property not matched to a site — the office links it)") : "") + (r.fbc ? " · FBC tracker" + (r.fbc.quoteRequired ? " (quote required)" : "") : ""), reference: fields.reference || "", payload: jobPayload(fields, sender) };
+    const made = await createJob(env, ctx, fetchSelf, fields, sender);
+    // FBC layer: stamp the tracker row + log the email as the first conversation
+    // entry (both fail-soft; never block the job that was just created).
+    if (r.fbc && made.jobId && (made.outcome === "created" || made.outcome === "updated")) {
+      try { await recordFbcJob(env, tid, made.jobId, { ...r.fbc, siteCode: fields.siteCode, siteName: fields.siteName || r.fbc.siteName, reference: made.reference || fields.reference }); } catch {}
+      try { await appendFbcMessage(env, tid, made.jobId, { direction: "in", from: origFrom || sender, subject, body: text, messageId: msg.messageId, at: msg.receivedAt }); } catch {}
+    }
+    return { ...out, fields, ...made };
   }
 
   // No template for this layout → HOLD for a human. The AI only proposes fields.
