@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10366,7 +10371,7 @@ async function caseContext(env, tid, type, jobs) {
       engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
       worksJobId: j.remedialsWorksJobId || null,
       remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
-      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map((x) => ({ code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0 }))
+      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map((x) => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0 }))
     });
   }
   try {
@@ -10528,7 +10533,7 @@ function deriveCase(r, ctx, today, money2, rec) {
     testJob: testJob ? { id: testJob.id, ref: testJob.ref, status: testJob.status, date: testJob.date, engineer: testJob.engineer, remedials: testJob.remedials, worksJobId: testJob.worksJobId } : null,
     // The remedial works the engineer logged — for the schedule's price-up + create-works-job.
     // Material £ is money-gated; minutes/description are shown to anyone with the page.
-    remedialLines: testJob ? (testJob.remedialsList || []).map((x) => ({ code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, materialCost: money2 ? x.materialCost : void 0 })) : [],
+    remedialLines: testJob ? (testJob.remedialsList || []).map((x) => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, materialCost: money2 ? x.materialCost : void 0 })) : [],
     quote: c && c.quote_value != null ? { ref: c.quote_ref || "", value: money2 ? c.quote_value : void 0, at: c.quote_at || null, by: c.quote_by || "" } : null,
     worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
     cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null,
@@ -39420,9 +39425,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
