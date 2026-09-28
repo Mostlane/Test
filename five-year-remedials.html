@@ -108,6 +108,11 @@
     .remsum{color:#3a4658;}
     .c3lab{display:inline-flex;align-items:center;gap:5px;color:#3a4658;font-weight:600;cursor:pointer;user-select:none;}
     .c3lab input{width:auto;padding:0;margin:0;}
+    .rembadge{display:inline-block;margin-top:4px;font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 8px;line-height:1.4;}
+    .rembadge+.rembadge{margin-left:4px;}
+    .rb-yes{color:#166534;background:#dcfce7;border:1px solid #bbf7d0;}
+    .rb-none{color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;}
+    .rb-warn{color:#b45309;background:#fef3c7;border:1px solid #fde68a;}
     .remtbl tr.noevid td{background:#fff4e6;}
     .evtag{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;border-radius:999px;padding:1px 7px;white-space:nowrap;}
     .evno{color:#b45309;font-weight:700;}
@@ -286,6 +291,17 @@
     function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
     function inYear(r){ if (YEAR==="all") return true; const ny = r.nextDate ? +String(r.nextDate).slice(0,4) : null; return ny===YEAR || testedYear(r)===YEAR; }
     function stageOf(r){ return (r.case && r.case.stage12) || "needs_booking"; }
+    function isRemedialStage(r){ const c = r.case || {}, st = stageOf(r); return /^remedials_/.test(st) || st==="orders_received" || c.outcome==="unsatisfactory"; }
+    // At-a-glance store-cell badge: does this remedial-stage case have the remedial detail
+    // captured in the portal, or not? (green N remedials / amber "no detail" / amber no-photo)
+    function remBadge(r){
+      if (!isRemedialStage(r)) return "";
+      const lines = (r.case && r.case.remedialLines) || [];
+      if (!lines.length) return '<div class="rembadge rb-none">⚠ no remedial detail in portal</div>';
+      const bare = lines.filter(x => !(Number(x.photos)||0)).length;
+      return '<div class="rembadge rb-yes">🔧 '+lines.length+' remedial'+(lines.length===1?'':'s')+' captured</div>'
+        + (bare ? '<div class="rembadge rb-warn">⚠ '+bare+' awaiting engineer (no photo)</div>' : '');
+    }
     // Days until the MOSTLANE (compliance chart) due date — when our certificate runs out.
     function daysTo(s){ if(!s) return null; const t=Date.parse(String(s).slice(0,10)+"T00:00:00Z"); if(isNaN(t)) return null; return Math.round((t - Date.parse(TODAY+"T00:00:00Z"))/864e5); }
     // Urgency from when our cert runs out: red = out of date / no cert; amber = within 60 days; green = plenty of time.
@@ -440,7 +456,7 @@
       return '<tr>'
         + '<td class="store"><span class="code">'+esc(r.storeCode||"—")+'</span> <span class="site">'+esc(r.siteName||"")+'</span>'
           + (r.inactive?'<span class="pill inactive-pill">🚫 Inactive</span>':'')
-          + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + '</td>'
+          + (r.block?'<div class="sub">'+esc(r.block)+'</div>':'') + flag + hold + remBadge(r) + '</td>'
         + '<td>'+docCell+'</td>'
         + '<td>'+(r.nextDate?'<b>'+esc(fmtD(r.nextDate))+'</b>':'<span class="muted">—</span>')+rel+'</td>'
         + '<td>'+mdCell+'</td>'
@@ -485,8 +501,7 @@
     function remedialsBlock(r){
       const c = r.case, lines = c.remedialLines || [];
       const key = esc(r.id);
-      const st = stageOf(r);
-      const remedialStage = /^remedials_/.test(st) || st==="orders_received" || c.outcome==="unsatisfactory";
+      const remedialStage = isRemedialStage(r);
       const money2 = n => '£'+(Number(n)||0).toFixed(2);
       // Quote box (ref + amount) — reused whether or not portal line items exist.
       function quoteBox(suggested){
