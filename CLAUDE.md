@@ -5732,6 +5732,12 @@ files to this public repo.
   #003468, z-index 2147483000) and pushes the page below it. **`viewport-fit=cover`
   is now on every page that LOADS portal-config.js** (117 pages) — without it
   `env()` reports 0 and the cap can't size itself.
+  **The same injected style also carries `*{touch-action:manipulation}` (28 Sep
+  2026)** — kills the iOS double-tap-to-zoom gesture portal-wide so the installed
+  PWA feels native (Jamie's ask), while KEEPING pinch-zoom + scroll. The `*`
+  selector is specificity 0,0,0 so ANYTHING that sets its own `touch-action` wins:
+  signature pads / drag handles keep their `touch-action:none` (verified). Do not
+  change it to a `*{touch-action:none}` — that would break scrolling everywhere.
   **Two rules learned doing it:**
   (a) **The offset goes on `<html>`, never `<body>` — this took three attempts.**
   A CSS `body{padding-top:env(...)}` REPLACED the padding pages set for
