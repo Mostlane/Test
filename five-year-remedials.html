@@ -454,30 +454,51 @@
     // hours + materials), a quote box, and a "create the site-audit works job" button.
     function remedialsBlock(r){
       const c = r.case, lines = c.remedialLines || [];
-      if (!lines.length) return "";
+      const key = esc(r.id);
+      const st = stageOf(r);
+      const remedialStage = /^remedials_/.test(st) || st==="orders_received" || c.outcome==="unsatisfactory";
+      const money2 = n => '£'+(Number(n)||0).toFixed(2);
+      // Quote box (ref + amount) — reused whether or not portal line items exist.
+      function quoteBox(suggested){
+        if (!MONEY) return '';
+        const qv = (c.quote && c.quote.value!=null) ? Number(c.quote.value).toFixed(2) : (suggested!=null ? Number(suggested).toFixed(2) : "");
+        const qr = c.quote ? (c.quote.ref||"") : "";
+        const already = c.quote ? '<span class="muted" style="font-size:11px">saved'+(c.quote.by?" by "+esc(c.quote.by):"")+(c.quote.at?" "+fmtD(c.quote.at):"")+'</span>' : '';
+        return '<div class="rembar"><span>Quote ref <input id="qref-'+key+'" type="text" value="'+esc(qr)+'" placeholder="e.g. Q-1234" style="width:110px"></span>'
+          + '<span>Amount £<input id="qval-'+key+'" type="number" step="0.01" min="0" value="'+esc(qv)+'" style="width:90px"></span>'
+          + '<button data-quote="'+key+'">💷 Save quote</button> '+already+' <span class="saved" id="qsv-'+key+'"></span></div>';
+      }
+      // No line items were captured on a portal ⚡ electrical-test job — but the case is at a
+      // remedials stage (usually staged by hand). Still let the office record the quote figure.
+      if (!lines.length) {
+        if (!remedialStage) return "";
+        let msg = '<div class="remwrap"><div class="lbl">🔧 Remedial works</div>'
+          + '<div class="sub" style="margin:2px 0 8px">No priced remedial items were captured in the portal for this site. '
+          + 'They appear here <b>automatically</b>, already priced, once the 5-year test is done as an '
+          + '<b>⚡ Electrical test</b> job with the remedials logged on it (use “➕ Raise the test job” below). '
+          + 'This case was staged by hand, so record the quote figure below to keep it on file'
+          + ((c.note||"").toLowerCase().indexOf("google drive")>=0 ? ' — the detail is on Google Drive per the note.' : '.')
+          + '</div>'
+          + quoteBox(null);
+        if (c.worksJob) msg += '<div class="rembar"><span class="muted">🔧 Works job raised — '+esc(c.worksJob.status||"Pending")+'</span> <a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">open ↗</a></div>';
+        return msg + '</div>';
+      }
       const totalMins = lines.reduce((s,x)=>s+(Number(x.minutes)||0),0);
       const totalMat  = lines.reduce((s,x)=>s+(Number(x.materialCost)||0),0);
       const hours = totalMins/60, labour = hours*LRATE, computed = labour+totalMat;
-      const money2 = n => '£'+(Number(n)||0).toFixed(2);
       const head = '<tr><th>Code</th><th>Remedial work</th><th class="num">Time</th>'+(MONEY?'<th class="num">Materials</th>':'')+'<th class="num">Photos</th></tr>';
       const body = lines.map(x =>
         '<tr><td><b>'+esc(x.code||"—")+'</b></td><td>'+esc(x.description||"")+'</td>'
         + '<td class="num">'+(x.minutes||0)+'m</td>'
         + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
         + '<td class="num">'+(x.photos||0)+' 📷</td></tr>').join("");
-      const key = esc(r.id);
       let priceUi = '';
       if (MONEY) {
         priceUi = '<div class="rembar">'
           + '<span>Labour rate £<input class="rateinp" id="rate-'+key+'" type="number" step="0.01" min="0" value="'+(LRATE||"")+'" style="width:70px">/hr <button data-setrate="'+key+'">Set</button></span>'
           + '<span class="remsum">Hours <b>'+hours.toFixed(2)+'</b> · Labour <b>'+money2(labour)+'</b> · Materials <b>'+money2(totalMat)+'</b> · Suggested quote <b>'+money2(computed)+'</b></span>'
           + '</div>';
-        const qv = (c.quote && c.quote.value!=null) ? Number(c.quote.value).toFixed(2) : computed.toFixed(2);
-        const qr = c.quote ? (c.quote.ref||"") : "";
-        const already = c.quote ? '<span class="muted" style="font-size:11px">saved'+(c.quote.by?" by "+esc(c.quote.by):"")+(c.quote.at?" "+fmtD(c.quote.at):"")+'</span>' : '';
-        priceUi += '<div class="rembar"><span>Quote ref <input id="qref-'+key+'" type="text" value="'+esc(qr)+'" placeholder="e.g. Q-1234" style="width:110px"></span>'
-          + '<span>Amount £<input id="qval-'+key+'" type="number" step="0.01" min="0" value="'+esc(qv)+'" style="width:90px"></span>'
-          + '<button data-quote="'+key+'">💷 Save quote</button> '+already+' <span class="saved" id="qsv-'+key+'"></span></div>';
+        priceUi += quoteBox(computed);
       }
       let worksUi = '';
       if (c.worksJob) worksUi = '<div class="rembar"><span class="muted">🔧 Works job raised — '+esc(c.worksJob.status||"Pending")+'</span> <a href="/job-view.html?jobId='+encodeURIComponent(c.worksJob.id)+'">open ↗</a></div>';
