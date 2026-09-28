@@ -268,7 +268,7 @@
             const row = ROWS.find(x => x.jobId === jobId);
             if (row) {
               Object.assign(row, { cost: body.cost, invoiceStatus: body.invoiceStatus, invoiceMonth: newMonth });
-              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (row.status && ["complete","closed","closed jobs","invoiced","cancelled"].includes(String(row.status).toLowerCase()) ? "to_invoice" : "open"));
+              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (body.invoiceStatus === "to_invoice" ? "to_invoice" : ((!row.onBoard || (row.status && ["complete","closed","closed jobs","invoiced","cancelled"].includes(String(row.status).toLowerCase()))) ? "to_invoice" : "open")));
             }
             saved.classList.add("on"); setTimeout(()=>saved.classList.remove("on"), 1200);
             if (newMonth && newMonth !== curMonth) renderInv();          // moved to another sheet → drops out here
@@ -410,7 +410,7 @@
             // update ROWS in place so section grouping reflects the change on next render (without collapse)
             const row = ROWS.find(x => x.jobId === jobId);
             if (row) { Object.assign(row, { cost: body.cost, poNumber: body.poNumber, quoteStatus: body.quoteStatus, quoteAmount: body.quoteAmount, invoiceStatus: body.invoiceStatus, invoiceMonth: body.invoiceMonth, invoiceRef: body.invoiceRef });
-              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : row.invoiceState);
+              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (body.invoiceStatus === "to_invoice" ? "to_invoice" : row.invoiceState));
             }
           } catch {}
         };

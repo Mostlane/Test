@@ -165,6 +165,34 @@ async function main() {
     ok("note appears in the log", body.messages.some(m => m.direction === "note" && m.body.includes("awaiting access")));
   }
 
+  // ── tracking-only record (no SLA job): description + raised_at + to_invoice ──
+  {
+    const { env } = makeEnv();
+    // A back-filled historical incident: a meta row whose job_id has no sla_jobs row.
+    await fbc.recordFbcJob(env, 1, "FBC-hist1", {
+      reference: "FBC-hist1", siteCode: "3009", siteName: "Ferneham Hall",
+      reportedBy: "Historic Officer", jobTitle: "Old incident",
+      description: "Emergency light in stairwell not working — reported April 2026.",
+      raisedAt: "2026-04-15T10:00:00.000Z", source: "backfill",
+    });
+    const { body } = await call(env, "Jamie Line", "GET", "/fbc/list");
+    const h = rowBy(body.rows, "FBC-hist1");
+    ok("tracking-only record surfaces", !!h);
+    ok("description surfaced from meta (no job)", h && h.description.startsWith("Emergency light"), h && h.description);
+    ok("raisedAt from meta.raised_at", h && h.raisedAt === "2026-04-15T10:00:00.000Z", h && h.raisedAt);
+    ok("onBoard false (no SLA job)", h && h.onBoard === false);
+    ok("meta-only defaults to to_invoice", h && h.invoiceState === "to_invoice", h && h.invoiceState);
+    ok("row title falls back to reference", h && h.reference === "FBC-hist1");
+    // office can still mark it invoiced / not required
+    await call(env, "Jamie Line", "POST", "/fbc/meta", { jobId: "FBC-hist1", invoiceStatus: "not_required" });
+    const { body: b2 } = await call(env, "Jamie Line", "GET", "/fbc/job?id=FBC-hist1");
+    ok("tracking record can be marked not_required", b2.job.invoiceState === "not_required", b2.job.invoiceState);
+    // description editable via /meta
+    await call(env, "Jamie Line", "POST", "/fbc/meta", { jobId: "FBC-hist1", description: "Edited detail" });
+    const { body: b3 } = await call(env, "Jamie Line", "GET", "/fbc/job?id=FBC-hist1");
+    ok("description editable via /meta", b3.job.description === "Edited detail", b3.job.description);
+  }
+
   // ── unknown job → 404 ───────────────────────────────────────────────────────
   {
     const { env } = makeEnv();

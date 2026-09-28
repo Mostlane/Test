@@ -897,7 +897,8 @@ CREATE TABLE IF NOT EXISTS fbc_meta (
   reported_by TEXT, job_title TEXT, w3w TEXT,
   quote_required INTEGER DEFAULT 0, quote_status TEXT DEFAULT '', quote_amount REAL,
   cost REAL, po_number TEXT, invoice_month TEXT, invoice_status TEXT DEFAULT '',
-  invoiced_at TEXT, invoice_ref TEXT, source TEXT, created_at TEXT, updated_at TEXT
+  invoiced_at TEXT, invoice_ref TEXT, source TEXT, created_at TEXT, updated_at TEXT,
+  description TEXT, raised_at TEXT   -- description/raised_at carry a tracking-only row (no SLA job), e.g. a back-filled historical incident
 );
 CREATE INDEX IF NOT EXISTS idx_fbc_meta_t ON fbc_meta(tenant_id);
 CREATE TABLE IF NOT EXISTS fbc_messages (
