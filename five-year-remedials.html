@@ -108,6 +108,10 @@
     .remsum{color:#3a4658;}
     .c3lab{display:inline-flex;align-items:center;gap:5px;color:#3a4658;font-weight:600;cursor:pointer;user-select:none;}
     .c3lab input{width:auto;padding:0;margin:0;}
+    .remtbl tr.noevid td{background:#fff4e6;}
+    .evtag{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+    .evno{color:#b45309;font-weight:700;}
+    .evsum{margin-top:7px;font-size:12px;font-weight:600;color:#9a3412;background:#ffe8cc;border:1px solid #f3c48a;border-radius:8px;padding:6px 9px;}
     .mback{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:24px 14px;overflow:auto;}
     .mback.on{display:flex;}
     .mcard{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;box-shadow:0 12px 44px rgba(6,24,54,.32);}
@@ -512,12 +516,20 @@
       const totalMins = lines.reduce((s,x)=>s+(Number(x.minutes)||0),0);
       const totalMat  = lines.reduce((s,x)=>s+(Number(x.materialCost)||0),0);
       const hours = totalMins/60, labour = hours*LRATE, computed = labour+totalMat;
+      // A remedial with NO photo hasn't been captured on site — flag it so the office knows
+      // the engineer still needs to complete it in the portal (e.g. an office-added line).
+      const noPhoto = x => !(Number(x.photos)||0);
+      const bareN = lines.filter(noPhoto).length;
       const head = '<tr><th>Code</th><th>Remedial work</th><th class="num">Time</th>'+(MONEY?'<th class="num">Materials</th>':'')+'<th class="num">Photos</th></tr>';
-      const body = lines.map(x =>
-        '<tr><td><b>'+esc(x.code||"—")+'</b></td><td>'+esc(x.description||"")+'</td>'
-        + '<td class="num">'+(x.minutes||0)+'m</td>'
-        + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
-        + '<td class="num">'+(x.photos||0)+' 📷</td></tr>').join("");
+      const body = lines.map(x => {
+        const bare = noPhoto(x);
+        return '<tr'+(bare?' class="noevid"':'')+'><td><b>'+esc(x.code||"—")+'</b></td>'
+          + '<td>'+esc(x.description||"")+(bare?' <span class="evtag" title="No photo captured — the engineer still needs to complete this in the portal">⚠ awaiting engineer</span>':'')+'</td>'
+          + '<td class="num">'+(x.minutes||0)+'m</td>'
+          + (MONEY?'<td class="num">'+money2(x.materialCost)+'</td>':'')
+          + '<td class="num">'+(bare?'<span class="evno">⚠ none</span>':(x.photos+' 📷'))+'</td></tr>';
+      }).join("");
+      const bareNote = bareN ? '<div class="evsum">⚠ '+bareN+' of '+lines.length+' remedial'+(lines.length===1?'':'s')+' '+(bareN===1?'has':'have')+' no photo yet — the engineer still needs to complete '+(bareN===1?'it':'them')+' in the portal.</div>' : '';
       let priceUi = '';
       if (MONEY) {
         priceUi = '<div class="rembar">'
@@ -538,7 +550,7 @@
       else if (c.testJob) worksUi = '<div class="rembar"><button class="mkworks" data-mkworks="'+esc(c.testJob.id)+'" data-ppm="'+key+'">🔧 Create remedial works job</button> <span class="muted" style="font-size:11px">Builds a site-audit job — one photo item per remedial (C3 excluded unless ticked above), ready to allocate.</span> <span class="saved" id="mksv-'+key+'"></span></div>';
       return '<div class="remwrap"><div class="lbl">🔧 Remedial works ('+lines.length+')</div>'
         + '<table class="remtbl"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
-        + copyBar + priceUi + worksUi + '</div>';
+        + bareNote + copyBar + priceUi + worksUi + '</div>';
     }
 
     async function openCert(code){
