@@ -1779,7 +1779,10 @@ async function jobMetaFor(env, tid, days) {
       }
       const ref = r.helpdesk_ref || d.helpdeskRef || r.id;
       const site = d.siteName || r.site_code || "";
-      meta[r.id] = { ref, site, label: ref + (site ? " \u2014 " + site : "") };
+      const postcode = d.postcode || d.sitePostcode || "";
+      let place = d.address || "";
+      if (place && postcode && place.trim().toUpperCase() === postcode.trim().toUpperCase()) place = "";
+      meta[r.id] = { ref, site, postcode, place, label: ref + (site ? " \u2014 " + site : "") };
     }
   } catch {
   }
@@ -1957,7 +1960,7 @@ async function tsVerifyEngineerAI(env, e, monday, poolVans) {
     return DOW3[d.getUTCDay()] + " " + dt.slice(8);
   };
   const blocks = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
-    const jobs = (d.jobs || []).length ? d.jobs.map((j) => `[${j.ref}] ${j.site || "?"} \u2014 entered ${j.entered}h`).join("; ") : "(none booked)";
+    const jobs = (d.jobs || []).length ? d.jobs.map((j) => `[${j.ref}] ${j.site || "?"}${j.postcode ? " (" + j.postcode + (j.place ? ", " + j.place : "") + ")" : j.place ? " (" + j.place + ")" : ""} \u2014 entered ${j.entered}h`).join("; ") : "(none booked)";
     const trips = (d.trips || []).length ? d.trips.map((t) => `${t.s}\u2013${t.e} \u2192 ${t.to || "?"} (drive ${t.drive}m, stop ${t.stop}m)`).join("\n      ") : d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd}` : "van did not move";
     return `  ${dlab(d.date)} (${d.date}) \u2014 booked: ${jobs}
       Trips: ${trips}`;
@@ -1976,7 +1979,7 @@ async function tsVerifyEngineerAI(env, e, monday, poolVans) {
     }, required: ["date"] } },
     flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
   }, required: ["verdict"] };
-  const system = "You reconstruct a UK field engineer's working day from van tracker trips and check the hours they booked PER JOB. Rules: (1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. (2) IGNORE incidental stops \u2014 petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job \u2014 these are NOT jobs; don't create jobs for them or add their time to a job. (3) Match tracker stop locations to the engineer's booked jobs by town/road/postcode; a booked job is usually the longest stop(s) near that place. On-site time is the stopped time at the job location between arriving and leaving. (4) For each booked job estimate the hours it actually took (travel-to + on-site + drive-home for the last job) to the nearest 0.25h. Compare to what they entered. Only add a `note` when your `suggested` differs from `entered` by more than ~0.75h, saying briefly why. (5) Telematics is approximate and on-site work doesn't always move the van \u2014 be conservative; small differences are fine. Verdict: ok (matches well), check (minor differences worth a glance), flag (clear discrepancy or hours with no matching van activity). Use the booked job refs EXACTLY as given.";
+  const system = "You reconstruct a UK field engineer's working day from van tracker trips and suggest, PER JOB, roughly how the day's hours split across their booked jobs. Rules: (1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. (2) IGNORE incidental stops \u2014 petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job \u2014 these are NOT jobs; don't create jobs for them or add their time to a job. (3) MATCH BY LOCATION, NOT BY NAME. The tracker labels are nearby roads/shops/POIs (e.g. 'Newtown Rd', a supermarket) \u2014 they will almost NEVER contain the job's actual site name. Match a booked job to the tracker using its POSTCODE and TOWN: if the van was in that postcode district or town, treat the job as attended. Do NOT say a job has 'no matching location' just because its name isn't in the labels \u2014 that is expected. (4) On-site work often does not move the van, and the engineer may be dropped off or work a gang/subcontract job while the van sits at a yard or a different spot \u2014 a van parked somewhere for hours, or barely moving, is NORMAL and is not evidence the hours are wrong. (5) For each booked job estimate the hours it actually took to the nearest 0.25h. Only add a `note` when you are genuinely confident the entered hours are wrong (e.g. the van was demonstrably in a completely different area all day AND nowhere near the job's postcode/town), differing by more than ~1.5h. When the van was in the right town/postcode, or you cannot tell, set `suggested` equal to `entered` and leave `note` empty. (6) Be conservative \u2014 telematics is approximate. Do not penalise the engineer for gaps you cannot explain. Use the booked job refs EXACTLY as given. (An overall verdict is computed separately from the hours totals \u2014 focus only on the per-job split and only genuinely confident notes.)";
   const user = `Engineer ${e.name} (${e.username}), week beginning ${monday}, assigned van ${e.reg || "none"}. They entered ${e.total}h total; van door-to-door ${e.weekSpanH}h.
 
 Days:
@@ -1986,6 +1989,48 @@ Return your per-job suggested hours and any flags.`;
   const r = await anthropicToolLocal(env, { system, user, toolName: "verify_engineer", schema, maxTokens: 2e3 });
   if (!r.ok) return { error: r.error };
   return r.input || {};
+}
+function tsDeterministicVerdict(e) {
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const rank = { ok: 0, check: 1, flag: 2 };
+  const flags = [];
+  const byDate = {};
+  let worst = "ok";
+  let flagN = 0, checkN = 0;
+  for (const d of e.dayLog || []) {
+    const entered = +d.entered || 0;
+    const span = d.spanH == null ? null : +d.spanH;
+    const moved = !!d.moved;
+    let v = "ok", reason = "", sev = "low";
+    if (entered === 0 && moved && span != null && span >= 3) {
+      v = "flag";
+      sev = "high";
+      reason = `Van was out about ${r1(span)}h but no hours were booked.`;
+    } else if (entered > 0 && moved && span != null) {
+      const over = entered - span;
+      if (over > Math.max(2, span * 0.35)) {
+        v = "flag";
+        sev = "high";
+        reason = `Booked ${r1(entered)}h but the van was only out ${r1(span)}h.`;
+      } else if (over > 1) {
+        v = "check";
+        sev = "medium";
+        reason = `Booked a bit more than the van was out (${r1(entered)}h vs ${r1(span)}h).`;
+      }
+    }
+    byDate[d.date] = v;
+    if (v !== "ok") {
+      flags.push({ date: d.date, severity: sev, reason });
+      if (v === "flag") flagN++;
+      else checkN++;
+    }
+    if (rank[v] > rank[worst]) worst = v;
+  }
+  let summary;
+  if (worst === "flag") summary = (flagN === 1 ? "One day needs a look" : `${flagN} days need a look`) + " against the van data" + (checkN ? `, plus ${checkN} minor` : "") + ".";
+  else if (worst === "check") summary = (checkN === 1 ? "One day is" : `${checkN} days are`) + " a little over the van time \u2014 worth a glance.";
+  else summary = "Booked hours line up with the van's door-to-door time.";
+  return { verdict: worst, flags, summary, byDate };
 }
 async function hasEngTimesheet(env, tid, username) {
   try {
@@ -3715,7 +3760,7 @@ async function handle5(request, env, ctx, url, sess) {
           const hh = parseFloat(hv) || 0;
           if (hh > 0) {
             h += hh;
-            jobs.push({ ref: meta[jid] && meta[jid].ref || jid, site: meta[jid] && meta[jid].site || "", entered: Math.round(hh * 100) / 100 });
+            jobs.push({ ref: meta[jid] && meta[jid].ref || jid, site: meta[jid] && meta[jid].site || "", postcode: meta[jid] && meta[jid].postcode || "", place: meta[jid] && meta[jid].place || "", entered: Math.round(hh * 100) / 100 });
           }
         }
         if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
@@ -3763,15 +3808,23 @@ async function handle5(request, env, ctx, url, sess) {
     const aiResults = await Promise.all(engineers.slice(0, 30).map(async (e) => ({ e, ai: await tsVerifyEngineerAI(env, e, monday, poolVans) })));
     for (const { e, ai } of aiResults) {
       if (ai.error) aiErr = ai.error;
-      const byDate = {};
-      for (const dd of ai.days || []) if (dd && dd.date) byDate[dd.date] = dd;
+      const det = tsDeterministicVerdict(e);
+      const aiByDate = {};
+      for (const dd of ai.days || []) if (dd && dd.date) aiByDate[dd.date] = dd;
       const dayLog = e.dayLog.map((d) => {
-        const ad = byDate[d.date] || {};
+        const dayFlagged = det.byDate[d.date] && det.byDate[d.date] !== "ok";
+        const ad = aiByDate[d.date] || {};
         const sByRef = {};
         for (const j of ad.jobs || []) if (j && j.ref) sByRef[String(j.ref).toLowerCase()] = j;
         const jobs = d.jobs.map((j) => {
-          const s = sByRef[String(j.ref).toLowerCase()] || {};
-          return { ref: j.ref, site: j.site, entered: j.entered, suggested: s.suggested != null ? Math.round(s.suggested * 100) / 100 : null, note: s.note || "" };
+          const s = dayFlagged ? sByRef[String(j.ref).toLowerCase()] || {} : {};
+          return {
+            ref: j.ref,
+            site: j.site,
+            entered: j.entered,
+            suggested: dayFlagged && s.suggested != null ? Math.round(s.suggested * 100) / 100 : null,
+            note: dayFlagged ? s.note || "" : ""
+          };
         });
         return { date: d.date, entered: d.entered, moved: d.moved, vanStart: d.vanStart, vanEnd: d.vanEnd, spanH: d.spanH, driveH: d.driveH, locs: d.locs, jobs };
       });
@@ -3783,9 +3836,9 @@ async function handle5(request, env, ctx, url, sess) {
         score: e.score,
         total: e.total,
         dayLog,
-        verdict: ai.verdict || "ok",
-        summary: ai.summary || "",
-        flags: Array.isArray(ai.flags) ? ai.flags : []
+        verdict: det.verdict,
+        summary: det.summary,
+        flags: det.flags
       };
     }
     const unassignedVans = poolVans.map((v) => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
@@ -36289,11 +36342,38 @@ async function graphMailboxCheck(env, mailbox) {
     return { ok: false, error: String(e && e.message || e) };
   }
 }
-async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40 } = {}) {
-  const since = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
-  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(200, top * 4))}`;
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since } = {}) {
+  let filter;
+  const iso = (s, endOfDay) => {
+    const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
+    return isNaN(d) ? null : d.toISOString();
+  };
+  const fIso = from ? iso(from, false) : null;
+  const tIso = to ? iso(to, true) : null;
+  const sinceIso = since ? iso(since, false) : null;
+  if (fIso || tIso) {
+    const parts = [];
+    if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
+    if (tIso) parts.push(`receivedDateTime le ${tIso}`);
+    filter = parts.join(" and ");
+  } else if (sinceIso) {
+    filter = `receivedDateTime gt ${sinceIso}`;
+  } else {
+    filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 864e5).toISOString()}`;
+  }
+  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
   const j = await graphGet(env, q);
-  return (j && j.value || []).filter((m) => m.hasAttachments).slice(0, top);
+  let msgs = (j && j.value || []).filter((m) => m.hasAttachments);
+  const c = String(clue || "").trim().toLowerCase();
+  if (c) {
+    msgs = msgs.filter((m) => {
+      const subj = String(m.subject || "").toLowerCase();
+      const ea = m.from && m.from.emailAddress || {};
+      const frm = (String(ea.address || "") + " " + String(ea.name || "")).toLowerCase();
+      return subj.includes(c) || frm.includes(c);
+    });
+  }
+  return msgs.slice(0, top);
 }
 async function listPdfAttachments(env, mailbox, messageId) {
   const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
@@ -36354,8 +36434,69 @@ async function ensurePoInvoiceCols__raw(db) {
     )`).run();
   } catch {
   }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_seen (
+      tenant_id TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      status TEXT, po_number INTEGER, at TEXT,
+      PRIMARY KEY (mailbox, message_id, attachment_id)
+    )`).run();
+  } catch {
+  }
 }
 var ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+function seenKey(mailbox, messageId, attachmentId) {
+  return String(mailbox || "") + "|" + String(messageId || "") + "|" + String(attachmentId || "");
+}
+async function recordSeen(db, tenantId, mailbox, messageId, attachmentId, status, poNumber) {
+  if (!mailbox || !messageId || !attachmentId) return;
+  try {
+    await ensurePoInvoiceCols(db);
+    await db.prepare(`INSERT INTO invoice_seen (tenant_id, mailbox, message_id, attachment_id, status, po_number, at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(mailbox, message_id, attachment_id) DO UPDATE SET status = excluded.status, po_number = excluded.po_number, at = excluded.at`).bind(
+      String(tenantId || ""),
+      String(mailbox),
+      String(messageId),
+      String(attachmentId),
+      String(status || "handled"),
+      poNumber != null ? Number(poNumber) : null,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ).run();
+  } catch (e) {
+    console.error("PO recordSeen failed:", e && e.message);
+  }
+}
+async function getSeenSet(db, mailbox) {
+  const set = /* @__PURE__ */ new Set();
+  try {
+    const rows = (await db.prepare(`SELECT message_id, attachment_id FROM invoice_seen WHERE mailbox = ?`).bind(String(mailbox)).all()).results || [];
+    for (const r of rows) set.add(seenKey(mailbox, r.message_id, r.attachment_id));
+  } catch {
+  }
+  return set;
+}
+function sweepStateKey(mailbox) {
+  return "sweep_state:" + String(mailbox || "").toLowerCase();
+}
+async function getSweepState(db, mailbox) {
+  try {
+    const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value);
+      return { lastReceived: s.lastReceived || null, outstanding: Array.isArray(s.outstanding) ? s.outstanding : [] };
+    }
+  } catch {
+  }
+  return { lastReceived: null, outstanding: [] };
+}
+async function saveSweepState(db, mailbox, state) {
+  try {
+    const value = JSON.stringify({ lastReceived: state.lastReceived || null, outstanding: (state.outstanding || []).slice(0, 200) });
+    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(sweepStateKey(mailbox), value, value).run();
+  } catch (e) {
+    console.error("PO saveSweepState failed:", e && e.message);
+  }
+}
 var numOrNull2 = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -36532,7 +36673,7 @@ async function handle32(request, env, ctx, url, sess) {
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      if (!po) candidates = matchInvoiceCandidates(db, f, await uncostedPoRows(db));
       const cls = classifyProposal(f, po, known, subNames);
       return jr8({
         ok: true,
@@ -36597,11 +36738,15 @@ async function handle32(request, env, ctx, url, sess) {
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
       const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      const from = String(b.from || "").trim();
+      const to = String(b.to || "").trim();
+      const clue = String(b.clue || "").trim();
+      const mode = String(b.mode || "").trim() === "full" ? "full" : "incremental";
       await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
       const chk = await graphMailboxCheck(env, mailbox);
       if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days });
-      return jr8({ ok: true, mailbox, days, ...out });
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode });
+      return jr8({ ok: true, mailbox, days, from, to, clue, mode, ...out });
     }
     if (path === "/api/invoice/sweep-view" && method === "GET") {
       if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
@@ -36647,6 +36792,7 @@ async function handle32(request, env, ctx, url, sess) {
         contentType: "application/pdf",
         graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
       });
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr8({ ok: true, po_number: poNumber, invoiceUrl });
     }
     if (path === "/api/invoice/url" && method === "GET") {
@@ -37060,6 +37206,9 @@ async function addInvoiceFlag(env, db, sess, request) {
     userName(sess),
     now
   ).run();
+  if (b.message_id && b.attachment_id) {
+    await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull2(b.po_number));
+  }
   return { ok: true, id: res && res.meta && res.meta.last_row_id || null, invoice_key: key };
 }
 async function listInvoiceFlags(env, db, sess, origin, params) {
@@ -37351,17 +37500,49 @@ async function uploadVatInvoice(env, db, sess, origin, request) {
   ).run();
   return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
 }
-async function runInvoiceSweep(env, db, { mailbox, days }) {
+function mergeSweepProposals(outstanding, fresh) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const p of outstanding || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  for (const p of fresh || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  return Array.from(byKey.values());
+}
+function slimProposal(p) {
+  return {
+    mailbox: p.mailbox,
+    messageId: p.messageId,
+    attachmentId: p.attachmentId,
+    filename: p.filename,
+    subject: p.subject,
+    from: p.from,
+    receivedDateTime: p.receivedDateTime,
+    tier: p.tier,
+    fields: p.fields || {}
+  };
+}
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map((s) => s.name);
   const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  const isRange = !!(String(from || "").trim() || String(to || "").trim());
+  const hasClue = !!String(clue || "").trim();
+  const oneOff = isRange || hasClue;
+  const incremental = mode !== "full" && !oneOff;
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [] };
+  const readOpts = { top: 40, days };
+  if (oneOff) {
+    readOpts.from = from;
+    readOpts.to = to;
+    readOpts.clue = clue;
+  } else if (incremental && state.lastReceived) {
+    readOpts.since = state.lastReceived;
+  }
   let msgs = [];
   try {
-    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 });
+    msgs = await listRecentWithAttachments(env, mailbox, readOpts);
   } catch (e) {
     return { proposals: [], scanned: 0, error: String(e && e.message || e) };
   }
-  const proposals = [];
+  const fresh = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
   for (const m of msgs) {
     if (downloads >= MAX_DOWNLOADS) break;
@@ -37391,18 +37572,7 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
         skipped++;
         continue;
       }
-      const f = res.fields || {};
-      let po = null, candidates = [];
-      if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
-      const cls = classifyProposal(f, po, known, subNames);
-      const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
-      if (po && po.priced && po.has_invoice) {
-        skipped++;
-        continue;
-      }
-      if (!actionable) continue;
-      proposals.push({
+      fresh.push({
         mailbox,
         messageId: m.id,
         attachmentId: a.id,
@@ -37411,16 +37581,54 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
         from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
         receivedDateTime: m.receivedDateTime || null,
         tier: res.tier,
-        fields: f,
-        po,
-        candidates,
-        category: cls.category,
-        subName: cls.subName,
-        supName: cls.supName
+        fields: res.fields || {}
       });
     }
   }
-  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
+  const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
+  const seen = await getSeenSet(db, mailbox);
+  const poCache = await uncostedPoRows(db);
+  const proposals = [];
+  let doneNow = 0;
+  for (const p of merged) {
+    if (seen.has(seenKey(p.mailbox, p.messageId, p.attachmentId))) {
+      doneNow++;
+      continue;
+    }
+    const f = p.fields || {};
+    let po = null, candidates = [];
+    if (f.poNumber) po = await poBrief(db, f.poNumber);
+    if (po && po.priced && po.has_invoice) {
+      doneNow++;
+      continue;
+    }
+    if (!po) candidates = matchInvoiceCandidates(db, f, poCache);
+    const cls = classifyProposal(f, po, known, subNames);
+    const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
+    if (!actionable) continue;
+    proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
+  }
+  proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
+  let newest = state.lastReceived;
+  for (const m of msgs) {
+    const r = m.receivedDateTime;
+    if (r && (!newest || r > newest)) newest = r;
+  }
+  if (incremental || mode === "full") {
+    await saveSweepState(db, mailbox, { lastReceived: newest, outstanding: proposals.map(slimProposal) });
+  }
+  return {
+    proposals,
+    scanned: downloads,
+    aiUsed,
+    alreadyDone: skipped + doneNow,
+    capped: downloads >= MAX_DOWNLOADS,
+    incremental,
+    oneOff,
+    newProposals: fresh.length,
+    carriedOver: incremental ? state.outstanding.length : 0,
+    watermark: incremental || mode === "full" ? newest : null
+  };
 }
 async function poBrief(db, poNumber) {
   const r = await db.prepare(
@@ -37441,19 +37649,21 @@ async function poBrief(db, poNumber) {
     has_invoice: !!r.invoice_key
   };
 }
-async function matchInvoiceCandidates(db, f) {
-  const date = f && f.invoiceDate;
-  const supN = normSupplierName(f && f.supplier || "");
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
-  let rows = [];
+async function uncostedPoRows(db) {
   try {
-    rows = (await db.prepare(
+    return (await db.prepare(
       `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
          FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
     ).all()).results || [];
   } catch {
-    rows = [];
+    return [];
   }
+}
+function matchInvoiceCandidates(db, f, poCache) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const rows = Array.isArray(poCache) ? poCache : [];
   const scored = rows.map((r) => {
     const sup = normSupplierName(r.supplier || "");
     const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
@@ -43136,14 +43346,20 @@ async function runHealthChecks(env, tenantId) {
   const checks = [];
   for (const [name, desc, fn] of probeList(env)) {
     const t0 = Date.now();
-    try {
-      const detail = await fn();
-      const ms = Date.now() - t0;
-      checks.push({ name, desc, ok: true, ms, slow: ms > PROBE_SLOW_MS, detail: String(detail || "") });
-    } catch (e) {
-      const ms = Date.now() - t0;
-      checks.push({ name, desc, ok: false, ms, slow: false, detail: String(e && e.message || e).slice(0, 300) });
+    let detail, err = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        detail = await fn();
+        err = null;
+        break;
+      } catch (e) {
+        err = e;
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
+      }
     }
+    const ms = Date.now() - t0;
+    if (err) checks.push({ name, desc, ok: false, ms, slow: false, detail: String(err && err.message || err).slice(0, 300) });
+    else checks.push({ name, desc, ok: true, ms, slow: ms > PROBE_SLOW_MS, detail: String(detail || "") });
   }
   const failed = checks.filter((c) => !c.ok);
   const snapshot2 = {
@@ -43538,8 +43754,30 @@ async function setGateState(db, open, by, device, at) {
 async function pulseGate(env, db, cfg) {
   const code = cfg.openCode || "switch_1";
   const value = cfg.openValue === void 0 ? true : cfg.openValue;
-  const jr8 = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
-  return { jr: jr8, sent: { code, value } };
+  const rest = typeof value === "boolean" ? !value : false;
+  const dev = `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`;
+  const jr8 = await api(env, db, cfg, "POST", dev, { commands: [{ code, value }] });
+  if (jr8 && jr8.success) {
+    const ms = Math.min(3e3, Math.max(200, Number(cfg.pulseMs) || 800));
+    try {
+      await new Promise((r) => setTimeout(r, ms));
+      await api(env, db, cfg, "POST", dev, { commands: [{ code, value: rest }] });
+    } catch (e) {
+    }
+  }
+  return { jr: jr8, sent: { code, value, rest } };
+}
+function friendlyGateError(msg) {
+  const m = String(msg || "").toLowerCase();
+  if (/subscrib|expired|iot ?core|no permission|not been authorized|authoriz/.test(m))
+    return "The gate's cloud subscription (Tuya IoT Core) has expired \u2014 renew it at iot.tuya.com. The fob/keypad still work.";
+  if (/offline|not online|device.*online|device not exist|does not exist/.test(m))
+    return "The gate controller looks offline \u2014 no internet or power right now, so it didn't get the command. Check its power and WiFi. The fob/keypad still work.";
+  if (/frequ|rate|too many|qps|limit/.test(m))
+    return "Too many gate commands in a row \u2014 wait a few seconds and try again.";
+  if (/token|sign|secret|client_id|client id/.test(m))
+    return "The gate's Tuya login was rejected \u2014 the access keys may need re-adding on the worker.";
+  return "The gate command failed" + (msg ? " (" + msg + ")" : "") + ". The fob/keypad still work.";
 }
 async function logGate(db, entry) {
   const log = await loadKV(db, "tuya:openlog") || [];
@@ -43741,7 +43979,16 @@ async function handle41(request, env, ctx, url, sess) {
     }
     try {
       const { jr: jr8, sent } = await pulseGate(env, db, cfg);
-      if (!jr8.success) return json4({ ok: false, error: jr8.msg || "Tuya rejected the command" }, 502);
+      if (!jr8.success) {
+        let offline = false;
+        try {
+          const info = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}`);
+          if (info && info.success && info.result && info.result.online === false) offline = true;
+        } catch (e) {
+        }
+        const err = offline ? "The gate controller is offline \u2014 no internet or power right now, so it didn't get the command. Check its power and WiFi. The fob/keypad still work." : friendlyGateError(jr8.msg);
+        return json4({ ok: false, error: err, offline, raw: jr8.msg || "" }, 502);
+      }
       const nowIso = (/* @__PURE__ */ new Date()).toISOString();
       await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
       await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });

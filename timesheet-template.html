@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
+<title>Weekly Timesheet — Mostlane</title>
+<script src="/portal-config.js?v=38"></script>
+<link rel="stylesheet" href="/portal.css?v=1">
+<script src="auth.js"></script>
+<style>
+  :root{--ink:#0f1b2a;--line:#e4e9f1;--brand:#1A4F8F;--brand2:#003468;--muted:#68758a;--ok:#0e7a3c;--bg:#eef1f6;--card:#fff;--r:16px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:16px;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+  header.page{background:linear-gradient(160deg,#1A4F8F,#003468);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:40;box-shadow:0 2px 12px rgba(3,22,52,.25)}
+  header.page a{color:#fff;text-decoration:none;font-size:15px}
+  header.page h1{font-size:17px;flex:1;font-weight:700;letter-spacing:.2px}
+  .headbtn{appearance:none;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.12);color:#fff;border-radius:11px;padding:8px 12px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+  .headbtn:active{transform:scale(.97)}
+  .wrap{max-width:900px;margin:14px auto;padding:0 12px}
+  .muted{color:var(--muted)}
+  .note{background:#eef4fb;border:1px solid #cfdff4;color:#0e3a6d;border-radius:12px;padding:11px 14px;font-size:14px;margin-bottom:14px;line-height:1.45}
+  .sheet{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 2px 12px rgba(10,30,60,.06);padding:16px;margin-bottom:16px}
+  /* print-only masthead */
+  .printhead{display:none}
+  /* meta fields */
+  .meta{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px}
+  .field{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)}
+  .field .val{font-size:15px;font-weight:600}
+  input[type=text],input[type=date],input[type=time],textarea{font:inherit;color:var(--ink);border:1.5px solid #d5dde9;border-radius:12px;background:#f8fafd;padding:11px 12px;width:100%}
+  input:focus,textarea:focus{outline:none;border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(26,79,143,.12)}
+  input[type=time]{text-align:center;font-weight:600;padding-left:4px;padding-right:4px}
+  input[type=number]{font:inherit;color:var(--ink);border:1.5px solid #d5dde9;border-radius:12px;background:#f8fafd;padding:11px 8px;width:100%;text-align:center;font-weight:600}
+  textarea{resize:vertical;min-height:46px;line-height:1.4;overflow:hidden}
+  .cell.notes textarea{min-height:46px}
+  /* days grid (wide-first) */
+  .days{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .drow{display:grid;grid-template-columns:132px 106px 106px 78px 100px 1fr;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+  .drow:last-child{border-bottom:none}
+  .drow.head{background:#f3f6fb;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+  .drow.wknd{background:#fbfaf4}
+  .cell{min-width:0}
+  .cell.hd{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+  .clab{display:none}
+  .day b{font-size:15px;display:block;line-height:1.15}
+  .day span{font-size:12px;color:var(--muted)}
+  .hrs{font-weight:800;font-size:15px;color:var(--ok);font-variant-numeric:tabular-nums}
+  .hrs.zero{color:#9aa8bd;font-weight:600}
+  .drow.total{background:#f3f6fb;font-weight:800}
+  .drow.total .tlab{grid-column:1 / 5;font-size:13px;letter-spacing:.4px;text-transform:uppercase;color:var(--brand2)}
+  .drow.total .hrs{color:var(--brand2);font-size:17px}
+  /* week note */
+  .weeknote{margin-top:16px}
+  .weeknote label{display:block;font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  /* signatures */
+  .sign{display:flex;flex-wrap:wrap;gap:22px;margin-top:22px;padding-top:16px;border-top:1px dashed var(--line)}
+  .sigblock{flex:1;min-width:230px}
+  .sigblock .who{font-size:13px;font-weight:700;color:var(--brand2);margin-bottom:14px}
+  .sigline{display:flex;gap:16px}
+  .sigline .l{flex:1}
+  .sigline .l.d{flex:none;width:120px}
+  .sigline .rule{border-bottom:1px solid #9aa8bd;height:26px}
+  .sigline .cap{font-size:11px;color:var(--muted);margin-top:5px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:12px;padding:11px 16px;font:inherit;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .btn:active{transform:scale(.97)}
+  .saved{font-size:13px;color:var(--muted);align-self:center}
+
+  @media(max-width:720px){
+    .drow.head{display:none}
+    .days{border:none;border-radius:0}
+    .drow{grid-template-columns:1fr 1fr;gap:10px;padding:14px;background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:10px}
+    .drow.wknd{background:#fbfaf4}
+    .cell.day,.cell.notes{grid-column:1 / -1}
+    .cell.hours{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;background:#f6f9fd;border-radius:10px;padding:8px 12px}
+    .clab{display:block;font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:0 0 5px 2px}
+    .cell.hours .clab{margin:0}
+    .drow.total{grid-template-columns:1fr auto;background:#f3f6fb;border-color:#dbe4f0}
+    .drow.total .tlab{grid-column:auto}
+  }
+
+  @media print{
+    @page{size:A4 portrait;margin:12mm}
+    html{padding:0!important}
+    body{background:#fff;color:#000;padding:0;font-size:12px}
+    #pnav,#mlStatusCap,#mlBell,#mlchat-launch,#mlVaBar,#mlRefresh,#pnGate,#ocPill,.no-print,header.page{display:none!important}
+    .wrap{max-width:none;margin:0;padding:0}
+    .note{display:none}
+    .sheet{border:none;box-shadow:none;border-radius:0;padding:0;margin:0}
+    .printhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;border-bottom:2px solid #003468;padding-bottom:8px;margin-bottom:14px}
+    .printhead .brand{font-size:20px;font-weight:800;color:#003468;letter-spacing:.3px}
+    .printhead .brand small{display:block;font-size:11px;font-weight:600;color:#333;letter-spacing:1.5px;text-transform:uppercase;margin-top:2px}
+    .printhead .pw{text-align:right;font-size:12px;color:#222;line-height:1.5}
+    .printhead .pw b{font-size:14px;color:#000}
+    .meta{display:none}
+    .days{border:1px solid #999;border-radius:0}
+    .drow{border-bottom:1px solid #bbb;gap:6px;padding:6px 8px}
+    .drow.head{display:grid;background:#eef2f7;color:#003468}
+    .drow.wknd{background:#f7f6f0}
+    .hrs,.hrs.zero{color:#000}
+    input,textarea{border:none!important;background:transparent!important;box-shadow:none!important;padding:2px 0!important;font-weight:600}
+    textarea{min-height:0;white-space:pre-wrap}
+    .clab{display:none!important}
+    .drow.total{background:#eef2f7}
+    .drow.total .tlab,.drow.total .hrs{color:#000}
+    .sign{border-top:1px solid #999;margin-top:20px}
+    .actions{display:none}
+    .sigline .rule{border-bottom:1px solid #000}
+  }
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+  <h1>Weekly Timesheet</h1>
+  <button class="headbtn no-print" id="printBtn" type="button">🖨 Print</button>
+</header>
+
+<div class="wrap">
+  <div class="note no-print">
+    Fill in your hours for the week, then print it (or hand it in on your phone) and give it to the office.
+    Times are entered as start and finish; the hours work out for you. Your entries are saved on this device
+    while you fill them in.
+  </div>
+
+  <div class="sheet">
+    <!-- print-only masthead -->
+    <div class="printhead">
+      <div class="brand">Mostlane<small>Weekly Timesheet</small></div>
+      <div class="pw">
+        <div>Employee: <b id="pName">&nbsp;</b></div>
+        <div>Week: <b id="pWeek">&nbsp;</b></div>
+      </div>
+    </div>
+
+    <div class="meta no-print">
+      <div class="field">
+        <label for="empName">Employee name</label>
+        <input type="text" id="empName" placeholder="Your full name" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="weekMon">Week commencing (Monday)</label>
+        <input type="date" id="weekMon">
+        <span class="val muted" id="weekRange"></span>
+      </div>
+    </div>
+
+    <div class="days" id="days">
+      <div class="drow head">
+        <div class="cell hd">Day</div>
+        <div class="cell hd">Start</div>
+        <div class="cell hd">Finish</div>
+        <div class="cell hd">Break (min)</div>
+        <div class="cell hd">Hours</div>
+        <div class="cell hd">Work / job / site</div>
+      </div>
+      <!-- day rows injected -->
+      <div class="drow total">
+        <div class="tlab">Weekly total</div>
+        <div class="cell hours"><span class="clab">Total</span><span class="hrs" id="weekTotal">0h 00m</span></div>
+        <div class="cell"></div>
+      </div>
+    </div>
+
+    <div class="weeknote no-print">
+      <label for="wkNote">Notes for the week (optional)</label>
+      <textarea id="wkNote" rows="2" placeholder="Anything the office should know — overtime, callouts, materials, etc."></textarea>
+    </div>
+    <div class="weeknote" id="wkNotePrint" hidden></div>
+
+    <div class="sign">
+      <div class="sigblock">
+        <div class="who">Employee</div>
+        <div class="sigline">
+          <div class="l"><div class="rule"></div><div class="cap">Signature</div></div>
+          <div class="l d"><div class="rule"></div><div class="cap">Date</div></div>
+        </div>
+      </div>
+      <div class="sigblock">
+        <div class="who">Approved by (office)</div>
+        <div class="sigline">
+          <div class="l"><div class="rule"></div><div class="cap">Signature</div></div>
+          <div class="l d"><div class="rule"></div><div class="cap">Date</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions no-print">
+    <button class="btn primary" id="printBtn2" type="button">🖨 Print / save as PDF</button>
+    <button class="btn" id="clearBtn" type="button">Clear this week</button>
+    <span class="saved" id="savedNote"></span>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  var $ = function(id){ return document.getElementById(id); };
+
+  function pad(n){ return (n<10?"0":"")+n; }
+  function isoOf(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+  function parseISO(s){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||""); return m? new Date(+m[1],+m[2]-1,+m[3]) : null; }
+  function mondayOf(d){ var x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); var wd=(x.getDay()+6)%7; x.setDate(x.getDate()-wd); return x; }
+  function addDays(d,n){ var x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); x.setDate(x.getDate()+n); return x; }
+  function fmtDM(d){ return d.getDate()+" "+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]; }
+  function fmtDMY(d){ return pad(d.getDate())+"/"+pad(d.getMonth()+1)+"/"+d.getFullYear(); }
+
+  // safe localStorage helpers
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+
+  var NAME_KEY = "mlTsName";
+  function weekKey(monISO){ return "mlTsWeek:"+monISO; }
+
+  var curMonISO = null;
+
+  // build the 7 day rows once
+  var totalRow = document.querySelector(".drow.total");
+  for (var i=0;i<7;i++){
+    var row = document.createElement("div");
+    row.className = "drow day-row" + (i>=5?" wknd":"");
+    row.setAttribute("data-i", i);
+    row.innerHTML =
+      '<div class="cell day"><b class="dow"></b><span class="dt"></span></div>'+
+      '<div class="cell start"><span class="clab">Start</span><input type="time" step="300" data-f="s" aria-label="Start time"></div>'+
+      '<div class="cell finish"><span class="clab">Finish</span><input type="time" step="300" data-f="f" aria-label="Finish time"></div>'+
+      '<div class="cell brk"><span class="clab">Break (min)</span><input type="number" min="0" max="600" step="5" inputmode="numeric" data-f="b" placeholder="0" aria-label="Break minutes"></div>'+
+      '<div class="cell hours"><span class="clab">Hours</span><span class="hrs zero">0h 00m</span></div>'+
+      '<div class="cell notes"><span class="clab">Work / job / site</span><textarea rows="1" data-f="n" placeholder="Job / site / what you did" aria-label="Work notes"></textarea></div>';
+    totalRow.parentNode.insertBefore(row, totalRow);
+  }
+  var dayRows = Array.prototype.slice.call(document.querySelectorAll(".day-row"));
+
+  function minutesFor(s,f,b){
+    var ms=/^(\d{1,2}):(\d{2})/.exec(s||""), mf=/^(\d{1,2}):(\d{2})/.exec(f||"");
+    if(!ms||!mf) return null;
+    var start=(+ms[1])*60+(+ms[2]), fin=(+mf[1])*60+(+mf[2]);
+    var diff = fin-start; if(diff<0) diff+=24*60; // overnight
+    diff -= Math.max(0, Math.min(600, +b||0));
+    return Math.max(0, diff);
+  }
+  function fmtHM(mins){ return Math.floor(mins/60)+"h "+pad(mins%60)+"m"; }
+  function sizeTA(t){ if(!t) return; t.style.height="auto"; t.style.height=Math.max(46,t.scrollHeight)+"px"; }
+
+  function recompute(){
+    var total=0;
+    dayRows.forEach(function(row){
+      var s=row.querySelector('[data-f=s]').value, f=row.querySelector('[data-f=f]').value, b=row.querySelector('[data-f=b]').value;
+      var mins=minutesFor(s,f,b), hrsEl=row.querySelector(".hrs");
+      if(mins==null){ hrsEl.textContent="0h 00m"; hrsEl.classList.add("zero"); }
+      else { hrsEl.textContent=fmtHM(mins); hrsEl.classList.toggle("zero",mins===0); total+=mins; }
+    });
+    $("weekTotal").textContent = fmtHM(total);
+  }
+
+  function collect(){
+    var days = dayRows.map(function(row){
+      return {
+        s: row.querySelector('[data-f=s]').value,
+        f: row.querySelector('[data-f=f]').value,
+        b: row.querySelector('[data-f=b]').value,
+        n: row.querySelector('[data-f=n]').value
+      };
+    });
+    return { days: days, wkNote: $("wkNote").value };
+  }
+
+  var saveT=null;
+  function scheduleSave(){
+    if(saveT) clearTimeout(saveT);
+    saveT = setTimeout(save, 400);
+    var n=$("savedNote"); if(n) n.textContent="Saving…";
+  }
+  function save(){
+    if(!curMonISO) return;
+    lsSet(NAME_KEY, $("empName").value||"");
+    lsSet(weekKey(curMonISO), JSON.stringify(collect()));
+    var n=$("savedNote"); if(n) n.textContent="Saved ✓";
+  }
+
+  function applyDates(mon){
+    var end=addDays(mon,6);
+    $("weekRange").textContent = "Week ending Sunday "+fmtDMY(end);
+    dayRows.forEach(function(row){
+      var i=+row.getAttribute("data-i"), d=addDays(mon,i);
+      row.querySelector(".dow").textContent=DAYS[i];
+      row.querySelector(".dt").textContent=fmtDM(d);
+    });
+    // print masthead
+    $("pWeek").textContent = fmtDMY(mon)+" – "+fmtDMY(end);
+  }
+
+  function loadWeek(monISO){
+    curMonISO = monISO;
+    var raw = lsGet(weekKey(monISO)), data=null;
+    if(raw){ try{ data=JSON.parse(raw); }catch(e){} }
+    var days = (data&&data.days)||[];
+    dayRows.forEach(function(row){
+      var i=+row.getAttribute("data-i"), d=days[i]||{};
+      row.querySelector('[data-f=s]').value = d.s||"";
+      row.querySelector('[data-f=f]').value = d.f||"";
+      row.querySelector('[data-f=b]').value = d.b||"";
+      row.querySelector('[data-f=n]').value = d.n||"";
+    });
+    $("wkNote").value = (data&&data.wkNote)||"";
+    dayRows.forEach(function(row){ sizeTA(row.querySelector("[data-f=n]")); });
+    sizeTA($("wkNote"));
+    recompute();
+  }
+
+  // wire inputs
+  dayRows.forEach(function(row){
+    row.querySelectorAll("input,textarea").forEach(function(el){
+      el.addEventListener("input", function(){ if(el.tagName==="TEXTAREA") sizeTA(el); recompute(); scheduleSave(); });
+    });
+  });
+  $("wkNote").addEventListener("input", function(){ sizeTA($("wkNote")); scheduleSave(); });
+  $("empName").addEventListener("input", function(){ $("pName").textContent=$("empName").value||" "; scheduleSave(); });
+
+  $("weekMon").addEventListener("change", function(){
+    var d=parseISO(this.value); if(!d) return;
+    var mon=mondayOf(d); this.value=isoOf(mon); // snap to Monday
+    applyDates(mon); loadWeek(isoOf(mon));
+  });
+
+  function doPrint(){
+    // reflect the week note into a print block so it shows on paper
+    var pn=$("wkNotePrint");
+    if($("wkNote").value.trim()){ pn.hidden=false; pn.innerHTML='<label>Notes for the week</label>'; pn.appendChild(document.createTextNode($("wkNote").value)); pn.querySelector("label").style.cssText="display:block;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#003468;margin-bottom:4px"; }
+    else { pn.hidden=true; }
+    window.print();
+  }
+  $("printBtn").addEventListener("click", doPrint);
+  $("printBtn2").addEventListener("click", doPrint);
+
+  $("clearBtn").addEventListener("click", async function(){
+    var ok = window.MLUI && MLUI.confirm ? await MLUI.confirm("Clear all entries for this week? Your name is kept.",{title:"Clear this week",okLabel:"Clear",danger:true}) : true;
+    if(!ok) return;
+    dayRows.forEach(function(row){ row.querySelectorAll("input,textarea").forEach(function(el){ el.value=""; }); });
+    $("wkNote").value="";
+    lsDel(weekKey(curMonISO));
+    recompute(); save();
+  });
+
+  // init
+  var mon0 = mondayOf(new Date());
+  $("weekMon").value = isoOf(mon0);
+  applyDates(mon0);
+  var savedName = lsGet(NAME_KEY);
+  if(savedName){ $("empName").value=savedName; $("pName").textContent=savedName; }
+  loadWeek(isoOf(mon0));
+})();
+</script>
+</body>
+</html>

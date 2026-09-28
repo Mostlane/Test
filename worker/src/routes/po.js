@@ -62,8 +62,66 @@ async function ensurePoInvoiceCols__raw(db) {
       verified_by TEXT, verified_at TEXT, created_at TEXT
     )`).run();
   } catch { /* table already exists */ }
+  // Incremental-sweep ledger: one row per mailbox attachment the office has
+  // ALREADY dealt with (attached to a PO, or flagged) — keyed by mailbox +
+  // message + attachment, UNIQUE. A merged sweep drops anything in here, so a
+  // handled invoice never re-appears even before its PO shows priced.
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_seen (
+      tenant_id TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      status TEXT, po_number INTEGER, at TEXT,
+      PRIMARY KEY (mailbox, message_id, attachment_id)
+    )`).run();
+  } catch { /* table already exists */ }
 }
 const ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+
+// The mailbox reference that identifies one attachment across sweeps.
+function seenKey(mailbox, messageId, attachmentId) {
+  return String(mailbox || "") + "|" + String(messageId || "") + "|" + String(attachmentId || "");
+}
+// Mark a swept attachment as HANDLED (attached / flagged) so the next merged
+// sweep drops it. Best-effort — never blocks the action it follows.
+async function recordSeen(db, tenantId, mailbox, messageId, attachmentId, status, poNumber) {
+  if (!mailbox || !messageId || !attachmentId) return;
+  try {
+    await ensurePoInvoiceCols(db);
+    await db.prepare(`INSERT INTO invoice_seen (tenant_id, mailbox, message_id, attachment_id, status, po_number, at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(mailbox, message_id, attachment_id) DO UPDATE SET status = excluded.status, po_number = excluded.po_number, at = excluded.at`)
+      .bind(String(tenantId || ""), String(mailbox), String(messageId), String(attachmentId),
+        String(status || "handled"), poNumber != null ? Number(poNumber) : null, (/* @__PURE__ */ new Date()).toISOString()).run();
+  } catch (e) { console.error("PO recordSeen failed:", e && e.message); }
+}
+// The set of handled attachment keys for a mailbox.
+async function getSeenSet(db, mailbox) {
+  const set = new Set();
+  try {
+    const rows = (await db.prepare(`SELECT message_id, attachment_id FROM invoice_seen WHERE mailbox = ?`).bind(String(mailbox)).all()).results || [];
+    for (const r of rows) set.add(seenKey(mailbox, r.message_id, r.attachment_id));
+  } catch { /* table may not exist yet */ }
+  return set;
+}
+// Per-mailbox incremental memory, kept in the config key/value store as JSON:
+// { lastReceived: ISO of the newest email read, outstanding: [slim proposal…] }.
+function sweepStateKey(mailbox) { return "sweep_state:" + String(mailbox || "").toLowerCase(); }
+async function getSweepState(db, mailbox) {
+  try {
+    const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value);
+      return { lastReceived: s.lastReceived || null, outstanding: Array.isArray(s.outstanding) ? s.outstanding : [] };
+    }
+  } catch { /* no state yet */ }
+  return { lastReceived: null, outstanding: [] };
+}
+async function saveSweepState(db, mailbox, state) {
+  try {
+    const value = JSON.stringify({ lastReceived: state.lastReceived || null, outstanding: (state.outstanding || []).slice(0, 200) });
+    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`)
+      .bind(sweepStateKey(mailbox), value, value).run();
+  } catch (e) { console.error("PO saveSweepState failed:", e && e.message); }
+}
 
 const numOrNull = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
@@ -276,7 +334,7 @@ export async function handle(request, env, ctx, url, sess) {
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      if (!po) candidates = matchInvoiceCandidates(db, f, await uncostedPoRows(db));
       const cls = classifyProposal(f, po, known, subNames);
       return jr({ ok: true, tier: res.tier, aiUsed: res.aiUsed, textLen: res.textLen, fields: f, po, candidates,
         docType: res.docType || null, notInvoice: !!res.notInvoice,
@@ -320,12 +378,20 @@ export async function handle(request, env, ctx, url, sess) {
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
       const days = Math.max(1, Math.min(365, Number(b.days) || 60));
-      // Remember the mailbox/days for next time.
+      // Advanced search (optional): an explicit date range and/or a clue.
+      const from = String(b.from || "").trim();
+      const to = String(b.to || "").trim();
+      const clue = String(b.clue || "").trim();
+      // mode: "incremental" (default — only new emails, merged with the saved
+      // outstanding list) or "full" (ignore the memory, re-scan the look-back).
+      const mode = String(b.mode || "").trim() === "full" ? "full" : "incremental";
+      // Remember the mailbox/days for next time (the look-back default, not the
+      // one-off advanced range).
       await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
       const chk = await graphMailboxCheck(env, mailbox);
       if (!chk.ok) return jr({ error: "Couldn’t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days });
-      return jr({ ok: true, mailbox, days, ...out });
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode });
+      return jr({ ok: true, mailbox, days, from, to, clue, mode, ...out });
     }
     // Stream one mailbox attachment inline so the office can eyeball it before
     // attaching (fetched fresh from Graph; nothing stored).
@@ -362,6 +428,9 @@ export async function handle(request, env, ctx, url, sess) {
         bytes, filename: b.filename || "invoice.pdf", contentType: "application/pdf",
         graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id },
       });
+      // Remember this attachment is dealt with, so the next merged sweep drops it
+      // (even before its PO reads back as priced).
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr({ ok: true, po_number: poNumber, invoiceUrl });
     }
     // Signed URL for a PO's already-attached invoice (built on demand — signing
@@ -815,6 +884,11 @@ async function addInvoiceFlag(env, db, sess, request) {
     (b.note || "") || null, "open", key, filename || null,
     b.source || "sweep", userName(sess), now
   ).run();
+  // If this came from a mailbox sweep, mark the attachment handled so the next
+  // merged sweep drops it.
+  if (b.message_id && b.attachment_id) {
+    await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull(b.po_number));
+  }
   return { ok: true, id: (res && res.meta && res.meta.last_row_id) || null, invoice_key: key };
 }
 
@@ -993,14 +1067,52 @@ async function uploadVatInvoice(env, db, sess, origin, request) {
 // Read the mailbox, parse each PDF, and build confirm-first proposals (matched PO
 // or candidates). Bounded: at most MAX downloads, and an AI (vision) budget so a
 // big run can't stall — past the budget the reader uses the free text tier only.
-async function runInvoiceSweep(env, db, { mailbox, days }) {
+// Pure merge: remembered-outstanding + freshly-read, de-duped by the mailbox
+// attachment key, with the fresh copy winning on a re-read. Exported for tests.
+export function mergeSweepProposals(outstanding, fresh) {
+  const byKey = new Map();
+  for (const p of (outstanding || [])) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  for (const p of (fresh || [])) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  return Array.from(byKey.values());
+}
+
+// A proposal, minus the volatile po/candidates (those are re-derived on every
+// sweep from the stored `fields`) — this slim shape is what we remember.
+function slimProposal(p) {
+  return {
+    mailbox: p.mailbox, messageId: p.messageId, attachmentId: p.attachmentId,
+    filename: p.filename, subject: p.subject, from: p.from,
+    receivedDateTime: p.receivedDateTime, tier: p.tier, fields: p.fields || {},
+  };
+}
+
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map(s => s.name);
   const subNames = (await getSubcontractors(db)).map(s => s.name);
+
+  // Which kind of sweep is this?
+  //  • an explicit date range OR a clue is a targeted one-off — reads fresh and
+  //    NEVER touches the incremental memory (so it can't wind the pointer on).
+  //  • mode "full" ignores the memory but DOES reset it (a clean re-scan).
+  //  • otherwise it's an incremental sweep: read only what arrived since the
+  //    last scan, merge with the remembered outstanding list, and re-check each.
+  const isRange = !!(String(from || "").trim() || String(to || "").trim());
+  const hasClue = !!String(clue || "").trim();
+  const oneOff = isRange || hasClue;
+  const incremental = mode !== "full" && !oneOff;
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [] };
+
+  // Read the mailbox. Incremental with a watermark → only newer emails.
+  const readOpts = { top: 40, days };
+  if (oneOff) { readOpts.from = from; readOpts.to = to; readOpts.clue = clue; }
+  else if (incremental && state.lastReceived) { readOpts.since = state.lastReceived; }
   let msgs = [];
-  try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 }); }
+  try { msgs = await listRecentWithAttachments(env, mailbox, readOpts); }
   catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
-  const proposals = [];
+
+  // Parse only the freshly-read messages into slim proposals.
+  const fresh = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
   for (const m of msgs) {
     if (downloads >= MAX_DOWNLOADS) break;
@@ -1017,28 +1129,56 @@ async function runInvoiceSweep(env, db, { mailbox, days }) {
       // A remittance advice / statement (a payment record, not a bill) is not a
       // purchase invoice — drop it, however it was read (text OR vision docType).
       if (res.notInvoice || res.remittance) { skipped++; continue; }
-      const f = res.fields || {};
-      let po = null, candidates = [];
-      if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
-      const cls = classifyProposal(f, po, known, subNames);
-      // Only surface things the office can act on; drop non-invoice PDFs + POs
-      // already priced-and-attached (done on a previous sweep). A subcontractor /
-      // flag / other invoice with money read is actionable even with no candidate.
-      const actionable = (po && !po.priced) || (candidates && candidates.length)
-        || (f.net != null || f.gross != null);
-      if (po && po.priced && po.has_invoice) { skipped++; continue; }
-      if (!actionable) continue;
-      proposals.push({
+      fresh.push({
         mailbox, messageId: m.id, attachmentId: a.id, filename: a.name || "invoice.pdf",
         subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
         receivedDateTime: m.receivedDateTime || null,
-        tier: res.tier, fields: f, po, candidates,
-        category: cls.category, subName: cls.subName, supName: cls.supName,
+        tier: res.tier, fields: res.fields || {},
       });
     }
   }
-  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
+
+  // Merge remembered-outstanding + fresh (incremental), or just the fresh set,
+  // de-duped by the mailbox attachment key (fresh wins on a re-read).
+  const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
+
+  // Re-check EACH cheaply from its stored fields (no re-download): refresh the
+  // PO / candidates, and drop anything the office has since handled — attached
+  // to a PO (seen ledger, or the named PO is now priced+attached) or flagged.
+  const seen = await getSeenSet(db, mailbox);
+  const poCache = await uncostedPoRows(db);
+  const proposals = [];
+  let doneNow = 0;
+  for (const p of merged) {
+    if (seen.has(seenKey(p.mailbox, p.messageId, p.attachmentId))) { doneNow++; continue; }
+    const f = p.fields || {};
+    let po = null, candidates = [];
+    if (f.poNumber) po = await poBrief(db, f.poNumber);
+    if (po && po.priced && po.has_invoice) { doneNow++; continue; }   // already attached
+    if (!po) candidates = matchInvoiceCandidates(db, f, poCache);
+    const cls = classifyProposal(f, po, known, subNames);
+    const actionable = (po && !po.priced) || (candidates && candidates.length) || (f.net != null || f.gross != null);
+    if (!actionable) continue;
+    proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
+  }
+  // Newest, so most-useful, first.
+  proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
+
+  // Persist the incremental memory: advance the watermark to the newest email
+  // actually read, and remember the still-outstanding list (slim).
+  let newest = state.lastReceived;
+  for (const m of msgs) { const r = m.receivedDateTime; if (r && (!newest || r > newest)) newest = r; }
+  if (incremental || mode === "full") {
+    await saveSweepState(db, mailbox, { lastReceived: newest, outstanding: proposals.map(slimProposal) });
+  }
+
+  return {
+    proposals, scanned: downloads, aiUsed, alreadyDone: skipped + doneNow,
+    capped: downloads >= MAX_DOWNLOADS,
+    incremental, oneOff, newProposals: fresh.length,
+    carriedOver: incremental ? state.outstanding.length : 0,
+    watermark: (incremental || mode === "full") ? newest : null,
+  };
 }
 
 // A compact PO record for the invoice-match proposal.
@@ -1062,17 +1202,22 @@ async function poBrief(db, poNumber) {
 // later). Amount can't corroborate here — the PO is unpriced, the cost is exactly
 // what we're filling in. When the supplier couldn't be read, fall back to any
 // unpriced PO raised close to the transaction date.
-async function matchInvoiceCandidates(db, f) {
-  const date = f && f.invoiceDate;
-  const supN = normSupplierName(f && f.supplier || "");
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
-  let rows = [];
+// The unpriced POs a swept invoice could belong to (fetched once, reused).
+async function uncostedPoRows(db) {
   try {
-    rows = (await db.prepare(
+    return (await db.prepare(
       `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
          FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
     ).all()).results || [];
-  } catch { rows = []; }
+  } catch { return []; }
+}
+// `poCache` (the uncosted-PO rows from uncostedPoRows) is required — a merged
+// sweep re-checks many proposals against ONE fetched list rather than re-querying.
+function matchInvoiceCandidates(db, f, poCache) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const rows = Array.isArray(poCache) ? poCache : [];
   const scored = rows.map(r => {
     const sup = normSupplierName(r.supplier || "");
     const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));

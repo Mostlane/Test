@@ -81,6 +81,8 @@
   Cache-Control: no-cache
 /my-documents.html
   Cache-Control: no-cache
+/timesheet-template.html
+  Cache-Control: no-cache
 /notification-centre.html
   Cache-Control: no-cache
 /po.html
