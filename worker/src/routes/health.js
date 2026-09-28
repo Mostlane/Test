@@ -131,14 +131,17 @@ export async function runHealthChecks(env, tenantId) {
   const checks = [];
   for (const [name, desc, fn] of probeList(env)) {
     const t0 = Date.now();
-    try {
-      const detail = await fn();
-      const ms = Date.now() - t0;
-      checks.push({ name, desc, ok: true, ms, slow: ms > PROBE_SLOW_MS, detail: String(detail || "") });
-    } catch (e) {
-      const ms = Date.now() - t0;
-      checks.push({ name, desc, ok: false, ms, slow: false, detail: String(e && e.message || e).slice(0, 300) });
+    // Retry a failing probe ONCE (after a short pause). Cloudflare D1/R2 throw the
+    // occasional transient "internal error" that clears on the next attempt, and a
+    // single blip should not fire a 3am phone alert. A real outage fails both tries.
+    let detail, err = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { detail = await fn(); err = null; break; }
+      catch (e) { err = e; if (attempt === 0) await new Promise(r => setTimeout(r, 400)); }
     }
+    const ms = Date.now() - t0;
+    if (err) checks.push({ name, desc, ok: false, ms, slow: false, detail: String(err && err.message || err).slice(0, 300) });
+    else checks.push({ name, desc, ok: true, ms, slow: ms > PROBE_SLOW_MS, detail: String(detail || "") });
   }
   const failed = checks.filter(c => !c.ok);
   const snapshot = {
