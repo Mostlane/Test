@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -25906,6 +25901,14 @@ async function ensureTables__raw4(env) {
     invoiced_at TEXT, invoice_ref TEXT, source TEXT, created_at TEXT, updated_at TEXT
   )`).run();
   try {
+    await env.DB.prepare("ALTER TABLE fbc_meta ADD COLUMN description TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE fbc_meta ADD COLUMN raised_at TEXT").run();
+  } catch {
+  }
+  try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fbc_meta_t ON fbc_meta(tenant_id)").run();
   } catch {
   }
@@ -25939,12 +25942,14 @@ async function recordFbcJob(env, tid, jobId, m = {}) {
   const t = Number(tid) || 1;
   try {
     await env.DB.prepare(`INSERT INTO fbc_meta
-      (tenant_id, job_id, reference, site_code, site_name, reported_by, job_title, w3w, quote_required, source, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      (tenant_id, job_id, reference, site_code, site_name, reported_by, job_title, w3w, quote_required, description, raised_at, source, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(job_id) DO UPDATE SET
         reference=excluded.reference, site_code=excluded.site_code, site_name=excluded.site_name,
         reported_by=excluded.reported_by, job_title=excluded.job_title, w3w=excluded.w3w,
-        quote_required=excluded.quote_required, updated_at=excluded.updated_at`).bind(
+        quote_required=excluded.quote_required,
+        description=COALESCE(excluded.description, fbc_meta.description),
+        raised_at=COALESCE(excluded.raised_at, fbc_meta.raised_at), updated_at=excluded.updated_at`).bind(
       t,
       jobId,
       m.reference || "",
@@ -25954,6 +25959,8 @@ async function recordFbcJob(env, tid, jobId, m = {}) {
       m.jobTitle || "",
       m.w3w || "",
       m.quoteRequired ? 1 : 0,
+      m.description || null,
+      m.raisedAt || null,
       m.source || "jotform",
       now(),
       now()
@@ -26002,7 +26009,7 @@ async function handle17(request, env, ctx, url, sess) {
     const status = j && j.status || "";
     const finished = DONE.has(String(status).toLowerCase());
     const invStatus = m && m.invoice_status || "";
-    const invoiceState = invStatus === "invoiced" ? "invoiced" : invStatus === "not_required" ? "not_required" : finished ? "to_invoice" : "open";
+    const invoiceState = invStatus === "invoiced" ? "invoiced" : invStatus === "not_required" ? "not_required" : invStatus === "to_invoice" ? "to_invoice" : finished || !j ? "to_invoice" : "open";
     let siteName = m && m.site_name || "";
     if (!siteName && j && j.data) {
       try {
@@ -26019,8 +26026,8 @@ async function handle17(request, env, ctx, url, sess) {
       priority: j && j.priority || "",
       assignedTo: j && j.assigned_to || "",
       scheduledAt: j && j.scheduled_at || "",
-      raisedAt: j && j.created_at || m && m.created_at || "",
-      description: j && j.description || "",
+      raisedAt: j && j.created_at || m && m.raised_at || m && m.created_at || "",
+      description: j && j.description || m && m.description || "",
       reportedBy: m && m.reported_by || "",
       jobTitle: m && m.job_title || "",
       w3w: m && m.w3w || "",
@@ -26042,7 +26049,7 @@ async function handle17(request, env, ctx, url, sess) {
   };
   if (sub === "/list" && method === "GET") {
     const { results: metas } = await env.DB.prepare(
-      `SELECT m.*, j.id AS j_id, j.helpdesk_ref, j.status, j.priority, j.site_code AS j_site, j.assigned_to, j.scheduled_at, j.created_at AS j_created, j.description, j.data
+      `SELECT m.*, j.id AS j_id, j.helpdesk_ref, j.status, j.priority, j.site_code AS j_site, j.assigned_to, j.scheduled_at, j.created_at AS j_created, j.description AS j_descr, j.data
        FROM fbc_meta m LEFT JOIN sla_jobs j ON j.id=m.job_id AND j.tenant_id=?
        WHERE m.tenant_id=?`
     ).bind(tid, tid).all();
@@ -26054,7 +26061,7 @@ async function handle17(request, env, ctx, url, sess) {
     const seen = /* @__PURE__ */ new Set();
     const rows = (metas || []).map((r) => {
       seen.add(r.job_id);
-      const j = r.j_id ? { id: r.j_id, helpdesk_ref: r.helpdesk_ref, status: r.status, priority: r.priority, site_code: r.j_site, assigned_to: r.assigned_to, scheduled_at: r.scheduled_at, created_at: r.j_created, description: r.description, data: r.data } : null;
+      const j = r.j_id ? { id: r.j_id, helpdesk_ref: r.helpdesk_ref, status: r.status, priority: r.priority, site_code: r.j_site, assigned_to: r.assigned_to, scheduled_at: r.scheduled_at, created_at: r.j_created, description: r.j_descr, data: r.data } : null;
       return shape2(r, j, msgBy[r.job_id]);
     });
     const codes = await fbcSiteCodes(env, tid);
@@ -26096,6 +26103,11 @@ async function handle17(request, env, ctx, url, sess) {
       vals.push(v);
     };
     if ("cost" in b) put("cost", num2(b.cost));
+    if ("description" in b) put("description", String(b.description || "").slice(0, 4e3));
+    if ("raisedAt" in b) put("raised_at", String(b.raisedAt || "").slice(0, 40));
+    if ("siteCode" in b) put("site_code", String(b.siteCode || "").slice(0, 20));
+    if ("siteName" in b) put("site_name", String(b.siteName || "").slice(0, 200));
+    if ("reference" in b) put("reference", String(b.reference || "").slice(0, 200));
     if ("quoteAmount" in b) put("quote_amount", num2(b.quoteAmount));
     if ("poNumber" in b) put("po_number", String(b.poNumber || "").slice(0, 60));
     if ("invoiceMonth" in b) put("invoice_month", String(b.invoiceMonth || "").slice(0, 7));
@@ -39425,9 +39437,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
