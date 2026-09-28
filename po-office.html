@@ -633,11 +633,12 @@ async function submitNewPO(btn) {
   try {
     const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
     if (res.error) { alert(res.error); return; }
+    let wasSweep = false;
     if (invPending) {
       const pCost = Number(invPending.cost) || 0;
       let attach = null;
       try { attach = await invAttachToNewPo(res.po_number); } catch (e) { attach = { error: e.message }; }
-      if (invPending.kind === 'sweep' && invPending.it) invPending.it._done = true;
+      if (invPending.kind === 'sweep') { if (invPending.it) invPending.it._done = true; wasSweep = true; }
       invPending = null;
       alert(attach && attach.error
         ? 'PO ' + res.po_number + ' raised, but attaching the invoice failed: ' + attach.error
@@ -645,7 +646,11 @@ async function submitNewPO(btn) {
     } else {
       alert('PO ' + res.po_number + ' issued');
     }
-    closeModal(); loadPOs(); loadDashboard();
+    loadPOs(); loadDashboard();
+    // If this PO was raised from the mailbox sweep, go BACK to the sweep results
+    // (the actioned item is now ticked off) instead of closing — so the office
+    // never has to re-run the scan to carry on with the rest of the list.
+    if (wasSweep) invShowResults(); else closeModal();
   } catch (e) {
     alert('Error: ' + e.message);
   } finally {
@@ -1019,6 +1024,9 @@ let invSummaryHtml = '';
 // When a no-PO invoice needs a NEW PO raised for it, this holds the invoice so
 // submitNewPO can attach it (+ its cost) onto the PO it just created.
 let invPending = null;
+// The last sweep's search values, so the results view can be rebuilt (e.g. after
+// raising a PO from a swept invoice) WITHOUT re-running the scan.
+let invLastSweep = null;
 // Small coloured pill naming the category on each sweep card.
 function invCatBadge(cat) {
   const m = {
@@ -1030,6 +1038,33 @@ function invCatBadge(cat) {
   const [label, fg, bg] = m[cat] || m.other;
   return '<span style="display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;color:' + fg + ';background:' + bg + '">' + label + '</span>';
 }
+// The sweep view (config inputs + Advanced search + the results container). Used
+// by invStartSweep AND invShowResults so they never drift apart.
+function invSweepBodyHtml(v) {
+  v = v || {};
+  const advOpen = (v.from || v.to || v.clue) ? ' open' : '';
+  return (
+    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row.</p>' +
+    '<div class="grid-2">' +
+      '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(v.mailbox || '') + '"></div>' +
+      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(v.days || 60) + '" min="1" max="365"></div>' +
+    '</div>' +
+    '<details style="margin:2px 0 10px;border:1px solid #e3e7ee;border-radius:10px;padding:8px 11px;background:#f8fafc"' + advOpen + '>' +
+      '<summary style="cursor:pointer;font-weight:600;color:#003366;font-size:13px">Advanced search</summary>' +
+      '<div style="padding:8px 0 2px">' +
+        '<div class="muted" style="font-size:12px;margin-bottom:8px">Search a specific date range instead of the look-back above, and/or narrow the results by a clue.</div>' +
+        '<div class="grid-2">' +
+          '<div class="field"><label>From date</label><input id="sw-from" type="date" value="' + escapeAttr(v.from || '') + '"></div>' +
+          '<div class="field"><label>To date</label><input id="sw-to" type="date" value="' + escapeAttr(v.to || '') + '"></div>' +
+        '</div>' +
+        '<div class="field"><label>Clue (optional)</label><input id="sw-clue" type="text" placeholder="supplier, sender or a word in the subject" value="' + escapeAttr(v.clue || '') + '"></div>' +
+        '<div class="muted" style="font-size:11px">Leave the dates blank to use the look-back days above.</div>' +
+      '</div>' +
+    '</details>' +
+    '<div class="row"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log</button></div>' +
+    '<div id="sw-result" style="margin-top:14px"></div>'
+  );
+}
 async function invStartSweep() {
   document.getElementById('modal-title').textContent = '🔎 Sweep the mailbox for invoices';
   let cfg = {};
@@ -1038,23 +1073,32 @@ async function invStartSweep() {
     document.getElementById('modal-body').innerHTML = '<div class="alert warn">The mailbox connection isn’t set up on the server yet (the GRAPH_* secrets). Once those are in, this will read the inbox for you.</div><button class="ghost small" onclick="openInvoiceMatch()">‹ Back</button>';
     return;
   }
-  document.getElementById('modal-body').innerHTML =
-    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row.</p>' +
-    '<div class="grid-2">' +
-      '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(cfg.mailbox || '') + '"></div>' +
-      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(cfg.days || 60) + '" min="1" max="365"></div>' +
-    '</div>' +
-    '<div class="row"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log</button></div>' +
-    '<div id="sw-result" style="margin-top:14px"></div>';
+  document.getElementById('modal-body').innerHTML = invSweepBodyHtml({ mailbox: cfg.mailbox, days: cfg.days });
+}
+// Rebuild the sweep results view (kept in memory) WITHOUT re-running the scan —
+// e.g. after raising a PO from a swept invoice, so the office doesn't lose the list.
+function invShowResults() {
+  document.getElementById('modal-title').textContent = '🔎 Sweep the mailbox for invoices';
+  document.getElementById('modal-body').innerHTML = invSweepBodyHtml(invLastSweep || {});
+  document.getElementById('modal').classList.add('show');
+  invRenderResults();
 }
 async function invRunSweep(btn) {
   const mailbox = (document.getElementById('sw-mailbox') || {}).value || '';
   const days = Number((document.getElementById('sw-days') || {}).value) || 60;
+  const from = ((document.getElementById('sw-from') || {}).value || '').trim();
+  const to = ((document.getElementById('sw-to') || {}).value || '').trim();
+  const clue = ((document.getElementById('sw-clue') || {}).value || '').trim();
+  invLastSweep = { mailbox, days, from, to, clue };   // so the list can be rebuilt without re-scanning
   const res = document.getElementById('sw-result');
   res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">Reading the mailbox and reading each invoice… this can take a minute.</div>';
   if (btn) btn.disabled = true;
+  const reqBody = { mailbox, days };
+  if (from) reqBody.from = from;
+  if (to) reqBody.to = to;
+  if (clue) reqBody.clue = clue;
   let data;
-  try { data = await authFetch('/po/api/invoice/sweep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mailbox, days }) }).then(r => r.json()); }
+  try { data = await authFetch('/po/api/invoice/sweep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqBody) }).then(r => r.json()); }
   catch (e) { res.innerHTML = '<div class="alert warn">Sweep failed: ' + escapeHtml(e.message) + '</div>'; if (btn) btn.disabled = false; return; }
   if (btn) btn.disabled = false;
   if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; return; }

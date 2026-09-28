@@ -57,18 +57,45 @@ export async function graphMailboxCheck(env, mailbox) {
 
 // List recent messages in `mailbox` that have attachments, newest first, within
 // the last `days`. Returns lightweight message headers.
-export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40 } = {}) {
-  const since = new Date(Date.now() - Math.max(1, days) * 86400000).toISOString();
+export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue } = {}) {
   // Filter on receivedDateTime only (the property we also $orderby, which Graph
   // is happy to combine) and keep only messages WITH attachments in code — this
   // sidesteps the "filter/sort too complex" error that a boolean-plus-date
   // $filter can trigger. Pull a wider page since we post-filter.
+  // A date range (from/to, "Advanced search") wins over the rolling look-back.
+  let filter;
+  const iso = (s, endOfDay) => {
+    const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
+    return isNaN(d) ? null : d.toISOString();
+  };
+  const fIso = from ? iso(from, false) : null;
+  const tIso = to ? iso(to, true) : null;
+  if (fIso || tIso) {
+    const parts = [];
+    if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
+    if (tIso) parts.push(`receivedDateTime le ${tIso}`);
+    filter = parts.join(" and ");
+  } else {
+    filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 86400000).toISOString()}`;
+  }
   const q = `/users/${encodeURIComponent(mailbox)}/messages`
     + `?$select=id,subject,receivedDateTime,from,hasAttachments`
-    + `&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}`
-    + `&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(200, top * 4))}`;
+    + `&$filter=${encodeURIComponent(filter)}`
+    + `&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
   const j = await graphGet(env, q);
-  return ((j && j.value) || []).filter(m => m.hasAttachments).slice(0, top);
+  let msgs = ((j && j.value) || []).filter(m => m.hasAttachments);
+  // A "clue" narrows by sender or subject (case-insensitive), in code so it never
+  // clashes with the $filter/$orderby Graph combination.
+  const c = String(clue || "").trim().toLowerCase();
+  if (c) {
+    msgs = msgs.filter(m => {
+      const subj = String(m.subject || "").toLowerCase();
+      const ea = (m.from && m.from.emailAddress) || {};
+      const frm = (String(ea.address || "") + " " + String(ea.name || "")).toLowerCase();
+      return subj.includes(c) || frm.includes(c);
+    });
+  }
+  return msgs.slice(0, top);
 }
 
 // The PDF (or PDF-shaped) file attachments on one message — metadata only.

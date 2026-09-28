@@ -320,12 +320,17 @@ export async function handle(request, env, ctx, url, sess) {
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
       const days = Math.max(1, Math.min(365, Number(b.days) || 60));
-      // Remember the mailbox/days for next time.
+      // Advanced search (optional): an explicit date range and/or a clue.
+      const from = String(b.from || "").trim();
+      const to = String(b.to || "").trim();
+      const clue = String(b.clue || "").trim();
+      // Remember the mailbox/days for next time (the look-back default, not the
+      // one-off advanced range).
       await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
       const chk = await graphMailboxCheck(env, mailbox);
       if (!chk.ok) return jr({ error: "Couldn’t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days });
-      return jr({ ok: true, mailbox, days, ...out });
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue });
+      return jr({ ok: true, mailbox, days, from, to, clue, ...out });
     }
     // Stream one mailbox attachment inline so the office can eyeball it before
     // attaching (fetched fresh from Graph; nothing stored).
@@ -993,12 +998,12 @@ async function uploadVatInvoice(env, db, sess, origin, request) {
 // Read the mailbox, parse each PDF, and build confirm-first proposals (matched PO
 // or candidates). Bounded: at most MAX downloads, and an AI (vision) budget so a
 // big run can't stall — past the budget the reader uses the free text tier only.
-async function runInvoiceSweep(env, db, { mailbox, days }) {
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map(s => s.name);
   const subNames = (await getSubcontractors(db)).map(s => s.name);
   let msgs = [];
-  try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 }); }
+  try { msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40, from, to, clue }); }
   catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
   const proposals = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
