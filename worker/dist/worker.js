@@ -36299,11 +36299,35 @@ async function graphMailboxCheck(env, mailbox) {
     return { ok: false, error: String(e && e.message || e) };
   }
 }
-async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40 } = {}) {
-  const since = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
-  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(200, top * 4))}`;
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue } = {}) {
+  let filter;
+  const iso = (s, endOfDay) => {
+    const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
+    return isNaN(d) ? null : d.toISOString();
+  };
+  const fIso = from ? iso(from, false) : null;
+  const tIso = to ? iso(to, true) : null;
+  if (fIso || tIso) {
+    const parts = [];
+    if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
+    if (tIso) parts.push(`receivedDateTime le ${tIso}`);
+    filter = parts.join(" and ");
+  } else {
+    filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 864e5).toISOString()}`;
+  }
+  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
   const j = await graphGet(env, q);
-  return (j && j.value || []).filter((m) => m.hasAttachments).slice(0, top);
+  let msgs = (j && j.value || []).filter((m) => m.hasAttachments);
+  const c = String(clue || "").trim().toLowerCase();
+  if (c) {
+    msgs = msgs.filter((m) => {
+      const subj = String(m.subject || "").toLowerCase();
+      const ea = m.from && m.from.emailAddress || {};
+      const frm = (String(ea.address || "") + " " + String(ea.name || "")).toLowerCase();
+      return subj.includes(c) || frm.includes(c);
+    });
+  }
+  return msgs.slice(0, top);
 }
 async function listPdfAttachments(env, mailbox, messageId) {
   const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
@@ -36607,11 +36631,14 @@ async function handle32(request, env, ctx, url, sess) {
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
       const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      const from = String(b.from || "").trim();
+      const to = String(b.to || "").trim();
+      const clue = String(b.clue || "").trim();
       await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
       const chk = await graphMailboxCheck(env, mailbox);
       if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days });
-      return jr8({ ok: true, mailbox, days, ...out });
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue });
+      return jr8({ ok: true, mailbox, days, from, to, clue, ...out });
     }
     if (path === "/api/invoice/sweep-view" && method === "GET") {
       if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
@@ -37361,13 +37388,13 @@ async function uploadVatInvoice(env, db, sess, origin, request) {
   ).run();
   return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
 }
-async function runInvoiceSweep(env, db, { mailbox, days }) {
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map((s) => s.name);
   const subNames = (await getSubcontractors(db)).map((s) => s.name);
   let msgs = [];
   try {
-    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40 });
+    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40, from, to, clue });
   } catch (e) {
     return { proposals: [], scanned: 0, error: String(e && e.message || e) };
   }
