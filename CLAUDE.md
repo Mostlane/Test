@@ -2058,6 +2058,60 @@ scratchpad — merge3-chapplins.mjs). Modelled as a full customer like Co-op/Far
 - **Ongoing intake (TODO/next):** new Chapplins job emails could auto-import via the
   Outlook connector on a schedule (like the Zapier /sla/inbound path) — not built yet.
 
+## FBC job tracker (routes/fbc.js + fbc.html — Sep 2026)
+Fareham Borough Council incidents arrive as **Jotform "Mostlane New Incident Form"**
+emails and now **auto-create a normal SLA job the moment the email lands**, with a
+dedicated FBC tracking area over the top (quotes · costs · invoice month/status · a
+per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
+- **Intake (emailtemplates.js `fbc-jotform`):** a deterministic reader (NO AI),
+  matched by sender `jotform.com` + subject "Mostlane New Incident Form" + the
+  "Quotation Required Before Works" marker. `replyOk:true` so the Jotform "Re:"
+  subject isn't dropped by the reply-guard. Parses Site (the pill = the register
+  `site_name`), Site Address (street/postcode/what3words/hours), Priority ("P3
+  (7 Days)"→"Priority 3"), Reported By, Job Title, Brief description, and the
+  Quotation-required Yes/No. `reference = "FBC-"+djb2(site|reporter|desc|priority)`
+  (content hash → a re-delivered email upserts the SAME job, never a duplicate).
+  `siteLookup:{client:"fbc", address:site, postcode}` resolves the FBC site
+  (postcode-first) to stamp `siteCode`. A sibling **`fbc-jotform-digest`** template
+  drops the weekly "Weekly Incident Report Update" summary. DEFAULT allow-list adds
+  `jotform.com`.
+- **emailjob.js** calls **`recordFbcJob`** (writes the `fbc_meta` marker + carries
+  the incident fields, never clobbering office-entered cost/PO/quote/invoice on a
+  re-delivery) and **`appendFbcMessage`** (logs the incident email; dedupe by
+  message-id) after the job is created/updated. `matchTemplate` now runs BEFORE the
+  reply-guard so `replyOk` templates survive.
+- **routes/fbc.js** (mounted `/fbc`; office = FullAccess|SLAAdmin|Compliance;
+  tenant_id INTEGER, always `Number(tid)` — dodges the '1.0' quirk). Tables
+  (self-migrating via `onceMigration`): **fbc_meta** (one row/job: quote_required,
+  quote_status, quote_amount, cost, po_number, invoice_month, invoice_status,
+  invoiced_at, invoice_ref, reported_by/job_title/w3w/site) + **fbc_messages**
+  (conversation log). Routes: **GET /fbc/list** (rows = fbc_meta LEFT JOIN sla_jobs,
+  PLUS jobs at FBC sites with no meta [manually raised], message counts, derived
+  `invoiceState` invoiced|not_required|to_invoice|open, + `months` seen), **GET
+  /fbc/job?id=** (one job + its messages), **POST /fbc/meta** (upsert cost/PO/
+  invoice/quote fields; marking `invoiced` auto-stamps invoiced_at + the month),
+  **POST /fbc/message** (add a note). `fbcSiteCodes` = `sites WHERE client='fbc'`.
+- **fbc.html** (🏛️ FBC Jobs tile `FBC:["FullAccess","SLAAdmin","Compliance"]`,
+  sidebar item, in _headers no-cache): summary tiles + filter chips (All · ⭐ Quote
+  required · Active · To invoice · Invoiced); "All" view breaks out ⭐ Quote-required,
+  🧾 To invoice, 🔧 Active, ✅ Invoiced (grouped by month w/ totals). Each job expands
+  to inline-editable cost/PO/quote status+amount/invoice status+month/ref (autosave
+  "Saved ✓") + a conversation log with an add-note box + "Open job card →".
+- **Tests:** `node worker/tools/test-fbc.mjs` (module: recordFbcJob/appendFbcMessage
+  round-trip, list grouping + invoiceState, meta updates don't clobber intake, dedupe,
+  access gating) + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest
+  dropped, Re: survives, same-ref on redelivery).
+- **GO-LIVE (manual, one-time):** an Outlook rule on the mailbox that receives the
+  Jotform incidents → **forward** (not redirect) the "Mostlane New Incident Form"
+  emails from `noreply@jotform.com` to the worker's `jobs@<domain>` intake address
+  (same Email-Routing worker as Concerto). Until that rule exists the template is
+  dormant.
+- **Phase 2 (TODO):** monitor `*@fareham.gov.uk` free-text emails — thread-match to
+  an existing FBC job (append to its conversation) or hold a genuinely-new one in a
+  review queue (exclude bcpartnership@ / auto-replies / insurance-cert-tender admin,
+  no duplicates). **Phase 3:** quote-sent workflow + monthly invoice reminder + fold
+  FBC cost into job costing.
+
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
 P&L** that unifies labour (SiteLog scans + SLA job-status taps), materials (PO

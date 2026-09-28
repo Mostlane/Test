@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -733,7 +728,7 @@ async function resolveNotificationsByTag(env, tenantId, tag, outcome) {
   if (!t) return;
   try {
     await ensureFeedTable(env);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const o = outcome || {};
     if (o.title || o.body) {
       await env.DB.prepare(
@@ -741,16 +736,16 @@ async function resolveNotificationsByTag(env, tenantId, tag, outcome) {
       ).bind(
         o.title ? String(o.title).slice(0, 200) : null,
         o.body ? String(o.body).slice(0, 600) : null,
-        now,
-        now,
-        now,
+        now2,
+        now2,
+        now2,
         tenantId,
         t
       ).run();
     } else {
       await env.DB.prepare(
         "UPDATE user_notifications SET resolved_at=?, read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
-      ).bind(now, now, now, tenantId, t).run();
+      ).bind(now2, now2, now2, tenantId, t).run();
     }
   } catch {
   }
@@ -1533,18 +1528,18 @@ async function trackJobTime(env, tid, actor, before, after) {
     }
     if (!mine) return;
     await ensureTables(env);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const DONE = /* @__PURE__ */ new Set(["complete", "closed", "invoiced"]);
     if (TS_ACTIVE.has(as)) {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
-      ).bind(now, tid, actor, String(after.id)).run();
+      ).bind(now2, tid, actor, String(after.id)).run();
       const kind = as === "travelling" ? "travel" : "onsite";
       const open = await env.DB.prepare(
         "SELECT id, kind FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(tid, actor, String(after.id)).first();
       if (open && (open.kind || "onsite") !== kind) {
-        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(now, open.id, tid).run();
+        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(now2, open.id, tid).run();
       }
       if (!open || (open.kind || "onsite") !== kind) await env.DB.prepare(
         "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, kind) VALUES (?,?,?,?,?,?,?,?)"
@@ -1555,16 +1550,16 @@ async function trackJobTime(env, tid, actor, before, after) {
         after.helpdeskRef || String(after.id),
         after.siteName || "",
         String(after.postcode || "").toUpperCase(),
-        now,
+        now2,
         kind
       ).run();
     } else {
       const res = await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
-      ).bind(now, tid, actor, String(after.id)).run();
+      ).bind(now2, tid, actor, String(after.id)).run();
       const closed = !!(res && res.meta && res.meta.changes > 0);
       if (!closed && DONE.has(as)) {
-        const dayStart = now.slice(0, 10) + "T00:00:00.000Z", dayEnd = now.slice(0, 10) + "T23:59:59.999Z";
+        const dayStart = now2.slice(0, 10) + "T00:00:00.000Z", dayEnd = now2.slice(0, 10) + "T23:59:59.999Z";
         const exists = await env.DB.prepare(
           "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND started_at>=? AND started_at<=? LIMIT 1"
         ).bind(tid, actor, String(after.id), dayStart, dayEnd).first();
@@ -1574,11 +1569,11 @@ async function trackJobTime(env, tid, actor, before, after) {
           ).bind(tid, actor, dayStart, dayEnd).first();
           let anchor = last && last.e ? last.e : null;
           if (!anchor) {
-            const sh = await env.DB.prepare("SELECT clock_on_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+            const sh = await env.DB.prepare("SELECT clock_on_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now2.slice(0, 10)).first().catch(() => null);
             if (sh && sh.clock_on_at) anchor = sh.clock_on_at;
           }
           if (anchor) {
-            const span = Date.parse(now) - Date.parse(anchor);
+            const span = Date.parse(now2) - Date.parse(anchor);
             if (span > 6e4 && span <= MAX_SEG_MS) await env.DB.prepare(
               "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, source) VALUES (?,?,?,?,?,?,?,?,?,?)"
             ).bind(
@@ -1589,7 +1584,7 @@ async function trackJobTime(env, tid, actor, before, after) {
               after.siteName || "",
               String(after.postcode || "").toUpperCase(),
               anchor,
-              now,
+              now2,
               "onsite",
               "shift"
             ).run();
@@ -1598,7 +1593,7 @@ async function trackJobTime(env, tid, actor, before, after) {
       }
     }
     if (DONE.has(as)) {
-      const sh = await env.DB.prepare("SELECT clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+      const sh = await env.DB.prepare("SELECT clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now2.slice(0, 10)).first().catch(() => null);
       if (sh && sh.clock_on_at && !sh.clock_off_at && after.postcode) {
         const homePc = await homePostcodeFor(env, tid, actor);
         if (homePc) {
@@ -1611,7 +1606,7 @@ async function trackJobTime(env, tid, actor, before, after) {
             }
           }
           if (mins != null && mins >= 0 && mins < 300)
-            await env.DB.prepare("UPDATE shifts SET home_drive_mins=? WHERE tenant_id=? AND username=? AND date=?").bind(mins, tid, actor, now.slice(0, 10)).run();
+            await env.DB.prepare("UPDATE shifts SET home_drive_mins=? WHERE tenant_id=? AND username=? AND date=?").bind(mins, tid, actor, now2.slice(0, 10)).run();
         }
       }
     }
@@ -2072,7 +2067,7 @@ function effectiveCfg(cfg, u) {
     profile = u.profile ? JSON.parse(u.profile) : {};
   } catch {
   }
-  const num2 = (v) => {
+  const num3 = (v) => {
     const n = parseFloat(v);
     return isFinite(n) && n > 0 ? n : null;
   };
@@ -2093,10 +2088,10 @@ function effectiveCfg(cfg, u) {
     lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
-    rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
+    rate: num3(mine.rate) ?? (mine.rateType === "day" ? num3(profile.dayRate) : num3(profile.hourlyRate)) ?? num3(profile.hourlyRate),
     // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
     // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
-    overtimeMult: num2(mine.overtimeMult),
+    overtimeMult: num3(mine.overtimeMult),
     overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],
@@ -3564,7 +3559,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (sub === "/miles" && method === "POST") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let saved = 0;
     for (const e of (Array.isArray(b.entries) ? b.entries : []).slice(0, 200)) {
       const key = normKey(e && e.name);
@@ -3576,7 +3571,7 @@ async function handle5(request, env, ctx, url, sess) {
       }
       await env.DB.prepare(
         "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET name=excluded.name, postcode=excluded.postcode, miles=excluded.miles, updated_at=excluded.updated_at"
-      ).bind(tid, key, String(e.name).trim().slice(0, 120), String(e.postcode || "").toUpperCase().slice(0, 10), round1(miles), now).run();
+      ).bind(tid, key, String(e.name).trim().slice(0, 120), String(e.postcode || "").toUpperCase().slice(0, 10), round1(miles), now2).run();
       saved++;
     }
     for (const n of (Array.isArray(b.delete) ? b.delete : []).slice(0, 200)) {
@@ -3595,7 +3590,7 @@ async function handle5(request, env, ctx, url, sess) {
     const have = new Set((saved || []).map((r) => r.key));
     const todo = (portal || []).filter((r) => !have.has(normKey(r.site_name)));
     const batch = todo.slice(0, 25);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let done = 0, failed = 0;
     for (const r of batch) {
       const pc = String(r.postcode).replace(/\*+$/, "");
@@ -3608,7 +3603,7 @@ async function handle5(request, env, ctx, url, sess) {
       const roundTrip = round1(haversineMiles(base, to) * ROAD_FACTOR * 2);
       await env.DB.prepare(
         "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET miles=excluded.miles, updated_at=excluded.updated_at"
-      ).bind(tid, normKey(r.site_name), r.site_name, pc.toUpperCase(), roundTrip, now).run();
+      ).bind(tid, normKey(r.site_name), r.site_name, pc.toUpperCase(), roundTrip, now2).run();
       done++;
     }
     return json({ ok: true, done, failed, remaining: Math.max(0, todo.length - batch.length) }, {}, env, request);
@@ -3956,17 +3951,17 @@ async function handle5(request, env, ctx, url, sess) {
         env,
         request
       );
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       await env.DB.prepare(
         "INSERT INTO eng_timesheets (tenant_id, week, username, data, at, approved_at, approved_by, admin_note) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET approved_at=excluded.approved_at, approved_by=excluded.approved_by, admin_note=excluded.admin_note"
-      ).bind(tid, monday, b.username, JSON.stringify({ days: {} }), now, now, sess.user.username, note).run();
+      ).bind(tid, monday, b.username, JSON.stringify({ days: {} }), now2, now2, sess.user.username, note).run();
       ctx?.waitUntil(sendToUser(env, tid, b.username, {
         title: "Timesheet approved",
         body: `Your week of ${fmtDate(monday)} has been approved${note ? " \u2014 the office left a note" : ""}. Tap to view.`,
         url: "/engineer-timesheet.html?week=" + monday,
         tag: "ts-approved:" + monday
       }));
-      return json({ ok: true, approvedAt: now, approvedBy: sess.user.username }, {}, env, request);
+      return json({ ok: true, approvedAt: now2, approvedBy: sess.user.username }, {}, env, request);
     }
     if (sub === "/admin/reopen" && method === "POST") {
       const b = await request.json().catch(() => ({}));
@@ -5671,9 +5666,9 @@ function toSqlUtc(ms) {
 }
 async function touchDevice(env, deviceToken) {
   if (!deviceToken) return;
-  const now = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace("T", " ");
+  const now2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace("T", " ");
   try {
-    await env.SITELOG_DB.prepare("UPDATE devices SET last_seen = ? WHERE device_token = ?").bind(now, deviceToken).run();
+    await env.SITELOG_DB.prepare("UPDATE devices SET last_seen = ? WHERE device_token = ?").bind(now2, deviceToken).run();
   } catch (e) {
   }
 }
@@ -6251,7 +6246,7 @@ async function handle6(request, env, ctx) {
     if (existing) return json4({ ok: true, already_pending: true });
     const tempPersonId = crypto.randomUUID();
     const transferId = crypto.randomUUID();
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     await env.SITELOG_DB.prepare(
       "INSERT INTO people (id, first_name, last_name, company, is_transfer_pending) VALUES (?, ?, ?, ?, 1)"
     ).bind(
@@ -6272,7 +6267,7 @@ async function handle6(request, env, ctx) {
       lastName.trim(),
       company.trim(),
       tempPersonId,
-      now
+      now2
     ).run();
     return json4({ ok: true });
   }
@@ -6305,14 +6300,14 @@ async function handle6(request, env, ctx) {
     if (!transfer) {
       return json4({ ok: false, error: "Transfer not found or already resolved" }, 404);
     }
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     await env.SITELOG_DB.prepare("UPDATE visits SET person_id = ? WHERE person_id = ?").bind(targetPersonId, transfer.temp_person_id).run();
     await env.SITELOG_DB.prepare("DELETE FROM devices WHERE person_id = ?").bind(targetPersonId).run();
     await env.SITELOG_DB.prepare("INSERT OR REPLACE INTO devices (device_token, person_id) VALUES (?, ?)").bind(transfer.new_device_token, targetPersonId).run();
     await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(transfer.temp_person_id).run();
     await env.SITELOG_DB.prepare(
       "UPDATE device_transfers SET status = 'approved', target_person_id = ?, resolved_at = ? WHERE id = ?"
-    ).bind(targetPersonId, now, transferId).run();
+    ).bind(targetPersonId, now2, transferId).run();
     return json4({ ok: true });
   }
   if (url.pathname === "/reject-transfer" && request.method === "POST") {
@@ -6324,12 +6319,12 @@ async function handle6(request, env, ctx) {
       "SELECT * FROM device_transfers WHERE id = ? AND status = 'pending'"
     ).bind(transferId).first();
     if (!transfer) return json4({ ok: false, error: "Transfer not found" }, 404);
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     await env.SITELOG_DB.prepare("DELETE FROM devices WHERE device_token = ?").bind(transfer.new_device_token).run();
     await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(transfer.temp_person_id).run();
     await env.SITELOG_DB.prepare(
       "UPDATE device_transfers SET status = 'rejected', resolved_at = ? WHERE id = ?"
-    ).bind(now, transferId).run();
+    ).bind(now2, transferId).run();
     return json4({ ok: true });
   }
   if (url.pathname === "/sites" && request.method === "GET") {
@@ -7782,7 +7777,7 @@ async function handle6(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const docId = crypto.randomUUID();
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     const type = body.type || "";
     const prefix2 = { induction: "IND", hwp: "HWP", tbt: "TBT" }[type] || "DOC";
     const maxRow = await env.SITELOG_DB.prepare("SELECT MAX(doc_seq) AS m FROM documents WHERE type = ?").bind(type).first();
@@ -7800,13 +7795,13 @@ async function handle6(request, env, ctx) {
       body.site_name || "",
       body.site_address || "",
       body.issued_by || "",
-      body.issued_at || now,
+      body.issued_at || now2,
       body.permit_no || null,
       body.valid_from || null,
       body.manager_signature || null,
-      body.manager_signature ? now : null,
+      body.manager_signature ? now2 : null,
       JSON.stringify(body.form_data || {}),
-      now,
+      now2,
       docNumber,
       docSeq
     ).run();
@@ -7829,7 +7824,7 @@ async function handle6(request, env, ctx) {
         a.contact || null,
         a.cscs || null,
         a.signature || null,
-        a.signature ? now : null
+        a.signature ? now2 : null
       ).run();
     }
     return json4({ ok: true, id: docId });
@@ -7838,7 +7833,7 @@ async function handle6(request, env, ctx) {
     const guard = requireAdmin2();
     if (guard) return guard;
     const body = await readBody(request);
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     if (!body.docId) return json4({ ok: false, error: "Missing docId" }, 400);
     await env.SITELOG_DB.prepare(`
         UPDATE documents
@@ -7853,8 +7848,8 @@ async function handle6(request, env, ctx) {
       body.completionTime || null,
       body.finalAreaSafe ?? null,
       body.managerSignature || null,
-      now,
-      now,
+      now2,
+      now2,
       body.docId
     ).run();
     return json4({ ok: true });
@@ -7973,10 +7968,10 @@ async function handle6(request, env, ctx) {
       "SELECT id FROM document_attendees WHERE document_id = ? AND person_id = ?"
     ).bind(docId, personId).first();
     if (!existing && !alreadyAttendee) {
-      const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+      const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
       await env.SITELOG_DB.prepare(
         "INSERT INTO document_links (id, document_id, person_id, person_name, linked_at) VALUES (?,?,?,?,?)"
-      ).bind(crypto.randomUUID(), docId, personId, body.personName || "", now).run();
+      ).bind(crypto.randomUUID(), docId, personId, body.personName || "", now2).run();
     }
     return json4({ ok: true });
   }
@@ -8038,7 +8033,7 @@ async function handle6(request, env, ctx) {
     if (!key || !value) {
       return json4({ ok: false, error: "key and value required" }, 400);
     }
-    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     const existing = await env.SITELOG_DB.prepare(`
         SELECT id, use_count
         FROM field_memory
@@ -8051,7 +8046,7 @@ async function handle6(request, env, ctx) {
           SET use_count = COALESCE(use_count,0) + 1,
               last_used_at = ?
           WHERE id = ?
-        `).bind(now, existing.id).run();
+        `).bind(now2, existing.id).run();
     } else {
       await env.SITELOG_DB.prepare(`
           INSERT INTO field_memory
@@ -8062,7 +8057,7 @@ async function handle6(request, env, ctx) {
         key,
         site || null,
         value,
-        now
+        now2
       ).run();
     }
     return json4({ ok: true });
@@ -8275,13 +8270,13 @@ async function handle6(request, env, ctx) {
   return new Response("Not found", { status: 404, headers: corsFor(request) });
 }
 async function sweepAutoClose(env) {
-  const now = londonNowParts();
+  const now2 = londonNowParts();
   const openVisits = await env.SITELOG_DB.prepare(
     "SELECT id, check_in_at FROM visits WHERE check_out_at IS NULL"
   ).all();
   for (const v of openVisits.results || []) {
     const visitDateKey = londonDateKeyFromUtcString(v.check_in_at);
-    if (visitDateKey < now.dateKey) {
+    if (visitDateKey < now2.dateKey) {
       const forcedCheckoutUtc = forcedCheckoutSql(v.check_in_at, visitDateKey, Date.now());
       await env.SITELOG_DB.prepare(`
             UPDATE visits
@@ -8486,7 +8481,7 @@ async function handle7(request, env, ctx, url, sess) {
     let updated = 0;
     const failed = [];
     let sampleError = "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     for (const site of batch) {
       let loc = locOf(site);
       let buf = null;
@@ -8532,13 +8527,13 @@ async function handle7(request, env, ctx, url, sess) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
         await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
         site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
-        site._svAt = now;
+        site._svAt = now2;
         delete site._noImagery;
         await saveSite(env, tenantId, site);
         updated++;
       } else {
         site._noImagery = true;
-        site._svAt = now;
+        site._svAt = now2;
         await saveSite(env, tenantId, site);
         failed.push(String(site.siteNumber));
       }
@@ -8659,11 +8654,11 @@ async function slCall(env, path, body) {
 }
 async function syncSiteToCompliance(env, tenantId, site) {
   try {
-    const num2 = String(site.siteNumber || "").trim();
-    if (!num2) return;
+    const num3 = String(site.siteNumber || "").trim();
+    if (!num3) return;
     const rows = await env.DB.prepare(
       "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
-    ).bind(tenantId, num2).all();
+    ).bind(tenantId, num3).all();
     const activeVal = site.active === false ? 0 : 1;
     for (const r of rows.results || []) {
       let meta = {};
@@ -9931,11 +9926,11 @@ function resolveRef(map, srRef, assetRef) {
 async function importRows(env, tid, layout, rows, fileName) {
   await ensureTables2(env);
   const map = await refMap(env, tid);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const out = { added: 0, updated: 0, unresolved: 0, gone: 0, skipped: 0, released: 0, ids: [] };
   const seen = /* @__PURE__ */ new Set(), typesSeen = /* @__PURE__ */ new Set();
   const stmts = [], logs = [];
-  const log = (id, event, detail) => logs.push(env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, id, event, JSON.stringify(detail || {}), now));
+  const log = (id, event, detail) => logs.push(env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, id, event, JSON.stringify(detail || {}), now2));
   for (const raw of rows || []) {
     let rec;
     if (layout === "schedule") {
@@ -9972,7 +9967,7 @@ async function importRows(env, tid, layout, rows, fileName) {
         next_date: next,
         order_nr: orderNr,
         ordered_value: raw.ordered === "" || raw.ordered == null ? null : Number(raw.ordered) || null,
-        released_at: orderNr ? now : null,
+        released_at: orderNr ? now2 : null,
         concerto_status: String(raw.status || "").slice(0, 40),
         month_marker: String(raw.monthMarker || "").slice(0, 40),
         discipline: String(raw.discipline || "").slice(0, 40),
@@ -10029,7 +10024,7 @@ async function importRows(env, tid, layout, rows, fileName) {
     if (rec.kind === "schedule") {
       if (rec.order_nr && !(ex && ex.order_nr)) {
         out.released++;
-        log(rec.id, "released", { orderNr: rec.order_nr, next: rec.next_date, store: rec.store_code, value: rec.ordered_value, daysBeforeDue: rec.next_date ? Math.round((Date.parse(rec.next_date) - Date.parse(now.slice(0, 10))) / 864e5) : null });
+        log(rec.id, "released", { orderNr: rec.order_nr, next: rec.next_date, store: rec.store_code, value: rec.ordered_value, daysBeforeDue: rec.next_date ? Math.round((Date.parse(rec.next_date) - Date.parse(now2.slice(0, 10))) / 864e5) : null });
       }
       if (ex && ex.next_date && rec.next_date && ex.next_date !== rec.next_date) log(rec.id, "next_date_changed", { from: ex.next_date, to: rec.next_date, store: rec.store_code });
     }
@@ -10076,9 +10071,9 @@ async function importRows(env, tid, layout, rows, fileName) {
       rec.planned_date,
       rec.last_date,
       String(fileName || "").slice(0, 120),
-      now,
-      now,
-      now,
+      now2,
+      now2,
+      now2,
       rec.next_date,
       rec.order_nr,
       rec.ordered_value,
@@ -10098,7 +10093,7 @@ async function importRows(env, tid, layout, rows, fileName) {
     const { results } = await env.DB.prepare("SELECT id, ppm_type FROM concerto_ppm WHERE tenant_id=? AND kind=? AND status='open'").bind(tid, kind).all();
     const goneIds = (results || []).filter((r) => !seen.has(r.id) && (kind === "order" || typesSeen.has(r.ppm_type))).map((r) => r.id);
     for (const id of goneIds) {
-      await env.DB.prepare("UPDATE concerto_ppm SET status='gone', gone_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, id).run();
+      await env.DB.prepare("UPDATE concerto_ppm SET status='gone', gone_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now2, now2, tid, id).run();
       log(id, "gone", {});
     }
     out.gone = goneIds.length;
@@ -10747,7 +10742,7 @@ async function handle9(request, env, ctx, url, sess) {
     await ensureTables2(env);
     const row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
     if (!row) return error("Schedule row not found", 404, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_id=? AND closed_at IS NULL").bind(tid, ppmId).first();
     const events = [];
     if (!c) {
@@ -10755,7 +10750,7 @@ async function handle9(request, env, ctx, url, sess) {
       const id = String(b.caseId || caseId(ppmId, cycle));
       c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
       if (!c) {
-        await env.DB.prepare("INSERT INTO concerto_cases (tenant_id,id,ppm_id,store_code,ppm_type,cycle_due,outcome,engineer,steps,opened_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(tid, id, ppmId, row.store_code || "", row.ppm_type || "fiveYear", cycle, "", "", "{}", now, now, me).run();
+        await env.DB.prepare("INSERT INTO concerto_cases (tenant_id,id,ppm_id,store_code,ppm_type,cycle_due,outcome,engineer,steps,opened_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(tid, id, ppmId, row.store_code || "", row.ppm_type || "fiveYear", cycle, "", "", "{}", now2, now2, me).run();
         c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
       } else if (c.closed_at && (b.reopen || b.step || b.outcome !== void 0 || b.hold || b.flag)) {
         c.closed_at = null;
@@ -10779,7 +10774,7 @@ async function handle9(request, env, ctx, url, sess) {
         const cur = steps[key] || {};
         if (typeof b.done === "boolean") {
           cur.done = b.done;
-          cur.at = b.done ? toIsoDate(b.at) || now : null;
+          cur.at = b.done ? toIsoDate(b.at) || now2 : null;
           cur.by = me;
           events.push({ action: b.done ? "tick" : "untick", step: key, done: b.done, text: (b.done ? "Ticked: " : "Unticked: ") + label2 + (b.done && b.at ? " (" + toIsoDate(b.at) + ")" : "") });
         }
@@ -10804,7 +10799,7 @@ async function handle9(request, env, ctx, url, sess) {
       const s = String(b.stage12 || "");
       if (s && !FY_STAGE_KEYS.has(s)) return error("Unknown stage", 400, env, request);
       c.stage12 = s || null;
-      c.stage12_at = s ? now : null;
+      c.stage12_at = s ? now2 : null;
       c.stage12_by = s ? me : null;
       const lbl = (FY_STAGES.find((x) => x.key === s) || {}).label || s;
       events.push({ action: "stage12", stage12: s, text: s ? "Status set: " + lbl : "Status cleared (back to what the portal sees)" });
@@ -10815,7 +10810,7 @@ async function handle9(request, env, ctx, url, sess) {
       const reason = String(b.hold || "").slice(0, 200);
       if (reason) {
         c.hold_reason = reason;
-        c.held_at = now;
+        c.held_at = now2;
         c.held_by = me;
         events.push({ action: "hold", hold: reason, text: "On hold: " + reason });
       } else {
@@ -10829,7 +10824,7 @@ async function handle9(request, env, ctx, url, sess) {
       const note = String(b.flag || "").slice(0, 300);
       if (note) {
         c.flag_note = note;
-        c.flagged_at = now;
+        c.flagged_at = now2;
         c.flagged_by = me;
         events.push({ action: "flag", flag: note, text: "\u{1F6A9} Flagged: " + note });
       } else {
@@ -10843,7 +10838,7 @@ async function handle9(request, env, ctx, url, sess) {
       const note = String(b.caseNote || "").slice(0, 1e3);
       if (note) {
         c.note = note;
-        c.note_at = now;
+        c.note_at = now2;
         c.note_by = me;
         events.push({ action: "note", note, text: "\u{1F4DD} Note: " + note });
       } else {
@@ -10858,18 +10853,18 @@ async function handle9(request, env, ctx, url, sess) {
       const val2 = Number(b.quote.value);
       c.quote_ref = String(b.quote.ref || "").slice(0, 60) || null;
       c.quote_value = Number.isFinite(val2) ? val2 : null;
-      c.quote_at = now;
+      c.quote_at = now2;
       c.quote_by = me;
       quoteChanged = true;
       const cur = steps["quoted"] || {};
       cur.done = true;
-      cur.at = now;
+      cur.at = now2;
       cur.by = me;
       steps["quoted"] = cur;
       events.push({ action: "quote", text: "Remedials quoted" + (c.quote_ref ? " " + c.quote_ref : "") + (Number.isFinite(val2) ? " \xA3" + val2.toFixed(2) : "") });
     }
     if (b.close) {
-      c.closed_at = now;
+      c.closed_at = now2;
       c.closed_by = me;
       c.hold_reason = null;
       c.flag_note = null;
@@ -10880,9 +10875,9 @@ async function handle9(request, env, ctx, url, sess) {
       c.closed_by = null;
       events.push({ action: "reopen", text: "Case reopened" });
     }
-    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, note=?, note_at=?, note_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.note || null, c.note_at || null, c.note_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now, me, tid, c.id).run();
+    await env.DB.prepare("UPDATE concerto_cases SET steps=?, outcome=?, engineer=?, hold_reason=?, held_at=?, held_by=?, flag_note=?, flagged_at=?, flagged_by=?, note=?, note_at=?, note_by=?, stage12=?, stage12_at=?, stage12_by=?, closed_at=?, closed_by=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(steps), c.outcome || "", c.engineer || "", c.hold_reason || null, c.held_at || null, c.held_by || null, c.flag_note || null, c.flagged_at || null, c.flagged_by || null, c.note || null, c.note_at || null, c.note_by || null, c.stage12 || null, c.stage12_at || null, c.stage12_by || null, c.closed_at || null, c.closed_by || null, now2, me, tid, c.id).run();
     if (quoteChanged) await env.DB.prepare("UPDATE concerto_cases SET quote_ref=?, quote_value=?, quote_at=?, quote_by=? WHERE tenant_id=? AND id=?").bind(c.quote_ref || null, c.quote_value == null ? null : c.quote_value, c.quote_at || null, c.quote_by || null, tid, c.id).run();
-    for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now).run();
+    for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now2).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }
   if (path === "/concerto/alex-list") {
@@ -10903,9 +10898,9 @@ async function handle9(request, env, ctx, url, sess) {
     if (method === "POST") {
       const b = await body();
       let items = await load();
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       if (typeof b.add === "string" && b.add.trim()) {
-        items.unshift({ id: "ax" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: b.add.trim().slice(0, 500), done: false, addedAt: now, addedBy: me, storeCode: String(b.storeCode || "").slice(0, 12), siteName: String(b.siteName || "").slice(0, 120) });
+        items.unshift({ id: "ax" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: b.add.trim().slice(0, 500), done: false, addedAt: now2, addedBy: me, storeCode: String(b.storeCode || "").slice(0, 12), siteName: String(b.siteName || "").slice(0, 120) });
       } else if (b.id) {
         const it = items.find((x) => x.id === b.id);
         if (!it) return error("Item not found", 404, env, request);
@@ -10913,7 +10908,7 @@ async function handle9(request, env, ctx, url, sess) {
         else {
           if (typeof b.done === "boolean") {
             it.done = b.done;
-            it.doneAt = b.done ? now : null;
+            it.doneAt = b.done ? now2 : null;
             it.doneBy = b.done ? me : "";
           }
           if (typeof b.text === "string") it.text = b.text.trim().slice(0, 500);
@@ -11704,18 +11699,18 @@ async function maybeCompletePumpJob(env, tid, rec) {
     if (!job.pumpMaintenance) return false;
     if (/complete|closed|invoiced|cancel/i.test(String(job.status || ""))) return false;
     if (!/^(review|final)$/.test(String(rec.status || ""))) return false;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     job.status = "Complete";
-    job.updatedAt = now;
-    job.closedAt = job.closedAt || now;
+    job.updatedAt = now2;
+    job.closedAt = job.closedAt || now2;
     const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
     if (engs.length) {
       job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now, by: "pump" };
+      for (const e of engs) job.engStatus[normEng(e)] = { status: "Complete", at: now2, by: "pump" };
     }
     job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-    job.statusHistory.push({ status: "Complete", at: now, by: "pump" });
-    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, rec.job_id).run();
+    job.statusHistory.push({ status: "Complete", at: now2, by: "pump" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now2, JSON.stringify(job), tid, rec.job_id).run();
     return true;
   } catch {
     return false;
@@ -11843,16 +11838,16 @@ async function handle10(request, env, ctx, url, sess) {
     const ds = sanSig(b.dmSig);
     if (ds !== void 0) data.dmSig = ds;
     else if (rec) data.dmSig = shapeRow(rec).dmSig || "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     if (!id) {
       id = "pump-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
     }
     const siteCode = store ? store.siteCode || "" : rec ? rec.site_code : "";
     const storeId = store ? store.id : rec ? rec.store : "";
     if (rec) {
-      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now, tid, id).run();
+      await env.DB.prepare("UPDATE pump_records SET store=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(storeId, siteCode, JSON.stringify(data), now2, tid, id).run();
     } else {
-      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now, now).run();
+      await env.DB.prepare("INSERT INTO pump_records (tenant_id,id,job_id,store,site_code,status,data,engineer,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, id, jobId, storeId, siteCode, "draft", JSON.stringify(data), me, now2, now2).run();
     }
     const saved = await loadRec(id);
     const out = shapeRow(saved);
@@ -11976,7 +11971,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (!rec) return error("Not found", 404, env, request);
     const d = shapeRow(rec);
     const bytes = await buildPdfFor(env, rec);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const finalKey = `pump/${tid}/${rec.id}/record.pdf`;
     if (env.JOB_FILES) {
       try {
@@ -11993,17 +11988,17 @@ async function handle10(request, env, ctx, url, sess) {
           code,
           type: "pump",
           bytes,
-          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now.slice(0, 10)}.pdf`,
-          docDate: d.date || now.slice(0, 10),
+          filename: `Pump-${(d.storeName || rec.id).replace(/[^A-Za-z0-9]+/g, "-")}-${d.date || now2.slice(0, 10)}.pdf`,
+          docDate: d.date || now2.slice(0, 10),
           bump: true,
           source: "pump:" + rec.id,
-          label: "Pump maintenance \u2014 " + (d.date || now.slice(0, 10))
+          label: "Pump maintenance \u2014 " + (d.date || now2.slice(0, 10))
         });
         filedToSite = true;
       } catch {
       }
     }
-    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now, tid, rec.id).run();
+    await env.DB.prepare("UPDATE pump_records SET status='final', r2_final_key=?, updated_at=? WHERE tenant_id=? AND id=?").bind(finalKey, now2, tid, rec.id).run();
     const fresh = await loadRec(rec.id);
     try {
       await maybeCompletePumpJob(env, tid, fresh);
@@ -12315,7 +12310,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     return { count: 0 };
   }
   const siteName = rec.installation && rec.installation.name || rec.client && rec.client.name || siteCode;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const pending = fails.filter((f) => !f.replaced);
   const onsite = fails.filter((f) => f.replaced);
   const isBatt = (f) => f.kind === "battery";
@@ -12345,7 +12340,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.replaced ? "done" : "pending",
     null,
     certRow.engineer || "",
-    now,
+    now2,
     f.kind,
     f.batterySpec,
     f.batteryQty,
@@ -12379,7 +12374,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
       pending.length,
       batteries.length,
       lightsPending,
-      now
+      now2
     ).run();
     await env.DB.prepare("UPDATE em_remedial_acks SET status_label=?, po_received_at=NULL, po_received_by=NULL, awaiting_batteries=0, batteries_arrived_at=NULL, works_done_at=NULL WHERE tenant_id=? AND cert_id=?").bind(statusLabel, tid, certRow.id).run();
   } catch {
@@ -12518,8 +12513,8 @@ async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate 
     source: "cert:" + cert.id,
     label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
   });
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, by, now, tid, cert.id).run();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now2, by, now2, tid, cert.id).run();
   return filed;
 }
 async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = false } = {}) {
@@ -12597,14 +12592,14 @@ async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = fa
   }
 }
 async function poReceived(env, tid, certId, me, ctx) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const { results } = await env.DB.prepare("SELECT kind, status FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certId).all();
   const rows = results || [];
   const pend = rows.filter((r) => r.status === "pending");
-  await env.DB.prepare("UPDATE em_remedial_acks SET po_received_at=?, po_received_by=?, approved_at=COALESCE(approved_at,?), approved_by=COALESCE(approved_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, now, me, tid, certId).run();
+  await env.DB.prepare("UPDATE em_remedial_acks SET po_received_at=?, po_received_by=?, approved_at=COALESCE(approved_at,?), approved_by=COALESCE(approved_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now2, me, now2, me, tid, certId).run();
   if (!pend.length) {
     const newId4 = await reissueCleanCert(env, tid, certId, ctx);
-    await env.DB.prepare("UPDATE em_remedial_acks SET stage='done', works_done_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='done', works_done_at=? WHERE tenant_id=? AND cert_id=?").bind(now2, tid, certId).run();
     return { stage: "done", reissueCertId: newId4 };
   }
   const awaiting = pend.some((r) => r.kind === "battery");
@@ -12617,7 +12612,7 @@ async function poReceived(env, tid, certId, me, ctx) {
         const o = shapeOrder(r);
         if (o.unlinkedJobId && o.unlinkedJobId === jobId) continue;
         await linkOrderToJobById(env, tid, o, jobId, me, { kind: "em" });
-        await env.DB.prepare("UPDATE client_orders SET status='actioned', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, r.id).run();
+        await env.DB.prepare("UPDATE client_orders SET status='actioned', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now2, me, tid, r.id).run();
       }
     } catch {
     }
@@ -12653,21 +12648,21 @@ async function reissueCleanCert(env, tid, certId, ctx) {
     return r;
   });
   if (!changed) return null;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const newData = { ...data, rows: cleanRows, reissueOf: certId, replacedAt: now };
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  const newData = { ...data, rows: cleanRows, reissueOf: certId, replacedAt: now2 };
   await env.DB.prepare(
     "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-  ).bind(newId4, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now, now, now).run();
+  ).bind(newId4, tid, "em", "review", orig.job_id, orig.site_code, orig.cert_number || "", JSON.stringify(newData), orig.engineer, now2, now2, now2).run();
   let filed = false;
   try {
     const nrow = await env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, newId4).first();
     const rec = shapeRow2(nrow);
-    await fileCertNow(env, tid, nrow, rec, orig.cert_number || rec.certNumber || "", { bump: false, docDate: now.slice(0, 10), by: "auto (remedial works)" });
+    await fileCertNow(env, tid, nrow, rec, orig.cert_number || rec.certNumber || "", { bump: false, docDate: now2.slice(0, 10), by: "auto (remedial works)" });
     filed = true;
   } catch {
   }
   try {
-    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=?, works_done_at=COALESCE(works_done_at,?), stage=CASE WHEN COALESCE(stage,'')='invoiced' THEN stage ELSE 'done' END WHERE tenant_id=? AND cert_id=?").bind(newId4, now, now, tid, certId).run();
+    await env.DB.prepare("UPDATE em_remedial_acks SET reissue_cert_id=?, reissue_at=?, works_done_at=COALESCE(works_done_at,?), stage=CASE WHEN COALESCE(stage,'')='invoiced' THEN stage ELSE 'done' END WHERE tenant_id=? AND cert_id=?").bind(newId4, now2, now2, tid, certId).run();
   } catch {
   }
   try {
@@ -12701,15 +12696,15 @@ async function reissueCleanCertForRemedialJob(env, tid, job) {
   }
 }
 async function matchOrderToRemedial(env, tid, o) {
-  const code = padCode2(o.storeCode), num2 = numOf(o.storeCode);
-  if (!code && !num2) return null;
+  const code = padCode2(o.storeCode), num3 = numOf(o.storeCode);
+  if (!code && !num3) return null;
   try {
     const { results } = await env.DB.prepare(
       "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
     const skip = String(o.unlinkedJobId || "");
     const waiting = (r) => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
-    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num2 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num3 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
       const late = !waiting(r) && r.job_id;
@@ -12740,7 +12735,7 @@ async function matchOrderToRemedial(env, tid, o) {
   }
   try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
-    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num2);
+    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num3);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
   } catch {
   }
@@ -12784,7 +12779,7 @@ function shapeOrder(r) {
   };
 }
 async function handleOrderInbound(env, tid, b, ctx, request) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const extId = String(b.externalId || b.messageId || "").slice(0, 200);
   const orderNumber = String(b.orderNumber || "").slice(0, 60);
   const storeCode = padCode2(b.storeCode || (b.siteRaw ? (String(b.siteRaw).match(/\d{2,5}/) || [])[0] : ""));
@@ -12854,7 +12849,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     siteName || null,
     srRef || null,
     String(b.siteRaw || "").slice(0, 200),
-    String(b.notifiedAt || now).slice(0, 40),
+    String(b.notifiedAt || now2).slice(0, 40),
     String(b.link || "").slice(0, 800) || null,
     String(b.source || "concerto").slice(0, 40),
     status,
@@ -12862,8 +12857,8 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     m ? m.certId || null : null,
     m ? m.jobId || null : null,
     m ? m.note : null,
-    now,
-    now,
+    now2,
+    now2,
     emailSubject,
     emailFrom,
     emailText
@@ -12872,7 +12867,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
     try {
       await env.DB.prepare(
         "UPDATE five_year_remedials SET order_number=?, order_value=?, order_id=?, stage=CASE WHEN COALESCE(stage,'quoted') IN ('quoted','') THEN 'ordered' ELSE stage END, updated_at=? WHERE tenant_id=? AND id=?"
-      ).bind(orderNumber || null, b.orderValue != null ? Number(b.orderValue) : null, id, now, tid, m.certId).run();
+      ).bind(orderNumber || null, b.orderValue != null ? Number(b.orderValue) : null, id, now2, tid, m.certId).run();
     } catch {
     }
   }
@@ -12974,20 +12969,20 @@ async function maybeCompleteCertJob(env, tid, cert) {
     ).bind(tid, cert.job_id).all();
     const have = new Set((results || []).map((r) => r.type));
     if (!need.every((t) => have.has(t))) return false;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     job.status = "Complete";
-    job.updatedAt = now;
-    job.closedAt = job.closedAt || now;
+    job.updatedAt = now2;
+    job.closedAt = job.closedAt || now2;
     const engs = Array.isArray(job.assignedEngineers) && job.assignedEngineers.length ? job.assignedEngineers.filter(Boolean) : job.assignedTo ? [job.assignedTo] : [];
     if (engs.length >= 2) {
       job.engStatus = job.engStatus || {};
-      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now, by: "cert" };
+      for (const e of engs) job.engStatus[normEng2(e)] = { status: "Complete", at: now2, by: "cert" };
     } else if (job.engStatus) {
-      for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now, by: "cert" };
+      for (const k of Object.keys(job.engStatus)) job.engStatus[k] = { status: "Complete", at: now2, by: "cert" };
     }
     job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-    job.statusHistory.push({ status: "Complete", at: now, by: "cert" });
-    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now, JSON.stringify(job), tid, cert.job_id).run();
+    job.statusHistory.push({ status: "Complete", at: now2, by: "cert" });
+    await env.DB.prepare("UPDATE sla_jobs SET status='Complete', closed_at=?, updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(job.closedAt, now2, JSON.stringify(job), tid, cert.job_id).run();
     return true;
   } catch {
     return false;
@@ -13277,7 +13272,7 @@ async function upsertFiveYearFromJob(env, tid, job, opts) {
     workStatus: ""
   }));
   const budget = rems.reduce((a, r) => a + (Number(r.materialCost) || 0), 0);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const existing = await env.DB.prepare("SELECT stage, quote_date, data FROM five_year_remedials WHERE tenant_id=? AND id=?").bind(tid, id).first().catch(() => null);
   let data = {};
   try {
@@ -13288,10 +13283,10 @@ async function upsertFiveYearFromJob(env, tid, job, opts) {
   data.jobId = job.id;
   if (job.remedialsWorksJobId) data.worksJobId = job.remedialsWorksJobId;
   const stage = existing && existing.stage ? existing.stage : "to_review";
-  const quoteDate = existing && existing.quote_date ? existing.quote_date : now.slice(0, 10);
+  const quoteDate = existing && existing.quote_date ? existing.quote_date : now2.slice(0, 10);
   await env.DB.prepare(
     "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET store_code=excluded.store_code, site_name=excluded.site_name, budget_cost=excluded.budget_cost, lines=excluded.lines, data=excluded.data, updated_at=excluded.updated_at"
-  ).bind(id, tid, "", store, siteName, "Electrical remedials", quoteDate, budget, job.priority || "", "", stage, JSON.stringify(lines), JSON.stringify(data), now, now).run();
+  ).bind(id, tid, "", store, siteName, "Electrical remedials", quoteDate, budget, job.priority || "", "", stage, JSON.stringify(lines), JSON.stringify(data), now2, now2).run();
   _fyrTestedCache = { tid: null, at: 0, map: null };
   if (existing || opts.silent) return;
   try {
@@ -13460,8 +13455,8 @@ async function fiveYearSchedule(env, tid, year) {
   return rows;
 }
 async function fiveYearTestedMap(env, tid) {
-  const now = Date.now();
-  if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now - _fyrTestedCache.at < 5 * 60 * 1e3)
+  const now2 = Date.now();
+  if (_fyrTestedCache.map && _fyrTestedCache.tid === tid && now2 - _fyrTestedCache.at < 5 * 60 * 1e3)
     return _fyrTestedCache.map;
   const map = {};
   const set = (code, info) => {
@@ -13470,7 +13465,7 @@ async function fiveYearTestedMap(env, tid) {
     if (map[c] && map[c].source === "remedial" && info.source !== "remedial") return;
     map[c] = info;
   };
-  const recentCut = new Date(now - 300 * 864e5).toISOString();
+  const recentCut = new Date(now2 - 300 * 864e5).toISOString();
   try {
     const jobs = await listJobs(env, tid);
     for (const j of jobs || []) {
@@ -13510,7 +13505,7 @@ async function fiveYearTestedMap(env, tid) {
     }
   } catch {
   }
-  _fyrTestedCache = { tid, at: now, map };
+  _fyrTestedCache = { tid, at: now2, map };
   return map;
 }
 async function handle11(request, env, ctx, url, sess) {
@@ -13687,10 +13682,10 @@ async function handle11(request, env, ctx, url, sess) {
     const yr = String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
     const created = [], skipped = [];
     for (const it of sites) {
-      const num2 = String(it.siteNumber || "");
-      const s = byNum[num2];
-      if (!num2 || !s) {
-        if (num2) skipped.push(num2);
+      const num3 = String(it.siteNumber || "");
+      const s = byNum[num3];
+      if (!num3 || !s) {
+        if (num3) skipped.push(num3);
         continue;
       }
       let addr = "", siteDur = 0;
@@ -13701,18 +13696,18 @@ async function handle11(request, env, ctx, url, sess) {
       } catch {
       }
       const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : siteDur > 0 ? siteDur : dur;
-      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num2) : "";
+      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num3) : "";
       let desc;
-      if (em && pat) desc = `EM: Import certificate number ${setNum || num2}-${yr}
-PAT: Import certificate number ${num2}-${yr}`;
-      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num2}` : `Import certificate number ${setNum || num2}-${yr}`;
-      else desc = `Import certificate number ${num2}-${yr}`;
+      if (em && pat) desc = `EM: Import certificate number ${setNum || num3}-${yr}
+PAT: Import certificate number ${num3}-${yr}`;
+      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num3}` : `Import certificate number ${setNum || num3}-${yr}`;
+      else desc = `Import certificate number ${num3}-${yr}`;
       const sched = /^\d{4}-\d{2}-\d{2}T/.test(String(it.scheduledAt || "")) ? it.scheduledAt : void 0;
       const job = await createOrUpdateJobFromPayload(env, tid, {
-        reference: s.site_name || num2,
+        reference: s.site_name || num3,
         description: desc,
         siteName: s.site_name || "",
-        siteCode: num2,
+        siteCode: num3,
         address: addr,
         postcode: s.postcode || "",
         emTest: em,
@@ -13724,17 +13719,17 @@ PAT: Import certificate number ${num2}-${yr}`;
         assignedEngineers: engineers,
         originator: "bulk-em"
       });
-      created.push({ id: job.id, site: s.site_name || num2 });
+      created.push({ id: job.id, site: s.site_name || num3 });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
   }
   if (sub === "/site-duration" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const num2 = String(b.siteNumber || "").trim();
+    const num3 = String(b.siteNumber || "").trim();
     const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
-    if (!num2) return error("siteNumber required", 400, env, request);
-    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num2).first();
+    if (!num3) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num3).first();
     if (!row) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -13743,7 +13738,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     }
     if (mins > 0) data.expectedDurationMinutes = mins;
     else delete data.expectedDurationMinutes;
-    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num2, row.client).run();
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num3, row.client).run();
     return json({ ok: true, minutes: mins }, {}, env, request);
   }
   if (sub === "/w3w-key" && method === "GET") {
@@ -13893,7 +13888,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const b = await request.json().catch(() => ({}));
     const type = T(b.type);
     let id = b.id ? String(b.id) : "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let existing = id ? await loadCert(id) : null;
     if (existing && !await canWriteCert(existing)) return error("Not your certificate", 403, env, request);
     if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
@@ -13936,11 +13931,11 @@ PAT: Import certificate number ${num2}-${yr}`;
       }
       await env.DB.prepare(
         "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode2(b.siteCode) : "", "", JSON.stringify(data), owner, now, now).run();
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode2(b.siteCode) : "", "", JSON.stringify(data), owner, now2, now2).run();
     } else {
       await env.DB.prepare(
         "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
-      ).bind(type, b.siteCode ? padCode2(b.siteCode) : existing.site_code, JSON.stringify(data), now, tid, id).run();
+      ).bind(type, b.siteCode ? padCode2(b.siteCode) : existing.site_code, JSON.stringify(data), now2, tid, id).run();
     }
     return json({ ok: true, id }, {}, env, request);
   }
@@ -13949,8 +13944,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now2, now2, tid, cert.id).run();
     const jobDone = await maybeCompleteCertJob(env, tid, cert);
     const payload = {
       title: (cert.type === "pat" ? "PAT" : "EM") + " certificate ready to review",
@@ -14173,12 +14168,12 @@ PAT: Import certificate number ${num2}-${yr}`;
       source: "cert:" + cert.id,
       label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
     });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     if (cert.type === "pat") {
       const n = Number(String(number).replace(/\D/g, "").slice(0, 5));
       if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:patseq:" + tid, String(n)).run();
     }
-    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, me, now, tid, cert.id).run();
+    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now2, me, now2, tid, cert.id).run();
     try {
       await maybeCompleteCertJob(env, tid, cert);
     } catch {
@@ -14247,8 +14242,8 @@ PAT: Import certificate number ${num2}-${yr}`;
       source: "cert:" + cert.id,
       label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
     });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE certificates SET status='final', r2_final_key=?, finalised_at=COALESCE(finalised_at,?), finalised_by=COALESCE(finalised_by,?), updated_at=? WHERE tenant_id=? AND id=?").bind(filed.key, now, me, now, tid, cert.id).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='final', r2_final_key=?, finalised_at=COALESCE(finalised_at,?), finalised_by=COALESCE(finalised_by,?), updated_at=? WHERE tenant_id=? AND id=?").bind(filed.key, now2, me, now2, tid, cert.id).run();
     return json({ ok: true, number, key: filed.key, reissued: true }, {}, env, request);
   }
   if (sub === "/remedials" && method === "GET") {
@@ -14357,10 +14352,10 @@ PAT: Import certificate number ${num2}-${yr}`;
   };
   if (sub === "/remedials/outstanding" && method === "GET") {
     if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const { results } = await env.DB.prepare(
       "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
-    ).bind(tid, now).all();
+    ).bind(tid, now2).all();
     const rows = results || [];
     const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
     const out = [];
@@ -14488,9 +14483,9 @@ PAT: Import certificate number ${num2}-${yr}`;
     const action = String(b.action || "").toLowerCase();
     const ord = await env.DB.prepare("SELECT * FROM client_orders WHERE tenant_id=? AND id=?").bind(tid, oid).first();
     if (!ord) return error("Order not found", 404, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     if (action === "dismiss") {
-      await env.DB.prepare("UPDATE client_orders SET status='dismissed', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now, me, tid, oid).run();
+      await env.DB.prepare("UPDATE client_orders SET status='dismissed', actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(now2, me, tid, oid).run();
       return json({ ok: true, status: "dismissed" }, {}, env, request);
     }
     if (action === "reopen") {
@@ -14516,7 +14511,7 @@ PAT: Import certificate number ${num2}-${yr}`;
       } else {
         return json({ ok: false, error: "This order isn't matched to a remedial \u2014 open the tracker and link it manually." }, { status: 400 }, env, request);
       }
-      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=COALESCE(?,matched_job_id), actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(jobId, now, me, tid, oid).run();
+      await env.DB.prepare("UPDATE client_orders SET status='actioned', matched_job_id=COALESCE(?,matched_job_id), actioned_at=?, actioned_by=? WHERE tenant_id=? AND id=?").bind(jobId, now2, me, tid, oid).run();
       return json({ ok: true, status: "actioned", jobId, note }, {}, env, request);
     }
     return error("Unknown action", 400, env, request);
@@ -14526,13 +14521,13 @@ PAT: Import certificate number ${num2}-${yr}`;
     const b = await request.json().catch(() => ({}));
     const certId = String(b.certId || b.id || "").trim();
     if (!certId) return error("Missing certId", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     if (String(b.action) === "later") {
       const until = new Date(Date.now() + 4 * 3600 * 1e3).toISOString();
       await env.DB.prepare("UPDATE em_remedial_acks SET snooze_until=? WHERE tenant_id=? AND cert_id=?").bind(until, tid, certId).run();
       return json({ ok: true, snoozed: until }, {}, env, request);
     }
-    await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=?, quoted_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=?, quoted_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now2, me, tid, certId).run();
     return json({ ok: true, stage: "quoted" }, {}, env, request);
   }
   if (sub === "/remedials/stage" && method === "POST") {
@@ -14541,17 +14536,17 @@ PAT: Import certificate number ${num2}-${yr}`;
     const certId = String(b.certId || "").trim();
     const to = String(b.to || "").trim();
     if (!certId || STAGES.indexOf(to) < 0) return error("Missing certId or bad stage", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let jobId = null;
     if (to === "approved" || to === "in_works" || to === "done") {
       const res = await poReceived(env, tid, certId, me, ctx);
       jobId = res.jobId || null;
     } else if (to === "invoiced") {
-      await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now2, me, tid, certId).run();
     } else if (to === "to_quote") {
       await env.DB.prepare("UPDATE em_remedial_acks SET stage='to_quote', snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(tid, certId).run();
     } else {
-      await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=COALESCE(quoted_at,?), quoted_by=COALESCE(quoted_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=COALESCE(quoted_at,?), quoted_by=COALESCE(quoted_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now2, me, tid, certId).run();
     }
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     return json({ ok: true, stage: to, jobId, case: row ? shapeCase(row) : null }, {}, env, request);
@@ -14743,8 +14738,8 @@ PAT: Import certificate number ${num2}-${yr}`;
     const certId = String(b.certId || b.id || "").trim();
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
     if (!row) return error("No remedial case for that certificate", 404, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now, tid, certId).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now2, tid, certId).run();
     const jobId = row.job_id || "emrem:" + certId;
     try {
       const job = await getJob2(env, tid, jobId);
@@ -14985,8 +14980,8 @@ ${con.tradingTitle || "Mostlane"}`;
       source: "cert:" + cert.id,
       label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
     });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, me, now, tid, cert.id).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now2, me, now2, tid, cert.id).run();
     return json({ ok: true, number, key: filed.key }, {}, env, request);
   }
   if (sub === "/delete" && method === "POST") {
@@ -15017,8 +15012,8 @@ ${con.tradingTitle || "Mostlane"}`;
     const number = parseInt(b.number, 10);
     if (!Number.isFinite(number) || number < 1 || number > 999999) return error("A valid number is required.", 400, env, request);
     const job = String(b.job || "").slice(0, 300);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=excluded.job, updated_at=excluded.updated_at, updated_by=excluded.updated_by").bind(tid, number, job, "fiveYear", now, now, me).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=excluded.job, updated_at=excluded.updated_at, updated_by=excluded.updated_by").bind(tid, number, job, "fiveYear", now2, now2, me).run();
     return json({ ok: true, number, job }, {}, env, request);
   }
   if (sub === "/register/delete" && method === "POST") {
@@ -15035,8 +15030,8 @@ ${con.tradingTitle || "Mostlane"}`;
     const number = parseInt(b.number, 10);
     if (!Number.isFinite(number) || number < 1 || number > 99999) return json({ ok: true, added: false, reason: "out-of-range" }, {}, env, request);
     const job = String(b.job || "").slice(0, 300);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const res = await env.DB.prepare("INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, number, job, "fiveYear", now, now, me, "scan").run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const res = await env.DB.prepare("INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, number, job, "fiveYear", now2, now2, me, "scan").run();
     const added = !!(res && res.meta && res.meta.changes);
     return json({ ok: true, added, number }, {}, env, request);
   }
@@ -15054,14 +15049,14 @@ ${con.tradingTitle || "Mostlane"}`;
       }
     }
     if (!entries.length) return error("Nothing to import \u2014 paste lines like '349<tab>Corsham Remedials'.", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let imported = 0;
     for (let i = 0; i < entries.length; i += 40) {
       const chunk = entries.slice(i, i + 40);
       await env.DB.batch(chunk.map((e) => env.DB.prepare(
         // Keep an existing non-empty job if the incoming job is blank.
         "INSERT INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id,number) DO UPDATE SET job=CASE WHEN excluded.job<>'' THEN excluded.job ELSE cert_register.job END, updated_at=excluded.updated_at, updated_by=excluded.updated_by"
-      ).bind(tid, e.number, e.job, "fiveYear", now, now, me)));
+      ).bind(tid, e.number, e.job, "fiveYear", now2, now2, me)));
       imported += chunk.length;
     }
     if (b.fillGaps) {
@@ -15074,7 +15069,7 @@ ${con.tradingTitle || "Mostlane"}`;
       for (let i = 0; i < missing.length; i += 40) {
         await env.DB.batch(missing.slice(i, i + 40).map((n) => env.DB.prepare(
           "INSERT OR IGNORE INTO cert_register (tenant_id,number,job,cert_type,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?)"
-        ).bind(tid, n, "", "fiveYear", now, now, me)));
+        ).bind(tid, n, "", "fiveYear", now2, now2, me)));
       }
     }
     const row = await env.DB.prepare("SELECT MAX(number) AS mx, COUNT(*) AS n FROM cert_register WHERE tenant_id=?").bind(tid).first();
@@ -15153,8 +15148,8 @@ ${con.tradingTitle || "Mostlane"}`;
     const id = String(b.id || "");
     const stage = FYR_STAGES.includes(b.stage) ? b.stage : null;
     if (!id || !stage) return error("id and a valid stage are required", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const upd = await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, now, tid, id).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const upd = await env.DB.prepare("UPDATE five_year_remedials SET stage=?, updated_at=? WHERE tenant_id=? AND id=?").bind(stage, now2, tid, id).run();
     if (!upd.meta || !upd.meta.changes) {
       const m = b.meta || {};
       const data = { source: m.source || "", jobId: m.jobId || "" };
@@ -15167,15 +15162,15 @@ ${con.tradingTitle || "Mostlane"}`;
         fyrCode(m.storeCode) || String(m.storeCode || ""),
         String(m.siteName || "").slice(0, 200),
         "5-year electrical test",
-        String(m.completedAt || now).slice(0, 10),
+        String(m.completedAt || now2).slice(0, 10),
         0,
         "",
         "",
         stage,
         "[]",
         JSON.stringify(data),
-        now,
-        now
+        now2,
+        now2
       ).run();
     }
     _fyrTestedCache = { tid: null, at: 0, map: null };
@@ -15261,13 +15256,13 @@ Total: ${lines.length} item${lines.length === 1 ? "" : "s"}` + (mat ? ` \xB7 est
     }
     const list = Object.values(cases);
     if (!list.length) return error("No rows with an SR or store code.", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let imported = 0;
     for (let i = 0; i < list.length; i += 25) {
       const chunk = list.slice(i, i + 25);
       await env.DB.batch(chunk.map((c) => env.DB.prepare(
         "INSERT INTO five_year_remedials (id,tenant_id,sr,store_code,site_name,element,quote_date,budget_cost,priority,work_status,stage,lines,data,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET site_name=excluded.site_name, element=excluded.element, quote_date=excluded.quote_date, budget_cost=excluded.budget_cost, priority=excluded.priority, work_status=excluded.work_status, lines=excluded.lines, updated_at=excluded.updated_at"
-      ).bind(c.id, tid, c.sr, c.store, c.siteName, c.element, c.quoteDate, c.budgetCost, c.priority, c.workStatus, "quoted", JSON.stringify(c.lines), "{}", now, now)));
+      ).bind(c.id, tid, c.sr, c.store, c.siteName, c.element, c.quoteDate, c.budgetCost, c.priority, c.workStatus, "quoted", JSON.stringify(c.lines), "{}", now2, now2)));
       imported += chunk.length;
     }
     _fyrTestedCache = { tid: null, at: 0, map: null };
@@ -15391,9 +15386,9 @@ function badScheduleDate(iso, label2 = "Scheduled date") {
   if (iso === void 0 || iso === null || iso === "") return null;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return `${label2} isn't a valid date/time.`;
-  const y = new Date(t).getUTCFullYear(), now = (/* @__PURE__ */ new Date()).getUTCFullYear();
-  if (y < now - SCHED_YEARS_BACK || y > now + SCHED_YEARS_FWD)
-    return `${label2} has the year ${y} \u2014 check the date (expected ${now - SCHED_YEARS_BACK}\u2013${now + SCHED_YEARS_FWD}).`;
+  const y = new Date(t).getUTCFullYear(), now2 = (/* @__PURE__ */ new Date()).getUTCFullYear();
+  if (y < now2 - SCHED_YEARS_BACK || y > now2 + SCHED_YEARS_FWD)
+    return `${label2} has the year ${y} \u2014 check the date (expected ${now2 - SCHED_YEARS_BACK}\u2013${now2 + SCHED_YEARS_FWD}).`;
   return null;
 }
 function badScheduleIn(body) {
@@ -15698,14 +15693,14 @@ async function handle12(request, env, ctx, url, sess) {
         }
         const installer = rec.installer || (job.assignedTo || sess.user && sess.user.username || "");
         const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
-        const now = /* @__PURE__ */ new Date();
+        const now2 = /* @__PURE__ */ new Date();
         const dflt = {
           company: cfg.company,
           sealCategory: cfg.sealCategory,
           declaration: cfg.declaration,
           installer,
           siteAddress,
-          dateOfIssue: `${padRef2(now.getUTCDate())}/${padRef2(now.getUTCMonth() + 1)}/${now.getUTCFullYear()}`,
+          dateOfIssue: `${padRef2(now2.getUTCDate())}/${padRef2(now2.getUTCMonth() + 1)}/${now2.getUTCFullYear()}`,
           nextRef: padRef(cfg.nextRef)
         };
         return jsonResponse({ record: rec, defaults: dflt, firestopping: !!job.firestopping }, headers);
@@ -15838,16 +15833,16 @@ async function handle12(request, env, ctx, url, sess) {
     const moveTo = String(body?.moveTo || "Pending").trim() || "Pending";
     if (!name) return jsonResponse({ error: "name required" }, headers, 400);
     const who = sess.user && sess.user.username || "system";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const jobs = await listJobs(env, tenantId);
     let moved = 0;
     for (const job of jobs) {
       if (String(job.status || "").toLowerCase() !== name.toLowerCase()) continue;
       job.status = moveTo;
       job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
-      job.statusHistory.push({ status: moveTo, at: now, by: who });
-      if (moveTo === "Closed Jobs" && !job.closedAt) job.closedAt = now;
-      job.updatedAt = now;
+      job.statusHistory.push({ status: moveTo, at: now2, by: who });
+      if (moveTo === "Closed Jobs" && !job.closedAt) job.closedAt = now2;
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       moved++;
     }
@@ -16691,7 +16686,7 @@ async function handle12(request, env, ctx, url, sess) {
     } catch {
     }
     if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false, error: "Nothing to undo." }, headers, 400);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let reverted = 0, skipped = 0;
     for (const id of rec.jobIds) {
       let job = null;
@@ -16709,8 +16704,8 @@ async function handle12(request, env, ctx, url, sess) {
       job.assignedEngineers = [];
       job.engStatus = void 0;
       job.status = "Pending";
-      (job.statusHistory ||= []).push({ status: "Pending", at: now, by: "undo-auto-day" });
-      job.updatedAt = now;
+      (job.statusHistory ||= []).push({ status: "Pending", at: now2, by: "undo-auto-day" });
+      job.updatedAt = now2;
       try {
         await saveJob(env, tenantId, job);
         reverted++;
@@ -17480,13 +17475,13 @@ async function handle12(request, env, ctx, url, sess) {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
       job.hold = job.hold || {};
-      job.hold.approval = { state: "approved", requestedBy, by: sess.user.username, at: now };
+      job.hold.approval = { state: "approved", requestedBy, by: sess.user.username, at: now2 };
       job.statusHistory ||= [];
-      job.statusHistory.push({ status: "On Hold \u2014 approved", at: now, by: sess.user.username });
-      job.updatedAt = now;
+      job.statusHistory.push({ status: "On Hold \u2014 approved", at: now2, by: sess.user.username });
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       const eng = requestedBy || assignedList(job)[0];
       if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
@@ -17507,16 +17502,16 @@ async function handle12(request, env, ctx, url, sess) {
       const body = await readJson2(request);
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
       job.hold = job.hold || {};
-      job.hold.approval = { state: "rejected", requestedBy, by: sess.user.username, at: now, reason: String(body.reason || "").slice(0, 300) };
+      job.hold.approval = { state: "rejected", requestedBy, by: sess.user.username, at: now2, reason: String(body.reason || "").slice(0, 300) };
       job.status = "In Progress";
       job.statusHistory ||= [];
-      job.statusHistory.push({ status: "In Progress", at: now, by: sess.user.username });
+      job.statusHistory.push({ status: "In Progress", at: now2, by: sess.user.username });
       job.events ||= [];
-      job.events.push({ at: now, by: sess.user.username, type: "note", note: "On-hold rejected" + (body.reason ? ": " + body.reason : "") });
-      job.updatedAt = now;
+      job.events.push({ at: now2, by: sess.user.username, type: "note", note: "On-hold rejected" + (body.reason ? ": " + body.reason : "") });
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       const eng = requestedBy || assignedList(job)[0];
       if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
@@ -17538,19 +17533,19 @@ async function handle12(request, env, ctx, url, sess) {
       if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       job.raBlock = {
         state: "open",
         reason: reason.slice(0, 500),
         items: Array.isArray(b.items) ? b.items.slice(0, 10).map((x) => String(x).slice(0, 120)) : [],
         by: sess.user.username,
-        at: now
+        at: now2
       };
       job.statusHistory ||= [];
-      job.statusHistory.push({ status: "Awaiting office (safety)", at: now, by: sess.user.username });
+      job.statusHistory.push({ status: "Awaiting office (safety)", at: now2, by: sess.user.username });
       job.events ||= [];
-      job.events.push({ at: now, by: sess.user.username, type: "note", note: "Can't proceed safely: " + reason });
-      job.updatedAt = now;
+      job.events.push({ at: now2, by: sess.user.username, type: "note", note: "Can't proceed safely: " + reason });
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
         title: "\u26A0 Safety flag \u2014 can't proceed",
@@ -17565,14 +17560,14 @@ async function handle12(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       if (String(b.action || "start") === "clear") {
         job.emTimer = null;
       } else {
         const mins = Number.isFinite(Number(b.durationMinutes)) ? Math.max(1, Math.min(600, Number(b.durationMinutes))) : 180;
-        job.emTimer = { startedAt: now, durationMinutes: mins, startedBy: sess.user.username };
+        job.emTimer = { startedAt: now2, durationMinutes: mins, startedBy: sess.user.username };
       }
-      job.updatedAt = now;
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
@@ -17603,13 +17598,13 @@ async function handle12(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
       const note = String(b.note || "").slice(0, 300);
-      job.raBlock = Object.assign({}, job.raBlock, { state: "resolved", resolvedBy: sess.user.username, resolvedAt: now, resolveNote: note });
+      job.raBlock = Object.assign({}, job.raBlock, { state: "resolved", resolvedBy: sess.user.username, resolvedAt: now2, resolveNote: note });
       job.statusHistory ||= [];
-      job.statusHistory.push({ status: "Safety flag resolved", at: now, by: sess.user.username });
-      job.updatedAt = now;
+      job.statusHistory.push({ status: "Safety flag resolved", at: now2, by: sess.user.username });
+      job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
         title: "Safety flag resolved",
@@ -17810,7 +17805,7 @@ async function handle12(request, env, ctx, url, sess) {
     const b = await readJson2(request);
     const j = await getJob3(env, tenantId, b.jobId);
     if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
-    const num2 = (v) => {
+    const num3 = (v) => {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : null;
     };
@@ -17818,10 +17813,10 @@ async function handle12(request, env, ctx, url, sess) {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       by: sess.user.username,
       quoteNumber: String(b.quoteNumber || "").trim(),
-      amountExVat: num2(b.amountExVat),
-      amountIncVat: num2(b.amountIncVat),
-      labourCost: num2(b.labourCost),
-      materialsCost: num2(b.materialsCost)
+      amountExVat: num3(b.amountExVat),
+      amountIncVat: num3(b.amountIncVat),
+      labourCost: num3(b.labourCost),
+      materialsCost: num3(b.materialsCost)
     };
     j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     await saveJob(env, tenantId, j);
@@ -18520,8 +18515,8 @@ function isMultiEng(job) {
   return assignedList(job).length >= 2;
 }
 function stampCancelled(job, opts = {}) {
-  const now = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
-  job.cancelledAt = now;
+  const now2 = opts.at && Number.isFinite(Date.parse(opts.at)) ? new Date(opts.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  job.cancelledAt = now2;
   job.cancelledBy = String(opts.by || "").slice(0, 80) || "office";
   job.cancelReason = String(opts.reason || "").slice(0, 500);
   job.cancelSource = opts.source || "office";
@@ -18557,14 +18552,14 @@ function rollupStatus(job) {
   }
   return sts.find((s) => !DONE_STATES.has(String(s).toLowerCase())) || job.status;
 }
-function seedEngStatus(job, prevEngs, prevStatus, now) {
+function seedEngStatus(job, prevEngs, prevStatus, now2) {
   if (!isMultiEng(job)) return;
   job.engStatus = job.engStatus || {};
   const prevArr = prevEngs instanceof Set ? [...prevEngs] : Array.isArray(prevEngs) ? prevEngs : [];
   const prev = new Set(prevArr.map(normId));
   for (const e of assignedList(job).map(normId)) {
     if (job.engStatus[e]) continue;
-    job.engStatus[e] = { status: prev.has(e) ? prevStatus || "Scheduled" : "Scheduled", at: now, by: "system" };
+    job.engStatus[e] = { status: prev.has(e) ? prevStatus || "Scheduled" : "Scheduled", at: now2, by: "system" };
   }
 }
 function londonOffsetMs(utcMs) {
@@ -19271,15 +19266,15 @@ async function cancelIncidentJobs(env, tenantId, ctx, b) {
   const held = kind === "quote" ? open.filter((j) => !WAITING.has(String(j.status || "").toLowerCase())) : [];
   const targets = open.filter((j) => !held.includes(j));
   const cancelled = [];
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   for (const j of targets) {
     const prevStatus = j.status;
     j.status = "Cancelled";
-    (j.statusHistory ||= []).push({ status: "Cancelled", at: now, by, note: reason || void 0 });
+    (j.statusHistory ||= []).push({ status: "Cancelled", at: now2, by, note: reason || void 0 });
     stampCancelled(j, { by, reason, source: "client", at });
-    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now, by };
-    (j.events ||= []).push({ at: now, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " \u2014 " + reason : "") });
-    j.updatedAt = now;
+    if (j.engStatus) for (const e of Object.keys(j.engStatus)) j.engStatus[e] = { status: "Cancelled", at: now2, by };
+    (j.events ||= []).push({ at: now2, by, type: "note", note: (kind === "quote" ? "Quote request cancelled by the client" : "Job cancelled by the client") + (reason ? " \u2014 " + reason : "") });
+    j.updatedAt = now2;
     await saveJob(env, tenantId, j);
     const engs = assignedList(j);
     cancelled.push({ id: j.id, reference: j.helpdeskRef || j.id, previousStatus: prevStatus, engineers: engs, scheduledAt: j.scheduledAt || null });
@@ -19576,10 +19571,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig3(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
   const existing = await getJob3(env, tenantId, id);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
-  const raisedAt = body.raisedAt || existing?.raisedAt || now;
+  const raisedAt = body.raisedAt || existing?.raisedAt || now2;
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
   const isFleetRenewal = body.fleetRenewal === true || existing?.fleetRenewal === true;
   const noSla = isProjJob || isFleetRenewal;
@@ -19753,9 +19748,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     renewalType: body.renewalType !== void 0 ? String(body.renewalType || "") || null : existing?.renewalType ?? null,
     // Set when a historical archive job is pulled back onto the live board.
     reopenedFromArchive: body.reopenedFromArchive !== void 0 ? String(body.reopenedFromArchive || "") || null : existing?.reopenedFromArchive ?? null,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    createdAt: existing?.createdAt || now2,
+    updatedAt: now2,
+    closedAt: status === "Closed Jobs" ? now2 : existing?.closedAt || null,
     // Cancellation stamps survive a re-save (set/cleared below on the transition).
     cancelledAt: existing?.cancelledAt,
     cancelledBy: existing?.cancelledBy,
@@ -19780,10 +19775,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
-  job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
-  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now });
+  job.statusHistory.push({ status, at: now2, by: body.changedBy || "system" });
+  if (isCancelledStatus(status) && !isCancelledStatus(existing?.status)) stampCancelled(job, { by: body.cancelledBy || body.changedBy || "office", reason: body.cancelReason, source: body.cancelSource || "office", at: now2 });
   else if (!isCancelledStatus(status) && isCancelledStatus(existing?.status)) clearCancelled(job);
-  seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
+  seedEngStatus(job, assignedList(existing || {}), existing?.status, now2);
   pruneEngSchedule(job);
   await saveJob(env, tenantId, job);
   return job;
@@ -19791,7 +19786,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
 async function patchJob(env, tenantId, id, patch, ctx) {
   const job = await getJob3(env, tenantId, id);
   if (!job) return null;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
   job.events ||= [];
   const hadEngineers = assignedList(job).length > 0;
@@ -19812,7 +19807,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
   }
   if (patch.assignedEngineers !== void 0 || patch.assignedTo !== void 0) {
-    seedEngStatus(job, prevEngs, prevStatus, now);
+    seedEngStatus(job, prevEngs, prevStatus, now2);
     pruneEngSchedule(job);
     if (job.releaseNotified && !job.releaseNotifiedBy) {
       job.releaseNotifiedBy = {};
@@ -19885,7 +19880,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       engSchedule: job.engSchedule ? JSON.parse(JSON.stringify(job.engSchedule)) : null
     };
     if (JSON.stringify(schedAfter) !== JSON.stringify(schedBefore)) {
-      job.prevSchedule = { ...schedBefore, at: now, by: patch.changedBy || "office" };
+      job.prevSchedule = { ...schedBefore, at: now2, by: patch.changedBy || "office" };
     }
   }
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
@@ -19940,7 +19935,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
     const cfg = await getConfig3(env, tenantId);
-    job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
+    job.targetAt = computeSlaTarget(job.raisedAt || now2, job.priority, cfg);
   }
   if (jobIsProject(job)) {
     job.priority = "";
@@ -19957,47 +19952,47 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     job.engStatus = job.engStatus || {};
     const prev = job.engStatus[patch.__engActor] && job.engStatus[patch.__engActor].status;
     if (s !== prev) {
-      job.engStatus[patch.__engActor] = { status: s, at: now, by: patch.changedBy || patch.__engActor };
-      const entry = { status: s, at: now, by: patch.changedBy || "system", eng: patch.__engActor };
+      job.engStatus[patch.__engActor] = { status: s, at: now2, by: patch.changedBy || patch.__engActor };
+      const entry = { status: s, at: now2, by: patch.changedBy || "system", eng: patch.__engActor };
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
     }
     const wasCancelled = isCancelledStatus(job.status);
     job.status = rollupStatus(job);
-    if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
-    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now });
+    if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now2;
+    if (isCancelledStatus(job.status) && !wasCancelled) stampCancelled(job, { by: patch.changedBy || patch.__engActor, reason: patch.cancelReason, source: "office", at: now2 });
     else if (!isCancelledStatus(job.status) && wasCancelled) clearCancelled(job);
   } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
     const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
       job.status = s;
-      const entry = { status: s, at: now, by: patch.changedBy || "system" };
+      const entry = { status: s, at: now2, by: patch.changedBy || "system" };
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
-      if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
-      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now });
+      if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now2;
+      if (isCancelledStatus(s)) stampCancelled(job, { by: patch.changedBy || "office", reason: patch.cancelReason, source: patch.cancelSource || "office", at: now2 });
       else if (job.cancelledAt) clearCancelled(job);
     } else if (isCancelledStatus(s) && patch.cancelReason !== void 0 && !job.cancelReason) {
       job.cancelReason = String(patch.cancelReason || "").slice(0, 500);
     }
     if (isMultiEng(job) && job.engStatus) {
-      for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
+      for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now2, by: patch.changedBy || "office" };
     }
   } else if (!hadEngineers && assignedList(job).length && (job.status === "Pending" || job.status === "Co-op Pending")) {
     job.status = "Scheduled";
-    job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
+    job.statusHistory.push({ status: "Scheduled", at: now2, by: patch.changedBy || "system" });
   }
   if (assignedList(job).length && /^(?:co-op )?pending$/i.test(String(job.status))) {
     job.status = "Scheduled";
-    if (!(job.statusHistory || []).some((h) => h.status === "Scheduled" && h.at === now))
-      (job.statusHistory ||= []).push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
+    if (!(job.statusHistory || []).some((h) => h.status === "Scheduled" && h.at === now2))
+      (job.statusHistory ||= []).push({ status: "Scheduled", at: now2, by: patch.changedBy || "system" });
   }
   if (patch.note) {
-    job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
+    job.events.push({ at: now2, by: patch.changedBy || "system", type: "note", note: patch.note });
   }
   if (patch.hiddenFromClient !== void 0) job.hiddenFromClient = !!patch.hiddenFromClient;
-  job.updatedAt = now;
+  job.updatedAt = now2;
   await saveJob(env, tenantId, job);
   if (job.status !== prevStatus && ctx && ctx.waitUntil) {
     try {
@@ -21486,16 +21481,16 @@ async function notifyFallbackAdmins(env, tid, payload) {
 async function sweepFallbacks(env, tid = 1) {
   const cfg = await getFallbacks(env, tid);
   if (!cfg.enabled) return;
-  const now = londonNow();
-  if (now.dow === 0 || now.dow === 6) return;
+  const now2 = londonNow();
+  if (now2.dow === 0 || now2.dow === 6) return;
   let slot = null;
-  if (now.hour === 15 && now.minute >= 30 && now.minute < 35) slot = "warn1";
-  else if (now.hour === 18 && now.minute < 5) slot = "warn2";
-  else if (now.hour === 19 && now.minute < 5) slot = "assign";
+  if (now2.hour === 15 && now2.minute >= 30 && now2.minute < 35) slot = "warn1";
+  else if (now2.hour === 18 && now2.minute < 5) slot = "warn2";
+  else if (now2.hour === 19 && now2.minute < 5) slot = "assign";
   if (!slot) return;
-  const holidays = await fallbackHolidaySet(env, tid, Number(now.date.slice(0, 4)));
-  if (holidays.has(now.date)) return;
-  const target = nextWorkingDay(now.date, holidays);
+  const holidays = await fallbackHolidaySet(env, tid, Number(now2.date.slice(0, 4)));
+  if (holidays.has(now2.date)) return;
+  const target = nextWorkingDay(now2.date, holidays);
   const db = tenantDB(env, tid);
   const dedupKey = "sla:fallbackswept:" + tid;
   let swept = {};
@@ -22560,7 +22555,7 @@ async function handle13(request, env, ctx, url, sess) {
       "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
     ).bind(db.tenantId, year).all();
     const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const stmts = [];
     const ins = db.prepare(`
       INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
@@ -22570,11 +22565,11 @@ async function handle13(request, env, ctx, url, sess) {
     for (const u of usernames) {
       for (const b of bank) {
         if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
+        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now2));
       }
       for (const s of shut) {
         if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
+        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now2));
       }
     }
     if (stmts.length) await db.batch(stmts);
@@ -24657,9 +24652,9 @@ async function handle14(request, env, ctx, url, sess) {
     const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
     const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
     await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const asset = await getAsset(env, tenantId, req.asset_id);
-    const when = londonWhen(now);
+    const when = londonWhen(now2);
     let cond = {};
     try {
       cond = req.condition_photos ? JSON.parse(req.condition_photos) : {};
@@ -24682,7 +24677,7 @@ async function handle14(request, env, ctx, url, sess) {
       to: req.to_user,
       message: req.note || "",
       requestedAt: utcify(req.requested_at),
-      acceptedAt: now,
+      acceptedAt: now2,
       acceptedAtText: when,
       acceptedBy: me,
       signatureKey: sigKey,
@@ -24691,15 +24686,15 @@ async function handle14(request, env, ctx, url, sess) {
       statement: `I, ${me}, accept this item and take responsibility for it from ${when}. I accept responsibility for the cost to repair or replace this item at any point as required whilst this item remains allocated to myself. This includes if the item is left unattended at any point in time. This also includes any and all accessories.`,
       releaseStatement: req.from_user && req.from_user !== "Unassigned" ? `Upon this acceptance, custody of the item passed from ${req.from_user}. ${req.from_user}'s responsibility for this item and all of its accessories ended on ${when}, when ${me} accepted the item and signed this note.` : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
     };
-    await putTransfer(env, tenantId, { ...note, timestamp: now });
+    await putTransfer(env, tenantId, { ...note, timestamp: now2 });
     if (asset) {
       asset.assignedTo = req.to_user;
-      asset.lastTransfer = now;
+      asset.lastTransfer = now2;
       await putAsset(env, tenantId, asset);
     }
     await db.prepare(
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
-    ).bind(now, sigKey, db.tenantId, req.id).run();
+    ).bind(now2, sigKey, db.tenantId, req.id).run();
     ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
       title: "Equipment accepted",
       body: `You accepted ${asset?.name || req.asset_id}.`
@@ -24716,8 +24711,8 @@ async function handle14(request, env, ctx, url, sess) {
     const me = sess2.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
       return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now2, db.tenantId, req.id).run();
     await putTransfer(env, tenantId, {
       type: "TRANSFER_REJECTED",
       transferId: req.id,
@@ -24725,7 +24720,7 @@ async function handle14(request, env, ctx, url, sess) {
       from: req.from_user,
       to: req.to_user,
       reason: b.reason || "",
-      timestamp: now
+      timestamp: now2
     });
     ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
       title: "Equipment declined",
@@ -24903,7 +24898,7 @@ async function handle14(request, env, ctx, url, sess) {
       "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
     ).bind(db.tenantId, r.asset_id).first();
     if (dupT) return json4({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const holderNow = String(asset.assignedTo || "").trim();
     const res = await db.prepare(
       "INSERT INTO asset_transfer_requests (tenant_id, asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?,?)"
@@ -24913,11 +24908,11 @@ async function handle14(request, env, ctx, url, sess) {
       isRealHolder(holderNow) ? holderNow : me,
       r.requested_by,
       ("Requested" + (r.message ? ": " + r.message : "")).slice(0, 200),
-      now
+      now2
     ).run();
     await db.prepare(
       "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
-    ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
+    ).bind(now2, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
     return json4({ ok: true, transferStarted: true });
   }
   if (method === "POST" && pathname === "/asset/request/reject") {
@@ -25704,7 +25699,77 @@ function chapplinsJob(subject, t) {
     }
   };
 }
+var djb2 = (s) => {
+  let h = 5381;
+  const str = String(s || "");
+  for (let i = 0; i < str.length; i++) h = (h << 5) + h + str.charCodeAt(i) >>> 0;
+  return h.toString(16);
+};
+function fbcJotform(subject, t) {
+  const val2 = (re) => {
+    const m = re.exec(t);
+    return m ? String(m[1] || "").replace(/\s+/g, " ").trim() : "";
+  };
+  const site = val2(/^\s*Site[ \t]+(?!Address)(.+)$/im);
+  const addrBlock = (/^\s*Site Address[ \t]+([\s\S]+?)\n\s*(?:Priority|Reported By)\b/im.exec(t) || [])[1] || "";
+  const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
+  const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
+  const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
+  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im);
+  const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
+  const reportedBy = val2(/^\s*Reported By[ \t]+(.+)$/im);
+  const jobTitle = val2(/^\s*Job Title[ \t]+(.+)$/im);
+  let desc = (/^\s*Brief description of the issue[ \t]+([\s\S]+?)\n\s*Quotation Required/im.exec(t) || [])[1] || "";
+  desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
+  const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
+  const reference = "FBC-" + djb2([site, reportedBy, desc.slice(0, 120), prNum].join("|"));
+  const missing = [];
+  if (!site) missing.push("site");
+  if (!desc) missing.push("description");
+  return {
+    kind: "job",
+    missing,
+    // Match on the SITE NAME (the "Site" pill = the register's site_name); the
+    // postcode narrows first, the name disambiguates when a postcode is shared.
+    siteLookup: { client: "fbc", address: site, postcode },
+    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName: site },
+    fields: {
+      isJob: true,
+      reference,
+      priority: prNum ? "Priority " + prNum : "",
+      siteCode: "",
+      siteName: site,
+      address: streetAddr || site,
+      postcode,
+      telephone: "",
+      description: desc,
+      raisedAt: "",
+      respondBy: "",
+      completeBy: "",
+      storeType: "fbc"
+    }
+  };
+}
 var TEMPLATES = [
+  // replyOk: Jotform sends the incident form as "Re: Mostlane New Incident Form",
+  // so these are exempt from the "a Re: subject is a reply, not a job" drop.
+  {
+    id: "fbc-jotform-digest",
+    label: "Fareham BC \u2014 Jotform weekly digest (ignored)",
+    domains: ["jotform.com"],
+    replyOk: true,
+    test: (s) => /Weekly Incident Report Update/i.test(s),
+    read: () => ({ kind: "notice", reason: "Jotform weekly incident digest \u2014 a summary, not a job" })
+  },
+  {
+    id: "fbc-jotform",
+    label: "Fareham BC \u2014 Jotform New Incident Form",
+    domains: ["jotform.com"],
+    replyOk: true,
+    test: (s, t) => /Mostlane New Incident Form/i.test(s) && /Quotation Required Before Works/i.test(t),
+    read: fbcJotform
+  },
   {
     id: "concerto-job",
     label: "Concerto \u2014 New Job Alert (Southern Co-op)",
@@ -25822,6 +25887,239 @@ async function lookupSite(env, tid, { client, address, postcode }) {
   return null;
 }
 
+// src/routes/fbc.js
+init_http();
+init_auth();
+init_tenantdb();
+init_once();
+async function ensureTables__raw4(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fbc_meta (
+    tenant_id INTEGER, job_id TEXT PRIMARY KEY, reference TEXT, site_code TEXT, site_name TEXT,
+    reported_by TEXT, job_title TEXT, w3w TEXT,
+    quote_required INTEGER DEFAULT 0, quote_status TEXT DEFAULT '', quote_amount REAL,
+    cost REAL, po_number TEXT, invoice_month TEXT, invoice_status TEXT DEFAULT '',
+    invoiced_at TEXT, invoice_ref TEXT, source TEXT, created_at TEXT, updated_at TEXT
+  )`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fbc_meta_t ON fbc_meta(tenant_id)").run();
+  } catch {
+  }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fbc_messages (
+    id TEXT PRIMARY KEY, tenant_id INTEGER, job_id TEXT, at TEXT, direction TEXT,
+    from_addr TEXT, subject TEXT, body TEXT, message_id TEXT, created_at TEXT
+  )`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fbc_msg_job ON fbc_messages(tenant_id, job_id)").run();
+  } catch {
+  }
+}
+var ensureTables5 = onceMigration(ensureTables__raw4);
+var now = () => (/* @__PURE__ */ new Date()).toISOString();
+var num2 = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+var monthOf = (iso) => (String(iso || "").match(/^(\d{4}-\d{2})/) || [])[1] || "";
+async function fbcSiteCodes(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND client='fbc' AND site_number IS NOT NULL AND site_number<>''").bind(Number(tid)).all();
+    return (results || []).map((r) => String(r.site_number));
+  } catch {
+    return [];
+  }
+}
+async function recordFbcJob(env, tid, jobId, m = {}) {
+  if (!env || !env.DB || !jobId) return;
+  await ensureTables5(env);
+  const t = Number(tid) || 1;
+  try {
+    await env.DB.prepare(`INSERT INTO fbc_meta
+      (tenant_id, job_id, reference, site_code, site_name, reported_by, job_title, w3w, quote_required, source, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(job_id) DO UPDATE SET
+        reference=excluded.reference, site_code=excluded.site_code, site_name=excluded.site_name,
+        reported_by=excluded.reported_by, job_title=excluded.job_title, w3w=excluded.w3w,
+        quote_required=excluded.quote_required, updated_at=excluded.updated_at`).bind(
+      t,
+      jobId,
+      m.reference || "",
+      m.siteCode || "",
+      m.siteName || "",
+      m.reportedBy || "",
+      m.jobTitle || "",
+      m.w3w || "",
+      m.quoteRequired ? 1 : 0,
+      m.source || "jotform",
+      now(),
+      now()
+    ).run();
+  } catch (e) {
+    console.log("recordFbcJob", String(e && e.message || e));
+  }
+}
+async function appendFbcMessage(env, tid, jobId, msg = {}) {
+  if (!env || !env.DB || !jobId) return;
+  await ensureTables5(env);
+  const t = Number(tid) || 1;
+  const mid = String(msg.messageId || "").trim();
+  const id = jobId + "|" + (mid || "n-" + Math.random().toString(36).slice(2, 10));
+  try {
+    await env.DB.prepare(`INSERT OR IGNORE INTO fbc_messages
+      (id, tenant_id, job_id, at, direction, from_addr, subject, body, message_id, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+      id,
+      t,
+      jobId,
+      msg.at || now(),
+      msg.direction || "in",
+      String(msg.from || "").slice(0, 200),
+      String(msg.subject || "").slice(0, 300),
+      String(msg.body || "").slice(0, 8e3),
+      mid,
+      now()
+    ).run();
+  } catch (e) {
+    console.log("appendFbcMessage", String(e && e.message || e));
+  }
+}
+async function handle17(request, env, ctx, url, sess) {
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess || !sess.user) return error("Login required", 401, env, request);
+  const tid = Number(await resolveTenantId(env, request)) || 1;
+  const perms = await permissionsFor(env, tid, sess.user.username);
+  const office = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  if (!office) return error("FBC access needs Full Access, SLA admin or Compliance.", 403, env, request);
+  await ensureTables5(env);
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/fbc(?=\/|$)/, "") || "/";
+  const DONE = /* @__PURE__ */ new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+  const shape2 = (m, j, msg) => {
+    const status = j && j.status || "";
+    const finished = DONE.has(String(status).toLowerCase());
+    const invStatus = m && m.invoice_status || "";
+    const invoiceState = invStatus === "invoiced" ? "invoiced" : invStatus === "not_required" ? "not_required" : finished ? "to_invoice" : "open";
+    let siteName = m && m.site_name || "";
+    if (!siteName && j && j.data) {
+      try {
+        siteName = JSON.parse(j.data).siteName || "";
+      } catch {
+      }
+    }
+    return {
+      jobId: m && m.job_id || j && j.id || "",
+      reference: j && j.helpdesk_ref || m && m.reference || "",
+      siteCode: m && m.site_code || j && j.site_code || "",
+      siteName: siteName || j && j.site_code || "",
+      status,
+      priority: j && j.priority || "",
+      assignedTo: j && j.assigned_to || "",
+      scheduledAt: j && j.scheduled_at || "",
+      raisedAt: j && j.created_at || m && m.created_at || "",
+      description: j && j.description || "",
+      reportedBy: m && m.reported_by || "",
+      jobTitle: m && m.job_title || "",
+      w3w: m && m.w3w || "",
+      quoteRequired: !!(m && m.quote_required),
+      quoteStatus: m && m.quote_status || "",
+      quoteAmount: m ? m.quote_amount : null,
+      cost: m ? m.cost : null,
+      poNumber: m && m.po_number || "",
+      invoiceMonth: m && m.invoice_month || "",
+      invoiceStatus: invStatus,
+      invoiceState,
+      invoicedAt: m && m.invoiced_at || "",
+      invoiceRef: m && m.invoice_ref || "",
+      source: m && m.source || (j ? "manual" : ""),
+      messageCount: msg && msg.n || 0,
+      lastMessageAt: msg && msg.last || "",
+      onBoard: !!j
+    };
+  };
+  if (sub === "/list" && method === "GET") {
+    const { results: metas } = await env.DB.prepare(
+      `SELECT m.*, j.id AS j_id, j.helpdesk_ref, j.status, j.priority, j.site_code AS j_site, j.assigned_to, j.scheduled_at, j.created_at AS j_created, j.description, j.data
+       FROM fbc_meta m LEFT JOIN sla_jobs j ON j.id=m.job_id AND j.tenant_id=?
+       WHERE m.tenant_id=?`
+    ).bind(tid, tid).all();
+    const { results: mc } = await env.DB.prepare(
+      "SELECT job_id, COUNT(*) AS n, MAX(at) AS last FROM fbc_messages WHERE tenant_id=? GROUP BY job_id"
+    ).bind(tid).all();
+    const msgBy = {};
+    for (const r of mc || []) msgBy[r.job_id] = { n: r.n, last: r.last };
+    const seen = /* @__PURE__ */ new Set();
+    const rows = (metas || []).map((r) => {
+      seen.add(r.job_id);
+      const j = r.j_id ? { id: r.j_id, helpdesk_ref: r.helpdesk_ref, status: r.status, priority: r.priority, site_code: r.j_site, assigned_to: r.assigned_to, scheduled_at: r.scheduled_at, created_at: r.j_created, description: r.description, data: r.data } : null;
+      return shape2(r, j, msgBy[r.job_id]);
+    });
+    const codes = await fbcSiteCodes(env, tid);
+    if (codes.length) {
+      const ph = codes.map(() => "?").join(",");
+      const { results: extra } = await env.DB.prepare(
+        `SELECT id, helpdesk_ref, status, priority, site_code, assigned_to, scheduled_at, created_at, description, data
+         FROM sla_jobs WHERE tenant_id=? AND site_code IN (${ph})`
+      ).bind(tid, ...codes).all();
+      for (const j of extra || []) {
+        if (seen.has(j.id)) continue;
+        rows.push(shape2(null, j, msgBy[j.id]));
+      }
+    }
+    rows.sort((a, b) => String(b.raisedAt).localeCompare(String(a.raisedAt)));
+    const months = [...new Set(rows.map((r) => r.invoiceMonth).filter(Boolean))].sort().reverse();
+    return json({ ok: true, rows, months }, {}, env, request);
+  }
+  if (sub === "/job" && method === "GET") {
+    const jobId = url.searchParams.get("id") || "";
+    if (!jobId) return error("id required", 400, env, request);
+    const m = await env.DB.prepare("SELECT * FROM fbc_meta WHERE tenant_id=? AND job_id=?").bind(tid, jobId).first();
+    const j = await env.DB.prepare("SELECT id, helpdesk_ref, status, priority, site_code, assigned_to, scheduled_at, created_at, description, data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+    if (!m && !j) return error("Not found", 404, env, request);
+    const { results: msgs } = await env.DB.prepare(
+      "SELECT at, direction, from_addr, subject, body FROM fbc_messages WHERE tenant_id=? AND job_id=? ORDER BY at DESC"
+    ).bind(tid, jobId).all();
+    const mcount = { n: (msgs || []).length, last: msgs && msgs[0] && msgs[0].at || "" };
+    return json({ ok: true, job: shape2(m, j, mcount), messages: msgs || [] }, {}, env, request);
+  }
+  if (sub === "/meta" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "");
+    if (!jobId) return error("jobId required", 400, env, request);
+    await env.DB.prepare("INSERT OR IGNORE INTO fbc_meta (tenant_id, job_id, source, created_at, updated_at) VALUES (?,?,?,?,?)").bind(tid, jobId, "manual", now(), now()).run();
+    const sets = [], vals = [];
+    const put = (col, v) => {
+      sets.push(col + "=?");
+      vals.push(v);
+    };
+    if ("cost" in b) put("cost", num2(b.cost));
+    if ("quoteAmount" in b) put("quote_amount", num2(b.quoteAmount));
+    if ("poNumber" in b) put("po_number", String(b.poNumber || "").slice(0, 60));
+    if ("invoiceMonth" in b) put("invoice_month", String(b.invoiceMonth || "").slice(0, 7));
+    if ("invoiceRef" in b) put("invoice_ref", String(b.invoiceRef || "").slice(0, 60));
+    if ("quoteStatus" in b) put("quote_status", ["", "needed", "sent", "approved", "declined"].includes(b.quoteStatus) ? b.quoteStatus : "");
+    if ("invoiceStatus" in b) {
+      const st = ["", "to_invoice", "invoiced", "not_required"].includes(b.invoiceStatus) ? b.invoiceStatus : "";
+      put("invoice_status", st);
+      if (st === "invoiced") {
+        put("invoiced_at", now());
+        if (!("invoiceMonth" in b)) put("invoice_month", monthOf(now()));
+      }
+    }
+    if (!sets.length) return json({ ok: true, unchanged: true }, {}, env, request);
+    put("updated_at", now());
+    vals.push(tid, jobId);
+    await env.DB.prepare(`UPDATE fbc_meta SET ${sets.join(", ")} WHERE tenant_id=? AND job_id=?`).bind(...vals).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/message" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "");
+    if (!jobId || !String(b.body || "").trim()) return error("jobId and body required", 400, env, request);
+    await appendFbcMessage(env, tid, jobId, { direction: "note", from: sess.user.username, subject: "", body: b.body, at: now() });
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown FBC route", 404, env, request);
+}
+
 // src/routes/emailjob.js
 init_push();
 init_once();
@@ -25837,7 +26135,7 @@ async function ensureTable__raw2(env) {
   }
 }
 var ensureTable2 = onceMigration(ensureTable__raw2);
-var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com"], aiAutoCreate: false };
+var DEFAULT_CFG = { enabled: true, allowFrom: ["concerto.co.uk", "chapplins.co.uk", "mostlane.com", "jotform.com"], aiAutoCreate: false };
 async function getIntakeConfig(env, tid) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "email:intake").first();
@@ -26147,8 +26445,8 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
   const text = String(msg.text || "").slice(0, 12e3);
   const base = { fields: null, reference: "", jobId: "", status: null, origFrom, subject, template: "", source: "" };
   if (!opts.dryRun && cfg.enabled === false) return { ...base, outcome: "ignored", reason: "Email intake is switched off" };
-  if (/^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread \u2014 not a new job", source: "template" };
   const tm = matchTemplate(sender, subject, text);
+  if (!(tm && tm.tpl.replyOk) && /^\s*(?:re|aw|antw|sv)\s*:/i.test(String(msg.subject || ""))) return { ...base, outcome: "dropped", reason: "Reply in an existing thread \u2014 not a new job", source: "template" };
   if (!opts.force && !tm && !templateDomain(sender) && !senderAllowed(cfg, origFrom, from)) return { ...base, outcome: "ignored", reason: "Sender not on the allow-list (" + sender + ")" };
   if (!opts.dryRun && !opts.force && msg.messageId) {
     try {
@@ -26189,8 +26487,19 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
         fields2.siteMatched = true;
       } else fields2.siteMatched = false;
     }
-    if (opts.dryRun) return { ...out2, fields: fields2, outcome: "dryrun", reason: "Would " + (fields2.reference ? "create/update job " + fields2.reference : "create a job") + (r.siteLookup ? fields2.siteMatched ? " at site " + fields2.siteCode : " (property not matched to a site \u2014 the office links it)" : ""), reference: fields2.reference || "", payload: jobPayload(fields2, sender) };
-    return { ...out2, fields: fields2, ...await createJob(env, ctx, fetchSelf, fields2, sender) };
+    if (opts.dryRun) return { ...out2, fields: fields2, outcome: "dryrun", reason: "Would " + (fields2.reference ? "create/update job " + fields2.reference : "create a job") + (r.siteLookup ? fields2.siteMatched ? " at site " + fields2.siteCode : " (property not matched to a site \u2014 the office links it)" : "") + (r.fbc ? " \xB7 FBC tracker" + (r.fbc.quoteRequired ? " (quote required)" : "") : ""), reference: fields2.reference || "", payload: jobPayload(fields2, sender) };
+    const made = await createJob(env, ctx, fetchSelf, fields2, sender);
+    if (r.fbc && made.jobId && (made.outcome === "created" || made.outcome === "updated")) {
+      try {
+        await recordFbcJob(env, tid, made.jobId, { ...r.fbc, siteCode: fields2.siteCode, siteName: fields2.siteName || r.fbc.siteName, reference: made.reference || fields2.reference });
+      } catch {
+      }
+      try {
+        await appendFbcMessage(env, tid, made.jobId, { direction: "in", from: origFrom || sender, subject, body: text, messageId: msg.messageId, at: msg.receivedAt });
+      } catch {
+      }
+    }
+    return { ...out2, fields: fields2, ...made };
   }
   let fields = null;
   if (!opts.noAi) fields = await aiExtract(env, { from: sender, subject, text });
@@ -26416,10 +26725,10 @@ async function autoCloseOverdue(env, tenantId, username) {
   const db = tenantDB(env, tenantId);
   const stmt = username ? db.prepare("SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0)").bind(tenantId, username) : db.prepare("SELECT * FROM office_shifts WHERE tenant_id=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0)").bind(tenantId);
   const { results } = await stmt.all();
-  const now = Date.now(), iso = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = Date.now(), iso = (/* @__PURE__ */ new Date()).toISOString();
   for (const r of results || []) {
     const cut = cutoffISOFor(r);
-    if (now <= Date.parse(cut)) continue;
+    if (now2 <= Date.parse(cut)) continue;
     await db.prepare(
       "UPDATE office_shifts SET clock_out=?, edited_by=?, edited_at=?, edit_note=?, updated_at=? WHERE id=? AND tenant_id=?"
     ).bind(
@@ -26499,7 +26808,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -26558,9 +26867,9 @@ async function handle17(request, env, ctx, url, sess) {
     await autoCloseOverdue(env, tenantId, me);
     const open = await openSegmentRow(env, tenantId, me);
     if (open) return json({ ok: true, already: true, open: { id: open.id, date: open.date, clockIn: effIn(open) } }, {}, env, request);
-    const now = /* @__PURE__ */ new Date();
-    const iso = now.toISOString();
-    const date = londonDate(now);
+    const now2 = /* @__PURE__ */ new Date();
+    const iso = now2.toISOString();
+    const date = londonDate(now2);
     const res = await db.prepare(
       "INSERT INTO office_shifts (username, tenant_id, date, clock_in, device_id, updated_at) VALUES (?,?,?,?,?,?)"
     ).bind(me, db.tenantId, date, iso, deviceId, iso).run();
@@ -26717,7 +27026,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -26838,7 +27147,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -27014,7 +27323,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -27261,7 +27570,7 @@ async function handle20(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const docType = String(b.doc_type || "");
     if (!PREFIX[docType]) return error("Unknown document type", 400, env, request);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const site = String(b.site || "").trim();
     const status = b.status === "closed" ? "closed" : "open";
     const data = b.data && typeof b.data === "object" ? b.data : {};
@@ -27270,12 +27579,12 @@ async function handle20(request, env, ctx, url, sess) {
       const existing = await db.prepare("SELECT id, ref FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
       if (!existing) return error("Document not found", 404, env, request);
       const ref2 = typedRef || existing.ref;
-      await db.prepare("UPDATE hs_documents SET ref=?, site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(ref2, site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
+      await db.prepare("UPDATE hs_documents SET ref=?, site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(ref2, site, status, JSON.stringify(data), now2, db.tenantId, b.id).run();
       return json({ ok: true, id: b.id, ref: ref2 }, {}, env, request);
     }
     const id = "HSD-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
     const ref = typedRef || await mintRef(db, docType, site);
-    await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
+    await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now2, now2).run();
     return json({ ok: true, id, ref }, {}, env, request);
   }
   if (path === "/hs/library" && method === "GET") {
@@ -27405,7 +27714,7 @@ async function handle20(request, env, ctx, url, sess) {
     const { results } = await db.prepare(
       "SELECT id, ref, site, data, created_by FROM hs_documents WHERE tenant_id=? AND doc_type='hotworks' AND status='open'"
     ).bind(db.tenantId).all();
-    const now = Date.now();
+    const now2 = Date.now();
     const isOffice = perms.FullAccess === "Yes";
     const me2 = sess.user.username;
     const items = [];
@@ -27416,7 +27725,7 @@ async function handle20(request, env, ctx, url, sess) {
       } catch {
       }
       const exp = d.expiresAt ? Date.parse(d.expiresAt) : NaN;
-      if (!exp || exp > now) continue;
+      if (!exp || exp > now2) continue;
       if (!isOffice && r.created_by !== me2) continue;
       items.push({ id: r.id, ref: r.ref, site: r.site, expiresAt: d.expiresAt });
     }
@@ -27796,7 +28105,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -27878,11 +28187,11 @@ async function handle21(request, env, ctx, url, sess) {
     const regOf = {};
     for (const u of urows || []) regOf[u.username] = u.vehicle_assigned || "";
     const items = JSON.stringify({ checklist: tpl.checklist, equipment: tpl.equipment, photoSlots: tpl.photoSlots });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const created = [];
     for (const un of usernames) {
       const id = "cvc-" + crypto.randomUUID().slice(0, 12);
-      await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, regOf[un] || "", tpl.id, tpl.name, items, "pending", me, now).run();
+      await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, regOf[un] || "", tpl.id, tpl.name, items, "pending", me, now2).run();
       created.push({ id, username: un });
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
         title: "Van check to complete",
@@ -27916,8 +28225,8 @@ async function handle21(request, env, ctx, url, sess) {
     const s = await getSettings(db);
     const items = JSON.stringify({ checklist: s.checklist || [], equipment: s.equipment || [], photoSlots: s.photoSlots || [] });
     const id = "cvc-" + crypto.randomUUID().slice(0, 12);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at,due_at,snooze) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, reg, "", "Van check \u2014 " + reg, items, "pending", me, now, dueAt, snooze).run();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at,due_at,snooze) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, reg, "", "Van check \u2014 " + reg, items, "pending", me, now2, dueAt, snooze).run();
     if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
       title: "Van check requested",
       body: `Please complete the van check for ${reg}.`,
@@ -28073,15 +28382,15 @@ async function handle21(request, env, ctx, url, sess) {
       issues,
       ...custom ? { custom } : {}
     });
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare(`
       INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
       VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(username, week) DO UPDATE SET
         vehicle=excluded.vehicle, checked_at=excluded.checked_at,
         safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
-    `).bind(db.tenantId, me, week, vehicle, now, b.safeToDrive === false ? 0 : 1, items, String(b.note || "").trim()).run();
-    if (customRow) await db.prepare("UPDATE custom_van_checks SET status='done', submitted_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, customRow.id).run();
+    `).bind(db.tenantId, me, week, vehicle, now2, b.safeToDrive === false ? 0 : 1, items, String(b.note || "").trim()).run();
+    if (customRow) await db.prepare("UPDATE custom_van_checks SET status='done', submitted_at=? WHERE tenant_id=? AND id=?").bind(now2, db.tenantId, customRow.id).run();
     if (alerts.length && (s2.alertUsers || []).length) {
       const who = `${sess.user.first_name || ""} ${sess.user.last_name || ""}`.trim() || me;
       const body = `${who} \u2014 ${vehicle}: ` + alerts.map((a) => `${a.label}: ${answerWord(a.answer)}`).join(", ");
@@ -28233,13 +28542,13 @@ async function handle21(request, env, ctx, url, sess) {
       if (!it.skipped) return json({ ok: true, already: true }, {}, env, request);
     }
     const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, who).first();
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const items = JSON.stringify({ skipped: true, skippedBy: me, skippedAt: now, source: "skip" });
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const items = JSON.stringify({ skipped: true, skippedBy: me, skippedAt: now2, source: "skip" });
     await db.prepare(`
       INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
       VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
-    `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now, null, items, "Skipped by " + me).run();
+    `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now2, null, items, "Skipped by " + me).run();
     return json({ ok: true, week: wk, skippedBy: me }, {}, env, request);
   }
   if (path === "/vancheck/unskip" && method === "POST") {
@@ -28295,7 +28604,7 @@ async function handle21(request, env, ctx, url, sess) {
       const statuses = await getGridStatuses(db);
       const gs = statuses.find((s) => s.key === String(b.status || "")) || statuses.find((s) => s.key === "skipped") || DEFAULT_GRID_STATUSES[0];
       const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, who).first();
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const items = JSON.stringify({
         override: true,
         status: gs.key,
@@ -28303,18 +28612,18 @@ async function handle21(request, env, ctx, url, sess) {
         tone: gs.tone,
         colour: gs.colour,
         by: me,
-        at: now,
+        at: now2,
         source: "override",
         // Keep the legacy flags so old readers still treat every override as a skip.
         skipped: true,
         skippedBy: me,
-        skippedAt: now
+        skippedAt: now2
       });
       await db.prepare(`
         INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
         VALUES (?,?,?,?,?,?,?,?)
         ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
-      `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now, null, items, gs.label + " (by " + me + ")").run();
+      `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now2, null, items, gs.label + " (by " + me + ")").run();
       return json({ ok: true, week: wk, status: "override", key: gs.key, label: gs.label, colour: gs.colour, tone: gs.tone }, {}, env, request);
     }
     if (action === "clear") {
@@ -28416,8 +28725,8 @@ async function remindDrivers(env, tid, week, payload) {
   }
   return { reminded: recipients.length, recipients };
 }
-async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
-  const d = new Date(now);
+async function sendWeeklyReminders(env, now2 = /* @__PURE__ */ new Date()) {
+  const d = new Date(now2);
   const nowMs = d.getTime();
   const lonDate = londonDate2(d);
   const lonHour = Number(d.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -28492,7 +28801,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -28502,10 +28811,10 @@ async function handle22(request, env, ctx, url, sess) {
   ).bind(db.tenantId, sess.user.username).all();
   const perms = new Set((permRows.results || []).map((r) => r.permission));
   if (!perms.has("FullAccess")) return json2({ error: "Full access only" }, 403, env, request);
-  const now = Date.now();
+  const now2 = Date.now();
   const isoMonthStart = new Date((/* @__PURE__ */ new Date()).getFullYear(), (/* @__PURE__ */ new Date()).getMonth(), 1).toISOString();
-  const iso7 = new Date(now - 7 * 864e5).toISOString();
-  const iso30 = new Date(now - 30 * 864e5).toISOString();
+  const iso7 = new Date(now2 - 7 * 864e5).toISOString();
+  const iso30 = new Date(now2 - 30 * 864e5).toISOString();
   const naive7 = iso7.replace("T", " ").slice(0, 19);
   const year = (/* @__PURE__ */ new Date()).getFullYear();
   const T3 = db.tenantId;
@@ -28736,7 +29045,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -29072,7 +29381,7 @@ async function computeDriverChecks(db) {
     };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -29272,14 +29581,14 @@ async function handle24(request, env, ctx, url, sess) {
     const name = String(b.name || "").trim().slice(0, 160);
     if (!name) return error("A subcontractor name is required.", 400, env, request);
     const key = nameKeyOf(name);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const existing = await db.prepare("SELECT name_key FROM staff_subcontractors WHERE tenant_id=? AND name_key=?").bind(db.tenantId, key).first();
     const trade = String(b.trade || "").slice(0, 120), contact = String(b.contact || "").slice(0, 120), phone = String(b.phone || "").slice(0, 60), email = String(b.email || "").slice(0, 160);
     const active = b.active === false ? 0 : 1;
     if (existing) {
-      await db.prepare("UPDATE staff_subcontractors SET name=?, trade=?, contact=?, phone=?, email=?, active=?, updated_at=? WHERE tenant_id=? AND name_key=?").bind(name, trade, contact, phone, email, active, now, db.tenantId, key).run();
+      await db.prepare("UPDATE staff_subcontractors SET name=?, trade=?, contact=?, phone=?, email=?, active=?, updated_at=? WHERE tenant_id=? AND name_key=?").bind(name, trade, contact, phone, email, active, now2, db.tenantId, key).run();
     } else {
-      await db.prepare("INSERT INTO staff_subcontractors (tenant_id, name_key, name, trade, contact, phone, email, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, key, name, trade, contact, phone, email, active, now, now).run();
+      await db.prepare("INSERT INTO staff_subcontractors (tenant_id, name_key, name, trade, contact, phone, email, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, key, name, trade, contact, phone, email, active, now2, now2).run();
     }
     if (active) ctx?.waitUntil ? ctx.waitUntil(poAddSubcontractor(env, name)) : await poAddSubcontractor(env, name);
     return json({ ok: true, nameKey: key, username: SUB_PREFIX + key }, {}, env, request);
@@ -29411,7 +29720,7 @@ async function handle24(request, env, ctx, url, sess) {
       data = JSON.parse(String(form.get("data") || "{}"));
     } catch {
     }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let existing = null;
     if (id) existing = await db.prepare("SELECT * FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
     const recId = existing ? existing.id : "SR-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
@@ -29421,7 +29730,7 @@ async function handle24(request, env, ctx, url, sess) {
     if (file && typeof file === "object" && file.size) {
       if (file.size > 25 * 1024 * 1024) return error("File too large (max 25 MB).", 400, env, request);
       const key = `staffrec/${db.tenantId}/${username}/${recId}/${Date.now()}-${safeName3(file.name)}`;
-      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { by: me, at: now } });
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" }, customMetadata: { by: me, at: now2 } });
       if (docKey && docKey !== key) {
         try {
           await env.JOB_FILES.delete(docKey);
@@ -29439,9 +29748,9 @@ async function handle24(request, env, ctx, url, sess) {
       docName = "";
     }
     if (existing) {
-      await db.prepare(`UPDATE staff_records SET username=?, kind=?, title=?, number=?, issuer=?, issued=?, expires=?, data=?, doc_key=?, doc_name=?, updated_at=? WHERE tenant_id=? AND id=?`).bind(username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, now, db.tenantId, recId).run();
+      await db.prepare(`UPDATE staff_records SET username=?, kind=?, title=?, number=?, issuer=?, issued=?, expires=?, data=?, doc_key=?, doc_name=?, updated_at=? WHERE tenant_id=? AND id=?`).bind(username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, now2, db.tenantId, recId).run();
     } else {
-      await db.prepare(`INSERT INTO staff_records (tenant_id, id, username, kind, title, number, issuer, issued, expires, data, doc_key, doc_name, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(db.tenantId, recId, username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, me, now, now).run();
+      await db.prepare(`INSERT INTO staff_records (tenant_id, id, username, kind, title, number, issuer, issued, expires, data, doc_key, doc_name, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(db.tenantId, recId, username, kind, title, number, issuer, issued, expires, JSON.stringify(data), docKey, docName, me, now2, now2).run();
     }
     const row = await db.prepare("SELECT * FROM staff_records WHERE tenant_id=? AND id=?").bind(db.tenantId, recId).first();
     return json({ ok: true, record: await shape(env, url.origin, row) }, {}, env, request);
@@ -29616,7 +29925,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -29729,7 +30038,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -29749,9 +30058,9 @@ async function handle26(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     if (path === "/sites/register/update") {
       const client = String(b.client || "").toLowerCase().trim();
-      const num2 = String(b.siteNumber || "").trim();
-      if (!client || !num2) return error("client and siteNumber required", 400, env, request);
-      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num2).first();
+      const num3 = String(b.siteNumber || "").trim();
+      if (!client || !num3) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num3).first();
       if (!row) return error("Site not found", 404, env, request);
       let data = {};
       try {
@@ -29775,7 +30084,7 @@ async function handle26(request, env, ctx, url, sess) {
         JSON.stringify(data),
         tid,
         client,
-        num2
+        num3
       ).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
@@ -29785,11 +30094,11 @@ async function handle26(request, env, ctx, url, sess) {
       const name = String(b.name || "").trim();
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
-      const num2 = slugNum(name);
+      const num3 = slugNum(name);
       const ll = parseLatLngPair(b.lat, b.lng);
       const data = {
         client,
-        siteNumber: num2,
+        siteNumber: num3,
         siteName: name,
         postcode: String(b.postcode || "").toUpperCase().trim(),
         addedVia: "register"
@@ -29801,10 +30110,10 @@ async function handle26(request, env, ctx, url, sess) {
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
-          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num3, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
-      return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
+      return json({ ok: true, client, siteNumber: num3, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
       const alias = normName(b.alias);
@@ -31164,9 +31473,9 @@ async function reconcileSitelogSessions(env, tid, opts) {
   const o = opts || {};
   if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
   await ensure3(env);
-  const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
-  const to = londonDate3(now.toISOString());
-  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const now2 = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
+  const to = londonDate3(now2.toISOString());
+  const fromD = new Date(now2.getTime() - (o.days || 4) * 864e5);
   const from = londonDate3(fromD.toISOString());
   const visits = await fetchSitelogVisits(env, from, to);
   if (!visits) return { ok: false, reason: "SiteLog unreachable" };
@@ -31287,12 +31596,12 @@ async function ratesMap(env, tid) {
   }
   try {
     const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
-    const num2 = (v) => {
+    const num3 = (v) => {
       const n = parseFloat(v);
       return isFinite(n) && n > 0 ? n : null;
     };
     const defs = cfg.defaults || {};
-    const defPence = num2(defs.pencePerMile);
+    const defPence = num3(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {};
       try {
@@ -31301,8 +31610,8 @@ async function ratesMap(env, tid) {
       }
       const mine = cfg.byUser && cfg.byUser[u.username] || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
-      const rate = num2(mine.rate) ?? (rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate);
-      const pence = num2(mine.pencePerMile) ?? defPence;
+      const rate = num3(mine.rate) ?? (rateType === "day" ? num3(profile.dayRate) : num3(profile.hourlyRate)) ?? num3(profile.hourlyRate);
+      const pence = num3(mine.pencePerMile) ?? defPence;
       const fuelPerMile = pence != null ? pence / 100 : null;
       out[u.username] = { rate, rateType, fuelPerMile };
     }
@@ -31862,11 +32171,11 @@ async function reassignRenewalJobs(env, tid, reg, newDriver) {
     const map = await appConfigJson(env, RENEWALACK_KEY(tid));
     const entry = map[regKey(reg)];
     if (!entry) return;
-    const now = Date.now();
+    const now2 = Date.now();
     for (const type of ["mot", "service"]) {
       const e = entry[type];
       if (!e || !e.jobId || !e.scheduledAt) continue;
-      if (Date.parse(e.scheduledAt) < now) continue;
+      if (Date.parse(e.scheduledAt) < now2) continue;
       const engineers = newDriver ? [newDriver] : await officeUsernames(env, tid);
       await createOrUpdateJobFromPayload(
         env,
@@ -32029,7 +32338,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -32242,12 +32551,12 @@ async function handle27(request, env, ctx, url, sess) {
       const username = String(b.username || "").trim();
       const from = /^\d{4}-\d{2}-\d{2}$/.test(b.fromDate || "") ? b.fromDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
       if (!reg) return jr4({ error: "reg required" }, headers, 400);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind(from, tid, reg).run();
       await env.DB.prepare("UPDATE users SET vehicle_assigned='' WHERE tenant_id=? AND vehicle_assigned=?").bind(tid, reg).run();
       if (username) {
         await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND username=? AND end_date IS NULL").bind(from, tid, username).run();
-        await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, username, from, null, sess.user.username, now).run();
+        await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, username, from, null, sess.user.username, now2).run();
         await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
       }
       await reassignRenewalJobs(env, tid, reg, username);
@@ -32429,7 +32738,7 @@ async function handle27(request, env, ctx, url, sess) {
     await ensureVehTable(env);
     const b = await readJson4(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
-    const num2 = (x) => {
+    const num3 = (x) => {
       const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
       return isNaN(n) ? null : n;
     };
@@ -32456,12 +32765,12 @@ async function handle27(request, env, ctx, url, sess) {
         v.taxDue || v.taxDate || "",
         v.nextServiceDate || v.serviceDate || "",
         v.notes || "",
-        num2(v.svcIntervalDays),
-        num2(v.svcIntervalMiles),
+        num3(v.svcIntervalDays),
+        num3(v.svcIntervalMiles),
         v.lastServiceDate || "",
-        num2(v.lastServiceMiles),
-        num2(v.warnDays),
-        num2(v.warnMiles),
+        num3(v.lastServiceMiles),
+        num3(v.warnDays),
+        num3(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
       if (v.specs !== void 0) {
@@ -32639,7 +32948,7 @@ async function handle27(request, env, ctx, url, sess) {
     }).filter((a) => a.cat);
     const file = form.get("file");
     const removeDoc = String(form.get("removeDoc") || "") === "1";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const existing = id && !isNaN(id) ? await env.DB.prepare("SELECT * FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
     let docKey = existing ? existing.doc_key || "" : "";
     let docName = existing ? existing.doc_name || "" : "";
@@ -32655,7 +32964,7 @@ async function handle27(request, env, ctx, url, sess) {
       docName = file.name || safe;
       await env.JOB_FILES.put(docKey, file.stream(), {
         httpMetadata: { contentType: file.type || "application/octet-stream" },
-        customMetadata: { name: docName, reg, by: sess.user.username, at: now }
+        customMetadata: { name: docName, reg, by: sess.user.username, at: now2 }
       });
     } else if (removeDoc && docKey) {
       try {
@@ -32671,7 +32980,7 @@ async function handle27(request, env, ctx, url, sess) {
     }
     const res = await env.DB.prepare(
       "INSERT INTO vehicle_maintenance (tenant_id,reg,date,description,allocs,doc_key,doc_name,by,at) VALUES (?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, reg, date, description, JSON.stringify(allocs), docKey, docName, sess.user.username, now).run();
+    ).bind(tid, reg, date, description, JSON.stringify(allocs), docKey, docName, sess.user.username, now2).run();
     return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
   }
   if (sub === "/maintenance-delete" && method === "POST") {
@@ -32787,7 +33096,7 @@ async function handle27(request, env, ctx, url, sess) {
     if (!reg || !date || !milesV) return jr4({ error: "reg, date and miles are required" }, headers, 400);
     const note = String(b.note || "").slice(0, 120);
     const id = parseInt(String(b.id || ""), 10);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     if (id && !isNaN(id)) {
       await env.DB.prepare("UPDATE odometer_readings SET reg=?,date=?,miles=?,note=?,source='manual' WHERE tenant_id=? AND id=?").bind(reg, date, milesV, note, tid, id).run();
       return jr4({ ok: true, id }, headers);
@@ -32797,7 +33106,7 @@ async function handle27(request, env, ctx, url, sess) {
       await env.DB.prepare("UPDATE odometer_readings SET miles=?,note=?,source='manual' WHERE tenant_id=? AND id=?").bind(milesV, note, tid, ex.id).run();
       return jr4({ ok: true, id: ex.id, updated: true }, headers);
     }
-    const res = await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?, 'manual')").bind(tid, reg, date, milesV, note, sess.user.username, now).run();
+    const res = await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?, 'manual')").bind(tid, reg, date, milesV, note, sess.user.username, now2).run();
     return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
   }
   if (sub === "/odometer/import" && method === "POST") {
@@ -32808,7 +33117,7 @@ async function handle27(request, env, ctx, url, sess) {
     if (!reg || !readings.length) return jr4({ error: "reg + readings required" }, headers, 400);
     const source = b.source === "manual" ? "manual" : "fuel";
     const rank = ODO_RANK[source] || 1;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let created = 0, updated = 0, skipped = 0;
     for (const rd of readings) {
       const date = /^\d{4}-\d{2}-\d{2}$/.test(rd.date || "") ? rd.date : "";
@@ -32826,7 +33135,7 @@ async function handle27(request, env, ctx, url, sess) {
         await env.DB.prepare("UPDATE odometer_readings SET miles=?,source=? WHERE tenant_id=? AND id=?").bind(milesV, source, tid, ex.id).run();
         updated++;
       } else {
-        await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, "", sess.user.username, now, source).run();
+        await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, "", sess.user.username, now2, source).run();
         created++;
       }
     }
@@ -32882,18 +33191,18 @@ async function handle27(request, env, ctx, url, sess) {
       const reg = String(b.reg || "").trim();
       if (!reg) return jr4({ error: "reg required" }, headers, 400);
       const f = b.finance && typeof b.finance === "object" ? b.finance : {};
-      const num2 = (x) => {
+      const num3 = (x) => {
         const n = Number(x);
         return isFinite(n) && n !== 0 ? n : x === 0 || x === "0" ? 0 : null;
       };
       const clean = {
         ownership: f.ownership === "financed" ? "financed" : "owned",
-        insuranceYear: num2(f.insuranceYear),
-        roadTaxYear: num2(f.roadTaxYear),
-        financeMonthly: num2(f.financeMonthly),
+        insuranceYear: num3(f.insuranceYear),
+        roadTaxYear: num3(f.roadTaxYear),
+        financeMonthly: num3(f.financeMonthly),
         financeEnd: /^\d{4}-\d{2}-\d{2}$/.test(f.financeEnd || "") ? f.financeEnd : "",
-        allowedMiles: num2(f.allowedMiles),
-        excessPence: num2(f.excessPence),
+        allowedMiles: num3(f.allowedMiles),
+        excessPence: num3(f.excessPence),
         note: String(f.note || "").slice(0, 300)
       };
       await env.DB.prepare("UPDATE vehicles SET finance=? WHERE tenant_id=? AND reg=?").bind(JSON.stringify(clean), tid, reg).run();
@@ -32935,12 +33244,12 @@ async function handle27(request, env, ctx, url, sess) {
       const { byCard } = await fuelCardMap(env, tid);
       const username = (byCard[card2] || {}).username || "";
       const id = parseInt(String(b.id || ""), 10);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       if (id && !isNaN(id)) {
         await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(card2, username, date, litres, cost, note, tid, id).run();
         return jr4({ ok: true, id }, headers);
       }
-      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card2, username, date, litres, cost, note, sess.user.username, now).run();
+      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card2, username, date, litres, cost, note, sess.user.username, now2).run();
       return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
     }
     if (sub === "/fuel/entry-delete" && method === "POST") {
@@ -32958,7 +33267,7 @@ async function handle27(request, env, ctx, url, sess) {
       const entries = Array.isArray(b.entries) ? b.entries : [];
       if (!entries.length) return jr4({ error: "no entries" }, headers, 400);
       if (entries.length > 2e3) return jr4({ error: "too many rows in one call (max 2000)" }, headers, 400);
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       let created = 0, updated = 0, skipped = 0;
       for (const e of entries) {
         const reg = String(e.reg || "").trim();
@@ -32980,7 +33289,7 @@ async function handle27(request, env, ctx, url, sess) {
             continue;
           }
         }
-        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card2, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
+        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card2, "", reg, ref, date, litres, cost, note, sess.user.username, now2).run();
         created++;
       }
       return jr4({ ok: true, created, updated, skipped, total: entries.length }, headers);
@@ -33333,11 +33642,11 @@ async function handle27(request, env, ctx, url, sess) {
     const reg = String(b.reg || "").trim();
     const username = String(b.username || "").trim();
     if (!reg || !username) return jr4({ error: "reg and username required" }, headers, 400);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare("UPDATE vehicle_handovers SET status='superseded' WHERE tenant_id=? AND reg=? AND username=? AND status='pending'").bind(tid, reg, username).run();
     const res = await env.DB.prepare(
       "INSERT INTO vehicle_handovers (tenant_id,reg,username,status,requested_by,requested_at) VALUES (?,?,?,?,?,?)"
-    ).bind(tid, reg, username, "pending", sess.user.username, now).run();
+    ).bind(tid, reg, username, "pending", sess.user.username, now2).run();
     const id = res.meta ? res.meta.last_row_id : null;
     if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
       title: "Van handover required",
@@ -33455,10 +33764,10 @@ async function handle27(request, env, ctx, url, sess) {
       source: "portal",
       alerts
     };
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare(
       "UPDATE vehicle_handovers SET status='done', completed_at=?, mileage=?, safe_to_drive=?, note=?, items=? WHERE tenant_id=? AND id=?"
-    ).bind(now, String(b.mileage || "").trim(), b.safeToDrive === false ? 0 : 1, String(b.note || "").slice(0, 1e3), JSON.stringify(items), tid, id).run();
+    ).bind(now2, String(b.mileage || "").trim(), b.safeToDrive === false ? 0 : 1, String(b.note || "").slice(0, 1e3), JSON.stringify(items), tid, id).run();
     if (row.requested_by && row.requested_by !== row.username && ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, row.requested_by, {
       title: "Van handover completed",
       body: `${row.username} completed the handover for ${row.reg}.`,
@@ -34438,12 +34747,12 @@ function financeOf(v) {
 }
 function runningCost(fin, fuelV, odoV, maint12) {
   fin = fin || {};
-  const num2 = (x) => {
+  const num3 = (x) => {
     const n = Number(x);
     return isFinite(n) ? n : 0;
   };
-  const insurance = num2(fin.insuranceYear), roadTax = num2(fin.roadTaxYear);
-  const finance = fin.ownership === "financed" ? num2(fin.financeMonthly) * 12 : 0;
+  const insurance = num3(fin.insuranceYear), roadTax = num3(fin.roadTaxYear);
+  const finance = fin.ownership === "financed" ? num3(fin.financeMonthly) * 12 : 0;
   let fuelYear = 0, fuelProjected = false, milesYear = 0;
   if (fuelV && fuelV.spend > 0 && fuelV.first && fuelV.last) {
     const days = Math.max(1, (Date.parse(fuelV.last) - Date.parse(fuelV.first)) / 864e5);
@@ -34454,9 +34763,9 @@ function runningCost(fin, fuelV, odoV, maint12) {
     const days = Math.max(1, (Date.parse(odoV.last) - Date.parse(odoV.first)) / 864e5);
     milesYear = odoV.milesDriven / days * 365;
   }
-  const maintenance = num2(maint12);
+  const maintenance = num3(maint12);
   let excess = 0, excessProjected = false;
-  const allowed = num2(fin.allowedMiles), excessPence = num2(fin.excessPence);
+  const allowed = num3(fin.allowedMiles), excessPence = num3(fin.excessPence);
   if (fin.ownership === "financed" && allowed > 0 && excessPence > 0 && milesYear > allowed) {
     excess = (milesYear - allowed) * excessPence / 100;
     excessProjected = true;
@@ -34699,7 +35008,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -35093,7 +35402,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -35603,7 +35912,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -35622,15 +35931,15 @@ async function handle30(request, env, ctx, url, sess) {
     const title = String(b.title || "").trim();
     const body = String(b.body || "");
     if (!title) return jr7({ error: "Title required" }, headers, 400);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const id = parseInt(b.id, 10) || 0;
     if (id) {
       const row = await env.DB.prepare("SELECT id FROM doc_templates WHERE tenant_id=? AND id=?").bind(tid, id).first();
       if (!row) return jr7({ error: "Not found" }, headers, 404);
-      await env.DB.prepare("UPDATE doc_templates SET title=?, body=?, updated_at=? WHERE tenant_id=? AND id=?").bind(title, body, now, tid, id).run();
+      await env.DB.prepare("UPDATE doc_templates SET title=?, body=?, updated_at=? WHERE tenant_id=? AND id=?").bind(title, body, now2, tid, id).run();
       return jr7({ ok: true, id }, headers);
     }
-    const res = await env.DB.prepare("INSERT INTO doc_templates (tenant_id, title, body, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?)").bind(tid, title, body, me, now, now).run();
+    const res = await env.DB.prepare("INSERT INTO doc_templates (tenant_id, title, body, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?)").bind(tid, title, body, me, now2, now2).run();
     const newId4 = res.meta ? res.meta.last_row_id : 0;
     const ref = "MOS-DOC-" + String(newId4).padStart(4, "0");
     await env.DB.prepare("UPDATE doc_templates SET ref=? WHERE tenant_id=? AND id=?").bind(ref, tid, newId4).run();
@@ -35829,7 +36138,7 @@ init_auth();
 var CLIENT = "chapplins";
 var SCHEME = "chapplins";
 var _ready = false;
-async function ensureTables5(env, tenantId) {
+async function ensureTables6(env, tenantId) {
   if (_ready) return;
   const db = tenantDB(env, tenantId);
   await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
@@ -35884,14 +36193,14 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
-  await ensureTables5(env, tenantId);
+  await ensureTables6(env, tenantId);
   if (path === "/chapplins/sites" && method === "GET") {
     const { results: siteRows } = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
@@ -35923,28 +36232,28 @@ async function handle31(request, env, ctx, url, sess) {
     } catch {
     }
     const sites = (siteRows || []).map((s) => {
-      const num2 = String(s.site_number);
-      const tens = (tenBySite[num2] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+      const num3 = String(s.site_number);
+      const tens = (tenBySite[num3] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
       const cur = tens.find((t) => t.is_current) || tens[0] || null;
       return {
-        siteNumber: num2,
+        siteNumber: num3,
         siteName: s.site_name || "",
         postcode: s.postcode || "",
         active: s.active == null ? 1 : s.active,
-        jobCount: jobCount[String(Number(num2))] || jobCount[num2] || 0,
+        jobCount: jobCount[String(Number(num3))] || jobCount[num3] || 0,
         tenantCount: tens.length,
         currentTenant: cur ? { ref: cur.ref || "", name: cur.name || "", phone: cur.phone || "", email: cur.email || "" } : null,
-        due: dueByCode[num2] || {}
+        due: dueByCode[num3] || {}
       };
     });
     return json({ ok: true, sites, count: sites.length }, {}, env, request);
   }
   if (path === "/chapplins/site" && method === "GET") {
-    const num2 = String(q.get("number") || "").trim();
-    if (!num2) return error("number required", 400, env, request);
+    const num3 = String(q.get("number") || "").trim();
+    if (!num3) return error("number required", 400, env, request);
     const s = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? AND site_number=?"
-    ).bind(tenantId, CLIENT, num2).first();
+    ).bind(tenantId, CLIENT, num3).first();
     if (!s) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -35953,11 +36262,11 @@ async function handle31(request, env, ctx, url, sess) {
     }
     const { results: tenRows } = await db.prepare(
       "SELECT * FROM site_tenants WHERE tenant_id=? AND client=? AND site_number=? ORDER BY is_current DESC, last_seen DESC"
-    ).bind(tenantId, CLIENT, num2).all();
+    ).bind(tenantId, CLIENT, num3).all();
     const tenants = (tenRows || []).map(tenantOut);
     let jobs = [];
     try {
-      const code = String(Number(num2));
+      const code = String(Number(num3));
       const { results: jr8 } = await db.prepare(
         "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
       ).bind(tenantId, code).all();
@@ -36299,8 +36608,8 @@ function graphConfigured(env) {
 }
 var _tok = { value: "", exp: 0 };
 async function getToken(env) {
-  const now = Date.now();
-  if (_tok.value && now < _tok.exp - 6e4) return _tok.value;
+  const now2 = Date.now();
+  if (_tok.value && now2 < _tok.exp - 6e4) return _tok.value;
   const url = `https://login.microsoftonline.com/${encodeURIComponent(env.GRAPH_TENANT_ID)}/oauth2/v2.0/token`;
   const body = new URLSearchParams({
     client_id: env.GRAPH_CLIENT_ID,
@@ -36314,7 +36623,7 @@ async function getToken(env) {
     const msg = j && (j.error_description || j.error) || "HTTP " + r.status;
     throw new Error("Graph sign-in failed: " + String(msg).split("\n")[0].slice(0, 200));
   }
-  _tok = { value: j.access_token, exp: now + Number(j.expires_in || 3600) * 1e3 };
+  _tok = { value: j.access_token, exp: now2 + Number(j.expires_in || 3600) * 1e3 };
   return _tok.value;
 }
 async function graphGet(env, path, { raw } = {}) {
@@ -36591,7 +36900,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const path = url.pathname.replace(/^\/po/, "") || "/";
@@ -36896,8 +37205,8 @@ async function updateConfig(db, body) {
 }
 async function getSystemStatus(db) {
   const config = await getConfigMap(db);
-  const now = /* @__PURE__ */ new Date();
-  const ukTime = new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const now2 = /* @__PURE__ */ new Date();
+  const ukTime = new Date(now2.toLocaleString("en-US", { timeZone: "Europe/London" }));
   const dayMap = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
   const today = dayMap[ukTime.getDay()];
   const todayDate = ukTime.toISOString().split("T")[0];
@@ -37038,7 +37347,7 @@ async function writeInvoiceToPo(env, db, sess, origin, o) {
     at: (/* @__PURE__ */ new Date()).toISOString(),
     graph: o.graph || null
   });
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const fields = [
     "cost_ex_vat = ?",
     "invoice_key = ?",
@@ -37048,7 +37357,7 @@ async function writeInvoiceToPo(env, db, sess, origin, o) {
     "last_edited_by_name = ?",
     "last_edited_at = ?"
   ];
-  const binds = [o.cost, key, meta, now, userSlug(sess), userName(sess), now];
+  const binds = [o.cost, key, meta, now2, userSlug(sess), userName(sess), now2];
   if (o.vatRate != null) {
     fields.push("vat_rate = ?");
     binds.push(o.vatRate);
@@ -37181,7 +37490,7 @@ async function addInvoiceFlag(env, db, sess, request) {
       key = null;
     }
   }
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const res = await db.prepare(`INSERT INTO invoice_flags
     (tenant_id, supplier, invoice_no, invoice_date, net, vat, gross, engineer_slug, engineer_name,
      job_id, job_ref, po_number, note, status, invoice_key, filename, source, created_by, created_at)
@@ -37204,7 +37513,7 @@ async function addInvoiceFlag(env, db, sess, request) {
     filename || null,
     b.source || "sweep",
     userName(sess),
-    now
+    now2
   ).run();
   if (b.message_id && b.attachment_id) {
     await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull2(b.po_number));
@@ -38053,7 +38362,7 @@ function userName2(sess) {
   const u = sess && sess.user || {};
   return (u.name || ((u.first_name || u.FirstName || "") + " " + (u.last_name || u.LastName || "")).trim() || u.username || "").trim();
 }
-async function ensureTables__raw4(db) {
+async function ensureTables__raw5(db) {
   for (const ddl of [
     `CREATE TABLE IF NOT EXISTS acct_documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT,
@@ -38078,7 +38387,7 @@ async function ensureTables__raw4(db) {
     }
   }
 }
-var ensureTables6 = onceMigration(ensureTables__raw4);
+var ensureTables7 = onceMigration(ensureTables__raw5);
 function bytesToBase642(bytes) {
   try {
     const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -38180,12 +38489,12 @@ function normIso(s) {
   const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
   return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}` : null;
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("Accounts database not bound (PO_DB)", 500, env, request);
   const path = url.pathname.replace(/^\/accounts/, "") || "/";
   const method = request.method.toUpperCase();
-  await ensureTables6(db);
+  await ensureTables7(db);
   if (path === "/doc-file" && method === "GET") return serveDocFile(request, env, url);
   if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
   if (String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
@@ -38256,7 +38565,7 @@ async function uploadDoc(env, db, sess, origin, request) {
   const kind = kindHint || (isStatement ? "statement" : read.docType === "invoice" || read.docType === "receipt" ? read.docType : "other");
   const dates = read.lines.map((l) => l.date).filter(Boolean).sort();
   const docDate = dates.length ? dates[dates.length - 1] : null;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const res = await db.prepare(`INSERT INTO acct_documents
     (tenant_id, kind, filename, r2_key, content_type, supplier, doc_date, period, amount, doc_type, source, status, line_count, created_by, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
@@ -38274,14 +38583,14 @@ async function uploadDoc(env, db, sess, origin, request) {
     "open",
     read.lines.length,
     userName2(sess),
-    now
+    now2
   ).run();
   const docId = res && res.meta && res.meta.last_row_id;
   if (docId && read.lines.length) await insertLines(db, sess, docId, read.lines);
   return { ok: true, id: docId, kind, docType: read.docType, supplier: read.supplier, lineCount: read.lines.length, unreadable: read.docType === "unreadable" };
 }
 async function insertLines(db, sess, docId, lines) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   for (const l of lines) {
     try {
       await db.prepare(`INSERT INTO acct_statement_lines
@@ -38294,7 +38603,7 @@ async function insertLines(db, sess, docId, lines) {
         numOrNull3(l.amount),
         vatQuarter2(l.date),
         "open",
-        now
+        now2
       ).run();
     } catch {
     }
@@ -38496,7 +38805,7 @@ async function setSupplierCheck(db, sess, b) {
   if (!name) return { error: "No name" };
   const key = normKey2(name);
   const checked = b.checked ? 1 : 0;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
   await db.prepare(`INSERT INTO acct_supplier_check (tenant_id, period, party_key, name, kind, checked, checked_by, checked_at, note)
     VALUES (?,?,?,?,?,?,?,?,?)
     ON CONFLICT(tenant_id, period, party_key) DO UPDATE SET
@@ -38509,7 +38818,7 @@ async function setSupplierCheck(db, sess, b) {
     String(b.kind || "supplier"),
     checked,
     checked ? userName2(sess) : null,
-    checked ? now : null,
+    checked ? now2 : null,
     b.note !== void 0 ? b.note || null : null
   ).run();
   return { ok: true };
@@ -38591,10 +38900,10 @@ function londonISO(date, hhmm) {
 async function resolveSite2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { ok: false };
-  const num2 = q.replace(/\D/g, "");
+  const num3 = q.replace(/\D/g, "");
   try {
-    if (num2) {
-      const cands = [num2, num2.padStart(4, "0"), String(Number(num2))];
+    if (num3) {
+      const cands = [num3, num3.padStart(4, "0"), String(Number(num3))];
       for (const c of [...new Set(cands)]) {
         const r = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND site_number=? AND active=1 LIMIT 1").bind(tid, c).first();
         if (r) return siteOut(r);
@@ -39051,7 +39360,7 @@ function simEmpat(sites, m, opts) {
   const DAY_START = 420, DAY_END = 990;
   const firstOpen = sites[order[0]].win && sites[order[0]].win.from != null ? sites[order[0]].win.from : DAY_START;
   const dayStart = Math.max(DAY_START, firstOpen - tv(0, idx(order[0])));
-  let now = dayStart, loc = 0;
+  let now2 = dayStart, loc = 0;
   const started = {}, per = {}, pending = [], steps = [], warnings = [];
   let ni = 0;
   while (ni < order.length || pending.length) {
@@ -39064,62 +39373,62 @@ function simEmpat(sites, m, opts) {
       else {
         const tNs = tv(loc, idx(ns));
         const back2 = tv(idx(ns), idx(chk));
-        if (now + tNs + A + back2 > started[chk].due + SLACK) doCheck = true;
+        if (now2 + tNs + A + back2 > started[chk].due + SLACK) doCheck = true;
       }
     }
     if (doCheck && chk != null) {
       const t = tv(loc, idx(chk));
       if (t > 0) {
-        steps.push({ t: now, kind: "travel", mins: t });
-        now += t;
+        steps.push({ t: now2, kind: "travel", mins: t });
+        now2 += t;
         loc = idx(chk);
       }
-      if (now < started[chk].due) {
-        const w2 = started[chk].due - now;
-        steps.push({ t: now, kind: "wait", mins: w2 });
-        now += w2;
+      if (now2 < started[chk].due) {
+        const w2 = started[chk].due - now2;
+        steps.push({ t: now2, kind: "wait", mins: w2 });
+        now2 += w2;
       }
-      steps.push({ t: now, kind: "check", site: chk, mins: CHK });
-      per[chk].check = now;
-      const lateBy = now - started[chk].onTime;
+      steps.push({ t: now2, kind: "check", site: chk, mins: CHK });
+      per[chk].check = now2;
+      const lateBy = now2 - started[chk].onTime;
       if (lateBy > LATE) warnings.push(sites[chk].code + ": light check " + (lateBy - LATE) + "m past the 3-hour limit \u2014 lights may have dropped");
       const w = sites[chk].win;
-      if (w && w.to != null && now + CHK > w.to) warnings.push(sites[chk].code + ": light check after the site closes (" + w.label + ")");
-      now += CHK;
+      if (w && w.to != null && now2 + CHK > w.to) warnings.push(sites[chk].code + ": light check after the site closes (" + w.label + ")");
+      now2 += CHK;
       pending.splice(pending.indexOf(chk), 1);
     } else if (ns != null) {
       const t = tv(loc, idx(ns));
       if (t > 0) {
-        steps.push({ t: now, kind: "travel", mins: t });
-        now += t;
+        steps.push({ t: now2, kind: "travel", mins: t });
+        now2 += t;
         loc = idx(ns);
       }
       const w = sites[ns].win;
-      if (w && w.from != null && now < w.from) {
-        const wait = w.from - now;
-        steps.push({ t: now, kind: "wait", mins: wait });
-        now += wait;
+      if (w && w.from != null && now2 < w.from) {
+        const wait = w.from - now2;
+        steps.push({ t: now2, kind: "wait", mins: wait });
+        now2 += wait;
       }
-      steps.push({ t: now, kind: "onsite", site: ns, mins: A });
-      started[ns] = { onTime: now, due: now + DUE };
-      per[ns] = { emOn: now };
+      steps.push({ t: now2, kind: "onsite", site: ns, mins: A });
+      started[ns] = { onTime: now2, due: now2 + DUE };
+      per[ns] = { emOn: now2 };
       pending.push(ns);
-      if (now > latestOn[ns] + SLACK) warnings.push(sites[ns].code + ": lights on at " + minToHm(now) + " \u2014 too late to check before it closes (" + (w ? w.label : "") + "); needs lights on by " + minToHm(latestOn[ns]) + ", so move it to another day");
-      else if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
-      now += A;
+      if (now2 > latestOn[ns] + SLACK) warnings.push(sites[ns].code + ": lights on at " + minToHm(now2) + " \u2014 too late to check before it closes (" + (w ? w.label : "") + "); needs lights on by " + minToHm(latestOn[ns]) + ", so move it to another day");
+      else if (w && w.to != null && now2 + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
+      now2 += A;
       ni++;
     } else break;
   }
-  const lastWork = now;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  const lastWork = now2;
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
-    steps.push({ t: now, kind: "travel", mins: back });
-    now += back;
+    steps.push({ t: now2, kind: "travel", mins: back });
+    now2 += back;
   }
-  return { steps, startMin: dayStart, endMin: now, per, warnings };
+  return { steps, startMin: dayStart, endMin: now2, per, warnings };
 }
 async function complianceClosed(env, tid, code) {
   try {
@@ -39213,12 +39522,12 @@ async function toolFindSite(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { count: 0, sites: [] };
   const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
-  const num2 = q.replace(/\D/g, "");
+  const num3 = q.replace(/\D/g, "");
   const binds = [tid, like, like];
   let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
-  if (num2) {
+  if (num3) {
     sql += " OR site_number IN (?,?,?)";
-    binds.push(num2, num2.padStart(4, "0"), String(Number(num2) || ""));
+    binds.push(num3, num3.padStart(4, "0"), String(Number(num3) || ""));
   }
   sql += ") ORDER BY length(site_name) LIMIT 10";
   const { results } = await env.DB.prepare(sql).bind(...binds).all();
@@ -39245,12 +39554,12 @@ async function toolFindCompliance(env, tid, caps2, query, scheme) {
   const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
   if (bare) {
     const like = "%" + likeKey2(bare.replace(/[%_]/g, "")) + "%";
-    const num2 = bare.replace(/\D/g, "");
+    const num3 = bare.replace(/\D/g, "");
     sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
     binds.push(like, like);
-    if (num2) {
+    if (num3) {
       sql += " OR code IN (?,?,?)";
-      binds.push(num2, num2.padStart(4, "0"), String(Number(num2) || ""));
+      binds.push(num3, num3.padStart(4, "0"), String(Number(num3) || ""));
     }
     sql += ")";
   }
@@ -39410,7 +39719,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -39841,7 +40150,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -40223,7 +40532,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables__raw5(env) {
+async function ensureTables__raw6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -40239,7 +40548,7 @@ async function ensureTables__raw5(env) {
     }
   }
 }
-var ensureTables7 = onceMigration(ensureTables__raw5);
+var ensureTables8 = onceMigration(ensureTables__raw6);
 function lonYMD(d) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -40264,8 +40573,8 @@ function mondayOf5(ymd2) {
   return d.toISOString().slice(0, 10);
 }
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
-function occurrence(task, now) {
-  const today = lonYMD(now);
+function occurrence(task, now2) {
+  const today = lonYMD(now2);
   const [Y, M8] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
@@ -40334,8 +40643,8 @@ async function autoDone(env, tid, task, user, startAt) {
     return false;
   }
 }
-async function statusFor(env, tid, task, user, now, doneMap) {
-  const occ = occurrence(task, now);
+async function statusFor(env, tid, task, user, now2, doneMap) {
+  const occ = occurrence(task, now2);
   const manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
     "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
   ).bind(tid, task.id, user, occ.periodKey).first().then((r) => r && r.done_at);
@@ -40371,7 +40680,7 @@ function shapeTask(t) {
     link: t.link || ""
   };
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -40391,7 +40700,7 @@ async function handle36(request, env, ctx, url, sess) {
       for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
       if (diff !== 0) return json({ ok: false, error: "Bad token" }, { status: 401 }, env, request);
       const tid2 = await resolveTenantId(env, request);
-      await ensureTables7(env);
+      await ensureTables8(env);
       const b = await request.json().catch(() => ({}));
       const action = String(b.action || "").toLowerCase();
       const extKey0 = String(b.externalId || b.externalKey || b.messageId || "").slice(0, 200);
@@ -40442,7 +40751,7 @@ async function handle36(request, env, ctx, url, sess) {
       const category = String(b.category || "Emails").trim().slice(0, 40) || "Emails";
       const refRaw = String(b.date || b.receivedAt || b.emailDate || "").slice(0, 25);
       const refDate = /^\d{4}-\d{2}-\d{2}/.test(refRaw) ? refRaw.slice(0, 10) : null;
-      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
       let id = null, created = true;
       if (extKey) {
         try {
@@ -40476,8 +40785,8 @@ async function handle36(request, env, ctx, url, sess) {
         "",
         1,
         "inbound",
-        now,
-        now,
+        now2,
+        now2,
         String(b.source || "outlook").slice(0, 40),
         extKey || null,
         category,
@@ -40494,26 +40803,26 @@ async function handle36(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables7(env);
+  await ensureTables8(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
-    const now = /* @__PURE__ */ new Date();
+    const now2 = /* @__PURE__ */ new Date();
     const mine = (await activeTasks()).filter((t) => parseAssignees(t).includes(me));
     const out = [];
     for (const t of mine) {
-      const st = await statusFor(env, tid, t, me, now);
+      const st = await statusFor(env, tid, t, me, now2);
       out.push({ ...shapeTask(t), status: st });
     }
     out.sort((a, b) => a.status.done - b.status.done || new Date(a.status.dueAt) - new Date(b.status.dueAt));
     return json({ ok: true, tasks: out }, {}, env, request);
   }
   if (sub === "/attention" && method === "GET") {
-    const now = /* @__PURE__ */ new Date();
+    const now2 = /* @__PURE__ */ new Date();
     const mine = (await activeTasks()).filter((t) => parseAssignees(t).includes(me));
     let outstanding = 0, overdue = 0;
     for (const t of mine) {
-      const st = await statusFor(env, tid, t, me, now);
+      const st = await statusFor(env, tid, t, me, now2);
       if (!st.done) {
         outstanding++;
         if (st.overdue) overdue++;
@@ -40543,7 +40852,7 @@ async function handle36(request, env, ctx, url, sess) {
   }
   if (sub === "/admin" && method === "GET") {
     if (!await isFull4()) return error("Forbidden", 403, env, request);
-    const now = /* @__PURE__ */ new Date();
+    const now2 = /* @__PURE__ */ new Date();
     const { results: rows } = await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? ORDER BY created_at DESC").bind(tid).all();
     const users = /* @__PURE__ */ new Set();
     for (const t of rows || []) parseAssignees(t).forEach((u) => users.add(u));
@@ -40555,7 +40864,7 @@ async function handle36(request, env, ctx, url, sess) {
       const area = t.area || "";
       const people = [];
       for (const u of assignees) {
-        const st = t.active ? await statusFor(env, tid, t, u, now) : null;
+        const st = t.active ? await statusFor(env, tid, t, u, now2) : null;
         const p = permCache[u] || {};
         const hasAccess = !area || p.FullAccess === "Yes" || p[area] === "Yes";
         people.push({ username: u, status: st, hasAccess });
@@ -40574,7 +40883,7 @@ async function handle36(request, env, ctx, url, sess) {
     if (!assignees.length) return error("Pick at least one person.", 400, env, request);
     const area = AREA_BY_KEY[String(b.area || "")] ? String(b.area) : "";
     const autoMatch = b.autoComplete === false ? "" : b.autoMatch != null ? String(b.autoMatch) : (AREA_BY_KEY[area] || {}).auto || "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
     const id = String(b.id || "") || crypto.randomUUID();
     const existing = b.id ? await env.DB.prepare("SELECT created_at, created_by FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
@@ -40601,8 +40910,8 @@ async function handle36(request, env, ctx, url, sess) {
       autoMatch,
       b.active === false ? 0 : 1,
       existing && existing.created_by || me,
-      existing && existing.created_at || now,
-      now,
+      existing && existing.created_at || now2,
+      now2,
       category
     ).run();
     if (ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid, u, { title: "New task assigned", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
@@ -40630,10 +40939,10 @@ async function handle36(request, env, ctx, url, sess) {
   }
   return error("Unknown tasks route", 404, env, request);
 }
-async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
-  const lonHour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+async function sweepTaskReminders(env, now2 = /* @__PURE__ */ new Date()) {
+  const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
   if (lonHour !== 8) return { ran: false, reason: "not-8am" };
-  const today = lonYMD(now);
+  const today = lonYMD(now2);
   let tenants = [];
   try {
     tenants = ((await env.DB.prepare("SELECT DISTINCT tenant_id FROM admin_tasks WHERE active=1").all()).results || []).map((r) => r.tenant_id);
@@ -40657,7 +40966,7 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
     const perUser = {};
     for (const t of rows || []) {
       for (const u of parseAssignees(t)) {
-        const st = await statusFor(env, tid, t, u, now);
+        const st = await statusFor(env, tid, t, u, now2);
         if (!st.done) {
           perUser[u] = perUser[u] || { n: 0, overdue: 0 };
           perUser[u].n++;
@@ -40904,13 +41213,13 @@ init_logo();
 init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables__raw6(env) {
+async function ensureTables__raw7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
-var ensureTables8 = onceMigration(ensureTables__raw6);
+var ensureTables9 = onceMigration(ensureTables__raw7);
 async function getConfig5(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
@@ -40943,13 +41252,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables8(env);
+  await ensureTables9(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -40995,14 +41304,14 @@ async function handle37(request, env, ctx, url, sess) {
   }
   if (sub === "/save" && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const id = b.id || "cc:" + now.replace(/[-:.TZ]/g, "").slice(0, 14) + ":" + Math.random().toString(36).slice(2, 6);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const id = b.id || "cc:" + now2.replace(/[-:.TZ]/g, "").slice(0, 14) + ":" + Math.random().toString(36).slice(2, 6);
     const rec = b.record || {};
     const inp = rec.inputs || {}, m = rec.meta || {};
     const ref = b.ref || rec.ref || "";
     const outcome = rec.incomplete ? "incomplete" : rec.pass ? "compliant" : "not-compliant";
     const exists = await env.DB.prepare("SELECT id,created_at FROM cable_calcs WHERE tenant_id=? AND id=?").bind(tid, id).first();
-    const created = exists && exists.created_at ? exists.created_at : now;
+    const created = exists && exists.created_at ? exists.created_at : now2;
     await env.DB.prepare(`INSERT INTO cable_calcs
       (id,tenant_id,ref,title,client,site,circuit_ref,inputs,results,engineer,outcome,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -41021,7 +41330,7 @@ async function handle37(request, env, ctx, url, sess) {
       m.engineer || me,
       outcome,
       created,
-      now
+      now2
     ).run();
     return json({ ok: true, id, ref }, {}, env, request);
   }
@@ -41415,9 +41724,9 @@ function buildProgrammePdf(data, meta = {}) {
           doc.text(x + 1, gridTop + 8, "BH", { size: 5.4, color: [0.7, 0.45, 0.05] });
         }
         if (dayW >= 8 || isMon || first2) {
-          const num2 = p2(d.getUTCDate());
-          if (x + 1 + textWidth(num2, 5.6) <= rightEdge)
-            doc.text(x + 1, gridTop + 17.5, num2, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
+          const num3 = p2(d.getUTCDate());
+          if (x + 1 + textWidth(num3, 5.6) <= rightEdge)
+            doc.text(x + 1, gridTop + 17.5, num3, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
         }
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
@@ -41535,7 +41844,7 @@ function buildProgrammePdf(data, meta = {}) {
 // src/routes/programmes.js
 init_once();
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables__raw7(env) {
+async function ensureTables__raw8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -41564,7 +41873,7 @@ async function ensureTables__raw7(env) {
   } catch {
   }
 }
-var ensureTables9 = onceMigration(ensureTables__raw7);
+var ensureTables10 = onceMigration(ensureTables__raw8);
 async function bankHolidayDates(db) {
   const y = (/* @__PURE__ */ new Date()).getFullYear();
   const years = [y - 1, y, y + 1, y + 2];
@@ -41686,14 +41995,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle38(request, env, ctx, url) {
+async function handle39(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables9(env);
+  await ensureTables10(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -41871,7 +42180,7 @@ async function handle38(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     const c = cleanData(b.data);
     if (c.error) return json4({ ok: false, error: c.error }, 400);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const title = String(b.title ?? c.obj.title ?? "").slice(0, 200) || "Untitled programme";
     const client = String(b.client ?? c.obj.client ?? "").slice(0, 200);
     const site = String(b.site ?? c.obj.site ?? "").slice(0, 200);
@@ -41884,13 +42193,13 @@ async function handle38(request, env, ctx, url) {
       }
       await db.prepare(
         "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=?, updated_by=? WHERE id=? AND tenant_id=?"
-      ).bind(title, client, site, c.json, now, me, id, db.tenantId).run();
+      ).bind(title, client, site, c.json, now2, me, id, db.tenantId).run();
     } else {
       id = newId2("PRG");
       await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now, me).run();
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now2, now2, me).run();
     }
-    return json4({ ok: true, id, updatedAt: now });
+    return json4({ ok: true, id, updatedAt: now2 });
   }
   if (method === "POST" && pathname === "/prog/ai-draft") {
     const key = env.ANTHROPIC_API_KEY;
@@ -42068,9 +42377,9 @@ async function handle38(request, env, ctx, url) {
       tasks
     };
     const id = newId2("PRG");
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, data.title, data.client, data.site, JSON.stringify(data), me, now, now, me).run();
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, data.title, data.client, data.site, JSON.stringify(data), me, now2, now2, me).run();
     return json4({ ok: true, id, taskCount: tasks.length, contractors: contractors.length });
   }
   if (method === "POST" && pathname === "/prog/ai-edit") {
@@ -42291,7 +42600,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables__raw8(env) {
+async function ensureTables__raw9(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -42306,7 +42615,7 @@ async function ensureTables__raw8(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
-var ensureTables10 = onceMigration(ensureTables__raw8);
+var ensureTables11 = onceMigration(ensureTables__raw9);
 async function setProjFinValue(env, tid, costingKey, value, name) {
   return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
 }
@@ -42462,7 +42771,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -42486,7 +42795,7 @@ async function handle39(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables10(env);
+  await ensureTables11(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -42532,7 +42841,7 @@ async function handle39(request, env, ctx, url, sess) {
     for (const dt of DOC_TYPES) required[dt.key] = bool(b.required && b.required[dt.key]);
     const companies = Array.isArray(b.sitelog && b.sitelog.companies) ? b.sitelog.companies.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 60) : [];
     const contractValue = b.contractValue != null && b.contractValue !== "" ? Number(b.contractValue) : null;
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     const id = newId3("PRJ");
     const data = {
       postcode: String(b.postcode || "").trim(),
@@ -42559,8 +42868,8 @@ async function handle39(request, env, ctx, url, sess) {
       "live",
       JSON.stringify(data),
       me,
-      now,
-      now
+      now2,
+      now2
     ).run();
     if (required.valuations && contractValue) await setProjFinValue(env, tenantId, costingKey, contractValue, name);
     if (data.sitelog.rules || data.sitelog.visitorRules) {
@@ -42572,7 +42881,7 @@ async function handle39(request, env, ctx, url, sess) {
         `INSERT OR IGNORE INTO compliance_stores
           (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
           VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
-      ).bind(tenantId, number, name, siteNumber, now).run();
+      ).bind(tenantId, number, name, siteNumber, now2).run();
     } catch {
     }
     const row = await getRow(id);
@@ -43149,7 +43458,7 @@ async function handle39(request, env, ctx, url, sess) {
       if (!description) return error("Description required", 400, env, request);
     }
     const id = newId3("PC");
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare(`INSERT INTO project_costs
       (id, tenant_id, project_id, kind, date, username, hours, rate, supplier, description, amount, created_by, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
@@ -43165,7 +43474,7 @@ async function handle39(request, env, ctx, url, sess) {
       description,
       amount,
       me,
-      now
+      now2
     ).run();
     return json({ ok: true, id, amount }, {}, env, request);
   }
@@ -43565,7 +43874,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -43605,9 +43914,9 @@ async function handle40(request, env, ctx, url, sess) {
     return json3({ ok: true, events: results || [] }, 200, env, request);
   }
   if (url.pathname === "/health/status" && method === "GET") {
-    const now = Date.now();
-    const iso24 = new Date(now - 24 * 36e5).toISOString();
-    const iso7 = new Date(now - 7 * 864e5).toISOString();
+    const now2 = Date.now();
+    const iso24 = new Date(now2 - 24 * 36e5).toISOString();
+    const iso7 = new Date(now2 - 7 * 864e5).toISOString();
     let lastRun = null, integrity = null;
     try {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "health:lastrun:" + tid).first();
@@ -43703,13 +44012,13 @@ async function getToken2(env, db, cfg) {
   const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
   if (!accessId || !secret) throw new Error("Tuya not configured (add TUYA_ACCESS_ID / TUYA_ACCESS_SECRET secrets)");
   const cached = await loadKV(db, TOK_KEY);
-  const now = Date.now();
-  if (cached && cached.access_token && cached.region === (cfg.region || "eu") && cached.expireAt - 6e4 > now) {
+  const now2 = Date.now();
+  if (cached && cached.access_token && cached.region === (cfg.region || "eu") && cached.expireAt - 6e4 > now2) {
     return cached.access_token;
   }
   const base = baseFor(cfg);
   const path = "/v1.0/token?grant_type=1";
-  const t = String(now);
+  const t = String(now2);
   const sign = await signRequest(accessId, secret, "", "GET", path, "", t);
   const resp = await fetch(base + path, {
     method: "GET",
@@ -43721,7 +44030,7 @@ async function getToken2(env, db, cfg) {
   }
   const token = jr8.result.access_token;
   const expireSecs = Number(jr8.result.expire_time || 7200);
-  await saveKV2(db, TOK_KEY, { access_token: token, expireAt: now + expireSecs * 1e3, region: cfg.region || "eu" });
+  await saveKV2(db, TOK_KEY, { access_token: token, expireAt: now2 + expireSecs * 1e3, region: cfg.region || "eu" });
   return token;
 }
 async function api(env, db, cfg, method, path, body) {
@@ -43807,18 +44116,18 @@ function userWindows(cfg, username) {
   const w = bu[normU(username)];
   return w && Array.isArray(w.windows) ? w.windows : [];
 }
-function accessAllowedForUser(cfg, username, now) {
+function accessAllowedForUser(cfg, username, now2) {
   const windows = userWindows(cfg, username);
   if (!windows.length) return true;
   for (const w of windows) {
     const days = Array.isArray(w.days) ? w.days.map(Number) : [];
-    if (days.length && !days.includes(now.dow)) continue;
+    if (days.length && !days.includes(now2.dow)) continue;
     const from = toMin2(w.from), to = toMin2(w.to);
     if (from == null || to == null) continue;
     if (from <= to) {
-      if (now.mins >= from && now.mins <= to) return true;
+      if (now2.mins >= from && now2.mins <= to) return true;
     } else {
-      if (now.mins >= from || now.mins <= to) return true;
+      if (now2.mins >= from || now2.mins <= to) return true;
     }
   }
   return false;
@@ -43839,7 +44148,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -44069,19 +44378,19 @@ async function checkGateLeftOpen(env, tenantId) {
     const st = await getGateState(db);
     const open = !!st.open;
     const watch = await loadKV(db, WATCH_KEY) || {};
-    const now = Date.now();
+    const now2 = Date.now();
     if (!open) {
       if (watch.open) await saveKV2(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
       return;
     }
-    const since = st.at || watch.since || new Date(now).toISOString();
+    const since = st.at || watch.since || new Date(now2).toISOString();
     const openedBy = st.by || watch.openedBy || null;
-    const openMins = Math.round((now - Date.parse(since)) / 6e4);
+    const openMins = Math.round((now2 - Date.parse(since)) / 6e4);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
     const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);
     const lastAlertAt = watch.lastAlertAt ? Date.parse(watch.lastAlertAt) : 0;
     let newLastAlert = watch.lastAlertAt || null;
-    if (openMins >= threshold && (!lastAlertAt || now - lastAlertAt >= repeat * 6e4)) {
+    if (openMins >= threshold && (!lastAlertAt || now2 - lastAlertAt >= repeat * 6e4)) {
       const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal \u2014 check emergency access)`;
       const payload = {
         title: "\u26A0\uFE0F Yard gate left open",
@@ -44103,7 +44412,7 @@ async function checkGateLeftOpen(env, tenantId) {
         await sendToPermission(env, tenantId, ["FullAccess"], payload).catch(() => {
         });
       }
-      newLastAlert = new Date(now).toISOString();
+      newLastAlert = new Date(now2).toISOString();
     }
     await saveKV2(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
   } catch (e) {
@@ -44163,7 +44472,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -44377,7 +44686,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -44566,7 +44875,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -44885,7 +45194,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle45(request, env, ctx, url, sess) {
+async function handle46(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -45025,29 +45334,29 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle14],
   ["*", "/upload-asset-thumb", handle14],
   ["*", "/delete-asset-image", handle14],
-  ["*", "/sla/workever", handle44],
+  ["*", "/sla/workever", handle45],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
-  ["*", "/stats", handle22],
-  ["*", "/staff", handle23],
+  ["*", "/stats", handle23],
+  ["*", "/staff", handle24],
   // staff personal + company documents
-  ["*", "/hr/", handle24],
+  ["*", "/hr/", handle25],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle25],
+  ["*", "/privacy", handle26],
   // GDPR data export + erasure
-  ["*", "/fleet", handle27],
+  ["*", "/fleet", handle28],
   // fleet reports + driver mapping
   ["*", "/push", handle],
   // web push subscriptions + test send
-  ["*", "/messages", handle28],
+  ["*", "/messages", handle29],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle29],
+  ["*", "/memos", handle30],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle30],
+  ["*", "/documents", handle31],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle34],
+  ["*", "/ai", handle35],
   // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
@@ -45059,17 +45368,17 @@ var ROUTES = [
   ["*", "/import-sites", handle7],
   ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle26],
+  ["*", "/sites/register", handle27],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle26],
+  ["*", "/ledger", handle27],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle26],
+  ["*", "/costing", handle27],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle26],
+  ["*", "/exceptions", handle27],
   // needs-a-human-eye list
   ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle31],
+  ["*", "/chapplins", handle32],
   // Chapplins customer: site tenants (current/previous) + directory
   ["*", "/settings", handle15],
   ["*", "/oncall", handle15],
@@ -45084,51 +45393,53 @@ var ROUTES = [
   // activity log (page views + viewer)
   ["*", "/sitelog", handle16],
   ["*", "/sitelog-launch", handle16],
-  ["*", "/office", handle17],
+  ["*", "/office", handle18],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle18],
+  ["*", "/key", handle19],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle19],
+  ["*", "/theme", handle20],
   // per-user colour theme + background
-  ["*", "/hs/", handle20],
+  ["*", "/hs/", handle21],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle21],
+  ["*", "/vancheck", handle22],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle32],
+  ["*", "/po", handle33],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/accounts", handle33],
+  ["*", "/accounts", handle34],
   // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
-  ["*", "/cctv", handle35],
+  ["*", "/cctv", handle36],
   // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
   // office view of the email→job intake (log, test box, re-run, allow-list)
-  ["*", "/tasks", handle36],
+  ["*", "/tasks", handle37],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/fbc", handle17],
+  // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
   ["*", "/concerto", handle9],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs", handle11],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump", handle10],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle37],
+  ["*", "/cablecalc", handle38],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle38],
+  ["*", "/prog", handle39],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle39],
+  ["*", "/projects", handle40],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle39],
+  ["*", "/project", handle40],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle40],
+  ["*", "/health/", handle41],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle45],
+  ["*", "/comms", handle46],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle45],
+  ["*", "/customer", handle46],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle41],
+  ["*", "/tuya", handle42],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle42],
+  ["*", "/client", handle43],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle43]
+  ["*", "/fra", handle44]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -45253,10 +45564,10 @@ var worker = {
 };
 var index_default = worker;
 async function remindDailyApprovals(env) {
-  const now = /* @__PURE__ */ new Date();
-  const lonHour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  const now2 = /* @__PURE__ */ new Date();
+  const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
   if (lonHour !== 8) return;
-  const today = now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const today = now2.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
   const key = "approvals:dailyReminded:1";
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=1 AND key=?").bind(key).first();
