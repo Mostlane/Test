@@ -36299,7 +36299,7 @@ async function graphMailboxCheck(env, mailbox) {
     return { ok: false, error: String(e && e.message || e) };
   }
 }
-async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue } = {}) {
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since } = {}) {
   let filter;
   const iso = (s, endOfDay) => {
     const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
@@ -36307,11 +36307,14 @@ async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, fr
   };
   const fIso = from ? iso(from, false) : null;
   const tIso = to ? iso(to, true) : null;
+  const sinceIso = since ? iso(since, false) : null;
   if (fIso || tIso) {
     const parts = [];
     if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
     if (tIso) parts.push(`receivedDateTime le ${tIso}`);
     filter = parts.join(" and ");
+  } else if (sinceIso) {
+    filter = `receivedDateTime gt ${sinceIso}`;
   } else {
     filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 864e5).toISOString()}`;
   }
@@ -36388,8 +36391,69 @@ async function ensurePoInvoiceCols__raw(db) {
     )`).run();
   } catch {
   }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_seen (
+      tenant_id TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      status TEXT, po_number INTEGER, at TEXT,
+      PRIMARY KEY (mailbox, message_id, attachment_id)
+    )`).run();
+  } catch {
+  }
 }
 var ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+function seenKey(mailbox, messageId, attachmentId) {
+  return String(mailbox || "") + "|" + String(messageId || "") + "|" + String(attachmentId || "");
+}
+async function recordSeen(db, tenantId, mailbox, messageId, attachmentId, status, poNumber) {
+  if (!mailbox || !messageId || !attachmentId) return;
+  try {
+    await ensurePoInvoiceCols(db);
+    await db.prepare(`INSERT INTO invoice_seen (tenant_id, mailbox, message_id, attachment_id, status, po_number, at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(mailbox, message_id, attachment_id) DO UPDATE SET status = excluded.status, po_number = excluded.po_number, at = excluded.at`).bind(
+      String(tenantId || ""),
+      String(mailbox),
+      String(messageId),
+      String(attachmentId),
+      String(status || "handled"),
+      poNumber != null ? Number(poNumber) : null,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ).run();
+  } catch (e) {
+    console.error("PO recordSeen failed:", e && e.message);
+  }
+}
+async function getSeenSet(db, mailbox) {
+  const set = /* @__PURE__ */ new Set();
+  try {
+    const rows = (await db.prepare(`SELECT message_id, attachment_id FROM invoice_seen WHERE mailbox = ?`).bind(String(mailbox)).all()).results || [];
+    for (const r of rows) set.add(seenKey(mailbox, r.message_id, r.attachment_id));
+  } catch {
+  }
+  return set;
+}
+function sweepStateKey(mailbox) {
+  return "sweep_state:" + String(mailbox || "").toLowerCase();
+}
+async function getSweepState(db, mailbox) {
+  try {
+    const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value);
+      return { lastReceived: s.lastReceived || null, outstanding: Array.isArray(s.outstanding) ? s.outstanding : [] };
+    }
+  } catch {
+  }
+  return { lastReceived: null, outstanding: [] };
+}
+async function saveSweepState(db, mailbox, state) {
+  try {
+    const value = JSON.stringify({ lastReceived: state.lastReceived || null, outstanding: (state.outstanding || []).slice(0, 200) });
+    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(sweepStateKey(mailbox), value, value).run();
+  } catch (e) {
+    console.error("PO saveSweepState failed:", e && e.message);
+  }
+}
 var numOrNull2 = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -36566,7 +36630,7 @@ async function handle32(request, env, ctx, url, sess) {
       const f = res.fields || {};
       let po = null, candidates = [];
       if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
+      if (!po) candidates = matchInvoiceCandidates(db, f, await uncostedPoRows(db));
       const cls = classifyProposal(f, po, known, subNames);
       return jr8({
         ok: true,
@@ -36634,11 +36698,12 @@ async function handle32(request, env, ctx, url, sess) {
       const from = String(b.from || "").trim();
       const to = String(b.to || "").trim();
       const clue = String(b.clue || "").trim();
+      const mode = String(b.mode || "").trim() === "full" ? "full" : "incremental";
       await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
       const chk = await graphMailboxCheck(env, mailbox);
       if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue });
-      return jr8({ ok: true, mailbox, days, from, to, clue, ...out });
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode });
+      return jr8({ ok: true, mailbox, days, from, to, clue, mode, ...out });
     }
     if (path === "/api/invoice/sweep-view" && method === "GET") {
       if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
@@ -36684,6 +36749,7 @@ async function handle32(request, env, ctx, url, sess) {
         contentType: "application/pdf",
         graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
       });
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr8({ ok: true, po_number: poNumber, invoiceUrl });
     }
     if (path === "/api/invoice/url" && method === "GET") {
@@ -37097,6 +37163,9 @@ async function addInvoiceFlag(env, db, sess, request) {
     userName(sess),
     now
   ).run();
+  if (b.message_id && b.attachment_id) {
+    await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull2(b.po_number));
+  }
   return { ok: true, id: res && res.meta && res.meta.last_row_id || null, invoice_key: key };
 }
 async function listInvoiceFlags(env, db, sess, origin, params) {
@@ -37388,17 +37457,49 @@ async function uploadVatInvoice(env, db, sess, origin, request) {
   ).run();
   return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
 }
-async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue }) {
+function mergeSweepProposals(outstanding, fresh) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const p of outstanding || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  for (const p of fresh || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  return Array.from(byKey.values());
+}
+function slimProposal(p) {
+  return {
+    mailbox: p.mailbox,
+    messageId: p.messageId,
+    attachmentId: p.attachmentId,
+    filename: p.filename,
+    subject: p.subject,
+    from: p.from,
+    receivedDateTime: p.receivedDateTime,
+    tier: p.tier,
+    fields: p.fields || {}
+  };
+}
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
   const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
   const known = (await getSuppliers(db)).map((s) => s.name);
   const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  const isRange = !!(String(from || "").trim() || String(to || "").trim());
+  const hasClue = !!String(clue || "").trim();
+  const oneOff = isRange || hasClue;
+  const incremental = mode !== "full" && !oneOff;
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [] };
+  const readOpts = { top: 40, days };
+  if (oneOff) {
+    readOpts.from = from;
+    readOpts.to = to;
+    readOpts.clue = clue;
+  } else if (incremental && state.lastReceived) {
+    readOpts.since = state.lastReceived;
+  }
   let msgs = [];
   try {
-    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 40, from, to, clue });
+    msgs = await listRecentWithAttachments(env, mailbox, readOpts);
   } catch (e) {
     return { proposals: [], scanned: 0, error: String(e && e.message || e) };
   }
-  const proposals = [];
+  const fresh = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
   for (const m of msgs) {
     if (downloads >= MAX_DOWNLOADS) break;
@@ -37428,18 +37529,7 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue }) {
         skipped++;
         continue;
       }
-      const f = res.fields || {};
-      let po = null, candidates = [];
-      if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = await matchInvoiceCandidates(db, f);
-      const cls = classifyProposal(f, po, known, subNames);
-      const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
-      if (po && po.priced && po.has_invoice) {
-        skipped++;
-        continue;
-      }
-      if (!actionable) continue;
-      proposals.push({
+      fresh.push({
         mailbox,
         messageId: m.id,
         attachmentId: a.id,
@@ -37448,16 +37538,54 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue }) {
         from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
         receivedDateTime: m.receivedDateTime || null,
         tier: res.tier,
-        fields: f,
-        po,
-        candidates,
-        category: cls.category,
-        subName: cls.subName,
-        supName: cls.supName
+        fields: res.fields || {}
       });
     }
   }
-  return { proposals, scanned: downloads, aiUsed, alreadyDone: skipped, capped: downloads >= MAX_DOWNLOADS };
+  const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
+  const seen = await getSeenSet(db, mailbox);
+  const poCache = await uncostedPoRows(db);
+  const proposals = [];
+  let doneNow = 0;
+  for (const p of merged) {
+    if (seen.has(seenKey(p.mailbox, p.messageId, p.attachmentId))) {
+      doneNow++;
+      continue;
+    }
+    const f = p.fields || {};
+    let po = null, candidates = [];
+    if (f.poNumber) po = await poBrief(db, f.poNumber);
+    if (po && po.priced && po.has_invoice) {
+      doneNow++;
+      continue;
+    }
+    if (!po) candidates = matchInvoiceCandidates(db, f, poCache);
+    const cls = classifyProposal(f, po, known, subNames);
+    const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
+    if (!actionable) continue;
+    proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
+  }
+  proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
+  let newest = state.lastReceived;
+  for (const m of msgs) {
+    const r = m.receivedDateTime;
+    if (r && (!newest || r > newest)) newest = r;
+  }
+  if (incremental || mode === "full") {
+    await saveSweepState(db, mailbox, { lastReceived: newest, outstanding: proposals.map(slimProposal) });
+  }
+  return {
+    proposals,
+    scanned: downloads,
+    aiUsed,
+    alreadyDone: skipped + doneNow,
+    capped: downloads >= MAX_DOWNLOADS,
+    incremental,
+    oneOff,
+    newProposals: fresh.length,
+    carriedOver: incremental ? state.outstanding.length : 0,
+    watermark: incremental || mode === "full" ? newest : null
+  };
 }
 async function poBrief(db, poNumber) {
   const r = await db.prepare(
@@ -37478,19 +37606,21 @@ async function poBrief(db, poNumber) {
     has_invoice: !!r.invoice_key
   };
 }
-async function matchInvoiceCandidates(db, f) {
-  const date = f && f.invoiceDate;
-  const supN = normSupplierName(f && f.supplier || "");
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
-  let rows = [];
+async function uncostedPoRows(db) {
   try {
-    rows = (await db.prepare(
+    return (await db.prepare(
       `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
          FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
     ).all()).results || [];
   } catch {
-    rows = [];
+    return [];
   }
+}
+function matchInvoiceCandidates(db, f, poCache) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const rows = Array.isArray(poCache) ? poCache : [];
   const scored = rows.map((r) => {
     const sup = normSupplierName(r.supplier || "");
     const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));

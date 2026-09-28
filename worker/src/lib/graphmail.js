@@ -57,12 +57,14 @@ export async function graphMailboxCheck(env, mailbox) {
 
 // List recent messages in `mailbox` that have attachments, newest first, within
 // the last `days`. Returns lightweight message headers.
-export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue } = {}) {
+// Precedence for what to read: an explicit date range (from/to, "Advanced
+// search") wins; then `since` (an incremental high-watermark — only emails that
+// arrived AFTER the last scan); then the rolling `days` look-back.
+export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since } = {}) {
   // Filter on receivedDateTime only (the property we also $orderby, which Graph
   // is happy to combine) and keep only messages WITH attachments in code — this
   // sidesteps the "filter/sort too complex" error that a boolean-plus-date
   // $filter can trigger. Pull a wider page since we post-filter.
-  // A date range (from/to, "Advanced search") wins over the rolling look-back.
   let filter;
   const iso = (s, endOfDay) => {
     const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
@@ -70,11 +72,16 @@ export async function listRecentWithAttachments(env, mailbox, { days = 60, top =
   };
   const fIso = from ? iso(from, false) : null;
   const tIso = to ? iso(to, true) : null;
+  const sinceIso = since ? iso(since, false) : null;
   if (fIso || tIso) {
     const parts = [];
     if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
     if (tIso) parts.push(`receivedDateTime le ${tIso}`);
     filter = parts.join(" and ");
+  } else if (sinceIso) {
+    // Incremental: strictly newer than the last email we read (gt), so a normal
+    // sweep only downloads what has arrived since.
+    filter = `receivedDateTime gt ${sinceIso}`;
   } else {
     filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 86400000).toISOString()}`;
   }

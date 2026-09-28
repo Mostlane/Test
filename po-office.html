@@ -1044,7 +1044,7 @@ function invSweepBodyHtml(v) {
   v = v || {};
   const advOpen = (v.from || v.to || v.clue) ? ' open' : '';
   return (
-    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row.</p>' +
+    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row. <strong>Run sweep</strong> only reads emails that have arrived since the last scan and adds them to anything still outstanding — anything you\'ve attached or flagged drops off automatically.</p>' +
     '<div class="grid-2">' +
       '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(v.mailbox || '') + '"></div>' +
       '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(v.days || 60) + '" min="1" max="365"></div>' +
@@ -1052,7 +1052,7 @@ function invSweepBodyHtml(v) {
     '<details style="margin:2px 0 10px;border:1px solid #e3e7ee;border-radius:10px;padding:8px 11px;background:#f8fafc"' + advOpen + '>' +
       '<summary style="cursor:pointer;font-weight:600;color:#003366;font-size:13px">Advanced search</summary>' +
       '<div style="padding:8px 0 2px">' +
-        '<div class="muted" style="font-size:12px;margin-bottom:8px">Search a specific date range instead of the look-back above, and/or narrow the results by a clue.</div>' +
+        '<div class="muted" style="font-size:12px;margin-bottom:8px">A one-off search of a specific date range instead of the look-back above, and/or narrowed by a clue. This reads fresh and doesn\'t affect the normal "since last scan" memory.</div>' +
         '<div class="grid-2">' +
           '<div class="field"><label>From date</label><input id="sw-from" type="date" value="' + escapeAttr(v.from || '') + '"></div>' +
           '<div class="field"><label>To date</label><input id="sw-to" type="date" value="' + escapeAttr(v.to || '') + '"></div>' +
@@ -1061,7 +1061,7 @@ function invSweepBodyHtml(v) {
         '<div class="muted" style="font-size:11px">Leave the dates blank to use the look-back days above.</div>' +
       '</div>' +
     '</details>' +
-    '<div class="row"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log</button></div>' +
+    '<div class="row" style="flex-wrap:wrap"><button onclick="invRunSweep(this)">🔎 Run sweep</button><button class="ghost small" onclick="invRunSweep(this, \'full\')" title="Ignore the memory and re-read the whole look-back">↻ Full re-scan</button><button class="ghost small" onclick="openInvoiceMatch()">‹ Back to drop a file</button><button class="ghost small" onclick="openFlagLogList()">📋 Flagged-invoices log</button></div>' +
     '<div id="sw-result" style="margin-top:14px"></div>'
   );
 }
@@ -1083,7 +1083,7 @@ function invShowResults() {
   document.getElementById('modal').classList.add('show');
   invRenderResults();
 }
-async function invRunSweep(btn) {
+async function invRunSweep(btn, mode) {
   const mailbox = (document.getElementById('sw-mailbox') || {}).value || '';
   const days = Number((document.getElementById('sw-days') || {}).value) || 60;
   const from = ((document.getElementById('sw-from') || {}).value || '').trim();
@@ -1091,9 +1091,11 @@ async function invRunSweep(btn) {
   const clue = ((document.getElementById('sw-clue') || {}).value || '').trim();
   invLastSweep = { mailbox, days, from, to, clue };   // so the list can be rebuilt without re-scanning
   const res = document.getElementById('sw-result');
-  res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">Reading the mailbox and reading each invoice… this can take a minute.</div>';
+  const isFull = mode === 'full';
+  res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">' + (isFull ? 'Re-reading the whole look-back — this can take a minute.' : 'Reading any new invoices since the last scan…') + '</div>';
   if (btn) btn.disabled = true;
   const reqBody = { mailbox, days };
+  if (mode) reqBody.mode = mode;
   if (from) reqBody.from = from;
   if (to) reqBody.to = to;
   if (clue) reqBody.clue = clue;
@@ -1104,7 +1106,16 @@ async function invRunSweep(btn) {
   if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; return; }
   invSweepItems = data.proposals || [];
   invFilter = 'all';
-  invSummaryHtml = '<div class="muted" style="font-size:13px;margin-bottom:8px">Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox) + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done / not invoices' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
+  // Summary: for an incremental sweep, say how many are newly read vs carried
+  // over from before; for a full/advanced read, the classic "read N PDFs" line.
+  let lead;
+  if (data.incremental) {
+    const nNew = Number(data.newProposals || 0);
+    lead = 'Checked for new invoices' + (nNew ? ' · read ' + nNew + ' new' : ' · none new') + (data.carriedOver ? ' · ' + Number(data.carriedOver) + ' still outstanding from before' : '');
+  } else {
+    lead = 'Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox);
+  }
+  invSummaryHtml = '<div class="muted" style="font-size:13px;margin-bottom:8px">' + lead + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done / not invoices' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
   invRenderResults();
 }
 // Category of a swept invoice: the server sets it, with a safe fallback.
