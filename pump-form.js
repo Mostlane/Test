@@ -131,13 +131,42 @@
 
     // ── signature pad ──
     function initSig(canvas, key) {
-      var ctx = canvas.getContext("2d"), draw = false, drew = false, last = null;
-      function resize() { var r = canvas.getBoundingClientRect(); canvas.width = r.width * 2; canvas.height = r.height * 2; ctx.scale(2, 2); ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#12305a"; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); redrawFrom(); }
+      var ctx = canvas.getContext("2d"), draw = false, drew = false, last = null, inited = false;
+      // Size + white-fill the pad ONCE, and only once it's actually laid out. If
+      // the card is still collapsed/hidden (width 0) we retry — a 0-size init
+      // meant the white fill never landed, so the strokes were captured on a
+      // transparent canvas that JPEG turns solid BLACK (the black-blob bug).
+      function resize() {
+        if (inited) return;
+        var r = canvas.getBoundingClientRect();
+        if (!r.width) { setTimeout(resize, 60); return; }
+        inited = true;
+        canvas.width = r.width * 2; canvas.height = r.height * 2; ctx.scale(2, 2);
+        ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#12305a";
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        redrawFrom();
+      }
       function redrawFrom() { if (REC[key] && /^data:image/.test(REC[key])) { var img = new Image(); img.onload = function () { var r = canvas.getBoundingClientRect(); ctx.drawImage(img, 0, 0, r.width, r.height); }; img.src = REC[key]; drew = true; } }
       function pos(e) { var r = canvas.getBoundingClientRect(); var t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; }
       function start(e) { if (RO) return; e.preventDefault(); draw = true; last = pos(e); }
       function move(e) { if (!draw) return; e.preventDefault(); var p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; drew = true; }
-      function end() { if (!draw) return; draw = false; if (drew) { try { REC[key] = canvas.toDataURL("image/jpeg", 0.7); } catch (e) {} queueSave(); } }
+      // Export composited over a guaranteed white background — JPEG has no alpha,
+      // so a transparent pad would otherwise export solid black. This makes the
+      // white background certain regardless of device/timing.
+      function end() {
+        if (!draw) return; draw = false;
+        if (drew) {
+          try {
+            var out = document.createElement("canvas");
+            out.width = canvas.width || 1; out.height = canvas.height || 1;
+            var octx = out.getContext("2d");
+            octx.fillStyle = "#fff"; octx.fillRect(0, 0, out.width, out.height);
+            octx.drawImage(canvas, 0, 0);
+            REC[key] = out.toDataURL("image/jpeg", 0.7);
+          } catch (e) {}
+          queueSave();
+        }
+      }
       canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
       canvas.addEventListener("touchstart", start, { passive: false }); canvas.addEventListener("touchmove", move, { passive: false }); canvas.addEventListener("touchend", end);
       sigPads[key] = { clear: function () { var r = canvas.getBoundingClientRect(); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); drew = false; REC[key] = ""; queueSave(); } };
