@@ -235,8 +235,63 @@ function chapplinsJob(subject, t) {
   };
 }
 
+/* ── Fareham Borough Council (FBC) — Jotform "Mostlane New Incident Form" ─────
+   FBC officers log incidents on our Jotform; Jotform emails a fixed table from
+   noreply@jotform.com, subject "Re: Mostlane New Incident Form". stripHtml lays
+   each row as "<label> <value>" on one line (verified). Fields: Site (a pill),
+   Site Address (name + street + postcode + hours + a ///what3words), Priority
+   ("P3 (7 Days)"), Reported By, Job Title, Brief description of the issue, and
+   "Quotation Required Before Works?" (Yes/No). The weekly "FBC Weekly Incident
+   Report Update" digest is from the same sender but carries none of these value
+   rows, so requiring the Quotation row (below) excludes it.
+   No incident number exists, so the reference is a stable hash of the incident's
+   own content — the same submission re-delivered yields the same ref (update, not
+   duplicate); two different incidents at one site never collide on the site name. */
+const djb2 = s => { let h = 5381; const str = String(s || ""); for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; return h.toString(16); };
+function fbcJotform(subject, t) {
+  const val = re => { const m = re.exec(t); return m ? String(m[1] || "").replace(/\s+/g, " ").trim() : ""; };
+  const site = val(/^\s*Site[ \t]+(?!Address)(.+)$/im);
+  // NB `$` under /m is end-of-LINE, so multi-line blocks end on the NEXT known
+  // label, never `$`, or they'd capture only the first line.
+  const addrBlock = (/^\s*Site Address[ \t]+([\s\S]+?)\n\s*(?:Priority|Reported By)\b/im.exec(t) || [])[1] || "";
+  const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
+  const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
+  const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
+  const prTxt = val(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im);
+  const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
+  const reportedBy = val(/^\s*Reported By[ \t]+(.+)$/im);
+  const jobTitle = val(/^\s*Job Title[ \t]+(.+)$/im);
+  let desc = (/^\s*Brief description of the issue[ \t]+([\s\S]+?)\n\s*Quotation Required/im.exec(t) || [])[1] || "";
+  desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
+  // The street address for display: the address block minus the hours + what3words.
+  const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
+  const reference = "FBC-" + djb2([site, reportedBy, desc.slice(0, 120), prNum].join("|"));
+  const missing = [];
+  if (!site) missing.push("site");
+  if (!desc) missing.push("description");
+  return {
+    kind: "job", missing,
+    // Match on the SITE NAME (the "Site" pill = the register's site_name); the
+    // postcode narrows first, the name disambiguates when a postcode is shared.
+    siteLookup: { client: "fbc", address: site, postcode },
+    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName: site },
+    fields: {
+      isJob: true, reference, priority: prNum ? "Priority " + prNum : "",
+      siteCode: "", siteName: site, address: streetAddr || site, postcode,
+      telephone: "", description: desc, raisedAt: "", respondBy: "", completeBy: "", storeType: "fbc"
+    }
+  };
+}
+
 /* ── The registry ─────────────────────────────────────────────────────────── */
 export const TEMPLATES = [
+  // replyOk: Jotform sends the incident form as "Re: Mostlane New Incident Form",
+  // so these are exempt from the "a Re: subject is a reply, not a job" drop.
+  { id: "fbc-jotform-digest", label: "Fareham BC — Jotform weekly digest (ignored)", domains: ["jotform.com"], replyOk: true,
+    test: (s) => /Weekly Incident Report Update/i.test(s), read: () => ({ kind: "notice", reason: "Jotform weekly incident digest — a summary, not a job" }) },
+  { id: "fbc-jotform", label: "Fareham BC — Jotform New Incident Form", domains: ["jotform.com"], replyOk: true,
+    test: (s, t) => /Mostlane New Incident Form/i.test(s) && /Quotation Required Before Works/i.test(t), read: fbcJotform },
   { id: "concerto-job", label: "Concerto — New Job Alert (Southern Co-op)", domains: ["concerto.co.uk"],
     test: (s, t) => /New Job Alert/i.test(s) || /You have been assigned a new job/i.test(t), read: concertoJob },
   { id: "concerto-order", label: "Concerto — order sheet (client purchase order)", domains: ["concerto.co.uk"],

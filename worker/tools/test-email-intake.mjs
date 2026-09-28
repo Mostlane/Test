@@ -13,6 +13,8 @@ const HTML = `<table><tr><td><div>Concerto</div><div>Notification sent on</div><
 <p>Fault/Issue: Ceiling : Requires Attention - water dripping by the kitchen door ACCESS TIMES: 10 til 4 Monday to Friday. Branch Number 01234567890</p>
 <p><a href="https://example.concerto.co.uk/">Click here to login to Concerto</a></p></div>`;
 const b64 = s => Buffer.from(s, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+// Mirror of emailjob.js stripHtml — for direct matchTemplate() calls on HTML fixtures.
+const stripForTest = h => String(h).replace(/<\/(p|div|tr|br|li|h[1-6]|table)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 const mail = (from, subject, mid, html, plain) => [
   "From: " + from, "To: enquiries@example.com", "Subject: " + subject, "Message-ID: <" + mid + ">", "MIME-Version: 1.0",
   'Content-Type: multipart/mixed; boundary="MIX"', "", "--MIX", 'Content-Type: multipart/alternative; boundary="ALT"', "",
@@ -80,7 +82,23 @@ const rawQuoteCancel = mail("noreply@concerto.co.uk", "Quote : 001999 - Q003. Ca
 // Unknown layout from an allowed sender
 const rawUnknown = mail("someone@mostlane.com", "Leak at the test site", "test-unknown@outlook", `<div>Hi, can you send someone to Test Store, there's water coming through the ceiling. Thanks</div>`);
 
+// FBC — Jotform "Mostlane New Incident Form" (HTML table; nested-table pills; Re: subject)
+const FBC_HTML = (quote) => `<h3>Mostlane New Incident Form</h3>
+<table><tbody>
+<tr><td>Site</td><td><table><tbody><tr><td><table><tbody><tr><td>Control Tower</td></tr></tbody></table></td></tr></tbody></table></td></tr>
+<tr><td>Site Address</td><td>Control Tower<br />Daedalus Dr<br />Lee-on-the-Solent<br />PO13 9FZ<br /><br />Mon–Fri 8am–5pm<br /><br />///ulterior.movements.breezy</td></tr>
+<tr><td>Priority</td><td><table><tbody><tr><td><table><tbody><tr><td>P3 (7 Days)</td></tr></tbody></table></td></tr></tbody></table></td></tr>
+<tr><td>Reported By</td><td>Sarah Lydford</td></tr>
+<tr><td>Job Title</td><td>Property Development Officer</td></tr>
+<tr><td>Brief description of the issue</td><td>Electrical socket DBG3 on kitchen area in VCR double socket u/s.<br /><br />This is all the info I have.</td></tr>
+<tr><td>Quotation Required Before Works?</td><td><table><tbody><tr><td><table><tbody><tr><td>${quote}</td></tr></tbody></table></td></tr></tbody></table></td></tr>
+</tbody></table>`;
+const rawFbc = mail("noreply@jotform.com", "Re: Mostlane New Incident Form", "test-fbc1@jotform", FBC_HTML("No"));
+const rawFbcQuote = mail("noreply@jotform.com", "Re: Mostlane New Incident Form - light out", "test-fbc2@jotform", FBC_HTML("Yes"));
+const rawFbcDigest = mail("noreply@jotform.com", "FBC Weekly Incident Report Update", "test-fbcd@jotform", "<div>Below is your latest digest. No new submissions Mostlane New Incident Form No new submissions</div>");
+
 const CHAP_SITES = [
+  { site_number: "3008", site_name: "Control Tower", postcode: "PO13 9FZ" },
   { site_number: "4007", site_name: "159a Fratton Road, Portsmouth, PO1 5ET", postcode: "PO1 5ET" },
   { site_number: "4012", site_name: "32A Archers Road, Southampton, SO15 2LT", postcode: "SO15 2LT" },
   { site_number: "4013", site_name: "32B Archers Road, Southampton, SO15 2LT", postcode: "SO15 2LT" },
@@ -264,6 +282,21 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   ok("lookup: exact unit match", a && a.siteCode === "4013", JSON.stringify(a));
   ok("lookup: ambiguous (no unit) → no match", b === null, JSON.stringify(b));
   ok("lookup: flat matched", c && c.siteCode === "4079", JSON.stringify(c));
+}
+{ // 11. FBC — Jotform "Mostlane New Incident Form" ("Re:" subject) → job auto-created + FBC tracker
+  const E = makeEnv();
+  const r = await run(E, rawFbc, "noreply@jotform.com"); const p = E.inbound[0] && E.inbound[0].body;
+  ok("fbc: Jotform incident created despite the 'Re:' subject", r.outcome === "created" && E.inbound.length === 1, r.outcome + " / " + r.reason);
+  ok("fbc: fields — stable FBC- ref, priority, matched site 3008, fault text, storeType", p && /^FBC-[0-9a-f]+$/.test(p.reference) && p.priority === "Priority 3" && p.siteCode === "3008" && p.postcode === "PO13 9FZ" && p.storeType === "fbc" && /Electrical socket DBG3/.test(p.description) && !/Reported By|Quotation/.test(p.description), JSON.stringify(p));
+  const same = await run(E, rawFbc.replace("test-fbc1@jotform", "test-fbc1b@jotform"), "noreply@jotform.com");
+  ok("fbc: same incident content → same ref (update, not a duplicate job)", E.inbound[1] && E.inbound[1].body.reference === p.reference, (E.inbound[1] && E.inbound[1].body.reference) + " vs " + p.reference);
+  // template-level checks for the quote flag + digest exclusion
+  const mQuote = matchTemplate("noreply@jotform.com", "Re: Mostlane New Incident Form - light out", stripForTest(FBC_HTML("Yes")));
+  const mNo = matchTemplate("noreply@jotform.com", "Re: Mostlane New Incident Form", stripForTest(FBC_HTML("No")));
+  ok("fbc: 'Quotation Required = Yes' sets quoteRequired", mQuote && mQuote.result.fbc && mQuote.result.fbc.quoteRequired === true, JSON.stringify(mQuote && mQuote.result.fbc));
+  ok("fbc: 'Quotation Required = No' clears quoteRequired + reads reporter", mNo && mNo.result.fbc.quoteRequired === false && mNo.result.fbc.reportedBy === "Sarah Lydford" && mNo.result.fbc.jobTitle === "Property Development Officer" && /ulterior\.movements\.breezy/.test(mNo.result.fbc.w3w), JSON.stringify(mNo && mNo.result.fbc));
+  const dg = await run(E, rawFbcDigest, "noreply@jotform.com");
+  ok("fbc: weekly digest → dropped, never a job", dg.outcome === "dropped" && /digest/i.test(dg.reason) && E.inbound.length === 2, dg.outcome + " / " + dg.reason);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

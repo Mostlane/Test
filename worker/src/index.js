@@ -30,6 +30,7 @@ import * as portal from "./routes/portal.js";      // DONE  (settings, on-call r
 import * as sitelog from "./routes/sitelog.js";    // DONE  (portal↔SiteLog bridge: launch token + admin proxy → local module or remote)
 import * as sitelogApi from "./routes/sitelog-api.js"; // DONE  (ported SiteLog backend: scanner API on api.site-log.co.uk + daily auto-close)
 import { handleInboundEmail, handleApi as emailIntakeApi } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
+import * as fbc from "./routes/fbc.js";       // FBC (Fareham BC) job tracker — Jotform incidents, quotes, invoicing, conversation log
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
@@ -133,6 +134,7 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => emailIntakeApi(req, env, ctx, url, sess, worker.fetch)], // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/fbc",        fbc.handle],      // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
   ["*", "/concerto",   concerto.handle], // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
