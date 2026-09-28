@@ -211,3 +211,5 @@
   Cache-Control: no-cache
 /fbc.html
   Cache-Control: no-cache
+/ml-xlsx.js
+  Cache-Control: no-cache

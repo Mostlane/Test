@@ -2092,11 +2092,27 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
   invoice/quote fields; marking `invoiced` auto-stamps invoiced_at + the month),
   **POST /fbc/message** (add a note). `fbcSiteCodes` = `sites WHERE client='fbc'`.
 - **fbc.html** (🏛️ FBC Jobs tile `FBC:["FullAccess","SLAAdmin","Compliance"]`,
-  sidebar item, in _headers no-cache): summary tiles + filter chips (All · ⭐ Quote
-  required · Active · To invoice · Invoiced); "All" view breaks out ⭐ Quote-required,
-  🧾 To invoice, 🔧 Active, ✅ Invoiced (grouped by month w/ totals). Each job expands
-  to inline-editable cost/PO/quote status+amount/invoice status+month/ref (autosave
-  "Saved ✓") + a conversation log with an add-note box + "Open job card →".
+  sidebar item, in _headers no-cache) has TWO tabs:
+  - **📋 Jobs** — summary tiles + filter chips (All · ⭐ Quote required · Active · To
+    invoice · Invoiced); "All" view breaks out ⭐ Quote-required, 🧾 To invoice, 🔧
+    Active, ✅ Invoiced (grouped by month w/ totals). Each job expands to
+    inline-editable cost/PO/quote status+amount/invoice status+month/ref (autosave
+    "Saved ✓") + a conversation log with an add-note box + "Open job card →".
+  - **🧾 Invoicing (Sep 2026 — Jamie's monthly-invoice ask)** — a month-by-month
+    worksheet. **Every FBC job defaults into the month it was RECEIVED** —
+    `effMonth(r)` = `r.invoiceMonth` if set, else the month of `raisedAt`
+    (created_at) — so nothing has to be touched to appear. A ‹ Month Year › navigator
+    flicks calendar month by month (defaults to the latest month that has jobs). The
+    table (Site · Job · Received · **Cost £** · **Invoice status** · **Sheet (month)**)
+    autosaves each cell via POST /fbc/meta: set a cost, mark To invoice/Invoiced/No
+    invoice, or **move a job onto a different month's sheet** (the `Sheet` month input
+    → sets `invoiceMonth`, so it drops out of the received month and onto the chosen
+    one). A running **Total £** + counts head the month. **Excel export** (real
+    `.xlsx` via the new **`ml-xlsx.js`** — `window.MLXlsx.download(name, sheets)`, a
+    dependency-free stored-zip OOXML writer, values-only, leading-zero site codes kept
+    as text, £ number format, bold totals): **⬇ Export month** (one sheet) and **⬇
+    Export all** (an "All FBC jobs" sheet with a Month column + one sheet per month,
+    each with a totals row). `ml-xlsx.js` is reusable for any table→xlsx elsewhere.
 - **Tests:** `node worker/tools/test-fbc.mjs` (module: recordFbcJob/appendFbcMessage
   round-trip, list grouping + invoiceState, meta updates don't clobber intake, dedupe,
   access gating) + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest

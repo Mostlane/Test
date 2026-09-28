@@ -7,6 +7,7 @@
   <script src="/portal-config.js?v=39"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
+  <script src="ml-xlsx.js?v=1"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --amber:#b7791f; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -63,7 +64,37 @@
     .addnote{display:flex;gap:8px;margin-top:8px;}
     .addnote textarea{flex:1;min-height:38px;padding:8px;border:1px solid #ccd5dd;border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;}
     .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#eef2f7;color:var(--brand);border:1px solid #d7dee6;}
     .empty{padding:14px 4px;color:#8a97a8;font-size:13px;}
+    /* view tabs */
+    .tabs{display:flex;gap:8px;margin:2px 0 12px;}
+    .tab{flex:none;background:#fff;border:1px solid #ccd5dd;color:#334;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+    .tab.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    /* invoicing */
+    .monthnav{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    .monthnav .arw{width:38px;height:38px;border-radius:10px;border:1px solid #ccd5dd;background:#fff;font-size:18px;cursor:pointer;font-family:inherit;color:var(--brand);flex:none;}
+    .monthnav .arw:disabled{opacity:.4;cursor:default;}
+    .monthnav .mlab{font-size:17px;font-weight:800;color:var(--brand);min-width:150px;text-align:center;}
+    .monthnav .sp{flex:1;}
+    .invtot{display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;margin:2px 0 12px;font-size:14px;}
+    .invtot b{font-size:20px;color:var(--brand);}
+    table.inv{width:100%;border-collapse:collapse;font-size:13.5px;}
+    table.inv th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;color:#6b7a90;padding:6px 8px;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+    table.inv td{padding:7px 8px;border-bottom:1px solid #eef2f6;vertical-align:middle;}
+    table.inv tr:hover td{background:#f8fafc;}
+    table.inv .site{font-weight:700;white-space:nowrap;}
+    table.inv .jb{color:#374151;}
+    table.inv input,table.inv select{padding:6px 7px;border:1px solid #ccd5dd;border-radius:8px;font-size:13.5px;font-family:inherit;background:#fff;color:#1f2438;}
+    table.inv input.cost{width:96px;text-align:right;}
+    table.inv input.mth{width:135px;}
+    table.inv .rowsaved{color:var(--ok);font-weight:800;font-size:12px;opacity:0;transition:opacity .2s;}
+    table.inv .rowsaved.on{opacity:1;}
+    .b-inv2{color:#0e7a3b;} .b-toinv2{color:#7a5b00;}
+    @media(max-width:640px){ table.inv thead{display:none;} table.inv,table.inv tbody,table.inv tr,table.inv td{display:block;width:100%;}
+      table.inv tr{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;padding:6px 4px;}
+      table.inv td{border:none;padding:5px 10px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
+      table.inv td::before{content:attr(data-l);font-size:11px;font-weight:700;color:#6b7a90;text-transform:uppercase;}
+      table.inv input.cost,table.inv input.mth{width:auto;} }
   </style>
 </head>
 <body>
@@ -73,20 +104,43 @@
   </header>
 
   <div class="wrap">
-    <div class="card">
-      <p class="muted" id="greet" style="margin:0 0 10px;">Fareham Borough Council jobs — quotes, costs, and what to invoice each month.</p>
-      <div class="sumrow" id="summary"></div>
+    <div class="tabs">
+      <button class="tab on" data-v="jobs">📋 Jobs</button>
+      <button class="tab" data-v="inv">🧾 Invoicing</button>
     </div>
 
-    <div class="filters" id="filters">
-      <button class="chip on" data-f="all">All</button>
-      <button class="chip" data-f="quote">⭐ Quote required</button>
-      <button class="chip" data-f="active">Active</button>
-      <button class="chip" data-f="toinvoice">To invoice</button>
-      <button class="chip" data-f="invoiced">Invoiced</button>
+    <div id="jobsView">
+      <div class="card">
+        <p class="muted" id="greet" style="margin:0 0 10px;">Fareham Borough Council jobs — quotes, costs, and what to invoice each month.</p>
+        <div class="sumrow" id="summary"></div>
+      </div>
+
+      <div class="filters" id="filters">
+        <button class="chip on" data-f="all">All</button>
+        <button class="chip" data-f="quote">⭐ Quote required</button>
+        <button class="chip" data-f="active">Active</button>
+        <button class="chip" data-f="toinvoice">To invoice</button>
+        <button class="chip" data-f="invoiced">Invoiced</button>
+      </div>
+
+      <div id="list"><div class="card"><p class="muted" style="padding:6px 4px;">Loading…</p></div></div>
     </div>
 
-    <div id="list"><div class="card"><p class="muted" style="padding:6px 4px;">Loading…</p></div></div>
+    <div id="invView" style="display:none;">
+      <div class="card">
+        <div class="monthnav">
+          <button class="arw" id="mPrev" title="Previous month">‹</button>
+          <div class="mlab" id="mLab">—</div>
+          <button class="arw" id="mNext" title="Next month">›</button>
+          <span class="sp"></span>
+          <button class="btn ghost" id="expMonth">⬇ Export month</button>
+          <button class="btn ghost" id="expAll">⬇ Export all</button>
+        </div>
+        <p class="muted" style="margin:0 0 10px;">Every FBC job sits under the month it came in. Set a <b>cost</b>, move a job to a different invoice month, and mark it invoiced once it's on a sheet.</p>
+        <div class="invtot" id="invTot"></div>
+        <div id="invBody"><p class="muted" style="padding:6px 4px;">Loading…</p></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -98,7 +152,9 @@
     const fmtDay = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}); } catch { return ""; } };
     const fmtDT = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return ""; } };
     const monthLbl = m => { if(!/^\d{4}-\d{2}$/.test(m||"")) return m||""; const d=new Date(m+"-01T00:00:00"); return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
-    let FILTER = "all", ROWS = [];
+    let FILTER = "all", ROWS = [], VIEW = "jobs", curMonth = null;
+    const ym = d => { const x = new Date(d); return isNaN(x) ? "" : (x.getFullYear() + "-" + String(x.getMonth()+1).padStart(2,"0")); };
+    const effMonth = r => (/^\d{4}-\d{2}$/.test(r.invoiceMonth||"") ? r.invoiceMonth : ym(r.raisedAt));
 
     (async () => {
       try {
@@ -110,8 +166,23 @@
         [].forEach.call(g("filters").querySelectorAll(".chip"), x => x.classList.toggle("on", x.dataset.f === FILTER));
         render();
       });
+      [].forEach.call(document.querySelectorAll(".tab"), b => b.onclick = () => switchView(b.dataset.v));
+      g("mPrev").onclick = () => stepMonth(-1);
+      g("mNext").onclick = () => stepMonth(1);
+      g("expMonth").onclick = () => exportXlsx(false);
+      g("expAll").onclick = () => exportXlsx(true);
       load();
     })();
+
+    function switchView(v) {
+      VIEW = v;
+      [].forEach.call(document.querySelectorAll(".tab"), b => b.classList.toggle("on", b.dataset.v === v));
+      g("jobsView").style.display = v === "jobs" ? "" : "none";
+      g("invView").style.display = v === "inv" ? "" : "none";
+      if (v === "inv") { if (!curMonth) curMonth = defaultMonth(); renderInv(); }
+    }
+    const defaultMonth = () => { const ms = ROWS.map(effMonth).filter(Boolean).sort(); return ms.length ? ms[ms.length-1] : ym(new Date().toISOString()); };
+    function stepMonth(n) { const [y,m] = curMonth.split("-").map(Number); const d = new Date(y, m-1+n, 1); curMonth = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0"); renderInv(); }
 
     const isQuote = r => r.quoteRequired && r.quoteStatus !== "approved" && r.quoteStatus !== "declined";
     function invBadge(r) {
@@ -145,6 +216,102 @@
         const n = cnt[b.dataset.f]; b.innerHTML = b.textContent.replace(/\s*\d+$/,"").trim() + (n!=null?' <span class="c">'+n+'</span>':"");
       });
       render();
+      if (VIEW === "inv") { if (!curMonth) curMonth = defaultMonth(); renderInv(); }
+    }
+
+    // ── Invoicing view ──────────────────────────────────────────────────────────
+    const invLabel = r => r.invoiceState === "invoiced" ? "Invoiced" : (r.invoiceState === "not_required" ? "No invoice" : (r.invoiceState === "to_invoice" ? "To invoice" : "Open"));
+    const jobText = r => r.reference || (r.description ? r.description.split("\n")[0] : "") || r.siteName || r.siteCode || "FBC job";
+
+    function renderInv() {
+      g("mLab").textContent = monthLbl(curMonth) || curMonth;
+      const rows = ROWS.filter(r => effMonth(r) === curMonth)
+                       .sort((a,b) => String(a.raisedAt).localeCompare(String(b.raisedAt)));
+      const total = rows.reduce((s,r) => s + (Number(r.cost)||0), 0);
+      const costed = rows.filter(r => Number(r.cost) > 0).length;
+      const invd = rows.filter(r => r.invoiceState === "invoiced").length;
+      g("invTot").innerHTML = rows.length
+        ? ('<span>' + rows.length + ' job' + (rows.length===1?"":"s") + '</span><span>Total <b>' + money(total) + '</b></span>'
+           + '<span class="muted">' + costed + ' with a cost · ' + invd + ' invoiced</span>')
+        : '<span class="muted">No FBC jobs received in this month.</span>';
+      if (!rows.length) { g("invBody").innerHTML = ''; return; }
+      let h = '<table class="inv"><thead><tr><th>Site</th><th>Job</th><th>Received</th><th>Cost</th><th>Invoice</th><th>Sheet (month)</th><th></th></tr></thead><tbody>';
+      rows.forEach(r => {
+        h += '<tr data-jobid="'+esc(r.jobId)+'">'
+          + '<td data-l="Site" class="site">'+esc(r.siteName||r.siteCode||"—")+'</td>'
+          + '<td data-l="Job" class="jb">'+esc(jobText(r))+(r.quoteRequired?' <span class="badge qpill">quote</span>':'')+'</td>'
+          + '<td data-l="Received">'+esc(fmtDay(r.raisedAt))+'</td>'
+          + '<td data-l="Cost"><input class="cost" type="number" step="0.01" inputmode="decimal" data-k="cost" value="'+(r.cost!=null?esc(r.cost):"")+'"></td>'
+          + '<td data-l="Invoice"><select data-k="invoiceStatus">'+opt(["","to_invoice","invoiced","not_required"],["Open","To invoice","Invoiced","No invoice"],r.invoiceStatus)+'</select></td>'
+          + '<td data-l="Sheet"><input class="mth" type="month" data-k="invoiceMonth" value="'+esc(effMonth(r))+'"></td>'
+          + '<td><span class="rowsaved">Saved ✓</span> '+(r.onBoard?'<a class="lnk" style="padding:5px 9px;" href="job-view.html?jobId='+encodeURIComponent(r.jobId)+'">↗</a>':'')+'</td>'
+          + '</tr>';
+      });
+      h += '</tbody></table>';
+      g("invBody").innerHTML = h;
+      wireInvRows();
+    }
+
+    function wireInvRows() {
+      [].forEach.call(g("invBody").querySelectorAll("tr[data-jobid]"), tr => {
+        const jobId = tr.dataset.jobid, saved = tr.querySelector(".rowsaved");
+        const save = async () => {
+          const body = { jobId };
+          [].forEach.call(tr.querySelectorAll("[data-k]"), el => {
+            let v = el.value;
+            if (el.dataset.k === "cost") v = v === "" ? null : Number(v);
+            body[el.dataset.k] = v;
+          });
+          const newMonth = body.invoiceMonth || "";
+          try {
+            await authFetch("/fbc/meta", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+            const row = ROWS.find(x => x.jobId === jobId);
+            if (row) {
+              Object.assign(row, { cost: body.cost, invoiceStatus: body.invoiceStatus, invoiceMonth: newMonth });
+              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (row.status && ["complete","closed","closed jobs","invoiced","cancelled"].includes(String(row.status).toLowerCase()) ? "to_invoice" : "open"));
+            }
+            saved.classList.add("on"); setTimeout(()=>saved.classList.remove("on"), 1200);
+            if (newMonth && newMonth !== curMonth) renderInv();          // moved to another sheet → drops out here
+            else { g("invTot").innerHTML = ""; renderInvTotalsOnly(); }
+          } catch {}
+        };
+        [].forEach.call(tr.querySelectorAll("[data-k]"), el => {
+          el.addEventListener("change", save);
+          if (el.classList.contains("cost")) { let t=null; el.addEventListener("input", () => { clearTimeout(t); t=setTimeout(save, 600); }); }
+        });
+      });
+    }
+    // Cheap totals refresh after a same-month edit (no full re-render, keeps focus).
+    function renderInvTotalsOnly() {
+      const rows = ROWS.filter(r => effMonth(r) === curMonth);
+      const total = rows.reduce((s,r) => s + (Number(r.cost)||0), 0);
+      const costed = rows.filter(r => Number(r.cost) > 0).length;
+      const invd = rows.filter(r => r.invoiceState === "invoiced").length;
+      g("invTot").innerHTML = '<span>' + rows.length + ' job' + (rows.length===1?"":"s") + '</span><span>Total <b>' + money(total) + '</b></span>'
+        + '<span class="muted">' + costed + ' with a cost · ' + invd + ' invoiced</span>';
+    }
+
+    function invSheet(month, rows, withMonthCol) {
+      const head = (withMonthCol ? [{v:"Month",bold:true}] : []).concat(
+        [{v:"Site",bold:true},{v:"Site name",bold:true},{v:"Job",bold:true},{v:"Received",bold:true},{v:"Priority",bold:true},{v:"Invoice status",bold:true},{v:"Cost",bold:true}]);
+      const body = rows.map(r => (withMonthCol ? [monthLbl(effMonth(r))] : []).concat(
+        [{v:String(r.siteCode||""),text:true}, r.siteName||"", jobText(r), fmtDay(r.raisedAt), r.priority||"", invLabel(r), {v:Number(r.cost)||0, money:true}]));
+      const total = rows.reduce((s,r) => s + (Number(r.cost)||0), 0);
+      const totRow = (withMonthCol ? [""] : []).concat([{v:"Total",bold:true},"","","","","",{v:total,money:true,bold:true}]);
+      return { name: (month ? monthLbl(month) : "All FBC jobs"), rows: [head].concat(body, [totRow]) };
+    }
+
+    function exportXlsx(all) {
+      if (!window.MLXlsx) { alert("Excel export isn't available — reload the page."); return; }
+      if (all) {
+        const months = [...new Set(ROWS.map(effMonth).filter(Boolean))].sort();
+        const allRows = ROWS.slice().sort((a,b)=>String(effMonth(a)+a.raisedAt).localeCompare(String(effMonth(b)+b.raisedAt)));
+        const sheets = [invSheet("", allRows, true)].concat(months.map(m => invSheet(m, ROWS.filter(r=>effMonth(r)===m).sort((a,b)=>String(a.raisedAt).localeCompare(String(b.raisedAt))), false)));
+        MLXlsx.download("FBC jobs — all months.xlsx", sheets);
+      } else {
+        const rows = ROWS.filter(r => effMonth(r) === curMonth).sort((a,b)=>String(a.raisedAt).localeCompare(String(b.raisedAt)));
+        MLXlsx.download("FBC — " + (monthLbl(curMonth)||curMonth) + ".xlsx", [invSheet(curMonth, rows, false)]);
+      }
     }
 
     function pass(r) {
