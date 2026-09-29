@@ -15370,6 +15370,7 @@ __export(sla_exports, {
   listFallbackTemplates: () => listFallbackTemplates,
   listJobs: () => listJobs,
   notifyNewlyAssigned: () => notifyNewlyAssigned,
+  optimiseEmDay: () => optimiseEmDay,
   raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
   releaseVisibleNow: () => releaseVisibleNow,
@@ -16565,6 +16566,12 @@ async function handle12(request, env, ctx, url, sess) {
     if (roRes.aiUsed) ctx?.waitUntil(bumpAiUsage(env, tenantId, "route-optimize"));
     if (roCap.capped) (roRes.warnings = roRes.warnings || []).push(`Daily AI limit reached (${roCap.cap}) \u2014 used shortest-driving order without the AI pass.`);
     return jsonResponse(roRes, headers);
+  }
+  if (subpath === "/em-optimize" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "Only SLA admins can optimise an EM/PAT day." }, headers, 403);
+    return jsonResponse(await optimiseEmDay(env, tenantId, await readJson2(request)), headers);
   }
   if (subpath === "/auto-schedule" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -19671,6 +19678,11 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     emKind: body.emKind !== void 0 ? body.emKind === "monthly" ? "monthly" : "yearly" : existing?.emKind || "",
     pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
     emTimer: body.emTimer !== void 0 ? body.emTimer || null : existing?.emTimer || null,
+    // EM/PAT day optimiser: the light-CHECK return visit planned for a 3-hour
+    // drain-down job — {at,end,dueAt,patDeferred,checkMin,drainMin}. The flick
+    // (+ optional PAT) is the job's own scheduledAt/scheduledEnd; this is the
+    // second visit the engineer makes to confirm the lights survived 3 hours.
+    emReturn: body.emReturn !== void 0 ? body.emReturn || null : existing?.emReturn || null,
     // Electrical test job: the engineer runs the test and captures a list of
     // REMEDIAL works (each: code C1/C2/C3/FI, description, duration, material £,
     // photos). Completion is relaxed (the remedials list is the deliverable). A
@@ -19894,6 +19906,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emKind !== void 0) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== void 0) job.pat = !!patch.pat;
   if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
+  if (patch.emReturn !== void 0) job.emReturn = patch.emReturn || null;
   if (patch.elecTest !== void 0) job.elecTest = !!patch.elecTest;
   if (patch.remedials !== void 0) job.remedials = normRemedials(patch.remedials, job);
   if (patch.pumpMaintenance !== void 0) job.pumpMaintenance = !!patch.pumpMaintenance;
@@ -20529,6 +20542,192 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
+      source: M8.source
+    },
+    warnings
+  };
+}
+async function optimiseEmDay(env, tenantId, body) {
+  const clampInt = (v, def, lo, hi) => {
+    const n = Math.round(Number(v));
+    return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : def;
+  };
+  const rnd1 = (x) => Math.round(x * 10) / 10;
+  const engineer = String(body.engineer || "").trim();
+  const date = String(body.date || "").slice(0, 10);
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunchMinutes = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 0));
+  const warnings = [];
+  if (!engineer) return { ok: false, error: "No engineer given." };
+  const flickMin = clampInt(body.flickMin, 10, 1, 120);
+  const patMin = clampInt(body.patMin, 45, 5, 240);
+  const checkMin = clampInt(body.checkMin, 15, 1, 120);
+  const drainMin = clampInt(body.drainMin, 180, 30, 600);
+  const dayCapMin = clampInt(body.dayMinutes, 540, 120, 900);
+  const home = await engineerHome(env, tenantId, engineer);
+  if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round trip can be worked out." };
+  let blkOffsets = [];
+  try {
+    const mine = blocksOnDate(await getSlaBlocks(env, tenantId), date).filter((b) => normId(b.username) === normId(engineer));
+    blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
+  } catch {
+  }
+  const jobs = [];
+  for (const j of Array.isArray(body.jobs) ? body.jobs : []) {
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    let coord = isFinite(lat) && isFinite(lng) && (lat || lng) ? [lat, lng] : null;
+    if (!coord && j.postcode) {
+      const g = await geocodePcServer(j.postcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${j.ref || j.site || "A job"} has no map location \u2014 left out.`);
+      continue;
+    }
+    const emTest = !!j.emTest, pat = !!j.pat, monthly = String(j.emKind || "") === "monthly";
+    const twoVisit = emTest && !monthly;
+    const drain = twoVisit ? clampInt(j.drainMinutes, drainMin, 30, 600) : 0;
+    let singleDur = 0;
+    if (!twoVisit) {
+      singleDur = (pat ? patMin : 0) + (emTest && monthly ? flickMin + checkMin : 0);
+      if (!singleDur) singleDur = Math.max(15, Math.round(Number(j.durationMinutes)) || 60);
+    }
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), siteCode: String(j.siteCode || ""), priority: String(j.priority || ""), coord, emTest, pat, monthly, twoVisit, drain, singleDur });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable jobs on this day to optimise.", warnings };
+  const emJobs = jobs.filter((j) => j.twoVisit);
+  if (!emJobs.length) return { ok: false, error: "None of these are 3-hour EM (drain-down) jobs \u2014 use the normal route optimiser for a plain round trip.", warnings };
+  const pts = [home.coord, ...jobs.map((j) => j.coord)];
+  const M8 = await driveMatrix(env, pts);
+  const jobPoint = new Map(jobs.map((j, i) => [j.id, i + 1]));
+  const baseSeq = solveRoute(M8.mins);
+  const outboundJobs = baseSeq.map((p) => jobs[p - 1]);
+  function evalPlan(patAtStart) {
+    const stops2 = [];
+    let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0, waitMins = 0;
+    const ready = /* @__PURE__ */ new Map();
+    for (const j of outboundJobs) {
+      const p = jobPoint.get(j.id), dMin = M8.mins[cur][p], dMi = M8.miles[cur][p];
+      driveMins += dMin;
+      driveMiles += dMi;
+      if (j.twoVisit) {
+        const here = !!(j.pat && patAtStart.get(j.id));
+        const dur = flickMin + (here ? patMin : 0);
+        const arrival = avoidBlocks(t + dMin, dur, blkOffsets);
+        const dueOff = arrival + flickMin + j.drain;
+        ready.set(j.id, dueOff);
+        stops2.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "start", kind: "em", patHere: here, arrivalOffset: arrival, endOffset: arrival + dur, driveMins: dMin, driveMiles: rnd1(dMi), durationMin: dur, checkDueOffset: dueOff, label: here ? "Flick lights + PAT test" : "Flick lights \u2014 starts the 3-hour timer" });
+        siteMins += dur;
+        t = arrival + dur;
+        cur = p;
+      } else {
+        const dur = j.singleDur, arrival = avoidBlocks(t + dMin, dur, blkOffsets);
+        stops2.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "single", kind: j.monthly ? "emmonthly" : j.pat ? "pat" : "other", patHere: !!j.pat, arrivalOffset: arrival, endOffset: arrival + dur, driveMins: dMin, driveMiles: rnd1(dMi), durationMin: dur, label: j.monthly ? "EM function test" : j.pat ? "PAT test" : "On site" });
+        siteMins += dur;
+        t = arrival + dur;
+        cur = p;
+      }
+    }
+    const remaining = emJobs.slice();
+    while (remaining.length) {
+      let best2 = -1, bestEnd = Infinity, bi = null;
+      for (let k = 0; k < remaining.length; k++) {
+        const j2 = remaining[k], p = jobPoint.get(j2.id), dMin = M8.mins[cur][p];
+        const arrival = avoidBlocks(t + dMin, checkMin, blkOffsets);
+        const here = !!(j2.pat && !patAtStart.get(j2.id));
+        const rdy = ready.get(j2.id);
+        let checkStart, wait;
+        if (here) {
+          const patEnd = arrival + patMin;
+          checkStart = Math.max(patEnd, rdy);
+          wait = Math.max(0, rdy - patEnd);
+        } else {
+          checkStart = Math.max(arrival, rdy);
+          wait = Math.max(0, rdy - arrival);
+        }
+        checkStart = avoidBlocks(checkStart, checkMin, blkOffsets);
+        const end = checkStart + checkMin;
+        if (end < bestEnd) {
+          bestEnd = end;
+          best2 = k;
+          bi = { p, dMin, dMi: M8.miles[cur][p], arrival, here, checkStart, wait, end };
+        }
+      }
+      const j = remaining.splice(best2, 1)[0], dur = checkMin + (bi.here ? patMin : 0);
+      driveMins += bi.dMin;
+      driveMiles += bi.dMi;
+      siteMins += dur;
+      waitMins += bi.wait;
+      stops2.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "return", kind: "em", patHere: bi.here, arrivalOffset: bi.arrival, checkStartOffset: bi.checkStart, endOffset: bi.end, driveMins: bi.dMin, driveMiles: rnd1(bi.dMi), durationMin: dur, waitMins: Math.round(bi.wait), label: bi.here ? "Light check + PAT test" : "Light check (3-hour result)" });
+      t = bi.end;
+      cur = bi.p;
+    }
+    const homeMin = M8.mins[cur][0], homeMi = M8.miles[cur][0];
+    return { stops: stops2, makespan: t + homeMin, waitMins, driveMins: driveMins + homeMin, driveMiles: driveMiles + homeMi, siteMins, homeMin, homeMi };
+  }
+  const patSites = emJobs.filter((j) => j.pat);
+  const K = patSites.length;
+  let candidates = [];
+  if (K <= 8) {
+    for (let mask = 0; mask < 1 << K; mask++) {
+      const m = new Map(emJobs.map((j) => [j.id, true]));
+      patSites.forEach((j, bit) => m.set(j.id, !!(mask & 1 << bit)));
+      candidates.push(m);
+    }
+  } else {
+    candidates = [new Map(emJobs.map((j) => [j.id, true])), new Map(emJobs.map((j) => [j.id, false]))];
+    warnings.push(`${K} EM+PAT sites \u2014 checked a couple of layouts rather than every combination.`);
+  }
+  let best = null;
+  for (const m of candidates) {
+    const r2 = evalPlan(m);
+    const fits = r2.makespan <= dayCapMin;
+    if (!best || fits && !best.fits || fits === best.fits && r2.makespan < best.r.makespan) best = { r: r2, fits };
+  }
+  const r = best.r;
+  const stops = r.stops;
+  const dayStartMin = hhmmMin(dayStart) || 0;
+  const lunchTarget = Math.max(0, 13 * 60 - dayStartMin);
+  let lunch = null;
+  if (lunchMinutes > 0 && stops.length) {
+    let idx = stops.findIndex((s) => s.arrivalOffset >= lunchTarget);
+    if (idx === -1) idx = stops.length;
+    const at = idx < stops.length ? stops[idx].arrivalOffset : r.makespan - r.homeMin;
+    lunch = { offset: at, minutes: lunchMinutes, beforeJobId: idx < stops.length ? stops[idx].jobId : null, beforeIndex: idx };
+    for (let i = idx; i < stops.length; i++) {
+      const s = stops[i];
+      s.arrivalOffset += lunchMinutes;
+      s.endOffset += lunchMinutes;
+      if (s.checkStartOffset != null) s.checkStartOffset += lunchMinutes;
+      if (s.checkDueOffset != null) s.checkDueOffset += lunchMinutes;
+    }
+  }
+  const dayLength = r.makespan + (lunch ? lunchMinutes : 0);
+  if (M8.source === "estimate") warnings.push("Used estimated distances (no live driving times available) \u2014 times are approximate.");
+  if (emJobs.length === 1) warnings.push("Only one EM site \u2014 there's no other work to fill its 3-hour drain-down, so expect a long wait before the light check.");
+  if (dayLength > dayCapMin) warnings.push(`This plan runs to about ${Math.round(dayLength / 60 * 10) / 10}h \u2014 past the ~${Math.round(dayCapMin / 60)}h day. Consider moving a site to another day.`);
+  return {
+    ok: true,
+    engineer,
+    date,
+    dayStart,
+    matrixSource: M8.source,
+    home: { postcode: home.postcode },
+    timing: { flickMin, patMin, checkMin, drainMin },
+    stops,
+    lunch,
+    summary: {
+      emSites: emJobs.length,
+      patJobs: jobs.filter((j) => j.pat).length,
+      jobs: jobs.length,
+      driveMins: Math.round(r.driveMins),
+      driveMiles: rnd1(r.driveMiles),
+      siteMins: Math.round(r.siteMins),
+      waitMins: Math.round(r.waitMins),
+      lunchMins: lunchMinutes,
+      dayLengthMins: Math.round(dayLength),
+      homeDriveMins: r.homeMin,
+      homeDriveMiles: rnd1(r.homeMi),
       source: M8.source
     },
     warnings

@@ -342,6 +342,14 @@
           ["Under the route, <b>➕ Jobs you could work in</b> lists other jobs that fit this day with little detour — each shows the extra time/miles and whether it's <b>🆕 unscheduled</b> or <b>⚠ currently</b> another engineer's. Tap <b>👁</b> to peek at the job card and come straight back. Tick any and press <b>↻ Re-optimise</b> to fold them in (they get reassigned to this engineer when you apply)."],
           ["Happy with it? Tap <b>✓ Apply to schedule</b> and the jobs are re-timed on the board. If a job has no location it's listed and left where it is."],
         ]},
+        { icon: "⚡", title: "Plan an EM/PAT day (fill the 3-hour timers)", perms: ["SLAAdmin"], steps: [
+          ["An EM (emergency-light) job needs the lights flicked onto battery, then a light check <b>3 hours later</b>. That wait is dead time — this tool fills it with the PAT test and the next site, so a run of EM/PAT sites gets done in one efficient loop."],
+          ["Assign the day's <b>EM/PAT jobs</b> to one engineer, and make sure they have a <b>Home postcode</b> set in Users Admin (the round trip starts and ends there)."],
+          ["On the scheduler, tap the engineer's <b>name</b> to open their day, then <b>⚡ EM/PAT day</b>. Pick the start time and lunch (the ⚙ Timings section lets you change the flick/PAT/check/drain minutes if needed)."],
+          ["Tap <b>⚡ Work out the day</b>. You get a running order: <b>💡 flick</b> (starts a site's 3-hour timer), <b>🔌/💡 PAT</b>, and <b>🔦 light check</b> visits — each EM site appears twice (go on, come back). It shows each site's <b>check-due time</b>, any <b>wait</b>, driving time and the total day length. It automatically decides whether each site's PAT is best done on the way in or when you come back."],
+          ["Tap <b>✓ Apply to schedule</b>. Each job is booked at its flick time and stamped with its return-check time. On the board the job shows a <b>🔦</b> tag, and the engineer sees a <b>“come back to check the lights at HH:MM”</b> note on the job plus a 🔦 chip in their jobs list."],
+          ["Got only one EM site, or the day runs long? It still plans it and tells you (there's no other work to fill a lone site's wait). Move a site to another day and re-run if it warns the day is too long."],
+        ]},
         { icon: "💡", title: "Fill loose jobs into the best engineer's day", perms: ["SLAAdmin"], steps: [
           ["On the scheduler, tap <b>💡 Fill-ins</b> (top right). Tick which engineers to consider (anyone with a home postcode set)."],
           ["It scans that day and lists loose jobs — unscheduled ones, and jobs sitting with an engineer you didn't tick — showing the <b>best-fit engineer</b> and the extra time it'd add to their run."],

@@ -691,6 +691,12 @@
     var card=$("emTimerCard"); if(!card) return;
     var t=job.emTimer, rem=emRemainMs();
     var h='<div class="sec-h"><span class="t">💡 3-hour drain-down timer</span></div>';
+    // Office EM/PAT-day plan: when to come back for the light check (the drain-down
+    // is filled with work at other sites, so the return is a planned time).
+    if(job.emReturn && (job.emReturn.checkStartAt||job.emReturn.at)){
+      var _rt=job.emReturn.checkStartAt||job.emReturn.at;
+      h+='<div class="hint" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:8px 10px;margin-bottom:8px;color:#9a3412">🔦 <b>Planned:</b> come back to check the lights at <b>'+fmtTime(_rt)+'</b>'+(job.emReturn.patDeferred?' (do the PAT test then too)':'')+'.</div>';
+    }
     if(!t||!t.startedAt){
       h+='<div class="hint">Flick the lights onto battery, then start the 3-hour timer. It shows here and in the office while it counts down.</div>';
       h+='<button class="btn line wide" id="emStartBtn" style="margin-top:8px">▶ Start 3-hour drain test</button>';
