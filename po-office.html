@@ -628,6 +628,16 @@ async function submitNewPO(btn) {
       job_id: (document.getElementById('m-job-id') || {}).value || null, job_ref: (document.getElementById('m-job-ref') || {}).value || null,
       office_user_slug: null, office_user_name: null };
   }
+  // Raising a PO to carry an invoice → confirm/correct the invoice's net cost
+  // FIRST (the raise form otherwise has no cost box, so a mis-read amount — even
+  // £0 — used to save silently). Validate before anything is created.
+  if (invPending) {
+    const costEl = document.getElementById('inv-raise-cost');
+    const c = costEl ? parseFloat(costEl.value) : Number(invPending.cost);
+    if (!Number.isFinite(c) || c < 0) { alert('Enter the invoice’s net (ex-VAT) cost before raising the PO.'); if (costEl) costEl.focus(); return; }
+    if (c === 0 && !confirm('The cost reads £0 — raise this PO and attach the invoice at zero cost anyway?')) { if (costEl) costEl.focus(); return; }
+    invPending.cost = c;
+  }
   submittingNewPO = true;
   if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
   try {
@@ -991,6 +1001,7 @@ async function invApply(poNumber, btn) {
   const rateEl = document.getElementById('inv-vat-rate');
   const cost = costEl ? parseFloat(costEl.value) : NaN;
   if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  if (cost === 0 && !confirm('The cost is £0 — attach this invoice at zero cost anyway?')) return;
   if (!invFile) { alert('The invoice file was lost — drop it again'); return; }
   if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
   const f = invFields || {};
@@ -1181,7 +1192,8 @@ function invSweepCard(it, i) {
       '<button class="ghost small" onclick="invRaisePO(' + i + ')">➕ Raise a new PO</button>' +
       (cat === 'other' ? '<button class="ghost small" onclick="invAddParty(' + i + ')">🏷️ Add supplier/sub</button>' : '') +
       (cat === 'flag' || cat === 'other' ? '<button class="ghost small" style="color:#c0392b" onclick="openFlagLog(' + i + ')">⚠ Flag &amp; log</button>' : '')) +
-    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
+    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button>' +
+    '<button class="ghost small" style="color:#8a6d00" title="Not an invoice — hide it and never suggest it again" onclick="invDismiss(' + i + ')">🚫 Not an invoice</button></div>';
   return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
 }
 function invSweepPo(i) {
@@ -1210,6 +1222,7 @@ async function invSweepApply(i, btn) {
   if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
   const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
   if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  if (cost === 0 && !confirm('The cost is £0 — attach this invoice at zero cost anyway?')) return;
   const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
   if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
   let res;
@@ -1219,6 +1232,19 @@ async function invSweepApply(i, btn) {
   it._done = true;
   invRenderResults();
   loadPOs(); loadDashboard();
+}
+// Dismiss a swept document that isn't an invoice (statement, delivery note, advert…)
+// — records it in the seen ledger so no future sweep suggests it again.
+async function invDismiss(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  if (!confirm('Dismiss this document as “not an invoice”? It won’t be suggested by the sweep again.')) return;
+  try {
+    const res = await authFetch('/po/api/invoice/sweep-dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId }) }).then(r => r.json());
+    if (res && res.error) { alert(res.error); return; }
+  } catch (e) { alert('Couldn’t dismiss: ' + e.message); return; }
+  it._done = true;
+  invRenderResults();
 }
 // ── "Attach all confident matches" → a review modal you flick through ─────────
 function invBulkReview() {
@@ -1315,8 +1341,22 @@ async function openInvRaise() {
   note.textContent = (p.job
       ? '🔗 Raising a PO tied to ' + (p.job.project ? 'project ' : 'job ') + (p.job.ref || p.job.site || '') + ' — the cost lands on it. '
       : '➕ ')
-    + 'The invoice “' + (p.filename || 'invoice') + '” (' + invMoney(p.cost) + ' net) attaches automatically once you press Issue.';
+    + 'The invoice “' + (p.filename || 'invoice') + '” attaches automatically once you press Issue.';
   body.insertBefore(note, body.firstChild);
+  // Editable net cost — the ONE place to set/correct the price on this raise flow.
+  // Prefilled from the invoice read; blank + a warning when the reader got nothing
+  // (so a mis-read £0 can never save unnoticed).
+  const gotCost = Number(p.cost) > 0;
+  const costWrap = document.createElement('div');
+  costWrap.className = 'field';
+  costWrap.style.cssText = 'margin:0 0 12px';
+  costWrap.innerHTML = '<label>Net cost ex VAT (£) — from the invoice</label>' +
+    '<input id="inv-raise-cost" type="number" step="0.01" min="0" inputmode="decimal" value="' + (gotCost ? escapeAttr(p.cost) : '') + '" placeholder="Enter the invoice amount">' +
+    '<div class="muted" style="font-size:12px;margin-top:4px">' +
+      (gotCost ? '✓ Read from the invoice — check it matches, then press Issue.'
+               : '⚠ Couldn’t read the amount from this invoice — type the net (ex-VAT) cost in.') +
+    '</div>';
+  body.insertBefore(costWrap, note.nextSibling);
   // Prefill from a picked job/project (the site drives costing; the hidden job
   // link ties an SLA job's cost precisely — a project rolls up by its site name).
   if (p.job) {

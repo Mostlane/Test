@@ -37481,6 +37481,13 @@ async function handle33(request, env, ctx, url, sess) {
       await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr8({ ok: true, po_number: poNumber, invoiceUrl });
     }
+    if (path === "/api/invoice/sweep-dismiss" && method === "POST") {
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "ignored", null);
+      return jr8({ ok: true });
+    }
     if (path === "/api/invoice/url" && method === "GET") {
       const n = Number(q.get("po"));
       const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
