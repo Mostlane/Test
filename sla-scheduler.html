@@ -543,6 +543,7 @@
         <label style="flex:1;min-width:88px;font-size:12px;color:var(--muted);">Drain (min)<input type="number" id="emOptDrain" value="180" min="30" step="15" style="width:100%;"></label>
       </div>
     </details>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:2px 0 8px;color:#334155;"><input type="checkbox" id="emOptWriteInstr" checked style="width:auto;"> ✏️ Write timing instructions into each job (what to do, how long, when to return)</label>
     <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap;">
       <button type="button" class="btn btn-primary" id="emOptRun">⚡ Work out the day</button>
       <button type="button" class="btn" id="emOptApply" style="display:none;background:#16a34a;color:#fff;">✓ Apply to schedule</button>
@@ -1994,6 +1995,66 @@ function renderEmOptimise(data){
   $("emOptResult").innerHTML = rows.join("");
   $("emOptApply").style.display = "";
 }
+// Human duration for the instructions ("2h 15m", "45 min", "3 hours").
+function emFmtDur(mins){
+  mins = Math.max(0, Math.round(mins));
+  if(mins < 60) return mins + " min";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? (h + "h " + m + "m") : (h + " hour" + (h === 1 ? "" : "s"));
+}
+// Marker so re-applying REPLACES the auto block instead of stacking it.
+const EM_PLAN_RE = /🔧 EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\n*/g;
+// Build the engineer instructions for one job from the ordered plan. Timings are
+// RELATIVE (they may not arrive on the dot); planned clock times are a soft hint.
+function buildEmInstructions(stops, i, timing){
+  const st = stops[i];
+  const dayStart = emOptResult.dayStart;
+  const clk = off => optWallClock(emOptCtx.date, dayStart, off);
+  const siteOf = s => s ? (s.site || s.ref || "the next site") : null;
+  const nextOf = k => (k + 1 < stops.length) ? siteOf(stops[k + 1]) : null;
+  const nextDrive = k => (k + 1 < stops.length) ? stops[k + 1].driveMins : null;
+  const L = [];
+  L.push("🔧 EM/PAT DAY PLAN (auto) — " + (st.site || st.ref || "this site"));
+  L.push("");
+  if(st.phase === "single"){
+    if(st.kind === "pat"){
+      L.push("• Carry out the PAT test here. (~" + emFmtDur(timing.patMin || 45) + ")");
+    } else if(st.kind === "emmonthly"){
+      L.push("• Function-test the emergency lights (flick test — no 3-hour drain needed). (~" + emFmtDur(st.durationMin) + ")");
+    } else {
+      L.push("• On site ~" + emFmtDur(st.durationMin) + ".");
+    }
+    const ns = nextOf(i);
+    if(ns) L.push("• Next: go to " + ns + (nextDrive(i) ? " (~" + emFmtDur(nextDrive(i)) + " drive)" : "") + ".");
+    else L.push("• After this: head home — day complete.");
+    L.push("");
+    L.push("(Planned around ~" + clk(st.arrivalOffset) + " — you don't have to hit it exactly.)");
+    L.push("— end of plan —");
+    return L.join("\n");
+  }
+  // EM start visit + its return.
+  const rt = stops.find(s => s.phase === "return" && s.jobId === st.jobId);
+  const patUp = st.patHere;
+  const flick = timing.flickMin || 10, drain = timing.drainMin || 180, check = timing.checkMin || 15, pat = timing.patMin || 45;
+  const sinceFlickAtLeave = Math.max(0, st.durationMin - flick);      // lights already draining when you leave
+  const returnAfterLeave = Math.max(0, drain - sinceFlickAtLeave);    // wait from leaving to the earliest check
+  L.push("VISIT 1 — on arrival:");
+  L.push("• Flick ALL emergency lights onto battery/test — this STARTS the 3-hour timer. (~" + emFmtDur(flick) + ")");
+  if(patUp) L.push("• Do the PAT test now. (~" + emFmtDur(pat) + ")");
+  L.push("• Time on site: ~" + emFmtDur(st.durationMin) + ", then leave the lights running.");
+  const ns = nextOf(i);
+  if(ns) L.push("• Next: go to " + ns + (nextDrive(i) ? " (~" + emFmtDur(nextDrive(i)) + " drive)" : "") + ".");
+  L.push("");
+  L.push("VISIT 2 — come back for the 3-hour light check:");
+  L.push("• Return no sooner than ~" + emFmtDur(returnAfterLeave) + " after you leave here (the lights must run a full 3 hours).");
+  if(!patUp) L.push("• On the return, do the PAT test (~" + emFmtDur(pat) + ") as well.");
+  L.push("• Check every emergency light is still lit, then complete the certificate. (~" + emFmtDur(check) + ")");
+  if(rt){ const ri = stops.indexOf(rt); const nr = (ri + 1 < stops.length) ? siteOf(stops[ri + 1]) : null; L.push("• After the check: " + (nr ? "go to " + nr + "." : "head home — day complete.")); }
+  L.push("");
+  L.push("(Planned ~" + clk(st.arrivalOffset) + ", return ~" + (rt ? clk(rt.checkStartOffset != null ? rt.checkStartOffset : rt.arrivalOffset) : "later") + " — approximate, work to the durations above.)");
+  L.push("— end of plan —");
+  return L.join("\n");
+}
 async function applyEmOptimise(){
   if(!emOptResult || !emOptResult.stops) return;
   $("emOptApply").disabled = true; $("emOptStatus").textContent = "Applying the day…";
@@ -2001,9 +2062,12 @@ async function applyEmOptimise(){
   const base = new Date(emOptCtx.date.getFullYear(), emOptCtx.date.getMonth(), emOptCtx.date.getDate(), h, m, 0, 0);
   const iso = off => new Date(base.getTime() + Math.round(off) * 60000).toISOString();
   const t = emOptResult.timing || {};
-  const returns = {}; emOptResult.stops.filter(x => x.phase === "return").forEach(x => returns[x.jobId] = x);
+  const stops = emOptResult.stops;
+  const writeInstr = $("emOptWriteInstr") ? $("emOptWriteInstr").checked : true;
+  const returns = {}; stops.filter(x => x.phase === "return").forEach(x => returns[x.jobId] = x);
   let ok = 0, fail = 0;
-  for(const st of emOptResult.stops){
+  for(let i = 0; i < stops.length; i++){
+    const st = stops[i];
     if(st.phase === "return") continue;   // the check is folded into its start job's emReturn
     const patch = { scheduledAt: iso(st.arrivalOffset), scheduledEnd: iso(st.endOffset), durationMinutes: st.durationMin,
       assignedEngineers: [emOptCtx.username], assignedTo: emOptCtx.username, changedBy: currentUser || "scheduler" };
@@ -2011,6 +2075,15 @@ async function applyEmOptimise(){
       const rt = returns[st.jobId];
       if(rt) patch.emReturn = { at: iso(rt.arrivalOffset), checkStartAt: iso(rt.checkStartOffset != null ? rt.checkStartOffset : rt.arrivalOffset),
         end: iso(rt.endOffset), dueAt: iso(st.checkDueOffset), patDeferred: !!rt.patHere, checkMin: t.checkMin || 15, drainMin: t.drainMin || 180 };
+    }
+    // Write the timing instructions into the job description (idempotent — replaces
+    // any previous auto block, keeps the original text below). Skip plain jobs.
+    if(writeInstr && (st.phase === "start" || st.kind === "pat" || st.kind === "emmonthly")){
+      const bj = jobs.find(x => x.id === st.jobId);
+      const cur = (bj && bj.title) ? String(bj.title) : "";
+      const clean = cur.replace(EM_PLAN_RE, "").trim();
+      const block = buildEmInstructions(stops, i, t);
+      patch.description = block + (clean ? "\n\n" + clean : "");
     }
     try{
       const res = await authFetch("/sla/jobs/" + encodeURIComponent(st.jobId), { method: "PATCH",

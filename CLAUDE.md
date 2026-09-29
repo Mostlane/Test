@@ -2878,8 +2878,18 @@ the engineer's EM/PAT jobs for the day, coords resolved client-side) → itinera
 preview (💡 flick / 🔦 check / 🔌 PAT, check-due + wait per row) → **✓ Apply**
 PATCHes each job's start `scheduledAt/scheduledEnd/durationMinutes` + `emReturn`
 (the return stop is folded into its start job — never a separate job) + assigns the
-engineer. The scheduler day block shows a 🔦 tag + "return for the 3-hour light check
-~HH:MM" tooltip when a job has an emReturn. **Front-end (engineer):**
+engineer, AND (checkbox, default on) **writes relative-timing INSTRUCTIONS into each
+job's description** (`buildEmInstructions`): VISIT 1 flick(+PAT) with durations + the
+next site to drive to; VISIT 2 "return no sooner than ~Nh Mm after you leave" (drain −
+time already on site, so 2h15m when PAT's up front, a full 3h when deferred) + check
+(+deferred PAT) + where to go after — durations in min/hours (engineers rarely arrive
+on the dot; planned clock times are a soft hint). Idempotent: a `🔧 EM/PAT DAY PLAN
+(auto) … — end of plan —` marker block is stripped + rebuilt on re-apply, keeping the
+original cert description below. The scheduler day block shows a 🔦 tag + "return for
+the 3-hour light check ~HH:MM" tooltip when a job has an emReturn. **The office day
+summary (click an engineer's name) uses `/sla/jobs/for-engineer?office=1` (SLA-admin
+only) so it shows jobs still HIDDEN from the engineer (drip-fed), each badged 🙈 —
+without it a fully drip-fed EM/PAT day read "0 jobs". **Front-end (engineer):**
 engineer-job.html's 💡 drain-down card shows a "🔦 Planned: come back to check the
 lights at HH:MM (do the PAT then too)" banner; engineer-jobs.html job cards carry a
 🔦 check-HH:MM chip beside the ⏱ countdown chip. Test
