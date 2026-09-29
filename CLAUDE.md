@@ -2113,9 +2113,29 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     as text, £ number format, bold totals): **⬇ Export month** (one sheet) and **⬇
     Export all** (an "All FBC jobs" sheet with a Month column + one sheet per month,
     each with a totals row). `ml-xlsx.js` is reusable for any table→xlsx elsewhere.
+- **Tracking-only records (28 Sep 2026 — 18-month back-fill):** an `fbc_meta` row can
+  now exist with **no live SLA job** (a historical incident logged for the invoicing
+  record, not put on the board). `fbc_meta` gained **`description`** + **`raised_at`**
+  (self-migrating ALTERs) so a meta-only row shows its incident detail and sits in the
+  right invoicing month without an `sla_jobs` row; `shape()` falls back to them, and a
+  row with no linked job derives **`invoiceState:"to_invoice"`** (the actionable bucket)
+  instead of "open". `/fbc/meta` accepts `description`/`raisedAt`/`siteCode`/`siteName`/
+  `reference` edits. NB the `/list` query aliases `j.description AS j_descr` — selecting
+  a bare `j.description` alongside `m.*` clobbered the meta's description on a meta-only
+  row (fixed). **Back-fill:** Jamie's 18 months of "Mostlane New Incident Form" Jotform
+  emails were read from the mailbox (Outlook connector) and **58 tracking records**
+  loaded straight to D1 (`source='backfill'`, `job_id='FBCH-<djb2>'`, customer/officer
+  data D1-only — never the repo). Dedup: 6 incidents that already had a manual portal
+  job (all ≥20 Aug 2026 — the oldest board job) were skipped; 4 form-setup test
+  submissions + duplicate `Fwd:` copies were excluded. 6 records are "Other" sites with
+  no FBC code (Bandstand West St, Innovation Centre, cricket club, leisure centre,
+  Melvin Jones House, Collingwood Court) — full address kept as the site name. To
+  re-run/extend, insert more `fbc_meta` rows the same way (deterministic `FBCH-` id =
+  idempotent); the intake go-live is still the Outlook rule below.
 - **Tests:** `node worker/tools/test-fbc.mjs` (module: recordFbcJob/appendFbcMessage
   round-trip, list grouping + invoiceState, meta updates don't clobber intake, dedupe,
-  access gating) + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest
+  access gating, **tracking-only record: description/raised_at surfaced + to_invoice**)
+  + the FBC cases in `test-email-intake.mjs` (Jotform Yes/No, digest
   dropped, Re: survives, same-ref on redelivery).
 - **GO-LIVE (manual, one-time):** an Outlook rule on the mailbox that receives the
   Jotform incidents → **forward** (not redirect) the "Mostlane New Incident Form"
@@ -2828,9 +2848,57 @@ on the engineer job LIST (engineer-jobs.html `emTimerChip` in `jobCardInner`) an
 office board (sla-main.html, table statusline + mobile card) — `⏱ H:MM` remaining in
 navy, flipping to a green "✅ lights due" when done; a shared 1s `tickEmChips()` polls
 `.em-chip[data-emend]` in the DOM so re-rendered cards stay live.
-**TODO (next):** scheduler cross-over optimiser — an EM job is 45 min active +
-~2 h idle (drain-down) + 15 min light check; when two EM sites are close, recommend
-interleaving them (do site B during A's wait, loop back to check A's lights).
+**EM/PAT DAY OPTIMISER — cross-site interleaving (Sep 2026, DONE):** the scheduler
+now plans a whole EM/PAT day so each site's ~3-hour drain-down is filled with work
+at OTHER sites. **Each 3-hour EM site is worked TWICE:** a START visit (flick the
+lights onto battery + optionally the 45-min PAT) and a RETURN visit (the 15-min
+light check), with the return no sooner than **flick + 3h**. **POST /sla/em-optimize**
+(sla.js `optimiseEmDay`, exported; SLA-admin) is DETERMINISTIC — reuses
+`driveMatrix` (Google/OSRM, haversine fallback) + `engineerHome` + `solveRoute` +
+the appointment `blocks`, **NO Claude, no AI cost**. It orders an outbound flick
+sweep (shortest driving), then a greedy readiness-aware return sweep (take the check
+that FINISHES soonest = travel + wait), and **chooses PAT placement per site** by
+evaluating every combination (2^K, K = EM+PAT sites, cap 8) and keeping the tightest
+day — so a site whose check comes up first can have its PAT DEFERRED to the return to
+fill what would be a wait, while others do PAT up front. PAT-only / monthly-EM / plain
+jobs slot into the outbound sweep as single visits. Lunch (~13:00) is inserted
+post-hoc (only pushes things later, so checks stay legal). Returns a PREVIEW —
+`stops[]` (phase start|return|single, arrivalOffset/endOffset in minutes-from-start,
+durationMin, checkDueOffset on starts, checkStartOffset/waitMins on returns, per-stop
+drive) + `lunch` + `summary` (emSites, patJobs, drive/site/wait/lunch mins,
+dayLengthMins, round-trip miles) + `warnings` (no home / unlocatable / estimate /
+single-site unfilled drain / day runs long). **Job field `job.emReturn`** =
+`{at, checkStartAt, end, dueAt, patDeferred, checkMin, drainMin}` — the planned
+light-check return visit (the flick+PAT is the job's own scheduledAt/scheduledEnd);
+threaded through createOrUpdateJobFromPayload (preserve) + patchJob (accept), carried
+to the scheduler via normaliseJob and to GET responses via the decorate spread.
+**Front-end (office):** engDay modal → **⚡ EM/PAT day** button → `#emOptBackdrop`
+(start/lunch + advanced timings) → **⚡ Work out the day** (POST /sla/em-optimize with
+the engineer's EM/PAT jobs for the day, coords resolved client-side) → itinerary
+preview (💡 flick / 🔦 check / 🔌 PAT, check-due + wait per row) → **✓ Apply**
+PATCHes each job's start `scheduledAt/scheduledEnd/durationMinutes` + `emReturn`
+(the return stop is folded into its start job — never a separate job) + assigns the
+engineer, AND (checkbox, default on) **writes relative-timing INSTRUCTIONS into each
+job's description** (`buildEmInstructions`): VISIT 1 flick(+PAT) with durations + the
+next site to drive to; VISIT 2 "return no sooner than ~Nh Mm after you leave" (drain −
+time already on site, so 2h15m when PAT's up front, a full 3h when deferred) + check
+(+deferred PAT) + where to go after — durations in min/hours (engineers rarely arrive
+on the dot; planned clock times are a soft hint). Emoji-led (💡 flick · 🔌 PAT · 🔦 check · 🚗 next · 🛬 come back from · 🏁 home) with a
+whole-day **🗺️ THE DAY** timeline on every job (🏠 → icon+site per stop → 🏠) so it reads
+like a story. Idempotent: a `⚡ EM/PAT DAY PLAN (auto) … — end of plan —` marker block is
+stripped + rebuilt on re-apply (the strip regex matches any leading emoji, so an older
+🔧-headed block is replaced too), keeping the original cert description below. The scheduler day block shows a 🔦 tag + "return for
+the 3-hour light check ~HH:MM" tooltip when a job has an emReturn. **The office day
+summary (click an engineer's name) uses `/sla/jobs/for-engineer?office=1` (SLA-admin
+only) so it shows jobs still HIDDEN from the engineer (drip-fed), each badged 🙈 —
+without it a fully drip-fed EM/PAT day read "0 jobs". **Front-end (engineer):**
+engineer-job.html's 💡 drain-down card shows a "🔦 Planned: come back to check the
+lights at HH:MM (do the PAT then too)" banner; engineer-jobs.html job cards carry a
+🔦 check-HH:MM chip beside the ⏱ countdown chip. Test
+`node worker/tools/test-em-optimize.mjs` (28 cases: two-visit structure, drain
+respected, PAT XOR placement, mixed day, custom timings, error paths, single-site
+warning). **TODO/next:** a full two-block engineer itinerary view; cross-ENGINEER
+EM interleaving (share nearby EM sites between two engineers); fold into job costing.
 - **EM cert number now read from the PDF CONTENT (authoritative), Aug 2026:** the
   "set number" is the number printed on the certificate, and the FILENAME is only a
   proxy — several stored EM certs sit in the wrong store folder, carry a set number
@@ -5736,6 +5804,12 @@ files to this public repo.
   #003468, z-index 2147483000) and pushes the page below it. **`viewport-fit=cover`
   is now on every page that LOADS portal-config.js** (117 pages) — without it
   `env()` reports 0 and the cap can't size itself.
+  **The same injected style also carries `*{touch-action:manipulation}` (28 Sep
+  2026)** — kills the iOS double-tap-to-zoom gesture portal-wide so the installed
+  PWA feels native (Jamie's ask), while KEEPING pinch-zoom + scroll. The `*`
+  selector is specificity 0,0,0 so ANYTHING that sets its own `touch-action` wins:
+  signature pads / drag handles keep their `touch-action:none` (verified). Do not
+  change it to a `*{touch-action:none}` — that would break scrolling everywhere.
   **Two rules learned doing it:**
   (a) **The offset goes on `<html>`, never `<body>` — this took three attempts.**
   A CSS `body{padding-top:env(...)}` REPLACED the padding pages set for

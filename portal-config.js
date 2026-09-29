@@ -659,6 +659,14 @@
       + "  padding-right:env(safe-area-inset-right, 0px) !important; } }"
       + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
       + "  background:#003468; z-index:2147483000; pointer-events:none; }"
+      // Kill the iOS double-tap-to-zoom gesture portal-wide so the installed PWA
+      // feels like a native app (Jamie's ask). `touch-action:manipulation` keeps
+      // panning/scroll AND pinch-zoom (accessibility) — it only drops double-tap
+      // zoom and other non-standard gestures. The `*` selector is specificity
+      // 0,0,0, so ANY element that sets its own touch-action wins: signature pads
+      // and drag handles keep their `touch-action:none` untouched. It therefore
+      // only flips default-`auto` elements (buttons, cards, text) to manipulation.
+      + "*{ touch-action:manipulation; }"
 ;
     (document.head || document.documentElement).appendChild(st);
 

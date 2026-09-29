@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>FBC Jobs</title>
-  <script src="/portal-config.js?v=39"></script>
+  <script src="/portal-config.js?v=40"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="ml-xlsx.js?v=1"></script>
@@ -66,12 +66,18 @@
     .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
     .btn.ghost{background:#eef2f7;color:var(--brand);border:1px solid #d7dee6;}
     .empty{padding:14px 4px;color:#8a97a8;font-size:13px;}
+    /* Sticky top chrome — header + tabs stay locked to the screen (PWA app feel).
+       Pinned at the status-bar cap inset so it sits right under the iOS clock. */
+    .fbctop{position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--ml-topbar,0px));z-index:60;background:#eef1f4;}
+    .tabsbar{background:#eef1f4;border-bottom:1px solid #dbe2ea;}
     /* view tabs */
-    .tabs{display:flex;gap:8px;margin:2px 0 12px;}
+    .tabs{display:flex;gap:8px;max-width:900px;margin:0 auto;padding:8px 12px 10px;}
     .tab{flex:none;background:#fff;border:1px solid #ccd5dd;color:#334;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
     .tab.on{background:var(--brand);color:#fff;border-color:var(--brand);}
     /* invoicing */
-    .monthnav{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    .monthnav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+      position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--ml-topbar,0px) + var(--fbctop-h,104px));z-index:40;
+      background:#fff;margin:-14px -14px 12px;padding:12px 14px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;}
     .monthnav .arw{width:38px;height:38px;border-radius:10px;border:1px solid #ccd5dd;background:#fff;font-size:18px;cursor:pointer;font-family:inherit;color:var(--brand);flex:none;}
     .monthnav .arw:disabled{opacity:.4;cursor:default;}
     .monthnav .mlab{font-size:17px;font-weight:800;color:var(--brand);min-width:150px;text-align:center;}
@@ -82,7 +88,7 @@
     table.inv th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;color:#6b7a90;padding:6px 8px;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
     table.inv td{padding:7px 8px;border-bottom:1px solid #eef2f6;vertical-align:middle;}
     table.inv tr:hover td{background:#f8fafc;}
-    table.inv .site{font-weight:700;white-space:nowrap;}
+    table.inv .site{font-weight:700;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
     table.inv .jb{color:#374151;}
     table.inv input,table.inv select{padding:6px 7px;border:1px solid #ccd5dd;border-radius:8px;font-size:13.5px;font-family:inherit;background:#fff;color:#1f2438;}
     table.inv input.cost{width:96px;text-align:right;}
@@ -98,17 +104,20 @@
   </style>
 </head>
 <body>
-  <header class="page">
-    <a class="ml-back" href="/main.html" style="text-decoration:none;">‹ Back</a>
-    <h1>🏛️ FBC Jobs</h1>
-  </header>
+  <div class="fbctop">
+    <header class="page">
+      <a class="ml-back" href="/main.html" style="text-decoration:none;">‹ Back</a>
+      <h1>🏛️ FBC Jobs</h1>
+    </header>
+    <div class="tabsbar">
+      <div class="tabs">
+        <button class="tab on" data-v="jobs">📋 Jobs</button>
+        <button class="tab" data-v="inv">🧾 Invoicing</button>
+      </div>
+    </div>
+  </div>
 
   <div class="wrap">
-    <div class="tabs">
-      <button class="tab on" data-v="jobs">📋 Jobs</button>
-      <button class="tab" data-v="inv">🧾 Invoicing</button>
-    </div>
-
     <div id="jobsView">
       <div class="card">
         <p class="muted" id="greet" style="margin:0 0 10px;">Fareham Borough Council jobs — quotes, costs, and what to invoice each month.</p>
@@ -155,6 +164,18 @@
     let FILTER = "all", ROWS = [], VIEW = "jobs", curMonth = null;
     const ym = d => { const x = new Date(d); return isNaN(x) ? "" : (x.getFullYear() + "-" + String(x.getMonth()+1).padStart(2,"0")); };
     const effMonth = r => (/^\d{4}-\d{2}$/.test(r.invoiceMonth||"") ? r.invoiceMonth : ym(r.raisedAt));
+
+    // Keep the sticky month-navigator's offset equal to the real height of the
+    // pinned header+tabs, so it locks directly beneath them (survives orientation
+    // / font-size changes). env(safe-area-inset-top) is added in the CSS calc.
+    function measureTop() {
+      const top = document.querySelector(".fbctop");
+      if (top) document.documentElement.style.setProperty("--fbctop-h", top.offsetHeight + "px");
+    }
+    measureTop();
+    addEventListener("resize", measureTop);
+    addEventListener("orientationchange", () => setTimeout(measureTop, 200));
+    if (window.ResizeObserver) { try { new ResizeObserver(measureTop).observe(document.querySelector(".fbctop")); } catch {} }
 
     (async () => {
       try {
@@ -268,7 +289,7 @@
             const row = ROWS.find(x => x.jobId === jobId);
             if (row) {
               Object.assign(row, { cost: body.cost, invoiceStatus: body.invoiceStatus, invoiceMonth: newMonth });
-              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (row.status && ["complete","closed","closed jobs","invoiced","cancelled"].includes(String(row.status).toLowerCase()) ? "to_invoice" : "open"));
+              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (body.invoiceStatus === "to_invoice" ? "to_invoice" : ((!row.onBoard || (row.status && ["complete","closed","closed jobs","invoiced","cancelled"].includes(String(row.status).toLowerCase()))) ? "to_invoice" : "open")));
             }
             saved.classList.add("on"); setTimeout(()=>saved.classList.remove("on"), 1200);
             if (newMonth && newMonth !== curMonth) renderInv();          // moved to another sheet → drops out here
@@ -410,7 +431,7 @@
             // update ROWS in place so section grouping reflects the change on next render (without collapse)
             const row = ROWS.find(x => x.jobId === jobId);
             if (row) { Object.assign(row, { cost: body.cost, poNumber: body.poNumber, quoteStatus: body.quoteStatus, quoteAmount: body.quoteAmount, invoiceStatus: body.invoiceStatus, invoiceMonth: body.invoiceMonth, invoiceRef: body.invoiceRef });
-              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : row.invoiceState);
+              row.invoiceState = body.invoiceStatus === "invoiced" ? "invoiced" : (body.invoiceStatus === "not_required" ? "not_required" : (body.invoiceStatus === "to_invoice" ? "to_invoice" : row.invoiceState));
             }
           } catch {}
         };
