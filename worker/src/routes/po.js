@@ -433,6 +433,16 @@ export async function handle(request, env, ctx, url, sess) {
       await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr({ ok: true, po_number: poNumber, invoiceUrl });
     }
+    // ── Dismiss a swept attachment that ISN'T an invoice (statement / remittance /
+    // delivery note / advert…) so the seen ledger drops it from every future sweep
+    // and it's never re-suggested. Same mechanism as an attach, just no PO. ──
+    if (path === "/api/invoice/sweep-dismiss" && method === "POST") {
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr({ error: "Missing the mailbox message reference" }, 400);
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "ignored", null);
+      return jr({ ok: true });
+    }
     // Signed URL for a PO's already-attached invoice (built on demand — signing
     // needs the server secret, so getPOs returns only the raw key).
     if (path === "/api/invoice/url" && method === "GET") {
