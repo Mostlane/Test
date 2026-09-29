@@ -60,7 +60,7 @@ export async function graphMailboxCheck(env, mailbox) {
 // Precedence for what to read: an explicit date range (from/to, "Advanced
 // search") wins; then `since` (an incremental high-watermark — only emails that
 // arrived AFTER the last scan); then the rolling `days` look-back.
-export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since } = {}) {
+export async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since, before } = {}) {
   // Filter on receivedDateTime only (the property we also $orderby, which Graph
   // is happy to combine) and keep only messages WITH attachments in code — this
   // sidesteps the "filter/sort too complex" error that a boolean-plus-date
@@ -73,17 +73,24 @@ export async function listRecentWithAttachments(env, mailbox, { days = 60, top =
   const fIso = from ? iso(from, false) : null;
   const tIso = to ? iso(to, true) : null;
   const sinceIso = since ? iso(since, false) : null;
+  const beforeIso = before ? iso(before, false) : null;
+  const floorIso = new Date(Date.now() - Math.max(1, days) * 86400000).toISOString();
   if (fIso || tIso) {
     const parts = [];
     if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
     if (tIso) parts.push(`receivedDateTime le ${tIso}`);
     filter = parts.join(" and ");
-  } else if (sinceIso) {
-    // Incremental: strictly newer than the last email we read (gt), so a normal
-    // sweep only downloads what has arrived since.
-    filter = `receivedDateTime gt ${sinceIso}`;
+  } else if (sinceIso || beforeIso) {
+    // Incremental forward read (gt: newer than the last email we read) OR the
+    // backfill walk (lt: older than what we've already covered) — either way kept
+    // within the look-back window so it can't run off to the start of the mailbox.
+    const parts = [];
+    if (sinceIso) parts.push(`receivedDateTime gt ${sinceIso}`);
+    if (beforeIso) parts.push(`receivedDateTime lt ${beforeIso}`);
+    parts.push(`receivedDateTime ge ${floorIso}`);
+    filter = parts.join(" and ");
   } else {
-    filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 86400000).toISOString()}`;
+    filter = `receivedDateTime ge ${floorIso}`;
   }
   const q = `/users/${encodeURIComponent(mailbox)}/messages`
     + `?$select=id,subject,receivedDateTime,from,hasAttachments`

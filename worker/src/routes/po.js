@@ -110,14 +110,24 @@ async function getSweepState(db, mailbox) {
     const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
     if (row && row.value) {
       const s = JSON.parse(row.value);
-      return { lastReceived: s.lastReceived || null, outstanding: Array.isArray(s.outstanding) ? s.outstanding : [] };
+      return {
+        lastReceived: s.lastReceived || null,
+        outstanding: Array.isArray(s.outstanding) ? s.outstanding : [],
+        oldestScanned: s.oldestScanned || null,
+        backfillDone: !!s.backfillDone,
+      };
     }
   } catch { /* no state yet */ }
-  return { lastReceived: null, outstanding: [] };
+  return { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
 }
 async function saveSweepState(db, mailbox, state) {
   try {
-    const value = JSON.stringify({ lastReceived: state.lastReceived || null, outstanding: (state.outstanding || []).slice(0, 200) });
+    const value = JSON.stringify({
+      lastReceived: state.lastReceived || null,
+      outstanding: (state.outstanding || []).slice(0, 300),
+      oldestScanned: state.oldestScanned || null,
+      backfillDone: !!state.backfillDone,
+    });
     await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`)
       .bind(sweepStateKey(mailbox), value, value).run();
   } catch (e) { console.error("PO saveSweepState failed:", e && e.message); }
@@ -371,13 +381,13 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/invoice/sweep-config" && method === "GET") {
       const cfg = await getConfigMap(db);
       return jr({ ok: true, configured: graphConfigured(env),
-        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX, days: Number(cfg.invoice_sweep_days) || 60 });
+        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX, days: Number(cfg.invoice_sweep_days) || 180 });
     }
     if (path === "/api/invoice/sweep" && method === "POST") {
       if (!graphConfigured(env)) return jr({ error: "The mailbox connection isn’t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
-      const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      const days = Math.max(1, Math.min(365, Number(b.days) || 180));
       // Advanced search (optional): an explicit date range and/or a clue.
       const from = String(b.from || "").trim();
       const to = String(b.to || "").trim();
@@ -1104,47 +1114,95 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
   // Which kind of sweep is this?
   //  • an explicit date range OR a clue is a targeted one-off — reads fresh and
   //    NEVER touches the incremental memory (so it can't wind the pointer on).
-  //  • mode "full" ignores the memory but DOES reset it (a clean re-scan).
-  //  • otherwise it's an incremental sweep: read only what arrived since the
-  //    last scan, merge with the remembered outstanding list, and re-check each.
+  //  • mode "full" resets the memory and re-walks the whole look-back.
+  //  • otherwise it's an incremental sweep: read what arrived since the last scan
+  //    AND keep walking BACKWARDS through the window (the backfill) until the
+  //    whole look-back is covered — so a big backlog isn't stranded behind the
+  //    forward watermark. Repeated runs continue the walk (moreToScan=true).
   const isRange = !!(String(from || "").trim() || String(to || "").trim());
   const hasClue = !!String(clue || "").trim();
   const oneOff = isRange || hasClue;
   const incremental = mode !== "full" && !oneOff;
-  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [] };
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
 
-  // Read the mailbox. Incremental with a watermark → only newer emails.
-  const readOpts = { top: 40, days };
-  if (oneOff) { readOpts.from = from; readOpts.to = to; readOpts.clue = clue; }
-  else if (incremental && state.lastReceived) { readOpts.since = state.lastReceived; }
-  let msgs = [];
-  try { msgs = await listRecentWithAttachments(env, mailbox, readOpts); }
-  catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
-
-  // Parse only the freshly-read messages into slim proposals.
   const fresh = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
-  for (const m of msgs) {
-    if (downloads >= MAX_DOWNLOADS) break;
-    let atts = [];
-    try { atts = await listPdfAttachments(env, mailbox, m.id); } catch { continue; }
-    for (const a of atts) {
-      if (downloads >= MAX_DOWNLOADS) break;
-      let bytes;
-      try { bytes = await downloadAttachment(env, mailbox, m.id, a.id); downloads++; } catch { continue; }
-      let res;
-      try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
-      catch { continue; }
-      if (res.aiUsed) aiUsed++;
-      // A remittance advice / statement (a payment record, not a bill) is not a
-      // purchase invoice — drop it, however it was read (text OR vision docType).
-      if (res.notInvoice || res.remittance) { skipped++; continue; }
-      fresh.push({
-        mailbox, messageId: m.id, attachmentId: a.id, filename: a.name || "invoice.pdf",
-        subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
-        receivedDateTime: m.receivedDateTime || null,
-        tier: res.tier, fields: res.fields || {},
-      });
+  let newest = state.lastReceived;
+  let oldestScanned = state.oldestScanned;
+  let backfillDone = incremental ? state.backfillDone : false;
+
+  // Download + parse one message list within the shared download budget. Pushes
+  // any real invoices onto `fresh`. Returns the receivedDateTime of the OLDEST
+  // message whose attachments were ALL processed (the resumable cursor), plus
+  // whether the budget was hit mid-way.
+  async function processMsgs(msgs) {
+    let oldestFull = null, hitCap = false, minSeen = null;
+    for (const m of msgs) {
+      const r = m.receivedDateTime || null;
+      if (r && (!newest || r > newest)) newest = r;
+      if (r && (!minSeen || r < minSeen)) minSeen = r;
+      if (downloads >= MAX_DOWNLOADS) { hitCap = true; break; }
+      let atts = [];
+      try { atts = await listPdfAttachments(env, mailbox, m.id); } catch { continue; }
+      let complete = true;
+      for (const a of atts) {
+        if (downloads >= MAX_DOWNLOADS) { hitCap = true; complete = false; break; }
+        let bytes;
+        try { bytes = await downloadAttachment(env, mailbox, m.id, a.id); downloads++; } catch { continue; }
+        let res;
+        try { res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET }); }
+        catch { continue; }
+        if (res.aiUsed) aiUsed++;
+        // A remittance advice / statement (a payment record, not a bill) is not a
+        // purchase invoice — drop it, however it was read (text OR vision docType).
+        if (res.notInvoice || res.remittance) { skipped++; continue; }
+        fresh.push({
+          mailbox, messageId: m.id, attachmentId: a.id, filename: a.name || "invoice.pdf",
+          subject: m.subject || "", from: (m.from && m.from.emailAddress && m.from.emailAddress.address) || "",
+          receivedDateTime: r, tier: res.tier, fields: res.fields || {},
+        });
+      }
+      if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;
+      if (hitCap) break;
+    }
+    return { oldestFull, hitCap, minSeen, count: msgs.length };
+  }
+
+  if (oneOff) {
+    // Targeted read — never touches the incremental memory.
+    let msgs = [];
+    try { msgs = await listRecentWithAttachments(env, mailbox, { top: 40, days, from, to, clue }); }
+    catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
+    await processMsgs(msgs);
+  } else {
+    if (mode === "full") { newest = null; oldestScanned = null; backfillDone = false; }
+    // FORWARD: emails newer than the last one we read (nothing to do on a fresh /
+    // reset state — the backfill below starts from the top of the window instead).
+    if (state.lastReceived) {
+      let fwd = [];
+      try { fwd = await listRecentWithAttachments(env, mailbox, { top: 40, days, since: state.lastReceived }); }
+      catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
+      await processMsgs(fwd);
+    }
+    // BACKFILL: keep walking older-than-what-we've-covered, within the window,
+    // until an empty read proves we've reached the start. Uses whatever download
+    // budget the forward read left.
+    if (!backfillDone && downloads < MAX_DOWNLOADS) {
+      const opts = { top: 40, days };
+      if (oldestScanned) opts.before = oldestScanned;
+      let old = [];
+      try { old = await listRecentWithAttachments(env, mailbox, opts); }
+      catch (e) { return { proposals: [], scanned: 0, error: String(e && e.message || e) }; }
+      if (!old.length) {
+        backfillDone = true;                       // nothing older in the window
+      } else {
+        const { oldestFull, hitCap, minSeen } = await processMsgs(old);
+        // Advance the cursor to the oldest message we fully processed; if none
+        // completed (all errored) but we got through the list, move past them so
+        // we can't loop on the same batch.
+        if (oldestFull) oldestScanned = oldestFull;
+        else if (!hitCap && minSeen) oldestScanned = minSeen;
+      }
     }
   }
 
@@ -1174,13 +1232,19 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
   // Newest, so most-useful, first.
   proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
 
-  // Persist the incremental memory: advance the watermark to the newest email
-  // actually read, and remember the still-outstanding list (slim).
-  let newest = state.lastReceived;
-  for (const m of msgs) { const r = m.receivedDateTime; if (r && (!newest || r > newest)) newest = r; }
+  // Persist the incremental memory: the forward watermark (newest email read),
+  // the backfill cursor (oldest we've covered) + whether the walk is finished,
+  // and the still-outstanding list (slim).
   if (incremental || mode === "full") {
-    await saveSweepState(db, mailbox, { lastReceived: newest, outstanding: proposals.map(slimProposal) });
+    await saveSweepState(db, mailbox, {
+      lastReceived: newest, outstanding: proposals.map(slimProposal),
+      oldestScanned, backfillDone,
+    });
   }
+
+  // More to scan = the budget was hit this run, OR the backfill walk hasn't
+  // reached the start of the window yet. The office UI keeps going until false.
+  const moreToScan = !oneOff && (downloads >= MAX_DOWNLOADS || !backfillDone);
 
   return {
     proposals, scanned: downloads, aiUsed, alreadyDone: skipped + doneNow,
@@ -1188,6 +1252,7 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
     incremental, oneOff, newProposals: fresh.length,
     carriedOver: incremental ? state.outstanding.length : 0,
     watermark: (incremental || mode === "full") ? newest : null,
+    backfillDone, moreToScan, oldestScanned,
   };
 }
 
