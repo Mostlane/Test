@@ -16402,7 +16402,8 @@ async function handle12(request, env, ctx, url, sess) {
     const date = searchParams.get("date");
     const all = await listJobs(env, tenantId);
     let jobs = all.filter((j) => assignedList(j).some((a) => normId(a) === engineer));
-    jobs = jobs.filter((j) => releaseVisibleNowFor(j, engineer, all));
+    const officeView = searchParams.get("office") === "1" && !!sess && await isSlaAdmin(env, tenantId, sess);
+    if (!officeView) jobs = jobs.filter((j) => releaseVisibleNowFor(j, engineer, all));
     if (date) {
       jobs = jobs.filter((j) => {
         const s = effSchedule(j, engineer).scheduledAt;
@@ -16413,7 +16414,7 @@ async function handle12(request, env, ctx, url, sess) {
     return jsonResponse(jobs.map((j) => {
       const ms = effStatus(j, engineer);
       const es = effSchedule(j, engineer);
-      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
+      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd, hidden: officeView ? !releaseVisibleNowFor(j, engineer, all) : false };
     }), headers);
   }
   if (subpath === "/live" && method === "GET") {

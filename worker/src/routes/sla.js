@@ -1154,9 +1154,14 @@ export async function handle(request, env, ctx, url, sess) {
     const date = searchParams.get("date");
     const all = await listJobs(env, tenantId);
     let jobs = all.filter(j => assignedList(j).some(a => normId(a) === engineer));
+    // The OFFICE (SLA-admin) day summary asks for the TRUE plan incl. jobs still
+    // hidden from the engineer (drip-fed / queued) — office=1 keeps them, each
+    // tagged `hidden`. The engineer's own views never send it, so they still only
+    // see released jobs.
+    const officeView = searchParams.get("office") === "1" && !!sess && await isSlaAdmin(env, tenantId, sess);
     // Hide jobs whose release time hasn't arrived / whose turn in the queue
     // hasn't come — the engineer simply doesn't see them yet.
-    jobs = jobs.filter(j => releaseVisibleNowFor(j, engineer, all));
+    if (!officeView) jobs = jobs.filter(j => releaseVisibleNowFor(j, engineer, all));
     if (date) {
       jobs = jobs.filter(j => {
         const s = effSchedule(j, engineer).scheduledAt;   // THIS engineer's own slot
@@ -1171,7 +1176,7 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(jobs.map(j => {
       const ms = effStatus(j, engineer);
       const es = effSchedule(j, engineer);
-      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
+      return { ...stripMoney(decorateJobWithLiveSla(j)), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd, hidden: officeView ? !releaseVisibleNowFor(j, engineer, all) : false };
     }), headers);
   }
 

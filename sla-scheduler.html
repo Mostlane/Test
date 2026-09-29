@@ -1528,7 +1528,7 @@ function openEngDay(username, name, date){
   $("engDaySummary").innerHTML = "";
   $("engDayJobs").innerHTML = '<div class="eng-empty">Loading…</div>';
   $("engDayBackdrop").style.display = "flex";
-  authFetch("/sla/jobs/for-engineer?engineer=" + encodeURIComponent(username) + "&date=" + iso + "&t=" + Date.now())
+  authFetch("/sla/jobs/for-engineer?engineer=" + encodeURIComponent(username) + "&date=" + iso + "&office=1&t=" + Date.now())
     .then(r => r.json())
     .then(list => {
       const arr = Array.isArray(list) ? list : (list.jobs || []);
@@ -1564,7 +1564,7 @@ function renderEngDay(list){
     return `<div class="eng-jobrow" data-jid="${escapeAttr(j.id)}" style="border-left-color:${c}">
       <span class="ej-time">${t}</span>
       <span class="ej-main">
-        <span class="ej-title">${escapeHtml(title)}</span>
+        <span class="ej-title">${j.hidden ? '<span title="Hidden from the engineer until released">🙈 </span>' : ""}${escapeHtml(title)}</span>
         ${meta ? `<span class="ej-meta">${escapeHtml(meta)}</span>` : ""}
       </span>
       <span class="ej-chip" style="background:${c}">${escapeHtml(j.status || "Scheduled")}</span>
