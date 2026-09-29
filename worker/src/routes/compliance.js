@@ -445,7 +445,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Reads for a scheme's chart require at least "view" on that scheme. The public
   // /file GET (handled above, signature-gated) and the cross-scheme /site-files
   // path (site-folder, used by engineers) are deliberately NOT gated here.
-  const SCHEME_READS = new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code"]);
+  const SCHEME_READS = new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -825,6 +825,29 @@ export async function handle(request, env, ctx, url, sess) {
       } catch {}
     }
     return jr({ ok: true, code, due, siteNumber: siteNo }, headers);
+  }
+
+  // ── Manual "unsatisfactory" flag on the 5-Year date cell (Jamie: a flag I can
+  // turn on/off if the site is unsatisfactory). Per (scheme,code); stored as a
+  // small map in app_config so the /stores builder is untouched. Shape mirrors
+  // the tested/remedial flag maps the chart already consumes: {codes:{code:1}}.
+  if (sub === "/unsat-flags" && method === "GET") {
+    const key = "compliance:unsat:" + scheme + ":" + tid;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
+    return jr({ ok: true, codes }, headers);
+  }
+  if (sub === "/unsat-flag" && method === "POST") {
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const key = "compliance:unsat:" + scheme + ":" + tid;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    let codes = {}; try { codes = JSON.parse((row && row.value) || "{}") || {}; } catch {}
+    if (b.on) codes[code] = 1; else delete codes[code];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
+    return jr({ ok: true, code, on: !!b.on }, headers);
   }
 
   // ── Save a store's location / access meta (📍 pin + 🔑 access) ───────────────
