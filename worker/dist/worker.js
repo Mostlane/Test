@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9070,7 +9075,7 @@ async function handle8(request, env, ctx, url, sess) {
   const canRead = viaToken || level !== "none";
   const canWrite = viaToken || level === "edit";
   await ensure2(env);
-  const SCHEME_READS = /* @__PURE__ */ new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code"]);
+  const SCHEME_READS = /* @__PURE__ */ new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code", "/unsat-flags"]);
   if (!canRead && SCHEME_READS.has(sub)) {
     return jr2({ error: "No compliance access to this page" }, headers, 403);
   }
@@ -9440,6 +9445,33 @@ async function handle8(request, env, ctx, url, sess) {
       }
     }
     return jr2({ ok: true, code, due, siteNumber: siteNo }, headers);
+  }
+  if (sub === "/unsat-flags" && method === "GET") {
+    const key = "compliance:unsat:" + scheme + ":" + tid;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    let codes = {};
+    try {
+      codes = JSON.parse(row && row.value || "{}") || {};
+    } catch {
+    }
+    return jr2({ ok: true, codes }, headers);
+  }
+  if (sub === "/unsat-flag" && method === "POST") {
+    if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr2({ error: "code required" }, headers, 400);
+    const key = "compliance:unsat:" + scheme + ":" + tid;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    let codes = {};
+    try {
+      codes = JSON.parse(row && row.value || "{}") || {};
+    } catch {
+    }
+    if (b.on) codes[code] = 1;
+    else delete codes[code];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(codes)).run();
+    return jr2({ ok: true, code, on: !!b.on }, headers);
   }
   if (sub === "/store-meta" && method === "POST") {
     if (!canWrite) return jr2({ error: "Compliance access required" }, headers, 403);
@@ -39772,9 +39804,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });

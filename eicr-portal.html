@@ -154,6 +154,12 @@
     /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
        is the same height as one without (no wrap → no taller rows). */
     td.dc{ white-space:nowrap; }
+    /* Manual unsatisfactory flag toggle on the 5-Year date cell. Off = a faint
+       outline flag; on = a solid red flag. */
+    .unsat-flag{ border:0; background:none; padding:0 2px; cursor:pointer; font-size:1em; line-height:1; vertical-align:baseline; opacity:.35; filter:grayscale(1); }
+    .unsat-flag:hover{ opacity:.7; }
+    .unsat-flag.on{ opacity:1; filter:none; }
+    .unsat-flag[disabled]{ cursor:default; }
     /* Document rows inside the Documents modal. */
     .doc-row{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eef2f7; flex-wrap:wrap; }
     .doc-row:last-child{ border-bottom:0; }
@@ -507,6 +513,34 @@ async function loadTestedFlags(){
     if (allData.length) applyFilters();
   } catch(e){ /* non-critical */ }
 }
+// store code → 1 when the office has manually flagged the 5-year as UNSATISFACTORY
+// (a toggle on the 5-Year date cell — turned on/off by hand). Forces the cell red.
+let unsatFlags = {};
+async function loadUnsatFlags(){
+  try {
+    const r = await authFetch('/compliance/unsat-flags?scheme=' + COMPLIANCE_SCHEME);
+    if (!r.ok) return;
+    const j = await r.json();
+    unsatFlags = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+  } catch(e){ /* non-critical */ }
+}
+async function toggleUnsat(code, on){
+  const k = pad4(code), prev = !!unsatFlags[k];
+  if (on) unsatFlags[k] = 1; else delete unsatFlags[k];   // optimistic
+  applyFilters();
+  try {
+    const r = await authFetch('/compliance/unsat-flag?scheme=' + COMPLIANCE_SCHEME, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ code: k, on: !!on })
+    });
+    if (!r.ok) throw 0;
+  } catch(e){
+    if (prev) unsatFlags[k] = 1; else delete unsatFlags[k];   // revert on failure
+    applyFilters();
+    alert("Couldn't save the flag — check your connection and try again.");
+  }
+}
 async function loadComplianceIndex(){
   try {
     const r = await authFetch('/compliance/index');
@@ -515,6 +549,7 @@ async function loadComplianceIndex(){
     complianceIndex = (j && j.map) ? j.map : {};
     loadRemedialFlags();
     loadTestedFlags();
+    loadUnsatFlags();
     // re-render so cells pick up their 📄 links (data may already be shown)
     if (allData.length) applyFilters();
   } catch(e){ /* certs are non-critical — table still works without them */ }
@@ -942,7 +977,16 @@ function dateCell(code, colKey, val){
     const f = remedialFlags[pad4(code)];
     warn = ` <span class="rem-warn" title="EM remedial outstanding — ${f.fittings} fitting(s), £${Math.round(f.charge||0)} to charge/quote">⚠️</span>`;
   }
-  return `${esc(fmtDue(val))}${link}${warn}`;
+  // 5-Year cell: a manual on/off "unsatisfactory" flag. Edit users get a toggle
+  // button (faint ⚑ when off, red 🚩 when on); view users only see 🚩 when set.
+  let flag = '';
+  if (t === 'fiveYear') {
+    const on = !!unsatFlags[pad4(code)];
+    const editable = canEditCompliance();
+    if (on) flag = ` <button type="button" class="unsat-flag on" data-code="${esc(code)}" data-on="1" title="Marked UNSATISFACTORY${editable?' — tap to clear':''}"${editable?'':' disabled'}>🚩</button>`;
+    else if (editable) flag = ` <button type="button" class="unsat-flag" data-code="${esc(code)}" data-on="0" title="Mark this site unsatisfactory">⚑</button>`;
+  }
+  return `${esc(fmtDue(val))}${link}${warn}${flag}`;
 }
 
 /* The amber "✅ tested — cert to file" note for an overdue 5-year cell whose
@@ -1078,6 +1122,8 @@ function renderTable(d){
         const hasCert = !!(complianceIndex[pad4(e.storeCode)] && complianceIndex[pad4(e.storeCode)].fiveYear);
         if (tf && s === 'red') { s = 'amber'; extra = testedNote(tf, 'overdue'); }
         else if (tf && s !== 'red' && !hasCert) { s = 'amber'; extra = testedNote(tf, 'rolled'); }
+        // A manual UNSATISFACTORY flag wins — force the cell red whatever the date says.
+        if (unsatFlags[pad4(e.storeCode)]) { s = 'red'; extra = ''; }
       }
       return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}${extra}</td>`;
     };
@@ -1347,6 +1393,7 @@ function enableEditing(state){
         // Remove the 📄 cert link before editing so its emoji can't be captured
         // into the due-date text on save (that was baking "📄" into the value).
         td.querySelectorAll('.cert-link').forEach(a => a.remove());
+        td.querySelectorAll('.unsat-flag').forEach(b => b.remove());
         td.contentEditable = true;
         td.style.background = "#fff6d1";
         td.addEventListener("input", ()=> row.dataset.changed = "true", { once:true });
@@ -2036,6 +2083,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const tb = document.getElementById('tableBody');
   // 📄 certificate links + 📎 upload / 🗂 view (event-delegated, survives re-render)
   tb.addEventListener('click', (ev)=>{
+    const uf = ev.target.closest('.unsat-flag');
+    if (uf && !editMode && canEditCompliance()){ ev.preventDefault(); ev.stopPropagation(); toggleUnsat(uf.dataset.code, uf.dataset.on !== '1'); return; }
     const cert = ev.target.closest('.cert-link');
     if (cert && !editMode){ ev.preventDefault(); openCert(cert.dataset.code, cert.dataset.type); return; }
     const up = ev.target.closest('.doc-btn.up');
