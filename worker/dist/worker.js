@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -37454,6 +37449,13 @@ async function handle33(request, env, ctx, url, sess) {
       await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
       return jr8({ ok: true, po_number: poNumber, invoiceUrl });
     }
+    if (path === "/api/invoice/sweep-dismiss" && method === "POST") {
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "ignored", null);
+      return jr8({ ok: true });
+    }
     if (path === "/api/invoice/url" && method === "GET") {
       const n = Number(q.get("po"));
       const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
@@ -39770,9 +39772,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });

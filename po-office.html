@@ -1001,6 +1001,7 @@ async function invApply(poNumber, btn) {
   const rateEl = document.getElementById('inv-vat-rate');
   const cost = costEl ? parseFloat(costEl.value) : NaN;
   if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  if (cost === 0 && !confirm('The cost is £0 — attach this invoice at zero cost anyway?')) return;
   if (!invFile) { alert('The invoice file was lost — drop it again'); return; }
   if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
   const f = invFields || {};
@@ -1191,7 +1192,8 @@ function invSweepCard(it, i) {
       '<button class="ghost small" onclick="invRaisePO(' + i + ')">➕ Raise a new PO</button>' +
       (cat === 'other' ? '<button class="ghost small" onclick="invAddParty(' + i + ')">🏷️ Add supplier/sub</button>' : '') +
       (cat === 'flag' || cat === 'other' ? '<button class="ghost small" style="color:#c0392b" onclick="openFlagLog(' + i + ')">⚠ Flag &amp; log</button>' : '')) +
-    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button></div>';
+    '<button class="ghost small" onclick="invSweepView(' + i + ')">👁 View PDF</button>' +
+    '<button class="ghost small" style="color:#8a6d00" title="Not an invoice — hide it and never suggest it again" onclick="invDismiss(' + i + ')">🚫 Not an invoice</button></div>';
   return '<div class="card" id="sw-card-' + i + '" style="padding:14px">' + head + pick + confirm + '</div>';
 }
 function invSweepPo(i) {
@@ -1220,6 +1222,7 @@ async function invSweepApply(i, btn) {
   if (!poNumber || poNumber < 10011) { alert('Pick or type the PO number to attach to'); return; }
   const cost = parseFloat((document.getElementById('sw-cost-' + i) || {}).value);
   if (!Number.isFinite(cost) || cost < 0) { alert('Enter the net (ex-VAT) cost'); return; }
+  if (cost === 0 && !confirm('The cost is £0 — attach this invoice at zero cost anyway?')) return;
   const rate = parseFloat((document.getElementById('sw-rate-' + i) || {}).value);
   if (btn) { btn.disabled = true; btn.textContent = 'Attaching…'; }
   let res;
@@ -1229,6 +1232,19 @@ async function invSweepApply(i, btn) {
   it._done = true;
   invRenderResults();
   loadPOs(); loadDashboard();
+}
+// Dismiss a swept document that isn't an invoice (statement, delivery note, advert…)
+// — records it in the seen ledger so no future sweep suggests it again.
+async function invDismiss(i) {
+  const it = invSweepItems[i]; if (!it) return;
+  if (!confirm('Dismiss this document as “not an invoice”? It won’t be suggested by the sweep again.')) return;
+  try {
+    const res = await authFetch('/po/api/invoice/sweep-dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mailbox: it.mailbox, message_id: it.messageId, attachment_id: it.attachmentId }) }).then(r => r.json());
+    if (res && res.error) { alert(res.error); return; }
+  } catch (e) { alert('Couldn’t dismiss: ' + e.message); return; }
+  it._done = true;
+  invRenderResults();
 }
 // ── "Attach all confident matches" → a review modal you flick through ─────────
 function invBulkReview() {
