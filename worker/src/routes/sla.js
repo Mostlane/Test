@@ -1312,6 +1312,23 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(roRes, headers);
   }
 
+  /* POST /sla/em-optimize — sequence ONE engineer's EM/PAT day so the 3-hour
+     emergency-light drain-down at each site is filled with work at OTHER sites.
+     Each EM (3-hour) site is worked TWICE: a START visit (flick the lights to
+     battery + optionally the 45-min PAT) and a RETURN visit (the 15-min light
+     check), with the return no sooner than 3 hours after the flick. The optimiser
+     chooses per site whether the PAT runs up front or on the return, whichever
+     packs the day tighter. Deterministic — real driving times (Google/OSRM) or a
+     haversine estimate, NO Claude, so no AI cost. Returns a PREVIEW only; the
+     client writes the flick times + the return-check window back on Apply.
+     SLA-admin only. */
+  if (subpath === "/em-optimize" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "Only SLA admins can optimise an EM/PAT day." }, headers, 403);
+    return jsonResponse(await optimiseEmDay(env, tenantId, await readJson(request)), headers);
+  }
+
   /* POST /sla/auto-schedule — auto-build a day: assign + order loose jobs across
      one or many engineers (skill-preferred, capacity-limited). Preview only.
      Deterministic (Distance Matrix / estimate) — no Claude, so no AI cost. */
@@ -4583,6 +4600,11 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     emKind: body.emKind !== undefined ? (body.emKind === "monthly" ? "monthly" : "yearly") : (existing?.emKind || ""),
     pat: body.pat !== undefined ? !!body.pat : (existing?.pat || false),
     emTimer: body.emTimer !== undefined ? (body.emTimer || null) : (existing?.emTimer || null),
+    // EM/PAT day optimiser: the light-CHECK return visit planned for a 3-hour
+    // drain-down job — {at,end,dueAt,patDeferred,checkMin,drainMin}. The flick
+    // (+ optional PAT) is the job's own scheduledAt/scheduledEnd; this is the
+    // second visit the engineer makes to confirm the lights survived 3 hours.
+    emReturn: body.emReturn !== undefined ? (body.emReturn || null) : (existing?.emReturn || null),
     // Electrical test job: the engineer runs the test and captures a list of
     // REMEDIAL works (each: code C1/C2/C3/FI, description, duration, material £,
     // photos). Completion is relaxed (the remedials list is the deliverable). A
@@ -4841,6 +4863,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emKind !== undefined) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== undefined) job.pat = !!patch.pat;
   if (patch.emTimer !== undefined) job.emTimer = patch.emTimer || null;   // 3h drain-down countdown
+  if (patch.emReturn !== undefined) job.emReturn = patch.emReturn || null; // planned light-check return visit (EM/PAT day optimiser)
   if (patch.elecTest !== undefined) job.elecTest = !!patch.elecTest;
   if (patch.remedials !== undefined) job.remedials = normRemedials(patch.remedials, job);
   if (patch.pumpMaintenance !== undefined) job.pumpMaintenance = !!patch.pumpMaintenance;
@@ -5499,6 +5522,179 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       homeDriveMins: homeMin, homeDriveMiles: Math.round(homeMi * 10) / 10, source: M.source
     },
     warnings
+  };
+}
+
+/* EM/PAT day optimiser (see the /sla/em-optimize route comment). Each 3-hour EM
+   site is worked TWICE — a START visit (flick the lights onto battery + optionally
+   the 45-min PAT) and a RETURN visit (the 15-min light check, no sooner than 3h
+   after the flick). The ~2¾-hour drain-down at one site is filled with START
+   visits at OTHER sites. The optimiser picks per site whether the PAT runs up
+   front or on the return, trying every combination (≤8 PAT sites) and keeping the
+   plan that packs the day tightest. Deterministic — real driving times or a
+   haversine estimate, no Claude. Returns a PREVIEW; the client writes the flick
+   time + the return-check window back on Apply. */
+export async function optimiseEmDay(env, tenantId, body) {
+  const clampInt = (v, def, lo, hi) => { const n = Math.round(Number(v)); return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : def; };
+  const rnd1 = x => Math.round(x * 10) / 10;
+  const engineer = String(body.engineer || "").trim();
+  const date = String(body.date || "").slice(0, 10);
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunchMinutes = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 0));
+  const warnings = [];
+  if (!engineer) return { ok: false, error: "No engineer given." };
+
+  // Timings (minutes; overridable per call).
+  const flickMin = clampInt(body.flickMin, 10, 1, 120);
+  const patMin = clampInt(body.patMin, 45, 5, 240);
+  const checkMin = clampInt(body.checkMin, 15, 1, 120);
+  const drainMin = clampInt(body.drainMin, 180, 30, 600);
+  const dayCapMin = clampInt(body.dayMinutes, 540, 120, 900);
+
+  const home = await engineerHome(env, tenantId, engineer);
+  if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round trip can be worked out." };
+
+  // Reserved appointment blocks for this engineer/day (the plan works around them).
+  let blkOffsets = [];
+  try {
+    const mine = blocksOnDate(await getSlaBlocks(env, tenantId), date).filter(b => normId(b.username) === normId(engineer));
+    blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
+  } catch { }
+
+  // Classify + locate the selected jobs. A "two-visit" job = a 3-hour EM
+  // (drain-down) site; everything else (PAT-only, monthly EM, a plain job) is a
+  // single visit slotted into the outbound sweep.
+  const jobs = [];
+  for (const j of (Array.isArray(body.jobs) ? body.jobs : [])) {
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    let coord = (isFinite(lat) && isFinite(lng) && (lat || lng)) ? [lat, lng] : null;
+    if (!coord && j.postcode) { const g = await geocodePcServer(j.postcode); if (g) coord = g; }
+    if (!coord) { warnings.push(`${j.ref || j.site || "A job"} has no map location — left out.`); continue; }
+    const emTest = !!j.emTest, pat = !!j.pat, monthly = String(j.emKind || "") === "monthly";
+    const twoVisit = emTest && !monthly;
+    const drain = twoVisit ? clampInt(j.drainMinutes, drainMin, 30, 600) : 0;
+    let singleDur = 0;
+    if (!twoVisit) {
+      singleDur = (pat ? patMin : 0) + (emTest && monthly ? flickMin + checkMin : 0);
+      if (!singleDur) singleDur = Math.max(15, Math.round(Number(j.durationMinutes)) || 60);
+    }
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), siteCode: String(j.siteCode || ""), priority: String(j.priority || ""), coord, emTest, pat, monthly, twoVisit, drain, singleDur });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable jobs on this day to optimise.", warnings };
+  const emJobs = jobs.filter(j => j.twoVisit);
+  if (!emJobs.length) return { ok: false, error: "None of these are 3-hour EM (drain-down) jobs — use the normal route optimiser for a plain round trip.", warnings };
+
+  // Driving matrix over [home, ...job sites]; outbound order = shortest driving.
+  const pts = [home.coord, ...jobs.map(j => j.coord)];
+  const M = await driveMatrix(env, pts);
+  const jobPoint = new Map(jobs.map((j, i) => [j.id, i + 1]));
+  const baseSeq = solveRoute(M.mins);
+  const outboundJobs = baseSeq.map(p => jobs[p - 1]);
+
+  // Walk one PAT-placement plan → full timeline. patAtStart: Map(jobId -> bool).
+  function evalPlan(patAtStart) {
+    const stops = [];
+    let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0, waitMins = 0;
+    const ready = new Map();     // jobId -> earliest legal check (offset from dayStart)
+    for (const j of outboundJobs) {
+      const p = jobPoint.get(j.id), dMin = M.mins[cur][p], dMi = M.miles[cur][p];
+      driveMins += dMin; driveMiles += dMi;
+      if (j.twoVisit) {
+        const here = !!(j.pat && patAtStart.get(j.id));
+        const dur = flickMin + (here ? patMin : 0);
+        const arrival = avoidBlocks(t + dMin, dur, blkOffsets);
+        const dueOff = arrival + flickMin + j.drain;   // check legal from here
+        ready.set(j.id, dueOff);
+        stops.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "start", kind: "em", patHere: here, arrivalOffset: arrival, endOffset: arrival + dur, driveMins: dMin, driveMiles: rnd1(dMi), durationMin: dur, checkDueOffset: dueOff, label: here ? "Flick lights + PAT test" : "Flick lights — starts the 3-hour timer" });
+        siteMins += dur; t = arrival + dur; cur = p;
+      } else {
+        const dur = j.singleDur, arrival = avoidBlocks(t + dMin, dur, blkOffsets);
+        stops.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "single", kind: j.monthly ? "emmonthly" : (j.pat ? "pat" : "other"), patHere: !!j.pat, arrivalOffset: arrival, endOffset: arrival + dur, driveMins: dMin, driveMiles: rnd1(dMi), durationMin: dur, label: j.monthly ? "EM function test" : (j.pat ? "PAT test" : "On site") });
+        siteMins += dur; t = arrival + dur; cur = p;
+      }
+    }
+    // Return sweep: greedily take the check that FINISHES soonest (travel + wait).
+    const remaining = emJobs.slice();
+    while (remaining.length) {
+      let best = -1, bestEnd = Infinity, bi = null;
+      for (let k = 0; k < remaining.length; k++) {
+        const j = remaining[k], p = jobPoint.get(j.id), dMin = M.mins[cur][p];
+        const arrival = avoidBlocks(t + dMin, checkMin, blkOffsets);
+        const here = !!(j.pat && !patAtStart.get(j.id));   // PAT deferred to the return
+        const rdy = ready.get(j.id);
+        let checkStart, wait;
+        if (here) { const patEnd = arrival + patMin; checkStart = Math.max(patEnd, rdy); wait = Math.max(0, rdy - patEnd); }
+        else { checkStart = Math.max(arrival, rdy); wait = Math.max(0, rdy - arrival); }
+        checkStart = avoidBlocks(checkStart, checkMin, blkOffsets);
+        const end = checkStart + checkMin;
+        if (end < bestEnd) { bestEnd = end; best = k; bi = { p, dMin, dMi: M.miles[cur][p], arrival, here, checkStart, wait, end }; }
+      }
+      const j = remaining.splice(best, 1)[0], dur = checkMin + (bi.here ? patMin : 0);
+      driveMins += bi.dMin; driveMiles += bi.dMi; siteMins += dur; waitMins += bi.wait;
+      stops.push({ jobId: j.id, ref: j.ref, site: j.site, siteCode: j.siteCode, priority: j.priority, phase: "return", kind: "em", patHere: bi.here, arrivalOffset: bi.arrival, checkStartOffset: bi.checkStart, endOffset: bi.end, driveMins: bi.dMin, driveMiles: rnd1(bi.dMi), durationMin: dur, waitMins: Math.round(bi.wait), label: bi.here ? "Light check + PAT test" : "Light check (3-hour result)" });
+      t = bi.end; cur = bi.p;
+    }
+    const homeMin = M.mins[cur][0], homeMi = M.miles[cur][0];
+    return { stops, makespan: t + homeMin, waitMins, driveMins: driveMins + homeMin, driveMiles: driveMiles + homeMi, siteMins, homeMin, homeMi };
+  }
+
+  // Search PAT placement: only EM sites that ALSO need a PAT have a choice.
+  const patSites = emJobs.filter(j => j.pat);
+  const K = patSites.length;
+  let candidates = [];
+  if (K <= 8) {
+    for (let mask = 0; mask < (1 << K); mask++) {
+      const m = new Map(emJobs.map(j => [j.id, true]));
+      patSites.forEach((j, bit) => m.set(j.id, !!(mask & (1 << bit))));
+      candidates.push(m);
+    }
+  } else {
+    candidates = [new Map(emJobs.map(j => [j.id, true])), new Map(emJobs.map(j => [j.id, false]))];
+    warnings.push(`${K} EM+PAT sites — checked a couple of layouts rather than every combination.`);
+  }
+  let best = null;
+  for (const m of candidates) {
+    const r = evalPlan(m);
+    const fits = r.makespan <= dayCapMin;
+    if (!best || (fits && !best.fits) || (fits === best.fits && r.makespan < best.r.makespan)) best = { r, fits };
+  }
+  const r = best.r;
+  const stops = r.stops;
+
+  // Lunch (~13:00): insert before the first stop arriving after the target, else
+  // at the end; everything from there shifts later (always keeps checks legal).
+  const dayStartMin = hhmmMin(dayStart) || 0;
+  const lunchTarget = Math.max(0, (13 * 60) - dayStartMin);
+  let lunch = null;
+  if (lunchMinutes > 0 && stops.length) {
+    let idx = stops.findIndex(s => s.arrivalOffset >= lunchTarget);
+    if (idx === -1) idx = stops.length;
+    const at = idx < stops.length ? stops[idx].arrivalOffset : (r.makespan - r.homeMin);
+    lunch = { offset: at, minutes: lunchMinutes, beforeJobId: idx < stops.length ? stops[idx].jobId : null, beforeIndex: idx };
+    for (let i = idx; i < stops.length; i++) {
+      const s = stops[i];
+      s.arrivalOffset += lunchMinutes; s.endOffset += lunchMinutes;
+      if (s.checkStartOffset != null) s.checkStartOffset += lunchMinutes;
+      if (s.checkDueOffset != null) s.checkDueOffset += lunchMinutes;
+    }
+  }
+  const dayLength = r.makespan + (lunch ? lunchMinutes : 0);
+  if (M.source === "estimate") warnings.push("Used estimated distances (no live driving times available) — times are approximate.");
+  if (emJobs.length === 1) warnings.push("Only one EM site — there's no other work to fill its 3-hour drain-down, so expect a long wait before the light check.");
+  if (dayLength > dayCapMin) warnings.push(`This plan runs to about ${Math.round(dayLength / 60 * 10) / 10}h — past the ~${Math.round(dayCapMin / 60)}h day. Consider moving a site to another day.`);
+
+  return {
+    ok: true, engineer, date, dayStart, matrixSource: M.source,
+    home: { postcode: home.postcode }, timing: { flickMin, patMin, checkMin, drainMin },
+    stops, lunch,
+    summary: {
+      emSites: emJobs.length, patJobs: jobs.filter(j => j.pat).length, jobs: jobs.length,
+      driveMins: Math.round(r.driveMins), driveMiles: rnd1(r.driveMiles),
+      siteMins: Math.round(r.siteMins), waitMins: Math.round(r.waitMins),
+      lunchMins: lunchMinutes, dayLengthMins: Math.round(dayLength),
+      homeDriveMins: r.homeMin, homeDriveMiles: rnd1(r.homeMi), source: M.source,
+    },
+    warnings,
   };
 }
 

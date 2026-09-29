@@ -429,6 +429,7 @@
       <span style="display:flex;gap:6px;flex:none;">
         <button type="button" class="btn" id="engDayAuto" title="Auto-build this engineer's day from nearby unscheduled jobs they're competent for">🪄 Auto-build day</button>
         <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
+        <button type="button" class="btn" id="engDayEmOpt" title="Plan this engineer's EM/PAT day — flick, PAT and 3-hour light checks interleaved across sites">⚡ EM/PAT day</button>
         <button type="button" class="btn" id="engDayBlock" title="Block off time on this engineer's day (e.g. an appointment) — nothing gets scheduled into it">🚫 Block time</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
@@ -506,6 +507,49 @@
     <div id="optSummary"></div>
     <div id="optResult"></div>
     <div id="optBackfill"></div>
+  </div>
+</div>
+
+<!-- EM/PAT DAY OPTIMISER MODAL -->
+<div class="modal-backdrop" id="emOptBackdrop">
+  <div class="modal" style="max-width:640px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 id="emOptTitle" style="margin:0;">⚡ EM/PAT day</h2>
+        <div id="emOptDate" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="emOptClose" style="flex:none;">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 4px;">Each 3-hour EM site is flicked onto battery (the timer starts), then the light check is done ~3 hours later. The wait is filled with the PAT test and the next site — the plan works out the best order and where each PAT fits.</p>
+    <div class="opt-controls" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+      <label style="flex:1;min-width:120px;">Start of day
+        <input type="time" id="emOptStart" value="08:00" step="300" style="width:100%;">
+      </label>
+      <label style="flex:1;min-width:120px;">Lunch break
+        <select id="emOptLunch" style="width:100%;">
+          <option value="0">None</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="60">1 hour</option>
+        </select>
+      </label>
+    </div>
+    <details style="margin:2px 0 8px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;">⚙ Timings (advanced)</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <label style="flex:1;min-width:88px;font-size:12px;color:var(--muted);">Flick (min)<input type="number" id="emOptFlick" value="10" min="1" step="1" style="width:100%;"></label>
+        <label style="flex:1;min-width:88px;font-size:12px;color:var(--muted);">PAT (min)<input type="number" id="emOptPat" value="45" min="5" step="5" style="width:100%;"></label>
+        <label style="flex:1;min-width:88px;font-size:12px;color:var(--muted);">Check (min)<input type="number" id="emOptCheck" value="15" min="1" step="1" style="width:100%;"></label>
+        <label style="flex:1;min-width:88px;font-size:12px;color:var(--muted);">Drain (min)<input type="number" id="emOptDrain" value="180" min="30" step="15" style="width:100%;"></label>
+      </div>
+    </details>
+    <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary" id="emOptRun">⚡ Work out the day</button>
+      <button type="button" class="btn" id="emOptApply" style="display:none;background:#16a34a;color:#fff;">✓ Apply to schedule</button>
+    </div>
+    <div id="emOptStatus" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+    <div id="emOptSummary"></div>
+    <div id="emOptResult"></div>
   </div>
 </div>
 
@@ -799,6 +843,9 @@ function normaliseJob(j){
     // untouched — this is display only.
     statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : [],
     visitCount: j.visitCount || 0,
+    // EM/PAT day: flick/PAT nature + the planned light-check return visit (a
+    // 3-hour-drain-down job is worked twice — the day block shows a ↩ check hint).
+    emTest: !!j.emTest, pat: !!j.pat, emKind: j.emKind || "", emReturn: j.emReturn || null,
     // Release gating from the worker (engineers never receive hidden jobs; the
     // office sees 🙈 on the block until it's visible to them).
     releaseView: j.releaseView || null
@@ -1141,7 +1188,8 @@ function renderDayView(container){
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
       const hid = hiddenFromEng(job);
-      el.querySelector(".day-job-ref").textContent = (hid ? "🙈 " : "") + (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
+      const retClk = (job.emReturn && job.emReturn.at) ? new Date(job.emReturn.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      el.querySelector(".day-job-ref").textContent = (hid ? "🙈 " : "") + (holD ? "⚠ " : "") + (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "") + (retClk ? " 🔦" : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
@@ -1150,7 +1198,8 @@ function renderDayView(container){
                  (job.site ? "  ·  " + job.site : "") +
                  (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "") +
                  (holD ? "  ·  ⚠ " + engineer.name + " is on " + (holD.half ? holD.half + " leave" : "holiday") + " this day" : "") +
-                 (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "");
+                 (hid ? "  ·  🙈 Hidden from the engineer" + (job.releaseView && job.releaseView.label ? " — " + job.releaseView.label : "") : "") +
+                 (retClk ? "  ·  🔦 Return for the 3-hour light check ~" + retClk : "");
 
       // Completed jobs are locked (not draggable) — they still open on click.
       if(!done) attachPointerDrag(el, job, false);
@@ -1850,6 +1899,134 @@ document.getElementById("optClose").addEventListener("click", () => { $("optBack
 document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
 document.getElementById("optRun").addEventListener("click", runOptimise);
 document.getElementById("optApply").addEventListener("click", applyOptimise);
+
+/* ===== EM/PAT day optimiser — flick + PAT + 3-hour light check interleaved ===== */
+let emOptCtx = null, emOptResult = null;
+function openEmOptimise(){
+  if(!engDayCtx) return;
+  emOptCtx = { username: engDayCtx.username, name: engDayCtx.name, date: engDayCtx.date };
+  emOptResult = null;
+  $("engDayBackdrop").style.display = "none";
+  $("emOptTitle").textContent = "⚡ EM/PAT day — " + emOptCtx.name;
+  $("emOptDate").textContent = emOptCtx.date.toDateString();
+  $("emOptApply").style.display = "none";
+  $("emOptSummary").innerHTML = ""; $("emOptResult").innerHTML = ""; $("emOptStatus").textContent = "";
+  $("emOptBackdrop").style.display = "flex";
+}
+// This engineer's EM/PAT jobs for the day (or their unscheduled EM/PAT jobs).
+function emDayJobs(){
+  const eng = (emOptCtx.username || "").toLowerCase();
+  const iso = formatDateInput(emOptCtx.date);
+  return jobs.filter(j => {
+    if(!(j.emTest || j.pat)) return false;
+    if(!j.assignedEngineers.some(a => (a || "").toLowerCase() === eng)) return false;
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced","Cancelled"].includes(j.status)) return false;
+    const sched = j.scheduledAt ? new Date(j.scheduledAt).toISOString().slice(0, 10) : null;
+    return !sched || sched === iso;
+  });
+}
+async function runEmOptimise(){
+  const dayJobs = emDayJobs();
+  if(!dayJobs.some(j => j.emTest)){ $("emOptStatus").textContent = "No 3-hour EM jobs for " + emOptCtx.name + " on this day. Assign the EM/PAT jobs to them first, or use 🧭 Optimise route for a plain day."; return; }
+  $("emOptStatus").textContent = "Looking up locations…";
+  $("emOptRun").disabled = true; $("emOptApply").style.display = "none";
+  await ensureAllJobGeocodes();
+  const payloadJobs = dayJobs.map(j => {
+    const c = coordsFor(j);
+    return { id: j.id, ref: j.ref || j.site || j.siteCode, site: j.site, siteCode: j.siteCode, priority: j.priority,
+      emTest: j.emTest, pat: j.pat, emKind: j.emKind || "", durationMinutes: j.durationMinutes || undefined,
+      lat: c ? c[0] : undefined, lng: c ? c[1] : undefined, postcode: postcodeFor(j) || undefined };
+  });
+  $("emOptStatus").textContent = "Working out the best order + timers…";
+  try{
+    const res = await authFetch("/sla/em-optimize", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engineer: emOptCtx.username, name: emOptCtx.name, date: formatDateInput(emOptCtx.date),
+        dayStart: $("emOptStart").value || "08:00", lunchMinutes: Number($("emOptLunch").value) || 0,
+        flickMin: Number($("emOptFlick").value) || 10, patMin: Number($("emOptPat").value) || 45,
+        checkMin: Number($("emOptCheck").value) || 15, drainMin: Number($("emOptDrain").value) || 180,
+        jobs: payloadJobs }) });
+    const data = await res.json();
+    if(!data.ok){ $("emOptStatus").textContent = data.error || "Couldn't plan this day."; $("emOptRun").disabled = false; return; }
+    emOptResult = data; renderEmOptimise(data);
+  }catch(e){ $("emOptStatus").textContent = "Couldn't reach the optimiser — try again."; }
+  $("emOptRun").disabled = false;
+}
+function emStopIcon(st){
+  if(st.phase === "return") return "🔦";
+  if(st.phase === "single") return st.kind === "pat" ? "🔌" : (st.kind === "emmonthly" ? "💡" : "🧰");
+  return "💡";
+}
+function renderEmOptimise(data){
+  const s = data.summary, dayStart = data.dayStart;
+  const end = optWallClock(emOptCtx.date, dayStart, s.dayLengthMins);
+  const src = data.matrixSource && data.matrixSource !== "estimate" ? "live driving times" : "estimated distances";
+  $("emOptStatus").innerHTML = "⚡ " + s.emSites + " EM site" + (s.emSites === 1 ? "" : "s") + (s.patJobs ? " · " + s.patJobs + " PAT" : "") + " · " + src;
+  $("emOptSummary").innerHTML =
+    `<div class="opt-sum">
+      <div><b>${optFmtMins(s.driveMins)}</b><span>driving</span></div>
+      <div><b>${optFmtMins(s.siteMins)}</b><span>on site</span></div>
+      <div><b>${optFmtMins(s.waitMins)}</b><span>waiting</span></div>
+      ${s.lunchMins ? `<div><b>${optFmtMins(s.lunchMins)}</b><span>lunch</span></div>` : ""}
+      <div><b>${s.driveMiles} mi</b><span>round trip</span></div>
+      <div><b>${optFmtMins(s.dayLengthMins)}</b><span>day · ends ~${end}</span></div>
+    </div>` +
+    ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
+  const rows = [];
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${escapeHtml(dayStart)}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
+  data.stops.forEach((st, i) => {
+    if(data.lunch && data.lunch.beforeIndex === i){
+      rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(emOptCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+    }
+    const arrive = optWallClock(emOptCtx.date, dayStart, st.arrivalOffset);
+    const due = st.phase === "start" ? ` · <span style="color:#b45309;">🔦 check due ~${optWallClock(emOptCtx.date, dayStart, st.checkDueOffset)}</span>` : "";
+    const wait = st.waitMins ? ` · <span style="color:#b45309;">⏳ wait ${optFmtMins(st.waitMins)}</span>` : "";
+    rows.push(
+      `<div class="opt-leg"><span class="opt-time">${arrive}</span>
+        <span class="opt-main"><b>${emStopIcon(st)} ${escapeHtml(st.ref || st.site || "Job")}</b>
+          <span class="opt-meta">${escapeHtml(st.label)}${st.site && st.site !== st.ref ? " · " + escapeHtml(st.site) : ""} · ${st.durationMin} min${due}${wait}</span>
+          <span class="opt-drive">🚗 ${optFmtMins(st.driveMins)} · ${st.driveMiles} mi from previous</span>
+        </span></div>`);
+  });
+  if(data.lunch && data.lunch.beforeIndex >= data.stops.length){
+    rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(emOptCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+  }
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${end}</span><span>🏠 Back home · 🚗 ${optFmtMins(s.homeDriveMins)} · ${s.homeDriveMiles} mi</span></div>`);
+  $("emOptResult").innerHTML = rows.join("");
+  $("emOptApply").style.display = "";
+}
+async function applyEmOptimise(){
+  if(!emOptResult || !emOptResult.stops) return;
+  $("emOptApply").disabled = true; $("emOptStatus").textContent = "Applying the day…";
+  const dayStart = emOptResult.dayStart, [h, m] = dayStart.split(":").map(Number);
+  const base = new Date(emOptCtx.date.getFullYear(), emOptCtx.date.getMonth(), emOptCtx.date.getDate(), h, m, 0, 0);
+  const iso = off => new Date(base.getTime() + Math.round(off) * 60000).toISOString();
+  const t = emOptResult.timing || {};
+  const returns = {}; emOptResult.stops.filter(x => x.phase === "return").forEach(x => returns[x.jobId] = x);
+  let ok = 0, fail = 0;
+  for(const st of emOptResult.stops){
+    if(st.phase === "return") continue;   // the check is folded into its start job's emReturn
+    const patch = { scheduledAt: iso(st.arrivalOffset), scheduledEnd: iso(st.endOffset), durationMinutes: st.durationMin,
+      assignedEngineers: [emOptCtx.username], assignedTo: emOptCtx.username, changedBy: currentUser || "scheduler" };
+    if(st.phase === "start"){
+      const rt = returns[st.jobId];
+      if(rt) patch.emReturn = { at: iso(rt.arrivalOffset), checkStartAt: iso(rt.checkStartOffset != null ? rt.checkStartOffset : rt.arrivalOffset),
+        end: iso(rt.endOffset), dueAt: iso(st.checkDueOffset), patDeferred: !!rt.patHere, checkMin: t.checkMin || 15, drainMin: t.drainMin || 180 };
+    }
+    try{
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(st.jobId), { method: "PATCH",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      if(res.ok) ok++; else fail++;
+    }catch{ fail++; }
+  }
+  $("emOptStatus").textContent = `Applied ${ok} job${ok === 1 ? "" : "s"}${fail ? ", " + fail + " failed" : ""}.`;
+  await loadJobs(); render(); $("emOptApply").disabled = false;
+  if(!fail) setTimeout(() => { $("emOptBackdrop").style.display = "none"; }, 900);
+}
+document.getElementById("engDayEmOpt").addEventListener("click", openEmOptimise);
+document.getElementById("emOptClose").addEventListener("click", () => { $("emOptBackdrop").style.display = "none"; });
+document.getElementById("emOptBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("emOptBackdrop")) $("emOptBackdrop").style.display = "none"; });
+document.getElementById("emOptRun").addEventListener("click", runEmOptimise);
+document.getElementById("emOptApply").addEventListener("click", applyEmOptimise);
 
 /* ===== Cross-engineer fill-ins (local scan; no API calls until you assign) ===== */
 let fillThreshold = 20, fillRejected = new Set();
