@@ -2002,10 +2002,24 @@ function emFmtDur(mins){
   const h = Math.floor(mins / 60), m = mins % 60;
   return m ? (h + "h " + m + "m") : (h + " hour" + (h === 1 ? "" : "s"));
 }
-// Marker so re-applying REPLACES the auto block instead of stacking it.
-const EM_PLAN_RE = /🔧 EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\n*/g;
+// Marker so re-applying REPLACES the auto block instead of stacking it. Matches
+// any leading emoji so an OLDER 🔧-headed block is stripped too (no stacking).
+const EM_PLAN_RE = /[^\n]*EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\n*/g;
+// Short site label for the compact chain ("Guildford, Woodbridge" → "Guildford").
+function emShortSite(s){ const v = String((s && (s.site || s.ref)) || "?"); return (v.split(",")[0] || v).trim(); }
+// Icon for a stop in the whole-day chain.
+function emStopChainIcon(s){
+  if(s.phase === "return") return "🔦" + (s.patHere ? "🔌" : "");
+  if(s.phase === "single") return s.kind === "pat" ? "🔌" : (s.kind === "emmonthly" ? "💡" : "🔧");
+  return "💡" + (s.patHere ? "🔌" : "");
+}
+// The whole day as an emoji story: 🏠 → 💡🔌 Guildford → 💡 Milford → 🔦 … → 🏠
+function emDayTimeline(stops){
+  return ["🏠"].concat(stops.map(s => emStopChainIcon(s) + " " + emShortSite(s))).concat(["🏠"]).join(" → ");
+}
 // Build the engineer instructions for one job from the ordered plan. Timings are
 // RELATIVE (they may not arrive on the dot); planned clock times are a soft hint.
+// Emoji-led + a whole-day timeline so it reads like a story on a phone.
 function buildEmInstructions(stops, i, timing){
   const st = stops[i];
   const dayStart = emOptResult.dayStart;
@@ -2013,45 +2027,45 @@ function buildEmInstructions(stops, i, timing){
   const siteOf = s => s ? (s.site || s.ref || "the next site") : null;
   const nextOf = k => (k + 1 < stops.length) ? siteOf(stops[k + 1]) : null;
   const nextDrive = k => (k + 1 < stops.length) ? stops[k + 1].driveMins : null;
+  const nextLine = (k, then) => { const ns = nextOf(k); return ns ? ("🚗 " + then + " → 📍 " + ns + (nextDrive(k) ? " (~" + emFmtDur(nextDrive(k)) + " drive)" : "")) : "🏁 " + then + " → head home, day done"; };
+  const timeline = emDayTimeline(stops);
   const L = [];
-  L.push("🔧 EM/PAT DAY PLAN (auto) — " + (st.site || st.ref || "this site"));
+  L.push("⚡ EM/PAT DAY PLAN (auto)");
+  L.push("📍 " + (st.site || st.ref || "this site"));
   L.push("");
   if(st.phase === "single"){
-    if(st.kind === "pat"){
-      L.push("• Carry out the PAT test here. (~" + emFmtDur(timing.patMin || 45) + ")");
-    } else if(st.kind === "emmonthly"){
-      L.push("• Function-test the emergency lights (flick test — no 3-hour drain needed). (~" + emFmtDur(st.durationMin) + ")");
-    } else {
-      L.push("• On site ~" + emFmtDur(st.durationMin) + ".");
-    }
-    const ns = nextOf(i);
-    if(ns) L.push("• Next: go to " + ns + (nextDrive(i) ? " (~" + emFmtDur(nextDrive(i)) + " drive)" : "") + ".");
-    else L.push("• After this: head home — day complete.");
+    if(st.kind === "pat") L.push("🔌 PAT TEST — carry it out here (~" + emFmtDur(timing.patMin || 45) + ")");
+    else if(st.kind === "emmonthly") L.push("💡 EM FUNCTION TEST — flick test, no 3-hour drain needed (~" + emFmtDur(st.durationMin) + ")");
+    else L.push("🔧 On site ~" + emFmtDur(st.durationMin));
+    L.push(nextLine(i, "Next"));
     L.push("");
-    L.push("(Planned around ~" + clk(st.arrivalOffset) + " — you don't have to hit it exactly.)");
+    L.push("🗺️ THE DAY: " + timeline);
+    L.push("🕐 ~" + clk(st.arrivalOffset) + " (approximate — work to the durations)");
     L.push("— end of plan —");
     return L.join("\n");
   }
   // EM start visit + its return.
   const rt = stops.find(s => s.phase === "return" && s.jobId === st.jobId);
+  const ri = rt ? stops.indexOf(rt) : -1;
   const patUp = st.patHere;
   const flick = timing.flickMin || 10, drain = timing.drainMin || 180, check = timing.checkMin || 15, pat = timing.patMin || 45;
   const sinceFlickAtLeave = Math.max(0, st.durationMin - flick);      // lights already draining when you leave
   const returnAfterLeave = Math.max(0, drain - sinceFlickAtLeave);    // wait from leaving to the earliest check
-  L.push("VISIT 1 — on arrival:");
-  L.push("• Flick ALL emergency lights onto battery/test — this STARTS the 3-hour timer. (~" + emFmtDur(flick) + ")");
-  if(patUp) L.push("• Do the PAT test now. (~" + emFmtDur(pat) + ")");
-  L.push("• Time on site: ~" + emFmtDur(st.durationMin) + ", then leave the lights running.");
-  const ns = nextOf(i);
-  if(ns) L.push("• Next: go to " + ns + (nextDrive(i) ? " (~" + emFmtDur(nextDrive(i)) + " drive)" : "") + ".");
+  L.push("🅰️ VISIT 1 — flick the lights");
+  L.push("💡 Flick ALL emergency lights onto battery/test — ⏱️ this STARTS the 3-hour timer (~" + emFmtDur(flick) + ")");
+  if(patUp) L.push("🔌 Do the PAT test now (~" + emFmtDur(pat) + ")");
+  L.push("⏳ ~" + emFmtDur(st.durationMin) + " on site, then leave the lights running");
+  L.push(nextLine(i, "Next"));
   L.push("");
-  L.push("VISIT 2 — come back for the 3-hour light check:");
-  L.push("• Return no sooner than ~" + emFmtDur(returnAfterLeave) + " after you leave here (the lights must run a full 3 hours).");
-  if(!patUp) L.push("• On the return, do the PAT test (~" + emFmtDur(pat) + ") as well.");
-  L.push("• Check every emergency light is still lit, then complete the certificate. (~" + emFmtDur(check) + ")");
-  if(rt){ const ri = stops.indexOf(rt); const nr = (ri + 1 < stops.length) ? siteOf(stops[ri + 1]) : null; L.push("• After the check: " + (nr ? "go to " + nr + "." : "head home — day complete.")); }
+  L.push("🅱️ VISIT 2 — come back for the light check");
+  if(ri > 0) L.push("🛬 Come back here from 📍 " + emShortSite(stops[ri - 1]));
+  L.push("🔦 Return no sooner than ~" + emFmtDur(returnAfterLeave) + " after you leave here (lights must run a full 3 hours)");
+  if(!patUp) L.push("🔌 Do the PAT test on this visit too (~" + emFmtDur(pat) + ")");
+  L.push("✅ Check EVERY emergency light is still lit + complete the certificate (~" + emFmtDur(check) + ")");
+  if(rt) L.push(nextLine(ri, "Then"));
   L.push("");
-  L.push("(Planned ~" + clk(st.arrivalOffset) + ", return ~" + (rt ? clk(rt.checkStartOffset != null ? rt.checkStartOffset : rt.arrivalOffset) : "later") + " — approximate, work to the durations above.)");
+  L.push("🗺️ THE DAY: " + timeline);
+  L.push("🕐 ~" + clk(st.arrivalOffset) + " flick · ~" + (rt ? clk(rt.checkStartOffset != null ? rt.checkStartOffset : rt.arrivalOffset) : "later") + " back for the check (approximate — work to the durations)");
   L.push("— end of plan —");
   return L.join("\n");
 }
