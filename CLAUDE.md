@@ -2883,9 +2883,11 @@ job's description** (`buildEmInstructions`): VISIT 1 flick(+PAT) with durations 
 next site to drive to; VISIT 2 "return no sooner than ~Nh Mm after you leave" (drain −
 time already on site, so 2h15m when PAT's up front, a full 3h when deferred) + check
 (+deferred PAT) + where to go after — durations in min/hours (engineers rarely arrive
-on the dot; planned clock times are a soft hint). Idempotent: a `🔧 EM/PAT DAY PLAN
-(auto) … — end of plan —` marker block is stripped + rebuilt on re-apply, keeping the
-original cert description below. The scheduler day block shows a 🔦 tag + "return for
+on the dot; planned clock times are a soft hint). Emoji-led (💡 flick · 🔌 PAT · 🔦 check · 🚗 next · 🛬 come back from · 🏁 home) with a
+whole-day **🗺️ THE DAY** timeline on every job (🏠 → icon+site per stop → 🏠) so it reads
+like a story. Idempotent: a `⚡ EM/PAT DAY PLAN (auto) … — end of plan —` marker block is
+stripped + rebuilt on re-apply (the strip regex matches any leading emoji, so an older
+🔧-headed block is replaced too), keeping the original cert description below. The scheduler day block shows a 🔦 tag + "return for
 the 3-hour light check ~HH:MM" tooltip when a job has an emReturn. **The office day
 summary (click an engineer's name) uses `/sla/jobs/for-engineer?office=1` (SLA-admin
 only) so it shows jobs still HIDDEN from the engineer (drip-fed), each badged 🙈 —
