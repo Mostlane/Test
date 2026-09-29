@@ -410,5 +410,29 @@ const ROWS = [
   ok("alex list: non-office 403", (await call(env, "Nobody", "GET", "/concerto/alex-list")).status === 403);
   ok("alex list: bad payload 400", (await call(env, "Jamie Line", "POST", "/concerto/alex-list", {})).status === 400);
 }
+// ── "My schedule" — our actual 5-year tests this year (live + archive) ────────
+{
+  const { env } = makeEnv();
+  // J5 = a completed 5-year job at 0305 in 2026 (Connor). Archive MOS9800 = a 2021 EICR at 0622.
+  const my = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=2026");
+  ok("my-schedule: office GET ok, carries FY_STAGES", my.status === 200 && Array.isArray(my.body.rows) && my.body.stats.pipeline.stages12.length === 12, JSON.stringify({ n: (my.body.rows||[]).length }));
+  const byc = Object.fromEntries((my.body.rows || []).map(r => [r.storeCode, r]));
+  ok("my-schedule: 2026 includes 0305 (live done job), engineer + visit carried, off-list → MYS id", !!byc["0305"] && byc["0305"].id === "MYS:0305" && byc["0305"].onConcerto === false && byc["0305"].engineers.includes("Connor") && byc["0305"].myVisits.length === 1 && byc["0305"].myVisits[0].source === "live", JSON.stringify(byc["0305"] && { id: byc["0305"].id, eng: byc["0305"].engineers, v: byc["0305"].myVisits }));
+  ok("my-schedule: 2026 excludes the 2021 archive test (year filter)", !byc["0622"]);
+  const all = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=all");
+  const allc = Object.fromEntries((all.body.rows || []).map(r => [r.storeCode, r]));
+  ok("my-schedule: all-years includes the 2021 archive EICR at 0622 (Workever source)", !!allc["0622"] && allc["0622"].id === "MYS:0622" && allc["0622"].myVisits.some(v => v.source === "archive"), JSON.stringify(allc["0622"] && allc["0622"].myVisits));
+  // Set a status on an off-list MYS site → persists + reflected on re-fetch (shared store)
+  const setr = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "MYS:0305", stage12: "complete_satisfactory" });
+  ok("my-schedule: set status on a MYS: (off-list) site is accepted", setr.status === 200 && setr.body.ok);
+  const my2 = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=2026");
+  const r0305 = (my2.body.rows || []).find(r => r.storeCode === "0305");
+  ok("my-schedule: MYS status persists + is manual on re-fetch", r0305 && r0305.case.stage12 === "complete_satisfactory" && r0305.case.stage12Source === "manual", JSON.stringify(r0305 && { s: r0305.case.stage12, src: r0305.case.stage12Source }));
+  const note = await call(env, "Jamie Line", "POST", "/concerto/case", { ppmId: "MYS:0305", caseNote: "Cert to file" });
+  const my3 = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=2026");
+  const r2 = (my3.body.rows || []).find(r => r.storeCode === "0305");
+  ok("my-schedule: MYS note persists too", note.body.ok && r2 && r2.case.note === "Cert to file", JSON.stringify(r2 && r2.case.note));
+  ok("my-schedule: non-office 403", (await call(env, "Nobody", "GET", "/concerto/my-schedule?year=2026")).status === 403);
+}
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

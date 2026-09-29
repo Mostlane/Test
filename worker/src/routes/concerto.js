@@ -730,6 +730,98 @@ async function buildSchedule(env, tid, opts) {
   return { type, rows: filtered, total: rows.length, stats, today };
 }
 
+/* ── "My schedule" — OUR actual 5-year electrical tests this year ────────────
+   (Jamie, Sep 2026: "a new page in the 5-year remedial area — my full schedule
+   this year, the current status of each site pulled from compliance/remedials,
+   with clear notes + a clear status on each one, reflected everywhere.")
+   Unlike buildSchedule (which is driven by the Concerto PPM list = the client's
+   plan), this is driven by the jobs WE actually did/booked: live ⚡ elec-test /
+   5-year jobs + the Workever archive, one row per SITE that has a test this year.
+   Every row carries the SAME case as buildSchedule (deriveCase) so the stage +
+   notes are shared: a site on the Concerto list reuses its real ppm row (so a
+   status set here shows on the Concerto schedule + the eicr chart too); an
+   off-list site gets a synthetic MYS:<code> case that still persists in
+   concerto_cases and is addressable by POST /concerto/case. Company-wide, with
+   `engineers` per row for the front-end engineer filter, and `myVisits` = the
+   actual visits (live + archive) that back the row. */
+async function buildMySchedule(env, tid, opts) {
+  await ensureTables(env);
+  const type = "fiveYear", money = !!opts.money, today = todayIso();
+  const allYears = String(opts.year || "") === "all";
+  const year = allYears ? "" : String(opts.year || today.slice(0, 4)).slice(0, 4);
+  let jobs = []; try { jobs = await listJobs(env, tid); } catch {}
+  const cctx = await caseContext(env, tid, type, jobs);
+  const stores = await chartStores(env, tid);
+  const ppmByCode = new Map();
+  try {
+    const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=? AND ppm_type='fiveYear'").bind(tid).all();
+    for (const r of results || []) { const c = padCode(r.store_code); if (c && !ppmByCode.has(c)) ppmByCode.set(c, r); }
+  } catch {}
+  // Per-site visits this year (live + Workever archive)
+  const kw = TYPE_KEYWORDS.fiveYear;
+  const sites = new Map();   // code -> { code, visits:[] }
+  const add = (code, v) => { const k = padCode(code); if (!k) return; if (!sites.has(k)) sites.set(k, { code: k, visits: [] }); sites.get(k).visits.push(v); };
+  for (const j of jobs) {
+    const stl = String(j.status || "").toLowerCase(); if (stl === "cancelled") continue;
+    const text = [j.description, j.helpdeskRef, j.title].filter(Boolean).join(" ");
+    if (!j.elecTest && !kw.test(text)) continue;
+    const done = FINISHED.has(stl);
+    const date = (done ? (jobDoneDate(j) || (j.scheduledAt || "").slice(0, 10)) : (j.scheduledAt || "").slice(0, 10)) || "";
+    if (!allYears && date.slice(0, 4) !== year) continue;
+    add(j.siteCode, { source: "live", id: j.id, date, status: j.status || "", engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers.join(", ") : "") || j.assignedTo || "", name: j.helpdeskRef || j.siteName || "", done });
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, site_code, ref, status, assigned_to, completed_at, created_at, substr(data,1,600) AS d FROM sla_jobs_archive WHERE tenant_id=? AND site_code<>'' AND (search LIKE '%eicr%' OR search LIKE '%5 year%' OR search LIKE '%fixed wire%' OR search LIKE '%periodic%')").bind(tid).all();
+    for (const a of results || []) {
+      let name = "", eng = a.assigned_to || "";
+      try { const j = JSON.parse(a.d + (a.d.endsWith("}") ? "" : "\"}")); name = j.jobName || j.description || ""; eng = eng || j.assignedTo || ""; }
+      catch { const m = /"jobName":"([^"]*)"/.exec(a.d || ""); name = m ? m[1] : ""; }
+      const text = name + " " + (a.ref || "");
+      if (!kw.test(text) && !kw.test(a.d || "")) continue;
+      const date = (a.completed_at || a.created_at || "").slice(0, 10) || "";
+      if (!allYears && date.slice(0, 4) !== year) continue;
+      const stl = String(a.status || "").toLowerCase();
+      add(a.site_code, { source: "archive", id: a.id, date, status: a.status || "", engineer: eng, name: name || a.ref || a.id, done: FINISHED.has(stl) && stl !== "cancelled" });
+    }
+  } catch {}
+  const rows = [];
+  for (const [code, site] of sites) {
+    site.visits.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
+    const engineers = [...new Set(site.visits.map(v => v.engineer).filter(Boolean))];
+    const store = stores.get(code) || null;
+    const ppm = ppmByCode.get(code) || null;
+    const chartDue = (store && store.due[type]) || null;
+    const doneVisit = site.visits.find(v => v.done) || null;
+    let base, caseView, rec = null;
+    if (ppm) {
+      rec = ppm.status === "open" ? reconcileRow(ppm, store, today) : { flag: ppm.status, text: ppm.note || "" };
+      caseView = deriveCase(ppm, cctx, today, money, rec);
+      base = { id: ppm.id, srRef: ppm.sr_ref || "", nextDate: ppm.next_date || ppm.planned_date || null, released: !!ppm.order_nr, orderNr: ppm.order_nr || "", orderedValue: money ? ppm.ordered_value : undefined };
+    } else {
+      const synth = { id: "MYS:" + code, store_code: code, next_date: null, planned_date: null, sr_ref: "" };
+      caseView = deriveCase(synth, cctx, today, money, null);
+      base = { id: "MYS:" + code, srRef: "", nextDate: null, released: false, orderNr: "", orderedValue: undefined };
+    }
+    const firstName = (site.visits.find(v => v.name) || {}).name || "";
+    rows.push({
+      ...base, type, typeLabel: TYPE_LABEL[type] || type,
+      storeCode: code, siteName: (store && store.name) || firstName || "", block: "", category: store ? store.category : "",
+      inactive: !!(store && store.closed), onConcerto: !!ppm,
+      chartDue, flag: rec ? rec.flag : "", flagText: rec ? rec.text : "",
+      engineers, myVisits: site.visits.slice(0, 20),
+      case: caseView,
+      docStatus: fyDocStatus(chartDue, caseView, doneVisit ? { date: doneVisit.date } : null, today),
+    });
+  }
+  const byStage12 = {};
+  for (const r of rows) { const s = (r.case && r.case.stage12) || "needs_booking"; byStage12[s] = (byStage12[s] || 0) + 1; }
+  const engineerTotals = {};
+  for (const r of rows) for (const e of r.engineers) engineerTotals[e] = (engineerTotals[e] || 0) + 1;
+  const stats = { sites: rows.length, done: rows.filter(r => r.case && ["complete_satisfactory", "certificate_updated", "invoiced"].includes(r.case.stage12)).length,
+    pipeline: { stages12: FY_STAGES, steps: CASE_STEPS, byStage12 }, engineers: engineerTotals };
+  return { type, rows, total: rows.length, stats, today, year: allYears ? "all" : year };
+}
+
 /* ── 5-year test AUDIT (Jamie): tests we did this year that either aren't on the
    Concerto list at all, or re-test a site whose last EICR is still well in date.
    Both read the same test evidence as the schedule (filed cert / finished elec
@@ -788,6 +880,14 @@ export async function handle(request, env, ctx, url, sess) {
     let labourRate = 0; try { const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first(); labourRate = rr ? Number(rr.value) || 0 : 0; } catch {}
     return json({ ok: true, money, labourRate, ...out }, {}, env, request);
   }
+  // "My schedule" — the 5-year electrical tests WE actually did/booked this year
+  // (live + Workever archive), one row per site, sharing the same case/status/notes.
+  if (path === "/concerto/my-schedule" && method === "GET") {
+    const q = url.searchParams;
+    const out = await buildMySchedule(env, tid, { year: q.get("year") || "", money });
+    let labourRate = 0; try { const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first(); labourRate = rr ? Number(rr.value) || 0 : 0; } catch {}
+    return json({ ok: true, money, labourRate, ...out }, {}, env, request);
+  }
   // The £/hour labour rate used to price up remedials on the 5-Year schedule.
   if (path === "/concerto/fy-rate" && method === "POST") {
     const b = await body(); const rate = Number(b.rate);
@@ -803,8 +903,11 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await body();
     const ppmId = String(b.ppmId || "").trim(); if (!ppmId) return error("Need ppmId", 400, env, request);
     await ensureTables(env);
-    const row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
-    if (!row) return error("Schedule row not found", 404, env, request);
+    // "My schedule" off-list sites use a synthetic MYS:<code> case (no concerto_ppm
+    // row) — status/notes still persist in concerto_cases, addressable by this id.
+    let row;
+    if (ppmId.startsWith("MYS:")) row = { id: ppmId, store_code: ppmId.slice(4), ppm_type: "fiveYear", next_date: null, planned_date: null };
+    else { row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first(); if (!row) return error("Schedule row not found", 404, env, request); }
     const now = new Date().toISOString();
     let c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_id=? AND closed_at IS NULL").bind(tid, ppmId).first();
     const events = [];
