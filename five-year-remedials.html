@@ -91,6 +91,13 @@
     @media(max-width:640px){ td.store{position:static;} }
     .hbtn{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:7px 13px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
     .hbtn .n{background:#fff;color:var(--brand);border-radius:999px;padding:0 7px;font-size:12px;font-weight:800;}
+    .visitsbox{margin-top:10px;background:#f5f8ff;border:1px solid #d5e0f5;border-radius:10px;padding:9px 10px;}
+    .visitsbox .lbl{font-size:12px;font-weight:700;color:#334f86;margin-bottom:5px;}
+    .vrow{font-size:12.5px;padding:2px 0;border-top:1px solid #e6edfa;}
+    .vrow:first-of-type{border-top:none;}
+    .vsrc{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;margin-right:2px;}
+    .vsrc.live{background:#e0edff;color:#1e40af;}
+    .vsrc.arch{background:#efe6ff;color:#6b21a8;}
     .notebox{margin-top:10px;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:9px 10px;}
     .notebox .lbl{font-size:12px;font-weight:700;color:#54627a;margin-bottom:5px;}
     .jobnote{width:100%;box-sizing:border-box;min-height:52px;border:1px solid #ccd5dd;border-radius:9px;padding:8px;font:inherit;font-size:13px;color:#0f2438;resize:vertical;}
@@ -164,6 +171,9 @@
     <div id="audit"></div>
     <div class="toolbar">
       <input id="q" placeholder="Search store, site, engineer, order…">
+      <label class="muted" id="engWrap" style="display:none;align-items:center;gap:6px;">Engineer
+        <select id="engSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;"><option value="all">All engineers</option></select>
+      </label>
       <label class="muted" style="display:flex;align-items:center;gap:6px;">Sort
         <select id="sortSel" style="padding:7px 8px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;">
           <option value="code">Store number (Concerto order)</option>
@@ -195,7 +205,7 @@
     const safeUrl = u => { u=String(u==null?"":u).trim(); return /^(https?:|\/|\.\/|\?|#)/i.test(u)&&!/^javascript:/i.test(u)?u:"#"; };
 
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
-    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0;
+    let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0, ENG = "all";
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
     let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
@@ -211,7 +221,8 @@
       g("yearSel").innerHTML = '<option value="all">All years (whole list)</option>'
         + [5,4,3,2,1,0,-1,-2,-3].map(d => '<option value="'+(now+d)+'">'+(now+d)+'</option>').join("");
       g("yearSel").value = String(YEAR);
-      g("yearSel").onchange = () => { const v=g("yearSel").value; YEAR = v==="all" ? "all" : +v; render(); loadAudit(); };
+      g("yearSel").onchange = () => { const v=g("yearSel").value; YEAR = v==="all" ? "all" : +v; if (VIEW==="mine") load(); else { render(); loadAudit(); } };
+      g("engSel").onchange = () => { ENG = g("engSel").value; render(); };
       g("q").oninput = () => render();
       g("fFlag").onchange = () => render();
       g("sortSel").value = SORT;
@@ -227,9 +238,11 @@
     })();
 
     async function load(){
-      g("tbl").querySelector("tbody").innerHTML = '<tr><td class="muted" style="padding:16px;">Loading the schedule…</td></tr>';
+      const mine = VIEW==="mine";
+      g("tbl").querySelector("tbody").innerHTML = '<tr><td class="muted" style="padding:16px;">'+(mine?"Loading your 5-year tests…":"Loading the schedule…")+'</td></tr>';
+      const ep = mine ? ("/concerto/my-schedule?year="+(YEAR==="all"?"all":YEAR)) : "/concerto/schedule?type=fiveYear&status=all";
       let d = null;
-      try { d = await authFetch("/concerto/schedule?type=fiveYear&status=all").then(r=>r.json()); } catch {}
+      try { d = await authFetch(ep).then(r=>r.json()); } catch {}
       if (!d || !d.ok) { g("tbl").querySelector("tbody").innerHTML = '<tr><td style="padding:16px;color:#b00020">Couldn\'t load the schedule.</td></tr>'; return; }
       MONEY = !!d.money;
       LRATE = Number(d.labourRate) || 0;
@@ -239,6 +252,14 @@
       STAGE_LABEL = {}; STAGE_LIGHT = {};
       STAGES.forEach(s => { STAGE_LABEL[s.key] = s.label; STAGE_LIGHT[s.key] = s.light; });
       ROWS = (d.rows || []).filter(r => r.case);   // fiveYear pipeline rows carry a case
+      // Engineer filter (My schedule only): populate from the engineers on these rows.
+      if (mine) {
+        const set = new Set(); ROWS.forEach(r => (r.engineers||[]).forEach(e => e && set.add(e)));
+        const list = [...set].sort((a,b)=>a.localeCompare(b));
+        if (!list.includes(ENG)) ENG = "all";
+        g("engSel").innerHTML = '<option value="all">All engineers</option>' + list.map(e => '<option value="'+esc(e)+'"'+(ENG===e?" selected":"")+'>'+esc(e)+'</option>').join("");
+      }
+      g("engWrap").style.display = mine ? "flex" : "none";
       render();
       loadAudit();
     }
@@ -246,7 +267,7 @@
     // Off-list tests (tested this year, not on the Concerto list) + early re-tests.
     async function loadAudit(){
       const box = g("audit");
-      if (VIEW==="inactive") { box.innerHTML = ""; return; }   // audit is about active-site tests
+      if (VIEW==="inactive" || VIEW==="mine") { box.innerHTML = ""; return; }   // audit is about the Concerto-list active-site tests
       if (YEAR==="all") { box.innerHTML = ""; return; }   // the audit is year-specific
       let d = null;
       try { d = await authFetch("/concerto/audit?year="+YEAR).then(r=>r.json()); } catch {}
@@ -321,13 +342,21 @@
     // The Inactive tab ignores the year filter (shows every closed site Concerto still lists).
     function yearRows(){
       if (VIEW==="inactive") return ROWS.filter(r => r.inactive);
+      if (VIEW==="mine") return ROWS;   // server already filtered to the chosen year's actual jobs
       return ROWS.filter(r => !r.inactive && inYear(r));
     }
     function renderViewTabs(){
       const inact = ROWS.filter(r => r.inactive).length;
+      const mineN = VIEW==="mine" ? ROWS.length : null;
       const t = (v,label,n) => '<button class="viewtab'+(VIEW===v?" on":"")+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
-      g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("inactive","🚫 Inactive sites", inact);
-      g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => { if(VIEW===b.dataset.v) return; VIEW=b.dataset.v; FILTER="all"; EXPANDED.clear(); render(); loadAudit(); });
+      g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("mine","📋 My schedule", mineN) + t("inactive","🚫 Inactive sites", inact);
+      g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => {
+        if(VIEW===b.dataset.v) return;
+        const wasMine = VIEW==="mine", nowMine = b.dataset.v==="mine";
+        VIEW=b.dataset.v; FILTER="all"; ENG="all"; EXPANDED.clear();
+        if (wasMine!==nowMine) load();   // crossing the mine boundary needs the other endpoint
+        else { render(); loadAudit(); }
+      });
     }
     // Sort comparators. "code" (store number) is the Concerto order — the default.
     function codeCmp(a,b){ return String(a.storeCode||"~~~~").localeCompare(String(b.storeCode||"~~~~"), undefined, { numeric:true }); }
@@ -346,7 +375,8 @@
       return yearRows().filter(r => {
         if (FILTER!=="all" && stageOf(r)!==FILTER) return false;
         if (flagOnly && !(r.case.flagged)) return false;
-        if (q && ![r.storeCode, r.siteName, r.orderNr, r.srRef, r.case.engineer, r.case.flagNote].join(" ").toLowerCase().includes(q)) return false;
+        if (VIEW==="mine" && ENG!=="all" && !((r.engineers||[]).includes(ENG))) return false;
+        if (q && ![r.storeCode, r.siteName, r.orderNr, r.srRef, r.case.engineer, r.case.flagNote, (r.engineers||[]).join(" ")].join(" ").toLowerCase().includes(q)) return false;
         return true;
       }).sort(cmpRows);
     }
@@ -364,8 +394,8 @@
         const overdue = rows.filter(r => notDone(r) && dueUrgency(r)==="red").length;   // out of date / no cert
         const dueSoon = rows.filter(r => notDone(r) && dueUrgency(r)==="amber").length;  // runs out within 60 days
         g("sumrow").innerHTML =
-          stat(rows.length, YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR, "") +
-          stat(needsBooking, "Needs booking", "") +
+          stat(rows.length, VIEW==="mine" ? (YEAR==="all" ? "Sites we've tested" : "Sites tested in "+YEAR) : (YEAR==="all" ? "Sites (whole list)" : "Sites in "+YEAR), "") +
+          stat(needsBooking, VIEW==="mine" ? "Not yet booked/done" : "Needs booking", "") +
           stat(dueSoon, "Due within 60 days", dueSoon?"amber":"") +
           stat(overdue, "Out of date / no cert", overdue?"red":"") +
           stat(done, "Complete", done?"green":"");
@@ -440,7 +470,8 @@
         ? '<button class="pilllink" data-cert="'+esc(r.storeCode)+'" title="Open the current 5-year certificate">'+docInner+' <span class="opendoc">📄 open</span></button>'
         : docInner;
       const rel = r.released ? '<div class="sub" style="color:#166534;font-weight:700">Released'+(r.orderNr?" · "+esc(r.orderNr):"")+(MONEY&&r.orderedValue!=null?" · £"+Math.round(r.orderedValue):"")+'</div>' : '';
-      const testedBy = c.engineer ? esc(c.engineer) : '<span class="muted">—</span>';
+      const engFallback = (r.engineers && r.engineers.length) ? r.engineers.join(", ") : "";
+      const testedBy = c.engineer ? esc(c.engineer) : (engFallback ? esc(engFallback) : '<span class="muted">—</span>');
       const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>' : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
       const flag = c.flagged ? '<div class="flagtag">🚩 '+esc(c.flagNote || (c.autoFlag&&"No certificate cover") || "Flagged")+'</div>' : '';
       const hold = c.held ? '<div class="holdtag">⏸ '+esc(c.holdReason||"On hold")+'</div>' : '';
@@ -488,8 +519,21 @@
         + '<textarea class="jobnote" placeholder="Leave a note on this job/site…">'+esc(c.note||"")+'</textarea>'
         + '<div style="margin-top:6px"><button class="notesave" data-note="'+esc(r.id)+'">💾 Save note</button> <span class="saved" id="nsv-'+esc(r.id)+'"></span></div>'
         + '</div>';
+      // My-schedule rows carry the actual visits (live + Workever archive) behind the row.
+      let visitsBox = "";
+      if (Array.isArray(r.myVisits) && r.myVisits.length) {
+        const srcTag = s => s==="archive" ? '<span class="vsrc arch">🗄 Workever</span>' : '<span class="vsrc live">⚡ Portal</span>';
+        visitsBox = '<div class="visitsbox"><div class="lbl">🗓 Test visits this year ('+r.myVisits.length+')</div>'
+          + r.myVisits.map(v => '<div class="vrow">'+srcTag(v.source)+' <b>'+esc(fmtD(v.date)||"—")+'</b>'
+              + ' · '+esc(v.status||"")+(v.engineer?' · '+esc(v.engineer):'')
+              + (v.source==="live" ? ' · <a href="/job-view.html?jobId='+encodeURIComponent(v.id)+'">open ↗</a>' : '')
+              + '</div>').join("")
+          + (r.onConcerto ? '' : '<div class="sub" style="margin-top:4px;color:#92400e">Not on the Concerto PPM list — status &amp; notes are kept here.</div>')
+          + '</div>';
+      }
       return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
         + out + strip
+        + visitsBox
         + remedialsBlock(r)
         + noteBox
         + '<div class="dlinks">'+links.join("")+'</div>'

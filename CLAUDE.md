@@ -3590,6 +3590,30 @@ totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTe
     site Concerto still lists, ignoring the year filter). An inactive row carries a
     grey "🚫 Inactive" pill in the store cell; the audit cards are hidden in the
     inactive view. Front-end tab state `VIEW` ("active"|"inactive"); no `?v=` bump.
+  - **"📋 My schedule" tab (29 Sep 2026, Jamie: "a new page in the 5-year remedial
+    area — my full schedule this year, current status of each site from
+    compliance/remedials, with clear notes + a clear status on each, reflected
+    everywhere"):** a THIRD view tab driven not by the Concerto PPM list but by the
+    tests WE actually did/booked this year — **GET /concerto/my-schedule?year=**
+    (`buildMySchedule`, office): one row per SITE that has a 5-year test this year,
+    from **live ⚡ elecTest / 5-year jobs + the Workever `sla_jobs_archive`**
+    (company-wide; `year=all` for every year). Each row carries the SAME
+    `case` as buildSchedule (via `deriveCase`) so the **stage12 dropdown + notes are
+    the shared `concerto_cases` store** — a site ON the Concerto list reuses its real
+    ppm `id` (status set here shows on the ⚡ Schedule tab + eicr chart too); an
+    OFF-list site (Chapplins, freshly-raised, archive-only) gets a synthetic
+    **`MYS:<code>`** case that still persists in concerto_cases — **POST
+    /concerto/case now accepts `MYS:<code>` ppmIds** (no concerto_ppm row needed).
+    Rows also carry `engineers[]` (a toolbar **engineer filter**, shown only on this
+    tab) + `myVisits[]` (the actual live/archive visits, listed in the row's ▸
+    Details with a ⚡ Portal / 🗄 Workever source tag + open-job link). The stage is
+    still pipeline-derived (only elecTest-flagged jobs auto-advance it — a completed
+    5-year job with no elecTest flag shows in the visit list + docStatus but sits at
+    "needs booking" until set by hand, same as the ⚡ Schedule tab). Front-end reuses
+    rowHtml/detailHtml/remedialsBlock/setStage/saveNote unchanged; `load()` picks the
+    endpoint by VIEW; no `?v=`/SW bump (HTML-only, network-first). Test cases in
+    `test-concerto.mjs` ("My schedule" block). **TODO/next:** could augment the
+    my-schedule case to count non-elecTest completed jobs toward "tested".
   - **Stuck red flag once a certificate is filed — FIXED (14 Sep 2026, Jamie:
     "the 5-year page is keeping items flagged when I have uploaded a certificate…
     example is Emsworth").** A `reconcileRow` "gap" (our chart due earlier than

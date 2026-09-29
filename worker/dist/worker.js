@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10654,6 +10659,119 @@ async function buildSchedule(env, tid, opts) {
   }
   return { type, rows: filtered, total: rows.length, stats, today };
 }
+async function buildMySchedule(env, tid, opts) {
+  await ensureTables2(env);
+  const type = "fiveYear", money2 = !!opts.money, today = todayIso();
+  const allYears = String(opts.year || "") === "all";
+  const year = allYears ? "" : String(opts.year || today.slice(0, 4)).slice(0, 4);
+  let jobs = [];
+  try {
+    jobs = await listJobs(env, tid);
+  } catch {
+  }
+  const cctx = await caseContext(env, tid, type, jobs);
+  const stores = await chartStores(env, tid);
+  const ppmByCode = /* @__PURE__ */ new Map();
+  try {
+    const { results } = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=? AND ppm_type='fiveYear'").bind(tid).all();
+    for (const r of results || []) {
+      const c = padCode(r.store_code);
+      if (c && !ppmByCode.has(c)) ppmByCode.set(c, r);
+    }
+  } catch {
+  }
+  const kw = TYPE_KEYWORDS.fiveYear;
+  const sites = /* @__PURE__ */ new Map();
+  const add = (code, v) => {
+    const k = padCode(code);
+    if (!k) return;
+    if (!sites.has(k)) sites.set(k, { code: k, visits: [] });
+    sites.get(k).visits.push(v);
+  };
+  for (const j of jobs) {
+    const stl = String(j.status || "").toLowerCase();
+    if (stl === "cancelled") continue;
+    const text = [j.description, j.helpdeskRef, j.title].filter(Boolean).join(" ");
+    if (!j.elecTest && !kw.test(text)) continue;
+    const done = FINISHED.has(stl);
+    const date = (done ? jobDoneDate(j) || (j.scheduledAt || "").slice(0, 10) : (j.scheduledAt || "").slice(0, 10)) || "";
+    if (!allYears && date.slice(0, 4) !== year) continue;
+    add(j.siteCode, { source: "live", id: j.id, date, status: j.status || "", engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers.join(", ") : "") || j.assignedTo || "", name: j.helpdeskRef || j.siteName || "", done });
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT id, site_code, ref, status, assigned_to, completed_at, created_at, substr(data,1,600) AS d FROM sla_jobs_archive WHERE tenant_id=? AND site_code<>'' AND (search LIKE '%eicr%' OR search LIKE '%5 year%' OR search LIKE '%fixed wire%' OR search LIKE '%periodic%')").bind(tid).all();
+    for (const a of results || []) {
+      let name = "", eng = a.assigned_to || "";
+      try {
+        const j = JSON.parse(a.d + (a.d.endsWith("}") ? "" : '"}'));
+        name = j.jobName || j.description || "";
+        eng = eng || j.assignedTo || "";
+      } catch {
+        const m = /"jobName":"([^"]*)"/.exec(a.d || "");
+        name = m ? m[1] : "";
+      }
+      const text = name + " " + (a.ref || "");
+      if (!kw.test(text) && !kw.test(a.d || "")) continue;
+      const date = (a.completed_at || a.created_at || "").slice(0, 10) || "";
+      if (!allYears && date.slice(0, 4) !== year) continue;
+      const stl = String(a.status || "").toLowerCase();
+      add(a.site_code, { source: "archive", id: a.id, date, status: a.status || "", engineer: eng, name: name || a.ref || a.id, done: FINISHED.has(stl) && stl !== "cancelled" });
+    }
+  } catch {
+  }
+  const rows = [];
+  for (const [code, site] of sites) {
+    site.visits.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
+    const engineers = [...new Set(site.visits.map((v) => v.engineer).filter(Boolean))];
+    const store = stores.get(code) || null;
+    const ppm = ppmByCode.get(code) || null;
+    const chartDue = store && store.due[type] || null;
+    const doneVisit = site.visits.find((v) => v.done) || null;
+    let base, caseView, rec = null;
+    if (ppm) {
+      rec = ppm.status === "open" ? reconcileRow(ppm, store, today) : { flag: ppm.status, text: ppm.note || "" };
+      caseView = deriveCase(ppm, cctx, today, money2, rec);
+      base = { id: ppm.id, srRef: ppm.sr_ref || "", nextDate: ppm.next_date || ppm.planned_date || null, released: !!ppm.order_nr, orderNr: ppm.order_nr || "", orderedValue: money2 ? ppm.ordered_value : void 0 };
+    } else {
+      const synth = { id: "MYS:" + code, store_code: code, next_date: null, planned_date: null, sr_ref: "" };
+      caseView = deriveCase(synth, cctx, today, money2, null);
+      base = { id: "MYS:" + code, srRef: "", nextDate: null, released: false, orderNr: "", orderedValue: void 0 };
+    }
+    const firstName = (site.visits.find((v) => v.name) || {}).name || "";
+    rows.push({
+      ...base,
+      type,
+      typeLabel: TYPE_LABEL[type] || type,
+      storeCode: code,
+      siteName: store && store.name || firstName || "",
+      block: "",
+      category: store ? store.category : "",
+      inactive: !!(store && store.closed),
+      onConcerto: !!ppm,
+      chartDue,
+      flag: rec ? rec.flag : "",
+      flagText: rec ? rec.text : "",
+      engineers,
+      myVisits: site.visits.slice(0, 20),
+      case: caseView,
+      docStatus: fyDocStatus(chartDue, caseView, doneVisit ? { date: doneVisit.date } : null, today)
+    });
+  }
+  const byStage12 = {};
+  for (const r of rows) {
+    const s = r.case && r.case.stage12 || "needs_booking";
+    byStage12[s] = (byStage12[s] || 0) + 1;
+  }
+  const engineerTotals = {};
+  for (const r of rows) for (const e of r.engineers) engineerTotals[e] = (engineerTotals[e] || 0) + 1;
+  const stats = {
+    sites: rows.length,
+    done: rows.filter((r) => r.case && ["complete_satisfactory", "certificate_updated", "invoiced"].includes(r.case.stage12)).length,
+    pipeline: { stages12: FY_STAGES, steps: CASE_STEPS, byStage12 },
+    engineers: engineerTotals
+  };
+  return { type, rows, total: rows.length, stats, today, year: allYears ? "all" : year };
+}
 async function fiveYearAudit(env, tid, year) {
   await ensureTables2(env);
   year = String(year || todayIso().slice(0, 4)).slice(0, 4);
@@ -10724,6 +10842,17 @@ async function handle9(request, env, ctx, url, sess) {
     }
     return json({ ok: true, money: money2, labourRate, ...out }, {}, env, request);
   }
+  if (path === "/concerto/my-schedule" && method === "GET") {
+    const q = url.searchParams;
+    const out = await buildMySchedule(env, tid, { year: q.get("year") || "", money: money2 });
+    let labourRate = 0;
+    try {
+      const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first();
+      labourRate = rr ? Number(rr.value) || 0 : 0;
+    } catch {
+    }
+    return json({ ok: true, money: money2, labourRate, ...out }, {}, env, request);
+  }
   if (path === "/concerto/fy-rate" && method === "POST") {
     const b = await body();
     const rate = Number(b.rate);
@@ -10740,8 +10869,12 @@ async function handle9(request, env, ctx, url, sess) {
     const ppmId = String(b.ppmId || "").trim();
     if (!ppmId) return error("Need ppmId", 400, env, request);
     await ensureTables2(env);
-    const row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
-    if (!row) return error("Schedule row not found", 404, env, request);
+    let row;
+    if (ppmId.startsWith("MYS:")) row = { id: ppmId, store_code: ppmId.slice(4), ppm_type: "fiveYear", next_date: null, planned_date: null };
+    else {
+      row = await env.DB.prepare("SELECT id, store_code, ppm_type, next_date, planned_date FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
+      if (!row) return error("Schedule row not found", 404, env, request);
+    }
     const now2 = (/* @__PURE__ */ new Date()).toISOString();
     let c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_id=? AND closed_at IS NULL").bind(tid, ppmId).first();
     const events = [];
@@ -39637,9 +39770,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
