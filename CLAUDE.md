@@ -5495,6 +5495,32 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      from`, then deactivates the source `sites` rows and ensures `into` is a known
      active site; returns `{merged, posMoved}`). Since costing matches
      `po_log.site` by NAME, the spend rolls straight up onto the kept site.
+   - **Invoice sweep — mailbox → uncosted PO matcher (po-office.html "🔎 Sweep",
+     po.js `runInvoiceSweep`; Graph read via lib/graphmail.js, gate PurchaseOrders|
+     FullAccess).** Reads the accounts mailbox for supplier-invoice PDFs, parses each
+     (text, then vision within an AI budget), matches to an uncosted PO (by PO number,
+     else supplier+date candidates) and lists them; **✓ Attach & set cost** →
+     `/api/invoice/sweep-apply` fills `po_log.cost_ex_vat`+`invoice_key`; **🚫 Not an
+     invoice** → `/api/invoice/sweep-dismiss`. A `invoice_seen` ledger (keyed
+     mailbox|message|attachment) drops attached/dismissed attachments from every
+     future sweep; an already-priced+attached PO drops too.
+     - **Resumable BACKFILL walk (Sep 2026 — was stranding ~100 invoices).** State
+       in config `sweep_state:<mailbox>` = `{lastReceived (forward watermark),
+       oldestScanned (backfill cursor), backfillDone, outstanding[≤300 slim
+       proposals]}`. Each incremental run does a FORWARD read (`receivedDateTime gt
+       lastReceived`, new arrivals) AND, until `backfillDone`, a BACKFILL read
+       (`receivedDateTime lt oldestScanned`, older-than-covered), both bounded to the
+       look-back window (graphmail's `since`/`before` now both apply the `days`
+       floor). Per run caps at **MAX_DOWNLOADS=40**; the cursor advances to the oldest
+       message FULLY processed so repeated runs walk the whole window; an empty
+       backfill read sets `backfillDone`. Response carries `moreToScan` +
+       `backfillDone`; **po-office `invRunSweep` auto-continues** batch by batch
+       (⏹ Stop scanning) until the whole window is covered — the server list is
+       cumulative (merged outstanding + fresh). **Default look-back is 180 days**
+       (was 60 — 43 uncosted POs were 61–124 days old and outside the old window).
+       **The old bug:** a single watermark advanced to the newest email each run, so
+       after the first sweep everything older than the newest ~40 was permanently
+       behind it and never re-read.
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a
