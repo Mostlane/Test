@@ -10398,7 +10398,7 @@ async function caseContext(env, tid, type, jobs) {
       engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
       worksJobId: j.remedialsWorksJobId || null,
       remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
-      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map((x) => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0 }))
+      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map((x) => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: (Array.isArray(x.photos) ? x.photos : []).map((k) => r2Url(env, k)) }))
     });
   }
   try {
@@ -10560,7 +10560,7 @@ function deriveCase(r, ctx, today, money2, rec) {
     testJob: testJob ? { id: testJob.id, ref: testJob.ref, status: testJob.status, date: testJob.date, engineer: testJob.engineer, remedials: testJob.remedials, worksJobId: testJob.worksJobId } : null,
     // The remedial works the engineer logged — for the schedule's price-up + create-works-job.
     // Material £ is money-gated; minutes/description are shown to anyone with the page.
-    remedialLines: testJob ? (testJob.remedialsList || []).map((x) => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, materialCost: money2 ? x.materialCost : void 0 })) : [],
+    remedialLines: testJob ? (testJob.remedialsList || []).map((x) => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, photoUrls: x.photoUrls || [], materialCost: money2 ? x.materialCost : void 0 })) : [],
     quote: c && c.quote_value != null ? { ref: c.quote_ref || "", value: money2 ? c.quote_value : void 0, at: c.quote_at || null, by: c.quote_by || "" } : null,
     worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
     cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null,
@@ -15544,6 +15544,7 @@ __export(sla_exports, {
   listJobs: () => listJobs,
   notifyNewlyAssigned: () => notifyNewlyAssigned,
   optimiseEmDay: () => optimiseEmDay,
+  r2Url: () => r2Url,
   raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
   releaseVisibleNow: () => releaseVisibleNow,
@@ -37041,7 +37042,7 @@ async function graphMailboxCheck(env, mailbox) {
     return { ok: false, error: String(e && e.message || e) };
   }
 }
-async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since } = {}) {
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since, before } = {}) {
   let filter;
   const iso = (s, endOfDay) => {
     const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
@@ -37050,15 +37051,21 @@ async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, fr
   const fIso = from ? iso(from, false) : null;
   const tIso = to ? iso(to, true) : null;
   const sinceIso = since ? iso(since, false) : null;
+  const beforeIso = before ? iso(before, false) : null;
+  const floorIso = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
   if (fIso || tIso) {
     const parts = [];
     if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
     if (tIso) parts.push(`receivedDateTime le ${tIso}`);
     filter = parts.join(" and ");
-  } else if (sinceIso) {
-    filter = `receivedDateTime gt ${sinceIso}`;
+  } else if (sinceIso || beforeIso) {
+    const parts = [];
+    if (sinceIso) parts.push(`receivedDateTime gt ${sinceIso}`);
+    if (beforeIso) parts.push(`receivedDateTime lt ${beforeIso}`);
+    parts.push(`receivedDateTime ge ${floorIso}`);
+    filter = parts.join(" and ");
   } else {
-    filter = `receivedDateTime ge ${new Date(Date.now() - Math.max(1, days) * 864e5).toISOString()}`;
+    filter = `receivedDateTime ge ${floorIso}`;
   }
   const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
   const j = await graphGet(env, q);
@@ -37182,15 +37189,25 @@ async function getSweepState(db, mailbox) {
     const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
     if (row && row.value) {
       const s = JSON.parse(row.value);
-      return { lastReceived: s.lastReceived || null, outstanding: Array.isArray(s.outstanding) ? s.outstanding : [] };
+      return {
+        lastReceived: s.lastReceived || null,
+        outstanding: Array.isArray(s.outstanding) ? s.outstanding : [],
+        oldestScanned: s.oldestScanned || null,
+        backfillDone: !!s.backfillDone
+      };
     }
   } catch {
   }
-  return { lastReceived: null, outstanding: [] };
+  return { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
 }
 async function saveSweepState(db, mailbox, state) {
   try {
-    const value = JSON.stringify({ lastReceived: state.lastReceived || null, outstanding: (state.outstanding || []).slice(0, 200) });
+    const value = JSON.stringify({
+      lastReceived: state.lastReceived || null,
+      outstanding: (state.outstanding || []).slice(0, 300),
+      oldestScanned: state.oldestScanned || null,
+      backfillDone: !!state.backfillDone
+    });
     await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(sweepStateKey(mailbox), value, value).run();
   } catch (e) {
     console.error("PO saveSweepState failed:", e && e.message);
@@ -37429,14 +37446,14 @@ async function handle33(request, env, ctx, url, sess) {
         ok: true,
         configured: graphConfigured(env),
         mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX,
-        days: Number(cfg.invoice_sweep_days) || 60
+        days: Number(cfg.invoice_sweep_days) || 180
       });
     }
     if (path === "/api/invoice/sweep" && method === "POST") {
       if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
       const b = await bodyOf();
       const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
-      const days = Math.max(1, Math.min(365, Number(b.days) || 60));
+      const days = Math.max(1, Math.min(365, Number(b.days) || 180));
       const from = String(b.from || "").trim();
       const to = String(b.to || "").trim();
       const clue = String(b.clue || "").trim();
@@ -38233,62 +38250,109 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
   const hasClue = !!String(clue || "").trim();
   const oneOff = isRange || hasClue;
   const incremental = mode !== "full" && !oneOff;
-  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [] };
-  const readOpts = { top: 40, days };
-  if (oneOff) {
-    readOpts.from = from;
-    readOpts.to = to;
-    readOpts.clue = clue;
-  } else if (incremental && state.lastReceived) {
-    readOpts.since = state.lastReceived;
-  }
-  let msgs = [];
-  try {
-    msgs = await listRecentWithAttachments(env, mailbox, readOpts);
-  } catch (e) {
-    return { proposals: [], scanned: 0, error: String(e && e.message || e) };
-  }
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
   const fresh = [];
   let downloads = 0, aiUsed = 0, skipped = 0;
-  for (const m of msgs) {
-    if (downloads >= MAX_DOWNLOADS) break;
-    let atts = [];
-    try {
-      atts = await listPdfAttachments(env, mailbox, m.id);
-    } catch {
-      continue;
+  let newest = state.lastReceived;
+  let oldestScanned = state.oldestScanned;
+  let backfillDone = incremental ? state.backfillDone : false;
+  async function processMsgs(msgs) {
+    let oldestFull = null, hitCap = false, minSeen = null;
+    for (const m of msgs) {
+      const r = m.receivedDateTime || null;
+      if (r && (!newest || r > newest)) newest = r;
+      if (r && (!minSeen || r < minSeen)) minSeen = r;
+      if (downloads >= MAX_DOWNLOADS) {
+        hitCap = true;
+        break;
+      }
+      let atts = [];
+      try {
+        atts = await listPdfAttachments(env, mailbox, m.id);
+      } catch {
+        continue;
+      }
+      let complete = true;
+      for (const a of atts) {
+        if (downloads >= MAX_DOWNLOADS) {
+          hitCap = true;
+          complete = false;
+          break;
+        }
+        let bytes;
+        try {
+          bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+          downloads++;
+        } catch {
+          continue;
+        }
+        let res;
+        try {
+          res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+        } catch {
+          continue;
+        }
+        if (res.aiUsed) aiUsed++;
+        if (res.notInvoice || res.remittance) {
+          skipped++;
+          continue;
+        }
+        fresh.push({
+          mailbox,
+          messageId: m.id,
+          attachmentId: a.id,
+          filename: a.name || "invoice.pdf",
+          subject: m.subject || "",
+          from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
+          receivedDateTime: r,
+          tier: res.tier,
+          fields: res.fields || {}
+        });
+      }
+      if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;
+      if (hitCap) break;
     }
-    for (const a of atts) {
-      if (downloads >= MAX_DOWNLOADS) break;
-      let bytes;
+    return { oldestFull, hitCap, minSeen, count: msgs.length };
+  }
+  if (oneOff) {
+    let msgs = [];
+    try {
+      msgs = await listRecentWithAttachments(env, mailbox, { top: 40, days, from, to, clue });
+    } catch (e) {
+      return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+    }
+    await processMsgs(msgs);
+  } else {
+    if (mode === "full") {
+      newest = null;
+      oldestScanned = null;
+      backfillDone = false;
+    }
+    if (state.lastReceived) {
+      let fwd = [];
       try {
-        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
-        downloads++;
-      } catch {
-        continue;
+        fwd = await listRecentWithAttachments(env, mailbox, { top: 40, days, since: state.lastReceived });
+      } catch (e) {
+        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
       }
-      let res;
+      await processMsgs(fwd);
+    }
+    if (!backfillDone && downloads < MAX_DOWNLOADS) {
+      const opts = { top: 40, days };
+      if (oldestScanned) opts.before = oldestScanned;
+      let old = [];
       try {
-        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
-      } catch {
-        continue;
+        old = await listRecentWithAttachments(env, mailbox, opts);
+      } catch (e) {
+        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
       }
-      if (res.aiUsed) aiUsed++;
-      if (res.notInvoice || res.remittance) {
-        skipped++;
-        continue;
+      if (!old.length) {
+        backfillDone = true;
+      } else {
+        const { oldestFull, hitCap, minSeen } = await processMsgs(old);
+        if (oldestFull) oldestScanned = oldestFull;
+        else if (!hitCap && minSeen) oldestScanned = minSeen;
       }
-      fresh.push({
-        mailbox,
-        messageId: m.id,
-        attachmentId: a.id,
-        filename: a.name || "invoice.pdf",
-        subject: m.subject || "",
-        from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
-        receivedDateTime: m.receivedDateTime || null,
-        tier: res.tier,
-        fields: res.fields || {}
-      });
     }
   }
   const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
@@ -38315,14 +38379,15 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
     proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
   }
   proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
-  let newest = state.lastReceived;
-  for (const m of msgs) {
-    const r = m.receivedDateTime;
-    if (r && (!newest || r > newest)) newest = r;
-  }
   if (incremental || mode === "full") {
-    await saveSweepState(db, mailbox, { lastReceived: newest, outstanding: proposals.map(slimProposal) });
+    await saveSweepState(db, mailbox, {
+      lastReceived: newest,
+      outstanding: proposals.map(slimProposal),
+      oldestScanned,
+      backfillDone
+    });
   }
+  const moreToScan = !oneOff && (downloads >= MAX_DOWNLOADS || !backfillDone);
   return {
     proposals,
     scanned: downloads,
@@ -38333,7 +38398,10 @@ async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode })
     oneOff,
     newProposals: fresh.length,
     carriedOver: incremental ? state.outstanding.length : 0,
-    watermark: incremental || mode === "full" ? newest : null
+    watermark: incremental || mode === "full" ? newest : null,
+    backfillDone,
+    moreToScan,
+    oldestScanned
   };
 }
 async function poBrief(db, poNumber) {
@@ -44460,18 +44528,8 @@ async function setGateState(db, open, by, device, at) {
 async function pulseGate(env, db, cfg) {
   const code = cfg.openCode || "switch_1";
   const value = cfg.openValue === void 0 ? true : cfg.openValue;
-  const rest = typeof value === "boolean" ? !value : false;
-  const dev = `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`;
-  const jr8 = await api(env, db, cfg, "POST", dev, { commands: [{ code, value }] });
-  if (jr8 && jr8.success) {
-    const ms = Math.min(3e3, Math.max(200, Number(cfg.pulseMs) || 800));
-    try {
-      await new Promise((r) => setTimeout(r, ms));
-      await api(env, db, cfg, "POST", dev, { commands: [{ code, value: rest }] });
-    } catch (e) {
-    }
-  }
-  return { jr: jr8, sent: { code, value, rest } };
+  const jr8 = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr: jr8, sent: { code, value } };
 }
 function friendlyGateError(msg) {
   const m = String(msg || "").toLowerCase();
@@ -44678,10 +44736,6 @@ async function handle42(request, env, ctx, url, sess) {
       if (dist > cfg.geo.radiusM) {
         return json4({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
       }
-    }
-    const st = await getGateState(db);
-    if (st.open === wantOpen) {
-      return json4({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
     }
     try {
       const { jr: jr8, sent } = await pulseGate(env, db, cfg);

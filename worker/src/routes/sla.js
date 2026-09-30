@@ -7110,7 +7110,7 @@ async function inferWorkArea(env, tenantId, description) {
 
 /* ================= FILES (R2) + PDF ================= */
 
-function r2Url(env, key) {
+export function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
 }

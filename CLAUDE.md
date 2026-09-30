@@ -4225,6 +4225,30 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   (button); van-checks.html writes it on load. The driver's own `mineDue` is NOT
   cleared by viewing (it clears when they submit their check). Week-scoped, so it
   re-appears next week. No worker change (/prefs merges arbitrary keys).
+- **Field-app van-check lockout (`van-check-gate.js`, Sep 2026)** — the main.html
+  attention gate below is OFFICE-home only; field engineers land on route.html →
+  engineer-jobs.html and never pass through it, so a missed weekly van check used
+  to stop nothing (only route.html's dismissible red banner). `van-check-gate.js`
+  (loaded AFTER portal-config on route/engineer-jobs/inbox/you — NOT van-check.html,
+  the escape) shows an unavoidable full-screen navy overlay when **GET
+  /vancheck/attention** reports **`mineDue && overdue`**, with one "Do my van check
+  now →" button to van-check.html. Scope = the WEEKLY assigned-van check only;
+  `mineDue` already folds in opt-out / admin mute / no-van, so those drivers are
+  never blocked. **Fails OPEN** (no token, API error, bad reply → no block — an
+  engineer must never be locked out by a glitch/weak signal), skips iframes, and
+  re-checks on pageshow/visibility so it clears itself once the check is in. The
+  admin escape for a driver who genuinely can't is the existing van-checks.html →
+  skip (`/vancheck/skip`). **View As = PREVIEW:** while the owner impersonates a
+  field engineer the block STILL shows (against the impersonated driver's real
+  `mineDue`/`overdue`, so it can be verified) but is DISMISSIBLE — a "✕ Close
+  (preview)" button so the owner is never trapped behind a full-screen overlay that
+  would otherwise cover the return bar. A real engineer on their own login gets the
+  hard, non-dismissible block (no close button). (Earlier it skipped View As
+  entirely, so the owner could never see it fire.) `_headers` no-cache + SW
+  `mostlane-v136`, `van-check-gate.js?v=3`. Test `scratchpad/vcgate-test.cjs`
+  (Playwright, 11 cases). NB the dormant
+  `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
+  gate, unrelated to this.
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
   outstanding items (no dismiss button); desktop gets a dismissible corner
   panel (sessionStorage sig). "💤 Remind me later" = 4h snooze, max 2 per
@@ -5331,21 +5355,31 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
 - **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
   FAAC toggles open↔close on each pulse. So **Open and
   Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
-  only in intent. **`pulseGate` now sends an explicit PRESS then RELEASE** (value,
-  wait `cfg.pulseMs`≈800ms, then `!value`) so the relay always returns to rest and
-  the pulse no longer depends on the device's own inching setting — success is
-  based on the PRESS, the release is best-effort. **Why (27 Sep 2026):** the old
-  code sent only `value:true` and relied on the device auto-releasing; when that
-  inching setting was lost/disabled the relay LATCHED ON — the gate opened once
-  (the one OFF→ON edge) then every later ON command (portal AND Tuya app) was a
-  no-op (already ON = no new edge), so the gate "worked to open then wouldn't do
-  anything". The press→release emulates a physical push-button and self-heals a
-  latched relay. NB the portal log records a pulse as "success" whenever Tuya
+  only in intent. **`pulseGate` sends a SINGLE command** (`switch_1=true`) and
+  lets the Tuya relay's own inching/momentary setting auto-release it — one
+  command = one button push = the FAAC toggles. **This is the form that ran
+  correctly for weeks and is what's live (reverted 30 Sep 2026).**
+  **DO NOT add an explicit release.** A press+RELEASE variant (a second
+  `switch_1=false` ~800ms later) was tried on 27 Sep 2026 to self-heal a latched
+  relay during the Tuya licence outage, but once the device inching is working
+  the release is a SECOND edge — the gate toggles open then straight back
+  ("opened then wouldn't do anything"). Jamie confirmed the single-pulse form
+  worked perfectly before the licence issue, so it was restored. If the relay
+  ever latches ON again (opens once then ignores every command), the fix is to
+  **re-enable inching/momentary on the Tuya device**, NOT to add a release here.
+  NB the portal log records a pulse as "success" whenever Tuya
   ACCEPTS the command, which doesn't prove the relay physically changed state. The relay can't report state, so the portal **TRACKS it** in
   app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
-  flips it. Open pulses only when tracked-closed, Close only when tracked-open
-  (so pressing Open twice can't accidentally close it); if already in the target
-  state it returns `already:true` without pulsing. `/tuya/gate/state` returns the
+  flips it. **Every Open/Close press ALWAYS pulses (30 Sep 2026) — no tracked-state
+  suppression.** The old `if (tracked === wanted) return already:true` short-circuit
+  silently SWALLOWED a real press whenever the portal's guess matched the button —
+  the "a command does nothing / not reliable" fault. Because the relay is a momentary
+  TOGGLE with no sensor and is also worked by fob/keypad, the tracked state is only a
+  guess and drifts, so the guard threw away genuine presses (Jamie had to Mark
+  open/closed mid-sequence to un-stick it). The tracked state is now a DISPLAY HINT
+  only (set to the button's intent after each pulse); **do NOT re-add an "already"
+  guard** — for a toggle relay both buttons send the identical pulse, so it never
+  prevented anything real, it only lost presses. `/tuya/gate/state` returns the
   TRACKED state (not a device read — that's why it used to be stuck on "closed").
   **Drift fix:** if the gate is used by fob/keypad, Full-Access can correct the
   tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
@@ -5495,6 +5529,32 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      from`, then deactivates the source `sites` rows and ensures `into` is a known
      active site; returns `{merged, posMoved}`). Since costing matches
      `po_log.site` by NAME, the spend rolls straight up onto the kept site.
+   - **Invoice sweep — mailbox → uncosted PO matcher (po-office.html "🔎 Sweep",
+     po.js `runInvoiceSweep`; Graph read via lib/graphmail.js, gate PurchaseOrders|
+     FullAccess).** Reads the accounts mailbox for supplier-invoice PDFs, parses each
+     (text, then vision within an AI budget), matches to an uncosted PO (by PO number,
+     else supplier+date candidates) and lists them; **✓ Attach & set cost** →
+     `/api/invoice/sweep-apply` fills `po_log.cost_ex_vat`+`invoice_key`; **🚫 Not an
+     invoice** → `/api/invoice/sweep-dismiss`. A `invoice_seen` ledger (keyed
+     mailbox|message|attachment) drops attached/dismissed attachments from every
+     future sweep; an already-priced+attached PO drops too.
+     - **Resumable BACKFILL walk (Sep 2026 — was stranding ~100 invoices).** State
+       in config `sweep_state:<mailbox>` = `{lastReceived (forward watermark),
+       oldestScanned (backfill cursor), backfillDone, outstanding[≤300 slim
+       proposals]}`. Each incremental run does a FORWARD read (`receivedDateTime gt
+       lastReceived`, new arrivals) AND, until `backfillDone`, a BACKFILL read
+       (`receivedDateTime lt oldestScanned`, older-than-covered), both bounded to the
+       look-back window (graphmail's `since`/`before` now both apply the `days`
+       floor). Per run caps at **MAX_DOWNLOADS=40**; the cursor advances to the oldest
+       message FULLY processed so repeated runs walk the whole window; an empty
+       backfill read sets `backfillDone`. Response carries `moreToScan` +
+       `backfillDone`; **po-office `invRunSweep` auto-continues** batch by batch
+       (⏹ Stop scanning) until the whole window is covered — the server list is
+       cumulative (merged outstanding + fresh). **Default look-back is 180 days**
+       (was 60 — 43 uncosted POs were 61–124 days old and outside the old window).
+       **The old bug:** a single watermark advanced to the newest email each run, so
+       after the first sweep everything older than the newest ~40 was permanently
+       behind it and never re-read.
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a

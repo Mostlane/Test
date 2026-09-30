@@ -201,26 +201,20 @@ async function setGateState(db, open, by, device, at) {
 // Send the single pulse (openCode=openValue) — the ONE command both Open and
 // Close use, because the gate toggles on each pulse.
 async function pulseGate(env, db, cfg) {
+  // SINGLE command only — send switch_1=true and let the Tuya relay's own
+  // inching/momentary setting auto-release it (one command = one button push =
+  // the FAAC toggles). This is the form that ran correctly for weeks.
+  //
+  // NB an explicit press+RELEASE (sending switch_1=false ~800ms later) was tried
+  // on 27 Sep to self-heal a latched relay during the Tuya licence outage, but
+  // once the device's inching is working the release is a SECOND edge — the gate
+  // toggles open then straight back ("opens then does nothing"). So we do NOT
+  // send a release; the device inching setting owns the reset. If the relay ever
+  // latches again, re-enable inching on the Tuya device, don't add a release here.
   const code = cfg.openCode || "switch_1";
   const value = (cfg.openValue === undefined) ? true : cfg.openValue;
-  const rest = (typeof value === "boolean") ? !value : false;
-  const dev = `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`;
-  // PRESS — the rising edge the FAAC reads as a button push.
-  const jr = await api(env, db, cfg, "POST", dev, { commands: [{ code, value }] });
-  // RELEASE after a short hold so the relay ALWAYS returns to rest. This emulates
-  // a physical push-button (press then release = one step) and makes the pulse
-  // independent of the device's own "inching"/momentary setting. Without it, a
-  // relay left latched ON (inching lost or disabled) opens once and then ignores
-  // every later command — sending ON to an already-ON relay is no new edge. We
-  // base success on the PRESS; the release is best-effort.
-  if (jr && jr.success) {
-    const ms = Math.min(3000, Math.max(200, Number(cfg.pulseMs) || 800));
-    try {
-      await new Promise(r => setTimeout(r, ms));
-      await api(env, db, cfg, "POST", dev, { commands: [{ code, value: rest }] });
-    } catch (e) { /* relay will still be reset on the next press */ }
-  }
-  return { jr, sent: { code, value, rest } };
+  const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr, sent: { code, value } };
 }
 // Map a raw Tuya command-failure message to something the person reads and acts
 // on. Tuya tells us whether it ACCEPTED + delivered the command (and why not);
@@ -453,10 +447,15 @@ export async function handle(request, env, ctx, url, sess) {
         return json({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
       }
     }
-    const st = await getGateState(db);
-    if (st.open === wantOpen) {
-      return json({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
-    }
+    // ALWAYS pulse — never suppress on the tracked state. The relay is a momentary
+    // TOGGLE with no position sensor, and it's also worked by fob/keypad, so the
+    // portal's tracked state is only a guess and drifts out of sync. The old
+    // `if (tracked === wanted) return already` short-circuit silently swallowed a
+    // real press whenever the guess happened to match the button — the "a command
+    // does nothing" unreliability. A press must always send a pulse. The tracked
+    // state below is kept purely as a display hint (set to the button's intent),
+    // and Mark open/closed still corrects it. (For a toggle relay both buttons send
+    // the identical pulse, so a suppression guard never prevented anything real.)
     try {
       const { jr, sent } = await pulseGate(env, db, cfg);
       if (!jr.success) {

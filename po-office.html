@@ -1055,10 +1055,10 @@ function invSweepBodyHtml(v) {
   v = v || {};
   const advOpen = (v.from || v.to || v.clue) ? ' open' : '';
   return (
-    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row. <strong>Run sweep</strong> only reads emails that have arrived since the last scan and adds them to anything still outstanding — anything you\'ve attached or flagged drops off automatically.</p>' +
+    '<p class="muted" style="margin-top:0">Reads the inbox for supplier-invoice PDFs, matches each to a PO, and lists them for you to confirm. Nothing is saved until you tap Attach on a row. <strong>Run sweep</strong> reads any new emails <em>and</em> keeps working backwards through the whole look-back in batches until every invoice in the window has been checked (press <strong>Stop scanning</strong> to pause). Anything you\'ve attached or flagged drops off automatically.</p>' +
     '<div class="grid-2">' +
       '<div class="field"><label>Mailbox</label><input id="sw-mailbox" type="text" value="' + escapeAttr(v.mailbox || '') + '"></div>' +
-      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(v.days || 60) + '" min="1" max="365"></div>' +
+      '<div class="field"><label>Look back (days)</label><input id="sw-days" type="number" value="' + Number(v.days || 180) + '" min="1" max="365"></div>' +
     '</div>' +
     '<details style="margin:2px 0 10px;border:1px solid #e3e7ee;border-radius:10px;padding:8px 11px;background:#f8fafc"' + advOpen + '>' +
       '<summary style="cursor:pointer;font-weight:600;color:#003366;font-size:13px">Advanced search</summary>' +
@@ -1094,16 +1094,26 @@ function invShowResults() {
   document.getElementById('modal').classList.add('show');
   invRenderResults();
 }
-async function invRunSweep(btn, mode) {
+let invStopScan = false;   // set by the "⏹ Stop" button to halt an auto-backfill
+async function invRunSweep(btn, mode, _auto) {
   const mailbox = (document.getElementById('sw-mailbox') || {}).value || '';
-  const days = Number((document.getElementById('sw-days') || {}).value) || 60;
+  const days = Number((document.getElementById('sw-days') || {}).value) || 180;
   const from = ((document.getElementById('sw-from') || {}).value || '').trim();
   const to = ((document.getElementById('sw-to') || {}).value || '').trim();
   const clue = ((document.getElementById('sw-clue') || {}).value || '').trim();
   invLastSweep = { mailbox, days, from, to, clue };   // so the list can be rebuilt without re-scanning
   const res = document.getElementById('sw-result');
   const isFull = mode === 'full';
-  res.innerHTML = '<div class="muted" style="text-align:center;padding:18px">' + (isFull ? 'Re-reading the whole look-back — this can take a minute.' : 'Reading any new invoices since the last scan…') + '</div>';
+  const oneOff = !!(from || to || clue);
+  if (!_auto) invStopScan = false;
+  // Auto-backfill walks the whole look-back in batches; count them for the user.
+  invRunSweep._batch = _auto ? (invRunSweep._batch || 1) + 1 : 1;
+  const scanning = '<div class="muted" style="text-align:center;padding:18px">'
+    + (isFull ? 'Re-reading the whole look-back from the top…'
+       : _auto ? ('Scanning older invoices… batch ' + invRunSweep._batch + (invSweepItems.length ? ' · ' + invSweepItems.length + ' found so far' : ''))
+       : 'Reading invoices…')
+    + '<br><button class="ghost small" style="margin-top:10px" onclick="invStopScan=true">⏹ Stop scanning</button></div>';
+  res.innerHTML = scanning;
   if (btn) btn.disabled = true;
   const reqBody = { mailbox, days };
   if (mode) reqBody.mode = mode;
@@ -1113,20 +1123,25 @@ async function invRunSweep(btn, mode) {
   let data;
   try { data = await authFetch('/po/api/invoice/sweep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqBody) }).then(r => r.json()); }
   catch (e) { res.innerHTML = '<div class="alert warn">Sweep failed: ' + escapeHtml(e.message) + '</div>'; if (btn) btn.disabled = false; return; }
-  if (btn) btn.disabled = false;
-  if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; return; }
-  invSweepItems = data.proposals || [];
+  if (!data || data.error) { res.innerHTML = '<div class="alert warn">' + escapeHtml((data && data.error) || 'Sweep failed') + '</div>'; if (btn) btn.disabled = false; return; }
+  invSweepItems = data.proposals || [];   // the server list is cumulative across batches
   invFilter = 'all';
-  // Summary: for an incremental sweep, say how many are newly read vs carried
-  // over from before; for a full/advanced read, the classic "read N PDFs" line.
+  // Keep walking the backlog automatically until the whole look-back is covered
+  // (or the office presses Stop). A one-off date/clue read never auto-continues.
+  const keepGoing = !oneOff && data.moreToScan && !invStopScan && invRunSweep._batch < 30;
+  if (keepGoing) { return invRunSweep(btn, mode, true); }
+  if (btn) btn.disabled = false;
+  // Summary line.
   let lead;
   if (data.incremental) {
     const nNew = Number(data.newProposals || 0);
-    lead = 'Checked for new invoices' + (nNew ? ' · read ' + nNew + ' new' : ' · none new') + (data.carriedOver ? ' · ' + Number(data.carriedOver) + ' still outstanding from before' : '');
+    lead = 'Checked for invoices' + (nNew ? ' · read ' + nNew + ' new' : '') + (data.carriedOver ? ' · ' + Number(data.carriedOver) + ' carried over' : '');
   } else {
     lead = 'Read ' + Number(data.scanned || 0) + ' PDF(s) from ' + escapeHtml(data.mailbox || mailbox);
   }
-  invSummaryHtml = '<div class="muted" style="font-size:13px;margin-bottom:8px">' + lead + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done / not invoices' : '') + (data.capped ? ' · stopped at the cap — run again for more' : '') + '.</div>';
+  const tail = invStopScan ? ' · stopped — press Check for new invoices to continue' : (data.moreToScan ? ' · more to scan — run again for the rest' : (data.incremental ? ' · whole look-back covered' : ''));
+  invSummaryHtml = '<div class="muted" style="font-size:13px;margin-bottom:8px">' + lead + ' · ' + invSweepItems.length + ' to action' + (data.alreadyDone ? ' · ' + data.alreadyDone + ' already done / not invoices' : '') + tail + '.</div>';
+  invStopScan = false; invRunSweep._batch = 0;
   invRenderResults();
 }
 // Category of a swept invoice: the server sets it, with a safe fallback.
