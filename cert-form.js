@@ -144,6 +144,117 @@
     return c.toDataURL("image/jpeg", 0.85);
   }
 
+  // ── Client-side prefill from a legacy cert PDF (font-aware, via PDF.js) ───────
+  // The worker's dependency-free PDF reader can't decode the "heavy" legacy Tysoft
+  // exports (they embed CID / glyph-mapped fonts), so its prefill returns 0 rows
+  // for those stores. PDF.js CAN read them. We fetch the signed PDF the server
+  // hands us (`legacyPdf.url`) and rebuild the appliance/light table by grouping
+  // text items into rows (by Y) and columns (by X-gap), then apply the SAME carry
+  // defaults as the server so a client-parsed cert is identical to a server one.
+  var CERT_PF     = function (s) { return /^(pass|fail|n\/?a|na|p|f)$/i.test(String(s).trim()); };
+  var CERT_DATE   = function (s) { return /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}$/.test(String(s).trim()); };
+  var CERT_STATUS = function (s) { return /^(pass|fail|skip|p|f|s)$/i.test(String(s).trim()); };
+  var capCell     = function (s) { s = String(s || "").trim(); return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s; };
+  // Class I (earthed metal-cased) vs II — re-derived from the description, exactly
+  // like the worker's carryRows (old certs often mis-recorded it).
+  var PAT_CLASS_I = /kettle|microwav|fridge|freezer|refriger|dishwash|washing\s*machine|tumble|dryer|toaster|\burn\b|water\s*heater|boiler|oven|cooker|\bhob\b|desktop|\bpc\b|pc\s*tower|tower\s*pc|printer|photocopier|copier|\bmfp\b|extension\s*(lead|reel)|\d+\s*[- ]?gang|multi[- ]?(gang|socket)|gang\s*(lead|extension)|metal/i;
+  function patClassFor(d) { return PAT_CLASS_I.test(String(d || "")) ? "I" : "II"; }
+  function patDefaults(c) { return c === "I" ? { earth: "0.08 Ω", insulation: ">200 MΩ", visual: "Pass", result: "Pass" } : { earth: "N/A", insulation: ">200 MΩ", visual: "Pass", result: "Pass" }; }
+
+  var PDFJS_BASE = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";   // same build as docviewer/MLEICR
+  var _pdfjsReady = null;
+  function loadPdfjs() {
+    if (_pdfjsReady) return _pdfjsReady;
+    _pdfjsReady = new Promise(function (res, rej) {
+      if (window.pdfjsLib) return res(window.pdfjsLib);
+      var s = document.createElement("script"); s.src = PDFJS_BASE + "pdf.min.js";
+      s.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js"; } catch (e) {} res(window.pdfjsLib); };
+      s.onerror = function () { rej(new Error("pdfjs load failed")); };
+      document.head.appendChild(s);
+    });
+    return _pdfjsReady;
+  }
+  // PDF ArrayBuffer → pages, each an array of lines, each line an array of CELL
+  // strings (columns rebuilt from X positions — so "IEC Lead" stays one cell).
+  async function pdfCells(buf) {
+    var lib = await loadPdfjs();
+    var pdf = await lib.getDocument({ data: buf }).promise;
+    var pages = [];
+    for (var p = 1; p <= pdf.numPages; p++) {
+      var page = await pdf.getPage(p);
+      var tc = await page.getTextContent();
+      var items = tc.items.map(function (it) {
+        return { s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: it.height || Math.abs(it.transform[3]) || 8 };
+      }).filter(function (it) { return it.s && it.s.trim(); });
+      items.sort(function (a, b) { return (b.y - a.y) || (a.x - b.x); });   // top→bottom, left→right
+      var lines = [], curL = null;
+      items.forEach(function (it) {
+        if (!curL || Math.abs(it.y - curL.y) > 3) { curL = { y: it.y, items: [] }; lines.push(curL); }
+        curL.items.push(it);
+      });
+      pages.push(lines.map(function (ln) {
+        var its = ln.items.slice().sort(function (a, b) { return a.x - b.x; });
+        var cells = [], c = null;
+        its.forEach(function (it) {
+          if (c) {
+            var gap = it.x - (c.x + c.w);
+            if (gap <= Math.max(4, 0.75 * (c.h || 8))) { c.s += (gap > 0.15 * (c.h || 8) ? " " : "") + it.s; c.w = (it.x + it.w) - c.x; return; }
+          }
+          c = { s: it.s, x: it.x, w: it.w, h: it.h }; cells.push(c);
+        });
+        return cells.map(function (x) { return x.s.replace(/\s+/g, " ").trim(); }).filter(function (x) { return x; });
+      }));
+    }
+    return pages;
+  }
+  // PAT data line:  ID · TestDate · Description · Location · [Serial] · [Period] · RetestDate · Status
+  function parsePatCells(pages) {
+    var rows = [];
+    pages.forEach(function (lines) { lines.forEach(function (cells) {
+      if (rows.length > 600 || cells.length < 4) return;
+      var id = cells[0];
+      if (!/^[A-Za-z0-9][A-Za-z0-9\-\/]{0,17}$/.test(id) || CERT_DATE(id) || CERT_STATUS(id)) return;
+      if (!CERT_DATE(cells[1])) return;                     // ID immediately followed by the test date
+      if (!CERT_STATUS(cells[cells.length - 1])) return;    // row ends in a status
+      rows.push({ appliance: cells[2] || "", location: cells[3] || "" });
+    }); });
+    return rows;
+  }
+  // EM data line:  No · Normal · LED · Emergency · [Battery mins] · Comments/location
+  function parseEmCells(pages) {
+    var rows = [];
+    pages.forEach(function (lines) { lines.forEach(function (cells) {
+      if (rows.length > 600 || cells.length < 2) return;
+      if (!/^\d{1,3}$/.test(cells[0]) || !CERT_PF(cells[1])) return;
+      var states = [], j = 1;
+      while (j < cells.length && CERT_PF(cells[j]) && states.length < 6) { states.push(capCell(cells[j])); j++; }
+      var battery = ""; if (j < cells.length && /^\d{1,4}$/.test(cells[j])) { battery = cells[j]; j++; }
+      var comments = cells.slice(j).join(" ").replace(/\s+/g, " ").trim().slice(0, 80);
+      rows.push({ normal: states[0] || "", led: states[1] || "", emergency: states[2] || states[states.length - 1] || "", battery: battery || 180, comments: comments });
+    }); });
+    return rows;
+  }
+  // Carry the parsed identities forward with the class standard defaults (engineer
+  // taps any that differ / failed) — mirrors the worker's carryRows().
+  function carryClient(rows, type) {
+    return (rows || []).map(function (r) {
+      if (type !== "pat") return { normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180, comments: r.comments || "" };
+      var cls = patClassFor(r.appliance), def = patDefaults(cls);
+      return { appliance: r.appliance || "", location: r.location || "", cls: cls, visual: def.visual, earth: def.earth, insulation: def.insulation, result: def.result, comments: r.comments || "" };
+    });
+  }
+  // Fetch + parse a legacy cert PDF entirely in the browser. [] on any failure.
+  async function clientPrefillPdf(pdfUrl, type) {
+    try {
+      var r = await fetch(pdfUrl, { credentials: "omit" });
+      if (!r.ok) return [];
+      var buf = await r.arrayBuffer();
+      var pages = await pdfCells(buf);
+      var parsed = type === "pat" ? parsePatCells(pages) : parseEmCells(pages);
+      return carryClient(parsed, type);
+    } catch (e) { return []; }
+  }
+
   async function mount(container, opts) {
     const { jobId, mode, api, token } = opts;
     const type = opts.type === "pat" ? "pat" : "em";
@@ -162,6 +273,7 @@
       rec = d.record || {};
       rec._prefilledRows = d.prefilledRows || 0;
       rec._seeded = !!d.seeded;
+      rec._legacyPdf = d.legacyPdf || null;   // signed link to last year's cert when our reader got nothing
     } catch (e) { container.innerHTML = '<p class="muted" style="padding:8px">Couldn\'t load the certificate.</p>'; return; }
 
     rec.type = type;
@@ -183,7 +295,12 @@
       h += '<div class="cc"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
         + '<h4 style="margin:0">' + esc(titleType) + ' certificate</h4>'
         + '<span class="pill">' + esc(rec.certNumber || "No. assigned on issue") + (rec.status === "review" ? " · in review" : rec.status === "final" ? " · issued" : " · draft") + '</span></div>';
-      if (rec._prefilledRows) h += '<div class="banner">↩ ' + rec._prefilledRows + ' item' + (rec._prefilledRows === 1 ? "" : "s") + ' carried forward from the last certificate — marked Pass, tap any to change.</div>';
+      if (rec._prefilling) h += '<div class="banner">⏳ Reading last year\'s certificate…</div>';
+      else if (rec._prefilledRows) h += '<div class="banner">↩ ' + rec._prefilledRows + ' item' + (rec._prefilledRows === 1 ? "" : "s") + ' carried forward from the last certificate — marked Pass, tap any to change.</div>';
+      else if (mode === "engineer" && !rec.rows.length && rec._legacyPdf && rec._legacyPdf.url)
+        h += '<div class="banner" style="background:#fff7ed;border-color:#fdba74;color:#9a3412">⚠️ Couldn\'t read last year\'s certificate automatically. '
+          + '<a href="' + esc(rec._legacyPdf.url) + '" target="_blank" rel="noopener" style="color:#9a3412;font-weight:700">📄 Open it</a> to copy the list, '
+          + 'or <button type="button" data-act="pull" class="lnkbtn" style="background:none;border:none;padding:0;color:#9a3412;font-weight:700;text-decoration:underline;cursor:pointer">↻ try again</button>, then add the ' + (type === "pat" ? "appliances" : "lights") + ' below.</div>';
       else if (rec._seeded && mode === "engineer") h += '<div class="banner">No previous certificate found for this site — nothing was carried forward. Add each ' + (type === "pat" ? "appliance" : "light") + ' below.</div>';
       h += '</div>';
 
@@ -572,7 +689,7 @@
       const sa = container.querySelector('[data-act="setall"]'); if (sa) sa.addEventListener("click", () => { const p = container.querySelector("#mlcSetAll"); if (p) p.style.display = p.style.display === "none" ? "block" : "none"; });
       container.querySelectorAll("[data-bulk]").forEach(btn => btn.addEventListener("click", () => { const [k, v] = btn.dataset.bulk.split("|"); bulkSet(k, v); }));
       const bi = container.querySelector('[data-act="bulkinput"]'); if (bi) bi.addEventListener("click", () => { const f = container.querySelector("#mlcBulkField").value; const v = container.querySelector("#mlcBulkVal").value.trim(); if (f) bulkSet(f, v); });
-      const pl = container.querySelector('[data-act="pull"]'); if (pl) pl.addEventListener("click", pullPrevious);
+      container.querySelectorAll('[data-act="pull"]').forEach(pl => pl.addEventListener("click", () => pullPrevious()));
       const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) { sigCtx.fillStyle = "#fff"; sigCtx.fillRect(0, 0, sigCanvas.width, sigCanvas.height); } rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
       // Saved signature: one tap to drop in a consistent personal signature, and a
       // button to save the current drawing as that default (stored per-user).
@@ -628,23 +745,49 @@
     }
     // Re-pull the previous certificate's items (+ blank header fields) on demand —
     // for a draft made before the reader existed, or to refresh from the last cert.
-    async function pullPrevious() {
+    // `auto` = the silent on-load attempt (no alerts/confirms, only acts if empty).
+    async function pullPrevious(auto) {
       let d;
       try { d = await authFetch("/certs/prefill?type=" + type + "&code=" + encodeURIComponent(rec.siteCode || "") + "&jobId=" + encodeURIComponent(rec.jobId || jobId || "")).then(r => r.json()); }
-      catch (e) { alert("Couldn't reach the previous certificate."); return; }
-      if (!d || !d.ok) { alert("Couldn't reach the previous certificate."); return; }
-      if (!d.rows || !d.rows.length) { alert("No previous certificate found for this site — nothing to pull. (It may be a scanned image with no readable text.)"); return; }
-      if (rec.rows.length && !confirm("Replace the current list with " + d.rows.length + " item" + (d.rows.length === 1 ? "" : "s") + " from the last certificate?")) return;
-      rec.rows = d.rows;
-      const hh = d.header;   // fill BLANK header fields only — never overwrite typed edits
-      if (hh) {
-        if (hh.client && !(rec.client && rec.client.name)) rec.client = hh.client;
-        if (hh.installation && !(rec.installation && rec.installation.name)) rec.installation = hh.installation;
-        if (hh.extent && !rec.extent) rec.extent = hh.extent;
-        if (hh.comments && !rec.comments) rec.comments = hh.comments;
+      catch (e) { if (!auto) alert("Couldn't reach the previous certificate."); return; }
+      if (!d || !d.ok) { if (!auto) alert("Couldn't reach the previous certificate."); return; }
+      if (d.legacyPdf && d.legacyPdf.url) rec._legacyPdf = d.legacyPdf;   // remember for the guardrail / retry
+      let rows = (d.rows && d.rows.length) ? d.rows : null;
+      let header = d.header;
+      // Worker read nothing but a legacy PDF is on file → parse it in the browser
+      // with PDF.js (handles the heavy CID-font Tysoft exports the worker can't).
+      if (!rows && rec._legacyPdf && rec._legacyPdf.url) {
+        if (!auto) { rec._prefilling = true; render(); }
+        const parsed = await clientPrefillPdf(rec._legacyPdf.url, type);
+        rec._prefilling = false;
+        if (parsed && parsed.length) { rows = parsed; header = null; }
       }
-      rec._prefilledRows = d.rows.length;
+      if (!rows || !rows.length) {
+        if (!auto) alert("Couldn't read last year's certificate automatically.\n\nOpen it with the 📄 link and copy the list, or add the items below.");
+        else render();   // show the guardrail banner
+        return;
+      }
+      if (!auto && rec.rows.length && !confirm("Replace the current list with " + rows.length + " item" + (rows.length === 1 ? "" : "s") + " from the last certificate?")) return;
+      rec.rows = rows;
+      if (header) {   // fill BLANK header fields only — never overwrite typed edits
+        if (header.client && !(rec.client && rec.client.name)) rec.client = header.client;
+        if (header.installation && !(rec.installation && rec.installation.name)) rec.installation = header.installation;
+        if (header.extent && !rec.extent) rec.extent = header.extent;
+        if (header.comments && !rec.comments) rec.comments = header.comments;
+      }
+      rec._prefilledRows = rows.length;
       render(); queueSave();
+    }
+    // On load: if the form is empty and last year's cert is on file but the worker
+    // couldn't read it, parse it in the browser automatically so the engineer sees
+    // the appliance list without lifting a finger. Never clobbers a started form.
+    async function maybeAutoPrefill() {
+      if (mode !== "engineer" || !editable) return;
+      if (rec.rows.length) return;                       // already has items
+      if (!rec._legacyPdf || !rec._legacyPdf.url) return; // nothing to read
+      rec._prefilling = true; render();
+      try { await pullPrevious(true); }
+      finally { if (rec._prefilling) { rec._prefilling = false; render(); } }
     }
 
     // Validate + save + submit for office review (NO job patch). Returns true on
@@ -726,6 +869,7 @@
     }
 
     render();
+    maybeAutoPrefill();   // fire-and-forget: reads last year's cert in-browser if ours couldn't
     return { save: doSave, submit, get: () => rec, ready: () => !!(rec.rows.length && rec.signature) };
   }
 

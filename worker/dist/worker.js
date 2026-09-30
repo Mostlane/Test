@@ -13281,6 +13281,7 @@ async function prefillFromPrevious(env, tid, code, type) {
           rows: carryRows(d.rows, type),
           from: "last certificate",
           source: "portal",
+          pdfKey: null,
           header: {
             client: d.client || null,
             installation: d.installation || null,
@@ -13294,17 +13295,26 @@ async function prefillFromPrevious(env, tid, code, type) {
   } catch {
   }
   const key = await latestCertR2Key(env, tid, c4, type);
-  if (!key || !env.JOB_FILES) return { rows: [], from: null, header: null };
+  if (!key || !env.JOB_FILES) return { rows: [], from: null, header: null, pdfKey: null };
   try {
     const obj = await env.JOB_FILES.get(key);
-    if (!obj) return { rows: [], from: null, header: null };
+    if (!obj) return { rows: [], from: null, header: null, pdfKey: null };
     const buf = await obj.arrayBuffer();
-    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null };
+    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null, pdfKey: key };
     const toks = await pdfExtractTokens(buf);
     const parsed = type === "pat" ? parsePatRowsTokens(toks) : parseEmRowsTokens(toks);
-    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null };
+    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null, pdfKey: key };
   } catch {
-    return { rows: [], from: null, header: null };
+    return { rows: [], from: null, header: null, pdfKey: key };
+  }
+}
+async function legacyPdfLink(env, origin, tid, code, type) {
+  try {
+    const key = await latestCertR2Key(env, tid, code, type);
+    if (!key || !env.JOB_FILES) return null;
+    return { url: await signedFileUrl(env, origin, "/compliance/file", key), name: key.split("/").pop() };
+  } catch {
+    return null;
   }
 }
 async function emSetFor(env, tid, code) {
@@ -13985,7 +13995,8 @@ PAT: Import certificate number ${num3}-${yr}`;
       code = job ? job.siteCode || "" : "";
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
-    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length }, {}, env, request);
+    const legacyPdf = !pre.rows.length && pre.pdfKey ? await legacyPdfLink(env, url.origin, tid, code, type) : null;
+    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length, legacyPdf }, {}, env, request);
   }
   if (sub === "/for-job" && method === "GET") {
     const jobId = String(q.get("jobId") || "");
@@ -14008,7 +14019,8 @@ PAT: Import certificate number ${num3}-${yr}`;
       const exRec = shapeRow2(existing);
       await backfillClient(env, tid, exRec);
       await resignRemedialPhotos(env, url.origin, exRec);
-      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
+      const legacyPdf2 = !Array.isArray(exRec.rows) || !exRec.rows.length ? await legacyPdfLink(env, url.origin, tid, exRec.siteCode || code, type) : null;
+      return json({ ok: true, record: exRec, config, seeded: false, legacyPdf: legacyPdf2 }, {}, env, request);
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
     const h = pre.header;
@@ -14042,7 +14054,8 @@ PAT: Import certificate number ${num3}-${yr}`;
       rows: pre.rows,
       signature: ""
     };
-    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length, prefillSource: pre.source || null }, {}, env, request);
+    const legacyPdf = !pre.rows.length && pre.pdfKey ? await legacyPdfLink(env, url.origin, tid, code, type) : null;
+    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length, prefillSource: pre.source || null, legacyPdf }, {}, env, request);
   }
   if (sub === "/save" && method === "POST") {
     const b = await request.json().catch(() => ({}));
