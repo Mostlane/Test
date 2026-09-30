@@ -4225,11 +4225,12 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   (button); van-checks.html writes it on load. The driver's own `mineDue` is NOT
   cleared by viewing (it clears when they submit their check). Week-scoped, so it
   re-appears next week. No worker change (/prefs merges arbitrary keys).
-- **Field-app van-check lockout (`van-check-gate.js`, Sep 2026)** — the main.html
+- **Whole-app van-check lockout (`van-check-gate.js`, Sep 2026)** — the main.html
   attention gate below is OFFICE-home only; field engineers land on route.html →
   engineer-jobs.html and never pass through it, so a missed weekly van check used
   to stop nothing (only route.html's dismissible red banner). `van-check-gate.js`
-  (loaded AFTER portal-config on route/engineer-jobs/inbox/you — NOT van-check.html,
+  (loaded AFTER portal-config on route/engineer-jobs/inbox/you AND **main.html** —
+  Jamie: "block the whole app" — NOT van-check.html,
   the escape) shows an unavoidable full-screen navy overlay when **GET
   /vancheck/attention** reports **`mineDue && overdue`**, with one "Do my van check
   now →" button to van-check.html. Scope = the WEEKLY assigned-van check only;
@@ -4244,9 +4245,12 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   (preview)" button so the owner is never trapped behind a full-screen overlay that
   would otherwise cover the return bar. A real engineer on their own login gets the
   hard, non-dismissible block (no close button). (Earlier it skipped View As
-  entirely, so the owner could never see it fire.) `_headers` no-cache + SW
-  `mostlane-v136`, `van-check-gate.js?v=3`. Test `scratchpad/vcgate-test.cjs`
-  (Playwright, 11 cases). NB the dormant
+  entirely, so the owner could never see it fire.) **On main.html it sits at
+  z-index 2147483600 — ABOVE main's own attention gate (99999) — and only fires
+  for a field engineer who is `mineDue && overdue`, so office users (no assigned
+  van → `mineDue:false`) are never blocked on their own home page.** `_headers`
+  no-cache + SW `mostlane-v137`, `van-check-gate.js?v=3`. Test
+  `scratchpad/vcgate-test.cjs` (Playwright, 11 cases). NB the dormant
   `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
   gate, unrelated to this.
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
