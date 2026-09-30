@@ -1,6 +1,13 @@
-/* van-check-gate.js — blocks the FIELD APP when a driver's weekly van check is
-   past its deadline. Included (after portal-config.js) on the field-app pages:
-   route.html / engineer-jobs.html / inbox.html / you.html.
+/* van-check-gate.js — blocks the WHOLE APP when a driver's weekly van check is
+   past its deadline. Included (after portal-config.js) on the field-app pages
+   route.html / engineer-jobs.html / inbox.html / you.html AND main.html.
+
+   The block fires ONLY once the deadline has PASSED (overdue). Before then the
+   reminder is snoozeable (main.html's attention gate / route.html's banner), so
+   the hard lockout only ever hits a genuinely-late driver. An admin can lift the
+   lockout for one driver for the week (van-checks.html -> "Lift lockout") without
+   marking the check done — GET /vancheck/attention then returns lockoutWaived and
+   this gate releases while the check stays outstanding.
 
    WHY: field engineers land on route.html -> engineer-jobs.html and never pass
    through main.html's blocking attention gate, so a missed weekly van check only
@@ -98,8 +105,11 @@
       .then(function (j) {
         busy = false;
         if (!j || !j.ok) { hide(); return; }  // fail OPEN on any bad reply
-        if (j.mineDue && j.overdue) show(j.vehicle || "");
-        else hide();                          // done / not due / cleared -> release
+        // Block ONLY when the check is due AND the deadline has passed AND an admin
+        // hasn't waived the lockout for this driver this week. Before the deadline
+        // (overdue false) there is no hard block — the reminder is snoozeable.
+        if (j.mineDue && j.overdue && !j.lockoutWaived) show(j.vehicle || "");
+        else hide();                          // done / not due / not yet overdue / waived / cleared -> release
       })
       .catch(function () { busy = false; hide(); });  // fail OPEN on network error
   }

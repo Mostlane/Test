@@ -36,6 +36,21 @@ async function getOptedOut(env, tid) {
 }
 // Is the whole van-check type paused for everyone (the blunt "bypass")?
 function isGloballyPaused(rules) { return (rules || []).some(r => r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === "")); }
+
+// Per-driver LOCKOUT WAIVER — an admin lets a driver back INTO the app despite an
+// overdue van check WITHOUT marking the check done/not-required (unlike skip/Off).
+// It lifts only the full-screen van-check-gate.js block; the check stays
+// outstanding (still badged, still snoozeable) and the waiver auto-expires — it is
+// keyed to the driver's current week, so next week the lockout returns.
+// Stored in app_config as { "<username>": "<YYYY-MM-DD monday>" }.
+const LOCKOUT_WAIVE_KEY = "vancheck:lockoutwaive";
+async function getLockoutWaivers(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, LOCKOUT_WAIVE_KEY).first();
+    const o = row && row.value ? JSON.parse(row.value) : {};
+    return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+  } catch { return {}; }
+}
 const DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -634,17 +649,19 @@ export async function handle(request, env, ctx, url, sess) {
     const byUser = {};
     for (const c of checks || []) byUser[c.username] = shapeCheck(c);
     const off = await getOptedOut(env, db.tenantId);           // drivers switched OFF
+    const waivers = await getLockoutWaivers(env, db.tenantId); // lockout lifted this week
     const rows = (drivers || []).map(u => ({
       username: u.username,
       name: (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username,
       vehicle: u.vehicle_assigned,
       enabled: !off.has(u.username),
+      lockoutWaived: waivers[u.username] === week,
       check: byUser[u.username] || null,
     }));
     // Checks from people without an allocated vehicle still show (e.g. spare van).
     for (const c of checks || []) {
       if (!rows.some(r => r.username === c.username))
-        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), check: shapeCheck(c) });
+        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), lockoutWaived: waivers[c.username] === week, check: shapeCheck(c) });
     }
     const dueAt = deadlineFor(week, s);
     const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
@@ -870,6 +887,28 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
   }
 
+  // ── Admin: lift the LOCKOUT for one driver this week (block only) ────────────
+  // Removes the full-screen overdue-van-check block for that driver for THIS week
+  // without marking the check done — it stays outstanding + snoozeable, and the
+  // waiver expires next week (keyed to the week monday). This is the "let them in,
+  // but they still owe the check" override, distinct from skip (Not required) and
+  // Off (out of the cycle).
+  if (path === "/vancheck/lockout-waive" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const wkIn = String(b.week || "").trim();
+    const week = mondayOf(wkIn && /^\d{4}-\d{2}-\d{2}$/.test(wkIn) ? wkIn : londonDate());
+    const waivers = await getLockoutWaivers(env, db.tenantId);
+    if (b.waived === false) delete waivers[who]; else waivers[who] = week;
+    // Prune any stale waivers from earlier weeks so the blob can't grow forever.
+    for (const k of Object.keys(waivers)) { if (waivers[k] < week) delete waivers[k]; }
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(db.tenantId, LOCKOUT_WAIVE_KEY, JSON.stringify(waivers)).run();
+    return json({ ok: true, username: who, week, waived: b.waived !== false }, {}, env, request);
+  }
+
   // ── Admin: pause / resume ALL van-check reminders (the blunt "bypass") ───────
   // Adds or removes the global vehicle-check suppression rule — the same one the
   // notification centre sets — surfaced here so it's controllable in one place.
@@ -903,6 +942,13 @@ export async function handle(request, env, ctx, url, sess) {
       const rules = await getRules(env, tenantId);
       if (isSuppressed(rules, "vehicle-check", me, week)) mineDue = false;
     }
+    // Admin lockout waiver — the check stays due (mineDue unchanged, so it's still
+    // badged + snoozeable), but the full-screen block is lifted for this week.
+    let lockoutWaived = false;
+    if (mineDue) {
+      const waivers = await getLockoutWaivers(env, db.tenantId);
+      lockoutWaived = waivers[me] === week;
+    }
     let missing = [];
     const p = await permissionsFor(env, tenantId, me);
     if (p.FullAccess === "Yes") {
@@ -924,7 +970,7 @@ export async function handle(request, env, ctx, url, sess) {
       overdue: r.due_at ? Date.now() > Date.parse(r.due_at) : false,
       snooze: r.snooze == null ? true : !!Number(r.snooze),
     }));
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
+    return json({ ok: true, week, dueAt, overdue, mineDue, lockoutWaived, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
   }
 
   return error("Unknown van-check route", 404, env, request);

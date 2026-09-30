@@ -4248,9 +4248,23 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   entirely, so the owner could never see it fire.) **On main.html it sits at
   z-index 2147483600 — ABOVE main's own attention gate (99999) — and only fires
   for a field engineer who is `mineDue && overdue`, so office users (no assigned
-  van → `mineDue:false`) are never blocked on their own home page.** `_headers`
-  no-cache + SW `mostlane-v140`, `van-check-gate.js?v=3`. Test
-  `scratchpad/vcgate-test.cjs` (Playwright, 11 cases). NB the dormant
+  van → `mineDue:false`) are never blocked on their own home page.**
+  **Snooze until the deadline, then the block:** the gate fires ONLY when `overdue`
+  (the deadline has passed) — before then there is no hard block, so the reminder
+  stays snoozeable (main.html's attention gate / route.html's banner).
+  **Admin override — lift the lockout without marking it done (30 Sep 2026):**
+  distinct from skip (marks the week "Not required") and Off (drops the driver
+  from the cycle), an admin can lift ONLY the block for one driver for the current
+  week while the check stays outstanding + snoozeable. Stored in app_config
+  **`vancheck:lockoutwaive:<tid>`** = `{username: week}` (auto-pruned to the current
+  week, so it self-expires); **POST /vancheck/lockout-waive** `{username, week?,
+  waived}` (Vehicles|FullAccess) sets/clears it. `/vancheck/attention` returns
+  **`lockoutWaived`** (mineDue stays true — still badged) and the gate blocks only
+  on `mineDue && overdue && !lockoutWaived`; `/vancheck/week` returns `lockoutWaived`
+  per driver. Surfaced on **van-checks.html**: a **🔓 Lift lockout** button on any
+  overdue-and-missing driver row (→ "lockout lifted" pill + Restore). `_headers`
+  no-cache + SW `mostlane-v141`, `van-check-gate.js?v=4`. Test
+  `scratchpad/vcgate-test.cjs` (Playwright, 12 cases). NB the dormant
   `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
   gate, unrelated to this.
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
