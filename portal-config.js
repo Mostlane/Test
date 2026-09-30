@@ -1163,9 +1163,9 @@
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Concerto PPM list", href: "concerto-ppm.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["concerto-ppm.html"] },
-          { label: "5-Year EICR", href: "five-year-remedials.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["five-year-remedials.html"] },
+          { label: "5-Year EICR", href: "five-year-remedials.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], officeOnly: true, match: ["five-year-remedials.html"] },
           { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
-          { label: "FBC Jobs", href: "fbc.html", icon: "compliance", perms: ["FullAccess", "SLAAdmin", "Compliance"], match: ["fbc.html"] },
+          { label: "FBC Jobs", href: "fbc.html", icon: "compliance", perms: ["FullAccess", "SLAAdmin", "Compliance"], officeOnly: true, match: ["fbc.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
           { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
@@ -1199,6 +1199,15 @@
           return uu === "Jamie Line" && !localStorage.getItem("mostlaneViewAsReal");
         }
         if (item.always) return true;
+        // Office-management boards are hidden from field engineers even when they
+        // hold a matching permission (Compliance/SLAAdmin for on-site cert work) —
+        // the pages/APIs refuse a field engineer anyway. (Full Access is never a
+        // field user, so it still passes below.)
+        if (item.officeOnly) {
+          var stx = String(perms.StaffType || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+          var isField = !yes(perms.FullAccess) && (stx === "field" || (stx !== "office" && (yes(perms.SLA) || yes(perms.StoryMode))));
+          if (isField) return false;
+        }
         if (yes(perms.FullAccess)) {
           // Hide pages the admin has switched off for Full access.
           var hid = mlMenuHidden();
