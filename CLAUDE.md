@@ -4245,7 +4245,7 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   would otherwise cover the return bar. A real engineer on their own login gets the
   hard, non-dismissible block (no close button). (Earlier it skipped View As
   entirely, so the owner could never see it fire.) `_headers` no-cache + SW
-  `mostlane-v135`, `van-check-gate.js?v=2`. Test `scratchpad/vcgate-test.cjs`
+  `mostlane-v136`, `van-check-gate.js?v=3`. Test `scratchpad/vcgate-test.cjs`
   (Playwright, 11 cases). NB the dormant
   `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
   gate, unrelated to this.
