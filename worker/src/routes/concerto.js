@@ -39,7 +39,7 @@
 //   POST /concerto/case {ppmId, step, done|note, outcome, engineer, hold, flag, close}
 import { json, error } from "../lib/http.js";
 import { permissionsFor, canSeeMoney } from "../lib/auth.js";
-import { listJobs } from "./sla.js";
+import { listJobs, r2Url } from "./sla.js";
 import { onceMigration } from "../lib/once.js";
 
 async function ensureTables__raw(env) {
@@ -561,7 +561,7 @@ async function caseContext(env, tid, type, jobs) {
     push(ctx.testJobs, code, { id: j.id, ref: j.helpdeskRef || j.siteName || "", status: j.status || "", done, doneDate, scheduledAt: j.scheduledAt || null,
       date: doneDate || (j.scheduledAt || "").slice(0, 10) || null, engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
       worksJobId: j.remedialsWorksJobId || null, remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
-      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map(x => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0 })) });
+      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map(x => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: (Array.isArray(x.photos) ? x.photos : []).map(k => r2Url(env, k)) })) });
   }
   try {
     const { results } = await env.DB.prepare("SELECT id, code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
@@ -665,7 +665,7 @@ export function deriveCase(r, ctx, today, money, rec) {
     testJob: testJob ? { id: testJob.id, ref: testJob.ref, status: testJob.status, date: testJob.date, engineer: testJob.engineer, remedials: testJob.remedials, worksJobId: testJob.worksJobId } : null,
     // The remedial works the engineer logged — for the schedule's price-up + create-works-job.
     // Material £ is money-gated; minutes/description are shown to anyone with the page.
-    remedialLines: testJob ? (testJob.remedialsList || []).map(x => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, materialCost: money ? x.materialCost : undefined })) : [],
+    remedialLines: testJob ? (testJob.remedialsList || []).map(x => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, photoUrls: x.photoUrls || [], materialCost: money ? x.materialCost : undefined })) : [],
     quote: c && c.quote_value != null ? { ref: c.quote_ref || "", value: money ? c.quote_value : undefined, at: c.quote_at || null, by: c.quote_by || "" } : null,
     worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
     cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null, certUpdated: cert2 ? { id: cert2.id, date: cert2.date, name: cert2.name } : null,
