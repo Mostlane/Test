@@ -38,7 +38,11 @@
 
   function api() { return window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev"; }
   function tok() { try { return localStorage.getItem("mostlaneToken") || ""; } catch (e) { return ""; } }
-  function dev() { try { return localStorage.getItem("mlDeviceId") || localStorage.getItem("deviceID") || ""; } catch (e) { return ""; } }
+  // The device-bound session is keyed to `deviceID` (what login.html posts and
+  // what portal-config's fetch bridge sends). Read THAT first — preferring
+  // mlDeviceId sent the wrong id, 401'd the call, and the gate failed open
+  // (no block) even when the driver was genuinely overdue.
+  function dev() { try { return localStorage.getItem("deviceID") || localStorage.getItem("mlDeviceId") || ""; } catch (e) { return ""; } }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 
   var dismissed = false;   // preview only: owner closed it for this page view
