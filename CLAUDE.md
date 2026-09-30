@@ -4235,11 +4235,18 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   now →" button to van-check.html. Scope = the WEEKLY assigned-van check only;
   `mineDue` already folds in opt-out / admin mute / no-van, so those drivers are
   never blocked. **Fails OPEN** (no token, API error, bad reply → no block — an
-  engineer must never be locked out by a glitch/weak signal), skips View As + iframes,
-  and re-checks on pageshow/visibility so it clears itself once the check is in. The
+  engineer must never be locked out by a glitch/weak signal), skips iframes, and
+  re-checks on pageshow/visibility so it clears itself once the check is in. The
   admin escape for a driver who genuinely can't is the existing van-checks.html →
-  skip (`/vancheck/skip`). `_headers` no-cache + SW `mostlane-v134`. Test
-  `scratchpad/vcgate-test.cjs` (Playwright, 8 cases). NB the dormant
+  skip (`/vancheck/skip`). **View As = PREVIEW:** while the owner impersonates a
+  field engineer the block STILL shows (against the impersonated driver's real
+  `mineDue`/`overdue`, so it can be verified) but is DISMISSIBLE — a "✕ Close
+  (preview)" button so the owner is never trapped behind a full-screen overlay that
+  would otherwise cover the return bar. A real engineer on their own login gets the
+  hard, non-dismissible block (no close button). (Earlier it skipped View As
+  entirely, so the owner could never see it fire.) `_headers` no-cache + SW
+  `mostlane-v135`, `van-check-gate.js?v=2`. Test `scratchpad/vcgate-test.cjs`
+  (Playwright, 11 cases). NB the dormant
   `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
   gate, unrelated to this.
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
