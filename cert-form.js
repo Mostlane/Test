@@ -873,5 +873,7 @@
     return { save: doSave, submit, get: () => rec, ready: () => !!(rec.rows.length && rec.signature) };
   }
 
-  window.MLCert = { mount };
+  // Expose the prefill reader so an admin audit page can run the EXACT same
+  // client pipeline against every legacy cert (cert-prefill-audit.html).
+  window.MLCert = { mount, prefill: { pdfCells, parsePatCells, parseEmCells, carryClient, clientPrefillPdf, loadPdfjs } };
 })();

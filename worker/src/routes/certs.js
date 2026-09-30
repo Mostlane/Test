@@ -1646,6 +1646,33 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length, legacyPdf }, {}, env, request);
   }
 
+  // ── Prefill AUDIT (office): list every legacy cert PDF (latest per site+type)
+  //    with a signed link, so cert-prefill-audit.html can run the font-aware
+  //    reader against ALL of them and report which now pull through. GET returns
+  //    the list; POST persists the run summary so it can be read back. ─────────
+  if (sub === "/prefill-audit" && (method === "GET" || method === "POST")) {
+    if (!isOffice) return error("Not allowed", 403, env, request);
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const summary = { at: new Date().toISOString(), by: me, ...(b && b.summary || {}) };
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(tid, "certs:prefillaudit:" + tid, JSON.stringify(summary).slice(0, 60000)).run();
+      return json({ ok: true, saved: true }, {}, env, request);
+    }
+    const heavyOnly = q.get("all") !== "1";
+    const { results } = await env.DB.prepare(
+      "SELECT code, type, r2_key, filename, size, MAX(COALESCE(doc_date,uploaded_at)) AS latest " +
+      "FROM compliance_files WHERE tenant_id=? AND type IN ('pat','em') AND r2_key IS NOT NULL GROUP BY code, type ORDER BY type, code"
+    ).bind(tid).all();
+    const items = [];
+    for (const r of (results || [])) {
+      if (heavyOnly && (r.size || 0) < 60000) continue;   // lean ones the worker already reads
+      items.push({ code: r.code, type: r.type, size: r.size || 0, name: String(r.filename || r.r2_key || "").split("/").pop(), url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key) });
+    }
+    let last = null; try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "certs:prefillaudit:" + tid).first(); last = row ? JSON.parse(row.value) : null; } catch {}
+    return json({ ok: true, items, count: items.length, lastRun: last }, {}, env, request);
+  }
+
   // ── Load or seed the certificate for a job ───────────────────────────────────
   if (sub === "/for-job" && method === "GET") {
     const jobId = String(q.get("jobId") || "");

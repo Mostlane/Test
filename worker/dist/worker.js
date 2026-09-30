@@ -13998,6 +13998,31 @@ PAT: Import certificate number ${num3}-${yr}`;
     const legacyPdf = !pre.rows.length && pre.pdfKey ? await legacyPdfLink(env, url.origin, tid, code, type) : null;
     return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length, legacyPdf }, {}, env, request);
   }
+  if (sub === "/prefill-audit" && (method === "GET" || method === "POST")) {
+    if (!isOffice) return error("Not allowed", 403, env, request);
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const summary = { at: (/* @__PURE__ */ new Date()).toISOString(), by: me, ...b && b.summary || {} };
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "certs:prefillaudit:" + tid, JSON.stringify(summary).slice(0, 6e4)).run();
+      return json({ ok: true, saved: true }, {}, env, request);
+    }
+    const heavyOnly = q.get("all") !== "1";
+    const { results } = await env.DB.prepare(
+      "SELECT code, type, r2_key, filename, size, MAX(COALESCE(doc_date,uploaded_at)) AS latest FROM compliance_files WHERE tenant_id=? AND type IN ('pat','em') AND r2_key IS NOT NULL GROUP BY code, type ORDER BY type, code"
+    ).bind(tid).all();
+    const items = [];
+    for (const r of results || []) {
+      if (heavyOnly && (r.size || 0) < 6e4) continue;
+      items.push({ code: r.code, type: r.type, size: r.size || 0, name: String(r.filename || r.r2_key || "").split("/").pop(), url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key) });
+    }
+    let last = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "certs:prefillaudit:" + tid).first();
+      last = row ? JSON.parse(row.value) : null;
+    } catch {
+    }
+    return json({ ok: true, items, count: items.length, lastRun: last }, {}, env, request);
+  }
   if (sub === "/for-job" && method === "GET") {
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
