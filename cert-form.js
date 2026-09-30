@@ -783,11 +783,17 @@
     // the appliance list without lifting a finger. Never clobbers a started form.
     async function maybeAutoPrefill() {
       if (mode !== "engineer" || !editable) return;
-      if (rec.rows.length) return;                       // already has items
+      if (rec.rows.length) return;                        // already has items
       if (!rec._legacyPdf || !rec._legacyPdf.url) return; // nothing to read
+      // /for-job already ran the server reader (empty) and handed us the PDF, so
+      // parse it straight in the browser — no redundant server round-trip.
       rec._prefilling = true; render();
-      try { await pullPrevious(true); }
-      finally { if (rec._prefilling) { rec._prefilling = false; render(); } }
+      try {
+        const parsed = await clientPrefillPdf(rec._legacyPdf.url, type);
+        rec._prefilling = false;
+        if (parsed && parsed.length && !rec.rows.length) { rec.rows = parsed; rec._prefilledRows = parsed.length; render(); queueSave(); }
+        else render();                                    // shows the guardrail banner
+      } catch (e) { rec._prefilling = false; render(); }
     }
 
     // Validate + save + submit for office review (NO job patch). Returns true on
