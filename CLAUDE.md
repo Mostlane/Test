@@ -4225,6 +4225,23 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   (button); van-checks.html writes it on load. The driver's own `mineDue` is NOT
   cleared by viewing (it clears when they submit their check). Week-scoped, so it
   re-appears next week. No worker change (/prefs merges arbitrary keys).
+- **Field-app van-check lockout (`van-check-gate.js`, Sep 2026)** — the main.html
+  attention gate below is OFFICE-home only; field engineers land on route.html →
+  engineer-jobs.html and never pass through it, so a missed weekly van check used
+  to stop nothing (only route.html's dismissible red banner). `van-check-gate.js`
+  (loaded AFTER portal-config on route/engineer-jobs/inbox/you — NOT van-check.html,
+  the escape) shows an unavoidable full-screen navy overlay when **GET
+  /vancheck/attention** reports **`mineDue && overdue`**, with one "Do my van check
+  now →" button to van-check.html. Scope = the WEEKLY assigned-van check only;
+  `mineDue` already folds in opt-out / admin mute / no-van, so those drivers are
+  never blocked. **Fails OPEN** (no token, API error, bad reply → no block — an
+  engineer must never be locked out by a glitch/weak signal), skips View As + iframes,
+  and re-checks on pageshow/visibility so it clears itself once the check is in. The
+  admin escape for a driver who genuinely can't is the existing van-checks.html →
+  skip (`/vancheck/skip`). `_headers` no-cache + SW `mostlane-v134`. Test
+  `scratchpad/vcgate-test.cjs` (Playwright, 8 cases). NB the dormant
+  `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
+  gate, unrelated to this.
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
   outstanding items (no dismiss button); desktop gets a dismissible corner
   panel (sessionStorage sig). "💤 Remind me later" = 4h snooze, max 2 per
