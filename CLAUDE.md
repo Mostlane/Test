@@ -4249,7 +4249,7 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   z-index 2147483600 — ABOVE main's own attention gate (99999) — and only fires
   for a field engineer who is `mineDue && overdue`, so office users (no assigned
   van → `mineDue:false`) are never blocked on their own home page.** `_headers`
-  no-cache + SW `mostlane-v137`, `van-check-gate.js?v=3`. Test
+  no-cache + SW `mostlane-v140`, `van-check-gate.js?v=3`. Test
   `scratchpad/vcgate-test.cjs` (Playwright, 11 cases). NB the dormant
   `DAY_START_CHECK=false` in route.html/engineer-jobs.html is a SEPARATE clock-on
   gate, unrelated to this.

@@ -201,6 +201,8 @@
   Cache-Control: no-cache
 /cert-register.html
   Cache-Control: no-cache
+/cert-prefill-audit.html
+  Cache-Control: no-cache
 /five-year-remedials.html
   Cache-Control: no-cache
 /engineers-live.html

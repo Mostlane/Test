@@ -41,6 +41,7 @@ import { json, error } from "../lib/http.js";
 import { permissionsFor, canSeeMoney } from "../lib/auth.js";
 import { listJobs, r2Url } from "./sla.js";
 import { onceMigration } from "../lib/once.js";
+// Build nudge: 2026-09-30 — re-trigger Workers Builds for the remedial photoUrls change.
 
 async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_ppm (

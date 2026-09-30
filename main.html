@@ -393,7 +393,6 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 -->
     <a class="button visible" href="my-tasks.html" id="MyTasks"><span class="emoji">✅</span> My Tasks</a>
     <a class="button visible" href="my-documents.html" id="MyDocs"><span class="emoji">📄</span> My Documents</a>
-    <a class="button visible" href="timesheet-template.html" id="TimesheetSheet"><span class="emoji">📝</span> Weekly Timesheet</a>
     <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
     <a class="button visible" id="Help" href="help.html"><span class="emoji">❓</span> Help</a>
 
@@ -543,6 +542,17 @@ const MAP = window.ML_PERM_MAP || {
         // (it's hardcoded "visible", so switch it off for them here).
         const mt = document.getElementById("MyTasks");
         if (mt) mt.classList.toggle("visible", !isFieldUser);
+        // OFFICE-ONLY management boards — hidden from field engineers even when
+        // they hold a matching permission. A field engineer legitimately holds
+        // Compliance / PurchaseOrders / SLAAdmin for on-site work (viewing certs,
+        // raising POs), but these boards are office management pages and their
+        // own pages + APIs refuse a field engineer anyway, so the tile shouldn't
+        // show. Add any new office-management tile here.
+        if (isFieldUser) {
+          ["ClientOrders", "FBC", "FiveYear"].forEach(id => {
+            const b = document.getElementById(id); if (b) b.classList.remove("visible");
+          });
+        }
         // Field users: SLA goes straight to their day (route.html) — no office
         // board bounce. route.html forwards on to the jobs list once the day
         // has started, so the tile is day-aware end to end.

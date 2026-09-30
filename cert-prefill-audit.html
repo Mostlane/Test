@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Prefill audit</title>
+  <script src="/portal-config.js?v=40"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="cert-form.js?v=27"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:900px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;}
+    .btn:disabled{opacity:.55;cursor:default;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+    .tile{flex:1;min-width:120px;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px;}
+    .tile .n{font-size:30px;font-weight:800;line-height:1;} .tile .l{font-size:12px;color:#6b7a90;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-top:4px;}
+    .tile.ok .n{color:var(--ok);} .tile.bad .n{color:var(--bad);} .tile.warn .n{color:var(--warn);} .tile.brand .n{color:var(--brand);}
+    .bar{height:10px;background:#e5eaf0;border-radius:999px;overflow:hidden;margin:8px 0;}
+    .bar > i{display:block;height:100%;background:var(--brand);width:0;transition:width .2s;}
+    table{width:100%;border-collapse:collapse;} th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;text-align:left;padding:6px 8px;border-bottom:2px solid #eef2f6;}
+    td{padding:5px 8px;border-bottom:1px solid #f2f5f8;vertical-align:middle;font-size:13.5px;}
+    .pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:700;}
+    .pill.ok{background:#dcfce7;color:#166534;} .pill.empty{background:#fee2e2;color:#b91c1c;} .pill.error{background:#fef3c7;color:#92400e;} .pill.wait{background:#e5eaf0;color:#475569;}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
+    .noaccess{max-width:520px;margin:60px auto;text-align:center;color:#6b7a90;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
+    <h1>🧪 Prefill audit</h1>
+  </header>
+  <div class="wrap" id="main" style="display:none;">
+    <div class="card">
+      <p class="muted" style="margin:0 0 8px;">Runs the in-browser certificate reader against every legacy cert on file and reports which ones now pull their appliance / light list through. <b>Heavy certs</b> are the ones the server can't read on its own — this is the real test of the fix. Nothing is changed; it only reads.</p>
+      <div class="toolbar">
+        <button class="btn" id="runBtn">▶ Run the test</button>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="allChk" style="width:auto;"> include the lean certs too (all records)</label>
+        <span class="muted" id="lastRun"></span>
+      </div>
+      <div class="tiles" id="tiles" style="display:none;">
+        <div class="tile brand"><div class="n" id="tTotal">0</div><div class="l">Certs</div></div>
+        <div class="tile ok"><div class="n" id="tOk">0</div><div class="l">Now readable</div></div>
+        <div class="tile bad"><div class="n" id="tEmpty">0</div><div class="l">Still empty</div></div>
+        <div class="tile warn"><div class="n" id="tErr">0</div><div class="l">Errors</div></div>
+      </div>
+      <div class="bar" id="barWrap" style="display:none;"><i id="bar"></i></div>
+      <div class="muted" id="prog"></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <strong style="font-size:14px;">Results</strong>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;margin-left:auto;"><input type="checkbox" id="probOnly" style="width:auto;"> problems only</label>
+      </div>
+      <table><thead><tr><th>Site</th><th>Type</th><th>Size</th><th>Rows</th><th>Result</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted" style="padding:16px;">Press <b>Run the test</b> to begin.</td></tr></tbody></table>
+    </div>
+  </div>
+  <div class="noaccess" id="denied" style="display:none;">You need Full-Access, SLA-Admin or Compliance to use this page.</div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const P = (window.MLCert && window.MLCert.prefill) || null;
+
+    // office gate (server enforces too)
+    function canOffice(){ try { const p = JSON.parse(localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"||p.Compliance==="Yes"; } catch(e){ return false; } }
+    if (!canOffice()) { g("denied").style.display="block"; }
+    else { g("main").style.display="block"; }
+
+    let ITEMS = [], RESULTS = [];
+    const kb = n => (n>=1024*1024 ? (n/1048576).toFixed(1)+" MB" : Math.round(n/1024)+" KB");
+
+    async function loadList(){
+      const all = g("allChk").checked ? "&all=1" : "";
+      const d = await authFetch("/certs/prefill-audit?x=1"+all).then(r=>r.json()).catch(()=>null);
+      if (!d || !d.ok) { g("prog").textContent = "Couldn't load the certificate list."; return null; }
+      if (d.lastRun && d.lastRun.at) g("lastRun").textContent = "Last run: "+new Date(d.lastRun.at).toLocaleString()+" — "+(d.lastRun.ok||0)+"/"+(d.lastRun.total||0)+" readable";
+      return d.items || [];
+    }
+
+    async function testOne(item){
+      try {
+        const r = await fetch(item.url);
+        if (!r.ok) return { ...item, status:"error", detail:"HTTP "+r.status, rows:0 };
+        const buf = await r.arrayBuffer();
+        const pages = await P.pdfCells(buf);
+        const parsed = item.type==="pat" ? P.parsePatCells(pages) : P.parseEmCells(pages);
+        const rows = P.carryClient(parsed, item.type);
+        return { ...item, status: rows.length ? "ok" : "empty", rows: rows.length, sample: rows[0] };
+      } catch(e){ return { ...item, status:"error", detail:String(e && e.message || e), rows:0 }; }
+    }
+
+    function drawRows(){
+      const probOnly = g("probOnly").checked;
+      const list = RESULTS.filter(r => !probOnly || r.status!=="ok");
+      if (!list.length) { g("rows").innerHTML = '<tr><td colspan="5" class="muted" style="padding:16px;">'+(RESULTS.length?"No problems — every cert read.":"—")+'</td></tr>'; return; }
+      g("rows").innerHTML = list.map(r =>
+        '<tr><td>'+esc(r.code)+' <span class="muted">'+esc((r.name||"").slice(0,42))+'</span></td>'
+        + '<td>'+r.type.toUpperCase()+'</td><td class="muted">'+kb(r.size)+'</td>'
+        + '<td>'+(r.status==="ok"?('<b>'+r.rows+'</b>'):"—")+'</td>'
+        + '<td><span class="pill '+r.status+'">'+(r.status==="ok"?"✓ read "+r.rows:(r.status==="empty"?"✗ empty":"⚠ "+esc(r.detail||"error")))+'</span></td></tr>'
+      ).join("");
+    }
+
+    function tally(){
+      const ok = RESULTS.filter(r=>r.status==="ok").length;
+      const empty = RESULTS.filter(r=>r.status==="empty").length;
+      const err = RESULTS.filter(r=>r.status==="error").length;
+      g("tTotal").textContent = RESULTS.length; g("tOk").textContent = ok; g("tEmpty").textContent = empty; g("tErr").textContent = err;
+      return { total: RESULTS.length, ok, empty, error: err,
+        byType: { pat: RESULTS.filter(r=>r.type==="pat").length, em: RESULTS.filter(r=>r.type==="em").length },
+        failures: RESULTS.filter(r=>r.status!=="ok").map(r=>({code:r.code,type:r.type,size:r.size,status:r.status,detail:r.detail||""})).slice(0,200) };
+    }
+
+    async function run(){
+      if (!P) { g("prog").textContent = "The certificate reader didn't load — refresh and try again."; return; }
+      g("runBtn").disabled = true; g("prog").textContent = "Loading the list…";
+      ITEMS = await loadList(); if (!ITEMS) { g("runBtn").disabled=false; return; }
+      RESULTS = []; g("tiles").style.display="flex"; g("barWrap").style.display="block";
+      let done = 0; const total = ITEMS.length;
+      g("prog").textContent = "Reading "+total+" certificate"+(total===1?"":"s")+"… (loads the PDF reader on first use)";
+      // small concurrency pool
+      const POOL = 4; let idx = 0;
+      async function worker(){
+        while (idx < ITEMS.length){
+          const my = idx++; const res = await testOne(ITEMS[my]);
+          RESULTS.push(res); done++;
+          g("bar").style.width = Math.round(done/total*100)+"%";
+          if (done % 5 === 0 || done === total) { tally(); drawRows(); g("prog").textContent = done+" / "+total+" read"; }
+        }
+      }
+      await Promise.all(Array.from({length:Math.min(POOL,total)}, worker));
+      const sum = tally(); drawRows();
+      g("prog").innerHTML = "<b>Done.</b> "+sum.ok+" of "+sum.total+" certs read"+(sum.empty?(", "+sum.empty+" still empty"):"")+(sum.error?(", "+sum.error+" errored"):"")+".";
+      try { await authFetch("/certs/prefill-audit", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ summary: sum }) }); } catch(e){}
+      g("runBtn").disabled = false;
+    }
+
+    g("runBtn").addEventListener("click", run);
+    g("probOnly").addEventListener("change", drawRows);
+    // show any previous run info on load
+    if (canOffice()) loadList().then(items => { if (items) g("prog").textContent = items.length+" heavy cert"+(items.length===1?"":"s")+" on file to test (tick the box to include the lean ones)."; });
+  </script>
+</body>
+</html>
