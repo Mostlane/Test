@@ -5346,9 +5346,16 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   NB the portal log records a pulse as "success" whenever Tuya
   ACCEPTS the command, which doesn't prove the relay physically changed state. The relay can't report state, so the portal **TRACKS it** in
   app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
-  flips it. Open pulses only when tracked-closed, Close only when tracked-open
-  (so pressing Open twice can't accidentally close it); if already in the target
-  state it returns `already:true` without pulsing. `/tuya/gate/state` returns the
+  flips it. **Every Open/Close press ALWAYS pulses (30 Sep 2026) — no tracked-state
+  suppression.** The old `if (tracked === wanted) return already:true` short-circuit
+  silently SWALLOWED a real press whenever the portal's guess matched the button —
+  the "a command does nothing / not reliable" fault. Because the relay is a momentary
+  TOGGLE with no sensor and is also worked by fob/keypad, the tracked state is only a
+  guess and drifts, so the guard threw away genuine presses (Jamie had to Mark
+  open/closed mid-sequence to un-stick it). The tracked state is now a DISPLAY HINT
+  only (set to the button's intent after each pulse); **do NOT re-add an "already"
+  guard** — for a toggle relay both buttons send the identical pulse, so it never
+  prevented anything real, it only lost presses. `/tuya/gate/state` returns the
   TRACKED state (not a device read — that's why it used to be stuck on "closed").
   **Drift fix:** if the gate is used by fob/keypad, Full-Access can correct the
   tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
