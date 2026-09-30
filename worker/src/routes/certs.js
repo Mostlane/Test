@@ -995,7 +995,7 @@ async function prefillFromPrevious(env, tid, code, type) {
       if (Array.isArray(d.rows) && d.rows.length) {
         const con = d.contractor || {};
         return {
-          rows: carryRows(d.rows, type), from: "last certificate", source: "portal",
+          rows: carryRows(d.rows, type), from: "last certificate", source: "portal", pdfKey: null,
           header: {
             client: d.client || null, installation: d.installation || null,
             extent: d.extent || "", comments: d.comments || "",
@@ -1006,20 +1006,33 @@ async function prefillFromPrevious(env, tid, code, type) {
     }
   } catch {}
   // 2) Fall back to the previous (legacy Tysoft) cert PDF on the compliance chart.
-  //    The ITEM ROWS parse reliably (each cell is its own token). The header
-  //    fields are NOT reliably delimited in legacy text, so we DO NOT guess them
-  //    — they come from the real site record / are left blank (header: null).
+  //    The ITEM ROWS parse reliably when the PDF's text is simple `(...)` string
+  //    operands (the lean Tysoft exports). Some legacy certs (the "heavy" batch,
+  //    ~130KB+) embed CID/glyph-mapped fonts our dependency-free reader can't
+  //    decode → 0 rows here; we still return `pdfKey` so the CALLER can hand the
+  //    browser a signed link and parse it client-side with PDF.js (font-aware).
+  //    Header fields are never guessed from legacy text (header: null).
   const key = await latestCertR2Key(env, tid, c4, type);
-  if (!key || !env.JOB_FILES) return { rows: [], from: null, header: null };
+  if (!key || !env.JOB_FILES) return { rows: [], from: null, header: null, pdfKey: null };
   try {
     const obj = await env.JOB_FILES.get(key);
-    if (!obj) return { rows: [], from: null, header: null };
+    if (!obj) return { rows: [], from: null, header: null, pdfKey: null };
     const buf = await obj.arrayBuffer();
-    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null };
+    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null, pdfKey: key };
     const toks = await pdfExtractTokens(buf);            // both parsers are token-based + format-flexible
     const parsed = type === "pat" ? parsePatRowsTokens(toks) : parseEmRowsTokens(toks);
-    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null };
-  } catch { return { rows: [], from: null, header: null }; }
+    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null, pdfKey: key };
+  } catch { return { rows: [], from: null, header: null, pdfKey: key }; }
+}
+
+// Build a signed, CORS-enabled link to a site's latest legacy cert PDF, so the
+// client can parse it with PDF.js when our server-side reader returned no rows.
+async function legacyPdfLink(env, origin, tid, code, type) {
+  try {
+    const key = await latestCertR2Key(env, tid, code, type);
+    if (!key || !env.JOB_FILES) return null;
+    return { url: await signedFileUrl(env, origin, "/compliance/file", key), name: key.split("/").pop() };
+  } catch { return null; }
 }
 
 // EM number = the store's EM set number (from sla:emsets) + "-YY". PAT number =
@@ -1627,7 +1640,37 @@ export async function handle(request, env, ctx, url, sess) {
     let code = q.get("code") || "";
     if (!code && q.get("jobId")) { const job = await getJob(env, tid, String(q.get("jobId"))); code = job ? (job.siteCode || "") : ""; }
     const pre = await prefillFromPrevious(env, tid, code, type);
-    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length }, {}, env, request);
+    // When our server-side reader found no rows but a legacy PDF exists, hand the
+    // client a signed link so it can parse it with PDF.js (font-aware) itself.
+    const legacyPdf = (!pre.rows.length && pre.pdfKey) ? await legacyPdfLink(env, url.origin, tid, code, type) : null;
+    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length, legacyPdf }, {}, env, request);
+  }
+
+  // ── Prefill AUDIT (office): list every legacy cert PDF (latest per site+type)
+  //    with a signed link, so cert-prefill-audit.html can run the font-aware
+  //    reader against ALL of them and report which now pull through. GET returns
+  //    the list; POST persists the run summary so it can be read back. ─────────
+  if (sub === "/prefill-audit" && (method === "GET" || method === "POST")) {
+    if (!isOffice) return error("Not allowed", 403, env, request);
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const summary = { at: new Date().toISOString(), by: me, ...(b && b.summary || {}) };
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(tid, "certs:prefillaudit:" + tid, JSON.stringify(summary).slice(0, 60000)).run();
+      return json({ ok: true, saved: true }, {}, env, request);
+    }
+    const heavyOnly = q.get("all") !== "1";
+    const { results } = await env.DB.prepare(
+      "SELECT code, type, r2_key, filename, size, MAX(COALESCE(doc_date,uploaded_at)) AS latest " +
+      "FROM compliance_files WHERE tenant_id=? AND type IN ('pat','em') AND r2_key IS NOT NULL GROUP BY code, type ORDER BY type, code"
+    ).bind(tid).all();
+    const items = [];
+    for (const r of (results || [])) {
+      if (heavyOnly && (r.size || 0) < 60000) continue;   // lean ones the worker already reads
+      items.push({ code: r.code, type: r.type, size: r.size || 0, name: String(r.filename || r.r2_key || "").split("/").pop(), url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key) });
+    }
+    let last = null; try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "certs:prefillaudit:" + tid).first(); last = row ? JSON.parse(row.value) : null; } catch {}
+    return json({ ok: true, items, count: items.length, lastRun: last }, {}, env, request);
   }
 
   // ── Load or seed the certificate for a job ───────────────────────────────────
@@ -1652,7 +1695,11 @@ export async function handle(request, env, ctx, url, sess) {
       const exRec = shapeRow(existing);
       await backfillClient(env, tid, exRec);   // fill any blank client field (name/address/postcode) from the site
       await resignRemedialPhotos(env, url.origin, exRec);
-      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
+      // An empty draft (e.g. seeded before/without a readable prefill) still gets
+      // a link to last year's cert so the client can parse it with PDF.js.
+      const legacyPdf = (!Array.isArray(exRec.rows) || !exRec.rows.length)
+        ? await legacyPdfLink(env, url.origin, tid, exRec.siteCode || code, type) : null;
+      return json({ ok: true, record: exRec, config, seeded: false, legacyPdf }, {}, env, request);
     }
 
     // seed a fresh draft from the job's site + config + prefill rows
@@ -1683,7 +1730,9 @@ export async function handle(request, env, ctx, url, sess) {
       rows: pre.rows,
       signature: "",
     };
-    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length, prefillSource: pre.source || null }, {}, env, request);
+    // No rows read our side but a legacy PDF is on file → let the client parse it.
+    const legacyPdf = (!pre.rows.length && pre.pdfKey) ? await legacyPdfLink(env, url.origin, tid, code, type) : null;
+    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length, prefillSource: pre.source || null, legacyPdf }, {}, env, request);
   }
 
   // ── Save (upsert) a draft ────────────────────────────────────────────────────
