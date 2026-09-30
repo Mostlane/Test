@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -28245,6 +28240,16 @@ async function getOptedOut(env, tid) {
 function isGloballyPaused(rules) {
   return (rules || []).some((r) => r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === ""));
 }
+var LOCKOUT_WAIVE_KEY = "vancheck:lockoutwaive";
+async function getLockoutWaivers(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, LOCKOUT_WAIVE_KEY).first();
+    const o = row && row.value ? JSON.parse(row.value) : {};
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch {
+    return {};
+  }
+}
 var DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -28830,16 +28835,18 @@ async function handle22(request, env, ctx, url, sess) {
     const byUser = {};
     for (const c of checks || []) byUser[c.username] = shapeCheck(c);
     const off = await getOptedOut(env, db.tenantId);
+    const waivers = await getLockoutWaivers(env, db.tenantId);
     const rows = (drivers || []).map((u) => ({
       username: u.username,
       name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username,
       vehicle: u.vehicle_assigned,
       enabled: !off.has(u.username),
+      lockoutWaived: waivers[u.username] === week,
       check: byUser[u.username] || null
     }));
     for (const c of checks || []) {
       if (!rows.some((r) => r.username === c.username))
-        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), check: shapeCheck(c) });
+        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), lockoutWaived: waivers[c.username] === week, check: shapeCheck(c) });
     }
     const dueAt = deadlineFor(week, s);
     const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
@@ -29061,6 +29068,22 @@ async function handle22(request, env, ctx, url, sess) {
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, OPTOUT_KEY, JSON.stringify([...off])).run();
     return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
   }
+  if (path === "/vancheck/lockout-waive" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const wkIn = String(b.week || "").trim();
+    const week = mondayOf3(wkIn && /^\d{4}-\d{2}-\d{2}$/.test(wkIn) ? wkIn : londonDate2());
+    const waivers = await getLockoutWaivers(env, db.tenantId);
+    if (b.waived === false) delete waivers[who];
+    else waivers[who] = week;
+    for (const k of Object.keys(waivers)) {
+      if (waivers[k] < week) delete waivers[k];
+    }
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, LOCKOUT_WAIVE_KEY, JSON.stringify(waivers)).run();
+    return json({ ok: true, username: who, week, waived: b.waived !== false }, {}, env, request);
+  }
   if (path === "/vancheck/pause-all" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
@@ -29086,6 +29109,11 @@ async function handle22(request, env, ctx, url, sess) {
       const rules = await getRules(env, tenantId);
       if (isSuppressed(rules, "vehicle-check", me, week)) mineDue = false;
     }
+    let lockoutWaived = false;
+    if (mineDue) {
+      const waivers = await getLockoutWaivers(env, db.tenantId);
+      lockoutWaived = waivers[me] === week;
+    }
     let missing = [];
     const p = await permissionsFor(env, tenantId, me);
     if (p.FullAccess === "Yes") {
@@ -29108,7 +29136,7 @@ async function handle22(request, env, ctx, url, sess) {
       overdue: r.due_at ? Date.now() > Date.parse(r.due_at) : false,
       snooze: r.snooze == null ? true : !!Number(r.snooze)
     }));
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
+    return json({ ok: true, week, dueAt, overdue, mineDue, lockoutWaived, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
   }
   return error("Unknown van-check route", 404, env, request);
 }
@@ -39910,9 +39938,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });

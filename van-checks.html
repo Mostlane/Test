@@ -389,13 +389,23 @@
       else if (c.defectCount) status = `<span class="pill defect">${c.defectCount} issue${c.defectCount === 1 ? "" : "s"}</span>`;
       else status = `<span class="pill done">✓ OK</span>`;
       const alertPill = (c && c.alerts && c.alerts.length) ? ` <span class="pill" style="background:#fee2e2;color:#b91c1c;">⚠ ${c.alerts.length}</span>` : "";
+      // Lockout override: only relevant when the driver is enabled, hasn't checked,
+      // and the deadline has passed (they'd be hard-locked out of the app). Lifting
+      // it lets them back in this week WITHOUT marking the check done — it stays
+      // MISSING/overdue here, and the lockout returns next week.
+      const locked = enabled && !c && d.overdue;
+      let lockBtn = "";
+      if (r.lockoutWaived)
+        lockBtn = ` <span class="pill" style="background:#fef3c7;color:#92400e;" title="This driver can use the app despite the overdue check — the check is still outstanding">🔓 lockout lifted</span> <button class="btn ghost small" data-lock="${esc(r.username)}" data-waive="0" title="Put the full-screen lockout back for this driver">Restore</button>`;
+      else if (locked)
+        lockBtn = ` <button class="btn small" style="background:#b45309;color:#fff;" data-lock="${esc(r.username)}" data-waive="1" title="Let this driver back into the app now (this week only). The check stays outstanding.">🔓 Lift lockout</button>`;
       const toggle = enabled
         ? `<button class="btn ghost small" data-toggle="${esc(r.username)}" data-enable="0" title="Take this driver out of the weekly van-check cycle">On ✓</button>`
         : `<button class="btn small" style="background:#e5e7eb;color:#374151;" data-toggle="${esc(r.username)}" data-enable="1" title="Put this driver back into the weekly van-check cycle">Off</button>`;
       return `<tr${enabled ? "" : ' style="opacity:.62;"'}>
         <td><b>${esc(r.name)}</b></td>
         <td>${esc((c && c.vehicle) || r.vehicle || "—")}</td>
-        <td>${status}${alertPill}</td>
+        <td>${status}${alertPill}${lockBtn}</td>
         <td class="muted">${c && !c.skipped ? esc(fmtDT(c.checkedAt)) + (c.source === "story" ? " · via My Day" : "") : "—"}</td>
         <td>${toggle}</td>
         <td style="text-align:right;">${c && !c.skipped ? `<button class="btn ghost small" data-view="${esc(r.username)}">Open</button>` : ""}</td>
@@ -437,6 +447,19 @@
   async function toggleDriver(username, enable) {
     try {
       const r = await authFetch("/vancheck/driver-toggle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, enabled: enable }) }).then(r => r.json());
+      if (!r.ok) { alert(r.error || "Couldn't update."); return; }
+      load();
+    } catch (e) { alert("Couldn't update."); }
+  }
+  // Lift / restore the overdue-van-check lockout for one driver (this week only).
+  async function waiveLockout(username, waive) {
+    if (waive) {
+      const msg = "Let this driver back into the app despite their overdue van check?\n\nThe check stays outstanding (still shows MISSING and they'll still be reminded) — you're only removing the full-screen block, for this week.";
+      const ok = window.MLUI ? await MLUI.confirm(msg, { title: "Lift lockout", okLabel: "🔓 Lift lockout" }) : confirm(msg);
+      if (!ok) return;
+    }
+    try {
+      const r = await authFetch("/vancheck/lockout-waive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, week: WEEK, waived: waive }) }).then(r => r.json());
       if (!r.ok) { alert(r.error || "Couldn't update."); return; }
       load();
     } catch (e) { alert("Couldn't update."); }
@@ -526,6 +549,7 @@
   document.addEventListener("click", e => {
     if (e.target.dataset.view) openCheck(e.target.dataset.view);
     if (e.target.dataset.toggle) toggleDriver(e.target.dataset.toggle, e.target.dataset.enable === "1");
+    if (e.target.dataset.lock) waiveLockout(e.target.dataset.lock, e.target.dataset.waive === "1");
     if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
     const mc = e.target.closest && e.target.closest("td.mc.clk");
     if (mc) {
