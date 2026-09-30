@@ -447,10 +447,15 @@ export async function handle(request, env, ctx, url, sess) {
         return json({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
       }
     }
-    const st = await getGateState(db);
-    if (st.open === wantOpen) {
-      return json({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
-    }
+    // ALWAYS pulse — never suppress on the tracked state. The relay is a momentary
+    // TOGGLE with no position sensor, and it's also worked by fob/keypad, so the
+    // portal's tracked state is only a guess and drifts out of sync. The old
+    // `if (tracked === wanted) return already` short-circuit silently swallowed a
+    // real press whenever the guess happened to match the button — the "a command
+    // does nothing" unreliability. A press must always send a pulse. The tracked
+    // state below is kept purely as a display hint (set to the button's intent),
+    // and Mark open/closed still corrects it. (For a toggle relay both buttons send
+    // the identical pulse, so a suppression guard never prevented anything real.)
     try {
       const { jr, sent } = await pulseGate(env, db, cfg);
       if (!jr.success) {

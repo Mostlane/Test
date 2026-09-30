@@ -44718,10 +44718,6 @@ async function handle42(request, env, ctx, url, sess) {
         return json4({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
       }
     }
-    const st = await getGateState(db);
-    if (st.open === wantOpen) {
-      return json4({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
-    }
     try {
       const { jr: jr8, sent } = await pulseGate(env, db, cfg);
       if (!jr8.success) {
