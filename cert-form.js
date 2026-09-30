@@ -453,9 +453,21 @@
       if (String(rem.note || "").trim()) return true;
       return false;
     }
+    // Did the engineer actually FILL anything in (vs the bare auto "failed" flag)?
+    // Used so clearing a mis-tapped Fail drops the phantom remedial, but a remedial
+    // with real detail survives.
+    function remHasDetail(rem) {
+      return !!(rem && (rem.replacedOnSite != null || rem.kind
+        || (Array.isArray(rem.photos) && rem.photos.length)
+        || String(rem.note || "").trim() || String(rem.batterySpec || "").trim()
+        || Number(rem.batteryQty) > 0 || String(rem.lightSpec || "").trim()));
+    }
     function remedialHtml(r, i) {
       const rem = r.remedial || {};
-      const on = isRealRem(rem);
+      // A light that FAILED its test IS a failed fitting — its remedial (fault +
+      // photo) shows automatically; the engineer never has to find a separate button.
+      const failedByResult = isFail(r);
+      const on = isRealRem(rem) || failedByResult;
       const onsite = rem.replacedOnSite === true ? "yes" : rem.replacedOnSite === false ? "no" : "";
       const kind = rem.kind === "battery" ? "battery" : "light";
       const photos = Array.isArray(rem.photos) ? rem.photos : [];
@@ -479,7 +491,9 @@
           : 'Choose whether it was replaced on site, and add a photo of the failed fitting.');
       const thumbs = photos.map((p, pi) => '<span class="mlrem-thw"><img class="mlrem-th" src="' + esc((p && p.url) || "") + '"><button type="button" class="mlrem-thx" data-rem="delphoto" data-i="' + i + '" data-p="' + pi + '">✕</button></span>').join("");
       return '<div class="mlrem' + (on ? " open" : "") + '">'
-        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed — tap to remove" : "Mark fitting failed") + '</button>'
+        + (failedByResult
+            ? '<button type="button" class="mlrem-flag on" disabled>⚠ Fitting failed — add the details below</button>'
+            : '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed — tap to remove" : "Mark fitting failed") + '</button>')
         + '<div class="mlrem-body" style="' + (on ? "" : "display:none") + '">'
           + '<span class="mlrem-q">Fault</span>'
           + '<div class="tg mlrem-kind" data-rem="kind" data-i="' + i + '">'
@@ -572,6 +586,13 @@
       container.querySelectorAll("[data-tg] button").forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-tg]"); const i = +tg.dataset.i; const key = tg.dataset.tg;
         rec.rows[i] = rec.rows[i] || {}; rec.rows[i][key] = btn.dataset.v;
+        // EM: a failed light IS a failed fitting — open the remedial (fault + photo)
+        // automatically the moment it's failed, and drop a bare auto-flag if un-failed.
+        if (type === "em") {
+          const row = rec.rows[i], rem = row.remedial || {};
+          if (isFail(row) && !isRealRem(rem)) { row.remedial = Object.assign({}, rem, { failed: true }); renderRows(); queueSave(); return; }
+          if (!isFail(row) && isRealRem(rem) && !remHasDetail(rem)) { row.remedial = {}; renderRows(); queueSave(); return; }
+        }
         tg.querySelectorAll("button").forEach(b => b.className = "");
         const opt = btn.dataset.v; const cls = /^pass$/i.test(opt) ? "pass" : /^fail$/i.test(opt) ? "fail" : (opt === "I" || opt === "II" || tg.querySelectorAll("button").length === 2) ? "one" : "na";
         btn.className = "on " + cls;
@@ -823,9 +844,11 @@
         let bad = false;
         if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
         else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
-        // A failed fitting MUST say whether it was done on site (drives the charge + remedial job).
-        if (type === "em" && isRealRem(r.remedial)) {
-          const rem = r.remedial;
+        // A failed light MUST have its remedial completed — whether it was done on
+        // site + a photo (drives the charge, the supplier quote and the works job).
+        // Gated on isFail so setting Emergency=Fail alone can't slip through.
+        if (type === "em" && (isFail(r) || isRealRem(r.remedial))) {
+          const rem = r.remedial || {};
           if (rem.replacedOnSite == null) { bad = true; remOpen++; }
           const hasPhoto = Array.isArray(rem.photos) && rem.photos.length > 0;
           // Batteries: spec + qty + at least one photo, so the supplier can quote.
