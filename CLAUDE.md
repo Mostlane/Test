@@ -5331,16 +5331,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
 - **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
   FAAC toggles open↔close on each pulse. So **Open and
   Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
-  only in intent. **`pulseGate` now sends an explicit PRESS then RELEASE** (value,
-  wait `cfg.pulseMs`≈800ms, then `!value`) so the relay always returns to rest and
-  the pulse no longer depends on the device's own inching setting — success is
-  based on the PRESS, the release is best-effort. **Why (27 Sep 2026):** the old
-  code sent only `value:true` and relied on the device auto-releasing; when that
-  inching setting was lost/disabled the relay LATCHED ON — the gate opened once
-  (the one OFF→ON edge) then every later ON command (portal AND Tuya app) was a
-  no-op (already ON = no new edge), so the gate "worked to open then wouldn't do
-  anything". The press→release emulates a physical push-button and self-heals a
-  latched relay. NB the portal log records a pulse as "success" whenever Tuya
+  only in intent. **`pulseGate` sends a SINGLE command** (`switch_1=true`) and
+  lets the Tuya relay's own inching/momentary setting auto-release it — one
+  command = one button push = the FAAC toggles. **This is the form that ran
+  correctly for weeks and is what's live (reverted 30 Sep 2026).**
+  **DO NOT add an explicit release.** A press+RELEASE variant (a second
+  `switch_1=false` ~800ms later) was tried on 27 Sep 2026 to self-heal a latched
+  relay during the Tuya licence outage, but once the device inching is working
+  the release is a SECOND edge — the gate toggles open then straight back
+  ("opened then wouldn't do anything"). Jamie confirmed the single-pulse form
+  worked perfectly before the licence issue, so it was restored. If the relay
+  ever latches ON again (opens once then ignores every command), the fix is to
+  **re-enable inching/momentary on the Tuya device**, NOT to add a release here.
+  NB the portal log records a pulse as "success" whenever Tuya
   ACCEPTS the command, which doesn't prove the relay physically changed state. The relay can't report state, so the portal **TRACKS it** in
   app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
   flips it. Open pulses only when tracked-closed, Close only when tracked-open

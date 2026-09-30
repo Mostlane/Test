@@ -44509,18 +44509,8 @@ async function setGateState(db, open, by, device, at) {
 async function pulseGate(env, db, cfg) {
   const code = cfg.openCode || "switch_1";
   const value = cfg.openValue === void 0 ? true : cfg.openValue;
-  const rest = typeof value === "boolean" ? !value : false;
-  const dev = `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`;
-  const jr8 = await api(env, db, cfg, "POST", dev, { commands: [{ code, value }] });
-  if (jr8 && jr8.success) {
-    const ms = Math.min(3e3, Math.max(200, Number(cfg.pulseMs) || 800));
-    try {
-      await new Promise((r) => setTimeout(r, ms));
-      await api(env, db, cfg, "POST", dev, { commands: [{ code, value: rest }] });
-    } catch (e) {
-    }
-  }
-  return { jr: jr8, sent: { code, value, rest } };
+  const jr8 = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr: jr8, sent: { code, value } };
 }
 function friendlyGateError(msg) {
   const m = String(msg || "").toLowerCase();
