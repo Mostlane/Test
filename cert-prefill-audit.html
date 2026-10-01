@@ -98,7 +98,15 @@
         const pages = await P.pdfCells(buf);
         const parsed = item.type==="pat" ? P.parsePatCells(pages) : P.parseEmCells(pages);
         const rows = P.carryClient(parsed, item.type);
-        return { ...item, status: rows.length ? "ok" : "empty", rows: rows.length, sample: rows[0] };
+        // Diagnostic: how much raw text did PDF.js actually pull out of this PDF?
+        // rawLen 0 = the PDF has NO extractable text (glyph/CID fonts with no
+        // Unicode map, or a scanned image) — nothing can be parsed from it, and
+        // only OCR / the source data could recover the list. rawLen > 0 but 0 rows
+        // = text came through but didn't match the row shape (a parser issue).
+        const allCells = pages.reduce((a, ls) => a.concat(ls.reduce((b, c) => b.concat(c), [])), []);
+        const rawLen = allCells.join(" ").length;
+        const sample = allCells.slice(0, 14).join(" · ").slice(0, 100);
+        return { ...item, status: rows.length ? "ok" : "empty", rows: rows.length, rawLen, sample };
       } catch(e){ return { ...item, status:"error", detail:String(e && e.message || e), rows:0 }; }
     }
 
@@ -106,22 +114,32 @@
       const probOnly = g("probOnly").checked;
       const list = RESULTS.filter(r => !probOnly || r.status!=="ok");
       if (!list.length) { g("rows").innerHTML = '<tr><td colspan="5" class="muted" style="padding:16px;">'+(RESULTS.length?"No problems — every cert read.":"—")+'</td></tr>'; return; }
-      g("rows").innerHTML = list.map(r =>
-        '<tr><td>'+esc(r.code)+' <span class="muted">'+esc((r.name||"").slice(0,42))+'</span></td>'
+      g("rows").innerHTML = list.map(r => {
+        // For an empty cert, show WHY: no extractable text at all (unreadable PDF)
+        // vs text came through but didn't parse (sample shown so we can see it).
+        let why = "";
+        if (r.status === "empty") {
+          why = (r.rawLen > 0)
+            ? '<div class="muted" style="font-size:11px;">'+r.rawLen+' chars of text but no rows matched · '+esc((r.sample||"").slice(0,80))+'</div>'
+            : '<div class="muted" style="font-size:11px;">no extractable text (image/glyph-only PDF)</div>';
+        }
+        return '<tr><td>'+esc(r.code)+' <span class="muted">'+esc((r.name||"").slice(0,42))+'</span>'+why+'</td>'
         + '<td>'+r.type.toUpperCase()+'</td><td class="muted">'+kb(r.size)+'</td>'
         + '<td>'+(r.status==="ok"?('<b>'+r.rows+'</b>'):"—")+'</td>'
-        + '<td><span class="pill '+r.status+'">'+(r.status==="ok"?"✓ read "+r.rows:(r.status==="empty"?"✗ empty":"⚠ "+esc(r.detail||"error")))+'</span></td></tr>'
-      ).join("");
+        + '<td><span class="pill '+r.status+'">'+(r.status==="ok"?"✓ read "+r.rows:(r.status==="empty"?(r.rawLen>0?"✗ no rows":"✗ no text"):"⚠ "+esc(r.detail||"error")))+'</span></td></tr>';
+      }).join("");
     }
 
     function tally(){
       const ok = RESULTS.filter(r=>r.status==="ok").length;
       const empty = RESULTS.filter(r=>r.status==="empty").length;
       const err = RESULTS.filter(r=>r.status==="error").length;
+      const noText = RESULTS.filter(r=>r.status==="empty" && !(r.rawLen>0)).length;   // PDF had zero extractable text
+      const noRows = empty - noText;                                                  // text came through but didn't parse
       g("tTotal").textContent = RESULTS.length; g("tOk").textContent = ok; g("tEmpty").textContent = empty; g("tErr").textContent = err;
-      return { total: RESULTS.length, ok, empty, error: err,
+      return { total: RESULTS.length, ok, empty, error: err, noText, noRows,
         byType: { pat: RESULTS.filter(r=>r.type==="pat").length, em: RESULTS.filter(r=>r.type==="em").length },
-        failures: RESULTS.filter(r=>r.status!=="ok").map(r=>({code:r.code,type:r.type,size:r.size,status:r.status,detail:r.detail||""})).slice(0,200) };
+        failures: RESULTS.filter(r=>r.status!=="ok").map(r=>({code:r.code,type:r.type,size:r.size,status:r.status,rawLen:r.rawLen||0,detail:r.detail||""})).slice(0,200) };
     }
 
     async function run(){
@@ -143,7 +161,14 @@
       }
       await Promise.all(Array.from({length:Math.min(POOL,total)}, worker));
       const sum = tally(); drawRows();
-      g("prog").innerHTML = "<b>Done.</b> "+sum.ok+" of "+sum.total+" certs read"+(sum.empty?(", "+sum.empty+" still empty"):"")+(sum.error?(", "+sum.error+" errored"):"")+".";
+      var detail = "";
+      if (sum.empty) {
+        var bits = [];
+        if (sum.noText) bits.push(sum.noText+" with no extractable text (image/glyph-only PDF — can't be read without OCR)");
+        if (sum.noRows) bits.push(sum.noRows+" had text but no rows matched the layout");
+        detail = " "+sum.empty+" still empty"+(bits.length?" — "+bits.join("; "):"")+".";
+      }
+      g("prog").innerHTML = "<b>Done.</b> "+sum.ok+" of "+sum.total+" certs read."+detail+(sum.error?(" "+sum.error+" errored."):"");
       try { await authFetch("/certs/prefill-audit", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ summary: sum }) }); } catch(e){}
       g("runBtn").disabled = false;
     }
