@@ -5773,6 +5773,26 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **Project P-numbers were RENUMBERED to start at P0710 (1 Oct 2026) + the counter
+  now has a FLOOR.** The whole project block (P0001–P0006, P0008–P0013) was shifted
+  to **P0710–P0721** in D1 — across `projects` (number + site_number + data),
+  `sites` (client='projects': site_number + job_number + data `siteNumber`/`jobNumber`),
+  `compliance_stores` (scheme='projects': code + site_number), `sla_jobs`
+  (site_code column + data `siteCode`) and `app_config` `site_aliases:1`
+  (`siteNumber`). The 4 ghost **P0007** "Yard" jobs (no site/project record) and the
+  legacy one-off **P0918** (Dilaps – Starbucks, kept deliberately OUTSIDE the block)
+  were left untouched. Name-based keys needed nothing (`proj_fin`/costing keyed by
+  costingKey = normalised name; costing_prefs; site_miles; SiteLog geofences; PO
+  `po_log.site`), and project HUB docs are R2-keyed by the stable `PRJ-` id (safe).
+  **`nextProjectNumber` (sites.js) now reads app_config `projects:nextfloor` (=722)
+  and returns the first FREE P-number ≥ the floor** — so new projects carry on at
+  **P0722** and will skip P0918 when reached, instead of `max+1` (which would hand
+  out P0919 because P0918 is kept). **Do NOT revert it to plain `max+1`** — that
+  regresses to P0919. No floor set → legacy max+1 is preserved. **Residual (narrow):
+  any ad-hoc file dropped directly on a project's site-folder "Site Documents" tab
+  lives in R2 at `sitedocs/P000x/…`** and is NOT auto-re-pathed (R2 keys aren't in
+  D1, can't be listed via the connector) — project HUB docs are unaffected; if a
+  project is missing a site-folder doc, it needs an R2 relink from the old key.
 - **Compliance codes are ZERO-PADDED to 4 digits; portal site numbers are not.**
   `pad4()` makes a Co-op store "0649", but the portal site created back in July is
   `site_number = "649"`. The old `/compliance/stores/import` set `site_number = code`
