@@ -464,14 +464,30 @@ async function nextProjectNumber(env, tenantId) {
   const { results } = await db.prepare(
     "SELECT job_number, site_number FROM sites WHERE tenant_id=?"
   ).bind(db.tenantId).all();
+  const taken = new Set();
   let max = 0;
   for (const r of results || []) {
     for (const v of [r.job_number, r.site_number]) {
       const m = String(v || "").match(/^P0*(\d+)$/i);
-      if (m) max = Math.max(max, parseInt(m[1], 10));
+      if (m) { const n = parseInt(m[1], 10); taken.add(n); max = Math.max(max, n); }
     }
   }
-  return "P" + String(max + 1).padStart(4, "0");
+  // Optional FLOOR: the block was renumbered to start at P0710 (Oct 2026) and
+  // a legacy one-off (P0918, Dilaps) was deliberately kept outside the block.
+  // Plain max+1 would therefore hand out P0919; `projects:nextfloor` pins the
+  // next number to the renumbered block (722) and we return the first FREE
+  // number at or above it — so the block fills contiguously and skips P0918
+  // when it's eventually reached, never colliding. No floor set → legacy max+1.
+  let floor = 0;
+  try {
+    const row = await db.prepare(
+      "SELECT value FROM app_config WHERE key='projects:nextfloor'"
+    ).first();
+    if (row && row.value != null) floor = parseInt(String(row.value), 10) || 0;
+  } catch {}
+  let n = floor > 0 ? floor : max + 1;
+  while (taken.has(n)) n++;
+  return "P" + String(n).padStart(4, "0");
 }
 
 async function nextSiteNumber(env, tenantId) {
