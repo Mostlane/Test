@@ -545,7 +545,8 @@
       const L2 = "To ensure minimal disruption to the operation of the store";
       const L3 = "Generally good in terms of electrical safety, some " + certCodePhrase(lines)
                + " recommendations within this report require remedial works to gain a satisfactory outcome.";
-      const all = L1 + "\n\n" + L2 + "\n\n" + L3;
+      const L4 = "---";
+      const all = L1 + "\n\n" + L2 + "\n\n" + L3 + "\n\n" + L4;
       const attr = s => esc(JSON.stringify(String(s)));
       const row = (text, i) => '<div class="ctrow"><span class="cttxt">' + esc(text) + '</span>'
         + '<button class="ctcopy" data-copytext=\'' + attr(text) + '\' data-sv="ctsv-'+key+'-'+i+'" title="Copy this line">📋</button>'
@@ -553,7 +554,7 @@
       return '<div class="certtext"><div class="lbl">📝 Certificate text'
         + '<button class="ctall" data-copytext=\'' + attr(all) + '\' data-sv="ctsv-'+key+'-all" title="Copy all three lines">📋 Copy all</button>'
         + '<span class="saved" id="ctsv-'+key+'-all"></span></div>'
-        + row(L1,1) + row(L2,2) + row(L3,3)
+        + row(L1,1) + row(L2,2) + row(L3,3) + row(L4,4)
         + '</div>';
     }
 
