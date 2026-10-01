@@ -157,6 +157,15 @@
     .axitem .meta{font-size:11px;color:#8a97a8;display:block;margin-top:2px;}
     .axitem .del{background:none;border:0;color:#b91c1c;font-size:16px;cursor:pointer;padding:0 2px;flex:0 0 auto;}
     .axempty{color:#6b7a90;font-size:14px;padding:14px 2px;}
+    /* Assigned/completed date line + copy-paste certificate text */
+    .datesline{margin:6px 0 2px;font-size:13.5px;color:#243445;background:#eef5ff;border:1px solid #d3e3f7;border-radius:9px;padding:8px 11px;}
+    .datesline b{color:var(--brand);}
+    .certtext{margin-top:12px;border:1px solid #d7dee6;border-radius:11px;padding:10px 12px;background:#fbfcfe;}
+    .certtext .lbl{font-weight:800;color:var(--brand);font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .ctrow{display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-top:1px solid rgba(0,0,0,.06);}
+    .ctrow .cttxt{flex:1;font-size:13.5px;line-height:1.4;color:#1d2a38;white-space:pre-wrap;}
+    .ctcopy,.ctall{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;flex:0 0 auto;}
+    .ctall{padding:4px 9px;}
   </style>
 </head>
 <body>
@@ -478,6 +487,7 @@
       tb.querySelectorAll("[data-quote]").forEach(b => b.onclick = () => saveQuote(b.dataset.quote, b));
       tb.querySelectorAll("[data-mkworks]").forEach(b => b.onclick = () => createWorks(b.dataset.mkworks, b.dataset.ppm, b));
       tb.querySelectorAll("[data-copyq]").forEach(b => b.onclick = () => copyQuote(b.dataset.copyq));
+      tb.querySelectorAll("[data-copytext]").forEach(b => b.onclick = () => { try { copyStr(JSON.parse(b.dataset.copytext), b.dataset.sv); } catch {} });
       tb.querySelectorAll("[data-photos]").forEach(b => b.onclick = () => openPhotos(b.dataset.photos, b.dataset.line));
     }
 
@@ -502,6 +512,49 @@
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
         else fallbackCopy(text, done);
       } catch { fallbackCopy(text, done); }
+    }
+    // Generic "copy this string" used by the certificate-text buttons.
+    function copyStr(text, svId){
+      const sv = svId && g(svId);
+      const done = () => { if (sv){ sv.textContent = "Copied ✓"; setTimeout(()=>{ sv.textContent=""; }, 1600); } };
+      if (!text){ return; }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+        else fallbackCopy(text, done);
+      } catch { fallbackCopy(text, done); }
+    }
+    // The dynamic middle of the generic certificate sentence — "F/I & C2" etc.,
+    // built from the codes actually on this site's remedials. C1/C2/F-I drive an
+    // unsatisfactory outcome (C3 is an improvement rec, so it's left out).
+    function certCodePhrase(lines){
+      const set = new Set((lines||[]).map(x => String(x.code||"").toUpperCase().replace(/[\s\/]/g,"")));
+      const parts = [];
+      if (set.has("C1")) parts.push("C1");
+      if (set.has("FI")) parts.push("F/I");
+      if (set.has("C2")) parts.push("C2");
+      if (!parts.length) parts.push("F/I","C2");   // generic fallback when nothing is coded yet
+      if (parts.length === 1) return parts[0];
+      return parts.slice(0,-1).join(", ") + " & " + parts[parts.length-1];
+    }
+    // Generic copy-and-paste certificate wording (Jamie's standard lines), with the
+    // middle line made dynamic from this site's remedial codes. One 📋 per line + Copy all.
+    function certTextBlock(r){
+      const lines = (r.case && r.case.remedialLines) || [];
+      const key = esc(r.id);
+      const L1 = "DM";
+      const L2 = "To ensure minimal disruption to the operation of the store";
+      const L3 = "Generally good in terms of electrical safety, some " + certCodePhrase(lines)
+               + " recommendations within this report require remedial works to gain a satisfactory outcome.";
+      const all = L1 + "\n\n" + L2 + "\n\n" + L3;
+      const attr = s => esc(JSON.stringify(String(s)));
+      const row = (text, i) => '<div class="ctrow"><span class="cttxt">' + esc(text) + '</span>'
+        + '<button class="ctcopy" data-copytext=\'' + attr(text) + '\' data-sv="ctsv-'+key+'-'+i+'" title="Copy this line">📋</button>'
+        + '<span class="saved" id="ctsv-'+key+'-'+i+'"></span></div>';
+      return '<div class="certtext"><div class="lbl">📝 Certificate text'
+        + '<button class="ctall" data-copytext=\'' + attr(all) + '\' data-sv="ctsv-'+key+'-all" title="Copy all three lines">📋 Copy all</button>'
+        + '<span class="saved" id="ctsv-'+key+'-all"></span></div>'
+        + row(L1,1) + row(L2,2) + row(L3,3)
+        + '</div>';
     }
 
     function rowHtml(r){
@@ -546,6 +599,16 @@
 
     function detailHtml(r){
       const c = r.case;
+      // When the test was booked/assigned to the engineer, and when it was completed —
+      // read straight off the pipeline steps (scheduled/tested) so it's always in step.
+      const sSched = (c.steps||[]).find(s => s.key === "scheduled");
+      const sTest  = (c.steps||[]).find(s => s.key === "tested");
+      const aDate = (sSched && sSched.at) || (c.testJob && c.testJob.date) || "";
+      const cDate = (sTest && sTest.done && sTest.at) || "";
+      const dateLine = '<div class="datesline">📅 Assigned / booked: <b>' + (aDate ? esc(fmtD(aDate)) : "—") + '</b>'
+        + (cDate ? ' &nbsp;·&nbsp; ✅ Completed: <b>' + esc(fmtD(cDate)) + '</b>' : '')
+        + (c.engineer ? ' &nbsp;·&nbsp; 👷 ' + esc(c.engineer) : '')
+        + '</div>';
       const shown = (c.steps||[]).filter(s => s.applicable);
       const strip = '<div class="steps">'+shown.map(s => '<span class="st '+(s.done?"done":(s.key===c.next?"next":""))+'" title="'+esc(s.label)+(s.at?" · "+fmtD(s.at):"")+(s.by?" · "+esc(s.by):"")+'">'+(s.done?"✓ ":"")+esc(s.short)+'</span>').join("")+'</div>';
       const outLbl = { satisfactory:"Satisfactory", unsatisfactory:"Unsatisfactory", remedied:"Remedied", "":"Outcome not set" };
@@ -578,9 +641,11 @@
           + '</div>';
       }
       return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
+        + dateLine
         + out + strip
         + visitsBox
         + remedialsBlock(r)
+        + certTextBlock(r)
         + noteBox
         + '<div class="dlinks">'+links.join("")+'</div>'
         + '<div class="log">'+log+'</div>';
