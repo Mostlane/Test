@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -29463,6 +29468,17 @@ async function addCategory(env, tenantId, name) {
   ).bind(tenantId, `staff_doc_categories:${tenantId}`, JSON.stringify(cats)).run();
   return cats;
 }
+async function getYardCodes(env, tenantId) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`yard:alarmcodes:${tenantId}`).first();
+    if (row && row.value) {
+      const m = JSON.parse(row.value);
+      if (m && typeof m === "object") return m;
+    }
+  } catch {
+  }
+  return {};
+}
 var personalPrefix = (tid, user) => `staffdocs/${tid}/user/${user}/`;
 var companyPrefix = (tid) => `staffdocs/${tid}/company/`;
 async function listUnder(env, prefix2) {
@@ -29552,6 +29568,37 @@ async function handle24(request, env, ctx, url, sess) {
     const { name } = await readJson3(request);
     if (!cleanCat(name)) return jr3({ error: "Category name required" }, headers, 400);
     return jr3({ ok: true, categories: await addCategory(env, tenantId, name) }, headers);
+  }
+  if (sub === "/yard-code" && method === "GET") {
+    const map = await getYardCodes(env, tenantId);
+    const mine = String(sess.user.username || "").toLowerCase();
+    let code = "";
+    for (const k of Object.keys(map)) {
+      if (String(k).toLowerCase() === mine) {
+        code = map[k];
+        break;
+      }
+    }
+    return jr3({ code: code || null }, headers);
+  }
+  if (sub === "/yard-codes" && method === "GET") {
+    if (!full) return jr3({ error: "Forbidden" }, headers, 403);
+    return jr3({ codes: await getYardCodes(env, tenantId) }, headers);
+  }
+  if (sub === "/yard-codes" && method === "POST") {
+    if (!full) return jr3({ error: "Only a Full-access user can set yard alarm codes." }, headers, 403);
+    const body = await readJson3(request);
+    const incoming = body && body.codes || {};
+    const clean = {};
+    for (const [u, v] of Object.entries(incoming)) {
+      const name = String(u || "").trim();
+      const code = String(v == null ? "" : v).replace(/\s+/g, "");
+      if (name && /^\d{3,8}$/.test(code)) clean[name] = code;
+    }
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tenantId, `yard:alarmcodes:${tenantId}`, JSON.stringify(clean)).run();
+    return jr3({ ok: true, codes: clean }, headers);
   }
   return jr3({ error: "Not found: " + sub }, headers, 404);
 }
@@ -39938,9 +39985,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });

@@ -56,6 +56,17 @@ async function addCategory(env, tenantId, name) {
   return cats;
 }
 
+// Yard alarm codes: one JSON map { "<username>": "1234" } in app_config, so the
+// sensitive codes live ONLY in D1 (never the repo). Each person sees just theirs.
+async function getYardCodes(env, tenantId) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?")
+      .bind(`yard:alarmcodes:${tenantId}`).first();
+    if (row && row.value) { const m = JSON.parse(row.value); if (m && typeof m === "object") return m; }
+  } catch { /* none set yet */ }
+  return {};
+}
+
 // Personal docs live under .../user/<username>/, company docs under .../company/.
 const personalPrefix = (tid, user) => `staffdocs/${tid}/user/${user}/`;
 const companyPrefix = tid => `staffdocs/${tid}/company/`;
@@ -165,6 +176,36 @@ export async function handle(request, env, ctx, url, sess) {
     const { name } = await readJson(request);
     if (!cleanCat(name)) return jr({ error: "Category name required" }, headers, 400);
     return jr({ ok: true, categories: await addCategory(env, tenantId, name) }, headers);
+  }
+
+  // ── Yard alarm code: the caller's OWN code (any session) ───────────────────
+  if (sub === "/yard-code" && method === "GET") {
+    const map = await getYardCodes(env, tenantId);
+    const mine = String(sess.user.username || "").toLowerCase();
+    let code = "";
+    for (const k of Object.keys(map)) { if (String(k).toLowerCase() === mine) { code = map[k]; break; } }
+    return jr({ code: code || null }, headers);
+  }
+
+  // ── Yard alarm codes: admin reads/sets the whole map (Full access only) ─────
+  if (sub === "/yard-codes" && method === "GET") {
+    if (!full) return jr({ error: "Forbidden" }, headers, 403);
+    return jr({ codes: await getYardCodes(env, tenantId) }, headers);
+  }
+  if (sub === "/yard-codes" && method === "POST") {
+    if (!full) return jr({ error: "Only a Full-access user can set yard alarm codes." }, headers, 403);
+    const body = await readJson(request);
+    const incoming = (body && body.codes) || {};
+    const clean = {};
+    for (const [u, v] of Object.entries(incoming)) {
+      const name = String(u || "").trim();
+      const code = String(v == null ? "" : v).replace(/\s+/g, "");
+      if (name && /^\d{3,8}$/.test(code)) clean[name] = code;   // blank / non-numeric = removed
+    }
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tenantId, `yard:alarmcodes:${tenantId}`, JSON.stringify(clean)).run();
+    return jr({ ok: true, codes: clean }, headers);
   }
 
   return jr({ error: "Not found: " + sub }, headers, 404);
