@@ -54,6 +54,13 @@
     <div id="myRecordsList"></div>
   </div>
 
+  <!-- Your yard alarm code (shown only if one is set for you) -->
+  <div class="card" id="yardCard" style="display:none;border-color:#003468;">
+    <h2>🔐 Yard alarm code</h2>
+    <p class="sub">Your personal code for the yard alarm. Keep it private — don’t share it.</p>
+    <div id="yardCode" style="font:700 30px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:6px;color:#003468;padding:6px 2px;"></div>
+  </div>
+
   <!-- Admin controls (Full access only) -->
   <div class="adminbar" id="adminBar" style="display:none;">
     <label class="lbl">Manage a staff member's file</label>
@@ -86,6 +93,21 @@
     <div class="row" style="border-top:1px solid #c7d2fe;padding-top:10px;margin-top:12px;">
       <label class="lbl">Signable documents (send an agreement/policy out to be signed):</label>
       <a class="btn primary small" href="/documents-admin.html">📄 Manage &amp; send documents</a>
+    </div>
+    <div class="row" style="border-top:1px solid #c7d2fe;padding-top:10px;margin-top:12px;">
+      <label class="lbl">Yard alarm codes (each person sees only their own, here under My Documents):</label>
+      <button class="btn small" id="yardMgrBtn">🔐 Set yard alarm codes</button>
+    </div>
+  </div>
+
+  <!-- Yard alarm code editor (Full access only) -->
+  <div class="card" id="yardMgr" style="display:none;border-color:#003468;">
+    <h2>🔐 Yard alarm codes</h2>
+    <p class="sub">Set each person’s yard alarm code — they’ll see only their own on this page. Leave a box blank to remove a code. Codes are stored securely in the portal and are never written into the website’s code.</p>
+    <div id="yardRows"><div class="empty">Loading…</div></div>
+    <div class="row" style="margin-top:12px;display:flex;gap:10px;">
+      <button class="btn primary small" id="yardSaveBtn">Save codes</button>
+      <button class="btn small" id="yardCloseBtn">Close</button>
     </div>
   </div>
 
@@ -345,15 +367,55 @@ async function loadMyRecords(){
       if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
   }catch(e){ /* non-fatal */ }
 }
+async function loadYardCode(){
+  try{
+    const d = await authFetch("/staff/yard-code").then(r=>r.json());
+    if(d && d.code){
+      document.getElementById("yardCode").textContent = d.code;
+      document.getElementById("yardCard").style.display = "block";
+    }
+  }catch(e){ /* non-fatal */ }
+}
+async function openYardMgr(){
+  const card = document.getElementById("yardMgr");
+  card.style.display = "block";
+  card.scrollIntoView({ behavior:"smooth", block:"start" });
+  const rowsEl = document.getElementById("yardRows");
+  rowsEl.innerHTML = '<div class="empty">Loading…</div>';
+  let codes = {};
+  try{ codes = (await authFetch("/staff/yard-codes").then(r=>r.json())).codes || {}; }catch{}
+  if(!ALL_USERS.length){ await loadUsers(); }
+  const active = ALL_USERS.filter(isActiveStatus);
+  const codeFor = un => { const k = Object.keys(codes).find(k => k.toLowerCase() === String(un).toLowerCase()); return k ? codes[k] : ""; };
+  rowsEl.innerHTML = active.map(u => { const un = (u.Username||u.username);
+    return `<div class="doc"><div class="nm" style="flex:1;"><b>${esc(un)}</b></div>`
+      + `<input class="yard-in" data-user="${esc(un)}" value="${esc(codeFor(un))}" inputmode="numeric" maxlength="8" placeholder="code" `
+      + `style="width:120px;font:600 16px ui-monospace,Menlo,Consolas,monospace;letter-spacing:3px;text-align:center;"></div>`;
+  }).join("") || '<div class="empty">No active staff.</div>';
+}
+async function saveYardCodes(){
+  const codes = {};
+  document.querySelectorAll(".yard-in").forEach(i => { const v = i.value.replace(/\s+/g,""); if(v) codes[i.dataset.user] = v; });
+  const btn = document.getElementById("yardSaveBtn"); btn.disabled = true;
+  try{
+    const r = await authFetch("/staff/yard-codes", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ codes }) }).then(r=>r.json());
+    if(r.ok){ toast("Yard alarm codes saved"); loadYardCode(); } else toast(r.error||"Save failed");
+  }catch{ toast("Save failed"); }
+  btn.disabled = false;
+}
 function init(){
   loadPending();
   loadMyRecords();
+  loadYardCode();
   if(full){
     document.getElementById("adminBar").style.display = "block";
     document.getElementById("upBtn").addEventListener("click", doUpload);
     document.getElementById("addCatBtn").addEventListener("click", addCategory);
     document.getElementById("exportBtn").addEventListener("click", exportData);
     document.getElementById("eraseBtn").addEventListener("click", eraseAccount);
+    document.getElementById("yardMgrBtn").addEventListener("click", openYardMgr);
+    document.getElementById("yardSaveBtn").addEventListener("click", saveYardCodes);
+    document.getElementById("yardCloseBtn").addEventListener("click", ()=>{ document.getElementById("yardMgr").style.display="none"; });
     loadUsers().then(load);
   }else{
     load();
