@@ -363,7 +363,7 @@ const ROWS = [
     { uprn:"SR00502", site:"0502 - Gamma", ref:"EL-5Y", type:"5 year fixed wire", frequency:"60 Months", nextDate:"2026-09-30", status:"Live", orderNr:"" },
   ], fileName: "ppm_schedule_stage12.xlsx" });
   let sc = await call(env, "Jamie Line", "GET", "/concerto/schedule?type=fiveYear"); let by = Object.fromEntries(sc.body.rows.map(r => [r.storeCode, r]));
-  ok("stage12: 12 stages advertised + byStage12 present", sc.body.stats.pipeline.stages12.length === 12 && sc.body.stats.pipeline.byStage12 && sc.body.rows.every(r => r.case.stage12 && r.docStatus), JSON.stringify(sc.body.stats.pipeline.byStage12));
+  ok("stage12: 15 stages advertised + byStage12 present", sc.body.stats.pipeline.stages12.length === 15 && sc.body.stats.pipeline.byStage12 && sc.body.rows.every(r => r.case.stage12 && r.docStatus), JSON.stringify(sc.body.stats.pipeline.byStage12));
   ok("0500 auto stage12 = remedials_to_quote (test complete WITH remedials logged); source auto", by["0500"].case.stage12 === "remedials_to_quote" && by["0500"].case.stage12Source === "auto" && by["0500"].case.stage12Auto === "remedials_to_quote", JSON.stringify({ s: by["0500"].case.stage12, src: by["0500"].case.stage12Source }));
   ok("0500 document status = in date but unsatisfactory (amber)", by["0500"].docStatus.key === "in_unsat" && by["0500"].docStatus.light === "amber");
   ok("0501 out of date (expired chart, nothing booked) → doc expired, stage needs_booking", by["0501"].docStatus.key === "expired" && by["0501"].docStatus.light === "red" && by["0501"].case.stage12 === "needs_booking");
@@ -415,7 +415,7 @@ const ROWS = [
   const { env } = makeEnv();
   // J5 = a completed 5-year job at 0305 in 2026 (Connor). Archive MOS9800 = a 2021 EICR at 0622.
   const my = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=2026");
-  ok("my-schedule: office GET ok, carries FY_STAGES", my.status === 200 && Array.isArray(my.body.rows) && my.body.stats.pipeline.stages12.length === 12, JSON.stringify({ n: (my.body.rows||[]).length }));
+  ok("my-schedule: office GET ok, carries FY_STAGES", my.status === 200 && Array.isArray(my.body.rows) && my.body.stats.pipeline.stages12.length === 15, JSON.stringify({ n: (my.body.rows||[]).length }));
   const byc = Object.fromEntries((my.body.rows || []).map(r => [r.storeCode, r]));
   ok("my-schedule: 2026 includes 0305 (live done job), engineer + visit carried, off-list → MYS id", !!byc["0305"] && byc["0305"].id === "MYS:0305" && byc["0305"].onConcerto === false && byc["0305"].engineers.includes("Connor") && byc["0305"].myVisits.length === 1 && byc["0305"].myVisits[0].source === "live", JSON.stringify(byc["0305"] && { id: byc["0305"].id, eng: byc["0305"].engineers, v: byc["0305"].myVisits }));
   ok("my-schedule: 2026 excludes the 2021 archive test (year filter)", !byc["0622"]);

@@ -10355,6 +10355,25 @@ async function historyIndex(env, tid, type, preloadedJobs) {
   for (const list of byCode.values()) list.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
   return byCode;
 }
+function mapConcertoStatus(raw) {
+  const s = String(raw || "").toLowerCase();
+  if (!s) return "";
+  if (s.includes("cancel")) return "cancelled";
+  if (s.includes("closed")) return "closed";
+  if (s.includes("complete")) return "awaiting_review";
+  if (s.includes("appointment") || s.includes("assigned")) return "scheduled";
+  if (s.includes("accepted") || s.includes("awaiting")) return "awaiting_assignment";
+  return "";
+}
+async function getConcertoJobStatus(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "concerto:jobstatus:" + tid).first();
+    const v = JSON.parse(r && r.value || "{}");
+    return v && typeof v.codes === "object" && v.codes ? v : { codes: {} };
+  } catch {
+    return { codes: {} };
+  }
+}
 function fyStage12Auto(c) {
   if (!c) return "needs_booking";
   const done = (k) => (c.steps || []).some((s) => s.key === k && s.done);
@@ -10761,6 +10780,16 @@ async function buildMySchedule(env, tid, opts) {
     }
   } catch {
   }
+  const jstat = await getConcertoJobStatus(env, tid);
+  const jcodes = jstat.codes || {};
+  const applyConcerto = (caseView, imp) => {
+    const stg = mapConcertoStatus(imp.status);
+    if (stg && caseView.stage12Source !== "manual") {
+      caseView.stage12 = stg;
+      caseView.stage12Source = "concerto";
+    }
+    return { status: imp.status || "", stage: stg, jobNumber: imp.jobNumber || "", sr: imp.sr || "", target: imp.target || "", actual: imp.actual || "", closed: !!imp.closed };
+  };
   const rows = [];
   for (const [code, site] of sites) {
     site.visits.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
@@ -10780,6 +10809,8 @@ async function buildMySchedule(env, tid, opts) {
       base = { id: "MYS:" + code, srRef: "", nextDate: null, released: false, orderNr: "", orderedValue: void 0 };
     }
     const firstName = (site.visits.find((v) => v.name) || {}).name || "";
+    const imp = jcodes[code] || null;
+    const concerto = imp ? applyConcerto(caseView, imp) : null;
     rows.push({
       ...base,
       type,
@@ -10788,7 +10819,7 @@ async function buildMySchedule(env, tid, opts) {
       siteName: store && store.name || firstName || "",
       block: "",
       category: store ? store.category : "",
-      inactive: !!(store && store.closed),
+      inactive: !!(store && store.closed || imp && imp.closed),
       onConcerto: !!ppm,
       chartDue,
       flag: rec ? rec.flag : "",
@@ -10796,7 +10827,46 @@ async function buildMySchedule(env, tid, opts) {
       engineers,
       myVisits: site.visits.slice(0, 20),
       case: caseView,
+      concerto,
       docStatus: fyDocStatus(chartDue, caseView, doneVisit ? { date: doneVisit.date } : null, today)
+    });
+  }
+  for (const [rawCode, imp] of Object.entries(jcodes)) {
+    const code = padCode(rawCode);
+    if (!code || sites.has(code)) continue;
+    if (!allYears && String(imp.year || "") && String(imp.year) !== year) continue;
+    const store = stores.get(code) || null;
+    const ppm = ppmByCode.get(code) || null;
+    let base, caseView, rec = null;
+    if (ppm) {
+      rec = ppm.status === "open" ? reconcileRow(ppm, store, today) : { flag: ppm.status, text: ppm.note || "" };
+      caseView = deriveCase(ppm, cctx, today, money2, rec);
+      base = { id: ppm.id, srRef: ppm.sr_ref || imp.sr || "", nextDate: ppm.next_date || ppm.planned_date || imp.target || null, released: !!ppm.order_nr, orderNr: ppm.order_nr || "", orderedValue: money2 ? ppm.ordered_value : void 0 };
+    } else {
+      const synth = { id: "MYS:" + code, store_code: code, next_date: imp.target || null, planned_date: null, sr_ref: imp.sr || "" };
+      caseView = deriveCase(synth, cctx, today, money2, null);
+      base = { id: "MYS:" + code, srRef: imp.sr || "", nextDate: imp.target || null, released: false, orderNr: "", orderedValue: void 0 };
+    }
+    const concerto = applyConcerto(caseView, imp);
+    const chartDue = store && store.due[type] || null;
+    rows.push({
+      ...base,
+      type,
+      typeLabel: TYPE_LABEL[type] || type,
+      storeCode: code,
+      siteName: store && store.name || imp.site || "",
+      block: "",
+      category: store ? store.category : "",
+      inactive: !!(store && store.closed || imp.closed),
+      onConcerto: !!ppm,
+      chartDue,
+      flag: rec ? rec.flag : "",
+      flagText: rec ? rec.text : "",
+      engineers: [],
+      myVisits: [],
+      case: caseView,
+      concerto,
+      docStatus: fyDocStatus(chartDue, caseView, null, today)
     });
   }
   const byStage12 = {};
@@ -10808,7 +10878,7 @@ async function buildMySchedule(env, tid, opts) {
   for (const r of rows) for (const e of r.engineers) engineerTotals[e] = (engineerTotals[e] || 0) + 1;
   const stats = {
     sites: rows.length,
-    done: rows.filter((r) => r.case && ["complete_satisfactory", "certificate_updated", "invoiced"].includes(r.case.stage12)).length,
+    done: rows.filter((r) => r.case && ["complete_satisfactory", "certificate_updated", "invoiced", "closed"].includes(r.case.stage12)).length,
     pipeline: { stages12: FY_STAGES, steps: CASE_STEPS, byStage12 },
     engineers: engineerTotals
   };
@@ -10894,6 +10964,39 @@ async function handle9(request, env, ctx, url, sess) {
     } catch {
     }
     return json({ ok: true, money: money2, labourRate, ...out }, {}, env, request);
+  }
+  if (path === "/concerto/jobstatus" && method === "GET") {
+    const v = await getConcertoJobStatus(env, tid);
+    return json({ ok: true, updatedAt: v.updatedAt || null, by: v.by || "", count: Object.keys(v.codes || {}).length, codes: v.codes || {} }, {}, env, request);
+  }
+  if (path === "/concerto/jobstatus/import" && method === "POST") {
+    const b = await body();
+    const inRows = Array.isArray(b.rows) ? b.rows : [];
+    const codes = {};
+    let skipped = 0;
+    for (const r of inRows) {
+      const code = padCode(r.code || r.storeCode || "");
+      const status = String(r.status || "").trim();
+      if (!code || !status) {
+        skipped++;
+        continue;
+      }
+      const entry = {
+        status,
+        jobNumber: String(r.jobNumber || r.job || "").trim(),
+        sr: normRef(r.sr || r.srRef || ""),
+        target: toIsoDate(r.target || r.targetCompletion || "") || String(r.target || "").slice(0, 10) || "",
+        actual: toIsoDate(r.actual || r.actualCompletion || "") || String(r.actual || "").slice(0, 10) || "",
+        closed: !!r.closed,
+        year: String(r.year || (r.target ? String(r.target).slice(0, 4) : "") || "").slice(0, 4),
+        site: String(r.site || "").trim()
+      };
+      const prev = codes[code];
+      if (!prev || (CONCERTO_RANK[mapConcertoStatus(status)] || 0) >= (CONCERTO_RANK[mapConcertoStatus(prev.status)] || 0)) codes[code] = entry;
+    }
+    const blob = { updatedAt: (/* @__PURE__ */ new Date()).toISOString(), by: me, count: Object.keys(codes).length, codes };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "concerto:jobstatus:" + tid, JSON.stringify(blob)).run();
+    return json({ ok: true, stored: blob.count, rows: inRows.length, skipped }, {}, env, request);
   }
   if (path === "/concerto/fy-rate" && method === "POST") {
     const b = await body();
@@ -11144,7 +11247,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -11183,8 +11286,9 @@ var init_concerto = __esm({
     STEP_KEYS = new Set(CASE_STEPS.map((s) => s.key));
     FY_STAGES = [
       { key: "needs_booking", label: "Needs booking", light: "red" },
-      { key: "scheduled", label: "Scheduled", light: "amber" },
-      { key: "awaiting_review", label: "Test complete \u2014 awaiting review", light: "amber" },
+      { key: "awaiting_assignment", label: "Work accepted \u2014 awaiting assignment", light: "amber" },
+      { key: "scheduled", label: "Operative assigned / appointment made", light: "amber" },
+      { key: "awaiting_review", label: "Work complete \u2014 awaiting review", light: "amber" },
       { key: "complete_satisfactory", label: "Complete \u2014 satisfactory", light: "green" },
       { key: "remedials_required", label: "Complete \u2014 remedials required", light: "red" },
       { key: "remedials_to_quote", label: "Remedials to quote", light: "red" },
@@ -11193,9 +11297,12 @@ var init_concerto = __esm({
       { key: "remedials_scheduled", label: "Remedials scheduled", light: "amber" },
       { key: "remedials_complete", label: "Remedials complete", light: "amber" },
       { key: "certificate_updated", label: "Certificate updated", light: "green" },
-      { key: "invoiced", label: "Invoiced", light: "green" }
+      { key: "closed", label: "Closed (Concerto)", light: "green" },
+      { key: "invoiced", label: "Invoiced", light: "green" },
+      { key: "cancelled", label: "Cancelled", light: "grey" }
     ];
     FY_STAGE_KEYS = new Set(FY_STAGES.map((s) => s.key));
+    CONCERTO_RANK = { cancelled: 1, closed: 2, awaiting_assignment: 3, scheduled: 4, awaiting_review: 5 };
     FY_UNSAT_STAGES = /* @__PURE__ */ new Set(["remedials_required", "remedials_to_quote", "remedials_quoted", "orders_received", "remedials_scheduled", "remedials_complete", "certificate_updated"]);
     caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
     REMEDIAL_ORDER = /eicr|5\s*-?\s*y(ea)?r|five\s*year|fixed\s*wire|electrical|remedial|\bC[123]\b/i;

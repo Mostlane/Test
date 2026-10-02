@@ -488,8 +488,9 @@ const STEP_KEYS = new Set(CASE_STEPS.map(s => s.key));
    forward until cleared. `light` drives the red/amber/green traffic-light. */
 export const FY_STAGES = [
   { key: "needs_booking",         label: "Needs booking",                          light: "red" },
-  { key: "scheduled",             label: "Scheduled",                              light: "amber" },
-  { key: "awaiting_review",       label: "Test complete — awaiting review",        light: "amber" },
+  { key: "awaiting_assignment",   label: "Work accepted — awaiting assignment",    light: "amber" },
+  { key: "scheduled",             label: "Operative assigned / appointment made",  light: "amber" },
+  { key: "awaiting_review",       label: "Work complete — awaiting review",         light: "amber" },
   { key: "complete_satisfactory", label: "Complete — satisfactory",                light: "green" },
   { key: "remedials_required",    label: "Complete — remedials required",          light: "red" },
   { key: "remedials_to_quote",    label: "Remedials to quote",                     light: "red" },
@@ -498,9 +499,36 @@ export const FY_STAGES = [
   { key: "remedials_scheduled",   label: "Remedials scheduled",                    light: "amber" },
   { key: "remedials_complete",    label: "Remedials complete",                     light: "amber" },
   { key: "certificate_updated",   label: "Certificate updated",                    light: "green" },
+  { key: "closed",                label: "Closed (Concerto)",                      light: "green" },
   { key: "invoiced",              label: "Invoiced",                               light: "green" },
+  { key: "cancelled",             label: "Cancelled",                              light: "grey" },
 ];
 const FY_STAGE_KEYS = new Set(FY_STAGES.map(s => s.key));
+
+// A Concerto PPM "Jobs" export (the official 2026 schedule) carries a Status per
+// job. Map each one onto a FY_STAGE so My Schedule reads exactly like Concerto.
+// A rank decides which wins when a store has more than one job in the export
+// (the live/most-advanced job beats an old closed/cancelled one).
+export function mapConcertoStatus(raw) {
+  const s = String(raw || "").toLowerCase();
+  if (!s) return "";
+  if (s.includes("cancel")) return "cancelled";
+  if (s.includes("closed")) return "closed";
+  if (s.includes("complete")) return "awaiting_review";                 // "Work complete"
+  if (s.includes("appointment") || s.includes("assigned")) return "scheduled";
+  if (s.includes("accepted") || s.includes("awaiting")) return "awaiting_assignment";
+  return "";
+}
+const CONCERTO_RANK = { cancelled: 1, closed: 2, awaiting_assignment: 3, scheduled: 4, awaiting_review: 5 };
+// The imported Concerto job-status map, keyed by padded store code.
+// app_config concerto:jobstatus:<tid> = { updatedAt, by, codes:{ "<code>": {...} } }.
+async function getConcertoJobStatus(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "concerto:jobstatus:" + tid).first();
+    const v = JSON.parse((r && r.value) || "{}");
+    return v && typeof v.codes === "object" && v.codes ? v : { codes: {} };
+  } catch { return { codes: {} }; }
+}
 // The unsatisfactory-path stages imply an unsatisfactory outcome; the satisfactory
 // one implies satisfactory. Used to keep the CASE_STEPS outcome coherent when the
 // office picks a stage on the dropdown (so both pages agree).
@@ -785,6 +813,15 @@ async function buildMySchedule(env, tid, opts) {
       add(a.site_code, { source: "archive", id: a.id, date, status: a.status || "", engineer: eng, name: name || a.ref || a.id, done: FINISHED.has(stl) && stl !== "cancelled" });
     }
   } catch {}
+  // The official Concerto 2026 job status per store (imported from the Jobs export).
+  const jstat = await getConcertoJobStatus(env, tid);
+  const jcodes = jstat.codes || {};
+  // Apply the imported status to a case view (unless the office picked one by hand).
+  const applyConcerto = (caseView, imp) => {
+    const stg = mapConcertoStatus(imp.status);
+    if (stg && caseView.stage12Source !== "manual") { caseView.stage12 = stg; caseView.stage12Source = "concerto"; }
+    return { status: imp.status || "", stage: stg, jobNumber: imp.jobNumber || "", sr: imp.sr || "", target: imp.target || "", actual: imp.actual || "", closed: !!imp.closed };
+  };
   const rows = [];
   for (const [code, site] of sites) {
     site.visits.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
@@ -804,21 +841,52 @@ async function buildMySchedule(env, tid, opts) {
       base = { id: "MYS:" + code, srRef: "", nextDate: null, released: false, orderNr: "", orderedValue: undefined };
     }
     const firstName = (site.visits.find(v => v.name) || {}).name || "";
+    const imp = jcodes[code] || null;
+    const concerto = imp ? applyConcerto(caseView, imp) : null;
     rows.push({
       ...base, type, typeLabel: TYPE_LABEL[type] || type,
       storeCode: code, siteName: (store && store.name) || firstName || "", block: "", category: store ? store.category : "",
-      inactive: !!(store && store.closed), onConcerto: !!ppm,
+      inactive: !!((store && store.closed) || (imp && imp.closed)), onConcerto: !!ppm,
       chartDue, flag: rec ? rec.flag : "", flagText: rec ? rec.text : "",
       engineers, myVisits: site.visits.slice(0, 20),
-      case: caseView,
+      case: caseView, concerto,
       docStatus: fyDocStatus(chartDue, caseView, doneVisit ? { date: doneVisit.date } : null, today),
+    });
+  }
+  // Sites in the Concerto export that WE haven't tested/booked in the portal yet —
+  // add them so My Schedule mirrors the whole 2026 list, carrying the Concerto status.
+  for (const [rawCode, imp] of Object.entries(jcodes)) {
+    const code = padCode(rawCode);
+    if (!code || sites.has(code)) continue;
+    if (!allYears && String(imp.year || "") && String(imp.year) !== year) continue;
+    const store = stores.get(code) || null;
+    const ppm = ppmByCode.get(code) || null;
+    let base, caseView, rec = null;
+    if (ppm) {
+      rec = ppm.status === "open" ? reconcileRow(ppm, store, today) : { flag: ppm.status, text: ppm.note || "" };
+      caseView = deriveCase(ppm, cctx, today, money, rec);
+      base = { id: ppm.id, srRef: ppm.sr_ref || imp.sr || "", nextDate: ppm.next_date || ppm.planned_date || imp.target || null, released: !!ppm.order_nr, orderNr: ppm.order_nr || "", orderedValue: money ? ppm.ordered_value : undefined };
+    } else {
+      const synth = { id: "MYS:" + code, store_code: code, next_date: imp.target || null, planned_date: null, sr_ref: imp.sr || "" };
+      caseView = deriveCase(synth, cctx, today, money, null);
+      base = { id: "MYS:" + code, srRef: imp.sr || "", nextDate: imp.target || null, released: false, orderNr: "", orderedValue: undefined };
+    }
+    const concerto = applyConcerto(caseView, imp);
+    const chartDue = (store && store.due[type]) || null;
+    rows.push({
+      ...base, type, typeLabel: TYPE_LABEL[type] || type,
+      storeCode: code, siteName: (store && store.name) || imp.site || "", block: "", category: store ? store.category : "",
+      inactive: !!((store && store.closed) || imp.closed), onConcerto: !!ppm,
+      chartDue, flag: rec ? rec.flag : "", flagText: rec ? rec.text : "",
+      engineers: [], myVisits: [], case: caseView, concerto,
+      docStatus: fyDocStatus(chartDue, caseView, null, today),
     });
   }
   const byStage12 = {};
   for (const r of rows) { const s = (r.case && r.case.stage12) || "needs_booking"; byStage12[s] = (byStage12[s] || 0) + 1; }
   const engineerTotals = {};
   for (const r of rows) for (const e of r.engineers) engineerTotals[e] = (engineerTotals[e] || 0) + 1;
-  const stats = { sites: rows.length, done: rows.filter(r => r.case && ["complete_satisfactory", "certificate_updated", "invoiced"].includes(r.case.stage12)).length,
+  const stats = { sites: rows.length, done: rows.filter(r => r.case && ["complete_satisfactory", "certificate_updated", "invoiced", "closed"].includes(r.case.stage12)).length,
     pipeline: { stages12: FY_STAGES, steps: CASE_STEPS, byStage12 }, engineers: engineerTotals };
   return { type, rows, total: rows.length, stats, today, year: allYears ? "all" : year };
 }
@@ -888,6 +956,38 @@ export async function handle(request, env, ctx, url, sess) {
     const out = await buildMySchedule(env, tid, { year: q.get("year") || "", money });
     let labourRate = 0; try { const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first(); labourRate = rr ? Number(rr.value) || 0 : 0; } catch {}
     return json({ ok: true, money, labourRate, ...out }, {}, env, request);
+  }
+  // The official Concerto "Jobs" export → per-store 2026 status (shown on My Schedule).
+  if (path === "/concerto/jobstatus" && method === "GET") {
+    const v = await getConcertoJobStatus(env, tid);
+    return json({ ok: true, updatedAt: v.updatedAt || null, by: v.by || "", count: Object.keys(v.codes || {}).length, codes: v.codes || {} }, {}, env, request);
+  }
+  if (path === "/concerto/jobstatus/import" && method === "POST") {
+    const b = await body();
+    const inRows = Array.isArray(b.rows) ? b.rows : [];
+    const codes = {};
+    let skipped = 0;
+    for (const r of inRows) {
+      const code = padCode(r.code || r.storeCode || "");
+      const status = String(r.status || "").trim();
+      if (!code || !status) { skipped++; continue; }
+      const entry = {
+        status,
+        jobNumber: String(r.jobNumber || r.job || "").trim(),
+        sr: normRef(r.sr || r.srRef || ""),
+        target: toIsoDate(r.target || r.targetCompletion || "") || String(r.target || "").slice(0, 10) || "",
+        actual: toIsoDate(r.actual || r.actualCompletion || "") || String(r.actual || "").slice(0, 10) || "",
+        closed: !!r.closed,
+        year: String(r.year || (r.target ? String(r.target).slice(0, 4) : "") || "").slice(0, 4),
+        site: String(r.site || "").trim(),
+      };
+      const prev = codes[code];
+      // When a store has more than one job in the export, keep the most-advanced/live one.
+      if (!prev || (CONCERTO_RANK[mapConcertoStatus(status)] || 0) >= (CONCERTO_RANK[mapConcertoStatus(prev.status)] || 0)) codes[code] = entry;
+    }
+    const blob = { updatedAt: new Date().toISOString(), by: me, count: Object.keys(codes).length, codes };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "concerto:jobstatus:" + tid, JSON.stringify(blob)).run();
+    return json({ ok: true, stored: blob.count, rows: inRows.length, skipped }, {}, env, request);
   }
   // The £/hour labour rate used to price up remedials on the 5-Year schedule.
   if (path === "/concerto/fy-rate" && method === "POST") {
