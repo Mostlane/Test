@@ -167,6 +167,17 @@
     .ctrow .cttxt{flex:1;font-size:13.5px;line-height:1.4;color:#1d2a38;white-space:pre-wrap;}
     .ctcopy,.ctall{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;flex:0 0 auto;}
     .ctall{padding:4px 9px;}
+    /* Due-date timeline (Gantt-style) */
+    .tlwrap{border:1px solid #d7dee6;border-radius:12px;background:#fff;padding:10px 10px 6px;margin-bottom:12px;}
+    .tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+    .tllegend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#54637a;align-items:center;}
+    .tllegend .k{display:inline-flex;align-items:center;gap:5px;}
+    .tldot{width:11px;height:11px;border-radius:50%;display:inline-block;}
+    .tldia{width:10px;height:10px;display:inline-block;transform:rotate(45deg);border:2px solid #777;background:#fff;}
+    .tlbody{overflow:auto;max-height:64vh;border-top:1px solid #eef2f6;}
+    .tlbody svg, .tlaxis svg{display:block;}
+    .tlempty{color:#6b7a90;font-size:14px;padding:16px 4px;}
+    .viewtab.on{background:var(--brand);color:#fff;border-color:var(--brand);}
   </style>
 </head>
 <body>
@@ -229,10 +240,12 @@
         </select>
       </label>
       <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
+      <button id="tlToggle" class="viewtab" title="Show a timeline of due dates vs today">📊 Timeline</button>
       <button id="impJobs" class="viewtab" style="display:none" title="Drop in a Concerto 'Jobs' export (.xlsx/.csv) to set each site's status">⤵ Import Concerto jobs</button>
       <input type="file" id="impJobsFile" accept=".xlsx,.csv" style="display:none">
       <span class="saved" id="impJobsMsg"></span>
     </div>
+    <div class="tlwrap" id="timeline" style="display:none"></div>
     <div class="chips" id="chips"></div>
     <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted" style="padding:16px;">Loading…</td></tr></tbody></table></div>
   </div>
@@ -254,6 +267,7 @@
     let ROWS = [], STAGES = [], STAGE_LABEL = {}, STAGE_LIGHT = {};
     let YEAR = new Date().getFullYear(), FILTER = "all", MONEY = false, VIEW = "active", LRATE = 0, ENG = "all";
     let SORT = (() => { try { return localStorage.getItem("mlFyrSort") || "code"; } catch { return "code"; } })();
+    let TLON = (() => { try { return localStorage.getItem("mlFyrTimeline") === "1"; } catch { return false; } })();
     let TODAY = new Date().toISOString().slice(0,10);
     const EXPANDED = new Set();
     // The current 5-year document status (server-computed) → label + light.
@@ -274,6 +288,8 @@
       g("fFlag").onchange = () => render();
       g("impJobs").onclick = () => g("impJobsFile").click();
       g("impJobsFile").onchange = () => { const f = g("impJobsFile").files[0]; if (f) importConcertoJobs(f); g("impJobsFile").value = ""; };
+      g("tlToggle").onclick = () => { TLON = !TLON; try { localStorage.setItem("mlFyrTimeline", TLON?"1":"0"); } catch {} render(); };
+      window.addEventListener("resize", () => { if (TLON && g("timeline").style.display!=="none") renderTimeline(visible()); });
       g("sortSel").value = SORT;
       g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
       g("alexBtn").onclick = openAlex;
@@ -506,9 +522,93 @@
           stat(done, "Complete", done?"green":"");
       }
       renderChips(rows);
+      // Timeline (shown when toggled on, not on the Inactive tab)
+      const tlBtn = g("tlToggle"); if (tlBtn) tlBtn.classList.toggle("on", TLON);
+      const showTl = TLON && VIEW !== "inactive";
+      g("timeline").style.display = showTl ? "block" : "none";
+      if (showTl) renderTimeline(visible());
       renderTable();
     }
     function stat(n, l, tone){ return '<div class="stat '+(tone||"")+'"><div class="n">'+n+'</div><div class="l">'+esc(l)+'</div></div>'; }
+
+    /* ── Due-date timeline (Gantt-style) ─────────────────────────────────────
+       One thin row per site on a date axis. A hollow ◇ marks the due date
+       (coloured by status), a filled ● marks the completed date, joined by a
+       faint line; a bold TODAY line runs down the whole chart. Pure inline SVG. */
+    const TL_COL = { red:"#dc2626", amber:"#f59e0b", green:"#16a34a", grey:"#9aa7b4" };
+    function tlDue(r){ return r.nextDate || (r.concerto && r.concerto.target) || r.chartDue || ""; }
+    function tlDone(r){ const c=r.case||{}; const t=(c.steps||[]).find(s=>s.key==="tested"&&s.done); return (r.concerto && r.concerto.actual) || (t && t.at) || ""; }
+    function tlParse(d){ const t = d ? Date.parse(String(d).slice(0,10)+"T00:00:00Z") : NaN; return isNaN(t) ? null : t; }
+    function renderTimeline(rows){
+      const box = g("timeline");
+      // Order by due date (then store), so the chart reads top-to-bottom through the year.
+      const list = rows.slice().sort((a,b)=> String(tlDue(a)||"9999").localeCompare(String(tlDue(b)||"9999")) || codeCmp(a,b));
+      const withDate = list.filter(r => tlParse(tlDue(r)));
+      const noDate = list.length - withDate.length;
+      // Date domain: the selected year (Jan–Dec), widened to cover any stray dates.
+      const now = Date.now();
+      let t0, t1;
+      if (YEAR==="all"){
+        const all = []; withDate.forEach(r=>{ const d=tlParse(tlDue(r)); if(d)all.push(d); const a=tlParse(tlDone(r)); if(a)all.push(a); });
+        all.push(now);
+        t0 = Math.min(...all); t1 = Math.max(...all);
+      } else {
+        t0 = Date.parse(YEAR+"-01-01T00:00:00Z"); t1 = Date.parse(YEAR+"-12-31T00:00:00Z");
+      }
+      // widen to include every plotted date + today
+      withDate.forEach(r=>{ const d=tlParse(tlDue(r)); if(d){ t0=Math.min(t0,d); t1=Math.max(t1,d);} const a=tlParse(tlDone(r)); if(a){ t0=Math.min(t0,a); t1=Math.max(t1,a);} });
+      t0=Math.min(t0,now); t1=Math.max(t1,now);
+      if (t1<=t0) t1 = t0 + 864e5*30;
+      const W = Math.max(640, (box.clientWidth||900) - 24);
+      const LBL = 150, PAD = 14, x0 = LBL, x1 = W - PAD;
+      const xFor = t => x0 + (t - t0)/(t1 - t0) * (x1 - x0);
+      const RH = 16, AX = 26, bodyH = Math.max(RH, withDate.length*RH) + 8;
+      // Month gridlines + labels
+      const months = [];
+      { let d = new Date(t0); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+        while (d.getTime() <= t1) { months.push(new Date(d)); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth()+1, 1)); } }
+      const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const todayX = xFor(now);
+      const escA = s => esc(String(s));
+      // Axis (sticky header)
+      let ax = '<svg width="'+W+'" height="'+AX+'" viewBox="0 0 '+W+' '+AX+'">';
+      months.forEach(m => { const x = xFor(m.getTime()); if (x<x0-1||x>x1+1) return;
+        ax += '<line x1="'+x.toFixed(1)+'" y1="'+(AX-6)+'" x2="'+x.toFixed(1)+'" y2="'+AX+'" stroke="#cbd5e1"/>';
+        ax += '<text x="'+(x+3).toFixed(1)+'" y="14" font-size="11" fill="#54637a">'+MON[m.getUTCMonth()]+(m.getUTCMonth()===0?" "+m.getUTCFullYear():"")+'</text>'; });
+      if (todayX>=x0 && todayX<=x1){ ax += '<line x1="'+todayX.toFixed(1)+'" y1="0" x2="'+todayX.toFixed(1)+'" y2="'+AX+'" stroke="#dc2626" stroke-width="2"/>'
+        + '<text x="'+(todayX+3).toFixed(1)+'" y="23" font-size="10" font-weight="700" fill="#dc2626">TODAY</text>'; }
+      ax += '</svg>';
+      // Body
+      let bd = '<svg width="'+W+'" height="'+bodyH+'" viewBox="0 0 '+W+' '+bodyH+'">';
+      months.forEach(m => { const x = xFor(m.getTime()); if (x<x0-1||x>x1+1) return; bd += '<line x1="'+x.toFixed(1)+'" y1="0" x2="'+x.toFixed(1)+'" y2="'+bodyH+'" stroke="#eef2f6"/>'; });
+      if (todayX>=x0 && todayX<=x1) bd += '<line x1="'+todayX.toFixed(1)+'" y1="0" x2="'+todayX.toFixed(1)+'" y2="'+bodyH+'" stroke="#dc2626" stroke-width="2" stroke-opacity="0.55"/>';
+      withDate.forEach((r,i) => {
+        const y = i*RH + RH/2 + 4;
+        const col = TL_COL[stageLight(r)] || TL_COL.grey;
+        const due = tlParse(tlDue(r)), done = tlParse(tlDone(r));
+        const label = (r.storeCode||"") + " " + (r.siteName||"");
+        const stLbl = STAGE_LABEL[stageOf(r)] || stageOf(r);
+        const tip = label + " — " + stLbl + (tlDue(r)?" · due "+fmtD(tlDue(r)):"") + (tlDone(r)?" · completed "+fmtD(tlDone(r)):"");
+        bd += '<g><title>'+escA(tip)+'</title>';
+        bd += '<text x="4" y="'+(y+4).toFixed(1)+'" font-size="11" fill="#243445" clip-path="inset(0 0 0 0)">'+escA(label.length>24?label.slice(0,23)+"…":label)+'</text>';
+        if (due!=null && done!=null){ const xa=xFor(due), xb=xFor(done); bd += '<line x1="'+Math.min(xa,xb).toFixed(1)+'" y1="'+y.toFixed(1)+'" x2="'+Math.max(xa,xb).toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#cbd5e1" stroke-width="2"/>'; }
+        if (done!=null){ const x=xFor(done); bd += '<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" fill="#16a34a"/>'; }
+        if (due!=null){ const x=xFor(due), s=4.5; bd += '<rect x="'+(x-s).toFixed(1)+'" y="'+(y-s).toFixed(1)+'" width="'+(s*2)+'" height="'+(s*2)+'" transform="rotate(45 '+x.toFixed(1)+' '+y.toFixed(1)+')" fill="#fff" stroke="'+col+'" stroke-width="2"/>'; }
+        bd += '</g>';
+      });
+      bd += '</svg>';
+      const legend = '<div class="tllegend">'
+        + '<span class="k"><span class="tldia"></span> due date</span>'
+        + '<span class="k"><span class="tldot" style="background:#16a34a"></span> completed</span>'
+        + '<span class="k"><span class="tldot" style="background:#dc2626"></span> overdue / no cert</span>'
+        + '<span class="k"><span class="tldot" style="background:#f59e0b"></span> in progress / due soon</span>'
+        + '<span class="k"><span class="tldot" style="background:#16a34a"></span> complete</span>'
+        + (noDate?'<span class="k" style="color:#92400e">'+noDate+' with no date (not plotted)</span>':'')
+        + '</div>';
+      box.innerHTML = '<div class="tlhead"><b style="color:var(--brand)">📊 Due-date timeline — '+withDate.length+' sites'+(YEAR==="all"?"":" ("+YEAR+")")+'</b>'+legend+'</div>'
+        + '<div class="tlaxis">'+ax+'</div>'
+        + (withDate.length ? '<div class="tlbody">'+bd+'</div>' : '<div class="tlempty">No dated sites for this filter.</div>');
+    }
 
     function renderChips(rows){
       const by = {}; rows.forEach(r => { const s=stageOf(r); by[s]=(by[s]||0)+1; });
