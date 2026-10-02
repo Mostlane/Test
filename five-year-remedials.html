@@ -7,6 +7,7 @@
   <script src="/portal-config.js?v=40"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
+  <script src="/xlsx-lite.js?v=2"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --warn:#b45309; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -228,6 +229,9 @@
         </select>
       </label>
       <label class="muted" style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="fFlag" style="width:16px;height:16px;"> 🚩 Flagged only</label>
+      <button id="impJobs" class="viewtab" style="display:none" title="Drop in a Concerto 'Jobs' export (.xlsx/.csv) to set each site's status">⤵ Import Concerto jobs</button>
+      <input type="file" id="impJobsFile" accept=".xlsx,.csv" style="display:none">
+      <span class="saved" id="impJobsMsg"></span>
     </div>
     <div class="chips" id="chips"></div>
     <div class="tblwrap"><table id="tbl"><thead></thead><tbody><tr><td class="muted" style="padding:16px;">Loading…</td></tr></tbody></table></div>
@@ -268,6 +272,8 @@
       g("engSel").onchange = () => { ENG = g("engSel").value; render(); };
       g("q").oninput = () => render();
       g("fFlag").onchange = () => render();
+      g("impJobs").onclick = () => g("impJobsFile").click();
+      g("impJobsFile").onchange = () => { const f = g("impJobsFile").files[0]; if (f) importConcertoJobs(f); g("impJobsFile").value = ""; };
       g("sortSel").value = SORT;
       g("sortSel").onchange = () => { SORT = g("sortSel").value; try { localStorage.setItem("mlFyrSort", SORT); } catch {} render(); };
       g("alexBtn").onclick = openAlex;
@@ -361,6 +367,50 @@
       box.querySelectorAll("[data-cert]").forEach(a => a.onclick = async e => { e.preventDefault(); await openCert(a.dataset.cert); });
     }
 
+    // Import a Concerto "Jobs" export (.xlsx/.csv) — the official per-store 2026 status.
+    // Parsed in the browser (xlsx-lite); only the extracted fields are POSTed.
+    function colIndexFyr(letters){ let n=0; for (const ch of String(letters)) n = n*26 + (ch.charCodeAt(0)-64); return n-1; }
+    function csvRowsFyr(text){ const out=[]; let row=[],cell="",q=false; for (let i=0;i<text.length;i++){ const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; } else if(c==='"') q=true; else if(c===","){ row.push(cell); cell=""; } else if(c==="\n"||c==="\r"){ if(c==="\r"&&text[i+1]==="\n") i++; row.push(cell); out.push(row); row=[]; cell=""; } else cell+=c; } if(cell!==""||row.length){ row.push(cell); out.push(row);} return out; }
+    // A date cell may be an Excel serial number or a string — normalise to YYYY-MM-DD.
+    function cellDate(v){
+      if (v==null||v==="") return "";
+      if (typeof v==="number" || /^\d+(\.\d+)?$/.test(String(v))){ const n=Number(v); if(n>20000&&n<80000){ const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*864e5); return d.toISOString().slice(0,10);} }
+      const d=new Date(v); return isNaN(d)? String(v).slice(0,10) : d.toISOString().slice(0,10);
+    }
+    async function importConcertoJobs(file){
+      const msg = g("impJobsMsg"); msg.textContent = "Reading "+file.name+"…";
+      let grid = [];
+      try {
+        if (/\.csv$/i.test(file.name)) grid = csvRowsFyr(await file.text());
+        else { const wb = await XLSXLite.parse(await file.arrayBuffer()); for await (const r of wb.rows()){ const cells=r.cells, arr=[]; for (const c of Object.keys(cells)) arr[colIndexFyr(c.replace(/\d+/g,""))]=cells[c]; grid.push(Array.from(arr, v=>v==null?"":v)); } }
+      } catch(e){ msg.textContent = "Couldn't read that file: "+(e.message||e); return; }
+      // Find the header row and the columns we need (by name, Concerto's layout).
+      const norm = s => String(s??"").trim().toLowerCase();
+      let hi=-1, H=null;
+      for (let i=0;i<Math.min(grid.length,15);i++){ const h=(grid[i]||[]).map(norm); if (h.indexOf("status")>=0 && (h.indexOf("site")>=0 || h.indexOf("job number")>=0)){ hi=i; H=h; break; } }
+      if (hi<0){ msg.textContent = "That doesn't look like a Concerto Jobs export (no Status/Site header)."; return; }
+      const col = (...names) => { for (const n of names){ const i=H.indexOf(n); if(i>=0) return i; } return -1; };
+      const ci = { job: col("job number","job"), desc: col("description"), site: col("site"), status: col("status"), target: col("target completion date","target completion"), actual: col("actual completion","actual completion date") };
+      const rows = [];
+      for (const r of grid.slice(hi+1)){
+        const site = String(r[ci.site]||""); const status = String(r[ci.status]||"").trim();
+        if (!status) continue;
+        const cm = site.match(/(\d{3,4})\s*-/); const code = cm?cm[1]:"";
+        if (!code) continue;
+        const srm = site.match(/(SR\d+)/i) || String(r[ci.desc]||"").match(/(SR\d+)/i);
+        const target = ci.target>=0 ? cellDate(r[ci.target]) : "";
+        rows.push({ code, status, jobNumber: String(r[ci.job]||"").trim(), sr: srm?srm[1].toUpperCase():"",
+          target, actual: ci.actual>=0 ? cellDate(r[ci.actual]) : "", closed: /closed/i.test(site), year: target.slice(0,4), site: site.replace(/^SR\d+:\s*/i,"").trim() });
+      }
+      if (!rows.length){ msg.textContent = "No job rows found in that file."; return; }
+      msg.textContent = "Importing "+rows.length+" jobs…";
+      try {
+        const res = await authFetch("/concerto/jobstatus/import", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ rows }) }).then(r=>r.json());
+        if (res && res.ok){ msg.textContent = "Imported "+res.stored+" sites ✓"; setTimeout(()=>{msg.textContent="";}, 4000); load(); }
+        else msg.textContent = (res&&res.error) || "Import failed";
+      } catch { msg.textContent = "Import failed"; }
+    }
+
     // A row belongs to YEAR if its Concerto next date is in that year OR the test was
     // carried out in that year (Concerto sometimes rolls the date forward after a test).
     function testedYear(r){ const t=(r.case.steps||[]).find(s=>s.key==="tested"&&s.done); return t&&t.at ? +String(t.at).slice(0,4) : null; }
@@ -404,6 +454,7 @@
       const mineN = VIEW==="mine" ? ROWS.length : null;
       const t = (v,label,n) => '<button class="viewtab'+(VIEW===v?" on":"")+'" data-v="'+v+'">'+esc(label)+(n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
       g("viewtabs").innerHTML = t("active","⚡ Schedule",null) + t("mine","📋 My schedule", mineN) + t("inactive","🚫 Inactive sites", inact);
+      g("impJobs").style.display = VIEW==="mine" ? "inline-block" : "none";
       g("viewtabs").querySelectorAll(".viewtab").forEach(b => b.onclick = () => {
         if(VIEW===b.dataset.v) return;
         const wasMine = VIEW==="mine", nowMine = b.dataset.v==="mine";
@@ -572,7 +623,9 @@
       const rel = r.released ? '<div class="sub" style="color:#166534;font-weight:700">Released'+(r.orderNr?" · "+esc(r.orderNr):"")+(MONEY&&r.orderedValue!=null?" · £"+Math.round(r.orderedValue):"")+'</div>' : '';
       const engFallback = (r.engineers && r.engineers.length) ? r.engineers.join(", ") : "";
       const testedBy = c.engineer ? esc(c.engineer) : (engFallback ? esc(engFallback) : '<span class="muted">—</span>');
-      const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>' : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
+      const src = c.stage12Source==="manual" ? '<span class="srcnote">set by hand</span> <button class="autoreset" data-reset="'+esc(key)+'" title="Back to what the portal sees ('+esc(STAGE_LABEL[c.stage12Auto]||c.stage12Auto)+')">↺ auto</button>'
+        : c.stage12Source==="concerto" ? '<span class="srcnote" title="Set from the Concerto Jobs export — pick a status to override">📋 from Concerto</span>'
+        : '<span class="srcnote">'+(STAGE_LABEL[c.stage12Auto]?"auto":"")+'</span>';
       const flag = c.flagged ? '<div class="flagtag">🚩 '+esc(c.flagNote || (c.autoFlag&&"No certificate cover") || "Flagged")+'</div>' : '';
       const hold = c.held ? '<div class="holdtag">⏸ '+esc(c.holdReason||"On hold")+'</div>' : '';
       // Mostlane due (compliance chart) with a plain-English "runs out" hint.
@@ -610,6 +663,13 @@
         + (cDate ? ' &nbsp;·&nbsp; ✅ Completed: <b>' + esc(fmtD(cDate)) + '</b>' : '')
         + (c.engineer ? ' &nbsp;·&nbsp; 👷 ' + esc(c.engineer) : '')
         + '</div>';
+      // The official Concerto job status for this site (from the imported Jobs export).
+      const cj = r.concerto;
+      const concertoLine = cj ? '<div class="datesline" style="background:#f4f1ff;border-color:#ddd1f6">📋 Concerto status: <b>' + esc(cj.status||"—") + '</b>'
+        + (cj.jobNumber ? ' &nbsp;·&nbsp; ' + esc(cj.jobNumber) : '')
+        + (cj.target ? ' &nbsp;·&nbsp; target ' + esc(fmtD(cj.target)) : '')
+        + (cj.actual ? ' &nbsp;·&nbsp; ✅ completed ' + esc(fmtD(cj.actual)) : '')
+        + '</div>' : '';
       const shown = (c.steps||[]).filter(s => s.applicable);
       const strip = '<div class="steps">'+shown.map(s => '<span class="st '+(s.done?"done":(s.key===c.next?"next":""))+'" title="'+esc(s.label)+(s.at?" · "+fmtD(s.at):"")+(s.by?" · "+esc(s.by):"")+'">'+(s.done?"✓ ":"")+esc(s.short)+'</span>').join("")+'</div>';
       const outLbl = { satisfactory:"Satisfactory", unsatisfactory:"Unsatisfactory", remedied:"Remedied", "":"Outcome not set" };
@@ -642,6 +702,7 @@
           + '</div>';
       }
       return '<div class="sub">Cycle due '+fmtD(c.cycleDue)+(r.srRef?' · Concerto '+esc(r.srRef):'')+'</div>'
+        + concertoLine
         + dateLine
         + out + strip
         + visitsBox
