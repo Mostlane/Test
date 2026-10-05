@@ -672,11 +672,16 @@
         + fld("rcMiles","Mileage at service (optional)","type=\"number\" placeholder=\"current mileage\"", (v&&v.currentMiles!=null)?v.currentMiles:"")
         + fld("rcNext","Next service due (optional — leave blank to auto-calculate)","type=\"date\"","");
     } else {
-      fields=fld("rcDate", type==="mot"?"New MOT expiry date":"New tax due date","type=\"date\"","");
+      // Pre-fill the new date to one year on from the current due date (the usual
+      // annual renewal), so completing on a phone is essentially one tap. Change if needed.
+      const addYear=s=>{ const d=s?new Date(s):new Date(); if(isNaN(d)) return ""; d.setFullYear(d.getFullYear()+1); return d.toISOString().slice(0,10); };
+      const cur=type==="mot"?(v&&v.motDue):(v&&v.taxDue);
+      const defDate=addYear(cur||today);
+      fields=fld("rcDate", type==="mot"?"New MOT expiry date":"New tax due date","type=\"date\"",defDate);
     }
     pModal(`
       <h3 style="margin:0 0 4px">✅ ${labels[type]} completed — ${esc(reg)}</h3>
-      <div class="hint" style="margin-bottom:2px">Enter the new date${type==="service"?"s":""} so the next one is tracked. This updates the vehicle and clears it from the list.</div>
+      <div class="hint" style="margin-bottom:2px">${type==="service"?"Enter the new dates so the next one is tracked.":"Check the new "+(type==="mot"?"MOT expiry":"tax due")+" date (pre-filled to one year on — change if different), then press Save."} This updates the vehicle and clears it from the red list.</div>
       ${fields}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
         <button class="btn ghost small" onclick="pClose()">Cancel</button>
