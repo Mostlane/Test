@@ -13282,8 +13282,17 @@ function isRealRemedial(rem) {
 }
 function normalizeRemedials(rec) {
   if (rec && Array.isArray(rec.rows)) {
+    const em = rec.type === "em";
     for (const r of rec.rows) {
-      if (r && r.remedial && isRealRemedial(r.remedial)) r.remedial.failed = true;
+      if (!r) continue;
+      if (r.remedial && isRealRemedial(r.remedial)) {
+        r.remedial.failed = true;
+        continue;
+      }
+      if (em && (!r.remedial || !isRealRemedial(r.remedial))) {
+        const failedTest = ["normal", "led", "emergency"].some((k) => /^\s*fail\s*$/i.test(String(r[k] || "")));
+        if (failedTest) r.remedial = { failed: true, kind: "light", replacedOnSite: false, note: "Auto-flagged: failed the emergency test \u2014 confirm light vs batteries.", auto: true, photos: [] };
+      }
     }
   }
   return rec;

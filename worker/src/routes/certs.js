@@ -862,7 +862,20 @@ function isRealRemedial(rem) {
 // render, £ processing, supplier enquiry, tracker) sees it. Mutates in place.
 function normalizeRemedials(rec) {
   if (rec && Array.isArray(rec.rows)) {
-    for (const r of rec.rows) { if (r && r.remedial && isRealRemedial(r.remedial)) r.remedial.failed = true; }
+    const em = rec.type === "em";
+    for (const r of rec.rows) {
+      if (!r) continue;
+      if (r.remedial && isRealRemedial(r.remedial)) { r.remedial.failed = true; continue; }
+      // EM safety net: a fitting that FAILED the test (emergency/LED/normal = Fail)
+      // but was never marked up as a remedial — the engineer skipped the "⚠ Mark
+      // fitting failed" step — is auto-flagged so it can never be lost from the
+      // office EM-remedials tracker. Defaults to a light replacement; the office
+      // reclassifies to batteries per fitting if needed. (0330 Aldershot exposed this.)
+      if (em && (!r.remedial || !isRealRemedial(r.remedial))) {
+        const failedTest = ["normal", "led", "emergency"].some(k => /^\s*fail\s*$/i.test(String(r[k] || "")));
+        if (failedTest) r.remedial = { failed: true, kind: "light", replacedOnSite: false, note: "Auto-flagged: failed the emergency test — confirm light vs batteries.", auto: true, photos: [] };
+      }
+    }
   }
   return rec;
 }
