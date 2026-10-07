@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=40"></script>
+  <script src="/portal-config.js?v=41"></script>
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -54,9 +54,13 @@
             if (st === "field") return true;
             return yes(perms.SLA) || yes(perms.StoryMode);
           }
-          // FIELD ENGINEERS always get the restricted raise page — never the
-          // office board (they raise POs from the job to keep costing linked).
-          if (isField()) { location.replace("po-raise.html"); return; }
+          // FIELD ENGINEERS raise POs ONLY from a job now (Oct 2026) — there is no
+          // standalone PO launcher for them. Point them back to the job instead of
+          // the bare raise form, so every PO stays costed to a job.
+          if (isField()) {
+            msg.innerHTML = "<h2>Raise a PO from the job</h2>Open the job you’re working on and tap <b>“Raise PO for this job”</b> — that ties the purchase order to the job.<br><br><a href='route.html'>Go to my jobs →</a>";
+            return;
+          }
           if (full || poPerm) { location.replace("po-office.html"); return; }
           msg.innerHTML = "<h2>No PO access</h2>Ask the office to enable Purchase Orders for your account.";
         })

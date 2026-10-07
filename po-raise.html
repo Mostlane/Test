@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=40"></script>
+  <script src="/portal-config.js?v=41"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -209,7 +209,49 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
 <script>
 const API = window.MOSTLANE_API;
 function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
-async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}} if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
+// The job id (if any) carried on the #mlpo link — the sanctioned way a field
+// engineer reaches this page ("Raise PO for this job"). Decoded the same way as
+// prefillFromJobLink. Empty string when there's no job context.
+function poJobIdFromHash(){
+  try{
+    var m = location.hash.match(/mlpo=([^&]+)/); if(!m) return "";
+    var raw = m[1].replace(/-/g,'+').replace(/_/g,'/'); while(raw.length%4) raw+='=';
+    var bin = atob(raw); var json;
+    try{ json = new TextDecoder().decode(Uint8Array.from(bin, function(c){ return c.charCodeAt(0); })); }
+    catch(e){ json = decodeURIComponent(escape(bin)); }
+    var d = JSON.parse(json); return d && d.jobId ? String(d.jobId) : "";
+  }catch(e){ return ""; }
+}
+async function boot(){
+  var u = {}, perms = {};
+  try{
+    var me = await authFetch("/auth/me").then(function(r){ return r.json(); });
+    u = (me && me.user) || {};
+    try{ perms = JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}") || {}; }catch(e){}
+    if(localStorage.getItem("mostlaneViewAsReal")) u = perms || u;
+    if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; }
+  }catch(e){ location.href="login.html"; return; }
+  // FIELD ENGINEERS may ONLY raise a PO FROM a job (keeps every PO costed to a
+  // job and stops loose/standalone POs). A direct open with no job link is sent
+  // back to their jobs. Office / Full-Access users are unaffected.
+  var yes = function(v){ return String(v||"").toLowerCase()==="yes"; };
+  var full = yes(u.FullAccess) || yes(perms.FullAccess);
+  var st = String(localStorage.getItem("mostlaneStaffType")||sessionStorage.getItem("mostlaneStaffType")||u.StaffType||"").toLowerCase();
+  var isField = !full && !yes(perms.SLAAdmin) && st!=="office" && (st==="field" || yes(perms.SLA) || yes(perms.StoryMode));
+  if(isField && !poJobIdFromHash()){
+    document.getElementById("poGate").innerHTML =
+      '<div style="max-width:420px;margin:40px auto 0;text-align:center">'
+      + '<div style="font-size:42px;margin-bottom:10px">🧾</div>'
+      + '<h2 style="color:#003366;margin:0 0 10px">Raise a PO from the job</h2>'
+      + '<p style="color:#5b6b78;font-size:15px;line-height:1.5">Open the job you’re working on and tap <b>“Raise PO for this job”</b>. That ties the purchase order to the job so it’s costed correctly.</p>'
+      + '<p style="margin-top:18px"><a href="route.html" style="color:#0066cc;font-weight:700;text-decoration:none">Go to my jobs →</a></p>'
+      + '</div>';
+    return;
+  }
+  document.getElementById("poGate").style.display="none";
+  document.getElementById("poApp").style.display="block";
+  init();
+}
 let SUPPLIERS = [];
 let PROJECTS = [];   // live projects an engineer may raise against
 let VEHICLES = [];   // company vehicles (their assigned one flagged .mine)

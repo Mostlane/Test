@@ -1137,9 +1137,11 @@
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
           { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
           { label: "Projects", href: "projects-live.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], match: ["projects-live.html", "project-new.html", "project-hub.html", "projects.html", "projects-admin.html"] },
-          { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
-          { label: "VAT capture", href: "vat.html", icon: "po", perms: ["PurchaseOrders"], match: ["vat.html"] },
-          { label: "Accounts capture", href: "accounts.html", icon: "po", perms: ["PurchaseOrders"], match: ["accounts.html"] },
+          // PO + finance-capture tools are office-only — field engineers raise POs
+          // only from a job now, and never do VAT/accounts capture (Oct 2026).
+          { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], officeOnly: true, match: ["po.html"] },
+          { label: "VAT capture", href: "vat.html", icon: "po", perms: ["PurchaseOrders"], officeOnly: true, match: ["vat.html"] },
+          { label: "Accounts capture", href: "accounts.html", icon: "po", perms: ["PurchaseOrders"], officeOnly: true, match: ["accounts.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [

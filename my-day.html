@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=40"></script>
+  <script src="/portal-config.js?v=41"></script>
   <script src="day-timesheet.js?v=1"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -115,10 +115,12 @@ async function fillSiteBlock(j){
     (dest ? `<a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}">🗺️ Directions</a>` : "");
 }
 
-// "Raise a PO" opens the in-portal PO raise form (no longer the old PO worker).
+// Standalone "Raise a PO" is RETIRED for field users (Oct 2026) — engineers now
+// raise POs ONLY from a job (open the job → "Raise PO for this job"), so every PO
+// stays costed to a job. The loose parts-PO link is kept hidden.
 function fillPoLink(){
   const a = $("poLink"); if(!a) return;
-  a.href = "po-raise.html"; a.style.display = "block";
+  a.style.display = "none";
 }
 
 function getEngineer(){

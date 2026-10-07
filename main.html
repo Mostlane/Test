@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=40"></script>
+  <script src="/portal-config.js?v=41"></script>
   <script src="/van-check-gate.js?v=4"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
@@ -497,7 +497,7 @@ const MAP = window.ML_PERM_MAP || {
       // Apply the menu gating for a given permission set. Idempotent, so it can
       // run twice: instantly from the cached permissions, then again with the
       // fresh server copy.
-      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "SiteLog", "Holiday", "Assets", "Forms", "Compliance"]);
+      const STORY_ALLOWED = new Set(["HSPlan", "SiteLog", "Holiday", "Assets", "Forms", "Compliance"]);
       function applyGate(user) {
         const fullAccess = String(user.FullAccess || "").toLowerCase() === "yes";
         const isStory = String(user.StoryMode || "").toLowerCase() === "yes";
@@ -549,7 +549,10 @@ const MAP = window.ML_PERM_MAP || {
         // own pages + APIs refuse a field engineer anyway, so the tile shouldn't
         // show. Add any new office-management tile here.
         if (isFieldUser) {
-          ["ClientOrders", "FBC", "FiveYear"].forEach(id => {
+          // PurchaseOrders2 = the "PO System" tile. Field engineers raise POs ONLY
+          // from a job now (open the job → "Raise PO for this job"), so the
+          // standalone PO launcher is removed for them (Oct 2026).
+          ["ClientOrders", "FBC", "FiveYear", "PurchaseOrders2"].forEach(id => {
             const b = document.getElementById(id); if (b) b.classList.remove("visible");
           });
         }
