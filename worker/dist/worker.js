@@ -28386,6 +28386,33 @@ async function getLockoutWaivers(env, tid) {
     return {};
   }
 }
+async function lockedOutDrivers(env, db) {
+  try {
+    const s = await getSettings(db);
+    const week = mondayOf3(londonDate2());
+    if (Date.now() <= Date.parse(deadlineFor(week, s))) return /* @__PURE__ */ new Set();
+    const rules = await getRules(env, db.tenantId);
+    if (isGloballyPaused(rules)) return /* @__PURE__ */ new Set();
+    const off = await getOptedOut(env, db.tenantId);
+    const waivers = await getLockoutWaivers(env, db.tenantId);
+    const [driversRes, doneRes] = await Promise.all([
+      db.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''").bind(db.tenantId).all(),
+      db.prepare("SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?").bind(db.tenantId, week).all()
+    ]);
+    const doneSet = new Set((doneRes.results || []).map((r) => r.username));
+    const out = /* @__PURE__ */ new Set();
+    for (const u of driversRes.results || []) {
+      const un = u.username;
+      if (!un || doneSet.has(un) || off.has(un)) continue;
+      if (isSuppressed(rules, "vehicle-check", un, week)) continue;
+      if (waivers[un] === week) continue;
+      out.add(un);
+    }
+    return out;
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
 var DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -33203,7 +33230,7 @@ async function handle28(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes, lockedSet] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -33225,7 +33252,10 @@ async function handle28(request, env, ctx, url, sess) {
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
-      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
+      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] })),
+      // Drivers currently HARD-LOCKED-OUT of the app (weekly van check overdue) —
+      // so the card can offer a one-tap "lift lockout". Set of usernames.
+      lockedOutDrivers(env, tenantDB(env, tid))
     ]);
     const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
     const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
@@ -33334,6 +33364,9 @@ async function handle28(request, env, ctx, url, sess) {
         // card status bar: ok | ack | due
         vanCheckRequested: pendVc.has(dn(v.reg)),
         // a one-off check is pending — hide the Request button
+        // This van's current driver is HARD-LOCKED-OUT of the app right now
+        // (weekly van check overdue) — the card offers a one-tap "lift lockout".
+        driverLockedOut: !!(drv[dn(v.reg)] && lockedSet.has(drv[dn(v.reg)])),
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0

@@ -63,9 +63,14 @@
   .vcbar.ok{background:#0a8a35;color:#fff;}
   .vcbar.due{background:#d11f2a;color:#fff;}
   .vcbar.ack{background:#b45309;color:#fff;}
-  .vcbar .vcbtn{background:rgba(255,255,255,.22);color:#fff;border:1px solid rgba(255,255,255,.55);
+  .vcbar .vcbtn,.lockbar .vcbtn{background:rgba(255,255,255,.22);color:#fff;border:1px solid rgba(255,255,255,.55);
     border-radius:6px;padding:2px 9px;font:700 12px inherit;font-family:inherit;cursor:pointer;white-space:nowrap;}
-  .vcbar .vcbtn:hover{background:rgba(255,255,255,.36);}
+  .vcbar .vcbtn:hover,.lockbar .vcbtn:hover{background:rgba(255,255,255,.36);}
+  /* Driver is HARD-LOCKED-OUT of the app (weekly van check overdue) — distinct
+     navy bar (ties to the full-screen lockout overlay), stacks under .vcbar. */
+  .lockbar{margin:0 -14px 2px;padding:8px 14px;font-size:13px;font-weight:800;letter-spacing:.02em;
+    display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;text-align:center;
+    background:#003468;color:#fff;}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;}
@@ -981,6 +986,28 @@
   }
 
   // Acknowledge (skip) a missed van check — waves the red bar for ~7 days.
+  // The van's current driver is hard-locked-out of the app (weekly van check
+  // overdue). A distinct navy banner + a one-tap "lift lockout" — lets them back
+  // in now without marking the check done (it stays outstanding, returns next week).
+  function lockoutBar(v){
+    if(!v.driverLockedOut) return "";
+    const who = pName(v.driver)||v.driver||"The driver";
+    return `<div class="lockbar" title="${esc(who)} is blocked from the whole app until this week's van check is done">`
+      + `🔒 ${esc(who)} locked out — overdue van check`
+      + `<button class="vcbtn" onclick="event.stopPropagation();liftLockout(${esc(JSON.stringify(String(v.driver||"")))})">🔓 Lift lockout</button></div>`;
+  }
+  async function liftLockout(username){
+    if(!username){ alert("No driver is assigned to this van, so there's no lockout to lift."); return; }
+    const who = pName(username)||username;
+    const msg = "Let "+who+" back into the app now?\n\nThis week's van check stays outstanding — they'll still be reminded, and the lockout returns next week if it's still not done.";
+    const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Lift lockout",okLabel:"🔓 Lift lockout"}) : confirm(msg);
+    if(!ok) return;
+    try{
+      const r=await aFetch("/vancheck/lockout-waive",{method:"POST",body:JSON.stringify({username,waived:true})}).then(r=>r.json());
+      if(r&&r.ok){ toast("Lockout lifted for "+who); loadFleet(); }
+      else alert((r&&r.error)||"Couldn't lift the lockout.");
+    }catch(e){ alert("Couldn't lift the lockout."); }
+  }
   async function ackVanCheck(reg){
     try{ const r=await aFetch("/fleet/vancheck-ack",{method:"POST",body:JSON.stringify({reg})}).then(r=>r.json());
       if(r&&r.ok){ toast("Missed check OK’d for "+reg); loadFleet(); } else alert((r&&r.error)||"Couldn't acknowledge."); }
@@ -1021,6 +1048,7 @@
         : `<div class="vphoto-empty" onclick="openPhotoModal(${esc(JSON.stringify(String(reg)))})">📷 Add a photo</div>`;
       card.innerHTML=`
         ${vanCheckBar(v)}
+        ${lockoutBar(v)}
         ${photo}
         <div class="reg-row">
           <div style="display:flex;align-items:center;gap:8px;min-width:0">
