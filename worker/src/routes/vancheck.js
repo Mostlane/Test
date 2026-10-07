@@ -51,6 +51,39 @@ async function getLockoutWaivers(env, tid) {
     return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
   } catch { return {}; }
 }
+
+// Drivers HARD-LOCKED-OUT of the app RIGHT NOW: this week's assigned-van check is
+// outstanding AND the deadline has passed AND they're not opted out / muted /
+// globally paused / already lockout-waived. This is EXACTLY van-check-gate.js's
+// block condition, exposed so other pages (the Vehicles cards) can show a one-tap
+// "lift lockout" for a locked-out driver. Returns a Set of usernames.
+// `db` = a tenantDB (has .tenantId + .prepare). Fails OPEN (empty set) on any
+// error so it can never break the page that calls it.
+export async function lockedOutDrivers(env, db) {
+  try {
+    const s = await getSettings(db);
+    const week = mondayOf(londonDate());
+    if (Date.now() <= Date.parse(deadlineFor(week, s))) return new Set();  // deadline not passed → no hard lockout yet
+    const rules = await getRules(env, db.tenantId);
+    if (isGloballyPaused(rules)) return new Set();                          // reminders paused for everyone
+    const off = await getOptedOut(env, db.tenantId);
+    const waivers = await getLockoutWaivers(env, db.tenantId);
+    const [driversRes, doneRes] = await Promise.all([
+      db.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''").bind(db.tenantId).all(),
+      db.prepare("SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?").bind(db.tenantId, week).all(),
+    ]);
+    const doneSet = new Set((doneRes.results || []).map(r => r.username));
+    const out = new Set();
+    for (const u of (driversRes.results || [])) {
+      const un = u.username;
+      if (!un || doneSet.has(un) || off.has(un)) continue;
+      if (isSuppressed(rules, "vehicle-check", un, week)) continue;
+      if (waivers[un] === week) continue;
+      out.add(un);
+    }
+    return out;
+  } catch { return new Set(); }
+}
 const DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },

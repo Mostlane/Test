@@ -17,7 +17,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
-import { evalAlerts, answerWord } from "./vancheck.js";
+import { evalAlerts, answerWord, lockedOutDrivers } from "./vancheck.js";
 import { loadRegister, resolveSite } from "./costing.js";
 import { createOrUpdateJobFromPayload, reconcileRelease, badScheduleIn } from "./sla.js";
 import { approvedLeaveInRange } from "./holidays.js";
@@ -817,7 +817,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Gather everything the cards need CONCURRENTLY — these lookups are
     // independent, so running them in parallel turns ~10 stacked round trips into
     // one, which is the main win for this page's speed.
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes, lockedSet] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -834,6 +834,9 @@ export async function handle(request, env, ctx, url, sess) {
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
       env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] })),
+      // Drivers currently HARD-LOCKED-OUT of the app (weekly van check overdue) —
+      // so the card can offer a one-tap "lift lockout". Set of usernames.
+      lockedOutDrivers(env, tenantDB(env, tid)),
     ]);
     const pendVc = new Set((pendVcRes.results || []).map(r => dn(r.reg)));
     const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
@@ -922,6 +925,9 @@ export async function handle(request, env, ctx, url, sess) {
         lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
         vanCheckRequested: pendVc.has(dn(v.reg)),  // a one-off check is pending — hide the Request button
+        // This van's current driver is HARD-LOCKED-OUT of the app right now
+        // (weekly van check overdue) — the card offers a one-tap "lift lockout".
+        driverLockedOut: !!(drv[dn(v.reg)] && lockedSet.has(drv[dn(v.reg)])),
 
         // Money views — Full Access only.
         finance: money ? financeOf(v) : undefined,
