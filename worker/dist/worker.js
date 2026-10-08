@@ -41729,10 +41729,14 @@ init_auth();
 init_once();
 async function ensureTables__raw7(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_modules (
-    tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT,
+    tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT, video TEXT,
     pass_mark INTEGER, min_seconds INTEGER, questions TEXT, active INTEGER DEFAULT 1,
     sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, created_by TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
+  try {
+    await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN video TEXT`).run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_attempts (
     tenant_id INTEGER, id TEXT, module_id TEXT, module_title TEXT, category TEXT,
     username TEXT, started_at TEXT, submitted_at TEXT, duration_seconds INTEGER,
@@ -41744,6 +41748,13 @@ async function ensureTables__raw7(env) {
   }
 }
 var ensureTables9 = onceMigration(ensureTables__raw7);
+function parseYouTubeId(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
 var nowISO2 = () => (/* @__PURE__ */ new Date()).toISOString();
 var uid = () => crypto.randomUUID ? crypto.randomUUID() : "cpd-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 var clampInt = (v, lo, hi) => {
@@ -41793,6 +41804,7 @@ function shapeModule(row, { withAnswers = false } = {}) {
     id: row.id,
     title: row.title || "",
     category: row.category || "",
+    video: row.video || "",
     content: row.content || "",
     passMark: row.pass_mark != null ? row.pass_mark : 80,
     minSeconds: row.min_seconds != null ? row.min_seconds : 0,
@@ -41901,6 +41913,7 @@ async function handle38(request, env, ctx, url, sess) {
         passMark: m.passMark,
         minSeconds: m.minSeconds,
         questionCount: m.questionCount,
+        hasVideo: !!m.video,
         myStatus: b ? Number(b.passed) ? "passed" : "attempted" : "not_started",
         myScore: b ? b.score : null,
         myPassedAt: b && Number(b.passed) ? b.submitted_at : null,
@@ -42000,11 +42013,12 @@ async function handle38(request, env, ctx, url, sess) {
       const minSeconds = clampInt(b.minSeconds != null ? b.minSeconds : 0, 0, 86400);
       const active = b.active === false ? 0 : 1;
       const sortOrder = clampInt(b.sortOrder || 0, 0, 1e5);
+      const video = parseYouTubeId(b.video);
       await env.DB.prepare(
-        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id,id) DO UPDATE SET title=excluded.title, category=excluded.category,
-           content=excluded.content, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
+           content=excluded.content, video=excluded.video, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
            questions=excluded.questions, active=excluded.active, sort_order=excluded.sort_order,
            updated_at=excluded.updated_at`
       ).bind(
@@ -42013,6 +42027,7 @@ async function handle38(request, env, ctx, url, sess) {
         title,
         String(b.category || "").trim(),
         String(b.content || ""),
+        video,
         passMark,
         minSeconds,
         JSON.stringify(questions),

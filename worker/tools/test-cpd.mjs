@@ -1,7 +1,7 @@
 // Focused unit test for the audit-critical CPD logic: question normalisation,
 // answer-stripping (answers never reach the browser) and grading.
 //   node --no-warnings worker/tools/test-cpd.mjs
-import { normQuestions, stripAnswers, gradeAttempt } from "../src/routes/cpd.js";
+import { normQuestions, stripAnswers, gradeAttempt, parseYouTubeId } from "../src/routes/cpd.js";
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  ✗ " + msg); } }
@@ -44,6 +44,15 @@ const rg = gradeAttempt([], {});
 eq([rg.total, rg.score], [0, 100], "reading-only module (no questions) scores 100 / total 0");
 // A string answer index still grades (the client sends numbers, be defensive).
 eq(gradeAttempt([{ id: "q1", q: "a", options: ["x", "y"], answer: 1 }], { q1: "1" }).score, 100, "string answer index grades correctly");
+
+// ── parseYouTubeId ────────────────────────────────────────────────────────────
+eq(parseYouTubeId("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ", "parses a watch URL");
+eq(parseYouTubeId("https://youtu.be/dQw4w9WgXcQ?t=42"), "dQw4w9WgXcQ", "parses a youtu.be share URL");
+eq(parseYouTubeId("https://www.youtube.com/embed/dQw4w9WgXcQ?rel=0"), "dQw4w9WgXcQ", "parses an embed URL");
+eq(parseYouTubeId("https://www.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ", "parses a shorts URL");
+eq(parseYouTubeId("dQw4w9WgXcQ"), "dQw4w9WgXcQ", "accepts a bare 11-char id");
+eq(parseYouTubeId("not a video"), "", "returns empty for a non-YouTube string");
+eq(parseYouTubeId("https://vimeo.com/12345"), "", "returns empty for a non-YouTube URL");
 
 console.log((fail ? "✗" : "✓") + " CPD: " + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

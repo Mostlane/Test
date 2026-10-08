@@ -92,8 +92,11 @@
         <div><label class="f">Title *</label><input type="text" id="mTitle" placeholder="e.g. 18th Edition — Amendment changes"></div>
         <div><label class="f">Category</label><input type="text" id="mCat" placeholder="e.g. Inspection &amp; Testing"></div>
       </div>
-      <label class="f">Reading material</label>
-      <textarea id="mContent" placeholder="Paste or type the material to read. Use # Heading, ## Sub-heading, - bullet, **bold**."></textarea>
+      <label class="f">YouTube video (optional)</label>
+      <input type="text" id="mVideo" placeholder="Paste a YouTube link, e.g. https://www.youtube.com/watch?v=…">
+      <div class="muted" style="font-size:12px;margin-top:3px">Find a suitable training video on YouTube and paste its link — it plays inside the portal. The test unlocks when the video finishes.</div>
+      <label class="f">Reading material (optional)</label>
+      <textarea id="mContent" placeholder="Optional notes to read alongside the video. Use # Heading, ## Sub-heading, - bullet, **bold**."></textarea>
       <div class="grid2">
         <div><label class="f">Pass mark (%)</label><input type="number" id="mPass" min="0" max="100" value="80"></div>
         <div><label class="f">Minimum reading time (seconds)</label><input type="number" id="mMin" min="0" value="60"></div>
@@ -122,6 +125,7 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){retu
 function fmtDur(sec){ sec=Math.round(sec||0); if(sec<60) return sec+"s"; var m=Math.floor(sec/60), s=sec%60; if(m<60) return m+"m"+(s?" "+s+"s":""); var h=Math.floor(m/60); return h+"h "+(m%60)+"m"; }
 function fmtDate(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 function fmtDay(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric"}); }catch(e){ return ""; } }
+function ytId(s){ s=String(s||"").trim(); if(!s) return ""; if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s; var m=s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/); return m?m[1]:""; }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 [].forEach.call(document.querySelectorAll(".tab"), function(t){
@@ -184,6 +188,7 @@ function openEditor(id){
   editId = m ? m.id : null;
   $("edTitle").textContent = m ? "Edit module" : "New module";
   $("mTitle").value = m?m.title:""; $("mCat").value = m?m.category:""; $("mContent").value = m?m.content:"";
+  $("mVideo").value = (m&&m.video) ? ("https://youtu.be/"+m.video) : "";
   $("mPass").value = m?m.passMark:80; $("mMin").value = m?m.minSeconds:60; $("mActive").checked = m?m.active:true;
   editQuestions = m ? (m.questions||[]).map(function(q){ return { id:q.id||qUid(), q:q.q, options:(q.options||[]).slice(), answer:q.answer||0 }; }) : [];
   renderQEditor();
@@ -196,6 +201,8 @@ $("cancelBtn").onclick=function(){ $("edModal").classList.remove("show"); };
 $("saveBtn").onclick=async function(){
   var title=$("mTitle").value.trim();
   if(!title){ $("edMsg").textContent="A title is required."; return; }
+  var vid=$("mVideo").value.trim();
+  if(vid && !ytId(vid)){ $("edMsg").textContent="That doesn't look like a YouTube link — paste the video's URL (or clear the field)."; return; }
   // Light validation: every question needs text + ≥2 non-blank options.
   for(var i=0;i<editQuestions.length;i++){
     var q=editQuestions[i]; var opts=q.options.map(function(o){return String(o||"").trim();}).filter(Boolean);
@@ -205,6 +212,7 @@ $("saveBtn").onclick=async function(){
   $("saveBtn").disabled=true; $("edMsg").textContent="Saving…";
   try{
     var body={ id:editId||undefined, title:title, category:$("mCat").value.trim(), content:$("mContent").value,
+      video:$("mVideo").value.trim(),
       passMark:Number($("mPass").value)||0, minSeconds:Number($("mMin").value)||0, active:$("mActive").checked,
       questions:editQuestions };
     var r = await authFetch("/cpd/admin/module",{ method:"POST", body:JSON.stringify(body) }).then(function(x){return x.json();});

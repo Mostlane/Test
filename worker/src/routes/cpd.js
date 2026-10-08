@@ -24,10 +24,13 @@ import { onceMigration } from "../lib/once.js";
 
 async function ensureTables__raw(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_modules (
-    tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT,
+    tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT, video TEXT,
     pass_mark INTEGER, min_seconds INTEGER, questions TEXT, active INTEGER DEFAULT 1,
     sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, created_by TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
+  // `video` added Oct 2026 — a module can embed a YouTube video to watch before the
+  // test. Self-migrating for a cpd_modules table created before this column existed.
+  try { await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN video TEXT`).run(); } catch {}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_attempts (
     tenant_id INTEGER, id TEXT, module_id TEXT, module_title TEXT, category TEXT,
     username TEXT, started_at TEXT, submitted_at TEXT, duration_seconds INTEGER,
@@ -38,6 +41,15 @@ async function ensureTables__raw(env) {
 }
 const ensureTables = onceMigration(ensureTables__raw);
 
+// Pull the 11-char YouTube video id out of whatever the admin pastes (a full
+// watch/share/embed/shorts URL, or a bare id). Returns "" if it isn't a YouTube id.
+export function parseYouTubeId(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;                    // already a bare id
+  const m = s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : "";
+}
 const nowISO = () => new Date().toISOString();
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : "cpd-" + Date.now() + "-" + Math.random().toString(36).slice(2));
 const clampInt = (v, lo, hi) => { let n = Math.round(Number(v) || 0); if (n < lo) n = lo; if (n > hi) n = hi; return n; };
@@ -83,7 +95,7 @@ function shapeModule(row, { withAnswers = false } = {}) {
   let questions = []; try { questions = JSON.parse(row.questions || "[]"); } catch {}
   if (!Array.isArray(questions)) questions = [];
   return {
-    id: row.id, title: row.title || "", category: row.category || "",
+    id: row.id, title: row.title || "", category: row.category || "", video: row.video || "",
     content: row.content || "", passMark: row.pass_mark != null ? row.pass_mark : 80,
     minSeconds: row.min_seconds != null ? row.min_seconds : 0,
     active: row.active == null ? true : !!Number(row.active),
@@ -164,7 +176,7 @@ export async function handle(request, env, ctx, url, sess) {
       const b = best[r.id];
       return {
         id: m.id, title: m.title, category: m.category, passMark: m.passMark,
-        minSeconds: m.minSeconds, questionCount: m.questionCount,
+        minSeconds: m.minSeconds, questionCount: m.questionCount, hasVideo: !!m.video,
         myStatus: b ? (Number(b.passed) ? "passed" : "attempted") : "not_started",
         myScore: b ? b.score : null, myPassedAt: (b && Number(b.passed)) ? b.submitted_at : null,
         myLastAt: b ? b.submitted_at : null, myAttempts: mine.filter(a => a.module_id === r.id).length,
@@ -244,14 +256,15 @@ export async function handle(request, env, ctx, url, sess) {
       const minSeconds = clampInt(b.minSeconds != null ? b.minSeconds : 0, 0, 86400);
       const active = b.active === false ? 0 : 1;
       const sortOrder = clampInt(b.sortOrder || 0, 0, 100000);
+      const video = parseYouTubeId(b.video);
       await env.DB.prepare(
-        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id,id) DO UPDATE SET title=excluded.title, category=excluded.category,
-           content=excluded.content, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
+           content=excluded.content, video=excluded.video, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
            questions=excluded.questions, active=excluded.active, sort_order=excluded.sort_order,
            updated_at=excluded.updated_at`
-      ).bind(tid, id, title, String(b.category || "").trim(), String(b.content || ""), passMark, minSeconds,
+      ).bind(tid, id, title, String(b.category || "").trim(), String(b.content || ""), video, passMark, minSeconds,
         JSON.stringify(questions), active, sortOrder,
         (existing && existing.created_at) || now, now, (existing && existing.created_by) || me).run();
       const row = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).first();
