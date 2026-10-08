@@ -544,12 +544,16 @@
     if(job && job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     // EM / PAT jobs complete via the certificate panel — only the start-work statuses here.
     if(job && (job.emTest || job.pat) && !job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
-    // Site-audit jobs: slim set — Travelling · In Progress · Complete (Complete is
-    // gated on every checklist item having its photo).
-    if(jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
-    // Electrical test: slim set — Travelling · In Progress · Complete (the
-    // remedials list is the deliverable; completion is relaxed).
-    if(job && job.elecTest && !job.firestopping && !(job.emTest||job.pat) && !jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
+    // Site-audit jobs (incl. the EM/elec REMEDIAL WORKS jobs raised via "Create a
+    // works job"): Travelling · In Progress · On Hold · Complete. On Hold lets an
+    // engineer PARK a part-finished works job (pending office approval) exactly
+    // like a normal job — the checklist progress is kept. Complete is still gated
+    // on every item having its photo. (Quote stays off — a works job isn't quoted.)
+    if(jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="On Hold" || s.n==="Complete"; });
+    // Electrical test: Travelling · In Progress · On Hold · Complete (the remedials
+    // list is the deliverable; completion is relaxed, and On Hold lets a part-done
+    // test be parked).
+    if(job && job.elecTest && !job.firestopping && !(job.emTest||job.pat) && !jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="On Hold" || s.n==="Complete"; });
     // Pump maintenance completes via the form panel — only the start-work statuses here.
     if(job && job.pumpMaintenance) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
@@ -600,9 +604,18 @@
     if(job && job.investigateOnly) return [];
     // Electrical test: the remedials list is the deliverable — nothing else is
     // gated, so Complete is always allowed.
-    if(job && job.elecTest && !jobIsAudit()){ return (chosen==="Complete") ? [] : null; }
-    // Site-audit job: Complete needs every checklist item photographed.
-    if(jobIsAudit()){ if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; } return null; }
+    if(job && job.elecTest && !jobIsAudit()){
+      if(chosen==="On Hold"){ var hm=[]; if(!ntrim("holdReason"))hm.push("the reason"); if(!ntrim("holdNeeds"))hm.push("what's needed to resume"); return hm; }
+      return (chosen==="Complete") ? [] : null;
+    }
+    // Site-audit job: Complete needs every checklist item photographed; On Hold
+    // just needs its pack (reason + what's needed) like a normal job, so the
+    // engineer can park a part-finished works job for office approval.
+    if(jobIsAudit()){
+      if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; }
+      if(chosen==="On Hold"){ var hm2=[]; if(!ntrim("holdReason"))hm2.push("the reason"); if(!ntrim("holdNeeds"))hm2.push("what's needed to resume"); return hm2; }
+      return null;
+    }
     if(chosen==="Complete"){var m=[];if(noteRequired() && ($("note").value||"").trim().length<15)m.push("a completion note");if(photoRequired() && !photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
     if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photoRequired() && photos.length<1)m.push("a photo");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
