@@ -92,14 +92,15 @@
         <div><label class="f">Title *</label><input type="text" id="mTitle" placeholder="e.g. 18th Edition — Amendment changes"></div>
         <div><label class="f">Category</label><input type="text" id="mCat" placeholder="e.g. Inspection &amp; Testing"></div>
       </div>
-      <label class="f">YouTube video (optional)</label>
-      <input type="text" id="mVideo" placeholder="Paste a YouTube link, e.g. https://www.youtube.com/watch?v=…">
-      <div class="muted" style="font-size:12px;margin-top:3px">Find a suitable training video on YouTube and paste its link — it plays inside the portal. The test unlocks when the video finishes.</div>
-      <label class="f">Reading material (optional)</label>
-      <textarea id="mContent" placeholder="Optional notes to read alongside the video. Use # Heading, ## Sub-heading, - bullet, **bold**."></textarea>
+      <label class="f">Videos in this lesson</label>
+      <div class="muted" style="font-size:12px;margin:0 0 6px">Paste a YouTube link for each video to play, in order. Optionally set a <b>Start</b>/<b>End</b> time (seconds or m:ss, e.g. 1:30) to play just that segment — leave blank for the whole video. The learner can pause &amp; go full screen but <b>can't skip</b>, and the test only opens once every video has played in full.</div>
+      <div id="segEditor"></div>
+      <button class="btn line sm" id="addSeg" style="margin-top:4px">➕ Add a video</button>
+      <label class="f" style="margin-top:14px">Reading material (optional)</label>
+      <textarea id="mContent" placeholder="Optional notes to read alongside the video(s). Use # Heading, ## Sub-heading, - bullet, **bold**."></textarea>
       <div class="grid2">
         <div><label class="f">Pass mark (%)</label><input type="number" id="mPass" min="0" max="100" value="80"></div>
-        <div><label class="f">Minimum reading time (seconds)</label><input type="number" id="mMin" min="0" value="60"></div>
+        <div></div>
       </div>
       <label style="font-size:13.5px;font-weight:600;display:block;margin:10px 0 0"><input type="checkbox" id="mActive" checked style="width:auto"> Active (visible to engineers)</label>
 
@@ -126,6 +127,24 @@ function fmtDur(sec){ sec=Math.round(sec||0); if(sec<60) return sec+"s"; var m=M
 function fmtDate(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 function fmtDay(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric"}); }catch(e){ return ""; } }
 function ytId(s){ s=String(s||"").trim(); if(!s) return ""; if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s; var m=s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/); return m?m[1]:""; }
+function secToClock(s){ if(s==null||s==="") return ""; s=Math.round(Number(s)); if(!isFinite(s)||s<0) return ""; var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60; return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(ss).padStart(2,"0"); }
+
+// ── Lesson videos (ordered clips) ─────────────────────────────────────────────
+var editSegments=[];
+function renderSegEditor(){
+  $("segEditor").innerHTML = editSegments.map(function(s,i){
+    return '<div class="segrow" style="display:flex;gap:7px;align-items:center;margin:6px 0;flex-wrap:wrap">'
+      + '<input type="text" data-su="'+i+'" value="'+esc(s.url||"")+'" placeholder="YouTube link" style="flex:1;min-width:170px">'
+      + '<input type="text" data-ss="'+i+'" value="'+esc(s.start||"")+'" placeholder="Start" style="width:84px">'
+      + '<input type="text" data-se="'+i+'" value="'+esc(s.end||"")+'" placeholder="End" style="width:84px">'
+      + '<button class="btn line sm" data-sr="'+i+'" title="Remove">✕</button></div>';
+  }).join("") || '<div class="muted" style="font-size:12px">No video yet — add one, or leave empty for a reading-only lesson.</div>';
+  [].forEach.call(document.querySelectorAll("[data-su]"),function(el){ el.oninput=function(){ editSegments[+el.getAttribute("data-su")].url=el.value; }; });
+  [].forEach.call(document.querySelectorAll("[data-ss]"),function(el){ el.oninput=function(){ editSegments[+el.getAttribute("data-ss")].start=el.value; }; });
+  [].forEach.call(document.querySelectorAll("[data-se]"),function(el){ el.oninput=function(){ editSegments[+el.getAttribute("data-se")].end=el.value; }; });
+  [].forEach.call(document.querySelectorAll("[data-sr]"),function(el){ el.onclick=function(){ editSegments.splice(+el.getAttribute("data-sr"),1); renderSegEditor(); }; });
+}
+$("addSeg").onclick=function(){ editSegments.push({url:"",start:"",end:""}); renderSegEditor(); };
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 [].forEach.call(document.querySelectorAll(".tab"), function(t){
@@ -149,7 +168,7 @@ async function loadModules(){
     $("modList").innerHTML = MODULES.length ? MODULES.map(function(m){
       var st=m.stats||{attempts:0,passes:0};
       return '<div class="row"><div class="g"><h3>'+esc(m.title)+'</h3>'
-        + '<div class="meta">'+(m.category?esc(m.category)+" · ":"")+m.questionCount+' question'+(m.questionCount===1?"":"s")+' · pass '+m.passMark+'% · '+st.attempts+' attempt'+(st.attempts===1?"":"s")+', '+st.passes+' pass'+(st.passes===1?"":"es")+'</div></div>'
+        + '<div class="meta">'+((m.segments&&m.segments.length)?("🎬 "+m.segments.length+" video"+(m.segments.length===1?"":"s")+" · "):"")+(m.category?esc(m.category)+" · ":"")+m.questionCount+' question'+(m.questionCount===1?"":"s")+' · pass '+m.passMark+'% · '+st.attempts+' attempt'+(st.attempts===1?"":"s")+', '+st.passes+' pass'+(st.passes===1?"":"es")+'</div></div>'
         + (m.active?'<span class="pill on">Active</span>':'<span class="pill off">Hidden</span>')
         + ' <button class="btn line sm" data-edit="'+esc(m.id)+'">Edit</button></div>';
     }).join("") : '<span class="muted">No modules yet — add one.</span>';
@@ -188,8 +207,9 @@ function openEditor(id){
   editId = m ? m.id : null;
   $("edTitle").textContent = m ? "Edit module" : "New module";
   $("mTitle").value = m?m.title:""; $("mCat").value = m?m.category:""; $("mContent").value = m?m.content:"";
-  $("mVideo").value = (m&&m.video) ? ("https://youtu.be/"+m.video) : "";
-  $("mPass").value = m?m.passMark:80; $("mMin").value = m?m.minSeconds:60; $("mActive").checked = m?m.active:true;
+  editSegments = (m && m.segments) ? m.segments.map(function(s){ return { url:"https://youtu.be/"+s.id, start:secToClock(s.start), end:secToClock(s.end) }; }) : [];
+  renderSegEditor();
+  $("mPass").value = m?m.passMark:80; $("mActive").checked = m?m.active:true;
   editQuestions = m ? (m.questions||[]).map(function(q){ return { id:q.id||qUid(), q:q.q, options:(q.options||[]).slice(), answer:q.answer||0 }; }) : [];
   renderQEditor();
   $("delBtn").classList.toggle("hidden", !m);
@@ -201,8 +221,12 @@ $("cancelBtn").onclick=function(){ $("edModal").classList.remove("show"); };
 $("saveBtn").onclick=async function(){
   var title=$("mTitle").value.trim();
   if(!title){ $("edMsg").textContent="A title is required."; return; }
-  var vid=$("mVideo").value.trim();
-  if(vid && !ytId(vid)){ $("edMsg").textContent="That doesn't look like a YouTube link — paste the video's URL (or clear the field)."; return; }
+  var segOut=[];
+  for(var si=0;si<editSegments.length;si++){
+    var sg=editSegments[si], su=String(sg.url||"").trim(); if(!su) continue;
+    if(!ytId(su)){ $("edMsg").textContent="Video "+(si+1)+" isn't a valid YouTube link."; return; }
+    segOut.push({ url:su, start:String(sg.start||"").trim(), end:String(sg.end||"").trim() });
+  }
   // Light validation: every question needs text + ≥2 non-blank options.
   for(var i=0;i<editQuestions.length;i++){
     var q=editQuestions[i]; var opts=q.options.map(function(o){return String(o||"").trim();}).filter(Boolean);
@@ -212,8 +236,7 @@ $("saveBtn").onclick=async function(){
   $("saveBtn").disabled=true; $("edMsg").textContent="Saving…";
   try{
     var body={ id:editId||undefined, title:title, category:$("mCat").value.trim(), content:$("mContent").value,
-      video:$("mVideo").value.trim(),
-      passMark:Number($("mPass").value)||0, minSeconds:Number($("mMin").value)||0, active:$("mActive").checked,
+      segments:segOut, passMark:Number($("mPass").value)||0, minSeconds:0, active:$("mActive").checked,
       questions:editQuestions };
     var r = await authFetch("/cpd/admin/module",{ method:"POST", body:JSON.stringify(body) }).then(function(x){return x.json();});
     if(!r.ok){ $("edMsg").textContent=r.error||"Couldn’t save."; $("saveBtn").disabled=false; return; }

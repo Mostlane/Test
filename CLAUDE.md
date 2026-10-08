@@ -4764,27 +4764,38 @@ holds CPD). Users-Admin grants it under "Compliance & docs".
   NICEIC). One clearly-labelled **EXAMPLE module is seeded** on first load (edit or
   delete it and build your own). `_headers` no-cache on both pages; portal-config `?v=42`,
   SW `mostlane-v143` (new sidebar nav item). Test `node --no-warnings
-  worker/tools/test-cpd.mjs` (now 22 cases: normQuestions, answer-stripping, grading
-  incl. reading-only + partial + string-index, + `parseYouTubeId`).
-- **YouTube video modules (Oct 2026, Jamie's ask — "find videos on YouTube, play them
-  in a window, then questions at the end").** A module can embed a YouTube video to
-  **watch before the test**. cpd_modules gained a **`video`** column (self-migrating
-  ALTER; stores the clean 11-char YouTube id). **`parseYouTubeId`** (exported, tested)
-  pulls the id out of whatever the admin pastes — a watch / youtu.be / embed / shorts
-  URL, or a bare id — returning "" if it isn't YouTube. cpd-admin.html editor has a
-  "YouTube video (optional)" field (validated client-side with the same parser);
-  shapeModule returns `video`; /cpd/modules carries `hasVideo` (a 🎬 card marker).
-  **Learner (cpd.html):** the read view shows a responsive 16:9 embed (`.vwrap` iframe
-  `youtube.com/embed/<id>?enablejsapi=1&rel=0&modestbranding=1`), rendered immediately
-  so it ALWAYS plays, with the **IFrame Player API attached for the "ended" unlock**
-  (`ensureYtApi` loads `youtube.com/iframe_api` once; `onStateChange===ENDED` →
-  `videoWatched`). **Unlock rule for a video module:** the test unlocks when the video
-  FINISHES (primary), else an admin time fallback (`min_seconds` — set it ≈ the video
-  length to enforce watching), else — ONLY if the JS API failed to load (12s timeout) —
-  a 30s floor so the learner is never trapped. The video is destroyed (playback stops)
-  when they move to the test / leave / go back; re-mounted on a retry. The SW skips
-  cross-origin, so YouTube is never intercepted. Active watch time is logged like read
-  time (visibility-aware + server wall-clock clamp). **TODO/next:** optional PDF/document
+  worker/tools/test-cpd.mjs` (33 cases: normQuestions, answer-stripping, grading
+  incl. reading-only + partial + string-index, + parseYouTubeId/parseTime/parseSegments).
+- **YouTube video LESSONS — no-skip, segmented, keep-screen-on (Oct 2026, Jamie's spec).**
+  A lesson is an **ordered list of YouTube clips** played in a window in the portal; the
+  learner can **pause and go full screen but CANNOT skip**, and the **test only opens
+  once every clip has played in full**. Replaces the earlier single-video + min-read-time
+  idea (**the "minimum reading time" field is GONE**). cpd_modules gained a **`segments`**
+  column (self-migrating; JSON `[{id,start,end}]`, start/end in seconds or null) alongside
+  the legacy `video` (a legacy single `video` reads as one clip; `video` now mirrors
+  segments[0].id). Helpers (exported + tested): **`parseYouTubeId`** (watch/youtu.be/
+  embed/shorts URL or bare id → the 11-char id), **`parseTime`** ("1:30"/"1:02:05"/
+  seconds → seconds), **`parseSegments`** (an array of {url,start,end} → clean clips, caps
+  12, drops a bad url + an end≤start). shapeModule returns `segments`; /cpd/modules carries
+  `hasVideo`+`videoCount` (🎬 card markers). **Admin (cpd-admin.html):** a "Videos in this
+  lesson" editor — a row per clip (YouTube link + optional Start/End as m:ss or seconds,
+  add/remove), reading material optional; no min-time field. **Learner (cpd.html):** a
+  responsive 16:9 player via the **IFrame Player API** with the native controls HIDDEN
+  (`controls:0, disablekb:1, fs:0, modestbranding:1, rel:0, playsinline:1`) — so there is
+  no scrub bar to skip with — plus our OWN overlay **⏸ Pause / ▶ Resume** and **⛶ Full
+  screen** buttons and a "Video N of M" counter. A **▶ Start lesson** overlay kicks off
+  playback (the gesture autoplay needs + lets us take the wake lock); each clip is cued
+  with `startSeconds`/`endSeconds` (so playback is bounded to the set segment), and on the
+  clip's `ENDED` the next clip auto-loads; after the last, `allWatched=true` unlocks the
+  test. **📱 "Keep screen on while watching"** toggle (default on) uses the **Screen Wake
+  Lock API** (`navigator.wakeLock.request("screen")`), re-acquired on resume + when the
+  tab returns to the foreground, released when paused/finished/left. **Never traps the
+  learner:** if the JS API is blocked or a clip is private/removed (`onError`, or a 15s
+  ready timeout), it DEGRADES to a plain embed (with YouTube's own controls) + a manual
+  "✓ I have watched it" unlock. The player is destroyed (playback stops) on moving to the
+  test / leaving / back; re-mounted on a retry. The SW skips cross-origin so YouTube is
+  never intercepted. Watch time is still logged (visibility-aware + server wall-clock
+  clamp). Test `test-cpd.mjs` now 33 cases (+ parseTime/parseSegments). **TODO/next:** optional PDF/document
   attach per module (reading material as an uploaded file); per-user printable CPD
   certificate; a yearly "who's done their CPD" reminder; fold into the home-hub.
 

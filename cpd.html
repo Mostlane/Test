@@ -31,7 +31,16 @@
     .content h2{ font-size:17px; color:var(--navy); margin:16px 0 6px; } .content h3{ font-size:14.5px; color:var(--navy); margin:12px 0 5px; }
     .content p{ margin:8px 0; line-height:1.6; font-size:14.5px; } .content ul{ margin:8px 0 8px 2px; padding-left:20px; } .content li{ margin:4px 0; line-height:1.55; }
     .vwrap{ position:relative; width:100%; padding-top:56.25%; border-radius:12px; overflow:hidden; background:#000; }
-    .vwrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+    .vwrap #ytFrame, .vwrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+    .vwrap:fullscreen, .vwrap:-webkit-full-screen{ padding-top:0; border-radius:0; }
+    .vstart{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); }
+    .vstartbtn{ background:#fff; color:var(--navy); border:none; border-radius:999px; padding:13px 26px; font:700 16px inherit; cursor:pointer; }
+    .vctrls{ position:absolute; left:0; right:0; bottom:0; z-index:4; display:none; align-items:center; gap:9px; padding:8px 10px; background:linear-gradient(transparent,rgba(0,0,0,.7)); }
+    .vwrap.playing .vctrls{ display:flex; }
+    .vcbtn{ background:rgba(255,255,255,.92); color:var(--navy); border:none; border-radius:8px; padding:7px 12px; font:700 13px inherit; cursor:pointer; }
+    .vprog{ color:#fff; font-size:12.5px; font-weight:600; margin-left:auto; text-shadow:0 1px 2px rgba(0,0,0,.7); }
+    .wake{ display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--muted); margin-top:9px; }
+    .wake input{ width:auto; }
     .timer{ position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:#eaf0f7; border:1px solid #cfe0f2; color:var(--navy);
       border-radius:10px; padding:9px 13px; font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px; margin-bottom:10px; }
     .q{ border:1px solid var(--line); border-radius:12px; padding:12px 13px; margin:10px 0; }
@@ -75,8 +84,17 @@
         <div class="meta muted" id="rCat" style="font-size:12px"></div>
       </div>
       <div class="card hidden" id="videoCard" style="padding:12px">
-        <div class="vwrap" id="videoBox"></div>
-        <div class="muted" id="videoHint" style="font-size:12.5px;margin-top:8px"></div>
+        <div class="vwrap" id="videoBox">
+          <div id="ytFrame"></div>
+          <div class="vstart" id="vStart"><button class="vstartbtn" id="vStartBtn">▶ Start lesson</button></div>
+          <div class="vctrls" id="vCtrls">
+            <button class="vcbtn" id="vPause">⏸ Pause</button>
+            <button class="vcbtn" id="vFull">⛶ Full screen</button>
+            <span class="vprog" id="vProg"></span>
+          </div>
+        </div>
+        <label class="wake"><input type="checkbox" id="vWake" checked> 📱 Keep screen on while watching</label>
+        <div class="muted" id="videoHint" style="font-size:12.5px;margin-top:6px"></div>
       </div>
       <div class="card hidden" id="contentCard"><div class="content" id="rContent"></div></div>
       <button class="btn wide" id="startTestBtn" disabled>Start the test →</button>
@@ -135,44 +153,97 @@ function fmtDate(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleSt
 // ── Timer (visibility-aware: only counts while the page is on screen) ──────────
 var curModule=null, startedAtISO="", activeSecs=0, timerInt=null;
 
-// ── YouTube video (embedded; the test unlocks when it finishes) ────────────────
-var ytPlayer=null, videoWatched=false, ytApiReady=false, ytApiFailed=false, ytFailTimer=null;
+// ── YouTube LESSON player (ordered clips · NO-SKIP · keep-screen-on) ───────────
+// curModule.segments = [{id,start,end}] plays in order via the IFrame API with the
+// native controls hidden (controls:0 + disablekb:1), so the learner can only PAUSE
+// and go FULL SCREEN (our own buttons) — never scrub/skip. endSeconds bounds each
+// clip; when the last clip ends the test unlocks.
+var ytPlayer=null, allWatched=false, segIdx=0, playing=false, wakeLock=null;
+var ytApiReady=false, apiFailed=false, ytFailTimer=null;
 var ytApiState=0, ytReadyCbs=[];   // 0 none · 1 loading · 2 ready
 function ensureYtApi(cb){
   if(ytApiState===2){ cb(); return; }
   ytReadyCbs.push(cb);
   if(ytApiState===0){
     ytApiState=1;
-    window.onYouTubeIframeAPIReady=function(){ ytApiState=2; var cbs=ytReadyCbs.splice(0); cbs.forEach(function(f){ try{f();}catch(e){} }); };
-    var s=document.createElement("script"); s.src="https://www.youtube.com/iframe_api"; s.onerror=function(){ ytApiFailed=true; paintTimer(); };
+    window.onYouTubeIframeAPIReady=function(){ ytApiState=2; ytReadyCbs.splice(0).forEach(function(f){ try{f();}catch(e){} }); };
+    var s=document.createElement("script"); s.src="https://www.youtube.com/iframe_api"; s.onerror=onApiFail;
     document.head.appendChild(s);
   }
 }
-function mountVideo(id){
-  videoWatched=false; ytApiReady=false; ytApiFailed=false;
-  // Render the iframe immediately so the video ALWAYS plays, even if the JS API is
-  // blocked; then attach the player API to it for the "ended" unlock.
-  $("videoBox").innerHTML='<iframe id="ytFrame" src="https://www.youtube.com/embed/'+encodeURIComponent(id)
-    +'?enablejsapi=1&rel=0&modestbranding=1&playsinline=1" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
+function segs(){ return (curModule&&curModule.segments)||[]; }
+function setProg(){ var p=$("vProg"); if(p){ var n=segs().length; p.textContent = n>1 ? ("Video "+Math.min(segIdx+1,n)+" of "+n) : ""; } }
+function cueSeg(i){
+  var seg=segs()[i]; if(!seg||!ytPlayer) return;
+  var o={ videoId:seg.id }; if(seg.start!=null) o.startSeconds=seg.start; if(seg.end!=null) o.endSeconds=seg.end;
+  try{ if(i===0) ytPlayer.cueVideoById(o); else ytPlayer.loadVideoById(o); }catch(e){}   // clips 2+ auto-play
+  setProg();
+}
+function mountLesson(){
+  allWatched=false; segIdx=0; playing=false; ytApiReady=false; apiFailed=false;
   $("videoCard").classList.remove("hidden");
-  clearTimeout(ytFailTimer);
-  ytFailTimer=setTimeout(function(){ if(!ytApiReady){ ytApiFailed=true; paintTimer(); } }, 12000);
+  var box=$("videoBox"); box.classList.remove("playing");
+  var sb=$("vStartBtn"); if(sb){ sb.disabled=true; sb.textContent="Loading video…"; }
+  $("vStart").style.display="flex"; setProg();
+  var slot=$("ytFrame"); if(slot) slot.innerHTML="";
+  clearTimeout(ytFailTimer); ytFailTimer=setTimeout(function(){ if(!ytApiReady) onApiFail(); }, 15000);
   ensureYtApi(function(){
     try{
-      ytPlayer=new YT.Player("ytFrame",{ events:{
-        onReady:function(){ ytApiReady=true; clearTimeout(ytFailTimer); paintTimer(); },
-        onStateChange:function(e){ if(e.data===YT.PlayerState.ENDED){ videoWatched=true; paintTimer(); try{ if(window.MLUI&&MLUI.toast) MLUI.toast("Video finished — the test is unlocked."); }catch(_){} } }
-      }});
-    }catch(e){ ytApiFailed=true; paintTimer(); }
+      ytPlayer=new YT.Player("ytFrame",{
+        playerVars:{ controls:0, disablekb:1, modestbranding:1, rel:0, playsinline:1, iv_load_policy:3, fs:0 },
+        events:{
+          onReady:function(){ ytApiReady=true; clearTimeout(ytFailTimer); cueSeg(0); var b=$("vStartBtn"); if(b){ b.disabled=false; b.textContent="▶ Start lesson"; } },
+          onStateChange:onYtState,
+          onError:onApiFail   // a clip is private/removed → degrade so they're not stuck
+        }
+      });
+    }catch(e){ onApiFail(); }
   });
+  paintTimer();
 }
-function destroyVideo(){
-  clearTimeout(ytFailTimer);
-  try{ if(ytPlayer&&ytPlayer.destroy) ytPlayer.destroy(); }catch(e){}
-  ytPlayer=null;
-  if($("videoBox")) $("videoBox").innerHTML="";
+function onYtState(e){
+  if(e.data===YT.PlayerState.PLAYING){ playing=true; $("videoBox").classList.add("playing"); $("vStart").style.display="none"; var pb=$("vPause"); if(pb) pb.textContent="⏸ Pause"; if($("vWake")&&$("vWake").checked) acquireWake(); }
+  else if(e.data===YT.PlayerState.PAUSED){ playing=false; var pb=$("vPause"); if(pb) pb.textContent="▶ Resume"; releaseWake(); }
+  else if(e.data===YT.PlayerState.ENDED){ segIdx++; if(segIdx<segs().length) cueSeg(segIdx); else finishLesson(); }
+}
+function finishLesson(){
+  allWatched=true; playing=false; releaseWake();
+  if($("videoBox")) $("videoBox").classList.remove("playing");
+  paintTimer();
+  try{ if(window.MLUI&&MLUI.toast) MLUI.toast("Lesson watched — the test is unlocked."); }catch(e){}
+}
+function onApiFail(){
+  // Degraded mode (JS API blocked / clip unavailable): show a normal embed so they
+  // can still watch, + a manual "I've watched it" unlock so they're never trapped.
+  if(apiFailed||allWatched) return; apiFailed=true; ytApiReady=true; clearTimeout(ytFailTimer);
+  try{ if(ytPlayer&&ytPlayer.destroy) ytPlayer.destroy(); }catch(e){} ytPlayer=null;
+  var first=segs()[0]||{}, box=$("videoBox");
+  var src="https://www.youtube.com/embed/"+encodeURIComponent(first.id||"")+"?rel=0&modestbranding=1&playsinline=1"+(first.start!=null?("&start="+first.start):"")+(first.end!=null?("&end="+first.end):"");
+  box.innerHTML='<iframe id="ytFrame" src="'+src+'" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
+  box.classList.remove("playing");
+  var vh=$("videoHint"); if(vh) vh.innerHTML='Having trouble with the player? Watch the video above'+(segs().length>1?" (plus the other clips on YouTube)":"")+', then confirm: <button class="btn line" id="vManual" style="padding:5px 11px;margin-top:4px">✓ I have watched it</button>';
+  var mb=$("vManual"); if(mb) mb.onclick=finishLesson;
+  paintTimer();
+}
+function wireVideoCtrls(){
+  var pb=$("vPause"); if(pb) pb.onclick=function(){ if(!ytPlayer) return; try{ if(ytPlayer.getPlayerState&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING) ytPlayer.pauseVideo(); else ytPlayer.playVideo(); }catch(e){} };
+  var fb=$("vFull"); if(fb) fb.onclick=function(){ var el=$("videoBox"); try{ if(document.fullscreenElement||document.webkitFullscreenElement){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); } else { (el.requestFullscreen||el.webkitRequestFullscreen).call(el); } }catch(e){} };
+  var sb=$("vStartBtn"); if(sb) sb.onclick=function(){ if(ytPlayer){ try{ ytPlayer.playVideo(); }catch(e){} } };
+  var wk=$("vWake"); if(wk) wk.onchange=function(){ if(wk.checked&&playing) acquireWake(); else releaseWake(); };
+}
+function destroyLesson(){
+  clearTimeout(ytFailTimer); releaseWake(); playing=false;
+  try{ if(ytPlayer&&ytPlayer.destroy) ytPlayer.destroy(); }catch(e){} ytPlayer=null;
+  var box=$("videoBox");
+  if(box){ box.classList.remove("playing"); box.innerHTML='<div id="ytFrame"></div><div class="vstart" id="vStart"><button class="vstartbtn" id="vStartBtn">▶ Start lesson</button></div><div class="vctrls" id="vCtrls"><button class="vcbtn" id="vPause">⏸ Pause</button><button class="vcbtn" id="vFull">⛶ Full screen</button><span class="vprog" id="vProg"></span></div>'; wireVideoCtrls(); }
   if($("videoCard")) $("videoCard").classList.add("hidden");
 }
+// Wake Lock — keep the screen on while watching (re-acquired on resume + when the
+// tab returns to the foreground, since the OS releases it when hidden).
+async function acquireWake(){ if(wakeLock) return; try{ if("wakeLock" in navigator){ wakeLock=await navigator.wakeLock.request("screen"); if(wakeLock&&wakeLock.addEventListener) wakeLock.addEventListener("release",function(){ wakeLock=null; }); } }catch(e){ wakeLock=null; } }
+function releaseWake(){ try{ if(wakeLock&&wakeLock.release) wakeLock.release(); }catch(e){} wakeLock=null; }
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState==="visible" && playing && $("vWake") && $("vWake").checked && !wakeLock) acquireWake(); });
+wireVideoCtrls();
 function startTimer(){
   activeSecs=0; startedAtISO=new Date().toISOString();
   clearInterval(timerInt);
@@ -185,25 +256,19 @@ function stopTimer(){ clearInterval(timerInt); timerInt=null; }
 function paintTimer(){
   if($("rTimer")) $("rTimer").textContent=fmtClock(activeSecs);
   if($("tTimer")) $("tTimer").textContent=fmtClock(activeSecs);
-  var need = curModule ? (curModule.minSeconds||0) : 0;
-  var hasVideo = !!(curModule && curModule.video);
+  var hasVideo = !!(curModule && curModule.segments && curModule.segments.length);
+  // A video lesson unlocks the test only once EVERY clip has played in full.
+  // A reading-only lesson is available at once.
+  var unlocked = hasVideo ? allWatched : true;
   var btn=$("startTestBtn"), hint=$("rTimerHint"), vhint=$("videoHint");
-  // Unlock rule: a video module unlocks when the video FINISHES (primary), else an
-  // admin time fallback (read/watch for min time), else — only if the JS API failed
-  // to load — a 30s floor so the learner is never trapped. A plain module unlocks on
-  // the min time.
-  var unlocked = hasVideo
-    ? ( videoWatched || (need>0 && activeSecs>=need) || (ytApiFailed && activeSecs>=Math.max(need,30)) )
-    : ( activeSecs>=need );
   if(btn){
     btn.disabled = !unlocked;
     btn.textContent = (curModule && !curModule.questionCount) ? "Mark as "+(hasVideo?"watched":"read") : "Start the test →";
   }
-  if(hint) hint.textContent = unlocked ? "· you can start the test" : (hasVideo ? "· watch the video" : "· read for at least "+fmtClock(need));
-  if(vhint){
-    vhint.textContent = videoWatched ? "✓ Watched — the test is unlocked."
-      : unlocked ? "The test is unlocked."
-      : "▶ Watch the video to the end — the test unlocks when it finishes"+(need>0?(" (or after "+fmtClock(need)+")"):"")+".";
+  if(hint) hint.textContent = hasVideo ? (unlocked ? "· watched in full" : "· watch the video to unlock the test") : "";
+  if(vhint && hasVideo && !apiFailed){
+    vhint.textContent = allWatched ? "✓ Watched in full — the test is unlocked."
+      : "Watch the whole video — you can pause and go full screen, but not skip. The test unlocks when it finishes.";
   }
 }
 
@@ -223,7 +288,7 @@ async function loadList(){
               : (m.questionCount?(m.questionCount+" question"+(m.questionCount===1?"":"s")+" · pass "+m.passMark+"%"):"Reading only");
       return '<div class="card mod">'
         + '<div class="body"><h3>'+esc(m.title)+'</h3>'
-        + '<div class="meta">'+(m.hasVideo?"🎬 Video · ":"")+(m.category?esc(m.category)+" · ":"")+esc(sub)+'</div>'
+        + '<div class="meta">'+(m.hasVideo?("🎬 "+(m.videoCount>1?(m.videoCount+" videos"):"Video")+" · "):"")+(m.category?esc(m.category)+" · ":"")+esc(sub)+'</div>'
         + '<div style="margin-top:6px">'+pill+'</div></div>'
         + '<button class="btn line" data-open="'+esc(m.id)+'">'+(m.myStatus==="not_started"?"Start":"Open")+'</button></div>';
     }).join("") || '<div class="card muted">No CPD modules yet.</div>';
@@ -254,18 +319,18 @@ async function openModule(id){
     var hasContent = String(curModule.content||"").trim() !== "";
     $("contentCard").classList.toggle("hidden", !hasContent);
     if(hasContent) $("rContent").innerHTML = mdRender(curModule.content);
-    destroyVideo();
-    if(curModule.video) mountVideo(curModule.video);
+    destroyLesson();
+    if(curModule.segments && curModule.segments.length) mountLesson();
     show("readView");
     startTimer();
     paintTimer();
   }catch(e){ alert("Couldn’t open that module."); }
 }
-$("readBack").onclick=function(){ stopTimer(); destroyVideo(); curModule=null; show("listView"); };
+$("readBack").onclick=function(){ stopTimer(); destroyLesson(); curModule=null; show("listView"); };
 $("startTestBtn").onclick=function(){
   if(!curModule) return;
-  destroyVideo();   // stop the video once they move on to the test
-  if(!curModule.questionCount){ submitAttempt({}); return; }   // reading/watch-only module
+  destroyLesson();   // stop the video once they move on to the test
+  if(!curModule.questionCount){ submitAttempt({}); return; }   // watch/read-only module
   renderTest();
 };
 
@@ -318,8 +383,8 @@ function showResult(r){
   loadMyHist();
   loadList();   // refresh statuses in the background
 }
-$("rsBack").onclick=function(){ destroyVideo(); curModule=null; show("listView"); };
-$("rsRetry").onclick=function(){ if(!curModule) return; destroyVideo(); if(curModule.video) mountVideo(curModule.video); show("readView"); startTimer(); paintTimer(); };
+$("rsBack").onclick=function(){ destroyLesson(); curModule=null; show("listView"); };
+$("rsRetry").onclick=function(){ if(!curModule) return; destroyLesson(); if(curModule.segments&&curModule.segments.length) mountLesson(); show("readView"); startTimer(); paintTimer(); };
 
 loadList();
 </script>

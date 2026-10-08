@@ -31,6 +31,9 @@ async function ensureTables__raw(env) {
   // `video` added Oct 2026 — a module can embed a YouTube video to watch before the
   // test. Self-migrating for a cpd_modules table created before this column existed.
   try { await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN video TEXT`).run(); } catch {}
+  // `segments` (Oct 2026) — a lesson's ordered YouTube clips [{id,start,end}], which
+  // supersedes the single `video`. Self-migrating; a legacy `video` reads as one clip.
+  try { await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN segments TEXT`).run(); } catch {}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_attempts (
     tenant_id INTEGER, id TEXT, module_id TEXT, module_title TEXT, category TEXT,
     username TEXT, started_at TEXT, submitted_at TEXT, duration_seconds INTEGER,
@@ -49,6 +52,32 @@ export function parseYouTubeId(input) {
   if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;                    // already a bare id
   const m = s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : "";
+}
+// A time as seconds (number or "90") or a clock string ("1:30", "1:02:05") → seconds.
+export function parseTime(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v >= 0 ? Math.round(v) : null;
+  const s = String(v).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const m = s.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);   // h:mm:ss or m:ss
+  if (m) return (parseInt(m[1] || 0, 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+  return null;
+}
+// A LESSON is an ordered list of YouTube clips: [{id, start, end}] (start/end in
+// seconds, null = natural start/end). Only real YouTube ids with a sane range survive.
+export function parseSegments(input) {
+  const out = [];
+  for (const raw of (Array.isArray(input) ? input : [])) {
+    if (!raw) continue;
+    const id = parseYouTubeId(raw.id || raw.url || raw.video || "");
+    if (!id) continue;
+    let start = parseTime(raw.start), end = parseTime(raw.end);
+    if (start != null && start < 0) start = null;
+    if (end != null && start != null && end <= start) end = null;   // invalid range → play to natural end
+    out.push({ id, start: start == null ? null : start, end: end == null ? null : end });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 const nowISO = () => new Date().toISOString();
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : "cpd-" + Date.now() + "-" + Math.random().toString(36).slice(2));
@@ -94,8 +123,11 @@ export function gradeAttempt(questions, answers) {
 function shapeModule(row, { withAnswers = false } = {}) {
   let questions = []; try { questions = JSON.parse(row.questions || "[]"); } catch {}
   if (!Array.isArray(questions)) questions = [];
+  // Lesson clips: the `segments` list, else a legacy single `video` as one clip.
+  let segments = []; try { segments = JSON.parse(row.segments || "[]"); } catch {}
+  if (!Array.isArray(segments) || !segments.length) segments = row.video ? [{ id: row.video, start: null, end: null }] : [];
   return {
-    id: row.id, title: row.title || "", category: row.category || "", video: row.video || "",
+    id: row.id, title: row.title || "", category: row.category || "", video: row.video || "", segments,
     content: row.content || "", passMark: row.pass_mark != null ? row.pass_mark : 80,
     minSeconds: row.min_seconds != null ? row.min_seconds : 0,
     active: row.active == null ? true : !!Number(row.active),
@@ -176,7 +208,8 @@ export async function handle(request, env, ctx, url, sess) {
       const b = best[r.id];
       return {
         id: m.id, title: m.title, category: m.category, passMark: m.passMark,
-        minSeconds: m.minSeconds, questionCount: m.questionCount, hasVideo: !!m.video,
+        minSeconds: m.minSeconds, questionCount: m.questionCount,
+        hasVideo: !!(m.segments && m.segments.length), videoCount: (m.segments || []).length,
         myStatus: b ? (Number(b.passed) ? "passed" : "attempted") : "not_started",
         myScore: b ? b.score : null, myPassedAt: (b && Number(b.passed)) ? b.submitted_at : null,
         myLastAt: b ? b.submitted_at : null, myAttempts: mine.filter(a => a.module_id === r.id).length,
@@ -256,15 +289,18 @@ export async function handle(request, env, ctx, url, sess) {
       const minSeconds = clampInt(b.minSeconds != null ? b.minSeconds : 0, 0, 86400);
       const active = b.active === false ? 0 : 1;
       const sortOrder = clampInt(b.sortOrder || 0, 0, 100000);
-      const video = parseYouTubeId(b.video);
+      // A lesson's clips. Accept the new `segments` list; fall back to a single
+      // `video` field (back-compat). `video` mirrors the first clip's id.
+      const segments = parseSegments(b.segments && b.segments.length ? b.segments : (b.video ? [{ url: b.video }] : []));
+      const video = segments.length ? segments[0].id : "";
       await env.DB.prepare(
-        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,segments,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id,id) DO UPDATE SET title=excluded.title, category=excluded.category,
-           content=excluded.content, video=excluded.video, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
-           questions=excluded.questions, active=excluded.active, sort_order=excluded.sort_order,
-           updated_at=excluded.updated_at`
-      ).bind(tid, id, title, String(b.category || "").trim(), String(b.content || ""), video, passMark, minSeconds,
+           content=excluded.content, video=excluded.video, segments=excluded.segments, pass_mark=excluded.pass_mark,
+           min_seconds=excluded.min_seconds, questions=excluded.questions, active=excluded.active,
+           sort_order=excluded.sort_order, updated_at=excluded.updated_at`
+      ).bind(tid, id, title, String(b.category || "").trim(), String(b.content || ""), video, JSON.stringify(segments), passMark, minSeconds,
         JSON.stringify(questions), active, sortOrder,
         (existing && existing.created_at) || now, now, (existing && existing.created_by) || me).run();
       const row = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).first();
