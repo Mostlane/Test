@@ -127,7 +127,22 @@ export function gradeAttempt(questions, answers) {
 // questions. Everything FAILS SOFT: no captions / no key → a clear message so the
 // office falls back to pasting the transcript or adding questions by hand.
 const YT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const YT_WEB_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"; // the public InnerTube web key
+// Public InnerTube keys (the same ones YouTube's own web/app clients use).
+const YT_WEB_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const YT_ANDROID_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w";
+// Cookie that gets past Google's EU consent interstitial on a server fetch.
+const YT_CONSENT = "CONSENT=YES+1; SOCS=CAI";
+// InnerTube client contexts to try, in order of reliability from a datacenter IP.
+// ANDROID / TVHTML5 return captionTracks without the consent/bot wall the WEB
+// watch page hits; WEB is the last resort.
+const YT_CLIENTS = [
+  { key: YT_ANDROID_KEY, host: "youtubei.googleapis.com", ua: "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+    ctx: { clientName: "ANDROID", clientVersion: "19.09.37", androidSdkVersion: 30, hl: "en", gl: "GB" } },
+  { key: YT_WEB_KEY, host: "www.youtube.com", ua: "Mozilla/5.0",
+    ctx: { clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion: "2.0", hl: "en", gl: "GB" } },
+  { key: YT_WEB_KEY, host: "www.youtube.com", ua: YT_UA,
+    ctx: { clientName: "WEB", clientVersion: "2.20240726.00.00", hl: "en", gl: "GB" } },
+];
 
 // Bracket-scan the first JSON array that follows `key` in a blob of text (robust to
 // nested arrays inside each caption-track's name renderer). Returns the parsed array.
@@ -153,39 +168,46 @@ function decodeXmlText(s) {
     .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   return un(un(s)).replace(/\s+/g, " ").trim();
 }
-// Find a video's caption tracks: scrape the watch page first (one GET, no key), then
-// the InnerTube player API as a fallback. Returns [] when none are available.
+// Find a video's caption tracks. Try each InnerTube client in turn (Android/TV
+// first — they answer from a datacenter IP without the consent wall), then fall
+// back to scraping the watch page. Returns [] when the video genuinely has none.
 async function youtubeCaptionTracks(videoId) {
-  try {
-    const r = await fetch("https://www.youtube.com/watch?v=" + videoId + "&hl=en&bpctr=9999999999", {
-      headers: { "accept-language": "en-US,en;q=0.9", "user-agent": YT_UA, "cookie": "CONSENT=YES+1" },
-    });
-    if (r.ok) {
-      const html = await r.text();
-      const tracks = jsonArrayAfter(html, '"captionTracks":');
-      if (Array.isArray(tracks) && tracks.length) return tracks;
-    }
-  } catch {}
-  try {
-    const r = await fetch("https://www.youtube.com/youtubei/v1/player?key=" + YT_WEB_KEY, {
-      method: "POST",
-      headers: { "content-type": "application/json", "accept-language": "en", "user-agent": YT_UA },
-      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.20240726.00.00", hl: "en", gl: "GB" } }, videoId }),
-    });
-    if (r.ok) {
+  for (const c of YT_CLIENTS) {
+    try {
+      const r = await fetch("https://" + c.host + "/youtubei/v1/player?key=" + c.key, {
+        method: "POST",
+        headers: { "content-type": "application/json", "accept-language": "en", "user-agent": c.ua, "cookie": YT_CONSENT, "origin": "https://www.youtube.com" },
+        body: JSON.stringify({ context: { client: c.ctx }, videoId, params: "8AEB", contentCheckOk: true, racyCheckOk: true }),
+      });
+      if (!r.ok) continue;
       const d = await r.json();
       const t = d && d.captions && d.captions.playerCaptionsTracklistRenderer && d.captions.playerCaptionsTracklistRenderer.captionTracks;
       if (Array.isArray(t) && t.length) return t;
-    }
-  } catch {}
+    } catch {}
+  }
+  // Last resort: the HTML watch page (often consent-walled from a server).
+  for (const url of [
+    "https://www.youtube.com/watch?v=" + videoId + "&hl=en&bpctr=9999999999&has_verified=1",
+    "https://m.youtube.com/watch?v=" + videoId + "&hl=en",
+  ]) {
+    try {
+      const r = await fetch(url, { headers: { "accept-language": "en-US,en;q=0.9", "user-agent": YT_UA, "cookie": YT_CONSENT } });
+      if (!r.ok) continue;
+      const html = await r.text();
+      const tracks = jsonArrayAfter(html, '"captionTracks":');
+      if (Array.isArray(tracks) && tracks.length) return tracks;
+    } catch {}
+  }
   return [];
 }
 // Fetch + flatten one track's text, optionally clipped to [start,end] seconds.
 async function trackText(track, start, end) {
   const inWin = t => (start == null || t >= start) && (end == null || t <= end);
-  const base = String(track.baseUrl || ""); if (!base) return "";
+  let base = String(track.baseUrl || ""); if (!base) return "";
+  if (base.startsWith("//")) base = "https:" + base;
+  const hdr = { "accept-language": "en", "user-agent": YT_UA, "cookie": YT_CONSENT };
   try {
-    const r = await fetch(base + (base.includes("fmt=") ? "" : "&fmt=json3"), { headers: { "accept-language": "en", "user-agent": YT_UA } });
+    const r = await fetch(base + (base.includes("fmt=") ? "" : "&fmt=json3"), { headers: hdr });
     if (r.ok) {
       const j = await r.json(); const ev = Array.isArray(j.events) ? j.events : []; const parts = [];
       for (const e of ev) {
@@ -198,7 +220,7 @@ async function trackText(track, start, end) {
     }
   } catch {}
   try {
-    const r = await fetch(base, { headers: { "accept-language": "en", "user-agent": YT_UA } });
+    const r = await fetch(base, { headers: hdr });
     if (r.ok) {
       const xml = await r.text(); const parts = []; const re = /<text[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g; let m;
       while ((m = re.exec(xml))) { if (!inWin(parseFloat(m[1]) || 0)) continue; const t = decodeXmlText(m[2]); if (t) parts.push(t); }
@@ -455,7 +477,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (!vid) return json({ ok: false, needTranscript: true, error: "Add a YouTube link first, or paste the transcript below." }, {}, env, request);
         transcript = await fetchYouTubeTranscript(vid, { start: parseTime(b.start), end: parseTime(b.end) });
         source = "captions";
-        if (!transcript) return json({ ok: false, needTranscript: true, error: "Couldn't read this video's captions automatically (it may have none, or YouTube blocked it). On YouTube open the video → ⋯ More → Show transcript, copy it all, and paste it below." }, {}, env, request);
+        if (!transcript) return json({ ok: false, needTranscript: true, error: "Couldn't read this video's captions — it may not have any. Check the video has subtitles (the CC button on YouTube) and try again, or pick a video that does." }, {}, env, request);
       }
       if (!env.ANTHROPIC_API_KEY) return json({ ok: false, error: "AI isn't set up on the server (no API key). You can still add questions by hand." }, {}, env, request);
       transcript = transcript.slice(0, 16000);

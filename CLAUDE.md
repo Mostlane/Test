@@ -4803,11 +4803,16 @@ holds CPD). Users-Admin grants it under "Compliance & docs".
   multiple-choice questions. **POST /cpd/admin/ai-questions** (FullAccess)
   `{videoId?/url?, start?, end?, transcript?, count?(1-15,def 5), instructions?}`:
   a PASTED transcript wins; else **`fetchYouTubeTranscript(videoId,{start,end})`**
-  (exported) gets the captions — scrapes the watch page's `captionTracks` first
-  (one GET via `jsonArrayAfter` bracket-scan + `decodeXmlText` double-decode), then
-  the **InnerTube** `/youtubei/v1/player` WEB client as fallback; prefers a real
+  (exported) gets the captions. **It tries the InnerTube `/youtubei/v1/player`
+  ANDROID client FIRST, then TVHTML5, then WEB (`YT_CLIENTS`) — these answer from a
+  Cloudflare datacenter IP without the EU-consent / bot wall that blocks the HTML
+  watch page** (the watch-page `captionTracks` scrape is now only the last resort);
+  all carry a `CONSENT=YES+1; SOCS=CAI` cookie. The caption download then reads
+  json3 (`&fmt=json3`) else the XML (`decodeXmlText` double-decode). Prefers a real
   English track over an `asr` auto one; clips to the clip's own start/end so
-  questions come only from what the engineer watches. Then the shared local
+  questions come only from what the engineer watches. A video with NO captions
+  fails soft with "check the video has subtitles (CC)…" — pasting is a quiet
+  one-off fallback, not the expected path. Then the shared local
   `anthropicTool` helper (forced `set_questions` tool → `{questions:[{question,
   options[3-4],answer(0-based)}]}`, transcript capped 16k chars) + `normQuestions`.
   **Fails soft** at every step: no captions / YouTube blocked → `{needTranscript:true}`
