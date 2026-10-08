@@ -4795,7 +4795,31 @@ holds CPD). Users-Admin grants it under "Compliance & docs".
   "✓ I have watched it" unlock. The player is destroyed (playback stops) on moving to the
   test / leaving / back; re-mounted on a retry. The SW skips cross-origin so YouTube is
   never intercepted. Watch time is still logged (visibility-aware + server wall-clock
-  clamp). Test `test-cpd.mjs` now 33 cases (+ parseTime/parseSegments). **TODO/next:** optional PDF/document
+  clamp). Test `test-cpd.mjs` now 33 cases (+ parseTime/parseSegments).
+- **🤖 Draft questions FROM the video — no watching, no writing (Oct 2026, Jamie:
+  "I need a way for you to extract questions, I don't want to watch all of these
+  videos").** A YouTube video carries a transcript (captions), so the worker fetches
+  it server-side (the browser can't — cross-origin) and Claude writes the
+  multiple-choice questions. **POST /cpd/admin/ai-questions** (FullAccess)
+  `{videoId?/url?, start?, end?, transcript?, count?(1-15,def 5), instructions?}`:
+  a PASTED transcript wins; else **`fetchYouTubeTranscript(videoId,{start,end})`**
+  (exported) gets the captions — scrapes the watch page's `captionTracks` first
+  (one GET via `jsonArrayAfter` bracket-scan + `decodeXmlText` double-decode), then
+  the **InnerTube** `/youtubei/v1/player` WEB client as fallback; prefers a real
+  English track over an `asr` auto one; clips to the clip's own start/end so
+  questions come only from what the engineer watches. Then the shared local
+  `anthropicTool` helper (forced `set_questions` tool → `{questions:[{question,
+  options[3-4],answer(0-based)}]}`, transcript capped 16k chars) + `normQuestions`.
+  **Fails soft** at every step: no captions / YouTube blocked → `{needTranscript:true}`
+  with a message telling the office to paste the transcript (YouTube → ⋯ More → Show
+  transcript); no `ANTHROPIC_API_KEY` → "add questions by hand". Nothing is stored —
+  the drafts return to the builder for the office to review (wording + the ticked
+  correct answer) before saving. Front-end **cpd-admin.html** module editor: a
+  "🤖 Draft questions from the video" panel above the questions builder (count +
+  optional focus hint + ✨ Draft from video) that appends the returned questions to
+  the editor; a paste-transcript fallback box reveals itself when the auto-fetch
+  can't read the captions. Reuses the existing `ANTHROPIC_API_KEY` — no new secret.
+  **TODO/next:** optional PDF/document
   attach per module (reading material as an uploaded file); per-user printable CPD
   certificate; a yearly "who's done their CPD" reminder; fold into the home-hub.
 

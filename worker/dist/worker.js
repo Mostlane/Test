@@ -41820,6 +41820,148 @@ function gradeAttempt(questions, answers) {
   const score = total ? Math.round(correct / total * 100) : 100;
   return { correct, total, score, results };
 }
+var YT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+var YT_WEB_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+function jsonArrayAfter(text, key) {
+  const i = text.indexOf(key);
+  if (i < 0) return null;
+  const start = text.indexOf("[", i);
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc3 = false;
+  for (let j = start; j < text.length; j++) {
+    const c = text[j];
+    if (inStr) {
+      if (esc3) esc3 = false;
+      else if (c === "\\") esc3 = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "[") depth++;
+    else if (c === "]") {
+      if (--depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, j + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+function decodeXmlText(s) {
+  s = String(s || "").replace(/<[^>]+>/g, "");
+  const un = (x) => x.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16))).replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  return un(un(s)).replace(/\s+/g, " ").trim();
+}
+async function youtubeCaptionTracks(videoId) {
+  try {
+    const r = await fetch("https://www.youtube.com/watch?v=" + videoId + "&hl=en&bpctr=9999999999", {
+      headers: { "accept-language": "en-US,en;q=0.9", "user-agent": YT_UA, "cookie": "CONSENT=YES+1" }
+    });
+    if (r.ok) {
+      const html = await r.text();
+      const tracks = jsonArrayAfter(html, '"captionTracks":');
+      if (Array.isArray(tracks) && tracks.length) return tracks;
+    }
+  } catch {
+  }
+  try {
+    const r = await fetch("https://www.youtube.com/youtubei/v1/player?key=" + YT_WEB_KEY, {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en", "user-agent": YT_UA },
+      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.20240726.00.00", hl: "en", gl: "GB" } }, videoId })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const t = d && d.captions && d.captions.playerCaptionsTracklistRenderer && d.captions.playerCaptionsTracklistRenderer.captionTracks;
+      if (Array.isArray(t) && t.length) return t;
+    }
+  } catch {
+  }
+  return [];
+}
+async function trackText(track, start, end) {
+  const inWin = (t) => (start == null || t >= start) && (end == null || t <= end);
+  const base = String(track.baseUrl || "");
+  if (!base) return "";
+  try {
+    const r = await fetch(base + (base.includes("fmt=") ? "" : "&fmt=json3"), { headers: { "accept-language": "en", "user-agent": YT_UA } });
+    if (r.ok) {
+      const j = await r.json();
+      const ev = Array.isArray(j.events) ? j.events : [];
+      const parts = [];
+      for (const e of ev) {
+        if (!e.segs) continue;
+        if (!inWin((e.tStartMs || 0) / 1e3)) continue;
+        const line2 = e.segs.map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim();
+        if (line2) parts.push(line2);
+      }
+      if (parts.length) return parts.join(" ").replace(/\s+/g, " ").trim();
+    }
+  } catch {
+  }
+  try {
+    const r = await fetch(base, { headers: { "accept-language": "en", "user-agent": YT_UA } });
+    if (r.ok) {
+      const xml = await r.text();
+      const parts = [];
+      const re = /<text[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+      let m;
+      while (m = re.exec(xml)) {
+        if (!inWin(parseFloat(m[1]) || 0)) continue;
+        const t = decodeXmlText(m[2]);
+        if (t) parts.push(t);
+      }
+      if (parts.length) return parts.join(" ").replace(/\s+/g, " ").trim();
+    }
+  } catch {
+  }
+  return "";
+}
+async function fetchYouTubeTranscript(videoId, seg) {
+  const tracks = await youtubeCaptionTracks(videoId);
+  if (!tracks.length) return "";
+  const en = tracks.filter((t) => /^en/i.test(t.languageCode || ""));
+  const pick = en.find((t) => t.kind !== "asr") || en[0] || tracks.find((t) => t.kind !== "asr") || tracks[0];
+  const start = seg && seg.start != null ? seg.start : null;
+  const end = seg && seg.end != null ? seg.end : null;
+  return await trackText(pick, start, end);
+}
+async function anthropicTool3(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't set up on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 800, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+  if (!resp.ok) {
+    let d = "";
+    try {
+      const j = await resp.json();
+      d = j && j.error && j.error.message || "";
+    } catch {
+    }
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected." };
+    if (resp.status === 404 && /model/i.test(d)) return { ok: false, error: `The AI model "${model}" isn't available on this key.` };
+    return { ok: false, error: "The AI service errored." + (d ? " (" + d + ")" : "") };
+  }
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return { ok: false, error: "AI gave an unreadable reply." };
+  }
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block || !block.input) return { ok: false, error: "AI returned nothing usable." };
+  return { ok: true, input: block.input };
+}
 function shapeModule(row, { withAnswers = false } = {}) {
   let questions = [];
   try {
@@ -42083,6 +42225,47 @@ async function handle38(request, env, ctx, url, sess) {
       if (!id) return error("id required", 400, env, request);
       await env.DB.prepare("DELETE FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).run();
       return json({ ok: true }, {}, env, request);
+    }
+    if (sub === "/admin/ai-questions" && method === "POST") {
+      const b = await readJson8();
+      const count = clampInt(b.count != null ? b.count : 5, 1, 15);
+      const instructions = String(b.instructions || "").slice(0, 500).trim();
+      let transcript = String(b.transcript || "").replace(/\s+/g, " ").trim();
+      let source = "pasted";
+      if (!transcript) {
+        const vid = parseYouTubeId(b.videoId || b.url || "");
+        if (!vid) return json({ ok: false, needTranscript: true, error: "Add a YouTube link first, or paste the transcript below." }, {}, env, request);
+        transcript = await fetchYouTubeTranscript(vid, { start: parseTime(b.start), end: parseTime(b.end) });
+        source = "captions";
+        if (!transcript) return json({ ok: false, needTranscript: true, error: "Couldn't read this video's captions automatically (it may have none, or YouTube blocked it). On YouTube open the video \u2192 \u22EF More \u2192 Show transcript, copy it all, and paste it below." }, {}, env, request);
+      }
+      if (!env.ANTHROPIC_API_KEY) return json({ ok: false, error: "AI isn't set up on the server (no API key). You can still add questions by hand." }, {}, env, request);
+      transcript = transcript.slice(0, 16e3);
+      const schema = {
+        type: "object",
+        properties: {
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string", description: "The question stem." },
+                options: { type: "array", items: { type: "string" }, description: "3 or 4 answer options." },
+                answer: { type: "integer", description: "0-based index of the single correct option." }
+              },
+              required: ["question", "options", "answer"]
+            }
+          }
+        },
+        required: ["questions"]
+      };
+      const system = "You write multiple-choice CPD (Continuing Professional Development) test questions for UK electricians, based ONLY on the supplied training-video transcript. Every question must be answerable from the transcript \u2014 never invent facts it does not state. Give each question 3 or 4 plausible options with exactly one correct answer, and set `answer` to that option's 0-based index. Keep the wording clear, practical and specific to the content; avoid trick questions and 'all/none of the above'.";
+      const user = "Write " + count + " multiple-choice question" + (count === 1 ? "" : "s") + " from this training-video transcript." + (instructions ? "\n\nExtra guidance from the trainer (prioritise this): " + instructions : "") + '\n\nTranscript:\n"""\n' + transcript + '\n"""';
+      const r = await anthropicTool3(env, { system, user, toolName: "set_questions", schema, maxTokens: 3500 });
+      if (!r.ok) return json({ ok: false, error: r.error || "The AI couldn't draft questions." }, {}, env, request);
+      const questions = normQuestions(r.input.questions);
+      if (!questions.length) return json({ ok: false, error: "The AI didn't return usable questions \u2014 try again, or add them by hand." }, {}, env, request);
+      return json({ ok: true, questions, source, transcriptChars: transcript.length }, {}, env, request);
     }
     if (sub === "/admin/report" && method === "GET") {
       const where = ["tenant_id=?"];
