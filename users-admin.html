@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=41"></script>
+  <script src="/portal-config.js?v=42"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -468,7 +468,7 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
-      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins","WhereEveryone","StaffRecords"];
+      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins","WhereEveryone","StaffRecords","CPD"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -492,7 +492,8 @@
       EicrCheck:"EICR Check tool (BS 7671 PDF checker)",
       Chapplins:"Chapplins customer area",
       WhereEveryone:"Where's everyone — live board of what each engineer is on right now",
-      StaffRecords:"Employee records (qualifications, licences, insurances)"
+      StaffRecords:"Employee records (qualifications, licences, insurances)",
+      CPD:"CPD training (electricians — read + test, logged for the NICEIC audit)"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
@@ -505,7 +506,7 @@
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
-      { title:"Compliance & docs",    perms:["Compliance","EicrCheck","Chapplins","MyDocuments","HSPlan"] },
+      { title:"Compliance & docs",    perms:["Compliance","EicrCheck","Chapplins","CPD","MyDocuments","HSPlan"] },
       { title:"Facilities",           perms:["YardGate","YardGateAnywhere"] },
       { title:"Personalisation",      perms:["ThemeColour","ThemeBackground"] }
     ];

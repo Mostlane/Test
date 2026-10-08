@@ -1170,6 +1170,7 @@
           { label: "FBC Jobs", href: "fbc.html", icon: "compliance", perms: ["FullAccess", "SLAAdmin", "Compliance"], officeOnly: true, match: ["fbc.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
           { label: "Cable Calculator", href: "cable-calc.html", icon: "compliance", perms: ["CableCalc"], match: ["cable-calc.html"] },
+          { label: "CPD Training", href: "cpd.html", icon: "forms", perms: ["CPD"], match: ["cpd.html", "cpd-admin.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },
@@ -1774,7 +1775,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","StaffType","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD","StaffType","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}
