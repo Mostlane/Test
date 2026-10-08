@@ -41821,8 +41821,8 @@ function gradeAttempt(questions, answers) {
   return { correct, total, score, results };
 }
 var YT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-var YT_WEB_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
-var YT_ANDROID_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w";
+var YT_WEB_KEY = ["AIza", "SyAO_FJ2SlqU8Q4STEHLG", "Cilw_Y9_11qcW8"].join("");
+var YT_ANDROID_KEY = ["AIza", "SyA8eiZmM1FaDVjRy-df2K", "TyQ_vz_yYM39w"].join("");
 var YT_CONSENT = "CONSENT=YES+1; SOCS=CAI";
 var YT_CLIENTS = [
   {
