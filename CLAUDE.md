@@ -3283,6 +3283,42 @@ it straight onto the compliance chart (rolling the next-due date).
   cert-review.html (To-action / All, per-order match note + ✅ Approve & raise works /
   Dismiss + Open-email/Open-job). GET /certs/remedials/order-inbound = a no-secret
   connection check.
+- **Failed-test AUTO-FLAG safety net — a failed fitting can NEVER be lost from the
+  tracker (Oct 2026).** The EM-remedials tracker only ever shows fittings that carry a
+  `remedial` object, so if an engineer marked a luminaire's emergency result **Fail**
+  on the test but SKIPPED the "⚠ Mark fitting failed" step, that failure never reached
+  the tracker, never charged, never quoted (0330 Aldershot exposed this; 0007/0328/0126
+  had the same gap). Now **`certs.js normalizeRemedials` (runs on EVERY cert save AND
+  finalise)** auto-flags it: for an EM cert, any row that failed the test
+  (`normal`/`led`/`emergency` = "Fail", matched `/^\s*fail\s*$/i`) but has no
+  `isRealRemedial` object gets `remedial = {failed:true, kind:"light",
+  replacedOnSite:false, note:"Auto-flagged: failed the emergency test — confirm light
+  vs batteries.", auto:true, photos:[]}` — so `processEmRemedials` logs it, the £50 is
+  charged, and it opens the `to_quote` case like any other. It DEFAULTS to a **light**
+  (the office reclassifies to batteries per fitting via the tracker's fitting-update
+  control if needed). **Sweep to catch pre-fix certs:** scan every finalised EM cert's
+  `data.rows` for a failed-test row with NO real remedial (`json_each` over `$.rows`;
+  failed = lower-trim of normal/led/emergency = 'fail'; real = the `isRealRemedial`
+  clauses — `remedial.failed`/`replacedOnSite`/`batterySpec`/`batteryQty>0`/`photos`/
+  `note`). Any found are backfilled in D1 exactly as a re-finalise would produce:
+  em_remedials rows (id `<certId>:<indexAmongFailedRows>`, pending/light/£50,
+  fitting_no = the cert row's `no`, light_ref = its `comments`), a `to_quote`
+  `em_remedial_acks` case (status_label "works"), and the auto-flag `remedial` written
+  onto the cert's own `data.rows[idx]`. Re-run that sweep after any EM change.
+- **On Hold on the remedial WORKS job (Oct 2026, engineer-job.html).** The works job
+  raised from a case — `emrem:<certId>` (EM) or the elec remedial works job — is a
+  **site-audit job**, which used a slim status set (Travelling · In Progress · Complete)
+  with NO On Hold, so an engineer part-way through couldn't park it (Connor hit this — a
+  half-done EM remedial job had to be reset to Scheduled from the office). The audit
+  status set (and the elec-TEST set) is now **Travelling · In Progress · On Hold ·
+  Complete**: picking On Hold shows its pack (reason + what's needed to resume) and the
+  slider reads "Slide to send for approval", going to the office **pending approval**
+  exactly like a normal job, with the checklist progress kept. `drawStatus()` adds On
+  Hold to both sets; `outcomeMissing()` handles On Hold in the audit + elec branches so
+  the slider shows (it previously returned `null` for any non-Complete status on these
+  jobs, hiding the slider). Quote stays OFF a works/test job. Server-side On Hold was
+  already job-type-agnostic (`holdMissing` needs only reason + needs; the pending/approve
+  flow is uniform), so this was a client-only gap — no worker change.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
@@ -3464,9 +3500,12 @@ C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the PO
 — engineer mode = add/edit/remove items (code · description · duration(min) · material
 £ · camera photos, autosaves via PATCH {remedials}); office mode = clean table +
 totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTest →
-`remedialHost`, slim Travelling/In Progress/Complete status set) + job-view.html
-(office `remedialCard`). NB the electrical engineer must be ADDED to the portal
-(Users Admin) before he can be assigned these jobs.
+`remedialHost`, status set **Travelling · In Progress · On Hold · Complete** — On Hold
+added Oct 2026 so a part-done test can be parked; see the EM-remedials "On Hold on the
+works job" note) + job-view.html (office `remedialCard`). The one-tap works job built
+from the remedials is a **site-audit job** and carries the same On Hold option. NB the
+electrical engineer must be ADDED to the portal (Users Admin) before he can be assigned
+these jobs.
 - **Elec-test remedials → the 5-Year Remedials pipeline (14 Sep 2026, Jamie: "should
   come up in Certificates to review… and under 5-Year Remedials as To Review, and the
   whole quote/order/create-job process from here").** Every ⚡ electrical test is treated
