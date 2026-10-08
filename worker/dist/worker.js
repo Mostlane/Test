@@ -41737,6 +41737,10 @@ async function ensureTables__raw7(env) {
     await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN video TEXT`).run();
   } catch {
   }
+  try {
+    await env.DB.prepare(`ALTER TABLE cpd_modules ADD COLUMN segments TEXT`).run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_attempts (
     tenant_id INTEGER, id TEXT, module_id TEXT, module_title TEXT, category TEXT,
     username TEXT, started_at TEXT, submitted_at TEXT, duration_seconds INTEGER,
@@ -41754,6 +41758,29 @@ function parseYouTubeId(input) {
   if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
   const m = s.match(/(?:youtu\.be\/|\/embed\/|\/shorts\/|[?&]v=)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : "";
+}
+function parseTime(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v >= 0 ? Math.round(v) : null;
+  const s = String(v).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const m = s.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+  if (m) return parseInt(m[1] || 0, 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+  return null;
+}
+function parseSegments(input) {
+  const out = [];
+  for (const raw of Array.isArray(input) ? input : []) {
+    if (!raw) continue;
+    const id = parseYouTubeId(raw.id || raw.url || raw.video || "");
+    if (!id) continue;
+    let start = parseTime(raw.start), end = parseTime(raw.end);
+    if (start != null && start < 0) start = null;
+    if (end != null && start != null && end <= start) end = null;
+    out.push({ id, start: start == null ? null : start, end: end == null ? null : end });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 var nowISO2 = () => (/* @__PURE__ */ new Date()).toISOString();
 var uid = () => crypto.randomUUID ? crypto.randomUUID() : "cpd-" + Date.now() + "-" + Math.random().toString(36).slice(2);
@@ -41800,11 +41827,18 @@ function shapeModule(row, { withAnswers = false } = {}) {
   } catch {
   }
   if (!Array.isArray(questions)) questions = [];
+  let segments = [];
+  try {
+    segments = JSON.parse(row.segments || "[]");
+  } catch {
+  }
+  if (!Array.isArray(segments) || !segments.length) segments = row.video ? [{ id: row.video, start: null, end: null }] : [];
   return {
     id: row.id,
     title: row.title || "",
     category: row.category || "",
     video: row.video || "",
+    segments,
     content: row.content || "",
     passMark: row.pass_mark != null ? row.pass_mark : 80,
     minSeconds: row.min_seconds != null ? row.min_seconds : 0,
@@ -41913,7 +41947,8 @@ async function handle38(request, env, ctx, url, sess) {
         passMark: m.passMark,
         minSeconds: m.minSeconds,
         questionCount: m.questionCount,
-        hasVideo: !!m.video,
+        hasVideo: !!(m.segments && m.segments.length),
+        videoCount: (m.segments || []).length,
         myStatus: b ? Number(b.passed) ? "passed" : "attempted" : "not_started",
         myScore: b ? b.score : null,
         myPassedAt: b && Number(b.passed) ? b.submitted_at : null,
@@ -42013,14 +42048,15 @@ async function handle38(request, env, ctx, url, sess) {
       const minSeconds = clampInt(b.minSeconds != null ? b.minSeconds : 0, 0, 86400);
       const active = b.active === false ? 0 : 1;
       const sortOrder = clampInt(b.sortOrder || 0, 0, 1e5);
-      const video = parseYouTubeId(b.video);
+      const segments = parseSegments(b.segments && b.segments.length ? b.segments : b.video ? [{ url: b.video }] : []);
+      const video = segments.length ? segments[0].id : "";
       await env.DB.prepare(
-        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,video,segments,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id,id) DO UPDATE SET title=excluded.title, category=excluded.category,
-           content=excluded.content, video=excluded.video, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
-           questions=excluded.questions, active=excluded.active, sort_order=excluded.sort_order,
-           updated_at=excluded.updated_at`
+           content=excluded.content, video=excluded.video, segments=excluded.segments, pass_mark=excluded.pass_mark,
+           min_seconds=excluded.min_seconds, questions=excluded.questions, active=excluded.active,
+           sort_order=excluded.sort_order, updated_at=excluded.updated_at`
       ).bind(
         tid,
         id,
@@ -42028,6 +42064,7 @@ async function handle38(request, env, ctx, url, sess) {
         String(b.category || "").trim(),
         String(b.content || ""),
         video,
+        JSON.stringify(segments),
         passMark,
         minSeconds,
         JSON.stringify(questions),

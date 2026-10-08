@@ -1,7 +1,7 @@
 // Focused unit test for the audit-critical CPD logic: question normalisation,
 // answer-stripping (answers never reach the browser) and grading.
 //   node --no-warnings worker/tools/test-cpd.mjs
-import { normQuestions, stripAnswers, gradeAttempt, parseYouTubeId } from "../src/routes/cpd.js";
+import { normQuestions, stripAnswers, gradeAttempt, parseYouTubeId, parseTime, parseSegments } from "../src/routes/cpd.js";
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.log("  ✗ " + msg); } }
@@ -53,6 +53,27 @@ eq(parseYouTubeId("https://www.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ", 
 eq(parseYouTubeId("dQw4w9WgXcQ"), "dQw4w9WgXcQ", "accepts a bare 11-char id");
 eq(parseYouTubeId("not a video"), "", "returns empty for a non-YouTube string");
 eq(parseYouTubeId("https://vimeo.com/12345"), "", "returns empty for a non-YouTube URL");
+
+// ── parseTime ─────────────────────────────────────────────────────────────────
+eq(parseTime(90), 90, "number seconds");
+eq(parseTime("90"), 90, "string seconds");
+eq(parseTime("1:30"), 90, "m:ss → seconds");
+eq(parseTime("1:02:05"), 3725, "h:mm:ss → seconds");
+eq(parseTime(""), null, "empty → null");
+eq(parseTime("abc"), null, "garbage → null");
+
+// ── parseSegments (a lesson's clips) ──────────────────────────────────────────
+const segs = parseSegments([
+  { url: "https://youtu.be/dQw4w9WgXcQ", start: "0:30", end: "1:30" },
+  { url: "dQw4w9WgXcQ" },                                   // whole video
+  { url: "https://www.youtube.com/watch?v=abcdefghijk", start: 10, end: 5 }, // bad range → end dropped
+  { url: "not a video" },                                   // dropped
+]);
+eq(segs.length, 3, "keeps the 3 valid clips, drops the bad url");
+eq([segs[0].start, segs[0].end], [30, 90], "parses start/end clock times");
+eq([segs[1].start, segs[1].end], [null, null], "whole-video clip has null start/end");
+eq(segs[2].end, null, "an end <= start is dropped (plays to natural end)");
+eq(parseSegments([]).length, 0, "no clips → empty");
 
 console.log((fail ? "✗" : "✓") + " CPD: " + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);
