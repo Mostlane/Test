@@ -20879,7 +20879,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   };
 }
 async function optimiseEmDay(env, tenantId, body) {
-  const clampInt = (v, def, lo, hi) => {
+  const clampInt2 = (v, def, lo, hi) => {
     const n = Math.round(Number(v));
     return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : def;
   };
@@ -20890,11 +20890,11 @@ async function optimiseEmDay(env, tenantId, body) {
   const lunchMinutes = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 0));
   const warnings = [];
   if (!engineer) return { ok: false, error: "No engineer given." };
-  const flickMin = clampInt(body.flickMin, 10, 1, 120);
-  const patMin = clampInt(body.patMin, 45, 5, 240);
-  const checkMin = clampInt(body.checkMin, 15, 1, 120);
-  const drainMin = clampInt(body.drainMin, 180, 30, 600);
-  const dayCapMin = clampInt(body.dayMinutes, 540, 120, 900);
+  const flickMin = clampInt2(body.flickMin, 10, 1, 120);
+  const patMin = clampInt2(body.patMin, 45, 5, 240);
+  const checkMin = clampInt2(body.checkMin, 15, 1, 120);
+  const drainMin = clampInt2(body.drainMin, 180, 30, 600);
+  const dayCapMin = clampInt2(body.dayMinutes, 540, 120, 900);
   const home = await engineerHome(env, tenantId, engineer);
   if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round trip can be worked out." };
   let blkOffsets = [];
@@ -20917,7 +20917,7 @@ async function optimiseEmDay(env, tenantId, body) {
     }
     const emTest = !!j.emTest, pat = !!j.pat, monthly = String(j.emKind || "") === "monthly";
     const twoVisit = emTest && !monthly;
-    const drain = twoVisit ? clampInt(j.drainMinutes, drainMin, 30, 600) : 0;
+    const drain = twoVisit ? clampInt2(j.drainMinutes, drainMin, 30, 600) : 0;
     let singleDur = 0;
     if (!twoVisit) {
       singleDur = (pat ? patMin : 0) + (emTest && monthly ? flickMin + checkMin : 0);
@@ -24372,8 +24372,10 @@ var PERMISSION_KEYS = [
   // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
   "WhereEveryone",
   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
-  "StaffRecords"
+  "StaffRecords",
   // HR: manage staff qualifications, insurances, licences + licence checks
+  "CPD"
+  // CPD training (electricians): read material + sit the test (records logged for the NICEIC audit)
 ];
 function isActiveStatus3(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -41721,6 +41723,360 @@ init_concerto();
 init_certs();
 init_pump();
 
+// src/routes/cpd.js
+init_http();
+init_auth();
+init_once();
+async function ensureTables__raw7(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_modules (
+    tenant_id INTEGER, id TEXT, title TEXT, category TEXT, content TEXT,
+    pass_mark INTEGER, min_seconds INTEGER, questions TEXT, active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, created_by TEXT,
+    PRIMARY KEY (tenant_id, id))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cpd_attempts (
+    tenant_id INTEGER, id TEXT, module_id TEXT, module_title TEXT, category TEXT,
+    username TEXT, started_at TEXT, submitted_at TEXT, duration_seconds INTEGER,
+    score INTEGER, total INTEGER, correct INTEGER, pass_mark INTEGER, passed INTEGER,
+    answers TEXT, created_at TEXT, PRIMARY KEY (tenant_id, id))`).run();
+  try {
+    await env.DB.prepare(`CREATE INDEX IF NOT EXISTS cpd_att_user ON cpd_attempts (tenant_id, username, submitted_at)`).run();
+  } catch {
+  }
+}
+var ensureTables9 = onceMigration(ensureTables__raw7);
+var nowISO2 = () => (/* @__PURE__ */ new Date()).toISOString();
+var uid = () => crypto.randomUUID ? crypto.randomUUID() : "cpd-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+var clampInt = (v, lo, hi) => {
+  let n = Math.round(Number(v) || 0);
+  if (n < lo) n = lo;
+  if (n > hi) n = hi;
+  return n;
+};
+function normQuestions(input) {
+  const out = [];
+  for (const raw of Array.isArray(input) ? input : []) {
+    if (!raw) continue;
+    const q = String(raw.q || raw.question || "").trim();
+    const options = (Array.isArray(raw.options) ? raw.options : []).map((o) => String(o == null ? "" : o).trim()).filter((o) => o !== "").slice(0, 8);
+    if (!q || options.length < 2) continue;
+    let answer = Number(raw.answer);
+    if (!Number.isInteger(answer) || answer < 0 || answer >= options.length) answer = 0;
+    out.push({ id: String(raw.id || "") || uid(), q: q.slice(0, 600), options, answer });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+var stripAnswers = (qs) => (Array.isArray(qs) ? qs : []).map((x) => ({ id: x.id, q: x.q, options: x.options }));
+function gradeAttempt(questions, answers) {
+  const qs = Array.isArray(questions) ? questions : [];
+  const a = answers && typeof answers === "object" ? answers : {};
+  const results = [];
+  let correct = 0;
+  for (const q of qs) {
+    const given = a[q.id];
+    const ok = given != null && Number(given) === Number(q.answer);
+    if (ok) correct++;
+    results.push({ id: q.id, correct: ok, given: given == null ? null : Number(given), answer: q.answer });
+  }
+  const total = qs.length;
+  const score = total ? Math.round(correct / total * 100) : 100;
+  return { correct, total, score, results };
+}
+function shapeModule(row, { withAnswers = false } = {}) {
+  let questions = [];
+  try {
+    questions = JSON.parse(row.questions || "[]");
+  } catch {
+  }
+  if (!Array.isArray(questions)) questions = [];
+  return {
+    id: row.id,
+    title: row.title || "",
+    category: row.category || "",
+    content: row.content || "",
+    passMark: row.pass_mark != null ? row.pass_mark : 80,
+    minSeconds: row.min_seconds != null ? row.min_seconds : 0,
+    active: row.active == null ? true : !!Number(row.active),
+    sortOrder: row.sort_order || 0,
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+    questionCount: questions.length,
+    questions: withAnswers ? questions : stripAnswers(questions)
+  };
+}
+function shapeAttempt(row) {
+  return {
+    id: row.id,
+    moduleId: row.module_id,
+    moduleTitle: row.module_title || "",
+    category: row.category || "",
+    username: row.username,
+    startedAt: row.started_at || "",
+    submittedAt: row.submitted_at || "",
+    durationSeconds: row.duration_seconds || 0,
+    score: row.score,
+    total: row.total,
+    correct: row.correct,
+    passMark: row.pass_mark,
+    passed: !!Number(row.passed)
+  };
+}
+async function seedIfEmpty(env, tid) {
+  const n = await env.DB.prepare("SELECT COUNT(*) AS c FROM cpd_modules WHERE tenant_id=?").bind(tid).first();
+  if (n && Number(n.c) > 0) return;
+  const now2 = nowISO2();
+  const content = [
+    "# Example CPD module \u2014 edit or replace me",
+    "",
+    "This is a sample so you can see how CPD training works on the portal. An admin can edit it (or delete it and add your own real NICEIC CPD material) from **Manage & audit**.",
+    "",
+    "## How it works for the engineer",
+    "- Read the material on this screen. The time you spend is recorded automatically.",
+    "- When you've read it, take the short test at the end.",
+    "- Your score, the date and the time spent are saved to your record.",
+    "",
+    "## Safe isolation \u2014 the basics (illustrative)",
+    "Before working on a circuit, prove it is dead using the correct procedure and an approved voltage indicator that you prove before AND after testing. Lock off and label the point of isolation so it cannot be re-energised while you work.",
+    "",
+    "Replace this content with your own CPD material and questions."
+  ].join("\n");
+  const questions = normQuestions([
+    { q: "Before testing a circuit is dead, what must you do with your voltage indicator?", options: ["Nothing \u2014 just test the circuit", "Prove it works before and after testing on a known source", "Only test it afterwards"], answer: 1 },
+    { q: "Why lock off and label the point of isolation?", options: ["It looks tidy", "So the circuit can't be re-energised while you work", "It's optional"], answer: 1 }
+  ]);
+  await env.DB.prepare(
+    `INSERT INTO cpd_modules (tenant_id,id,title,category,content,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    tid,
+    "cpd-sample",
+    "Example: Safe isolation (sample \u2014 edit or replace)",
+    "Example",
+    content,
+    80,
+    20,
+    JSON.stringify(questions),
+    1,
+    0,
+    now2,
+    now2,
+    "sample"
+  ).run();
+}
+async function handle38(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const sub = url.pathname.replace(/^\/cpd(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  await ensureTables9(env);
+  const perms = await permissionsFor(env, tid, me);
+  const isAdmin = perms.FullAccess === "Yes";
+  const canLearn = isAdmin || perms.CPD === "Yes";
+  const readJson8 = async () => {
+    try {
+      return await request.json();
+    } catch {
+      return {};
+    }
+  };
+  if (sub === "/modules" && method === "GET") {
+    if (!canLearn) return error("Forbidden", 403, env, request);
+    await seedIfEmpty(env, tid);
+    const { results } = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND active=1 ORDER BY sort_order, created_at").bind(tid).all();
+    const mine = (await env.DB.prepare("SELECT module_id, submitted_at, score, passed, duration_seconds FROM cpd_attempts WHERE tenant_id=? AND username=? ORDER BY submitted_at").bind(tid, me).all()).results || [];
+    const best = {};
+    for (const a of mine) {
+      const cur = best[a.module_id];
+      const better = !cur || Number(a.passed) > Number(cur.passed) || Number(a.passed) === Number(cur.passed) && (Number(a.score) || 0) >= (Number(cur.score) || 0);
+      if (better) best[a.module_id] = a;
+    }
+    const modules = (results || []).map((r) => {
+      const m = shapeModule(r);
+      const b = best[r.id];
+      return {
+        id: m.id,
+        title: m.title,
+        category: m.category,
+        passMark: m.passMark,
+        minSeconds: m.minSeconds,
+        questionCount: m.questionCount,
+        myStatus: b ? Number(b.passed) ? "passed" : "attempted" : "not_started",
+        myScore: b ? b.score : null,
+        myPassedAt: b && Number(b.passed) ? b.submitted_at : null,
+        myLastAt: b ? b.submitted_at : null,
+        myAttempts: mine.filter((a) => a.module_id === r.id).length
+      };
+    });
+    return json({ ok: true, modules, canManage: isAdmin }, {}, env, request);
+  }
+  if (sub === "/module" && method === "GET") {
+    if (!canLearn) return error("Forbidden", 403, env, request);
+    const row = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, q.get("id") || "").first();
+    if (!row) return error("Module not found", 404, env, request);
+    if (!Number(row.active) && !isAdmin) return error("Module not available", 403, env, request);
+    return json({ ok: true, module: shapeModule(row) }, {}, env, request);
+  }
+  if (sub === "/submit" && method === "POST") {
+    if (!canLearn) return error("Forbidden", 403, env, request);
+    const b = await readJson8();
+    const row = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, String(b.moduleId || "")).first();
+    if (!row) return error("Module not found", 404, env, request);
+    let questions = [];
+    try {
+      questions = JSON.parse(row.questions || "[]");
+    } catch {
+    }
+    if (!Array.isArray(questions)) questions = [];
+    const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
+    const { correct, total, score, results } = gradeAttempt(questions, answers);
+    const passMark = row.pass_mark != null ? row.pass_mark : 80;
+    const passed = total ? score >= passMark : true;
+    const submittedAt = /* @__PURE__ */ new Date();
+    const startedMs = Date.parse(b.startedAt);
+    const wall = Number.isFinite(startedMs) ? Math.max(0, Math.round((submittedAt.getTime() - startedMs) / 1e3)) : null;
+    let duration = clampInt(b.durationSeconds, 0, 86400);
+    if (wall != null) duration = Math.min(duration, wall + 5);
+    const startedAtIso = Number.isFinite(startedMs) ? new Date(startedMs).toISOString() : submittedAt.toISOString();
+    const id = uid();
+    await env.DB.prepare(
+      `INSERT INTO cpd_attempts (tenant_id,id,module_id,module_title,category,username,started_at,submitted_at,duration_seconds,score,total,correct,pass_mark,passed,answers,created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      tid,
+      id,
+      row.id,
+      row.title || "",
+      row.category || "",
+      me,
+      startedAtIso,
+      submittedAt.toISOString(),
+      duration,
+      score,
+      total,
+      correct,
+      passMark,
+      passed ? 1 : 0,
+      JSON.stringify(answers),
+      submittedAt.toISOString()
+    ).run();
+    return json({
+      ok: true,
+      attemptId: id,
+      score,
+      correct,
+      total,
+      passMark,
+      passed,
+      durationSeconds: duration,
+      results: isAdmin ? results : results.map((r) => ({ id: r.id, correct: r.correct }))
+    }, {}, env, request);
+  }
+  if (sub === "/my" && method === "GET") {
+    if (!canLearn) return error("Forbidden", 403, env, request);
+    const { results } = await env.DB.prepare("SELECT * FROM cpd_attempts WHERE tenant_id=? AND username=? ORDER BY submitted_at DESC LIMIT 500").bind(tid, me).all();
+    return json({ ok: true, attempts: (results || []).map(shapeAttempt) }, {}, env, request);
+  }
+  if (sub.startsWith("/admin")) {
+    if (!isAdmin) return error("Forbidden", 403, env, request);
+    if (sub === "/admin/modules" && method === "GET") {
+      await seedIfEmpty(env, tid);
+      const { results } = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? ORDER BY sort_order, created_at").bind(tid).all();
+      const counts = (await env.DB.prepare("SELECT module_id, COUNT(*) AS n, SUM(passed) AS p FROM cpd_attempts WHERE tenant_id=? GROUP BY module_id").bind(tid).all()).results || [];
+      const cmap = {};
+      for (const c of counts) cmap[c.module_id] = { attempts: Number(c.n) || 0, passes: Number(c.p) || 0 };
+      const modules = (results || []).map((r) => Object.assign(shapeModule(r, { withAnswers: true }), { stats: cmap[r.id] || { attempts: 0, passes: 0 } }));
+      return json({ ok: true, modules }, {}, env, request);
+    }
+    if (sub === "/admin/module" && method === "POST") {
+      const b = await readJson8();
+      const title = String(b.title || "").trim();
+      if (!title) return error("A title is required", 400, env, request);
+      const now2 = nowISO2();
+      const id = String(b.id || "") || uid();
+      const existing = await env.DB.prepare("SELECT created_at, created_by FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      const questions = normQuestions(b.questions);
+      const passMark = clampInt(b.passMark != null ? b.passMark : 80, 0, 100);
+      const minSeconds = clampInt(b.minSeconds != null ? b.minSeconds : 0, 0, 86400);
+      const active = b.active === false ? 0 : 1;
+      const sortOrder = clampInt(b.sortOrder || 0, 0, 1e5);
+      await env.DB.prepare(
+        `INSERT INTO cpd_modules (tenant_id,id,title,category,content,pass_mark,min_seconds,questions,active,sort_order,created_at,updated_at,created_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(tenant_id,id) DO UPDATE SET title=excluded.title, category=excluded.category,
+           content=excluded.content, pass_mark=excluded.pass_mark, min_seconds=excluded.min_seconds,
+           questions=excluded.questions, active=excluded.active, sort_order=excluded.sort_order,
+           updated_at=excluded.updated_at`
+      ).bind(
+        tid,
+        id,
+        title,
+        String(b.category || "").trim(),
+        String(b.content || ""),
+        passMark,
+        minSeconds,
+        JSON.stringify(questions),
+        active,
+        sortOrder,
+        existing && existing.created_at || now2,
+        now2,
+        existing && existing.created_by || me
+      ).run();
+      const row = await env.DB.prepare("SELECT * FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      return json({ ok: true, module: shapeModule(row, { withAnswers: true }) }, {}, env, request);
+    }
+    if (sub === "/admin/module-delete" && method === "POST") {
+      const b = await readJson8();
+      const id = String(b.id || "");
+      if (!id) return error("id required", 400, env, request);
+      await env.DB.prepare("DELETE FROM cpd_modules WHERE tenant_id=? AND id=?").bind(tid, id).run();
+      return json({ ok: true }, {}, env, request);
+    }
+    if (sub === "/admin/report" && method === "GET") {
+      const where = ["tenant_id=?"];
+      const args = [tid];
+      const user = (q.get("user") || "").trim();
+      if (user && user !== "all") {
+        where.push("username=?");
+        args.push(user);
+      }
+      const mod = (q.get("module") || "").trim();
+      if (mod && mod !== "all") {
+        where.push("module_id=?");
+        args.push(mod);
+      }
+      const from = (q.get("from") || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+        where.push("submitted_at>=?");
+        args.push(from + "T00:00:00.000Z");
+      }
+      const to = (q.get("to") || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        where.push("submitted_at<=?");
+        args.push(to + "T23:59:59.999Z");
+      }
+      const onlyPass = q.get("passed") === "1";
+      if (onlyPass) where.push("passed=1");
+      const { results } = await env.DB.prepare(
+        `SELECT * FROM cpd_attempts WHERE ${where.join(" AND ")} ORDER BY submitted_at DESC LIMIT 5000`
+      ).bind(...args).all();
+      const attempts = (results || []).map(shapeAttempt);
+      const users = (await env.DB.prepare("SELECT DISTINCT username FROM cpd_attempts WHERE tenant_id=? ORDER BY username").bind(tid).all()).results || [];
+      const mods = (await env.DB.prepare("SELECT id, title FROM cpd_modules WHERE tenant_id=? ORDER BY sort_order, created_at").bind(tid).all()).results || [];
+      const totalSeconds = attempts.reduce((s, a) => s + (a.durationSeconds || 0), 0);
+      return json({
+        ok: true,
+        attempts,
+        summary: { attempts: attempts.length, passes: attempts.filter((a) => a.passed).length, totalSeconds },
+        users: users.map((u) => u.username),
+        modules: mods.map((m) => ({ id: m.id, title: m.title }))
+      }, {}, env, request);
+    }
+    return error("Not found: " + sub, 404, env, request);
+  }
+  return error("Not found: " + sub, 404, env, request);
+}
+
 // src/routes/cablecalc.js
 init_http();
 init_auth();
@@ -41942,13 +42298,13 @@ init_logo();
 init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
 var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
-async function ensureTables__raw7(env) {
+async function ensureTables__raw8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
     circuit_ref TEXT, inputs TEXT, results TEXT, engineer TEXT, outcome TEXT,
     created_at TEXT, updated_at TEXT )`).run();
 }
-var ensureTables9 = onceMigration(ensureTables__raw7);
+var ensureTables10 = onceMigration(ensureTables__raw8);
 async function getConfig5(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
@@ -41981,13 +42337,13 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/cablecalc(?=\/|$)/, "") || "/";
   const q = url.searchParams;
-  await ensureTables9(env);
+  await ensureTables10(env);
   const perms = await permissionsFor(env, tid, me);
   const canUse = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.CableCalc === "Yes";
@@ -42573,7 +42929,7 @@ function buildProgrammePdf(data, meta = {}) {
 // src/routes/programmes.js
 init_once();
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables__raw8(env) {
+async function ensureTables__raw9(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -42602,7 +42958,7 @@ async function ensureTables__raw8(env) {
   } catch {
   }
 }
-var ensureTables10 = onceMigration(ensureTables__raw8);
+var ensureTables11 = onceMigration(ensureTables__raw9);
 async function bankHolidayDates(db) {
   const y = (/* @__PURE__ */ new Date()).getFullYear();
   const years = [y - 1, y, y + 1, y + 2];
@@ -42724,14 +43080,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle39(request, env, ctx, url) {
+async function handle40(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables10(env);
+  await ensureTables11(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -43042,7 +43398,7 @@ async function handle39(request, env, ctx, url) {
       return json4({ ok: false, error: "The AI couldn't find any work activities in that document." }, 422);
     }
     const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
-    const uid = () => "c" + Math.random().toString(36).slice(2, 8);
+    const uid2 = () => "c" + Math.random().toString(36).slice(2, 8);
     const conByName = /* @__PURE__ */ new Map();
     const contractors = [];
     const addCon = (nm) => {
@@ -43050,7 +43406,7 @@ async function handle39(request, env, ctx, url) {
       if (!name) return null;
       const kkey = name.toLowerCase();
       if (conByName.has(kkey)) return conByName.get(kkey);
-      const c = { id: uid(), name, colour: PALETTE[contractors.length % PALETTE.length] };
+      const c = { id: uid2(), name, colour: PALETTE[contractors.length % PALETTE.length] };
       contractors.push(c);
       conByName.set(kkey, c);
       return c;
@@ -43092,10 +43448,10 @@ async function handle39(request, env, ctx, url) {
       const off = Math.max(0, Number(t?.startOffset) || 0);
       const start = ymd2(addWorkingDays(base, off));
       const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
-      tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: false, progress: 0, milestone: !!t?.milestone });
+      tasks.push({ id: uid2(), name, contractor: con ? con.id : "", start, days, wknd: false, progress: 0, milestone: !!t?.milestone });
     }
     if (!tasks.length) return json4({ ok: false, error: "The AI couldn't turn that document into tasks." }, 422);
-    if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
+    if (!contractors.length) contractors.push({ id: uid2(), name: "Mostlane", colour: PALETTE[0] });
     const data = {
       title: hintTitle || String(out.title || "").slice(0, 200) || "Programme of works",
       client: hintClient,
@@ -43163,7 +43519,7 @@ async function handle39(request, env, ctx, url) {
     const out = r.input;
     if (!Array.isArray(out.tasks) || !out.tasks.length) return json4({ ok: false, error: "The AI returned no tasks." }, 422);
     const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
-    const uid = () => "c" + Math.random().toString(36).slice(2, 8);
+    const uid2 = () => "c" + Math.random().toString(36).slice(2, 8);
     const conByName = /* @__PURE__ */ new Map(), contractors = [];
     const addCon = (nm) => {
       const name = String(nm || "").trim().slice(0, 60);
@@ -43171,7 +43527,7 @@ async function handle39(request, env, ctx, url) {
       const k = name.toLowerCase();
       if (conByName.has(k)) return conByName.get(k);
       const colour = colourByName[k] || PALETTE[contractors.length % PALETTE.length];
-      const c = { id: uid(), name, colour };
+      const c = { id: uid2(), name, colour };
       contractors.push(c);
       conByName.set(k, c);
       return c;
@@ -43185,10 +43541,10 @@ async function handle39(request, env, ctx, url) {
       const con = t?.contractor ? addCon(t.contractor) : null;
       const start = isDate(t?.start) ? t.start : "";
       const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
-      tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: !!t?.wknd, progress: 0, milestone: !!t?.milestone });
+      tasks.push({ id: uid2(), name, contractor: con ? con.id : "", start, days, wknd: !!t?.wknd, progress: 0, milestone: !!t?.milestone });
     }
     if (!tasks.length) return json4({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
-    if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
+    if (!contractors.length) contractors.push({ id: uid2(), name: "Mostlane", colour: PALETTE[0] });
     const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
     return json4({ ok: true, data, taskCount: tasks.length });
   }
@@ -43329,7 +43685,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables__raw9(env) {
+async function ensureTables__raw10(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -43344,7 +43700,7 @@ async function ensureTables__raw9(env) {
     supplier TEXT, description TEXT, amount REAL,
     created_by TEXT, created_at TEXT)`).run();
 }
-var ensureTables11 = onceMigration(ensureTables__raw9);
+var ensureTables12 = onceMigration(ensureTables__raw10);
 async function setProjFinValue(env, tid, costingKey, value, name) {
   return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
 }
@@ -43500,7 +43856,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle40(request, env, ctx, url, sess) {
+async function handle41(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -43524,7 +43880,7 @@ async function handle40(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables11(env);
+  await ensureTables12(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -44603,7 +44959,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -44867,7 +45223,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -45187,7 +45543,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -45401,7 +45757,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -45590,7 +45946,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle45(request, env, ctx, url, sess) {
+async function handle46(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -45909,7 +46265,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle46(request, env, ctx, url, sess) {
+async function handle47(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -46049,7 +46405,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle14],
   ["*", "/upload-asset-thumb", handle14],
   ["*", "/delete-asset-image", handle14],
-  ["*", "/sla/workever", handle45],
+  ["*", "/sla/workever", handle46],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle12],
   ["*", "/stats", handle23],
@@ -46136,25 +46492,27 @@ var ROUTES = [
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump", handle10],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle38],
+  ["*", "/cablecalc", handle39],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/prog", handle39],
+  ["*", "/cpd", handle38],
+  // CPD training (electricians): read material + test → logged per user for the NICEIC audit
+  ["*", "/prog", handle40],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle40],
+  ["*", "/projects", handle41],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle40],
+  ["*", "/project", handle41],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle41],
+  ["*", "/health/", handle42],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle46],
+  ["*", "/comms", handle47],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle46],
+  ["*", "/customer", handle47],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle42],
+  ["*", "/tuya", handle43],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle43],
+  ["*", "/client", handle44],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle44]
+  ["*", "/fra", handle45]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.

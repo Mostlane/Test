@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=42"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>CPD Training — Mostlane Portal</title>
+  <link rel="stylesheet" href="/portal.css?v=1" />
+  <style>
+    :root{ --navy:#003468; --ink:#0f2438; --muted:#5b6b78; --line:#d7dee6; --ok:#0a8a35; --amber:#b45309; --red:#c0362c; }
+    html,body{ margin:0; background:#eef1f4; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:var(--ink); }
+    .wrap{ max-width:820px; margin:0 auto; padding:14px 16px 60px; }
+    header.page{ background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page .ttl{ font-size:17px; font-weight:700; }
+    header.page .spacer{ flex:1; }
+    .hbtn{ background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:999px; padding:7px 13px; font:600 13px inherit; text-decoration:none; white-space:nowrap; }
+    .intro{ color:var(--muted); font-size:13.5px; margin:12px 2px 6px; line-height:1.5; }
+    .card{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 15px; margin:12px 0; box-shadow:0 1px 2px rgba(16,36,56,.04); }
+    .mod{ display:flex; align-items:center; gap:12px; }
+    .mod .body{ flex:1; min-width:0; }
+    .mod h3{ margin:0 0 3px; font-size:15.5px; color:var(--navy); }
+    .mod .meta{ font-size:12px; color:var(--muted); }
+    .pill{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11.5px; font-weight:700; }
+    .pill.pass{ background:#e6f6ec; color:var(--ok); } .pill.todo{ background:#eef1f4; color:#5b6b78; } .pill.try{ background:#fdeede; color:var(--amber); }
+    .btn{ background:var(--navy); color:#fff; border:none; border-radius:10px; padding:11px 16px; font:700 14px inherit; cursor:pointer; text-decoration:none; display:inline-block; }
+    .btn.line{ background:#fff; color:var(--navy); border:1px solid var(--line); }
+    .btn:disabled{ opacity:.5; cursor:default; }
+    .btn.wide{ width:100%; text-align:center; }
+    .sec-h{ font-size:12px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:18px 2px 2px; }
+    .content h2{ font-size:17px; color:var(--navy); margin:16px 0 6px; } .content h3{ font-size:14.5px; color:var(--navy); margin:12px 0 5px; }
+    .content p{ margin:8px 0; line-height:1.6; font-size:14.5px; } .content ul{ margin:8px 0 8px 2px; padding-left:20px; } .content li{ margin:4px 0; line-height:1.55; }
+    .timer{ position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:#eaf0f7; border:1px solid #cfe0f2; color:var(--navy);
+      border-radius:10px; padding:9px 13px; font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    .q{ border:1px solid var(--line); border-radius:12px; padding:12px 13px; margin:10px 0; }
+    .q .qt{ font-weight:700; font-size:14.5px; margin-bottom:8px; }
+    .opt{ display:block; padding:9px 11px; border:1px solid var(--line); border-radius:9px; margin:6px 0; cursor:pointer; font-size:14px; }
+    .opt input{ width:auto; margin-right:9px; }
+    .opt.wrong{ border-color:var(--red); background:#fdecea; } .opt.right{ border-color:var(--ok); background:#e6f6ec; }
+    .result{ text-align:center; padding:22px 14px; }
+    .result .big{ font-size:46px; font-weight:800; } .result .big.pass{ color:var(--ok); } .result .big.fail{ color:var(--red); }
+    .hist{ font-size:13px; }
+    .hist .row{ display:flex; gap:8px; padding:8px 0; border-top:1px solid var(--line); align-items:baseline; }
+    .hist .row:first-child{ border-top:none; }
+    .hist .m{ flex:1; min-width:0; } .hist .m b{ color:var(--navy); font-size:13.5px; }
+    .muted{ color:var(--muted); } .hidden{ display:none !important; }
+    .note{ font-size:12.5px; color:var(--muted); margin-top:6px; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <div class="ttl">📚 CPD Training</div>
+    <div class="spacer"></div>
+    <a class="hbtn hidden" id="adminLink" href="cpd-admin.html">⚙ Manage &amp; audit</a>
+  </header>
+  <div class="wrap">
+    <div id="gate" class="intro">Loading…</div>
+
+    <!-- LIST VIEW -->
+    <div id="listView" class="hidden">
+      <p class="intro">Read each module, then take the short test. The time you spend and the date are recorded against your name as evidence of your CPD — kept for the yearly audit.</p>
+      <div id="modList"></div>
+      <div class="sec-h">My CPD record</div>
+      <div class="card"><div class="hist" id="myHist"><span class="muted">No attempts yet.</span></div></div>
+    </div>
+
+    <!-- READ VIEW -->
+    <div id="readView" class="hidden">
+      <div class="timer">⏱ <span id="rTimer">0:00</span><span class="muted" id="rTimerHint" style="font-weight:500"></span></div>
+      <div class="card">
+        <h2 id="rTitle" style="color:var(--navy);margin:0 0 2px"></h2>
+        <div class="meta muted" id="rCat" style="font-size:12px;margin-bottom:8px"></div>
+        <div class="content" id="rContent"></div>
+      </div>
+      <button class="btn wide" id="startTestBtn" disabled>Start the test →</button>
+      <button class="btn line wide" id="readBack" style="margin-top:8px">‹ Back to modules</button>
+    </div>
+
+    <!-- TEST VIEW -->
+    <div id="testView" class="hidden">
+      <div class="timer">⏱ <span id="tTimer">0:00</span><span class="muted" style="font-weight:500">· test in progress</span></div>
+      <div class="card">
+        <h2 style="color:var(--navy);margin:0 0 8px" id="tTitle"></h2>
+        <div id="qList"></div>
+        <button class="btn wide" id="submitBtn" disabled style="margin-top:6px">Submit answers</button>
+        <div class="note" id="submitHint">Answer every question to submit.</div>
+      </div>
+    </div>
+
+    <!-- RESULT VIEW -->
+    <div id="resultView" class="hidden">
+      <div class="card result">
+        <div class="big" id="rsBig">—</div>
+        <div id="rsLine" style="font-size:16px;font-weight:700;margin:6px 0"></div>
+        <div class="muted" id="rsSub" style="font-size:13.5px"></div>
+      </div>
+      <button class="btn line wide" id="rsBack">Back to modules</button>
+      <button class="btn wide hidden" id="rsRetry" style="margin-top:8px">Read again &amp; retry</button>
+    </div>
+  </div>
+
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(p, o){ o=o||{}; o.headers=Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); if(o.body && !o.headers["Content-Type"]) o.headers["Content-Type"]="application/json"; return fetch(API+p, o); }
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+function show(id){ ["listView","readView","testView","resultView"].forEach(function(v){ $(v).classList.toggle("hidden", v!==id); }); window.scrollTo(0,0); }
+
+// Markdown-lite renderer — ESCAPE first, then apply a tiny subset (## / # / - / **bold**).
+function mdRender(src){
+  var lines = String(src||"").split(/\r?\n/), html="", inList=false;
+  function inline(t){ return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>"); }
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i];
+    if(/^\s*-\s+/.test(ln)){ if(!inList){ html+="<ul>"; inList=true; } html+="<li>"+inline(ln.replace(/^\s*-\s+/,""))+"</li>"; continue; }
+    if(inList){ html+="</ul>"; inList=false; }
+    if(/^##\s+/.test(ln)) html+="<h3>"+inline(ln.replace(/^##\s+/,""))+"</h3>";
+    else if(/^#\s+/.test(ln)) html+="<h2>"+inline(ln.replace(/^#\s+/,""))+"</h2>";
+    else if(ln.trim()!=="") html+="<p>"+inline(ln)+"</p>";
+  }
+  if(inList) html+="</ul>";
+  return html;
+}
+function fmtClock(sec){ sec=Math.max(0,Math.round(sec)); var m=Math.floor(sec/60), s=sec%60; return m+":"+String(s).padStart(2,"0"); }
+function fmtDur(sec){ sec=Math.round(sec||0); if(sec<60) return sec+"s"; var m=Math.floor(sec/60), s=sec%60; if(m<60) return m+"m"+(s?" "+s+"s":""); var h=Math.floor(m/60); return h+"h "+(m%60)+"m"; }
+function fmtDate(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+
+// ── Timer (visibility-aware: only counts while the page is on screen) ──────────
+var curModule=null, startedAtISO="", activeSecs=0, timerInt=null;
+function startTimer(){
+  activeSecs=0; startedAtISO=new Date().toISOString();
+  clearInterval(timerInt);
+  timerInt=setInterval(function(){
+    if(document.visibilityState==="visible"){ activeSecs++; paintTimer(); }
+  },1000);
+  paintTimer();
+}
+function stopTimer(){ clearInterval(timerInt); timerInt=null; }
+function paintTimer(){
+  if($("rTimer")) $("rTimer").textContent=fmtClock(activeSecs);
+  if($("tTimer")) $("tTimer").textContent=fmtClock(activeSecs);
+  var need = curModule ? (curModule.minSeconds||0) : 0;
+  var btn=$("startTestBtn"), hint=$("rTimerHint");
+  if(btn){
+    if(activeSecs>=need){ btn.disabled=false; if(hint) hint.textContent="· you can start the test"; }
+    else { btn.disabled=true; if(hint) hint.textContent="· read for at least "+fmtClock(need); }
+  }
+  if(curModule && !curModule.questionCount && btn){ btn.textContent="Mark as read"; }
+}
+
+// ── Load the module list + my record ──────────────────────────────────────────
+async function loadList(){
+  try{
+    var r = await authFetch("/cpd/modules").then(function(x){return x.json();});
+    if(!r.ok){ $("gate").textContent = r.error==="Forbidden" ? "You don’t have access to CPD training." : "Couldn’t load CPD."; return; }
+    if(r.canManage) $("adminLink").classList.remove("hidden");
+    $("gate").classList.add("hidden"); $("listView").classList.remove("hidden");
+    var html = (r.modules||[]).map(function(m){
+      var pill = m.myStatus==="passed" ? '<span class="pill pass">✓ Passed</span>'
+               : m.myStatus==="attempted" ? '<span class="pill try">Not passed yet</span>'
+               : '<span class="pill todo">Not started</span>';
+      var sub = m.myStatus==="passed" ? ("Passed "+esc(fmtDate(m.myPassedAt))+(m.myScore!=null?(" · "+m.myScore+"%"):""))
+              : m.myStatus==="attempted" ? ("Last attempt "+esc(fmtDate(m.myLastAt))+(m.myScore!=null?(" · "+m.myScore+"%"):""))
+              : (m.questionCount?(m.questionCount+" question"+(m.questionCount===1?"":"s")+" · pass "+m.passMark+"%"):"Reading only");
+      return '<div class="card mod">'
+        + '<div class="body"><h3>'+esc(m.title)+'</h3>'
+        + '<div class="meta">'+(m.category?esc(m.category)+" · ":"")+esc(sub)+'</div>'
+        + '<div style="margin-top:6px">'+pill+'</div></div>'
+        + '<button class="btn line" data-open="'+esc(m.id)+'">'+(m.myStatus==="not_started"?"Start":"Open")+'</button></div>';
+    }).join("") || '<div class="card muted">No CPD modules yet.</div>';
+    $("modList").innerHTML = html;
+    [].forEach.call(document.querySelectorAll("[data-open]"), function(b){ b.onclick=function(){ openModule(b.getAttribute("data-open")); }; });
+    loadMyHist();
+  }catch(e){ $("gate").textContent="Couldn’t load CPD — check your connection."; }
+}
+async function loadMyHist(){
+  try{
+    var r = await authFetch("/cpd/my").then(function(x){return x.json();});
+    var rows = (r.attempts||[]).slice(0,40);
+    $("myHist").innerHTML = rows.length ? rows.map(function(a){
+      var res = a.passed ? '<span class="pill pass">Passed</span>' : '<span class="pill try">Not passed</span>';
+      return '<div class="row"><div class="m"><b>'+esc(a.moduleTitle)+'</b><div class="muted">'+esc(fmtDate(a.submittedAt))+' · '+fmtDur(a.durationSeconds)+(a.total?(' · '+a.score+'%'):'')+'</div></div>'+res+'</div>';
+    }).join("") : '<span class="muted">No attempts yet.</span>';
+  }catch(e){}
+}
+
+// ── Open a module to read ──────────────────────────────────────────────────────
+async function openModule(id){
+  try{
+    var r = await authFetch("/cpd/module?id="+encodeURIComponent(id)).then(function(x){return x.json();});
+    if(!r.ok){ alert(r.error||"Couldn’t open that module."); return; }
+    curModule = r.module;
+    $("rTitle").textContent = curModule.title;
+    $("rCat").textContent = curModule.category || "";
+    $("rContent").innerHTML = mdRender(curModule.content);
+    show("readView");
+    startTimer();
+  }catch(e){ alert("Couldn’t open that module."); }
+}
+$("readBack").onclick=function(){ stopTimer(); curModule=null; show("listView"); };
+$("startTestBtn").onclick=function(){
+  if(!curModule) return;
+  if(!curModule.questionCount){ submitAttempt({}); return; }   // reading-only module
+  renderTest();
+};
+
+// ── The test ──────────────────────────────────────────────────────────────────
+function renderTest(){
+  $("tTitle").textContent = curModule.title;
+  $("qList").innerHTML = (curModule.questions||[]).map(function(q,qi){
+    var opts = (q.options||[]).map(function(o,oi){
+      return '<label class="opt"><input type="radio" name="q_'+esc(q.id)+'" value="'+oi+'">'+esc(o)+'</label>';
+    }).join("");
+    return '<div class="q" data-qid="'+esc(q.id)+'"><div class="qt">'+(qi+1)+'. '+esc(q.q)+'</div>'+opts+'</div>';
+  }).join("");
+  [].forEach.call(document.querySelectorAll('#qList input[type=radio]'), function(el){ el.addEventListener("change", checkAllAnswered); });
+  $("submitBtn").disabled=true; $("submitHint").textContent="Answer every question to submit.";
+  show("testView");
+}
+function collectAnswers(){
+  var ans={};
+  (curModule.questions||[]).forEach(function(q){
+    var sel=document.querySelector('input[name="q_'+(window.CSS&&CSS.escape?CSS.escape(q.id):q.id)+'"]:checked');
+    if(sel) ans[q.id]=Number(sel.value);
+  });
+  return ans;
+}
+function checkAllAnswered(){
+  var ans=collectAnswers(), n=(curModule.questions||[]).length;
+  var done=Object.keys(ans).length;
+  $("submitBtn").disabled = done<n;
+  $("submitHint").textContent = done<n ? ("Answered "+done+" of "+n+".") : "All answered — submit when ready.";
+}
+$("submitBtn").onclick=function(){ submitAttempt(collectAnswers()); };
+
+async function submitAttempt(answers){
+  $("submitBtn").disabled=true; if($("startTestBtn")) $("startTestBtn").disabled=true;
+  stopTimer();
+  try{
+    var r = await authFetch("/cpd/submit",{ method:"POST", body:JSON.stringify({ moduleId:curModule.id, startedAt:startedAtISO, durationSeconds:activeSecs, answers:answers }) }).then(function(x){return x.json();});
+    if(!r.ok){ alert(r.error||"Couldn’t save that attempt."); $("submitBtn").disabled=false; return; }
+    showResult(r);
+  }catch(e){ alert("Couldn’t save — check your connection and try again."); startTimer(); $("submitBtn").disabled=false; }
+}
+function showResult(r){
+  var hasTest = r.total>0;
+  $("rsBig").textContent = hasTest ? (r.score+"%") : "✓";
+  $("rsBig").className = "big "+(r.passed?"pass":"fail");
+  $("rsLine").textContent = hasTest ? (r.passed?"Passed":"Not passed — "+r.passMark+"% needed") : "Marked as read";
+  $("rsSub").innerHTML = (hasTest?("You got "+r.correct+" of "+r.total+" right. "):"")+"Time spent "+fmtDur(r.durationSeconds)+". Saved to your CPD record.";
+  $("rsRetry").classList.toggle("hidden", !hasTest || r.passed);
+  show("resultView");
+  loadMyHist();
+  loadList();   // refresh statuses in the background
+}
+$("rsBack").onclick=function(){ curModule=null; show("listView"); };
+$("rsRetry").onclick=function(){ if(curModule){ show("readView"); startTimer(); } };
+
+loadList();
+</script>
+</body>
+</html>

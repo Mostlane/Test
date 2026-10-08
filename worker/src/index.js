@@ -57,6 +57,7 @@ import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin tas
 import * as concerto from "./routes/concerto.js"; // DONE  (Concerto PPM list: client's official EM/PAT/pump schedule, drop-in import + chart reconciliation)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
 import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
+import * as cpd from "./routes/cpd.js";            // DONE  (CPD training for electricians: read material + test → logged per user for the NICEIC audit)
 import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
@@ -139,6 +140,7 @@ const ROUTES = [
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
+  ["*", "/cpd",        cpd.handle],       // CPD training (electricians): read material + test → logged per user for the NICEIC audit
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs

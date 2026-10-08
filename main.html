@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=41"></script>
+  <script src="/portal-config.js?v=42"></script>
   <script src="/van-check-gate.js?v=4"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Main Menu</title>
@@ -375,6 +375,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="fbc.html" id="FBC"><span class="emoji">🏛️</span> FBC Jobs</a>
     <a class="button" href="eicr-check.html" id="EicrCheck"><span class="emoji">⚡</span> EICR Check</a>
     <a class="button" href="cable-calc.html" id="CableCalc"><span class="emoji">🔌</span> Cable Calculator</a>
+    <a class="button" href="cpd.html" id="CPD"><span class="emoji">📚</span> CPD Training</a>
     <a class="button" href="programmes.html" id="Programmes"><span class="emoji">📊</span> Programmes</a>
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
@@ -444,6 +445,7 @@ const MAP = window.ML_PERM_MAP || {
   FBC: ["FullAccess", "SLAAdmin", "Compliance"],
   EicrCheck: ["EicrCheck"],
   CableCalc: ["CableCalc"],
+  CPD: ["CPD"],
   Programmes: ["Programmes"],
   Users: ["Users", "usersAdmin", "usersAdminBtn", "DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
   TimesheetAdmin: [
@@ -497,7 +499,7 @@ const MAP = window.ML_PERM_MAP || {
       // Apply the menu gating for a given permission set. Idempotent, so it can
       // run twice: instantly from the cached permissions, then again with the
       // fresh server copy.
-      const STORY_ALLOWED = new Set(["HSPlan", "SiteLog", "Holiday", "Assets", "Forms", "Compliance"]);
+      const STORY_ALLOWED = new Set(["HSPlan", "SiteLog", "Holiday", "Assets", "Forms", "Compliance", "CPD"]);
       function applyGate(user) {
         const fullAccess = String(user.FullAccess || "").toLowerCase() === "yes";
         const isStory = String(user.StoryMode || "").toLowerCase() === "yes";

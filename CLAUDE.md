@@ -4716,6 +4716,59 @@ report — the ProCert-style calculation flow, v1. Permission **`CableCalc`**
   /delete, POST /pdf. **TODO/next:** multi-circuit / board schedule; fuse deviceZs
   tables; RCD as a hard check; fold into the compliance chart / job costing.
 
+## CPD training (routes/cpd.js + cpd.html + cpd-admin.html — Oct 2026)
+Continuing Professional Development training, **primarily for electricians** — the
+record Jamie shows NICEIC at the yearly audit. An admin builds **modules** (reading
+material + a short multiple-choice test + a pass mark); an engineer reads the material
+(the time they spend is tracked, visibility-aware) then sits the test; **every attempt
+is logged per user with the date, time spent, score and pass/fail**, kept for all users
+as audit evidence. Permission **`CPD`** (new PERMISSION_KEY; FullAccess implies) gates
+the 📚 CPD Training tile (main.html MAP `CPD:["CPD"]`) + sidebar NAV + all `/cpd/*`
+learner routes; **admin (modules + the audit report) is FullAccess**. CPD is for FIELD
+electricians, so the tile is NOT in the field-user hide list (shows for a field user who
+holds CPD). Users-Admin grants it under "Compliance & docs".
+- **Tables (self-migrating):** **cpd_modules** (tenant/id/title/category/content/
+  pass_mark/min_seconds/questions JSON/active/sort_order/timestamps/created_by) +
+  **cpd_attempts** (the audit log — tenant/id/module_id/module_title/category/username/
+  started_at/submitted_at/duration_seconds/score/total/correct/pass_mark/passed/answers
+  JSON; indexed by (tenant,username,submitted_at)). Questions are
+  `[{id,q,options[],answer:<index>}]`.
+- **Endpoints** (`/cpd/*`): learner (CPD|FullAccess) — **GET /cpd/modules** (active
+  modules + my best-attempt status per module), **GET /cpd/module?id=** (content +
+  questions **with the correct answer STRIPPED** — `stripAnswers`, so a learner can't
+  read the key from the API), **POST /cpd/submit** `{moduleId,startedAt,durationSeconds,
+  answers}` (graded server-side by `gradeAttempt`, logged; returns score/passed/results),
+  **GET /cpd/my** (own history). Admin (FullAccess) — **GET /cpd/admin/modules** (all +
+  attempt/pass counts + answers), **POST /cpd/admin/module** (create/update; `normQuestions`
+  validates — needs text + ≥2 options, clamps the answer index), **POST
+  /cpd/admin/module-delete** (removes the module but **KEEPS the attempt history** — the
+  audit record survives via the title snapshot), **GET /cpd/admin/report?user=&module=&
+  from=&to=&passed=1** (the audit log, filtered; + distinct users/modules for the filters
+  + a summary {attempts,passes,totalSeconds}).
+- **Time logging (audit-credible):** the learner page tracks **active** reading/test
+  seconds (counts only while `document.visibilityState==="visible"` — pauses when the
+  tab/app is backgrounded), and the test unlocks only after a per-module
+  **`min_seconds`** read time. On submit the server **clamps** the client-reported
+  duration to the real wall-clock window (`submittedAt − startedAt + 5s grace`) so it
+  can never be inflated. Both started_at + submitted_at are stored.
+- **Front-end:** **cpd.html** (learner) = module list with my status (✓ Passed dd/mm ·
+  score / Not passed yet / Not started) + "My CPD record"; open a module → read pane
+  (markdown-lite render: `#`/`##`/`-`/`**bold**`, escaped first) with a sticky live
+  ⏱ timer → "Start the test" (enabled after min read time) → radio questions (submit
+  enabled once all answered) → result (score, pass/fail, time spent). **cpd-admin.html**
+  (FullAccess, 📘 Modules + 📋 Audit report tabs) = module manager (title/category/
+  content/pass mark/min read time/active + a questions builder: add question, add/remove
+  options, tick the correct one) and the **audit report** (filters by engineer/module/
+  date range/passed-only, summary tiles, a table Engineer·Module·Category·Date·Time·
+  Score·Result, and **⬇ Export (Excel)** via `ml-xlsx.js` → an `.xlsx` CPD record for
+  NICEIC). One clearly-labelled **EXAMPLE module is seeded** on first load (edit or
+  delete it and build your own). `_headers` no-cache on both pages; portal-config `?v=42`,
+  SW `mostlane-v143` (new sidebar nav item). Test `node --no-warnings
+  worker/tools/test-cpd.mjs` (15 cases: normQuestions, answer-stripping, grading incl.
+  reading-only + partial + string-index). **TODO/next:** optional PDF/document attach
+  per module (reading material as an uploaded file); per-user printable CPD certificate;
+  a yearly "who's done their CPD" reminder; fold into the home-hub.
+
 ## EICR / BS 7671 check (eicr-check.html)
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
 Compliance|FullAccess; sidebar NAV entry too). NO backend — the PDF is read
@@ -4803,7 +4856,9 @@ tile gated by ThemeColour/ThemeBackground.
   worker `chapplins.js canManage` = FullAccess|Chapplins; sidebar NAV perms updated.
   Existing non-FullAccess users need the new toggle granted. **Van Check** now shows to
   a field engineer ONLY when they have a **vehicle assigned** (`user.VehicleAssigned`) —
-  an engineer with no van has nothing to check.
+  an engineer with no van has nothing to check. **CPD** (`CPD: ["CPD"]`, Oct 2026) is a
+  dedicated per-tile toggle for electricians' CPD training (📚 CPD Training → cpd.html);
+  it is for FIELD users so it is NOT in the office-only field-user hide list.
 - **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
   **long-press** (~2.5s — deliberately long so slow taps never trigger it)
   on any visible tile enters "arrange" mode (tiles wobble

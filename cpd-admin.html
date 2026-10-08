@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=42"></script>
+  <script src="auth.js"></script>
+  <script src="ml-xlsx.js?v=1"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>CPD — Manage &amp; Audit — Mostlane Portal</title>
+  <link rel="stylesheet" href="/portal.css?v=1" />
+  <style>
+    :root{ --navy:#003468; --ink:#0f2438; --muted:#5b6b78; --line:#d7dee6; --ok:#0a8a35; --amber:#b45309; --red:#c0362c; }
+    html,body{ margin:0; background:#eef1f4; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:var(--ink); }
+    .wrap{ max-width:1000px; margin:0 auto; padding:14px 16px 70px; }
+    header.page{ background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page .ttl{ font-size:17px; font-weight:700; } header.page .spacer{ flex:1; }
+    .hbtn{ background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:999px; padding:7px 13px; font:600 13px inherit; text-decoration:none; }
+    .tabs{ display:flex; gap:8px; margin:14px 0 6px; }
+    .tab{ background:#fff; border:1px solid var(--line); border-radius:999px; padding:8px 15px; font:700 13.5px inherit; cursor:pointer; color:var(--muted); }
+    .tab.on{ background:var(--navy); color:#fff; border-color:var(--navy); }
+    .card{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 15px; margin:12px 0; }
+    .btn{ background:var(--navy); color:#fff; border:none; border-radius:10px; padding:10px 15px; font:700 13.5px inherit; cursor:pointer; text-decoration:none; display:inline-block; }
+    .btn.line{ background:#fff; color:var(--navy); border:1px solid var(--line); } .btn.sm{ padding:6px 11px; font-size:12.5px; border-radius:8px; }
+    .btn.danger{ background:var(--red); } .btn:disabled{ opacity:.5; cursor:default; }
+    .row{ display:flex; align-items:center; gap:12px; padding:11px 0; border-top:1px solid var(--line); }
+    .row:first-child{ border-top:none; } .row .g{ flex:1; min-width:0; } .row h3{ margin:0 0 2px; font-size:15px; color:var(--navy); } .row .meta{ font-size:12px; color:var(--muted); }
+    .pill{ display:inline-block; border-radius:999px; padding:2px 9px; font-size:11px; font-weight:700; }
+    .pill.on{ background:#e6f6ec; color:var(--ok); } .pill.off{ background:#f1e4e3; color:var(--red); }
+    label.f{ display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin:10px 0 3px; }
+    input[type=text],input[type=number],input[type=date],textarea,select{ width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:9px; font:inherit; color:var(--ink); background:#fff; }
+    textarea{ min-height:150px; resize:vertical; line-height:1.5; }
+    .modal{ position:fixed; inset:0; background:rgba(8,20,34,.5); display:none; align-items:flex-start; justify-content:center; z-index:50; overflow:auto; padding:18px; }
+    .modal.show{ display:flex; } .sheet{ background:#fff; border-radius:16px; max-width:720px; width:100%; padding:18px; margin:auto; }
+    .sheet h2{ margin:0 0 4px; color:var(--navy); font-size:18px; }
+    .qbox{ border:1px solid var(--line); border-radius:11px; padding:11px; margin:9px 0; background:#fafbfc; }
+    .optrow{ display:flex; align-items:center; gap:8px; margin:5px 0; } .optrow input[type=text]{ flex:1; } .optrow input[type=radio]{ width:auto; }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; } @media(max-width:560px){ .grid2{ grid-template-columns:1fr; } }
+    .tiles{ display:flex; gap:10px; flex-wrap:wrap; margin:10px 0; }
+    .tile{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 15px; min-width:120px; }
+    .tile .n{ font-size:24px; font-weight:800; color:var(--navy); } .tile .l{ font-size:12px; color:var(--muted); }
+    table{ width:100%; border-collapse:collapse; font-size:13px; } th,td{ text-align:left; padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top; } th{ font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+    .filters{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .filters > div{ min-width:130px; } .muted{ color:var(--muted); } .hidden{ display:none !important; }
+    .scrollx{ overflow-x:auto; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="cpd.html" title="Back">‹ Back</a>
+    <div class="ttl">CPD — manage &amp; audit</div>
+    <div class="spacer"></div>
+    <a class="hbtn" href="cpd.html">📚 Training</a>
+  </header>
+  <div class="wrap">
+    <div id="gate" class="muted">Loading…</div>
+    <div id="app" class="hidden">
+      <div class="tabs">
+        <div class="tab on" data-tab="modules">📘 Modules</div>
+        <div class="tab" data-tab="report">📋 Audit report</div>
+      </div>
+
+      <!-- MODULES -->
+      <div id="tabModules">
+        <div style="margin:10px 0"><button class="btn" id="newBtn">➕ New module</button></div>
+        <div class="card"><div id="modList" class="muted">Loading…</div></div>
+      </div>
+
+      <!-- REPORT -->
+      <div id="tabReport" class="hidden">
+        <div class="card">
+          <div class="filters">
+            <div><label class="f">Engineer</label><select id="fUser"><option value="all">All</option></select></div>
+            <div><label class="f">Module</label><select id="fModule"><option value="all">All</option></select></div>
+            <div><label class="f">From</label><input type="date" id="fFrom"></div>
+            <div><label class="f">To</label><input type="date" id="fTo"></div>
+            <div style="min-width:auto"><label class="f">&nbsp;</label><label style="font-size:13px;font-weight:600"><input type="checkbox" id="fPass" style="width:auto"> Passed only</label></div>
+            <div style="min-width:auto"><label class="f">&nbsp;</label><button class="btn sm" id="applyBtn">Apply</button></div>
+            <div style="min-width:auto"><label class="f">&nbsp;</label><button class="btn line sm" id="xlsxBtn">⬇ Export (Excel)</button></div>
+          </div>
+        </div>
+        <div class="tiles" id="repTiles"></div>
+        <div class="card scrollx"><div id="repTable" class="muted">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODULE EDITOR -->
+  <div class="modal" id="edModal">
+    <div class="sheet">
+      <h2 id="edTitle">New module</h2>
+      <div class="grid2">
+        <div><label class="f">Title *</label><input type="text" id="mTitle" placeholder="e.g. 18th Edition — Amendment changes"></div>
+        <div><label class="f">Category</label><input type="text" id="mCat" placeholder="e.g. Inspection &amp; Testing"></div>
+      </div>
+      <label class="f">Reading material</label>
+      <textarea id="mContent" placeholder="Paste or type the material to read. Use # Heading, ## Sub-heading, - bullet, **bold**."></textarea>
+      <div class="grid2">
+        <div><label class="f">Pass mark (%)</label><input type="number" id="mPass" min="0" max="100" value="80"></div>
+        <div><label class="f">Minimum reading time (seconds)</label><input type="number" id="mMin" min="0" value="60"></div>
+      </div>
+      <label style="font-size:13.5px;font-weight:600;display:block;margin:10px 0 0"><input type="checkbox" id="mActive" checked style="width:auto"> Active (visible to engineers)</label>
+
+      <label class="f" style="margin-top:14px">Test questions</label>
+      <div id="qEditor"></div>
+      <button class="btn line sm" id="addQ" style="margin-top:6px">➕ Add question</button>
+
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn" id="saveBtn">Save module</button>
+        <button class="btn line" id="cancelBtn">Cancel</button>
+        <span style="flex:1"></span>
+        <button class="btn danger hidden" id="delBtn">🗑 Delete</button>
+      </div>
+      <div class="muted" id="edMsg" style="margin-top:8px;font-size:12.5px"></div>
+    </div>
+  </div>
+
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(p,o){ o=o||{}; o.headers=Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); if(o.body && !o.headers["Content-Type"]) o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+function fmtDur(sec){ sec=Math.round(sec||0); if(sec<60) return sec+"s"; var m=Math.floor(sec/60), s=sec%60; if(m<60) return m+"m"+(s?" "+s+"s":""); var h=Math.floor(m/60); return h+"h "+(m%60)+"m"; }
+function fmtDate(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+function fmtDay(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric"}); }catch(e){ return ""; } }
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+[].forEach.call(document.querySelectorAll(".tab"), function(t){
+  t.onclick=function(){
+    [].forEach.call(document.querySelectorAll(".tab"), function(x){ x.classList.toggle("on", x===t); });
+    var k=t.getAttribute("data-tab");
+    $("tabModules").classList.toggle("hidden", k!=="modules");
+    $("tabReport").classList.toggle("hidden", k!=="report");
+    if(k==="report" && !reportLoaded){ loadReport(); reportLoaded=true; }
+  };
+});
+
+// ── Modules list ─────────────────────────────────────────────────────────────
+var MODULES=[];
+async function loadModules(){
+  try{
+    var r = await authFetch("/cpd/admin/modules").then(function(x){return x.json();});
+    if(!r.ok){ $("gate").textContent = r.error==="Forbidden" ? "Only a Full-Access user can manage CPD." : "Couldn’t load."; return; }
+    $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
+    MODULES=r.modules||[];
+    $("modList").innerHTML = MODULES.length ? MODULES.map(function(m){
+      var st=m.stats||{attempts:0,passes:0};
+      return '<div class="row"><div class="g"><h3>'+esc(m.title)+'</h3>'
+        + '<div class="meta">'+(m.category?esc(m.category)+" · ":"")+m.questionCount+' question'+(m.questionCount===1?"":"s")+' · pass '+m.passMark+'% · '+st.attempts+' attempt'+(st.attempts===1?"":"s")+', '+st.passes+' pass'+(st.passes===1?"":"es")+'</div></div>'
+        + (m.active?'<span class="pill on">Active</span>':'<span class="pill off">Hidden</span>')
+        + ' <button class="btn line sm" data-edit="'+esc(m.id)+'">Edit</button></div>';
+    }).join("") : '<span class="muted">No modules yet — add one.</span>';
+    [].forEach.call(document.querySelectorAll("[data-edit]"), function(b){ b.onclick=function(){ openEditor(b.getAttribute("data-edit")); }; });
+  }catch(e){ $("gate").textContent="Couldn’t load — check your connection."; }
+}
+
+// ── Module editor ───────────────────────────────────────────────────────────
+var editId=null, editQuestions=[];
+function qUid(){ return "q"+Date.now()+Math.random().toString(36).slice(2,7); }
+function renderQEditor(){
+  $("qEditor").innerHTML = editQuestions.map(function(q,qi){
+    var opts = q.options.map(function(o,oi){
+      return '<div class="optrow"><input type="radio" name="corr_'+qi+'" '+(q.answer===oi?"checked":"")+' data-corr="'+qi+'|'+oi+'" title="Correct answer">'
+        + '<input type="text" data-opt="'+qi+'|'+oi+'" value="'+esc(o)+'" placeholder="Option '+(oi+1)+'">'
+        + '<button class="btn line sm" data-ropt="'+qi+'|'+oi+'">✕</button></div>';
+    }).join("");
+    return '<div class="qbox"><input type="text" data-q="'+qi+'" value="'+esc(q.q)+'" placeholder="Question '+(qi+1)+'">'
+      + '<div style="margin-top:7px">'+opts+'</div>'
+      + '<div style="margin-top:6px"><button class="btn line sm" data-aopt="'+qi+'">+ option</button> '
+      + '<button class="btn line sm" data-rq="'+qi+'" style="color:var(--red)">Remove question</button> '
+      + '<span class="muted" style="font-size:11.5px">· tick the ◉ for the correct answer</span></div></div>';
+  }).join("") || '<div class="muted" style="font-size:12.5px">No questions — a module can be reading-only, or add a question below.</div>';
+  // wire
+  [].forEach.call(document.querySelectorAll("[data-q]"), function(el){ el.oninput=function(){ editQuestions[+el.getAttribute("data-q")].q=el.value; }; });
+  [].forEach.call(document.querySelectorAll("[data-opt]"), function(el){ el.oninput=function(){ var p=el.getAttribute("data-opt").split("|"); editQuestions[+p[0]].options[+p[1]]=el.value; }; });
+  [].forEach.call(document.querySelectorAll("[data-corr]"), function(el){ el.onchange=function(){ var p=el.getAttribute("data-corr").split("|"); editQuestions[+p[0]].answer=+p[1]; }; });
+  [].forEach.call(document.querySelectorAll("[data-ropt]"), function(el){ el.onclick=function(){ var p=el.getAttribute("data-ropt").split("|"); var q=editQuestions[+p[0]]; q.options.splice(+p[1],1); if(q.answer>=q.options.length) q.answer=0; renderQEditor(); }; });
+  [].forEach.call(document.querySelectorAll("[data-aopt]"), function(el){ el.onclick=function(){ editQuestions[+el.getAttribute("data-aopt")].options.push(""); renderQEditor(); }; });
+  [].forEach.call(document.querySelectorAll("[data-rq]"), function(el){ el.onclick=function(){ editQuestions.splice(+el.getAttribute("data-rq"),1); renderQEditor(); }; });
+}
+$("addQ").onclick=function(){ editQuestions.push({ id:qUid(), q:"", options:["",""], answer:0 }); renderQEditor(); };
+
+function openEditor(id){
+  var m = id ? MODULES.find(function(x){return x.id===id;}) : null;
+  editId = m ? m.id : null;
+  $("edTitle").textContent = m ? "Edit module" : "New module";
+  $("mTitle").value = m?m.title:""; $("mCat").value = m?m.category:""; $("mContent").value = m?m.content:"";
+  $("mPass").value = m?m.passMark:80; $("mMin").value = m?m.minSeconds:60; $("mActive").checked = m?m.active:true;
+  editQuestions = m ? (m.questions||[]).map(function(q){ return { id:q.id||qUid(), q:q.q, options:(q.options||[]).slice(), answer:q.answer||0 }; }) : [];
+  renderQEditor();
+  $("delBtn").classList.toggle("hidden", !m);
+  $("edMsg").textContent=""; $("edModal").classList.add("show");
+}
+$("newBtn").onclick=function(){ openEditor(null); };
+$("cancelBtn").onclick=function(){ $("edModal").classList.remove("show"); };
+
+$("saveBtn").onclick=async function(){
+  var title=$("mTitle").value.trim();
+  if(!title){ $("edMsg").textContent="A title is required."; return; }
+  // Light validation: every question needs text + ≥2 non-blank options.
+  for(var i=0;i<editQuestions.length;i++){
+    var q=editQuestions[i]; var opts=q.options.map(function(o){return String(o||"").trim();}).filter(Boolean);
+    if(!String(q.q||"").trim()){ $("edMsg").textContent="Question "+(i+1)+" has no text."; return; }
+    if(opts.length<2){ $("edMsg").textContent="Question "+(i+1)+" needs at least two options."; return; }
+  }
+  $("saveBtn").disabled=true; $("edMsg").textContent="Saving…";
+  try{
+    var body={ id:editId||undefined, title:title, category:$("mCat").value.trim(), content:$("mContent").value,
+      passMark:Number($("mPass").value)||0, minSeconds:Number($("mMin").value)||0, active:$("mActive").checked,
+      questions:editQuestions };
+    var r = await authFetch("/cpd/admin/module",{ method:"POST", body:JSON.stringify(body) }).then(function(x){return x.json();});
+    if(!r.ok){ $("edMsg").textContent=r.error||"Couldn’t save."; $("saveBtn").disabled=false; return; }
+    $("edModal").classList.remove("show"); $("saveBtn").disabled=false; loadModules();
+  }catch(e){ $("edMsg").textContent="Couldn’t save — check your connection."; $("saveBtn").disabled=false; }
+};
+$("delBtn").onclick=async function(){
+  if(!editId) return;
+  var ok = window.MLUI ? await MLUI.confirm("Delete this module? Engineers' completed records are KEPT for the audit — only the module is removed.",{title:"Delete module",okLabel:"Delete",danger:true}) : confirm("Delete this module? (records are kept)");
+  if(!ok) return;
+  try{
+    var r=await authFetch("/cpd/admin/module-delete",{ method:"POST", body:JSON.stringify({id:editId}) }).then(function(x){return x.json();});
+    if(r.ok){ $("edModal").classList.remove("show"); loadModules(); } else alert(r.error||"Couldn’t delete.");
+  }catch(e){ alert("Couldn’t delete."); }
+};
+
+// ── Audit report ───────────────────────────────────────────────────────────
+var reportLoaded=false, REPORT=[];
+async function loadReport(){
+  var qs="?user="+encodeURIComponent($("fUser").value||"all")+"&module="+encodeURIComponent($("fModule").value||"all")
+    +"&from="+encodeURIComponent($("fFrom").value||"")+"&to="+encodeURIComponent($("fTo").value||"")+($("fPass").checked?"&passed=1":"");
+  $("repTable").innerHTML='<span class="muted">Loading…</span>';
+  try{
+    var r = await authFetch("/cpd/admin/report"+qs).then(function(x){return x.json();});
+    if(!r.ok){ $("repTable").textContent=r.error||"Couldn’t load."; return; }
+    REPORT=r.attempts||[];
+    // Fill filter dropdowns once.
+    if($("fUser").options.length<=1 && r.users){ $("fUser").innerHTML='<option value="all">All engineers</option>'+r.users.map(function(u){return '<option value="'+esc(u)+'">'+esc(u)+'</option>';}).join(""); }
+    if($("fModule").options.length<=1 && r.modules){ $("fModule").innerHTML='<option value="all">All modules</option>'+r.modules.map(function(m){return '<option value="'+esc(m.id)+'">'+esc(m.title)+'</option>';}).join(""); }
+    var s=r.summary||{attempts:0,passes:0,totalSeconds:0};
+    $("repTiles").innerHTML =
+      '<div class="tile"><div class="n">'+s.attempts+'</div><div class="l">Attempts</div></div>'
+      +'<div class="tile"><div class="n">'+s.passes+'</div><div class="l">Passes</div></div>'
+      +'<div class="tile"><div class="n">'+fmtDur(s.totalSeconds)+'</div><div class="l">Total CPD time</div></div>';
+    $("repTable").innerHTML = REPORT.length ? (
+      '<table><thead><tr><th>Engineer</th><th>Module</th><th>Category</th><th>Date</th><th>Time spent</th><th>Score</th><th>Result</th></tr></thead><tbody>'
+      + REPORT.map(function(a){
+        return '<tr><td><b>'+esc(a.username)+'</b></td><td>'+esc(a.moduleTitle)+'</td><td>'+esc(a.category||"")+'</td><td>'+esc(fmtDate(a.submittedAt))+'</td><td>'+fmtDur(a.durationSeconds)+'</td><td>'+(a.total?(a.score+"%"):"—")+'</td><td style="color:'+(a.passed?"var(--ok)":"var(--red)")+';font-weight:700">'+(a.passed?"Passed":"Not passed")+'</td></tr>';
+      }).join("")
+      + '</tbody></table>'
+    ) : '<span class="muted">No CPD attempts for this filter.</span>';
+  }catch(e){ $("repTable").textContent="Couldn’t load — check your connection."; }
+}
+$("applyBtn").onclick=loadReport;
+$("xlsxBtn").onclick=function(){
+  if(!REPORT.length){ alert("Nothing to export for this filter."); return; }
+  var rows=[["Engineer","Module","Category","Date","Time spent","Time (seconds)","Score %","Result","Started","Submitted"]];
+  REPORT.forEach(function(a){
+    rows.push([ a.username, a.moduleTitle, a.category||"", fmtDay(a.submittedAt), fmtDur(a.durationSeconds), a.durationSeconds||0,
+      (a.total?a.score:""), a.passed?"Passed":"Not passed", fmtDate(a.startedAt), fmtDate(a.submittedAt) ]);
+  });
+  var name="CPD-record-"+new Date().toISOString().slice(0,10)+".xlsx";
+  try{ window.MLXlsx.download(name, [{ name:"CPD record", rows:rows }]); }
+  catch(e){ alert("Couldn’t build the Excel file."); }
+};
+
+loadModules();
+</script>
+</body>
+</html>

@@ -482,6 +482,7 @@ const PERMISSION_KEYS = [
   "CableCalc",       // the BS 7671 Cable Calculator (single-circuit sizing / verification + report)
   "WhereEveryone",   // the live "Where's everyone" engineer board (engineers-live.html + GET /sla/live)
   "StaffRecords",    // HR: manage staff qualifications, insurances, licences + licence checks
+  "CPD",             // CPD training (electricians): read material + sit the test (records logged for the NICEIC audit)
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly

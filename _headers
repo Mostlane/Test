@@ -173,6 +173,10 @@
   Cache-Control: no-cache
 /cable-calc-engine.js
   Cache-Control: no-cache
+/cpd.html
+  Cache-Control: no-cache
+/cpd-admin.html
+  Cache-Control: no-cache
 /compliance-review.html
   Cache-Control: no-cache
 /programmes.html
