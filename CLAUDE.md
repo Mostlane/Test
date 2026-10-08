@@ -4764,10 +4764,29 @@ holds CPD). Users-Admin grants it under "Compliance & docs".
   NICEIC). One clearly-labelled **EXAMPLE module is seeded** on first load (edit or
   delete it and build your own). `_headers` no-cache on both pages; portal-config `?v=42`,
   SW `mostlane-v143` (new sidebar nav item). Test `node --no-warnings
-  worker/tools/test-cpd.mjs` (15 cases: normQuestions, answer-stripping, grading incl.
-  reading-only + partial + string-index). **TODO/next:** optional PDF/document attach
-  per module (reading material as an uploaded file); per-user printable CPD certificate;
-  a yearly "who's done their CPD" reminder; fold into the home-hub.
+  worker/tools/test-cpd.mjs` (now 22 cases: normQuestions, answer-stripping, grading
+  incl. reading-only + partial + string-index, + `parseYouTubeId`).
+- **YouTube video modules (Oct 2026, Jamie's ask — "find videos on YouTube, play them
+  in a window, then questions at the end").** A module can embed a YouTube video to
+  **watch before the test**. cpd_modules gained a **`video`** column (self-migrating
+  ALTER; stores the clean 11-char YouTube id). **`parseYouTubeId`** (exported, tested)
+  pulls the id out of whatever the admin pastes — a watch / youtu.be / embed / shorts
+  URL, or a bare id — returning "" if it isn't YouTube. cpd-admin.html editor has a
+  "YouTube video (optional)" field (validated client-side with the same parser);
+  shapeModule returns `video`; /cpd/modules carries `hasVideo` (a 🎬 card marker).
+  **Learner (cpd.html):** the read view shows a responsive 16:9 embed (`.vwrap` iframe
+  `youtube.com/embed/<id>?enablejsapi=1&rel=0&modestbranding=1`), rendered immediately
+  so it ALWAYS plays, with the **IFrame Player API attached for the "ended" unlock**
+  (`ensureYtApi` loads `youtube.com/iframe_api` once; `onStateChange===ENDED` →
+  `videoWatched`). **Unlock rule for a video module:** the test unlocks when the video
+  FINISHES (primary), else an admin time fallback (`min_seconds` — set it ≈ the video
+  length to enforce watching), else — ONLY if the JS API failed to load (12s timeout) —
+  a 30s floor so the learner is never trapped. The video is destroyed (playback stops)
+  when they move to the test / leave / go back; re-mounted on a retry. The SW skips
+  cross-origin, so YouTube is never intercepted. Active watch time is logged like read
+  time (visibility-aware + server wall-clock clamp). **TODO/next:** optional PDF/document
+  attach per module (reading material as an uploaded file); per-user printable CPD
+  certificate; a yearly "who's done their CPD" reminder; fold into the home-hub.
 
 ## EICR / BS 7671 check (eicr-check.html)
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
