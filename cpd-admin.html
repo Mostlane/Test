@@ -105,6 +105,21 @@
       <label style="font-size:13.5px;font-weight:600;display:block;margin:10px 0 0"><input type="checkbox" id="mActive" checked style="width:auto"> Active (visible to engineers)</label>
 
       <label class="f" style="margin-top:14px">Test questions</label>
+      <div class="card" style="background:#f3f7fb;border-color:#cfe0f0;padding:11px 12px;margin:0 0 10px">
+        <div style="font-weight:700;color:var(--navy);font-size:13.5px">🤖 Draft questions from the video</div>
+        <div class="muted" style="font-size:12px;margin:3px 0 8px">Reads the first video's transcript and writes multiple-choice questions for you to review. No need to watch it or write them yourself. Uses the first video above (and its Start/End if set).</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12.5px;font-weight:600;color:var(--muted)">How many <input type="number" id="aiCount" value="5" min="1" max="15" style="width:62px;display:inline-block;padding:6px 8px"></label>
+          <input type="text" id="aiHint" placeholder="Optional focus, e.g. 'RCD types &amp; testing'" style="flex:1;min-width:150px">
+          <button class="btn sm" id="aiGenBtn" type="button">✨ Draft from video</button>
+        </div>
+        <div id="aiPasteWrap" class="hidden" style="margin-top:9px">
+          <div class="muted" style="font-size:12px;margin-bottom:4px">Couldn't read the captions automatically. On YouTube: open the video → <b>⋯ More</b> → <b>Show transcript</b>, copy it all, and paste here:</div>
+          <textarea id="aiTranscript" placeholder="Paste the video transcript here…" style="min-height:90px"></textarea>
+          <button class="btn sm line" id="aiGenPasteBtn" type="button" style="margin-top:6px">✨ Draft from pasted transcript</button>
+        </div>
+        <div class="muted" id="aiMsg" style="font-size:12.5px;margin-top:7px"></div>
+      </div>
       <div id="qEditor"></div>
       <button class="btn line sm" id="addQ" style="margin-top:6px">➕ Add question</button>
 
@@ -202,6 +217,37 @@ function renderQEditor(){
 }
 $("addQ").onclick=function(){ editQuestions.push({ id:qUid(), q:"", options:["",""], answer:0 }); renderQEditor(); };
 
+// ── AI: draft questions from the video transcript ─────────────────────────────
+function appendAIQuestions(qs){
+  (qs||[]).forEach(function(q){ editQuestions.push({ id:qUid(), q:q.q, options:(q.options||[]).slice(), answer:q.answer||0 }); });
+  renderQEditor();
+}
+async function aiDraft(usePaste){
+  var count=Math.max(1,Math.min(15,Number($("aiCount").value)||5));
+  var body={ count:count, instructions:$("aiHint").value.trim() };
+  if(usePaste){ var t=$("aiTranscript").value.trim(); if(!t){ $("aiMsg").textContent="Paste the transcript first."; return; } body.transcript=t; }
+  else{
+    var seg=editSegments[0];
+    if(!seg || !ytId(seg.url)){ $("aiMsg").textContent="Add a YouTube video above first (or paste a transcript below)."; $("aiPasteWrap").classList.remove("hidden"); return; }
+    body.url=seg.url; body.start=seg.start||""; body.end=seg.end||"";
+  }
+  var btn = usePaste ? $("aiGenPasteBtn") : $("aiGenBtn");
+  btn.disabled=true; $("aiMsg").textContent="Reading the video & drafting questions… this can take ~15s.";
+  try{
+    var r=await authFetch("/cpd/admin/ai-questions",{ method:"POST", body:JSON.stringify(body) }).then(function(x){return x.json();});
+    if(!r.ok){
+      if(r.needTranscript) $("aiPasteWrap").classList.remove("hidden");
+      $("aiMsg").textContent=r.error||"Couldn’t draft questions."; btn.disabled=false; return;
+    }
+    appendAIQuestions(r.questions);
+    $("aiMsg").textContent="Added "+r.questions.length+" draft question"+(r.questions.length===1?"":"s")+" from the "+(r.source==="pasted"?"pasted transcript":"video transcript")+". Check the wording and the ticked ◉ correct answer, then Save.";
+    $("aiPasteWrap").classList.add("hidden");
+    btn.disabled=false;
+  }catch(e){ $("aiMsg").textContent="Couldn’t reach the AI — check your connection."; btn.disabled=false; }
+}
+$("aiGenBtn").onclick=function(){ aiDraft(false); };
+$("aiGenPasteBtn").onclick=function(){ aiDraft(true); };
+
 function openEditor(id){
   var m = id ? MODULES.find(function(x){return x.id===id;}) : null;
   editId = m ? m.id : null;
@@ -213,6 +259,9 @@ function openEditor(id){
   editQuestions = m ? (m.questions||[]).map(function(q){ return { id:q.id||qUid(), q:q.q, options:(q.options||[]).slice(), answer:q.answer||0 }; }) : [];
   renderQEditor();
   $("delBtn").classList.toggle("hidden", !m);
+  // Reset the AI-draft panel for this module.
+  if($("aiMsg")) $("aiMsg").textContent=""; if($("aiHint")) $("aiHint").value="";
+  if($("aiTranscript")) $("aiTranscript").value=""; if($("aiPasteWrap")) $("aiPasteWrap").classList.add("hidden");
   $("edMsg").textContent=""; $("edModal").classList.add("show");
 }
 $("newBtn").onclick=function(){ openEditor(null); };
