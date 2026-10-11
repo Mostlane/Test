@@ -171,7 +171,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
     <div id="form-area" style="display:none">
       <div class="card fade-in">
         <h1 style="margin-bottom:4px">Raise a PO</h1>
-        <p class="muted">Outside office hours only. Pick a <strong>live project</strong> or <strong>your vehicle</strong>, then supplier and description. For a reactive maintenance job, raise the PO from the <strong>“Raise PO for this job”</strong> button inside the job card so it ties to the job.</p>
+        <p class="muted">Pick a <strong>live project</strong> or <strong>your vehicle</strong>, then a supplier and description. For a reactive maintenance job, raise the PO from the <strong>“Raise PO for this job”</strong> button inside the job card so it ties to the job.</p>
         <div id="prefill-note" style="display:none;margin-top:12px;padding:10px 12px;border-radius:10px;background:#d6f5dd;color:#1e6c33;font-size:13px;font-weight:600"></div>
         <div class="field" style="position:relative;margin-top:16px">
           <label>Project or vehicle</label>
@@ -189,8 +189,12 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
         </div>
         <div class="field" style="position:relative">
           <label>Supplier</label>
-          <input id="supplier" type="text" placeholder="Start typing..." autocomplete="off" oninput="filterSuppliers()" onfocus="filterSuppliers()" onblur="setTimeout(hideSuppliers,200)">
+          <input id="supplier" type="text" placeholder="Start typing..." autocomplete="off" oninput="onSupplierInput()" onfocus="filterSuppliers()" onblur="setTimeout(hideSuppliers,200)">
           <div id="supplier-dropdown" class="ac-dropdown" style="display:none"></div>
+        </div>
+        <div class="field" id="trade-field" style="display:none">
+          <label>Trade <span style="font-weight:400;color:#7a4ca0">👷 Subcontractor</span></label>
+          <select id="trade"><option value="">— Select a trade —</option></select>
         </div>
         <div class="field">
           <label>Description</label>
@@ -238,6 +242,9 @@ async function boot(){
   var full = yes(u.FullAccess) || yes(perms.FullAccess);
   var st = String(localStorage.getItem("mostlaneStaffType")||sessionStorage.getItem("mostlaneStaffType")||u.StaffType||"").toLowerCase();
   var isField = !full && !yes(perms.SLAAdmin) && st!=="office" && (st==="field" || yes(perms.SLA) || yes(perms.StoryMode));
+  // Office / admin (FullAccess, or PurchaseOrders on a non-field account) can also
+  // pick a SUBCONTRACTOR as the supplier on a job PO — mirrors the server's `office`.
+  IS_OFFICE = full || st === "office" || (yes(perms.PurchaseOrders) && st !== "field");
   if(isField && !poJobIdFromHash()){
     document.getElementById("poGate").innerHTML =
       '<div style="max-width:420px;margin:40px auto 0;text-align:center">'
@@ -255,6 +262,10 @@ async function boot(){
 let SUPPLIERS = [];
 let PROJECTS = [];   // live projects an engineer may raise against
 let VEHICLES = [];   // company vehicles (their assigned one flagged .mine)
+let SUBCONTRACTORS = [];   // office/admin only — pickable as the "supplier" on a job PO
+let SUB_NAMES = new Set(); // subcontractor names, for quick lookup
+let TRADES = [];           // trades for a subcontractor PO
+let IS_OFFICE = false;     // set in boot(); gates the subcontractor option
 async function init() {
   const [status, suppliers, opts] = await Promise.all([
     authFetch('/po/api/status').then(r => r.json()),
@@ -266,12 +277,30 @@ async function init() {
   VEHICLES = Array.isArray(opts && opts.vehicles) ? opts.vehicles : [];
   const statusArea = document.getElementById('status-area');
   if (status.mode === 'disabled') { statusArea.innerHTML = '<div class="card fade-in"><div class="alert warn">' + escapeHtml(status.message) + '</div></div>'; loadMyPOs(true); return; }
-  if (status.mode === 'office_hours') {
+  // Engineers may only raise outside office hours; office/admin can raise any time
+  // (the server allows an office-source PO during office hours).
+  if (status.mode === 'office_hours' && !IS_OFFICE) {
     statusArea.innerHTML = '<div class="card fade-in" style="text-align:center;padding:36px 20px"><h2>Office is open</h2><p class="muted" style="margin-bottom:18px">' + escapeHtml(status.message) + '</p><a href="tel:02380262000" class="btn">📞 Call 02380 262000</a></div>';
     loadMyPOs(true);
     return;
   }
   document.getElementById('form-area').style.display = 'block';
+  // Office/admin only: subcontractors become pickable as the supplier, and the
+  // trades list feeds the Trade dropdown that appears when one is chosen.
+  if (IS_OFFICE) {
+    try {
+      const [subs, trades] = await Promise.all([
+        authFetch('/po/api/subcontractors').then(r => r.json()).catch(() => []),
+        authFetch('/po/api/trades').then(r => r.json()).catch(() => [])
+      ]);
+      SUBCONTRACTORS = Array.isArray(subs) ? subs : [];
+      SUB_NAMES = new Set(SUBCONTRACTORS.map(s => s.name));
+      TRADES = Array.isArray(trades) ? trades : [];
+      populateTrades();
+      const si = document.getElementById('supplier');
+      if (si) si.placeholder = 'Start typing a supplier or subcontractor…';
+    } catch (e) { /* subcontractors are a nice-to-have; leave the form supplier-only */ }
+  }
   prefillFromJobLink();
   loadMyPOs(false);
 }
@@ -385,24 +414,42 @@ function pickVehicle(reg, desc) {
 }
 function pickSite(name) { document.getElementById('site').value = name; document.getElementById('vehicle_reg').value = ''; pickedVehicleLabel = null; hideSites(); }
 function hideSites() { const dd = document.getElementById('site-dropdown'); dd.style.display = 'none'; dd.dataset.all = ''; }
+// Office/admin see subcontractors in the same box (tagged), alongside suppliers.
 function filterSuppliers() {
   const input = document.getElementById('supplier');
   const dd = document.getElementById('supplier-dropdown');
   const q = input.value.trim().toLowerCase();
   if (!q) { dd.style.display = 'none'; return; }
-  const matches = SUPPLIERS.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  const sup = SUPPLIERS.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8).map(s => ({ name: s.name, sub: false }));
+  const subs = IS_OFFICE ? SUBCONTRACTORS.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8).map(s => ({ name: s.name, sub: true })) : [];
+  const matches = sup.concat(subs).slice(0, 12);
   if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
-  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickSupplier('+escapeHtml(JSON.stringify(String(s.name)))+')">'+highlight(s.name, q)+'</div>').join('');
+  dd.innerHTML = matches.map(m => '<div class="ac-item" onmousedown="pickSupplier('+escapeHtml(JSON.stringify(String(m.name)))+','+(m.sub?'true':'false')+')">'+highlight(m.name, q)+(m.sub?' <span class="muted">· 👷 subcontractor</span>':'')+'</div>').join('');
   dd.style.display = 'block';
+}
+// Typing or picking updates whether the chosen name is a subcontractor, which
+// reveals the Trade dropdown (a subcontractor PO is categorised + needs a trade).
+function onSupplierInput() { updateSupplierKind(); filterSuppliers(); }
+function updateSupplierKind() {
+  const name = document.getElementById('supplier').value.trim();
+  const isSub = IS_OFFICE && SUB_NAMES.has(name);
+  const tf = document.getElementById('trade-field');
+  if (tf) tf.style.display = isSub ? 'block' : 'none';
+}
+function populateTrades() {
+  const sel = document.getElementById('trade');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select a trade —</option>' + TRADES.map(t => '<option value="'+escapeAttr(t.name)+'">'+escapeHtml(t.name)+'</option>').join('');
 }
 function highlight(text, q) {
   const i = text.toLowerCase().indexOf(q);
   if (i < 0) return escapeHtml(text);
   return escapeHtml(text.slice(0,i)) + '<strong>' + escapeHtml(text.slice(i,i+q.length)) + '</strong>' + escapeHtml(text.slice(i+q.length));
 }
-function pickSupplier(name) {
+function pickSupplier(name, isSub) {
   document.getElementById('supplier').value = name;
   hideSuppliers();
+  updateSupplierKind();
 }
 function hideSuppliers() { document.getElementById('supplier-dropdown').style.display = 'none'; }
 async function loadMyPOs(officeHours) {
@@ -435,11 +482,17 @@ async function submitPO(btn) {
   const description = document.getElementById('description').value.trim();
   const vehicleReg = (document.getElementById('vehicle_reg') || {}).value || '';
   const jobId = (document.getElementById('job_id') || {}).value || '';
+  // Office/admin may pick a subcontractor as the supplier — that makes it a
+  // subcontractor PO (needs a trade; the server categorises it for job costing).
+  const isSub = IS_OFFICE && SUB_NAMES.has(supplier);
+  const tradeEl = document.getElementById('trade');
+  const trade = tradeEl ? (tradeEl.value || '').trim() : '';
   if (!site) { alert('Pick a live project or your vehicle'); return; }
   if (!supplier) { alert('Supplier is required'); return; }
   if (!description) { alert('Description is required'); return; }
-  const valid = SUPPLIERS.some(s => s.name === supplier);
+  const valid = SUPPLIERS.some(s => s.name === supplier) || isSub;
   if (!valid) { alert('Please pick a supplier from the dropdown list'); return; }
+  if (isSub && !trade) { alert('Pick a trade for the subcontractor'); return; }
   // Engineers raise ONLY against a live project, their vehicle, or a reactive job
   // opened from the job card (which carries the job id). A plainly-typed site is
   // rejected — reactive POs must come from the job card so they tie to a job.
@@ -451,6 +504,8 @@ async function submitPO(btn) {
   try {
     const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ engineer_slug: null, engineer_name: null, source: 'engineer', site, incident_no: incident, supplier, description,
+        cost_category: isSub ? 'subcontractor' : 'materials',
+        trade: isSub ? trade : null,
         job_id: (document.getElementById('job_id') || {}).value || null,
         job_ref: (document.getElementById('job_ref') || {}).value || null,
         vehicle_reg: (document.getElementById('vehicle_reg') || {}).value || null }) }).then(r => r.json());
@@ -463,7 +518,7 @@ async function submitPO(btn) {
         <div class="po-display">${escapeHtml(res.po_number)}</div>
         <div style="margin:24px 0;color:#5a6677;font-size:14px;line-height:1.7">
           <strong style="color:#003366">${incident ? '🎫 ' + escapeHtml(incident) + (site ? ' · ' + escapeHtml(site) : '') : escapeHtml(site)}</strong><br>
-          ${escapeHtml(supplier)}<br><span style="font-size:13px">${escapeHtml(description)}</span>
+          ${escapeHtml(supplier)}${isSub ? ' <span style="color:#7a4ca0;font-weight:600">👷 ' + escapeHtml(trade || 'Subcontractor') + '</span>' : ''}<br><span style="font-size:13px">${escapeHtml(description)}</span>
         </div>
         <button class="ghost" onclick="location.reload()">Raise Another</button>
       </div>`;
