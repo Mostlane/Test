@@ -5728,6 +5728,24 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      UNAFFECTED (the office manages the full site list on po-admin.html → Sites).
      `getRaiseOptions`/`liveProjectNames`/`isLiveProjectSite` are the po.js helpers;
      they read env.DB (projects + users.vehicle_assigned).
+   - **Office/admin can pick a SUBCONTRACTOR as the supplier on a job PO (Oct 2026):**
+     when an **office/admin** user raises a PO through a job (the job-card "Raise PO
+     for this job" → po-raise.html#mlpo), subcontractors now appear in the same
+     Supplier autocomplete, tagged "· 👷 subcontractor". Picking one reveals a
+     **Trade** dropdown and raises it as a **subcontractor PO** (`cost_category:
+     "subcontractor"` + `trade`) so job costing splits subcontractor vs materials.
+     **Frontend-only change** — the worker already handles it: `/po/api/pos` POST
+     sets `source` from the caller's role (office ⇒ "office"), and `issuePO`'s
+     office subcontractor branch (site+supplier+trade+description, all satisfied —
+     site is prefilled from the job) accepts it; engineers are forced to
+     `materials` server-side regardless, so they never get subcontractors. Gated
+     client-side by `IS_OFFICE` = `FullAccess || staffType office || (PurchaseOrders
+     && non-field)` (mirrors po.js `office`); po-raise fetches `/po/api/subcontractors`
+     + `/po/api/trades` only for office users. **Office users also see the form
+     DURING office hours** (the `office_hours` status screen is skipped for
+     `IS_OFFICE` — the server already allows an office-source PO any time), so the
+     feature works in the day, not just out of hours. Engineers still only reach
+     the form outside hours. No SW/`?v=` bump (po-raise.html is network-first).
    - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
      **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
      (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
