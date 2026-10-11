@@ -136,6 +136,8 @@
     .client-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:1px 7px;vertical-align:middle;}
     .cancel-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#991b1b;background:#fee2e2;border:1px solid #fca5a5;border-radius:999px;padding:1px 7px;vertical-align:middle;white-space:nowrap;}
     .cancel-tag.soft{color:#7c2d12;background:#ffedd5;border-color:#fdba74;}
+    .drain-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#075985;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:999px;padding:1px 7px;vertical-align:middle;white-space:nowrap;}
+    .drain-tag.sent{color:#14532d;background:#dcfce7;border-color:#86efac;}
     tr.cancelled td .sitename, .mjob.cancelled .mjob-title{text-decoration:line-through;color:#6b7280;}
     .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
     .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
@@ -736,6 +738,14 @@ function cancelTag(j){
   return "";
 }
 
+/* 🚿 Drainage → Metro Rod pill: blue "Metro Rod?" while it's a flagged drainage job
+   not yet sent; green "With Metro Rod" (+ when) once sent. Opened on the job card. */
+function drainTag(j){
+  const sc = j.subcontract;
+  if(sc && sc.sentAt) return ` <span class="drain-tag sent" title="${esc("Sent to " + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : ""))}">🚿 With ${esc(sc.name||"Metro Rod")} ${esc(fmtWhen(sc.sentAt))}</span>`;
+  if(j.drainage && !["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status)) return ` <span class="drain-tag" title="Reads like a drainage job — open it to send to Metro Rod">🚿 Metro Rod?</span>`;
+  return "";
+}
 function slaBadge(job){
   if(isProjectJob(job)) return {text:"", cls:"sla-badge sla-none"};
   if(isClosed(job)) return {text:"", cls:"sla-badge sla-none"};
@@ -1037,7 +1047,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
@@ -1070,7 +1080,7 @@ function render(){
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
         ${emTimerChip(j)}
       </div>

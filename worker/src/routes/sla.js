@@ -699,6 +699,15 @@ export async function handle(request, env, ctx, url, sess) {
       payload.status = "Co-op Pending";
     }
     let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    // 🚿 A NEW drainage job → tell the office it's a possible Metro Rod job (the
+    // portal's replacement for the drainage Zap's "Send to MetroRod" email).
+    if (!before && isDrainageJob(job) && !job.subcontract) {
+      ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+        title: "🚿 Possible Metro Rod job",
+        body: `${job.helpdeskRef || job.id} — ${job.siteName || job.siteCode || ""}: ${String(job.description || "").slice(0, 110)}`,
+        url: "/job-view.html?jobId=" + encodeURIComponent(job.id), tag: "drain:" + job.id, actionable: true
+      }, null, { officeOnly: true }).catch(() => {}));
+    }
     if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
     // A client order for this reference may already be waiting → stamp its value on.
     try { if (await applyOrderToJob(env, tenantId, job)) job = (await getJob(env, tenantId, job.id)) || job; } catch {}
@@ -2346,6 +2355,80 @@ export async function handle(request, env, ctx, url, sess) {
         body: `${sess.user.username} can't proceed at ${job.helpdeskRef || id}: ${reason.slice(0, 80)}`,
         url: "/inbox.html", tag: "ra-block:" + id
       }, sess.user.username));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+
+    // POST /sla/jobs/{id}/drainage {value:true|false|null} — office overrides the
+    // drainage flag (null = back to the automatic keyword read).
+    if (parts[2] === "drainage" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      if (b.value === true || b.value === false) job.drainage = b.value; else delete job.drainage;
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+      if (b.value === false) ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { body: "Marked not a drainage job by " + sess.user.username }).catch(() => {}));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+
+    // POST /sla/jobs/{id}/subcontract {to:"metrorod"} — ONE press emails the job to
+    // the subcontractor and stamps job.subcontract. Locked: a second press (anyone,
+    // any device) returns {already:true} with who/when and sends nothing.
+    if (parts[2] === "subcontract" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson(request);
+      const key = String(b.to || "metrorod").toLowerCase();
+      const cfgAll = await getSubconConfig(env, tenantId);
+      const sc = cfgAll[key];
+      if (!sc || !sc.to) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      if (job.subcontract && job.subcontract.sentAt) return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
+      const lockId = "subcon:" + key + ":" + id;
+      if (!(await firstTime(env, tenantId, lockId, "subcontract"))) {
+        const fresh = await getJob(env, tenantId, id);
+        return jsonResponse({ ok: true, already: true, subcontract: (fresh && fresh.subcontract) || { name: sc.name, sentBy: "someone else", sentAt: null } }, headers);
+      }
+      const unlock = () => env.DB.prepare("DELETE FROM idempotency WHERE op_id=?").bind(lockId).run().catch(() => {});
+      let hours = 0;
+      try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
+      const mail = buildMetroRodEmail(job, hours);
+      const { sendEmail } = await import("../lib/email.js");
+      const r = await sendEmail(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
+      if (!r || !r.ok) {
+        await unlock();
+        return jsonResponse({ error: "The email didn't send" + (r && (r.error || r.reason) ? " — " + String(r.error || r.reason).slice(0, 160) : "") + ". Nothing was recorded; try again." }, headers, 502);
+      }
+      const now = new Date().toISOString();
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref };
+      job.events ||= [];
+      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) — "${mail.subject}"` });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🚿 Sent to " + sc.name, body: `${job.helpdeskRef || id} — sent by ${sess.user.username}` }).catch(() => {}));
+      return jsonResponse({ ok: true, subcontract: job.subcontract, job: decorateJobWithLiveSla(job) }, headers);
+    }
+
+    // POST /sla/jobs/{id}/subcontract-clear — Full Access: forget the "sent" record
+    // (sent by mistake / needs re-sending). Does NOT recall the email.
+    if (parts[2] === "subcontract-clear" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Full Access only" }, headers, 403);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const was = job.subcontract;
+      if (was) {
+        await env.DB.prepare("DELETE FROM idempotency WHERE op_id=?").bind("subcon:" + (was.key || "metrorod") + ":" + id).run().catch(() => {});
+        const now = new Date().toISOString();
+        job.events ||= [];
+        job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Cleared the "sent to ${was.name}" record (sent ${was.sentAt} by ${was.sentBy})` });
+        delete job.subcontract;
+        job.updatedAt = now;
+        await saveJob(env, tenantId, job);
+      }
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
@@ -6331,6 +6414,55 @@ export function stripMoney(job) {
   const { orderValue, ...rest } = job;
   return rest;
 }
+/* ═══════════ Drainage → Metro Rod (replaces the drainage Zap, Oct 2026) ═══════════
+   A drainage job is FLAGGED (keyword read of the description, overridable per job
+   with job.drainage true/false), the office is pushed "possible Metro Rod job",
+   and ONE press of "Send to Metro Rod" emails the job to their call centre and
+   stamps job.subcontract — the lock is an idempotency row, so a second press by
+   anyone just reports who sent it and when. */
+const DRAIN_RE = /\b(drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|soak ?aways?|interceptors?|grease traps?|fat traps?|jetting|foul water|backed up|overflowing|sani ?fl[oa]w?s?|cctv (?:survey|camera|down the drains?))\b|\bblocked (?:toilets?|wcs?|sinks?|urinals?|loos?|basins?|pans?|pipes?|waste)\b|\b(?:toilets?|wcs?|sinks?|urinals?|loos?|basins?)\s+(?:is |are )?(?:still )?blocked\b/i;
+export function isDrainageJob(j) {
+  if (!j) return false;
+  if (j.drainage === true) return true;
+  if (j.drainage === false) return false;
+  if (j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping || j.fleetRenewal) return false;
+  if (jobIsProject(j)) return false;
+  const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");   // the EM "drain-down" is not a drain
+  return DRAIN_RE.test(t);
+}
+const SUBCON_DEFAULTS = {
+  metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com" }
+};
+async function getSubconConfig(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subcontractors:" + tid).first();
+    const v = row ? JSON.parse(row.value) : {};
+    const out = {};
+    for (const k of Object.keys(SUBCON_DEFAULTS)) out[k] = { ...SUBCON_DEFAULTS[k], ...(v[k] || {}) };
+    return out;
+  } catch { return JSON.parse(JSON.stringify(SUBCON_DEFAULTS)); }
+}
+function escH(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+/* The Metro Rod email — same layout + wording the Zap sent, with Concerto's REAL
+   order number (the Zap mangled "00031502/1" into "315021"). */
+export function buildMetroRodEmail(job, hours) {
+  const ref = String(job.helpdeskRef || job.id || "").trim();
+  const pc = String(job.postcode || "").trim().toUpperCase();
+  const hrs = Number(hours) || 0;
+  const target = hrs ? (hrs % 24 === 0 && hrs >= 48 ? (hrs / 24) + " Days" : hrs + " Hours") : "";
+  const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
+  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
+  const site = [String(job.siteCode || "").trim(), String(job.siteName || "").trim()].filter(Boolean).join(" ");
+  const box = (label, val, big = true) => `<table style="width:100%;background:#f3f6fa;border-radius:12px;margin-bottom:10px"><tr><td style="padding:14px 18px"><div style="font-size:12px;color:#7a8794;text-transform:uppercase;letter-spacing:.04em">${escH(label)}</div><div style="font-size:${big ? 16 : 15}px;${big ? "font-weight:600;color:#1c2733" : "color:#33424f;line-height:1.5"};margin-top:3px">${escH(val || "—").replace(/\n/g, "<br>")}</div></td></tr></table>`;
+  const html = `<table style="width:100%;background:#eef1f5;margin:0;padding:24px 0"><tr><td align="center"><table style="width:600px;max-width:600px;background:#ffffff;border:1px solid #e2e6ec;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+<tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
+<tr><td style="padding:18px 28px 4px 28px">${box("Site", site)}${box("Address", job.address || job.siteName)}${box("Phone", job.telephone)}${target ? box("Target", target) : ""}${box("Details", job.description, false)}</td></tr>
+<tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">Please attend the above and confirm receipt. Contact the site on the number above to arrange access.</div></td></tr>
+<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
+</table></td></tr></table>`;
+  return { subject, html, ref };
+}
+
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
   const state = (job.status === "Closed Jobs" || job.status === "Complete" || job.status === "Cancelled")
@@ -6344,7 +6476,7 @@ function decorateJobWithLiveSla(job) {
     const t = releaseInstant(job);
     releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job), series: !!job.seriesId };
   }
-  return { ...job, releaseView, sla: { state, now: new Date().toISOString() } };
+  return { ...job, releaseView, drainage: isDrainageJob(job), sla: { state, now: new Date().toISOString() } };
 }
 
 /* ================= CONFIG (D1) ================= */

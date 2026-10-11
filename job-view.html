@@ -183,6 +183,11 @@
     .chip-red{border-color:#fecaca}     .chip-red[aria-pressed="true"]{background:#b91c1c}
     .cancel-banner{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#fee2e2;border:1px solid #fca5a5;color:#7f1d1d;font-size:14px;line-height:1.4}
     .cancel-banner b{font-size:15px} .cancel-banner.soft{background:#ffedd5;border-color:#fdba74;color:#7c2d12}
+    .drain-banner{margin:0 0 12px;padding:12px 14px;border-radius:12px;background:#e0f2fe;border:1px solid #7dd3fc;color:#0c4a6e;font-size:14px;line-height:1.45}
+    .drain-banner.sent{background:#dcfce7;border-color:#86efac;color:#14532d}
+    .drain-banner .db-btns{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+    .drain-banner button{border:0;border-radius:10px;padding:9px 14px;font-weight:700;font-size:14px;cursor:pointer}
+    .drain-banner .db-go{background:#15599d;color:#fff} .drain-banner .db-no{background:#fff;color:#0c4a6e;border:1px solid #7dd3fc} .drain-banner .db-link{background:none;color:#0c4a6e;text-decoration:underline;padding:4px 0;font-weight:600}
     /* Custom categories carry their own colour via --cc (border + filled state). */
     .chip-custom[aria-pressed="true"]{background:var(--cc,#64748b)}
     .status-hint{font-weight:400;color:var(--muted);font-size:11px}
@@ -947,6 +952,7 @@ function renderJob(){
   $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
   renderCancelBanner();
+  renderDrainBanner();
   renderOrderCard();
   $("jobRef").textContent = shortRef || "—";
   $("jobSite").textContent = name || site || "—";
@@ -1820,6 +1826,65 @@ function renderOrderCard(){
     '<div style="margin-top:4px;">Order <b>' + esc(job.orderNumber || "—") + '</b></div>' +
     (canMoney() ? '<div style="margin-top:8px;"><a href="/client-orders.html" style="font-size:13px;">Open the Client orders board →</a></div>' : '');
   card.style.display = "";
+}
+/* ---- 🚿 Drainage → Metro Rod (Oct 2026 — replaces the drainage Zap) ----
+   Office-only. A drainage-flagged job shows "Send to Metro Rod" (one press, locked
+   server-side so a second press anywhere just shows who sent it); once sent the
+   banner turns green "With Metro Rod since …". Any other job offers a quiet
+   "Mark as drainage" so a missed one can still go. */
+function renderDrainBanner(){
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  let el = $("drainBanner");
+  if(!el){ el = document.createElement("div"); el.id = "drainBanner"; el.style.display = "none";
+    const cb = $("cancelBanner"); const anchor = cb || document.querySelector(".card");
+    if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, cb ? cb.nextSibling : anchor); else document.body.insertBefore(el, document.body.firstChild); }
+  if(!job || !isOfficeAdmin() || (typeof isFieldUser === "function" && isFieldUser())){ el.style.display = "none"; return; }
+  const sc = job.subcontract;
+  const when = iso => { const d = parseDate(iso); return d ? fmtDateTimeLong(d) : ""; };
+  if(sc && sc.sentAt){
+    el.className = "drain-banner sent";
+    el.innerHTML = "<b>🚿 With " + esc(sc.name || "Metro Rod") + "</b> — sent " + esc(when(sc.sentAt)) + (sc.sentBy ? " by " + esc(sc.sentBy) : "") +
+      "<br><span style=\"font-size:12.5px;opacity:.85\">Emailed to " + esc(sc.to || "") + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") + "</span>" +
+      (isFullAccessJV() ? '<div class="db-btns"><button class="db-link" data-db="clear">Clear this record (sent by mistake)</button></div>' : "");
+  } else if(job.drainage){
+    el.className = "drain-banner";
+    el.innerHTML = "<b>🚿 Possible Metro Rod job</b> — this reads like a drainage job." +
+      '<div class="db-btns"><button class="db-go" data-db="send">Send to Metro Rod</button><button class="db-no" data-db="no">Not drainage</button></div>';
+  } else if(!["Complete","Closed Jobs","Invoiced","Cancelled"].includes(job.status)){
+    el.className = "drain-banner"; el.style.background = "transparent"; el.style.border = "0"; el.style.padding = "0 2px";
+    el.innerHTML = '<button class="db-link" data-db="yes" style="font-size:13px">🚿 Mark as drainage (Metro Rod)</button>';
+  } else { el.style.display = "none"; return; }
+  if(el.className.indexOf("sent") >= 0 || job.drainage){ el.style.background = ""; el.style.border = ""; el.style.padding = ""; }
+  el.style.display = "";
+  el.querySelectorAll("[data-db]").forEach(b => b.onclick = () => drainAction(b.dataset.db, b));
+}
+function isFullAccessJV(){ try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); return String(p.FullAccess||"").toLowerCase() === "yes"; }catch(e){ return false; } }
+async function drainAction(act, btn){
+  const id = (job && job.id) || getJobIdFromQuery();
+  const post = (path, body) => mApi("/sla/jobs/" + encodeURIComponent(id) + path, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body || {}) });
+  try{
+    if(act === "send"){
+      const ok = window.MLUI ? await MLUI.confirm("Email this job to Metro Rod's call centre now?", { title:"Send to Metro Rod", okLabel:"Send" }) : confirm("Email this job to Metro Rod now?");
+      if(!ok) return;
+      btn.disabled = true; btn.textContent = "Sending…";
+      const r = await post("/subcontract", { to:"metrorod" }); const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      if(d.already) alert("Already sent to Metro Rod" + (d.subcontract && d.subcontract.sentBy ? " by " + d.subcontract.sentBy : "") + " — nothing sent again.");
+      else alert("✓ Sent to Metro Rod");
+      if(d.job) job = d.job; else if(d.subcontract) job.subcontract = d.subcontract;
+    } else if(act === "no" || act === "yes"){
+      const r = await post("/drainage", { value: act === "yes" }); const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      job = d;
+    } else if(act === "clear"){
+      const ok = window.MLUI ? await MLUI.confirm("Forget that this was sent to Metro Rod? (It does NOT recall the email — use this only if it was sent by mistake or needs sending again.)", { title:"Clear sent record", okLabel:"Clear", danger:true }) : confirm("Clear the sent record?");
+      if(!ok) return;
+      const r = await post("/subcontract-clear"); const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      job = d;
+    }
+  }catch(e){ alert("Couldn't do that: " + (e.message || e)); }
+  renderDrainBanner();
 }
 /* ---- ❌ Cancelled banner: WHEN, by whom, why (Sep 2026) ---- */
 function renderCancelBanner(){

@@ -5519,6 +5519,39 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     note, 🚩 flagged "upload the PDF"; 0079 + 0376 flagged "confirm the test year"
     because their Workever job is 2025). Uploading the cert to the chart is what
     clears each one (the chart date rolls, the case auto-detects the cert).
+- **🚿 Drainage → Metro Rod (11 Oct 2026 — replaces the drainage Zap).** The Zap
+  emailed the office "Send N to MetroRod" with a one-press webhook button
+  (`mostlane-drainage-approve` worker, key-locked), which sent a branded "Mostlane -
+  Emergency - Order N at <postcode>" email to **Call.Centre@metrorod.co.uk** (CC
+  Enquiries) + a "Has Been Sent" receipt. NB it MANGLED the order number
+  ("00031502/1" → "315021"). Now in-portal (sla.js): **`isDrainageJob(j)`** (exported)
+  = `job.drainage` true/false override, else a keyword read of the description
+  (`DRAIN_RE`: drain/gully/sewer/manhole/saniflo/jetting/backed up/blocked
+  toilet|sink…; "drain-down" stripped; EM/PAT/pump/elec/firestop/fleet/project jobs
+  never) — returned on every decorated job as **`drainage`**. Live check: 10 of 351
+  jobs since 10 Sep flagged, a few borderline (gutter clearing, ice-bin pipe) — it
+  only PROMPTS, the office decides. A NEW flagged job through /sla/inbound pushes
+  FullAccess|SLAAdmin (office-only) an actionable **"🚿 Possible Metro Rod job"**
+  (tag `drain:<id>` → job-view). **POST /sla/jobs/{id}/subcontract {to:"metrorod"}**
+  (SLA admin): ONE press — lock = `firstTime(idempotency, "subcon:metrorod:<id>")`, a
+  second press anywhere returns `{already, subcontract}` and sends nothing; emails via
+  lib/email.js (Resend, From `EMAIL_FROM` no-reply@mostlane-portal.com, Reply-To +
+  CC from config) the same layout with the REAL ref (`buildMetroRodEmail`, exported);
+  a failed send releases the lock and records nothing; success stamps
+  **`job.subcontract = {key,name,to,sentAt,sentBy,subject,ref}`** + an event + resolves
+  the push. **POST …/drainage {value:true|false|null}** (override), **POST
+  …/subcontract-clear** (FullAccess — forget the record + lock; does NOT recall the
+  email). Recipients in app_config **`sla:subcontractors:<tid>`** (defaults
+  `SUBCON_DEFAULTS.metrorod` = to Call.Centre@metrorod.co.uk, cc Enquiries@,
+  replyTo jamie@). Front-end: **job-view.html `renderDrainBanner`** (office only —
+  blue "Possible Metro Rod job" + Send / Not drainage; green "With Metro Rod — sent
+  … by …"; a quiet "Mark as drainage" link on other open jobs); **sla-main
+  `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when>); **sla-scheduler** drops a
+  sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
+  cards still drop as `metrorod-report` notices (TODO: attach them to the job).
+  Test `node --no-warnings worker/tools/test-drainage.mjs` (23 cases). **Cut-over:**
+  turn the drainage Zap OFF when this goes live — the two locks are separate systems,
+  so both running could email Metro Rod twice.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
