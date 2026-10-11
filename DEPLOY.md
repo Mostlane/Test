@@ -66,7 +66,8 @@ has an email handler. Two dashboard steps, then test on the portal page:
    mostlane.com only if its nameservers are Cloudflare's) → **Email → Email Routing
    → Enable**. Under *Custom addresses* add `jobs@<that domain>` with the action
    **Send to a Worker → mostlane-api**. (Cloudflare adds the MX/SPF records itself.)
-2. **Outlook on the web → Settings → Mail → Rules → Add rule**: condition
+2. **Outlook on the web (the enquiries@mostlane.com mailbox — that's where Concerto
+   sends) → Settings → Mail → Rules → Add rule**: condition
    *From* `noreply@concerto.co.uk` **and** *From* `chapplins.co.uk` (the two
    layouts the portal reads on its own; add other job senders later once a
    template exists for them) → action
@@ -79,7 +80,9 @@ has an email handler. Two dashboard steps, then test on the portal page:
    Paste a real job email into the test box → *Check* shows what the portal would
    log; *Create the job* really logs it. Send a test through the rule and watch
    **Recent emails**. Run alongside the Zapier zap for a few days — the same job is
-   never duplicated (the portal matches by reference) — then switch the zap off.
+   never duplicated (the portal recognises the zap's `31474-Site` references as the
+   same incident as `00031474` and leaves the existing job alone) — then switch the
+   zap off.
 4. **What creates a job automatically:** only the layouts listed on the page
    under *Layouts the portal reads on its own* (Concerto "New Job Alert", Chapplins
    "new job has been raised"). Concerto order sheets go to **Client orders** on the

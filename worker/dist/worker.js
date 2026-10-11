@@ -15694,6 +15694,7 @@ __export(sla_exports, {
   findBlockingJob: () => findBlockingJob,
   getJob: () => getJob3,
   handle: () => handle12,
+  incidentKey: () => incidentKey,
   linkOrderToExistingJob: () => linkOrderToExistingJob,
   linkOrderToJobById: () => linkOrderToJobById,
   listFallbackTemplates: () => listFallbackTemplates,
@@ -16269,6 +16270,10 @@ async function handle12(request, env, ctx, url, sess) {
     try {
       sameIncident = await matchSameIncident(env, tenantId, payload.reference);
     } catch {
+    }
+    if (sameIncident && sameIncident.open && sameIncident.otherForm) {
+      const j = sameIncident.open;
+      return jsonResponse({ ok: true, created: false, alreadyHave: true, id: j.id, reference: j.helpdeskRef, status: j.status, priority: j.priority, targetAt: j.targetAt }, headers, 200);
     }
     if (sameIncident && sameIncident.open) {
       payload.id = sameIncident.open.id;
@@ -19188,6 +19193,25 @@ async function jobFinishedFor(env, tenantId) {
     return DONE_STATES.has(st) || done.has(st);
   };
 }
+function incidentKey(ref) {
+  const m = /^0*(\d{5,12})(?:\/(\d{1,3}))?(?:\s*-.*)?$/s.exec(String(ref || "").trim());
+  return m ? { inc: m[1], suf: m[2] || "" } : null;
+}
+async function jobsForIncidentKey(env, tenantId, inc) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, "%" + inc + "%").all()).results || [];
+  } catch {
+  }
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate && (incidentKey(j.helpdeskRef) || {}).inc === inc);
+}
 async function matchSameIncident(env, tenantId, reference) {
   const ref = String(reference || "").trim();
   if (!ref) return null;
@@ -19217,6 +19241,17 @@ async function matchSameIncident(env, tenantId, reference) {
     const open = newest(same.filter((j) => !finished(j)));
     if (open) return { open };
     return { prev: newest(same), kind: "reopened" };
+  }
+  const key = incidentKey(ref);
+  if (key) {
+    const all = await jobsForIncidentKey(env, tenantId, key.inc);
+    const twin = all.filter((j) => (incidentKey(j.helpdeskRef) || {}).suf === key.suf);
+    if (twin.length) {
+      const open = newest(twin.filter((j) => !finished(j)));
+      if (open) return { open, otherForm: true };
+      return { prev: newest(twin), kind: "reopened" };
+    }
+    if (key.suf && all.length) return { prev: newest(all), kind: "reassigned" };
   }
   const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
   if (!m) return null;
@@ -19580,6 +19615,8 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
     } catch {
     }
   }
+  const key = incidentKey(inc) || incidentKey(ref);
+  if (key) add(await jobsForIncidentKey(env, tenantId, key.inc));
   return [...seen.values()];
 }
 async function cancelIncidentJobs(env, tenantId, ctx, b) {
@@ -26149,7 +26186,7 @@ function concertoHelpdesk(subject, t) {
   const action = (sm ? sm[1] : line(/^\s*Action\s*:\s*([^\n,]+)/im, t)).trim();
   const incident = (sm ? sm[2] : "") || line(/Helpdesk reference\s*:\s*(\d{5,12})/i, t) || line(/information has been added to\s*(\d{5,12})/i, t) || line(/\bfor\s+(\d{5,12})\b/i, t);
   const isNote = /add a note|photo or document|additional information/i.test(action) || /^\s*Additional information has been added/i.test(subject);
-  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action) || /\bre-?open/i.test(action));
   const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
   const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
   const sr = line(/\b(SR\d{4,6})\b/i, siteLine);
@@ -26160,6 +26197,11 @@ function concertoHelpdesk(subject, t) {
   const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
   const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
   const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+  const ro = /Raised on\s*:\s*(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})\s+at\s+(\d{1,2}):(\d{2})/i.exec(t);
+  const raisedAt = ro && MON[ro[2].toLowerCase()] !== void 0 ? londonToIso(+ro[3], MON[ro[2].toLowerCase()], +ro[1], +ro[4], +ro[5]) : "";
+  const completeBy = concertoDate(line(/New target set to\s*([^\n.]+)/i, t));
+  const tail = (/^\s*Email\s*:[^\n]*\n([\s\S]*)$/im.exec(t) || [])[1] || "";
+  const hdNote = tail.split("\n").map((x) => x.trim()).filter((x) => x && !/^(New target set to|Click here|For further information)/i.test(x) && !/^[A-Za-z ]{2,20}\s*:/.test(x)).join(" ").replace(/\s+/g, " ").trim().slice(0, 400);
   if (isNote) {
     return { kind: "note", incident, note: { incident, reference: incident, text: desc, action, siteCode: code, siteName } };
   }
@@ -26180,10 +26222,10 @@ function concertoHelpdesk(subject, t) {
       address: address || siteName,
       postcode,
       telephone,
-      description: desc,
-      raisedAt: "",
+      description: hdNote ? desc + "\n\n" + action + ": " + hdNote : desc,
+      raisedAt,
       respondBy: "",
-      completeBy: ""
+      completeBy
     }
   };
 }
@@ -26910,7 +26952,7 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     } catch {
     }
     if (!resp.ok) return { outcome: "failed", reason: out && out.error || "HTTP " + resp.status, status: resp.status, reference: fields.reference || "", payload };
-    const reason = out.linkedVisit ? out.visitKind === "reassigned" ? "Re-assigned incident \u2014 new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : "Same incident sent again \u2014 new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : out.created ? "New job on the board" : "Existing job updated (same reference, still open)";
+    const reason = out.linkedVisit ? out.visitKind === "reassigned" ? "Re-assigned incident \u2014 new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : "Same incident sent again \u2014 new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")" : out.alreadyHave ? "Already on the board (made by the other intake path as " + (out.reference || "") + ") \u2014 left as it is" : out.created ? "New job on the board" : "Existing job updated (same reference, still open)";
     return { outcome: out.created ? "created" : "updated", reason, status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };

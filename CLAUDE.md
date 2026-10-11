@@ -5121,8 +5121,25 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   emails land in **jamie@mostlane.com** (enquiries@ is not a REST-enabled mailbox),
   so the Outlook rule lives on Jamie's mailbox. Test:
   `node worker/tools/test-email-intake.mjs` (synthetic Concerto-shaped emails only).
-  **Cutover plan:** run alongside the zap (dedupe-by-reference makes both paths
-  upsert the same job), watch the log, then disable the zap.
+  **Cutover plan:** run alongside the zap, watch the log, then disable the zap.
+  **Zap ↔ email reference forms (11 Oct 2026 — found checking real mail before
+  cutover; the parser had never received an email, `inbound_emails` didn't exist):**
+  the zap writes refs as `31474-Wimborne, Wimborne Rd (PFS)` / `31516/1-Portsmouth`
+  (zeros stripped, site glued on, siteCode unpadded); the email path keeps
+  Concerto's `00031474` / `00031484/1`. So "dedupe by reference" did NOT hold —
+  running both would have DOUBLED every job, and cancellation emails couldn't find
+  zap-made jobs. Fix: **`sla.js incidentKey(ref)`** (exported) reads both forms →
+  `{inc, suf}` (inc ≥5 digits, so store codes never match); `matchSameIncident`
+  falls back to it (same inc+suffix OPEN → `{open, otherForm:true}` → /sla/inbound
+  returns **`alreadyHave`** and leaves the existing job UNTOUCHED; finished →
+  linked re-visit; other suffix → reassigned) and `findIncidentJobs` (cancel) adds
+  the zap forms. Helpdesk template now also treats **"Re-open order"** as a job (it
+  was held for review), reads **Raised on** + **New target set to**, and appends the
+  helpdesk's free-text note ("…please re-attend") to the description. Verified on
+  4 real emails (New Job Alert / FM Approved / Re-open / Cancelled). Concerto mail
+  is addressed to **enquiries@mostlane.com** — the Outlook forward rule goes there.
+  NB client-order linking (`linkOrderToExistingJob`) still matches exact refs only,
+  so it won't attach an order to a zap-made job — fine once the zap is off.
 - **TEMPLATE-FIRST, "100% reliable" intake (9 Sep 2026 — Jamie: "jobs all look
   different… set templates… this needs to be 100% reliable"):** extraction is no
   longer AI-first. **`routes/emailtemplates.js`** holds ONE deterministic reader

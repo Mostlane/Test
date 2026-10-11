@@ -163,7 +163,9 @@ function concertoHelpdesk(subject, t) {
     || line(/\bfor\s+(\d{5,12})\b/i, t);
   const isNote = /add a note|photo or document|additional information/i.test(action)
     || /^\s*Additional information has been added/i.test(subject);
-  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action));
+  // "Re-open order" = the client sends us back to a job ("leak is still there —
+  // please re-attend"): a job to attend (it lands as a linked re-visit).
+  const isDispatch = !isNote && (/\bapproved\b/i.test(action) || /send to contractor/i.test(action) || /\bre-?open/i.test(action));
 
   const desc = line(/^\s*Description\s*:\s*([\s\S]*?)(?:\n\s*(?:Site|Address|Telephone|Block|Raised on|Action|Call status)\s*:|$)/im, t).replace(/\s+/g, " ").trim();
   const siteLine = line(/^\s*Site\s*:\s*([^\n]+)/im, t);
@@ -175,6 +177,16 @@ function concertoHelpdesk(subject, t) {
   const postcode = (PC_RE.exec(address) || PC_RE.exec(siteLine) || [])[1] || "";
   const telephone = phoneIn(line(/^\s*Telephone\s*:\s*([^\n]+)/im, t));
   const pr = line(/^\s*Urgency\s*:\s*Priority\s*([1-4])/im, t) || line(/Priority\s*([1-4])/i, t);
+  // "Raised on : 09 October 2026 at 15:03" (London wall clock).
+  const ro = /Raised on\s*:\s*(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})\s+at\s+(\d{1,2}):(\d{2})/i.exec(t);
+  const raisedAt = ro && MON[ro[2].toLowerCase()] !== undefined ? londonToIso(+ro[3], MON[ro[2].toLowerCase()], +ro[1], +ro[4], +ro[5]) : "";
+  const completeBy = concertoDate(line(/New target set to\s*([^\n.]+)/i, t));
+  // The helpdesk's own free-text note under the fields ("Area Manager reporting
+  // leak is still there - please re-attend.") — the reason for a re-open.
+  const tail = (/^\s*Email\s*:[^\n]*\n([\s\S]*)$/im.exec(t) || [])[1] || "";
+  const hdNote = tail.split("\n").map(x => x.trim())
+    .filter(x => x && !/^(New target set to|Click here|For further information)/i.test(x) && !/^[A-Za-z ]{2,20}\s*:/.test(x))
+    .join(" ").replace(/\s+/g, " ").trim().slice(0, 400);
 
   if (isNote) {
     // A store's note/chase on an existing job. Update-only downstream — it must
@@ -191,7 +203,8 @@ function concertoHelpdesk(subject, t) {
     fields: {
       isJob: true, reference: incident, priority: pr ? "Priority " + pr : "", siteCode: code,
       siteName: siteName || (address.split(",")[0] || "").trim(), address: address || siteName, postcode,
-      telephone, description: desc, raisedAt: "", respondBy: "", completeBy: ""
+      telephone, description: hdNote ? desc + "\n\n" + action + ": " + hdNote : desc,
+      raisedAt, respondBy: "", completeBy
     }
   };
 }
