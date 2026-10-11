@@ -250,6 +250,7 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
       ? (out.visitKind === "reassigned"
         ? "Re-assigned incident — new visit on the board, linked to our earlier job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")"
         : "Same incident sent again — new visit on the board, linked to the finished job " + (out.previousRef || "") + " (" + (out.previousStatus || "") + ")")
+      : out.alreadyHave ? "Already on the board (made by the other intake path as " + (out.reference || "") + ") — left as it is"
       : (out.created ? "New job on the board" : "Existing job updated (same reference, still open)");
     return { outcome: out.created ? "created" : "updated", reason, status: resp.status, reference: out.reference || fields.reference || "", jobId: out.id || "", payload };
   } catch (e) {

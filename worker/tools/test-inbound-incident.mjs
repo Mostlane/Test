@@ -7,6 +7,9 @@ const JOBS = {
   "00028541/1": { id: "00028541/1", helpdeskRef: "00028541/1", status: "Complete", closedAt: "2026-08-30T10:00:00.000Z", createdAt: "2026-08-26T08:00:00.000Z", description: "Door hinge broken — made safe, quoted", siteCode: "0335", siteName: "Test Store" },
   "REOPEN/1":   { id: "REOPEN/1", helpdeskRef: "REOPEN/1", status: "Closed Jobs", createdAt: "2026-07-01T08:00:00.000Z", description: "Old leak fixed", siteCode: "0100", siteName: "Old Store" },
   "OPEN/1":     { id: "OPEN/1", helpdeskRef: "OPEN/1", status: "Scheduled", createdAt: "2026-09-08T08:00:00.000Z", description: "Still open", siteCode: "0200", siteName: "Open Store" },
+  "zap-a":      { id: "zap-a", helpdeskRef: "31474-Wimborne, Wimborne Rd (PFS)", status: "Co-op Pending", createdAt: "2026-10-09T14:04:30.000Z", description: "Hot tap leaking (zap)", siteCode: "380", siteName: "Wimborne" },
+  "zap-b":      { id: "zap-b", helpdeskRef: "31516/1-Portsmouth", status: "Scheduled", createdAt: "2026-10-10T11:37:00.000Z", description: "Card machine (zap)", siteCode: "14", siteName: "Portsmouth" },
+  "zap-c":      { id: "zap-c", helpdeskRef: "31178-Pill, Baltic Place", status: "Complete", createdAt: "2026-10-06T08:00:00.000Z", description: "Bakery leak (zap)", siteCode: "313", siteName: "Pill" },
   "u-fra":      { id: "u-fra", helpdeskRef: "FRA/1", status: "FRA Complete", createdAt: "2026-08-01T08:00:00.000Z", description: "custom done cat", siteCode: "0300", siteName: "Cat Store" },
 };
 function makeEnv() {
@@ -20,7 +23,7 @@ function makeEnv() {
       return null; },
     async all() {
       if (/helpdesk_ref=\?/.test(sql)) return { results: rows().filter(j => j.helpdeskRef === binds[1]).map(j => ({ data: JSON.stringify(j) })) };
-      if (/helpdesk_ref LIKE \?/.test(sql)) { const pre = String(binds[1]).replace(/%$/, ""); return { results: rows().filter(j => String(j.helpdeskRef || "").startsWith(pre) && j.helpdeskRef !== binds[2]).map(j => ({ data: JSON.stringify(j) })) }; }
+      if (/helpdesk_ref LIKE \?/.test(sql)) { const re = new RegExp("^" + String(binds[1]).split("%").map(x => x.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&")).join(".*") + "$"); return { results: rows().filter(j => re.test(String(j.helpdeskRef || "")) && j.helpdeskRef !== binds[2]).map(j => ({ data: JSON.stringify(j) })) }; }
       if (/^SELECT data FROM sla_jobs WHERE tenant_id\s*=\s*\?\s*$/.test(sql.trim())) return { results: rows().map(j => ({ data: JSON.stringify(j) })) };
       console.log("UNMOCKED all():", sql.slice(0, 80));
       return { results: [] }; },
@@ -108,6 +111,30 @@ let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS
   const nj = r.saved[r.body.id];
   ok("a cancelled job counts as finished → a re-send becomes a linked visit, not an overwrite", r.status === 201 && r.body.linkedVisit && r.body.visitKind === "reopened" && nj && nj.status !== "Cancelled" && !nj.cancelledAt, JSON.stringify(r.body));
   delete JOBS["CX/1"];
+}
+/* ── Zapier ↔ email intake: the same incident written two ways ───────────── */
+{
+  const k = sla.incidentKey;
+  ok("incidentKey reads both forms", JSON.stringify(k("00031474")) === JSON.stringify(k("31474-Wimborne, Wimborne Rd (PFS)")) && k("00031516/1").suf === "1" && k("31516/1-Portsmouth").inc === "31516" && k("0384-Addlestone") === null && k("CHAP-1234") === null);
+}
+{ // email "00031474" while the zap already made "31474-Wimborne…" (open) → left alone, no duplicate
+  const r = await inbound({ reference: "00031474", description: "email text", siteCode: "0380" });
+  ok("email after zap (open) → alreadyHave, no new job, zap job untouched", r.status === 200 && r.body.alreadyHave && r.body.id === "zap-a" && !Object.keys(r.saved).length, JSON.stringify(r.body));
+}
+{ // the zap arriving AFTER the email-made job → also recognised
+  const { env, saved } = makeEnv();
+  const send = async b => { const url = new URL("https://api.test/sla/inbound"); const res = await sla.handle(new Request(url, { method: "POST", headers: { Authorization: "Bearer tok", "Content-Type": "application/json" }, body: JSON.stringify(b) }), env, { waitUntil() {} }, url, null); return res.json(); };
+  const a = await send({ reference: "00031999/1", description: "from email", siteCode: "0100" });
+  const b = await send({ reference: "31999/1-Old Store", description: "from zap", siteCode: "100" });
+  ok("zap after email → alreadyHave the email's job, one job only", a.created && b.alreadyHave && b.id === a.id && Object.keys(saved).length === 1, JSON.stringify(b));
+}
+{ // re-open order for an incident the zap made and we finished → linked visit
+  const r = await inbound({ reference: "00031178", description: "Leak still there - please re-attend", siteCode: "0313" });
+  ok("re-open of a finished zap job → new linked visit", r.status === 201 && r.body.linkedVisit && r.body.visitKind === "reopened" && r.body.previousId === "zap-c", JSON.stringify(r.body));
+}
+{ // cancellation email finds a zap-made job
+  const r = await inbound({ action: "cancel", kind: "job", incident: "00031516", reference: "00031516/1", reason: "Store to raise on connect", by: "Southern Co-op (Concerto)", at: "2026-10-10T12:01:30.000Z" });
+  ok("cancel email → cancels the zap-made 31516/1-Portsmouth", r.status === 200 && r.saved["zap-b"] && r.saved["zap-b"].status === "Cancelled", JSON.stringify(r.body));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

@@ -647,6 +647,12 @@ export async function handle(request, env, ctx, url, sess) {
     // the board shows the ×N badge and the history is in one place.
     let before = null, sameIncident = null;
     try { sameIncident = await matchSameIncident(env, tenantId, payload.reference); } catch {}
+    if (sameIncident && sameIncident.open && sameIncident.otherForm) {
+      // The other intake path (zap ↔ email) already made this job — keep it exactly
+      // as it is (the office may have triaged/assigned it already); never rewrite.
+      const j = sameIncident.open;
+      return jsonResponse({ ok: true, created: false, alreadyHave: true, id: j.id, reference: j.helpdeskRef, status: j.status, priority: j.priority, targetAt: j.targetAt }, headers, 200);
+    }
     if (sameIncident && sameIncident.open) {
       payload.id = sameIncident.open.id;                 // genuine re-send → update the open job
       before = sameIncident.open;
@@ -3826,6 +3832,23 @@ async function jobFinishedFor(env, tenantId) {
    reference, or a sibling suffix of the same Concerto incident "NNNNNNNN/n" —
    the caller creates a NEW linked visit). Concerto refs are "<incident>/<n>":
    /1 the first assignment, /2 the re-assignment after our quote is ordered. */
+/* A Concerto incident written two ways: the portal email intake keeps Concerto's
+   own form ("00031474", "00031484/1"); the old Zapier zap stripped the zeros and
+   glued the site on ("31474-Wimborne, Wimborne Rd (PFS)", "31516/1-Portsmouth").
+   incidentKey reads both → {inc:"31474", suf:"" | "1"} so the two paths recognise
+   each other's jobs (no duplicates while both run; a cancellation email finds a
+   zap-made job). Store codes (≤4 digits) never parse as an incident. */
+export function incidentKey(ref) {
+  const m = /^0*(\d{5,12})(?:\/(\d{1,3}))?(?:\s*-.*)?$/s.exec(String(ref || "").trim());
+  return m ? { inc: m[1], suf: m[2] || "" } : null;
+}
+async function jobsForIncidentKey(env, tenantId, inc) {
+  const db = tenantDB(env, tenantId);
+  let rows = [];
+  try { rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref LIKE ?").bind(tenantId, "%" + inc + "%").all()).results || []; } catch {}
+  return rows.map(r => { try { return JSON.parse(r.data); } catch { return null; } })
+    .filter(j => j && !j.fallbackTemplate && (incidentKey(j.helpdeskRef) || {}).inc === inc);
+}
 async function matchSameIncident(env, tenantId, reference) {
   const ref = String(reference || "").trim();
   if (!ref) return null;
@@ -3840,6 +3863,18 @@ async function matchSameIncident(env, tenantId, reference) {
     const open = newest(same.filter(j => !finished(j)));
     if (open) return { open };
     return { prev: newest(same), kind: "reopened" };
+  }
+  // The same incident written the OTHER way (zap "31474-Site" ↔ email "00031474").
+  const key = incidentKey(ref);
+  if (key) {
+    const all = await jobsForIncidentKey(env, tenantId, key.inc);
+    const twin = all.filter(j => (incidentKey(j.helpdeskRef) || {}).suf === key.suf);
+    if (twin.length) {
+      const open = newest(twin.filter(j => !finished(j)));
+      if (open) return { open, otherForm: true };
+      return { prev: newest(twin), kind: "reopened" };
+    }
+    if (key.suf && all.length) return { prev: newest(all), kind: "reassigned" };
   }
   const m = /^(\d{5,12})\/(\d{1,3})$/.exec(ref);
   if (!m) return null;
@@ -4129,6 +4164,9 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
     add(sibs.filter(j => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
     try { const j = await getJob(env, tenantId, inc); if (j && !j.fallbackTemplate) add([j]); } catch {}
   }
+  // …and the old zap's form of the same incident ("31516/1-Portsmouth").
+  const key = incidentKey(inc) || incidentKey(ref);
+  if (key) add(await jobsForIncidentKey(env, tenantId, key.inc));
   return [...seen.values()];
 }
 /* The client cancelled an incident. `b` = {reference?, incident?, reason?, by?,
