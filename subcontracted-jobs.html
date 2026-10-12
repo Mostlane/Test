@@ -30,15 +30,21 @@
     th .ar{opacity:.75;font-size:11px;margin-left:3px;}
     th:first-child,td:first-child{position:sticky;left:0;z-index:4;}
     th:first-child{z-index:6;}
-    td:first-child{background:#eef3f9;font-weight:700;white-space:nowrap;}
+    td:first-child{background:#eef3f9;font-weight:700;white-space:normal;word-break:break-word;}
     tbody tr.r:nth-child(4n+1) td:not(:first-child){background:#fff;}
     tbody tr.r:nth-child(4n+3) td:not(:first-child){background:#f4f7fb;}
     tbody tr.r:hover td{box-shadow:inset 0 0 0 9999px rgba(37,99,235,.07);}
     td.nw{white-space:nowrap;}
     td.c{text-align:center;}
-    td.site{max-width:190px;overflow:hidden;text-overflow:ellipsis;}
-    td.work{max-width:260px;min-width:160px;}
-    td.work .one{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;cursor:pointer;color:#334155;}
+    td.site{max-width:220px;white-space:normal;word-break:break-word;}
+    td.work{max-width:360px;min-width:110px;}
+    td.work .one{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;cursor:pointer;color:#334155;}
+    td.c-status{white-space:normal;}
+    td.c-act{white-space:normal;}
+    /* responsive: drop the columns that are ALSO shown in the tap-open detail row, so the table never needs side-scroll */
+    @media(max-width:1040px){ .c-since,.c-pos{display:none;} }
+    @media(max-width:760px){ .c-site,.c-cost{display:none;} }
+    @media(max-width:560px){ .c-status{display:none;} th,td{padding:4px 5px;font-size:12.5px;} }
     td.work .one:hover{color:var(--brand);text-decoration:underline;}
     td.st-green{background:#e3f6e8 !important;color:#166534;font-weight:700;}
     td.st-amber{background:#fff1c9 !important;color:#92400e;font-weight:700;}
@@ -145,7 +151,7 @@
     const cols = [["sub","Subcontractor"],["ref","Job"],["site","Site"],["work","Work",1],["since","Since"],["days","Days"],["status","Job status"],["pos","PO"]]
       .concat(DATA.money ? [["cost","PO £"]] : []).concat([["act","",1]]);
     list.sort(cmp);
-    const head = "<tr>" + cols.map(([k, l, nos]) => nos ? `<th class="nos">${l}</th>` : `<th data-sort="${k}">${l}${sortKey === k ? `<span class="ar">${sortDir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("") + "</tr>";
+    const head = "<tr>" + cols.map(([k, l, nos]) => nos ? `<th class="c-${k} nos">${l}</th>` : `<th class="c-${k}" data-sort="${k}">${l}${sortKey === k ? `<span class="ar">${sortDir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("") + "</tr>";
     g("list").innerHTML = `<div class="tblwrap"><table><thead>${head}</thead><tbody>${list.map(row).join("")}</tbody></table></div>`;
   }
 
@@ -179,21 +185,23 @@
     if (r.pos.length === 1) costIn = costInput("po", r.pos[0].number, r.pos[0].cost);
     else if (!r.pos.length && r.jobId && r.record) costIn = costInput("job", r.jobId, r.recordCost);
     else if (r.pos.length > 1) costIn = esc(money(r.cost)) + (r.poUnpriced ? ` <span style="color:#b45309" title="${r.poUnpriced} not priced — set them in the detail row">+?</span>` : "");
-    const cost = DATA.money ? `<td class="nw" style="text-align:right">${costIn}</td>` : "";
+    const cost = DATA.money ? `<td class="c-cost nw" style="text-align:right">${costIn}</td>` : "";
     const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
     const link = !r.jobId && r.pos.length ? `<button class="ib" data-link="${esc(r.pos[0].number)}" title="Link this PO to an incident / job">🔗 Link</button> ` : "";
     const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", r.jobId ? "Finished by the subcontractor — also sets the job to Complete" : "Finished by the subcontractor") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
     const work = r.description || "";
     const open = OPENDET.has(r.key);
-    let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="nw">${refHtml}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
-      <td class="work"><span class="one" data-det="${esc(r.key)}" title="${esc(work)}">${open ? "▾ " : "▸ "}${esc(work || "(no description)")}</span></td>
-      <td class="nw">${esc(fmtD(r.since))}</td><td class="nw c ${dCls}">${dTxt}</td><td class="nw">${status}</td><td class="nw">${pos}</td>${cost}<td class="nw">${acts}</td></tr>`;
+    let html = `<tr class="r"><td class="c-sub">${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="c-ref nw">${refHtml}</td><td class="c-site site" title="${esc(site)}">${esc(site || "—")}</td>
+      <td class="c-work work"><span class="one" data-det="${esc(r.key)}" title="${esc(work)}">${open ? "▾ " : "▸ "}${esc(work || "(no description)")}</span></td>
+      <td class="c-since nw">${esc(fmtD(r.since))}</td><td class="c-days nw c ${dCls}">${dTxt}</td><td class="c-status">${status}</td><td class="c-pos nw">${pos}</td>${cost}<td class="c-act">${acts}</td></tr>`;
     // detail row (always rendered to keep the zebra striping stable; hidden when closed)
     const rec = r.record;
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
     const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${rec && rec.declined ? " · <b>they can't take it</b>" + (rec.declined.reason ? ": “" + esc(rec.declined.reason) + "”" : "") : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
     const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" data-from="${esc(r.jobId)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
-    html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
+    const facts = `<div class="muted2" style="margin-bottom:6px"><b>Site:</b> ${esc(site || "—")} &nbsp;·&nbsp; <b>Status:</b> ${r.jobId ? esc(r.jobStatus || "—") : r.project ? "Project " + esc(r.project.status || "") : "No job found"}${r.state === "open" && r.days != null ? ` &nbsp;·&nbsp; <b>With them:</b> ${r.days === 0 ? "today" : r.days + "d"}` : ""}</div>`;
+    const recCostLine = (DATA.money && !r.pos.length && r.jobId && r.record) ? `<div class="po"><b>Cost (ex VAT):</b> ${costInput("job", r.jobId, r.recordCost)}</div>` : "";
+    html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}">${facts}<div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}${recCostLine}</td></tr>`;
     return html;
   }
 
