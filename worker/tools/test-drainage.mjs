@@ -293,5 +293,20 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const again = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
   ok("office can then send the job elsewhere (not blocked as 'already sent')", again.status === 200); }
 
+// PO with no incident: description job number links; otherwise a SUGGESTION only
+{ const jobs = [
+    { id: "J-W", helpdeskRef: "29339-Worle JS", siteCode: "9649", siteName: "Worle JS", address: "Sainsbury Queensway, Worle, Somerset", createdAt: "2026-09-18T09:00:00Z", status: "Co-op Pending", description: "The strip lights which run along the seating area" },
+    { id: "J-E", helpdeskRef: "25617-Eastleigh, Leigh Road", siteCode: "60", siteName: "Eastleigh, Leigh Road", address: "Leigh Road, Eastleigh, Southampton", createdAt: "2026-07-23T09:00:00Z", status: "Closed Jobs", description: "Ceiling tile fell" },
+  ];
+  const df = sla.siteWordFreq(jobs);
+  const w = sla.suggestJobsForPo({ issued_at: "2026-09-29T10:00:00Z", site: "Starbucks, Worle", description: "Attend site to fix striplights" }, jobs, df);
+  ok("Worle striplights PO → suggests 29339-Worle JS", w[0] && w[0].jobId === "J-W" && /striplights/.test(w[0].why));
+  const a = sla.suggestJobsForPo({ issued_at: "2026-07-21T10:00:00Z", site: "32B Archers Road, Southampton - Chapplins", description: "blocked toilet" }, jobs, df);
+  ok("a town name alone is not enough", a.length === 0, JSON.stringify(a));
+  const POS = [{ po_number: 10450, issued_at: new Date(Date.now() - 5 * 864e5).toISOString(), site: null, supplier: "Metrorod", cost_category: "subcontractor", description: "quoted works FOR JOB 31502/2", incident_no: "22589/2", job_id: null, job_ref: null, cost_ex_vat: null }];
+  const E = makeEnv({ pos: POS });
+  const r = await call(E, "Office Admin", "/subcontracted", null, "GET");
+  ok("mistyped incident box but 'FOR JOB nnnnn' in the description → linked to that job", (r.body.rows || []).some(x => x.jobId === "J-DRAIN" && x.pos.some(p => p.number === 10450)), JSON.stringify((r.body.rows||[]).map(x=>x.key))); }
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
