@@ -5681,6 +5681,22 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     (needs a portal-config `?v=` sweep); attach Metro Rod's reply/job-card emails to
     the job; fold subcontractor PO £ into job costing (it already rolls up via the
     stamped `job_id`).
+- **Subcontractor orders are SENT FROM enquiries@ via Microsoft 365 (12 Oct 2026).** A test
+  to Tanya from `no-reply@mostlane-portal.com` (Resend) never arrived though Resend accepted it,
+  so order + test emails now go through Graph **`sendMail` AS a real mailbox**
+  (`lib/graphmail.js graphSendMail`, `saveToSentItems:true`) — sender = app_config
+  **`sla:subconsender:<tid>`** `{mailbox}`, default **enquiries@mostlane.com**, set on
+  subcontractors.html "📤 Orders are sent from" (Full Access; GET /sla/subcontractors returns
+  `sender`, POST `{sender}`). **`sla.js sendSubconMail`** (exported) tries 365 first and FALLS
+  BACK to Resend (Reply-To = the mailbox) so an order is never lost; the job's
+  `subcontract.via` (m365|portal) / `from` / `fallbackReason` + the event line record which
+  route, and the job-card test message turns amber "NOT through Microsoft 365 — <reason>"
+  on a fallback. **Needs (Jamie, once):** the existing Graph app (same GRAPH_* secrets the
+  invoice sweep uses) granted the APPLICATION permission **Mail.Send** + admin consent; scope it
+  with an Exchange `New-ApplicationAccessPolicy` to the sender mailbox (otherwise it can send as
+  anyone). **enquiries@ reported "MailboxNotEnabledForRESTAPI"** to the delegated connector —
+  if 365 refuses with that, the shared mailbox needs fixing in the M365 admin centre; until then
+  sends fall back to the portal address. Tests in test-drainage.mjs ("365:" cases).
 - **🤝 Jobs with subcontractors — subcontracted-jobs.html (12 Oct 2026).** ONE list of
   everything sat with a subcontractor (🤝 With subcontractors button + open-count badge on
   sla-main; SLA-admin; 👷 Manage → subcontractors.html). Two sources, because the office

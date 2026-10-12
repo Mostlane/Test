@@ -246,7 +246,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
       await migrateWorkAreasOnce(env, tenantId).catch(() => {});
       const cfg = await getSubconConfig(env, tenantId);
-      const out = { ok: true, list: Object.keys(cfg).map(k => cfg[k]), areas: await getWorkAreas(env, tenantId) };
+      const out = { ok: true, list: Object.keys(cfg).map(k => cfg[k]), areas: await getWorkAreas(env, tenantId), sender: await getSubconSender(env, tenantId) };
       const jobId = url.searchParams.get("jobId");
       if (jobId) {
         const job = await getJob(env, tenantId, jobId);
@@ -265,6 +265,11 @@ export async function handle(request, env, ctx, url, sess) {
       const cfg = await getSubconConfig(env, tenantId);
       const raw = {}; for (const k of Object.keys(cfg)) raw[k] = cfg[k];   // current (normalised) as the base
       const reply = async (saved, extra = {}) => jsonResponse({ ok: true, list: Object.keys(saved).map(k => normSubcon(saved[k], k)), ...extra }, headers);
+      if (typeof b.sender === "string") {
+        const m = b.sender.trim();
+        if (m && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m)) return jsonResponse({ error: "That isn't an email address" }, headers, 400);
+        return jsonResponse({ ok: true, sender: await setSubconSender(env, tenantId, m) }, headers);
+      }
       if (b.importFromPO) {
         let names = [];
         try { const { listPoSubcontractorNames } = await import("./po.js"); names = await listPoSubcontractorNames(env); } catch {}
@@ -2483,7 +2488,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (!String(job.postcode || "").trim()) warnings.push("No postcode on the job.");
       if (String(job.telephone || "").replace(/\D/g, "").length < 7) warnings.push(sc.requirePhone ? "No valid phone number — you'll be asked for one when you send." : "No phone number on the job.");
       if (!String(mail.details || "").trim()) warnings.push("The details box is empty.");
-      const out = { ok: true, name: sc.name, from: env.EMAIL_FROM || "Mostlane <no-reply@mostlane-portal.com>", to: sc.to, cc: sc.cc || [], replyTo: sc.replyTo || "",
+      const out = { ok: true, name: sc.name, from: (await getSubconSender(env, tenantId)) || env.EMAIL_FROM || "Mostlane <no-reply@mostlane-portal.com>", to: sc.to, cc: sc.cc || [], replyTo: sc.replyTo || "",
         subject: mail.subject, html: mail.html, details: mail.details, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)."
           : nextNo ? "PO " + poRef + " is the next number — it is only raised when you press Send. If someone raises another PO first, the next free number is used."
           : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].", warnings };
@@ -2491,10 +2496,9 @@ export async function handle(request, env, ctx, url, sess) {
         const u = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(sess.user.username).first().catch(() => null);
         const me = u && String(u.email || "").trim();
         if (!me) return jsonResponse({ error: "There's no email address on your user — add one in Users Admin to get test copies." }, headers, 400);
-        const { sendEmail } = await import("../lib/email.js");
-        const r = await sendEmail(env, { to: me, subject: "[TEST — not sent to " + sc.name + "] " + mail.subject, html: mail.html });
+        const r = await sendSubconMail(env, tenantId, { to: me, subject: "[TEST — not sent to " + sc.name + "] " + mail.subject, html: mail.html });
         if (!r || !r.ok) return jsonResponse({ error: "Test email didn't send" + (r && r.error ? " — " + String(r.error).slice(0, 160) : "") }, headers, 502);
-        out.testSentTo = me;
+        out.testSentTo = me; out.testVia = r.via; out.testFrom = r.from; if (r.fallbackReason) out.testFallbackReason = r.fallbackReason;
       }
       return jsonResponse(out, headers);
     }
@@ -2576,8 +2580,7 @@ export async function handle(request, env, ctx, url, sess) {
       const sOpts = edited != null ? { details: edited } : {};
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
-      const { sendEmail } = await import("../lib/email.js");
-      const r = await sendEmail(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
+      const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
         await unlock();
         // Record the FAILED attempt on the job so the office can SEE it didn't go
@@ -2593,9 +2596,10 @@ export async function handle(request, env, ctx, url, sess) {
         return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " — " + errTxt : "") + ". Press again to re-send (the same PO is kept).", subcontract: job.subcontract }, headers, 502);
       }
       const now = new Date().toISOString();
-      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details };
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details, via: r.via, from: r.from };
+      if (r.fallbackReason) job.subcontract.fallbackReason = String(r.fallbackReason).slice(0, 200);
       job.events ||= [];
-      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) — "${mail.subject}"` });
+      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail — Microsoft 365 unavailable)" : ""} — "${mail.subject}"` });
       job.updatedAt = now;
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🚿 Sent to " + sc.name, body: `${job.helpdeskRef || id} — sent by ${sess.user.username}` }).catch(() => {}));
@@ -6912,6 +6916,40 @@ async function setSubconConfig(env, tid, map) {
   }
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
   return clean;
+}
+// The Microsoft 365 mailbox subcontractor orders are SENT FROM (lands in its
+// Sent Items, replies come back to it). app_config `sla:subconsender:<tid>`.
+const SUBCON_SENDER_DEFAULT = "enquiries@mostlane.com";
+export async function getSubconSender(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subconsender:" + tid).first();
+    const v = row ? JSON.parse(row.value) : null;
+    if (v && typeof v.mailbox === "string") return v.mailbox.trim();
+  } catch {}
+  return SUBCON_SENDER_DEFAULT;
+}
+async function setSubconSender(env, tid, mailbox) {
+  const m = String(mailbox || "").trim().slice(0, 120);
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subconsender:" + tid, JSON.stringify({ mailbox: m })).run();
+  return m;
+}
+// Send a subcontractor email: Microsoft 365 AS the sender mailbox first (best
+// deliverability, Sent Items copy); if 365 can't (not set up / no permission),
+// fall back to the portal's own mail service with Reply-To = the mailbox, so an
+// order is never lost. Returns {ok, via:"m365"|"portal", from, fallbackReason?, error?}.
+export async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html }) {
+  const mailbox = await getSubconSender(env, tid);
+  let reason = "no sending mailbox set";
+  if (mailbox) {
+    const { graphSendMail } = await import("../lib/graphmail.js");
+    const g = await graphSendMail(env, mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html });
+    if (g.ok) return { ok: true, via: "m365", from: mailbox };
+    reason = g.error || "Microsoft 365 send failed";
+  }
+  const { sendEmail } = await import("../lib/email.js");
+  const r = await sendEmail(env, { to, cc, replyTo: replyTo || mailbox || undefined, subject, html });
+  if (r && r.ok) return { ok: true, via: "portal", from: env.EMAIL_FROM || "no-reply@mostlane-portal.com", fallbackReason: reason };
+  return { ok: false, error: (r && (r.error || r.reason)) || "email send failed", fallbackReason: reason };
 }
 // Description → work area, NO AI cost: the shared classifier (lib/worktypes.js),
 // mapped onto the tenant's area list. A tenant still on an old area id ("plumbing"

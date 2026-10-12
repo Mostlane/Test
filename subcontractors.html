@@ -64,6 +64,16 @@
     <p class="muted">The routing list for sending a job out to a subcontractor (Metro Rod and others). Set where each one's order email goes, <b>which job details it carries</b>, the <b>work areas</b> they cover, their <b>coverage area</b> (base postcode + radius) and whether they do <b>out-of-hours</b> — so the job card can suggest the right one and the portal can nudge you out-of-hours.</p>
     <div id="roNote" class="note" hidden>You can view the setup but only a <b>Full&nbsp;Access</b> user can change it.</div>
 
+    <div class="card" id="senderCard">
+      <h2 style="font-size:15px;margin:0 0 6px;color:var(--brand);">📤 Orders are sent from</h2>
+      <p class="muted" style="margin:0 0 8px;">The Microsoft&nbsp;365 mailbox every subcontractor order goes out from. It shows as the sender, keeps a copy in that mailbox's <b>Sent Items</b>, and replies come back to it. If Microsoft&nbsp;365 can't send, the portal sends it from its own address instead (with replies still to this mailbox) and the job card says so.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="senderBox" type="email" placeholder="enquiries@mostlane.com" style="flex:1;min-width:220px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit;">
+        <button class="btn" id="senderSave">Save</button>
+        <span class="msg" id="senderMsg"></span>
+      </div>
+    </div>
+
     <div class="toolbar">
       <button class="btn" id="addBtn">＋ Add a subcontractor</button>
       <button class="btn ghost" id="importBtn">⤵ Import names from the PO system</button>
@@ -364,11 +374,22 @@
       var r = await authFetch("/sla/subcontractors").then(function(x){ return x.json(); });
       if(!r || !r.ok) throw new Error((r&&r.error)||"load failed");
       AREAS = r.areas || []; SUBS = r.list || [];
+      $("senderBox").value = r.sender || "";
+      if(!CAN_EDIT){ $("senderBox").disabled = true; $("senderSave").disabled = true; }
       $("gate").hidden = true; $("main").hidden = false;
       if(!CAN_EDIT){ $("roNote").hidden = false; $("addBtn").disabled = true; $("importBtn").disabled = true; }
       render();
     }catch(e){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Couldn’t load subcontractors: '+esc(e.message)+'</div>'; }
   }
+  $("senderSave").addEventListener("click", async function(){
+    var m = $("senderSave"), msg = $("senderMsg"); m.disabled = true; msg.textContent = "Saving…";
+    try{
+      var r = await authFetch("/sla/subcontractors",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ sender: $("senderBox").value.trim() }) }).then(function(x){ return x.json(); });
+      if(!r || !r.ok) throw new Error((r&&r.error)||"save failed");
+      $("senderBox").value = r.sender || ""; msg.textContent = "Saved ✓";
+    }catch(e){ msg.textContent = "⚠ " + e.message; }
+    m.disabled = false;
+  });
   load();
 })();
 </script>

@@ -133,3 +133,28 @@ export async function listPdfAttachments(env, mailbox, messageId) {
 export async function downloadAttachment(env, mailbox, messageId, attachmentId) {
   return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
 }
+
+// Send an email AS `mailbox` (a real Microsoft 365 mailbox, e.g. enquiries@)
+// via Graph sendMail — it goes out from Microsoft's own servers and lands in
+// that mailbox's Sent Items. Needs the APPLICATION permission Mail.Send
+// (admin-consented). Returns {ok:true, via:"m365"} or {ok:false, error}.
+export async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html } = {}) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up (GRAPH_* secrets missing)" };
+  const list = v => (Array.isArray(v) ? v : String(v || "").split(/[,;]/)).map(s => String(s).trim()).filter(Boolean)
+    .map(address => ({ emailAddress: { address } }));
+  const message = { subject: String(subject || ""), body: { contentType: "HTML", content: String(html || "") }, toRecipients: list(to) };
+  if (!message.toRecipients.length) return { ok: false, error: "no recipient" };
+  const ccl = list(cc); if (ccl.length) message.ccRecipients = ccl;
+  const rtl = list(replyTo); if (rtl.length) message.replyTo = rtl;
+  try {
+    const token = await getToken(env);
+    const r = await fetch(`${GRAPH}/users/${encodeURIComponent(mailbox)}/sendMail`, {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ message, saveToSentItems: true }),
+    });
+    if (r.status === 202 || r.ok) return { ok: true, via: "m365" };
+    let d = ""; try { const j = await r.json(); d = (j && j.error && (j.error.code ? j.error.code + ": " : "") + (j.error.message || "")) || ""; } catch {}
+    return { ok: false, status: r.status, error: "Microsoft 365 refused (" + r.status + ")" + (d ? " — " + d.slice(0, 200) : "") };
+  } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
+}

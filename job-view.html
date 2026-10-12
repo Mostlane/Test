@@ -1981,7 +1981,7 @@ function previewSubconEmail(id, key, name){
     det.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => load(false).catch(e => { msg.style.color="#b91c1c"; msg.textContent = e.message||e; }), 400); });
     wrap.querySelector("#pvTest").onclick = async function(){
       this.disabled = true; msg.style.color = "#334155"; msg.textContent = "Sending a test copy…";
-      try{ const d = await load(true); msg.style.color = "#166534"; msg.textContent = "✓ Test sent to " + d.testSentTo + " — nothing was sent to " + (name||"them") + " and no PO was raised."; }
+      try{ const d = await load(true); if (d.testVia === "portal") { msg.style.color = "#92400e"; msg.textContent = "⚠ Test sent to " + d.testSentTo + ", but NOT through Microsoft 365 — it went from the portal's own address (" + (d.testFallbackReason || "365 unavailable") + "). Real orders would do the same until this is fixed."; } else { msg.style.color = "#166534"; msg.textContent = "✓ Test sent to " + d.testSentTo + " from " + (d.testFrom || "Microsoft 365") + " — nothing was sent to " + (name||"them") + " and no PO was raised."; } }
       catch(e){ msg.style.color = "#b91c1c"; msg.textContent = e.message || e; }
       this.disabled = false;
     };
