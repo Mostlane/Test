@@ -2581,7 +2581,18 @@ export async function handle(request, env, ctx, url, sess) {
       if (was !== st || b.note != null) job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Marked ${label}${sc.note ? " — " + sc.note : ""}` });
       job.updatedAt = now;
       await saveJob(env, tenantId, job);
-      return jsonResponse({ ok: true, subcontract: sc, job: decorateJobWithLiveSla(job) }, headers);
+      // "Done" by the subcontractor completes the job itself (office action, so the
+      // engineer completion gates don't apply). Already-finished jobs are left alone;
+      // Reopen / Back-with-us never touch the job's status.
+      let out = job, completed = false;
+      if (st === "done") {
+        const finished = await jobFinishedFor(env, tenantId);
+        if (!finished(job)) {
+          const updated = await patchJob(env, tenantId, id, { status: "Complete", changedBy: sess.user.username }, ctx);
+          if (updated) { out = updated; completed = true; ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {})); }
+        }
+      }
+      return jsonResponse({ ok: true, subcontract: sc, completed, job: decorateJobWithLiveSla(out) }, headers);
     }
 
     // POST /sla/jobs/{id}/subcontract-clear — Full Access: forget the "sent" record
