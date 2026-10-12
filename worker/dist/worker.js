@@ -6335,6 +6335,7 @@ __export(po_exports, {
   handle: () => handle6,
   listPoSubcontractorNames: () => listPoSubcontractorNames,
   mergeSweepProposals: () => mergeSweepProposals,
+  peekNextPoNumber: () => peekNextPoNumber,
   raiseSubcontractorPO: () => raiseSubcontractorPO
 });
 async function ensurePoInvoiceCols__raw(db) {
@@ -7816,6 +7817,14 @@ async function getJobCost(db, params) {
       total_ex: jobs.reduce((s, j) => s + j.total_ex, 0)
     }
   };
+}
+async function peekNextPoNumber(env) {
+  if (!env || !env.PO_DB) return null;
+  try {
+    return await nextPoNumber(env.PO_DB);
+  } catch {
+    return null;
+  }
 }
 async function nextPoNumber(db) {
   const row = await db.prepare(`
@@ -21019,7 +21028,15 @@ async function handle13(request, env, ctx, url, sess) {
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const reused = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
-      const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : "[new PO no.]";
+      let nextNo = null;
+      if (!reused) {
+        try {
+          const { peekNextPoNumber: peekNextPoNumber2 } = await Promise.resolve().then(() => (init_po(), po_exports));
+          nextNo = await peekNextPoNumber2(env);
+        } catch {
+        }
+      }
+      const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : nextNo ? formatPoRef(nextNo, sc.poDigits) : "[new PO no.]";
       let hours = 0;
       try {
         const cfg = await getConfig4(env, tenantId);
@@ -21042,7 +21059,7 @@ async function handle13(request, env, ctx, url, sess) {
         subject: mail.subject,
         html: mail.html,
         details: mail.details,
-        poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)." : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].",
+        poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)." : nextNo ? "PO " + poRef + " is the next number \u2014 it is only raised when you press Send. If someone raises another PO first, the next free number is used." : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].",
         warnings
       };
       if (b.test) {

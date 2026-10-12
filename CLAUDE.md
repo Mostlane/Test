@@ -5743,7 +5743,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   (no postcode / no phone / empty details), the rendered email in a sandboxed iframe, an
   **editable Details box** (only the email text — the job is not changed; re-previews as
   you type) and **✉ Send a test to me** (to the presser's `users.email`, subject
-  "[TEST — not sent to X]", no PO, no lock, no record). **POST
+  "[TEST — not sent to X]", no PO, no lock, no record). The preview AND the test show the
+  **expected next PO number** (`po.js peekNextPoNumber` — the same read-only lookup
+  `nextPoNumber` does, nothing allocated); the note says it's only raised on Send and the
+  next free number is used if someone raises a PO in between. A failed earlier attempt
+  shows the PO it will re-use. **POST
   /sla/jobs/{id}/subcontract-preview {to, details?, test?}** (SLA admin); the send takes
   `details` and stores what went in `job.subcontract.details`. Email fixes in
   `buildMetroRodEmail` (5th arg `opts.details`): the Address box now carries the

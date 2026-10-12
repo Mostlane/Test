@@ -2468,7 +2468,9 @@ export async function handle(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const reused = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
-      const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : "[new PO no.]";
+      let nextNo = null;
+      if (!reused) { try { const { peekNextPoNumber } = await import("./po.js"); nextNo = await peekNextPoNumber(env); } catch {} }
+      const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : nextNo ? formatPoRef(nextNo, sc.poDigits) : "[new PO no.]";
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
@@ -2478,7 +2480,9 @@ export async function handle(request, env, ctx, url, sess) {
       if (String(job.telephone || "").replace(/\D/g, "").length < 7) warnings.push(sc.requirePhone ? "No valid phone number — you'll be asked for one when you send." : "No phone number on the job.");
       if (!String(mail.details || "").trim()) warnings.push("The details box is empty.");
       const out = { ok: true, name: sc.name, from: env.EMAIL_FROM || "Mostlane <no-reply@mostlane-portal.com>", to: sc.to, cc: sc.cc || [], replyTo: sc.replyTo || "",
-        subject: mail.subject, html: mail.html, details: mail.details, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)." : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].", warnings };
+        subject: mail.subject, html: mail.html, details: mail.details, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)."
+          : nextNo ? "PO " + poRef + " is the next number — it is only raised when you press Send. If someone raises another PO first, the next free number is used."
+          : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].", warnings };
       if (b.test) {
         const u = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(sess.user.username).first().catch(() => null);
         const me = u && String(u.email || "").trim();
