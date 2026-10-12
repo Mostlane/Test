@@ -2453,6 +2453,20 @@ export async function handle(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       if (job.subcontract && job.subcontract.sentAt) return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
+      // Phone gate — some subcontractors (Metro Rod) won't accept a job without a
+      // valid phone number. The client may re-send with {phone}; we save it onto
+      // the job (so the email carries it + it's kept) and only then proceed. No PO
+      // is raised and nothing is locked until a valid number is present.
+      if (sc.requirePhone) {
+        const provided = String(b.phone || "").trim();
+        if (provided && provided !== String(job.telephone || "").trim()) {
+          job.telephone = provided; job.updatedAt = new Date().toISOString();
+          await saveJob(env, tenantId, job);
+        }
+        if (String(job.telephone || "").replace(/\D/g, "").length < 7) {
+          return jsonResponse({ error: sc.name + " won’t accept a job without a valid phone number. Add a site contact number and try again.", needPhone: true, site: job.siteName || job.siteCode || "" }, headers, 400);
+        }
+      }
       const lockId = "subcon:" + key + ":" + id;
       if (!(await firstTime(env, tenantId, lockId, "subcontract"))) {
         const fresh = await getJob(env, tenantId, id);
@@ -6537,7 +6551,7 @@ export function isDrainageJob(j) {
 // app_config `sla:subcontractors:<tid>` override (via subcontractors.html) and it
 // behaves identically. Metro Rod stays the drainage default (keyword-routed).
 const SUBCON_DEFAULTS = {
-  metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {} }
+  metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {}, requirePhone: true }
 };
 const SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
 function subKey(name) { return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 40) || "sub"; }
@@ -6571,6 +6585,7 @@ function normSubcon(sc, key) {
     radiusMiles: Math.max(0, Number(sc.radiusMiles) || 0),
     ooh: sc.ooh === true,
     oohPriorities: Array.isArray(sc.oohPriorities) ? sc.oohPriorities.map(x => String(x).trim()).filter(Boolean) : [],
+    requirePhone: sc.requirePhone === true,
     fields
   };
 }
@@ -6590,7 +6605,7 @@ async function setSubconConfig(env, tid, map) {
   const clean = {};
   for (const k of Object.keys(map || {})) {
     const n = normSubcon(map[k], k); if (!n.name) continue;
-    clean[k] = { name: n.name, active: n.active, to: n.to, cc: n.cc, replyTo: n.replyTo, trade: n.trade, poDigits: n.poDigits, areas: n.areas, base: n.base, radiusMiles: n.radiusMiles, ooh: n.ooh, oohPriorities: n.oohPriorities, fields: n.fields };
+    clean[k] = { name: n.name, active: n.active, to: n.to, cc: n.cc, replyTo: n.replyTo, trade: n.trade, poDigits: n.poDigits, areas: n.areas, base: n.base, radiusMiles: n.radiusMiles, ooh: n.ooh, oohPriorities: n.oohPriorities, requirePhone: n.requirePhone, fields: n.fields };
   }
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
   return clean;
