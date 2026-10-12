@@ -20,9 +20,10 @@ function makeEnv({ sendOk = true } = {}) {
       return null;
     },
     async all() {
-      if (/FROM user_permissions/.test(sql)) return { results: (PERMS[b[1]] || []).map(p => ({ permission: p, username: b[1] })) };
+      if (/FROM user_permissions/.test(sql)) return { results: (PERMS[b[1]] || []).map(p => ({ permission: p, value: 1, username: b[1] })) };
       if (/helpdesk_ref=\?/.test(sql)) return { results: rows().filter(j => j.helpdeskRef === b[1]).map(j => ({ data: JSON.stringify(j) })) };
       if (/helpdesk_ref LIKE \?/.test(sql)) return { results: [] };
+      if (/SELECT data FROM sla_jobs WHERE tenant_id = \?$/.test(sql.trim())) return { results: rows().map(j => ({ data: JSON.stringify(j) })) };
       return { results: [] };
     },
     async run() {
@@ -37,7 +38,15 @@ function makeEnv({ sendOk = true } = {}) {
     if (String(url).includes("api.resend.com")) { sent.push(JSON.parse(init.body)); return new Response(sendOk ? "{}" : "boom", { status: sendOk ? 200 : 500 }); }
     return new Response("{}", { status: 200 });
   };
-  return { env: { DB: db, JOB_FILES: null, RESEND_API_KEY: "k", JOBS_INBOUND_TOKEN: "tok" }, saved, idem, sent, pushes };
+  const PO = [
+    { po_number: 10630, issued_at: new Date(Date.now() - 9 * 864e5).toISOString(), site: "Gosport", supplier: "Handyman In Bristol", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: 120, engineer_name: "", office_user_name: "Tanya" },
+    { po_number: 10620, issued_at: new Date(Date.now() - 2 * 864e5).toISOString(), site: "Crookhorn", supplier: "Metrorod", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null, engineer_name: "", office_user_name: "Tanya" },
+  ];
+  const poDb = { prepare(sql) { const st = { bind() { return st; }, async all() {
+    if (/FROM po_log/.test(sql)) return { results: PO };
+    if (/FROM subcontractors/.test(sql)) return { results: [{ name: "Metrorod" }, { name: "Handyman In Bristol" }] };
+    return { results: [] }; } }; return st; } };
+  return { env: { DB: db, PO_DB: poDb, JOB_FILES: null, RESEND_API_KEY: "k", JOBS_INBOUND_TOKEN: "tok" }, saved, idem, sent, pushes };
 }
 async function call(E, user, path, body, method = "POST") {
   const url = new URL("https://api.test/sla" + path);
@@ -91,6 +100,32 @@ ok("manual override wins both ways", sla.isDrainageJob({ description: "tap", dra
   ok("mark a non-drainage job as drainage", a.status === 200 && a.body.drainage === true && E.saved["J-TAP"].drainage === true);
   const b = await call(E, "Office Admin", "/jobs/J-TAP/drainage", { value: null });
   ok("null → back to automatic", b.body.drainage === false && E.saved["J-TAP"].drainage === undefined); }
+
+// jobs with subcontractors
+{ const E = makeEnv();
+  const f = await call(E, "Field Eng", "/subcontracted", null, "GET");
+  ok("list is office only", f.status === 403);
+  const a = await call(E, "Office Admin", "/subcontracted", null, "GET");
+  const rows = a.body.rows || [];
+  const drain = rows.find(r => r.jobId === "J-DRAIN"), poOnly = rows.find(r => r.key === "po:10620");
+  ok("PO matched to its job by incident number", drain && drain.pos.length === 1 && drain.subs[0] === "Handyman In Bristol" && drain.state === "open" && drain.days === 9, JSON.stringify(drain && { subs: drain.subs, days: drain.days }));
+  ok("PO with no job still listed", poOnly && !poOnly.jobId && poOnly.state === "open");
+  ok("no £ for a non-money SLA admin", drain.poTotal === undefined && !("cost" in drain.pos[0]));
+  const m = await call(E, "Boss", "/subcontracted", null, "GET");
+  const md = (m.body.rows || []).find(r => r.jobId === "J-DRAIN");
+  ok("£ shown to Full Access", md && md.poTotal === 120 && md.pos[0].cost === 120);
+  const h = await call(E, "Office Admin", "/jobs/J-TAP/subcontract", { name: "L&B Plumbing", note: "rang them" });
+  ok("manual hand-off records, no email", h.status === 200 && E.saved["J-TAP"].subcontract.manual && E.sent.length === 0);
+  const s1 = await call(E, "Office Admin", "/jobs/J-TAP/subcontract-status", { status: "done" });
+  ok("mark done", s1.status === 200 && E.saved["J-TAP"].subcontract.status === "done" && E.saved["J-TAP"].subcontract.closedBy === "Office Admin");
+  const s2 = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-status", { status: "returned", name: "Handyman In Bristol" });
+  ok("PO-only job gets a record when ticked", s2.status === 200 && E.saved["J-DRAIN"].subcontract.fromPo && E.saved["J-DRAIN"].subcontract.status === "returned");
+  const n = await call(E, "Office Admin", "/subcontracted?count=1", null, "GET");
+  ok("open count drops", n.body.open === 1, JSON.stringify(n.body));
+  const s3 = await call(E, "Office Admin", "/subcontracted/po-status", { key: "po:10620", status: "done" });
+  ok("close a PO-only row", s3.status === 200);
+  const nm = await call(E, "Office Admin", "/subcontractors", null, "GET");
+  ok("Metrorod + Metro Rod listed once", nm.body.subcontractors.filter(x => /metro ?rod/i.test(x.name)).length === 1, JSON.stringify(nm.body.subcontractors)); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
