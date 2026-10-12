@@ -275,7 +275,7 @@
             <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="concerto-stats.html" class="btn" id="coopStatsLink" style="display:none">📊 Co-op stats</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
-            <a href="subcontractors.html" class="btn" id="subconLink" style="display:none" title="Set up who jobs can be sent out to (Metro Rod + others)">👷 Subcontractors</a>
+            <a href="subcontractors.html" class="btn" id="subconMgrLink" style="display:none" title="Set up who jobs can be sent out to (Metro Rod + others)">👷 Subcontractors</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
             <a href="sla-settings.html" class="btn">⚙️ Settings</a>
@@ -292,7 +292,7 @@
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
-          var scl = document.getElementById("subconLink"); if (scl) scl.style.display = "";
+          var scl = document.getElementById("subconMgrLink"); if (scl) scl.style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           var csl = document.getElementById("coopStatsLink"); if (csl) csl.style.display = "";
           var sl = document.getElementById("subconLink");
