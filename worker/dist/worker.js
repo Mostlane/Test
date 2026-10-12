@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -582,13 +577,13 @@ async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey
   const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
   const rs = 4096;
-  const header3 = concat(
+  const header4 = concat(
     salt,
     new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
     new Uint8Array([asPubRaw.length]),
     asPubRaw
   );
-  return concat(header3, ciphertext);
+  return concat(header4, ciphertext);
 }
 async function importVapidPrivate(env) {
   const pub = b64urlToBytes(env.VAPID_PUBLIC);
@@ -605,10 +600,10 @@ async function importVapidPrivate(env) {
 }
 async function vapidAuth(env, endpoint) {
   const aud = new URL(endpoint).origin;
-  const header3 = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const header4 = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
   const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
   const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
-  const signingInput = header3 + "." + payload;
+  const signingInput = header4 + "." + payload;
   const key = await importVapidPrivate(env);
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
   return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
@@ -1450,8 +1445,8 @@ async function holidayDaysFor(env, tid, username, monday) {
 }
 function mondayOf(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
+  const dow2 = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow2);
   return d.toISOString().slice(0, 10);
 }
 function weekDays(monday) {
@@ -2700,16 +2695,16 @@ function londonOffsetMinutes(ms) {
   }
 }
 function tsDeadlineFor(monday, cfg) {
-  const dow = Number((cfg.defaults && cfg.defaults.dueDow) ?? 3);
+  const dow2 = Number((cfg.defaults && cfg.defaults.dueDow) ?? 3);
   const [hh, mm] = String(cfg.defaults && cfg.defaults.dueTime || "12:00").split(":").map((n) => parseInt(n, 10) || 0);
   const nextMon = /* @__PURE__ */ new Date(monday + "T00:00:00Z");
   nextMon.setUTCDate(nextMon.getUTCDate() + 7);
   const day = new Date(nextMon);
-  day.setUTCDate(day.getUTCDate() + (dow + 6) % 7);
+  day.setUTCDate(day.getUTCDate() + (dow2 + 6) % 7);
   const ds = day.toISOString().slice(0, 10);
   const naive = Date.parse(ds + "T" + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":00Z");
   const ms = naive - londonOffsetMinutes(naive) * 6e4;
-  return { ms, iso: new Date(ms).toISOString(), dow, hh, mm, label: DOW_NAME[dow] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
+  return { ms, iso: new Date(ms).toISOString(), dow: dow2, hh, mm, label: DOW_NAME[dow2] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
 }
 async function assignedJobsByDay(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
@@ -6100,8 +6095,8 @@ function tier1Confident(f) {
 async function aiExtract(env, bytes, filename) {
   const key = env && env.ANTHROPIC_API_KEY;
   if (!key) return null;
-  const b64 = bytesToBase64(bytes);
-  if (!b64 || b64.length > 12 * 1024 * 1024) return null;
+  const b642 = bytesToBase64(bytes);
+  if (!b642 || b642.length > 12 * 1024 * 1024) return null;
   const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
   const schema = {
     type: "object",
@@ -6131,7 +6126,7 @@ async function aiExtract(env, bytes, filename) {
         tools: [{ name: "extract_invoice", description: "Return the invoice's key fields.", input_schema: schema }],
         tool_choice: { type: "tool", name: "extract_invoice" },
         messages: [{ role: "user", content: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b642 } },
           { type: "text", text: "This is a PDF received by Mostlane Construction (a UK building contractor). FIRST decide what kind of document it is (docType) \u2014 be careful to distinguish a supplier PURCHASE INVOICE (a bill for us to pay) from a REMITTANCE ADVICE / payment advice (a record that a payment was made \u2014 do NOT treat this as an invoice) and from a monthly STATEMENT of account. Then read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) \u2014 it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." }
         ] }]
       })
@@ -9077,9 +9072,9 @@ async function handle7(request, env, ctx) {
   function isAdminAuthorised() {
     const secret = env.SITELOG_ADMIN_SECRET || "";
     if (!secret) return false;
-    const header3 = request.headers.get("x-admin-secret") ?? "";
-    if (!header3) return false;
-    return constantTimeEqual(header3, secret);
+    const header4 = request.headers.get("x-admin-secret") ?? "";
+    if (!header4) return false;
+    return constantTimeEqual(header4, secret);
   }
   function requireAdmin2() {
     if (!isAdminAuthorised()) {
@@ -12871,8 +12866,8 @@ function fmtPeriodUk(row) {
   if (row.planned_date) return fmtUk(row.planned_date);
   const m = /^(\d{4})-(\d{2})/.exec(String(row.period || ""));
   if (!m) return String(row.period || "");
-  const M8 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return (M8[Number(m[2]) - 1] || m[2]) + " " + m[1].slice(2);
+  const M9 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return (M9[Number(m[2]) - 1] || m[2]) + " " + m[1].slice(2);
 }
 function padCode(v) {
   const d = String(v ?? "").replace(/\D/g, "");
@@ -17679,10 +17674,10 @@ PAT: Import certificate number ${num3}-${yr}`;
       "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
     ).bind(tid, now2).all();
     const rows = results || [];
-    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    const fit5 = await fittingsFor(rows.map((r) => r.cert_id));
     const out = [];
     for (const r of rows) {
-      const c = shapeCase(r, fit4[r.cert_id]);
+      const c = shapeCase(r, fit5[r.cert_id]);
       try {
         const cert = await loadCert(r.cert_id);
         if (cert) {
@@ -17703,7 +17698,7 @@ PAT: Import certificate number ${num3}-${yr}`;
       `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
     ).bind(tid).all();
     const rows = results || [];
-    const fit4 = await fittingsFor(rows.map((r) => r.cert_id));
+    const fit5 = await fittingsFor(rows.map((r) => r.cert_id));
     const ordByCert = {};
     try {
       const ids = rows.map((r) => r.cert_id).filter(Boolean);
@@ -17716,7 +17711,7 @@ PAT: Import certificate number ${num3}-${yr}`;
       }
     } catch {
     }
-    return json({ ok: true, cases: rows.map((r) => ({ ...shapeCase(r, fit4[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
+    return json({ ok: true, cases: rows.map((r) => ({ ...shapeCase(r, fit5[r.cert_id]), order: ordByCert[r.cert_id] || null })) }, {}, env, request);
   }
   if (sub === "/orders" && method === "GET") {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
@@ -17971,8 +17966,8 @@ PAT: Import certificate number ${num3}-${yr}`;
     } catch {
     }
     const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
-    const fit4 = await fittingsFor([certId]);
-    return json({ ok: true, jobFixed, case: row ? shapeCase(row, fit4[certId] || []) : null }, {}, env, request);
+    const fit5 = await fittingsFor([certId]);
+    return json({ ok: true, jobFixed, case: row ? shapeCase(row, fit5[certId] || []) : null }, {}, env, request);
   }
   if (sub === "/remedials/fitting-photo" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -18252,12 +18247,12 @@ ${con.tradingTitle || "Mostlane"}`;
       }
     }
     cfg.supplierEmail = toAddr;
-    let b64 = "";
+    let b642 = "";
     try {
       let s = "";
       const CH = 32768;
       for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
-      b64 = btoa(s);
+      b642 = btoa(s);
     } catch {
     }
     const site = siteName || "site";
@@ -18269,7 +18264,7 @@ ${con.tradingTitle || "Mostlane"}`;
       subject: String(bodyIn.subject || "").trim() || `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
       html: customBody ? `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escH2(customBody)}</div>` : `<p>Hi${cfg.supplierName ? " " + escH2(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH2(site)}</b>. Details, quantities and photos are in the PDF.</p>`,
       text: customBody || void 0,
-      attachments: [{ filename: fname, content: b64 }]
+      attachments: [{ filename: fname, content: b642 }]
     });
     if (!r || r.ok === false) return error(r && r.error || "Couldn't send the email (check RESEND_API_KEY / supplier email).", 502, env, request);
     return json({ ok: true, sentTo: cfg.supplierEmail, fittings: items.length }, {}, env, request);
@@ -24105,14 +24100,14 @@ function ymdDow(date) {
 }
 function blocksOnDate(list, date) {
   if (!date) return [];
-  const dow = ymdDow(date);
+  const dow2 = ymdDow(date);
   const out = [];
   for (const b of Array.isArray(list) ? list : []) {
     if (!b) continue;
     const rep = b.repeat;
     if (rep && rep.dow != null) {
       const skipped = Array.isArray(rep.skip) && rep.skip.includes(date);
-      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until) && !skipped) out.push({ ...b, date, recurring: true });
+      if (Number(rep.dow) === dow2 && date >= (b.date || "") && (!rep.until || date <= rep.until) && !skipped) out.push({ ...b, date, recurring: true });
     } else if ((b.date || "") === date) {
       out.push({ ...b, recurring: false });
     }
@@ -24287,11 +24282,11 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   }
   if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M8 = await driveMatrix(env, pts);
-  const baseSeq = solveRoute(M8.mins);
+  const M9 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M9.mins);
   let order = baseSeq, aiUsed = false, aiReason = "";
   if (useAI && env.ANTHROPIC_API_KEY) {
-    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M8.mins, dayStart, notes, baseSeq });
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M9.mins, dayStart, notes, baseSeq });
     if (ai.ok) {
       const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
       const uniq = [...new Set(seq)];
@@ -24310,7 +24305,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const legs = [];
   let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
   for (const p of order) {
-    const dMin = M8.mins[cur][p], dMi = M8.miles[cur][p];
+    const dMin = M9.mins[cur][p], dMi = M9.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
     const j = jobs[p - 1];
@@ -24320,7 +24315,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     t = arrival + j.durationMin;
     cur = p;
   }
-  const homeMin = M8.mins[cur][0], homeMi = M8.miles[cur][0];
+  const homeMin = M9.mins[cur][0], homeMi = M9.miles[cur][0];
   driveMins += homeMin;
   driveMiles += homeMi;
   let lunch = null;
@@ -24340,7 +24335,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     dayStart,
     aiUsed,
     aiReason,
-    matrixSource: M8.source,
+    matrixSource: M9.source,
     home: { postcode: home.postcode },
     legs,
     lunch,
@@ -24354,7 +24349,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
-      source: M8.source
+      source: M9.source
     },
     warnings
   };
@@ -24410,16 +24405,16 @@ async function optimiseEmDay(env, tenantId, body) {
   const emJobs = jobs.filter((j) => j.twoVisit);
   if (!emJobs.length) return { ok: false, error: "None of these are 3-hour EM (drain-down) jobs \u2014 use the normal route optimiser for a plain round trip.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M8 = await driveMatrix(env, pts);
+  const M9 = await driveMatrix(env, pts);
   const jobPoint = new Map(jobs.map((j, i) => [j.id, i + 1]));
-  const baseSeq = solveRoute(M8.mins);
+  const baseSeq = solveRoute(M9.mins);
   const outboundJobs = baseSeq.map((p) => jobs[p - 1]);
   function evalPlan(patAtStart) {
     const stops2 = [];
     let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0, waitMins = 0;
     const ready = /* @__PURE__ */ new Map();
     for (const j of outboundJobs) {
-      const p = jobPoint.get(j.id), dMin = M8.mins[cur][p], dMi = M8.miles[cur][p];
+      const p = jobPoint.get(j.id), dMin = M9.mins[cur][p], dMi = M9.miles[cur][p];
       driveMins += dMin;
       driveMiles += dMi;
       if (j.twoVisit) {
@@ -24444,7 +24439,7 @@ async function optimiseEmDay(env, tenantId, body) {
     while (remaining.length) {
       let best2 = -1, bestEnd = Infinity, bi = null;
       for (let k = 0; k < remaining.length; k++) {
-        const j2 = remaining[k], p = jobPoint.get(j2.id), dMin = M8.mins[cur][p];
+        const j2 = remaining[k], p = jobPoint.get(j2.id), dMin = M9.mins[cur][p];
         const arrival = avoidBlocks(t + dMin, checkMin, blkOffsets);
         const here = !!(j2.pat && !patAtStart.get(j2.id));
         const rdy = ready.get(j2.id);
@@ -24462,7 +24457,7 @@ async function optimiseEmDay(env, tenantId, body) {
         if (end < bestEnd) {
           bestEnd = end;
           best2 = k;
-          bi = { p, dMin, dMi: M8.miles[cur][p], arrival, here, checkStart, wait, end };
+          bi = { p, dMin, dMi: M9.miles[cur][p], arrival, here, checkStart, wait, end };
         }
       }
       const j = remaining.splice(best2, 1)[0], dur = checkMin + (bi.here ? patMin : 0);
@@ -24474,7 +24469,7 @@ async function optimiseEmDay(env, tenantId, body) {
       t = bi.end;
       cur = bi.p;
     }
-    const homeMin = M8.mins[cur][0], homeMi = M8.miles[cur][0];
+    const homeMin = M9.mins[cur][0], homeMi = M9.miles[cur][0];
     return { stops: stops2, makespan: t + homeMin, waitMins, driveMins: driveMins + homeMin, driveMiles: driveMiles + homeMi, siteMins, homeMin, homeMi };
   }
   const patSites = emJobs.filter((j) => j.pat);
@@ -24515,7 +24510,7 @@ async function optimiseEmDay(env, tenantId, body) {
     }
   }
   const dayLength = r.makespan + (lunch ? lunchMinutes : 0);
-  if (M8.source === "estimate") warnings.push("Used estimated distances (no live driving times available) \u2014 times are approximate.");
+  if (M9.source === "estimate") warnings.push("Used estimated distances (no live driving times available) \u2014 times are approximate.");
   if (emJobs.length === 1) warnings.push("Only one EM site \u2014 there's no other work to fill its 3-hour drain-down, so expect a long wait before the light check.");
   if (dayLength > dayCapMin) warnings.push(`This plan runs to about ${Math.round(dayLength / 60 * 10) / 10}h \u2014 past the ~${Math.round(dayCapMin / 60)}h day. Consider moving a site to another day.`);
   return {
@@ -24523,7 +24518,7 @@ async function optimiseEmDay(env, tenantId, body) {
     engineer,
     date,
     dayStart,
-    matrixSource: M8.source,
+    matrixSource: M9.source,
     home: { postcode: home.postcode },
     timing: { flickMin, patMin, checkMin, drainMin },
     stops,
@@ -24540,7 +24535,7 @@ async function optimiseEmDay(env, tenantId, body) {
       dayLengthMins: Math.round(dayLength),
       homeDriveMins: r.homeMin,
       homeDriveMiles: rnd1(r.homeMi),
-      source: M8.source
+      source: M9.source
     },
     warnings
   };
@@ -24642,23 +24637,23 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
-  let M8;
-  if (pts.length <= 90) M8 = await roadMatrix(pts);
+  let M9;
+  if (pts.length <= 90) M9 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
-    M8 = { mins, source: "estimate" };
+    M9 = { mins, source: "estimate" };
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
   const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
-  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M8.mins[i][k2] += FERRY;
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M9.mins[i][k2] += FERRY;
   const insertCost = (ei, k) => {
     const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
     let bDelta = Infinity, bPos = 1;
     for (let pos = 1; pos < route.length; pos++) {
       const a = route[pos - 1], b = route[pos];
-      const delta = M8.mins[a][p] + M8.mins[p][b] - M8.mins[a][b];
+      const delta = M9.mins[a][p] + M9.mins[p][b] - M9.mins[a][b];
       if (delta < bDelta) {
         bDelta = delta;
         bPos = pos;
@@ -24666,7 +24661,7 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     return { pos: bPos, delta: bDelta };
   };
-  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M8.mins[pE(ei)][pJ(k)]));
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M9.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
   const unassigned = [], handled = /* @__PURE__ */ new Set();
   const remoteByArea = {};
@@ -24676,13 +24671,13 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => {
-      const c = Math.min(...ks.map((k) => M8.mins[pE(ei)][pJ(k)]));
+      const c = Math.min(...ks.map((k) => M9.mins[pE(ei)][pJ(k)]));
       if (c < bestCost) {
         bestCost = c;
         bestE = ei;
       }
     });
-    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M8.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M9.mins[pE(bestE)][pJ(k)])) : Infinity;
     const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
     const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
     if (!justified) {
@@ -24728,13 +24723,13 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
   const plan = engs.map((e, ei) => {
     const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
-    const subCost = sub.map((a) => sub.map((b) => M8.mins[a][b]));
+    const subCost = sub.map((a) => sub.map((b) => M9.mins[a][b]));
     const solved = solveRoute(subCost);
     const orderedK = solved.map((si) => e.seq[si - 1]);
     const legs = [];
     let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
-      const p = pJ(k), dMin = M8.mins[cur][p];
+      const p = pJ(k), dMin = M9.mins[cur][p];
       drive += dMin;
       const j = jobs[k];
       let arrival = t + dMin;
@@ -24749,12 +24744,12 @@ async function autoScheduleDay(env, tenantId, body) {
       t = arrival + j.durationMin;
       cur = p;
     }
-    const homeMin = orderedK.length ? M8.mins[cur][pE(ei)] : 0;
+    const homeMin = orderedK.length ? M9.mins[cur][pE(ei)] : 0;
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, blocks: e.blk.map((b) => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })), legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  let matrixSource = M8.source;
-  if (M8.source !== "osrm" && plan.length) {
+  let matrixSource = M9.source;
+  if (M9.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     const engBlk = new Map(engs.map((e) => [e.username, e.blk]));
@@ -25298,8 +25293,8 @@ function inferAreaKw(description, areas) {
   return a ? { id: a.id, name: a.name } : null;
 }
 function isOutOfHoursLondon() {
-  const { dow, hour } = londonNow();
-  return dow === 0 || dow === 6 || hour < 8 || hour >= 18;
+  const { dow: dow2, hour } = londonNow();
+  return dow2 === 0 || dow2 === 6 || hour < 8 || hour >= 18;
 }
 async function subcontractorSuggestions(env, tid, job) {
   const cfg = await getSubconConfig(env, tid);
@@ -25618,10 +25613,10 @@ function inboundEngineerFor(cfg, priority) {
   if (!cfg) return "";
   if (cfg.priorities && cfg.priorities.length && !(priority && cfg.priorities.includes(priority))) return "";
   if ((cfg.mode || "always") !== "windows") return cfg.engineer || "";
-  const { dow, hour, minute } = londonNow();
+  const { dow: dow2, hour, minute } = londonNow();
   const nowMin = hour * 60 + minute;
   for (const w of cfg.windows || []) {
-    if (!Array.isArray(w.days) || !w.days.includes(dow)) continue;
+    if (!Array.isArray(w.days) || !w.days.includes(dow2)) continue;
     const f = hhmmToMin(w.from), t = hhmmToMin(w.to);
     if (f == null || t == null) continue;
     const inWin = f <= t ? nowMin >= f && nowMin < t : nowMin >= f || nowMin < t;
@@ -31233,8 +31228,8 @@ async function openSegmentRow(env, tenantId, username) {
 }
 function mondayOf2(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
+  const dow2 = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow2);
   return d.toISOString().slice(0, 10);
 }
 function weekDays2(monday) {
@@ -32415,13 +32410,13 @@ async function getSettings(db) {
 function normReminders(arr) {
   const out = [], seen = /* @__PURE__ */ new Set();
   for (const r of Array.isArray(arr) ? arr : []) {
-    const dow = Math.min(7, Math.max(1, Number(r && r.dow) || 0));
+    const dow2 = Math.min(7, Math.max(1, Number(r && r.dow) || 0));
     const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(r && r.time) ? r.time : "";
-    if (!dow || !time) continue;
-    const key = dow + ":" + time;
+    if (!dow2 || !time) continue;
+    const key = dow2 + ":" + time;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ dow, time });
+    out.push({ dow: dow2, time });
   }
   return out.slice(0, 21).sort((a, b) => a.dow - b.dow || a.time.localeCompare(b.time));
 }
@@ -32583,9 +32578,9 @@ function answerWord(v) {
   return v === "defect" ? "Defect" : v === "missing" ? "Missing" : v === "present" ? "Present" : v === "ok" ? "OK" : String(v || "");
 }
 function deadlineFor(week, s) {
-  const dow = Math.min(7, Math.max(1, Number(s.dueDow) || 5));
+  const dow2 = Math.min(7, Math.max(1, Number(s.dueDow) || 5));
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(s.dueTime || "") ? s.dueTime : "17:00";
-  return londonToISO2(addDays2(week, dow - 1), hm);
+  return londonToISO2(addDays2(week, dow2 - 1), hm);
 }
 function shapeCheck(r) {
   if (!r) return null;
@@ -36324,8 +36319,8 @@ function rangeOf(q) {
 }
 function mondayOf4(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
+  const dow2 = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow2);
   return d.toISOString().slice(0, 10);
 }
 function spanMins(start, finish) {
@@ -41016,14 +41011,14 @@ function contentBlock(bytes, filename, ct) {
   const isPdf = c.includes("pdf") || name.endsWith(".pdf");
   const isImg = c.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/.test(name);
   const isHtml = c.includes("html") || c.startsWith("text/") || /\.(html?|txt|csv)$/.test(name);
-  const b64 = () => bytesToBase642(bytes);
+  const b642 = () => bytesToBase642(bytes);
   if (isPdf) {
-    const d = b64();
+    const d = b642();
     return d ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: d } } : null;
   }
   if (isImg) {
     const mt = c.startsWith("image/") ? c : name.endsWith(".png") ? "image/png" : name.endsWith(".webp") ? "image/webp" : name.endsWith(".gif") ? "image/gif" : "image/jpeg";
-    const d = b64();
+    const d = b642();
     return d ? { type: "image", source: { type: "base64", media_type: mt, data: d } } : null;
   }
   if (isHtml) {
@@ -41764,9 +41759,9 @@ async function siteWindow(env, tid, code, dateISO, clientHint) {
     }
   } catch {
   }
-  const dow = (/* @__PURE__ */ new Date(dateISO + "T12:00:00Z")).getUTCDay();
+  const dow2 = (/* @__PURE__ */ new Date(dateISO + "T12:00:00Z")).getUTCDay();
   let win = null, source = "default", closed = false;
-  const raw = data ? data[DAY_KEYS[dow]] : "";
+  const raw = data ? data[DAY_KEYS[dow2]] : "";
   if (raw != null && String(raw).trim() !== "") {
     if (/closed/i.test(String(raw))) closed = true;
     else {
@@ -42028,9 +42023,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -42986,9 +42981,9 @@ async function buildAuthHeader(wwwAuth, user, pass, methodHttp, uri) {
   h += extra;
   return h;
 }
-function parseAuthParams(header3) {
+function parseAuthParams(header4) {
   const out = {};
-  const s = header3.replace(/^\s*[A-Za-z]+\s+/, "");
+  const s = header4.replace(/^\s*[A-Za-z]+\s+/, "");
   const re = /(\w+)\s*=\s*(?:"([^"]*)"|([^,]*))/g;
   let m;
   while (m = re.exec(s)) out[m[1].toLowerCase()] = m[2] !== void 0 ? m[2] : (m[3] || "").trim();
@@ -43183,7 +43178,7 @@ function mondayOf5(ymd2) {
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now2) {
   const today = lonYMD(now2);
-  const [Y, M8] = today.split("-").map(Number);
+  const [Y, M9] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -43192,8 +43187,8 @@ function occurrence(task, now2) {
       const mon = mondayOf5(today);
       periodKey = "W:" + mon;
       startYMD = mon;
-      const dow = Math.min(7, Math.max(1, Number(task.due_dow) || 5));
-      dueYMD = addDaysYMD(mon, dow - 1);
+      const dow2 = Math.min(7, Math.max(1, Number(task.due_dow) || 5));
+      dueYMD = addDaysYMD(mon, dow2 - 1);
       break;
     }
     case "monthly": {
@@ -43204,7 +43199,7 @@ function occurrence(task, now2) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M8 - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M9 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -43726,12 +43721,12 @@ function jsonArrayAfter(text, key) {
   if (i < 0) return null;
   const start = text.indexOf("[", i);
   if (start < 0) return null;
-  let depth = 0, inStr = false, esc3 = false;
+  let depth = 0, inStr = false, esc4 = false;
   for (let j = start; j < text.length; j++) {
     const c = text[j];
     if (inStr) {
-      if (esc3) esc3 = false;
-      else if (c === "\\") esc3 = true;
+      if (esc4) esc4 = false;
+      else if (c === "\\") esc4 = true;
       else if (c === '"') inStr = false;
     } else if (c === '"') inStr = true;
     else if (c === "[") depth++;
@@ -44216,6 +44211,485 @@ async function handle38(request, env, ctx, url, sess) {
   return error("Not found: " + sub, 404, env, request);
 }
 
+// src/routes/sitelogts.js
+init_http();
+init_auth();
+init_email();
+init_logo();
+
+// src/lib/sitelogtspdf.js
+init_pdf();
+var PW = 842;
+var PH = 595;
+var M6 = 36;
+var NAVY5 = [0, 0.2, 0.4];
+var GREEN3 = [0.086, 0.639, 0.29];
+var RED3 = [0.863, 0.149, 0.149];
+var AMBER = [0.851, 0.467, 0.024];
+var ROW_RED = [0.996, 0.937, 0.937];
+var ROW_AMBER = [1, 0.969, 0.898];
+var ZEBRA3 = [0.973, 0.976, 0.984];
+var GRID = [0.85, 0.87, 0.9];
+function fit4(str, size, max) {
+  str = String(str == null ? "" : str);
+  if (textWidth(str, size) <= max) return str;
+  while (str.length > 1 && textWidth(str + "...", size) > max) str = str.slice(0, -1);
+  return str.trimEnd() + "...";
+}
+function fmtHM(mins) {
+  mins = Math.max(0, Math.round(Number(mins) || 0));
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+function mark(doc, cx, cy, ok) {
+  const r = 5.2;
+  doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: ok ? GREEN3 : RED3 });
+  const w = [1, 1, 1];
+  if (ok) {
+    doc.line(cx - 2.6, cy + 0.2, cx - 0.7, cy + 2.2, { stroke: w, lw: 1.4 });
+    doc.line(cx - 0.7, cy + 2.2, cx + 2.8, cy - 2.2, { stroke: w, lw: 1.4 });
+  } else {
+    doc.line(cx - 2.2, cy - 2.2, cx + 2.2, cy + 2.2, { stroke: w, lw: 1.4 });
+    doc.line(cx - 2.2, cy + 2.2, cx + 2.2, cy - 2.2, { stroke: w, lw: 1.4 });
+  }
+}
+function header3(doc, meta, subtitle) {
+  doc.rect(0, 0, PW, 58, { fill: NAVY5 });
+  if (meta.logo) {
+    try {
+      doc.image(meta.logo, M6, 12, 85, 34);
+    } catch (e) {
+    }
+  }
+  const x0 = meta.logo ? M6 + 98 : M6;
+  doc.text(x0, 28, meta.title || "SiteLog timesheet", { size: 16, bold: true, color: [1, 1, 1] });
+  doc.text(x0, 45, subtitle || meta.periodLabel || "", { size: 10, color: [0.85, 0.9, 1] });
+  doc.text(PW - M6, 28, meta.periodLabel || "", { size: 11, bold: true, color: [1, 1, 1], alignRight: true });
+  return 80;
+}
+function legend(doc, y) {
+  mark(doc, M6 + 5, y - 3, true);
+  doc.text(M6 + 14, y, "GPS verified at the site", { size: 8.5, grey: true });
+  mark(doc, M6 + 135, y - 3, false);
+  doc.text(M6 + 144, y, "Not verified (no location, auto sign-out, or edited by the office)", { size: 8.5, grey: true });
+  doc.rect(M6 + 418, y - 8, 10, 8, { fill: ROW_RED, stroke: [0.95, 0.7, 0.7], lw: 0.5 });
+  doc.text(M6 + 432, y, "Missed sign-out", { size: 8.5, grey: true });
+  doc.rect(M6 + 512, y - 8, 10, 8, { fill: ROW_AMBER, stroke: [0.95, 0.82, 0.6], lw: 0.5 });
+  doc.text(M6 + 526, y, "Still signed in", { size: 8.5, grey: true });
+}
+function personTotals(p) {
+  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0;
+  for (const v of p.visits) {
+    if (v.state !== "open") mins += v.mins || 0;
+    if (v.state === "auto") {
+      missed++;
+      autoMins += v.mins || 0;
+    }
+    if (v.state === "open") open++;
+    if (!v.inOk) unver++;
+    if (v.state !== "open" && !v.outOk) unver++;
+  }
+  return { mins, autoMins, missed, open, unver, visits: p.visits.length };
+}
+function summaryPage(doc, meta, people) {
+  let y = header3(doc, meta, "Summary \u2014 everyone");
+  const cols = [
+    { k: "name", x: M6, w: 200, label: "Person" },
+    { k: "company", x: M6 + 205, w: 150, label: "Company" },
+    { k: "visits", x: M6 + 410, label: "Visits", right: true },
+    { k: "hours", x: M6 + 500, label: "Hours on site", right: true },
+    { k: "missed", x: M6 + 600, label: "Missed sign-outs", right: true },
+    { k: "open", x: M6 + 680, label: "Still in", right: true },
+    { k: "unver", x: PW - M6 - 6, label: "Not verified", right: true }
+  ];
+  const head = () => {
+    doc.rect(M6, y, PW - 2 * M6, 18, { fill: [0.92, 0.94, 0.97] });
+    for (const c of cols) doc.text(c.x + (c.right ? 0 : 4), y + 12.5, c.label, { size: 8.5, bold: true, alignRight: !!c.right });
+    y += 18;
+  };
+  head();
+  const tot = { mins: 0, missed: 0, open: 0, unver: 0, visits: 0 };
+  people.forEach((p, i) => {
+    if (y > PH - 70) {
+      doc.newPage(PW, PH);
+      y = header3(doc, meta, "Summary \u2014 everyone (continued)");
+      head();
+    }
+    const t = personTotals(p);
+    tot.mins += t.mins;
+    tot.missed += t.missed;
+    tot.open += t.open;
+    tot.unver += t.unver;
+    tot.visits += t.visits;
+    const bad = t.missed || t.unver;
+    doc.rect(M6, y, PW - 2 * M6, 18, { fill: bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
+    doc.text(M6 + 4, y + 12.5, fit4(p.name, 9.5, 195), { size: 9.5, bold: true });
+    doc.text(M6 + 209, y + 12.5, fit4(p.company || "", 9, 190), { size: 9, grey: true });
+    doc.text(M6 + 410, y + 12.5, String(t.visits), { size: 9.5, alignRight: true });
+    doc.text(M6 + 500, y + 12.5, fmtHM(t.mins), { size: 9.5, bold: true, alignRight: true });
+    doc.text(M6 + 600, y + 12.5, String(t.missed), { size: 9.5, bold: !!t.missed, alignRight: true, color: t.missed ? RED3 : null });
+    doc.text(M6 + 680, y + 12.5, String(t.open), { size: 9.5, alignRight: true, color: t.open ? AMBER : null });
+    doc.text(PW - M6 - 6, y + 12.5, String(t.unver), { size: 9.5, bold: !!t.unver, alignRight: true, color: t.unver ? RED3 : null });
+    y += 18;
+  });
+  if (!people.length) {
+    doc.text(M6 + 4, y + 16, "Nobody signed in to a site in this period.", { size: 10, grey: true });
+    y += 24;
+  }
+  doc.hr(M6, y + 2, PW - M6);
+  doc.text(M6 + 4, y + 16, "Total", { size: 10, bold: true });
+  doc.text(M6 + 410, y + 16, String(tot.visits), { size: 10, bold: true, alignRight: true });
+  doc.text(M6 + 500, y + 16, fmtHM(tot.mins), { size: 10, bold: true, alignRight: true });
+  doc.text(M6 + 600, y + 16, String(tot.missed), { size: 10, bold: true, alignRight: true, color: tot.missed ? RED3 : null });
+  doc.text(M6 + 680, y + 16, String(tot.open), { size: 10, bold: true, alignRight: true });
+  doc.text(PW - M6 - 6, y + 16, String(tot.unver), { size: 10, bold: true, alignRight: true, color: tot.unver ? RED3 : null });
+  y += 34;
+  doc.text(M6, y, "Hours on site include visits the system closed automatically (missed sign-outs) \u2014 those times are an assumption, not a scan.", { size: 8.5, grey: true });
+  legend(doc, y + 18);
+}
+var VC = { date: M6, site: M6 + 72, inT: M6 + 330, inM: M6 + 372, outT: M6 + 392, outM: M6 + 434, hrs: M6 + 505, note: M6 + 520 };
+function personPages(doc, meta, p) {
+  doc.newPage(PW, PH);
+  let y = header3(doc, meta, `${p.name}${p.company ? " \u2014 " + p.company : ""}`);
+  const t = personTotals(p);
+  const chips = [
+    ["Hours on site", fmtHM(t.mins), null],
+    ["Visits", String(t.visits), null],
+    ["Missed sign-outs", String(t.missed), t.missed ? RED3 : null],
+    ["Not verified", String(t.unver), t.unver ? RED3 : null]
+  ];
+  if (t.open) chips.push(["Still signed in", String(t.open), AMBER]);
+  let cx = M6;
+  for (const [lab, val2, col] of chips) {
+    doc.roundRect(cx, y, 130, 36, 6, { fill: [0.95, 0.96, 0.98] });
+    doc.text(cx + 10, y + 14, lab, { size: 8, grey: true });
+    doc.text(cx + 10, y + 30, val2, { size: 13, bold: true, color: col });
+    cx += 140;
+  }
+  y += 52;
+  const head = () => {
+    doc.rect(M6, y, PW - 2 * M6, 18, { fill: [0.92, 0.94, 0.97] });
+    const h = (x, s, r) => doc.text(x, y + 12.5, s, { size: 8.5, bold: true, alignRight: !!r });
+    h(VC.date + 4, "Date");
+    h(VC.site, "Site");
+    h(VC.inT, "Signed in");
+    h(VC.outT, "Signed out");
+    h(VC.hrs, "Hours", true);
+    h(VC.note, "Notes");
+    y += 18;
+  };
+  head();
+  let lastDate = "";
+  p.visits.forEach((v, i) => {
+    if (y > PH - 56) {
+      doc.newPage(PW, PH);
+      y = header3(doc, meta, `${p.name} (continued)`);
+      head();
+      lastDate = "";
+    }
+    const bg = v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
+    doc.rect(M6, y, PW - 2 * M6, 20, { fill: bg });
+    if (v.date !== lastDate) {
+      doc.text(VC.date + 4, y + 13.5, v.date, { size: 9, bold: true });
+      if (lastDate) doc.line(M6, y, PW - M6, y, { stroke: GRID, lw: 0.6 });
+      lastDate = v.date;
+    }
+    doc.text(VC.site, y + 13.5, fit4(v.site, 9.5, 250), { size: 9.5 });
+    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true });
+    mark(doc, VC.inM, y + 10, !!v.inOk);
+    if (v.state === "open") {
+      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: AMBER });
+    } else {
+      doc.text(VC.outT, y + 13.5, v.outTime || "", { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : null });
+      mark(doc, VC.outM, y + 10, !!v.outOk);
+    }
+    doc.text(VC.hrs, y + 13.5, v.state === "open" ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
+    const note = v.note || "";
+    if (note) doc.text(VC.note, y + 13.5, fit4(note, 8.5, PW - M6 - VC.note - 4), {
+      size: 8.5,
+      bold: v.state === "auto" || v.state === "open",
+      color: v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
+    });
+    y += 20;
+  });
+  if (!p.visits.length) {
+    doc.text(M6 + 4, y + 16, "No visits.", { size: 10, grey: true });
+    y += 24;
+  }
+  if (y < PH - 40) legend(doc, y + 22);
+}
+function buildSiteLogTimesheetPdf(meta) {
+  const people = meta.people || [];
+  const doc = new PdfDoc(PW, PH);
+  summaryPage(doc, meta, people);
+  for (const p of people) personPages(doc, meta, p);
+  const n = doc.pages.length;
+  const gen = meta.generatedAt ? `Generated ${meta.generatedAt}` : "";
+  for (let i = 0; i < n; i++) {
+    doc.lineOn(i, M6, PH - 26, PW - M6, { grey: true });
+    doc.textOn(i, M6, PH - 14, `Mostlane SiteLog \xB7 ${meta.periodLabel || ""}${gen ? " \xB7 " + gen : ""}`, { size: 7.5, grey: true });
+    doc.textOn(i, PW - M6, PH - 14, `Page ${i + 1} of ${n}`, { size: 7.5, grey: true, alignRight: true });
+  }
+  return doc.bytes();
+}
+
+// src/routes/sitelogts.js
+var CFG_KEY4 = (tid) => `sitelog:tsmail:${tid}`;
+var SENT_KEY = (tid) => `sitelog:tsmail:sent:${tid}`;
+var DAILY_FROM = "16:00";
+var DAILY_FORCE = "20:00";
+var WEEKLY_FROM = "07:00";
+async function readKV(env, tid, key) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+  try {
+    return row && row.value ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function writeKV(env, tid, key, obj) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(obj)).run();
+}
+async function getConfig5(env, tid) {
+  const c = await readKV(env, tid, CFG_KEY4(tid)) || {};
+  return {
+    enabled: c.enabled !== false,
+    daily: c.daily !== false,
+    weekly: c.weekly !== false,
+    recipients: Array.isArray(c.recipients) ? c.recipients.filter(Boolean) : []
+  };
+}
+function london(d = /* @__PURE__ */ new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(d).map((x) => [x.type, x.value]));
+  return { key: `${p.year}-${p.month}-${p.day}`, hhmm: `${p.hour}:${p.minute}` };
+}
+function parseUtc(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  const iso = s.includes("T") ? s : s.replace(" ", "T");
+  const d = new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+  return isNaN(d) ? null : d;
+}
+function addDays3(key, n) {
+  const d = /* @__PURE__ */ new Date(key + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+var dow = (key) => (/* @__PURE__ */ new Date(key + "T12:00:00Z")).getUTCDay();
+var mondayOf6 = (key) => addDays3(key, -((dow(key) + 6) % 7));
+function niceDate(key, opts) {
+  return (/* @__PURE__ */ new Date(key + "T12:00:00Z")).toLocaleDateString("en-GB", Object.assign({ timeZone: "UTC" }, opts));
+}
+function periodFor(kind, dateKey) {
+  if (kind === "weekly") {
+    const from = mondayOf6(dateKey), to = addDays3(from, 6);
+    const label2 = `Week ${niceDate(from, { day: "numeric", month: "short" })} \u2013 ${niceDate(to, { day: "numeric", month: "short", year: "numeric" })}`;
+    return { kind, from, to, label: label2, file: `SiteLog-week-${from}.pdf` };
+  }
+  return {
+    kind: "daily",
+    from: dateKey,
+    to: dateKey,
+    label: niceDate(dateKey, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", ""),
+    file: `SiteLog-${dateKey}.pdf`
+  };
+}
+async function loadPeriod(env, from, to) {
+  const db = env.SITELOG_DB;
+  if (!db) throw new Error("SiteLog database is not connected to this worker");
+  const res = await db.prepare(`
+    SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
+           COALESCE(v.auto_checkout,0) AS auto_checkout, v.transferred_to,
+           COALESCE(v.manual_entry,0) AS manual_entry, v.provided_site_name,
+           COALESCE(v.sign_in_verified,0) AS sign_in_verified,
+           COALESCE(v.sign_out_verified,0) AS sign_out_verified,
+           v.sign_in_distance_m, v.sign_out_distance_m,
+           p.first_name, p.last_name, p.company
+    FROM visits v LEFT JOIN people p ON p.id = v.person_id
+    WHERE v.check_in_at >= ? AND v.check_in_at < ?
+    ORDER BY v.check_in_at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
+  const byPerson = /* @__PURE__ */ new Map();
+  for (const r of res.results || []) {
+    const inD = parseUtc(r.check_in_at);
+    if (!inD) continue;
+    const day = london(inD).key;
+    if (day < from || day > to) continue;
+    const outD = parseUtc(r.check_out_at);
+    const auto = Number(r.auto_checkout) === 1;
+    const state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
+    const inOk = Number(r.sign_in_verified) === 1;
+    const outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
+    const m = (d) => Math.round(Number(d));
+    let note = "";
+    if (state === "auto") note = "Did not sign out \u2014 closed automatically";
+    else if (state === "open") note = "Still signed in";
+    else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
+    else if (state === "manual") note = "Added by the office";
+    if (!note) {
+      const bits = [];
+      if (inOk && r.sign_in_distance_m != null) bits.push(`in ${m(r.sign_in_distance_m)} m from site`);
+      if (outOk && r.sign_out_distance_m != null) bits.push(`out ${m(r.sign_out_distance_m)} m`);
+      if (!inOk) bits.push("sign-in location not checked");
+      if (!outOk) bits.push("sign-out location not checked");
+      note = bits.join(" \xB7 ");
+    }
+    const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || "Unknown person";
+    const key = r.person_id || name;
+    if (!byPerson.has(key)) byPerson.set(key, { name, company: r.company || "", visits: [] });
+    byPerson.get(key).visits.push({
+      date: niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", ""),
+      site: r.site_code || r.provided_site_name || "",
+      inTime: london(inD).hhmm,
+      outTime: outD ? london(outD).hhmm : "",
+      mins: outD ? Math.max(0, (outD - inD) / 6e4) : 0,
+      inOk,
+      outOk,
+      state,
+      note,
+      inDist: r.sign_in_distance_m,
+      outDist: r.sign_out_distance_m
+    });
+  }
+  return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+async function buildPdf(env, kind, dateKey) {
+  const per = periodFor(kind, dateKey);
+  const people = await loadPeriod(env, per.from, per.to);
+  let logo = null;
+  try {
+    logo = logoBytes();
+  } catch (e) {
+  }
+  const now2 = london();
+  const bytes = buildSiteLogTimesheetPdf({
+    title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
+    periodLabel: per.label,
+    generatedAt: `${niceDate(now2.key, { day: "numeric", month: "short", year: "numeric" })} ${now2.hhmm}`,
+    people,
+    logo
+  });
+  return { per, people, bytes };
+}
+function b64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return btoa(s);
+}
+var esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+async function emailTimesheet(env, tid, kind, dateKey, recipients) {
+  const { per, people, bytes } = await buildPdf(env, kind, dateKey);
+  const rows = people.map((p) => {
+    const t = personTotals(p);
+    const flag = [
+      t.missed ? `${t.missed} missed sign-out${t.missed > 1 ? "s" : ""}` : "",
+      t.unver ? `${t.unver} not verified` : "",
+      t.open ? `${t.open} still in` : ""
+    ].filter(Boolean).join(" \xB7 ");
+    return `<tr><td style="padding:4px 10px 4px 0">${esc3(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc3(flag) : "All verified"}</td></tr>`;
+  }).join("");
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
+    <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc3(per.label)}</b></p>
+    ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
+    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began).</p></div>`;
+  const r = await sendEmail(env, {
+    to: recipients,
+    subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
+    html,
+    attachments: [{ filename: per.file, content: b64(bytes) }]
+  });
+  return { ...r, people: people.length, period: per.label };
+}
+async function sweepSitelogTimesheets(env, tid = 1) {
+  if (!env.SITELOG_DB) return;
+  const cfg = await getConfig5(env, tid);
+  if (!cfg.enabled || !cfg.recipients.length) return;
+  const now2 = london();
+  const sent = await readKV(env, tid, SENT_KEY(tid)) || {};
+  if (cfg.weekly && dow(now2.key) === 1 && now2.hhmm >= WEEKLY_FROM) {
+    const lastMon = addDays3(now2.key, -7);
+    if (sent.weekly !== lastMon) {
+      const r = await emailTimesheet(env, tid, "weekly", lastMon, cfg.recipients);
+      if (r.ok || r.skipped) {
+        sent.weekly = lastMon;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    }
+  }
+  if (cfg.daily && now2.hhmm >= DAILY_FROM && sent.daily !== now2.key) {
+    const people = await loadPeriod(env, now2.key, now2.key);
+    const visits = people.reduce((n, p) => n + p.visits.length, 0);
+    const open = people.reduce((n, p) => n + p.visits.filter((v) => v.state === "open").length, 0);
+    const force = now2.hhmm >= DAILY_FORCE;
+    if (!visits) {
+      if (force) {
+        sent.daily = now2.key;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    } else if (!open || force) {
+      const r = await emailTimesheet(env, tid, "daily", now2.key, cfg.recipients);
+      if (r.ok || r.skipped) {
+        sent.daily = now2.key;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    }
+  }
+}
+async function handle39(request, env, ctx, url, sess) {
+  if (!sess) return error("Not signed in", 401, env, request);
+  const tid = sess.tenantId;
+  const perms = await permissionsFor(env, tid, sess.user.username);
+  if (perms.FullAccess !== "Yes") return error("Full Access only", 403, env, request);
+  const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
+  if (path === "/config" && request.method === "GET") {
+    return json({
+      ok: true,
+      config: await getConfig5(env, tid),
+      sent: await readKV(env, tid, SENT_KEY(tid)) || {},
+      emailConfigured: !!(env.RESEND_API_KEY || env.RESET_EMAIL_WEBHOOK),
+      sitelogConnected: !!env.SITELOG_DB
+    }, {}, env, request);
+  }
+  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  if (path === "/config" && request.method === "POST") {
+    const cur = await getConfig5(env, tid);
+    const recips = Array.isArray(body.recipients) ? body.recipients : typeof body.recipients === "string" ? body.recipients.split(/[,;\s]+/) : cur.recipients;
+    const clean = [...new Set(recips.map((s) => String(s).trim().toLowerCase()).filter((s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))].slice(0, 20);
+    const next = {
+      enabled: body.enabled === void 0 ? cur.enabled : !!body.enabled,
+      daily: body.daily === void 0 ? cur.daily : !!body.daily,
+      weekly: body.weekly === void 0 ? cur.weekly : !!body.weekly,
+      recipients: clean
+    };
+    await writeKV(env, tid, CFG_KEY4(tid), next);
+    return json({ ok: true, config: next }, {}, env, request);
+  }
+  const kind = body.kind === "weekly" ? "weekly" : "daily";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays3(london().key, -7) : london().key;
+  if (path === "/pdf" && request.method === "POST") {
+    const { per, bytes } = await buildPdf(env, kind, date);
+    return new Response(bytes, { headers: Object.assign({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${per.file}"`,
+      "Cache-Control": "no-store"
+    }, corsHeaders(env, request)) });
+  }
+  if (path === "/send" && request.method === "POST") {
+    const cfg = await getConfig5(env, tid);
+    if (!cfg.recipients.length) return error("Add at least one email address first", 400, env, request);
+    const r = await emailTimesheet(env, tid, kind, date, cfg.recipients);
+    if (!r.ok) return error(r.reason === "no provider" ? "Email isn't set up on the portal (RESEND_API_KEY)" : r.error || "Email failed", 502, env, request);
+    return json({ ok: true, sentTo: cfg.recipients, period: r.period, people: r.people }, {}, env, request);
+  }
+  return error("Not found", 404, env, request);
+}
+
 // src/routes/cablecalc.js
 init_http();
 init_auth();
@@ -44224,18 +44698,18 @@ init_auth();
 init_pdf();
 var W7 = 595;
 var H4 = 842;
-var M6 = 40;
-var CW3 = W7 - M6 * 2;
+var M7 = 40;
+var CW3 = W7 - M7 * 2;
 var S4 = (v) => toWinAnsi(String(v == null ? "" : v));
-var NAVY5 = [0, 0.2, 0.41];
+var NAVY6 = [0, 0.2, 0.41];
 var INK5 = [0.09, 0.14, 0.22];
 var GREY5 = [0.42, 0.47, 0.53];
 var CARD4 = [0.97, 0.98, 0.99];
 var BORDER3 = [0.84, 0.87, 0.9];
-var GREEN3 = [0.13, 0.55, 0.3];
-var RED3 = [0.78, 0.16, 0.16];
-var AMBER = [0.7, 0.44, 0.03];
-var ZEBRA3 = [0.955, 0.965, 0.975];
+var GREEN4 = [0.13, 0.55, 0.3];
+var RED4 = [0.78, 0.16, 0.16];
+var AMBER2 = [0.7, 0.44, 0.03];
+var ZEBRA4 = [0.955, 0.965, 0.975];
 function card(doc, x, y, w, h, r = 10) {
   doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER3 });
   doc.roundRect(x, y, w, h, r, { fill: CARD4 });
@@ -44277,31 +44751,31 @@ function buildCableCalcPdf(record, meta = {}) {
   const v = record.values || {};
   const checks = record.checks || [];
   const m = record.meta || {};
-  doc.rect(0, 0, W7, 92, { fill: NAVY5 });
+  doc.rect(0, 0, W7, 92, { fill: NAVY6 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 30;
-      doc.image(meta.logo, M6, 20, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M7, 20, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  doc.text(M6, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
-  doc.text(W7 - M6, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W7 - M6, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
-  doc.text(W7 - M6, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(M7, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
+  doc.text(W7 - M7, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W7 - M7, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W7 - M7, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
   const overall = record.incomplete ? "INCOMPLETE" : record.pass ? "COMPLIANT" : "NOT COMPLIANT";
-  const oc = record.incomplete ? AMBER : record.pass ? GREEN3 : RED3;
+  const oc = record.incomplete ? AMBER2 : record.pass ? GREEN4 : RED4;
   const pw = textWidth(overall, 9) + 22;
-  doc.roundRect(M6, 108, pw, 20, 10, { fill: oc });
-  doc.text(M6 + 11, 122, overall, { size: 9, bold: true, color: [1, 1, 1] });
-  doc.text(M6 + pw + 12, 122, S4(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK5 });
+  doc.roundRect(M7, 108, pw, 20, 10, { fill: oc });
+  doc.text(M7 + 11, 122, overall, { size: 9, bold: true, color: [1, 1, 1] });
+  doc.text(M7 + pw + 12, 122, S4(m.title || (inp.circuitRef ? "Circuit " + inp.circuitRef : "Single circuit")), { size: 10.5, bold: true, color: INK5 });
   let y = 144;
-  const colW = (CW3 - 14) / 2, cx2 = M6 + colW + 14;
+  const colW = (CW3 - 14) / 2, cx2 = M7 + colW + 14;
   const cardH = 128;
-  card(doc, M6, y, colW, cardH);
+  card(doc, M7, y, colW, cardH);
   card(doc, cx2, y, colW, cardH);
-  label(doc, M6 + 12, y + 16, "Circuit");
+  label(doc, M7 + 12, y + 16, "Circuit");
   label(doc, cx2 + 12, y + 16, "Installation");
   const phase = inp.phases === 3 ? "3-phase 400 V" : "1-phase 230 V";
   const left = [
@@ -44323,8 +44797,8 @@ function buildCableCalcPdf(record, meta = {}) {
   const rowGap = 17.5;
   left.forEach((r, i) => {
     const ry = y + 34 + i * rowGap;
-    label(doc, M6 + 12, ry, r[0]);
-    val(doc, M6 + 12, ry + 11, r[1]);
+    label(doc, M7 + 12, ry, r[0]);
+    val(doc, M7 + 12, ry + 11, r[1]);
   });
   right.forEach((r, i) => {
     const ry = y + 34 + i * rowGap;
@@ -44332,8 +44806,8 @@ function buildCableCalcPdf(record, meta = {}) {
     val(doc, cx2 + 12, ry + 11, r[1]);
   });
   y += cardH + 14;
-  card(doc, M6, y, CW3, 34);
-  label(doc, M6 + 12, y + 14, "Correction factors (BS 7671 App 4)");
+  card(doc, M7, y, CW3, 34);
+  label(doc, M7 + 12, y + 14, "Correction factors (BS 7671 App 4)");
   const facs = [
     ["Ca", v.Ca && v.Ca.value],
     ["Cg", v.Cg && v.Cg.value],
@@ -44341,14 +44815,14 @@ function buildCableCalcPdf(record, meta = {}) {
     ["Cc", v.Cc && v.Cc.value],
     ["Product", v.factorProduct]
   ];
-  let fx = M6 + 12;
+  let fx = M7 + 12;
   facs.forEach((f) => {
     const t = f[0] + " " + (f[1] == null ? "\u2014" : f[1]);
     doc.text(fx, y + 27, S4(t), { size: 9, color: INK5, bold: f[0] === "Product" });
     fx += textWidth(t, 9) + 26;
   });
   y += 34 + 16;
-  doc.text(M6, y, "Verification", { size: 11, bold: true, color: NAVY5 });
+  doc.text(M7, y, "Verification", { size: 11, bold: true, color: NAVY6 });
   y += 8;
   const cols = [
     { key: "res", label: "", w: 0.05, align: "c" },
@@ -44356,8 +44830,8 @@ function buildCableCalcPdf(record, meta = {}) {
     { key: "reg", label: "BS 7671", w: 0.14 },
     { key: "detail", label: "Result", w: 0.47 }
   ];
-  card(doc, M6, y, CW3, 20, 6);
-  let cxp = M6 + 8;
+  card(doc, M7, y, CW3, 20, 6);
+  let cxp = M7 + 8;
   cols.forEach((c) => {
     if (c.label) doc.text(c.align === "c" ? cxp + CW3 * c.w / 2 - textWidth(c.label, 7) / 2 : cxp, y + 13, c.label.toUpperCase(), { size: 7, color: GREY5 });
     cxp += CW3 * c.w;
@@ -44367,10 +44841,10 @@ function buildCableCalcPdf(record, meta = {}) {
   checks.forEach((c, i) => {
     const detailLines = wrap7(c.detail || "", CW3 * 0.47 - 12, 8.4);
     const rh = Math.max(20, 8 + detailLines.length * 10.5);
-    if (i % 2) doc.rect(M6, y - 4, CW3, rh, { fill: ZEBRA3 });
-    let cxr = M6 + 8;
-    const dotc = c.pass === true ? GREEN3 : c.pass === false ? RED3 : AMBER;
-    doc.roundRect(M6 + CW3 * 0.05 / 2 - 3.5, y + 1, 7, 7, 3.5, { fill: dotc });
+    if (i % 2) doc.rect(M7, y - 4, CW3, rh, { fill: ZEBRA4 });
+    let cxr = M7 + 8;
+    const dotc = c.pass === true ? GREEN4 : c.pass === false ? RED4 : AMBER2;
+    doc.roundRect(M7 + CW3 * 0.05 / 2 - 3.5, y + 1, 7, 7, 3.5, { fill: dotc });
     cxr += CW3 * 0.05;
     doc.text(cxr, y + 8, S4(c.label), { size: 8.6, bold: true, color: INK5 });
     cxr += CW3 * 0.34;
@@ -44380,8 +44854,8 @@ function buildCableCalcPdf(record, meta = {}) {
     y += rh;
   });
   y += 12;
-  card(doc, M6, y, CW3, 58);
-  label(doc, M6 + 12, y + 15, "Key figures");
+  card(doc, M7, y, CW3, 58);
+  label(doc, M7 + 12, y + 15, "Key figures");
   const figs = [
     ["Ib", v.Ib, "A"],
     ["In", v.In, "A"],
@@ -44395,7 +44869,7 @@ function buildCableCalcPdf(record, meta = {}) {
   const perRow = 4, fw = CW3 / perRow;
   figs.forEach((f, i) => {
     const col = i % perRow, row = Math.floor(i / perRow);
-    const fxx = M6 + 12 + col * fw, fyy = y + 30 + row * 20;
+    const fxx = M7 + 12 + col * fw, fyy = y + 30 + row * 20;
     doc.text(fxx, fyy, S4(f[0]), { size: 7.4, color: GREY5 });
     doc.text(fxx + 62, fyy, S4((f[1] == null ? "\u2014" : f[1]) + (f[1] == null ? "" : " " + f[2])), { size: 8.6, bold: true, color: INK5 });
   });
@@ -44403,26 +44877,26 @@ function buildCableCalcPdf(record, meta = {}) {
   if ((record.warnings || []).length) {
     record.warnings.forEach((w) => {
       const lines = wrap7("\u2022 " + w, CW3 - 8, 8);
-      lines.forEach((ln, k) => doc.text(M6, y + k * 10, ln, { size: 8, color: AMBER }));
+      lines.forEach((ln, k) => doc.text(M7, y + k * 10, ln, { size: 8, color: AMBER2 }));
       y += lines.length * 10 + 3;
     });
     y += 4;
   }
   if (y > H4 - 120) {
     doc.newPage(W7, H4);
-    y = M6;
+    y = M7;
   }
-  card(doc, M6, y, CW3, 66);
-  label(doc, M6 + 12, y + 15, "Declaration");
-  doc.text(M6 + 12, y + 30, S4("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
-  doc.text(M6 + 12, y + 44, S4("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
-  doc.text(W7 - M6 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
-  doc.text(M6 + 12, y + 58, S4("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
+  card(doc, M7, y, CW3, 66);
+  label(doc, M7 + 12, y + 15, "Declaration");
+  doc.text(M7 + 12, y + 30, S4("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
+  doc.text(M7 + 12, y + 44, S4("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
+  doc.text(W7 - M7 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
+  doc.text(M7 + 12, y + 58, S4("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
   const total = doc.pages.length;
   for (let p = 0; p < total; p++) {
-    doc.lineOn(p, M6, H4 - 30, W7 - M6, { grey: true });
-    doc.textOn(p, M6, H4 - 18, "Mostlane Cable Calculator \u2014 checking aid, not a substitute for BS 7671 / a competent person", { size: 6.6, grey: true });
-    doc.textOn(p, W7 - M6, H4 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
+    doc.lineOn(p, M7, H4 - 30, W7 - M7, { grey: true });
+    doc.textOn(p, M7, H4 - 18, "Mostlane Cable Calculator \u2014 checking aid, not a substitute for BS 7671 / a competent person", { size: 6.6, grey: true });
+    doc.textOn(p, W7 - M7, H4 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
   }
   return doc.bytes();
 }
@@ -44436,7 +44910,7 @@ function devLabel(inp) {
 init_logo();
 init_once();
 var DATA_KEY = (tid) => `cablecalc:data:${tid}`;
-var CFG_KEY4 = (tid) => `cablecalc:config:${tid}`;
+var CFG_KEY5 = (tid) => `cablecalc:config:${tid}`;
 async function ensureTables__raw8(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS cable_calcs (
     id TEXT PRIMARY KEY, tenant_id TEXT, ref TEXT, title TEXT, client TEXT, site TEXT,
@@ -44444,8 +44918,8 @@ async function ensureTables__raw8(env) {
     created_at TEXT, updated_at TEXT )`).run();
 }
 var ensureTables10 = onceMigration(ensureTables__raw8);
-async function getConfig5(env, tid) {
-  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY4(tid)).first();
+async function getConfig6(env, tid) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY5(tid)).first();
   const stored = row && row.value ? safeParse(row.value) : {};
   return Object.assign({
     company: "Mostlane",
@@ -44476,7 +44950,7 @@ function safeParse(s) {
     return null;
   }
 }
-async function handle39(request, env, ctx, url, sess) {
+async function handle40(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -44506,12 +44980,12 @@ async function handle39(request, env, ctx, url, sess) {
     return json({ ok: true, data: SEED }, {}, env, request);
   }
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig5(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig6(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!canManage2) return error("Manage access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const next = Object.assign(await getConfig5(env, tid), b || {});
-      await saveKV(env, tid, CFG_KEY4(tid), next);
+      const next = Object.assign(await getConfig6(env, tid), b || {});
+      await saveKV(env, tid, CFG_KEY5(tid), next);
       return json({ ok: true, config: next }, {}, env, request);
     }
   }
@@ -44683,9 +45157,9 @@ try {
 }
 var LOGO_W = 76;
 var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
-var PW = 842;
-var PH = 595;
-var M7 = 26;
+var PW2 = 842;
+var PH2 = 595;
+var M8 = 26;
 var ROW_H3 = 14.5;
 var LINE_H = 10;
 var ROW_PAD = 4.5;
@@ -44700,16 +45174,16 @@ var COLS2 = [
   { key: "days", label: "Days", w: 26 }
 ];
 var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-var GRID_X = M7 + LEFT_W;
-var GRID_W = PW - M7 - GRID_X;
+var GRID_X = M8 + LEFT_W;
+var GRID_W = PW2 - M8 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
   COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
   LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-  GRID_X = M7 + LEFT_W;
-  GRID_W = PW - M7 - GRID_X;
+  GRID_X = M8 + LEFT_W;
+  GRID_W = PW2 - M8 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
@@ -44721,7 +45195,7 @@ var parse = (s) => {
   return isNaN(d) ? null : d;
 };
 var ymd = (d) => d.toISOString().slice(0, 10);
-var addDays3 = (d, n) => new Date(d.getTime() + n * DAY);
+var addDays4 = (d, n) => new Date(d.getTime() + n * DAY);
 var isWeekend = (d) => {
   const w = d.getUTCDay();
   return w === 0 || w === 6;
@@ -44739,10 +45213,10 @@ function endOf(t, hs) {
   const s = parse(t.start);
   if (!s) return null;
   const days = Math.min(730, Math.max(1, Number(t.days) || 1));
-  if (t.wknd) return addDays3(s, days - 1);
+  if (t.wknd) return addDays4(s, days - 1);
   let d = s, left = days - 1, guard = 0;
   while (left > 0 && guard++ < 4e3) {
-    d = addDays3(d, 1);
+    d = addDays4(d, 1);
     if (!nonWork(d, hs)) left--;
   }
   return d;
@@ -44813,9 +45287,9 @@ function buildProgrammePdf(data, meta = {}) {
   }
   if (!s0) {
     s0 = anchor;
-    e0 = addDays3(anchor, 29);
+    e0 = addDays4(anchor, 29);
   }
-  const totalDays = Math.min(550, Math.max(14, Math.round((addDays3(e0, 2) - s0) / DAY) + 1));
+  const totalDays = Math.min(550, Math.max(14, Math.round((addDays4(e0, 2) - s0) / DAY) + 1));
   const maxDaysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
   const nWindows = Math.max(1, Math.ceil(totalDays / maxDaysPerPage));
   const daysPerPage = Math.ceil(totalDays / nWindows);
@@ -44825,7 +45299,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const bodyH = PH - M7 - headerBlockH - HDR_H - footerH - M7;
+  const bodyH = PH2 - M8 - headerBlockH - HDR_H - footerH - M8;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -44849,52 +45323,52 @@ function buildProgrammePdf(data, meta = {}) {
     if (cur.length) pages.push({ win, rows: cur });
   }
   if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H3))) });
-  const doc = new PdfDoc(PW, PH);
+  const doc = new PdfDoc(PW2, PH2);
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
-  let lastGridBot = M7 + 100;
+  let lastGridBot = M8 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
       const dayW = Math.min(16, GRID_W / win.days);
-      const winStart = addDays3(s0, win.from);
+      const winStart = addDays4(s0, win.from);
       pageNo++;
-      if (!first) doc.newPage(PW, PH);
+      if (!first) doc.newPage(PW2, PH2);
       first = false;
-      let tx = M7;
+      let tx = M8;
       if (LOGO_BYTES) {
         try {
-          doc.image(LOGO_BYTES, M7, M7 - 2, LOGO_W, LOGO_H);
-          tx = M7 + LOGO_W + 12;
+          doc.image(LOGO_BYTES, M8, M8 - 2, LOGO_W, LOGO_H);
+          tx = M8 + LOGO_W + 12;
         } catch (e) {
         }
       }
-      let y = M7 + 14;
+      let y = M8 + 14;
       doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
-      doc.text(PW - M7, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      doc.text(PW2 - M8, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
         doc.text(tx, y, subBits, { size: 9, grey: true });
       }
-      doc.text(PW - M7, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      doc.text(PW2 - M8, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
-      const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays3(winStart, win.days - 1))})` : "";
-      if (rangeLbl) doc.text(PW - M7, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays4(winStart, win.days - 1))})` : "";
+      if (rangeLbl) doc.text(PW2 - M8, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
-      const legendRightL1 = PW - M7 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M7, line2 = 0, dropped = 0;
+      const legendRightL1 = PW2 - M8 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M8, line2 = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line2 === 0 ? legendRightL1 : PW - M7;
+        const right = line2 === 0 ? legendRightL1 : PW2 - M8;
         if (lx + w > right) {
           if (line2 === 0) {
             line2 = 1;
-            lx = M7;
+            lx = M8;
           } else {
             dropped++;
             continue;
@@ -44907,10 +45381,10 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line2 === 0 ? legendRightL1 : PW - M7;
+        const right = line2 === 0 ? legendRightL1 : PW2 - M8;
         if (lx + w > right && line2 === 0) {
           line2 = 1;
-          lx = M7;
+          lx = M8;
         }
         const ly = y + line2 * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
@@ -44919,11 +45393,11 @@ function buildProgrammePdf(data, meta = {}) {
         lx += w;
       }
       if (dropped) doc.text(lx, y + line2 * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
-      y = M7 + headerBlockH;
+      y = M8 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
-      doc.rect(M7, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
-      let cx = M7;
+      doc.rect(M8, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M8;
       for (const col of COLS2) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
@@ -44931,7 +45405,7 @@ function buildProgrammePdf(data, meta = {}) {
       const rightEdge = GRID_X + win.days * dayW;
       let lastMonR = -Infinity;
       for (let i = 0; i < win.days; i++) {
-        const d = addDays3(winStart, i);
+        const d = addDays4(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
@@ -44955,24 +45429,24 @@ function buildProgrammePdf(data, meta = {}) {
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
-      doc.line(M7, gridTop, M7 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
-      doc.line(M7, gridTop + HDR_H, M7 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M8, gridTop, M8 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M8, gridTop + HDR_H, M8 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
       rows.forEach((t) => {
         const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M7 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M8 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M7 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M7 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
+          doc.rect(M8 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M8 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M7 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M7 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
-        doc.text(M7 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M7, ry + rh, M7 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start) doc.text(M8 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M8 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M8 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M8, ry + rh, M8 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
-          for (let d = t._start; d <= t._end; d = addDays3(d, 1)) {
+          for (let d = t._start; d <= t._end; d = addDays4(d, 1)) {
             if (!t.wknd && nonWork(d, hs)) continue;
             const off = Math.round((d - winStart) / DAY);
             if (off >= 0 && off < win.days) marked.push(off);
@@ -44999,20 +45473,20 @@ function buildProgrammePdf(data, meta = {}) {
         }
         ry += rh;
       });
-      doc.rect(M7, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M8, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       lastGridBot = gridBot;
-      const fy = PH - M7 + 6;
+      const fy = PH2 - M8 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
-      doc.text(M7, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
-      doc.text(PW - M7, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+      doc.text(M8, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW2 - M8, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    const PAD = 10, LH = 12, contentW = PW - 2 * M7 - 2 * PAD;
+    const PAD = 10, LH = 12, contentW = PW2 - 2 * M8 - 2 * PAD;
     const notesLines = notes ? wrapLines2(notes, contentW, 10, 0) : [];
     const plainW = plain.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
     const discW = disc.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
@@ -45025,15 +45499,15 @@ function buildProgrammePdf(data, meta = {}) {
     }
     const boxH = 2 * PAD + adv;
     let boxTop, ownPage = false;
-    if (lastGridBot + 14 + boxH <= PH - M7) {
+    if (lastGridBot + 14 + boxH <= PH2 - M8) {
       boxTop = lastGridBot + 14;
     } else {
-      doc.newPage(PW, PH);
-      boxTop = M7 + 14;
+      doc.newPage(PW2, PH2);
+      boxTop = M8 + 14;
       ownPage = true;
     }
-    doc.roundRect(M7, boxTop, PW - 2 * M7, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
-    const x0 = M7 + PAD;
+    doc.roundRect(M8, boxTop, PW2 - 2 * M8, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M8 + PAD;
     let ny = boxTop + PAD + 10;
     const para = (lines, x) => {
       for (const ln of lines) {
@@ -45060,7 +45534,7 @@ function buildProgrammePdf(data, meta = {}) {
         para(w, x0 + 12);
       }
     }
-    if (ownPage) doc.text(M7, PH - M7 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    if (ownPage) doc.text(M8, PH2 - M8 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }
@@ -45219,7 +45693,7 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle40(request, env, ctx, url) {
+async function handle41(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -45995,7 +46469,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle41(request, env, ctx, url, sess) {
+async function handle42(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -46403,8 +46877,8 @@ async function handle41(request, env, ctx, url, sess) {
         return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
       };
       days = days.filter((d) => {
-        const dow = londonDow(d.scheduledAt);
-        return dow !== 0 && dow !== 6;
+        const dow2 = londonDow(d.scheduledAt);
+        return dow2 !== 0 && dow2 !== 6;
       });
     }
     if (!days.length) return error("No days given", 400, env, request);
@@ -47098,7 +47572,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle42(request, env, ctx, url, sess) {
+async function handle43(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -47182,7 +47656,7 @@ init_http();
 init_auth();
 init_tenantdb();
 init_push();
-var CFG_KEY5 = "tuya:config";
+var CFG_KEY6 = "tuya:config";
 var TOK_KEY = "tuya:token";
 var WATCH_KEY = "tuya:gatewatch";
 var REGION_BASE = {
@@ -47195,7 +47669,7 @@ function baseFor(cfg) {
   return REGION_BASE[cfg && cfg.region || "eu"] || REGION_BASE.eu;
 }
 async function loadCfg(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY5).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY6).first();
   let cfg = {};
   try {
     cfg = row ? JSON.parse(row.value) : {};
@@ -47204,7 +47678,7 @@ async function loadCfg(db) {
   return cfg && typeof cfg === "object" ? cfg : {};
 }
 async function saveCfg2(db, cfg) {
-  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY5, JSON.stringify(cfg)).run();
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY6, JSON.stringify(cfg)).run();
 }
 async function loadKV(db, key) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
@@ -47362,7 +47836,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle43(request, env, ctx, url, sess) {
+async function handle44(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -47682,7 +48156,7 @@ async function orgSites(env, tid, org) {
   sites.sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
   return sites;
 }
-async function handle44(request, env, ctx, url, sess) {
+async function handle45(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -47896,7 +48370,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle45(request, env, ctx, url, sess) {
+async function handle46(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -48085,7 +48559,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle46(request, env, ctx, url, sess) {
+async function handle47(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -48404,7 +48878,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle47(request, env, ctx, url, sess) {
+async function handle48(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -48544,7 +49018,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle15],
   ["*", "/upload-asset-thumb", handle15],
   ["*", "/delete-asset-image", handle15],
-  ["*", "/sla/workever", handle46],
+  ["*", "/sla/workever", handle47],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle13],
   ["*", "/stats", handle24],
@@ -48631,27 +49105,29 @@ var ROUTES = [
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump", handle11],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/cablecalc", handle39],
+  ["*", "/sitelog-ts", handle39],
+  // SiteLog timesheet PDFs (FullAccess)
+  ["*", "/cablecalc", handle40],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/cpd", handle38],
   // CPD training (electricians): read material + test → logged per user for the NICEIC audit
-  ["*", "/prog", handle40],
+  ["*", "/prog", handle41],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle41],
+  ["*", "/projects", handle42],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle41],
+  ["*", "/project", handle42],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle42],
+  ["*", "/health/", handle43],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle47],
+  ["*", "/comms", handle48],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle47],
+  ["*", "/customer", handle48],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle43],
+  ["*", "/tuya", handle44],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/client", handle44],
+  ["*", "/client", handle45],
   // external client portal (walled per-org: jobs, raise, compliance)
-  ["*", "/fra", handle45]
+  ["*", "/fra", handle46]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -48741,6 +49217,7 @@ var worker = {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
     ctx.waitUntil(sweepFallbacks(env, 1).catch((e) => console.error("scheduled fallback sweep:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
+    ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
@@ -48774,7 +49251,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -49031,7 +49508,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };

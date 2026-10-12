@@ -5765,6 +5765,35 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
   export just sits unused.
 
+## SiteLog GPS verification + timesheet emails (sitelog-api.js + routes/sitelogts.js — 12 Oct 2026)
+- **Every sign-in AND sign-out must be GPS-verified at the site** (Jamie: "No location, no event
+  recorded"). `sitelog-api.js verifySiteLocation(env, siteName, lat, lng)` (haversine vs
+  `sites.lat/lng/radius_m`, default 500 m) gates `/confirm-checkin` and `/confirm-checkout`: no
+  fix → 400 `no_location`, outside → 400 `outside_site`, nothing written. `/confirm-checkout` also
+  requires the visit to belong to the calling phone (`deviceToken` → `devices.person_id`, else 403).
+  `visits` gained `sign_in_verified/sign_in_distance_m/out_lat/out_lng/out_accuracy/
+  sign_out_verified/sign_out_distance_m`. `/scan` away from every site with a visit open returns
+  `outside_site_signed_in` (no sign-out offered). `/checkin-unmatched` is 410. **Always ❌ (never
+  verified):** auto sign-out (16:00 sweep / transfer), admin `/add-visit`, `/manual-checkout`, and a
+  `/update-visit-times` edit resets the edited side. 519 historic in-radius sign-ins were backfilled
+  ✅; historic sign-outs stay ❌. SiteLog repo (`Mostlane/SiteLog` docs/): app.html refuses sign-out
+  without a fix + sends lat/lng/accuracy/deviceToken; admin.html `gpsMark()` shows ✔/✘ (distance on
+  hover). Test `node --no-warnings worker/tools/test-sitelog-gps.mjs` (14). NB the OLD standalone
+  worker on api.site-log.co.uk is NOT patched — a direct call there bypasses the checks; retire it.
+- **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
+  FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
+  missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
+  sign-out times, a DRAWN green tick / red cross per event (WinAnsi has no glyphs), distance from
+  site, rows highlighted red = missed sign-out (auto-closed; hours counted but flagged as assumed),
+  amber = still signed in. **Daily**: cron (`sweepSitelogTimesheets`, every 5-min tick) sends once
+  every visit started today is closed, from 16:00 London, or at 20:00 regardless; no visits = no
+  email. **Weekly**: Monday ≥07:00 London, previous Mon–Sun. Dedupe in app_config
+  `sitelog:tsmail:sent:<tid>`; config `sitelog:tsmail:<tid>` = `{enabled,daily,weekly,recipients[]}`
+  — nothing sends until recipients are saved on **sitelog.html → 🧾 Timesheet emails** (Full Access;
+  also Today's / Last week's PDF preview + Send now). Endpoints GET/POST `/config`, POST `/pdf`
+  `{kind,date}`, POST `/send`. Needs `RESEND_API_KEY`. Test
+  `node --no-warnings worker/tools/test-sitelog-timesheets.mjs` (16).
+
 ## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
 The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
 `bf7240c4db7fedd458froe`, Central Europe DC → `eu`/tuyaeu.com). It's a

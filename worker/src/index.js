@@ -58,6 +58,7 @@ import * as concerto from "./routes/concerto.js"; // DONE  (Concerto PPM list: c
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
 import * as pump from "./routes/pump.js";          // DONE  (sump-pump monthly maintenance: per-store form + photo/video → office review → branded PDF)
 import * as cpd from "./routes/cpd.js";            // DONE  (CPD training for electricians: read material + test → logged per user for the NICEIC audit)
+import * as sitelogts from "./routes/sitelogts.js"; // SiteLog daily/weekly timesheet PDFs emailed to the office
 import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
@@ -139,6 +140,7 @@ const ROUTES = [
   ["*", "/concerto",   concerto.handle], // Concerto PPM list (import the client's export, reconcile against the compliance chart)
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
+  ["*", "/sitelog-ts", sitelogts.handle], // SiteLog timesheet PDFs (FullAccess)
   ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/cpd",        cpd.handle],       // CPD training (electricians): read material + test → logged per user for the NICEIC audit
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
@@ -286,6 +288,10 @@ const worker = {
     // Yard gate left-open watch — polls the gate's Tuya sensor and pushes an
     // alert if it's been open past the configured threshold. Self-gates: does
     // nothing until the Tuya secrets AND a state device/code are configured.
+    // SiteLog timesheet PDFs — daily once everyone has signed out (16:00–20:00
+    // London), weekly on Monday 07:00. Self-gates + deduped; no-op until
+    // recipients are set on sitelog.html.
+    ctx.waitUntil(sitelogts.sweepSitelogTimesheets(env, 1).catch(e => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
