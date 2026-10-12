@@ -257,5 +257,41 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("the real send uses the number the preview showed", /Order 010011 at/.test(E.sent[E.sent.length - 1].subject));
   ok("the edited details are what Metro Rod receives", s.status === 200 && last.to === "Call.Centre@metrorod.co.uk" && /Please jet the drain/.test(last.html) && E.saved["J-DRAIN"].description !== "Please jet the drain", JSON.stringify(s.body && s.body.error)); }
 
+// invoicing line + "we can't take this job" link (per-subcontractor setting)
+{ const E = makeEnv(); E.env.PORTAL_BRIDGE_SECRET = "test-secret";
+  const raw = async (href, method = "GET", form) => {
+    const u = new URL(href);
+    const init = { method };
+    if (form) { init.body = new URLSearchParams(form).toString(); init.headers = { "Content-Type": "application/x-www-form-urlencoded" }; }
+    const queued = [];
+    const res = await sla.handle(new Request(u, init), E.env, { waitUntil(p) { queued.push(p); } }, u, null);
+    return { status: res.status, text: await res.text(), queued: queued.length };
+  };
+  const off = sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4, "010011");
+  ok("every order email tells them invoices must quote the PO", /must quote our PO number 010011/.test(off.html));
+  ok("no 'can't take' link unless the subcontractor is set up for it", !/subcon-reply/.test(off.html));
+  const cfg = await call(E, "Boss", "/subcontractors", { sub: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], trade: "Drainage", poDigits: 6, requirePhone: true, declineLink: true } });
+  ok("setting saves", cfg.status === 200 && cfg.body.list.find(x => x.key === "metrorod").declineLink === true, JSON.stringify(cfg.body && cfg.body.error));
+  const pv = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
+  const testHref = (pv.body.html.match(/href="([^"]*subcon-reply[^"]*)"/) || [])[1];
+  ok("preview carries the link (a TEST link)", !!testHref);
+  const tp = await raw(testHref.replace(/&amp;/g, "&"), "POST", { reason: "x" });
+  ok("pressing a TEST link records nothing", tp.status === 200 && /TEST email/.test(tp.text) && !(E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subcontract));
+  await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
+  const sent = E.sent[E.sent.length - 1];
+  const href = ((sent.html.match(/href="([^"]*subcon-reply[^"]*)"/) || [])[1] || "").replace(/&amp;/g, "&");
+  ok("real order email has the link + the invoicing line", !!href && /must quote our PO number 010011/.test(sent.html) && /accepted this job/.test(sent.html));
+  const g = await raw(href);
+  ok("opening the link only shows a confirm page (mail scanners can't trigger it)", g.status === 200 && /<form method="post"/.test(g.text) && !E.saved["J-DRAIN"].subcontract.declined);
+  const bad = await raw(href.replace(/sig=[0-9a-f]{4}/, "sig=0000"));
+  ok("tampered link refused", bad.status === 403);
+  const p1 = await raw(href, "POST", { reason: "No engineer until Thursday" });
+  const sc = E.saved["J-DRAIN"].subcontract;
+  ok("confirming records it, back with us, office told", p1.status === 200 && sc.status === "returned" && sc.declined && sc.declined.reason === "No engineer until Thursday" && p1.queued > 0, JSON.stringify(sc));
+  const p2 = await raw(href, "POST", { reason: "again" });
+  ok("pressing twice says already received", /Already received/.test(p2.text) && E.saved["J-DRAIN"].subcontract.declined.reason === "No engineer until Thursday");
+  const again = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
+  ok("office can then send the job elsewhere (not blocked as 'already sent')", again.status === 200); }
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

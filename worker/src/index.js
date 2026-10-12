@@ -496,6 +496,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
+  ["GET", "/sla/subcon-reply"],    // subcontractor "can't take this job" link (signed, verified in-handler)
+  ["POST", "/sla/subcon-reply"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)
   // Machine-to-machine TASK intake (e.g. an Outlook "emails to reply to" bot) —
   // TASKS_INBOUND_TOKEN (or JOBS_INBOUND_TOKEN) verified in-handler.

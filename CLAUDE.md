@@ -5756,6 +5756,21 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   now gets "X has no email address" instead of "Unknown subcontractor" (only Metro Rod has
   one today). OPEN: the email footer says "Segensworth Business Centre, Fareham, PO15 5RQ"
   — other templates say "Segensworth Road… Titchfield"; confirm the right one.
+  **Invoicing line + "We can't take this job" link (12 Oct 2026):** every order email
+  carries an amber box "all invoices for this job must quote our PO number <ref>.
+  Invoices without it cannot be processed." Per subcontractor, **`declineLink`** (Subcontractors
+  page tick, OFF by default; saved by normSubcon + setSubconConfig) adds "We'll take it
+  that you've accepted this job unless you tell us otherwise… [We can't take this job]".
+  The link = `subconReplyUrl` → **GET/POST /sla/subcon-reply?key=<job|sub|poRef|test>&exp&sig**
+  (PUBLIC_ROUTES, HMAC via filesign, 30 days; NO link at all without a signing secret —
+  `verifyFileSig` passes unsigned when no secret, which would let anyone decline). GET only
+  shows a confirm page (mail scanners pre-open links); POST (optional reason) sets
+  `job.subcontract.declined={at,reason}`, status `returned`, an event, and pushes the
+  office (actionable `subcon-declined:<id>`, reminds them to cancel the PO). Preview/test
+  emails carry a TEST link (records nothing). A job that's moved on (other sub/PO) or was
+  already declined shows a polite page. Send now allows a fresh send when the record is
+  `returned` (was blocked as "already sent"). job-view shows a red "❌ X can't take this job"
+  banner with the reason; subcontracted-jobs shows "❌ Can't take".
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
