@@ -359,6 +359,10 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   appConfig["sla:subconsender:1"] = JSON.stringify({ mailbox: "orders@mostlane.com" }); graphOk = true; calls.length = 0;
   r = await sla.sendSubconMail(env, 1, { to: "a@b.c", subject: "S", html: "h" });
   ok("the sending mailbox is configurable", r.from === "orders@mostlane.com" && calls.some(c => c.url.includes("orders%40mostlane.com")));
+  appConfig["sla:subconsender:1"] = JSON.stringify({ from: "enquiries@mostlane.com", via: "jamie@mostlane.com" }); calls.length = 0;
+  r = await sla.sendSubconMail(env, 1, { to: "a@b.c", subject: "S", html: "h" });
+  const am = calls.find(c => c.url.includes("/sendMail"));
+  ok("alias: sent through jamie@ AS enquiries@", r.ok && r.from === "enquiries@mostlane.com" && am.url.includes("jamie%40mostlane.com") && JSON.parse(am.body).message.from.emailAddress.address === "enquiries@mostlane.com");
 }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");

@@ -5697,6 +5697,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   anyone). **enquiries@ reported "MailboxNotEnabledForRESTAPI"** to the delegated connector —
   if 365 refuses with that, the shared mailbox needs fixing in the M365 admin centre; until then
   sends fall back to the portal address. Tests in test-drainage.mjs ("365:" cases).
+  **enquiries@ is an ALIAS, not a mailbox** (Graph 404 ErrorInvalidUser), so the config is
+  `{from:"enquiries@mostlane.com", via:"jamie@mostlane.com"}` (set live 12 Oct): Graph sends
+  through jamie@'s mailbox with `message.from` = enquiries@ (needs Exchange
+  `Set-OrganizationConfig -SendFromAliasEnabled $true`, or Send As if it's a distribution
+  list); copies land in jamie@'s Sent Items. subcontractors.html has both fields (Shown as /
+  Sent through mailbox). graphSendMail retries once with a fresh token on 401/403 (a cached
+  token minted before Mail.Send lacks the role).
 - **🤝 Jobs with subcontractors — subcontracted-jobs.html (12 Oct 2026).** ONE list of
   everything sat with a subcontractor (🤝 With subcontractors button + open-count badge on
   sla-main; SLA-admin; 👷 Manage → subcontractors.html). Two sources, because the office

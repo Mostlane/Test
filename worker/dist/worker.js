@@ -6339,7 +6339,7 @@ async function listPdfAttachments(env, mailbox, messageId) {
 async function downloadAttachment(env, mailbox, messageId, attachmentId) {
   return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
 }
-async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html } = {}) {
+async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, from } = {}) {
   if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up (GRAPH_* secrets missing)" };
   const list = (v) => (Array.isArray(v) ? v : String(v || "").split(/[,;]/)).map((s) => String(s).trim()).filter(Boolean).map((address) => ({ emailAddress: { address } }));
   const message = { subject: String(subject || ""), body: { contentType: "HTML", content: String(html || "") }, toRecipients: list(to) };
@@ -6348,6 +6348,7 @@ async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html } = 
   if (ccl.length) message.ccRecipients = ccl;
   const rtl = list(replyTo);
   if (rtl.length) message.replyTo = rtl;
+  if (from && String(from).trim().toLowerCase() !== String(mailbox).trim().toLowerCase()) message.from = { emailAddress: { address: String(from).trim() } };
   try {
     const send = async () => fetch(`${GRAPH}/users/${encodeURIComponent(mailbox)}/sendMail`, {
       method: "POST",
@@ -18740,6 +18741,7 @@ __export(sla_exports, {
   formatPoRef: () => formatPoRef,
   getJob: () => getJob3,
   getSubconSender: () => getSubconSender,
+  getSubconSenderCfg: () => getSubconSenderCfg,
   handle: () => handle13,
   incidentKey: () => incidentKey,
   isDrainageJob: () => isDrainageJob,
@@ -18935,7 +18937,8 @@ async function handle13(request, env, ctx, url, sess) {
       await migrateWorkAreasOnce(env, tenantId).catch(() => {
       });
       const cfg = await getSubconConfig(env, tenantId);
-      const out = { ok: true, list: Object.keys(cfg).map((k) => cfg[k]), areas: await getWorkAreas(env, tenantId), sender: await getSubconSender(env, tenantId) };
+      const snd = await getSubconSenderCfg(env, tenantId);
+      const out = { ok: true, list: Object.keys(cfg).map((k) => cfg[k]), areas: await getWorkAreas(env, tenantId), sender: snd.from, senderVia: snd.mailbox };
       const jobId = url.searchParams.get("jobId");
       if (jobId) {
         const job = await getJob3(env, tenantId, jobId);
@@ -18956,9 +18959,11 @@ async function handle13(request, env, ctx, url, sess) {
       for (const k of Object.keys(cfg)) raw[k] = cfg[k];
       const reply = async (saved, extra = {}) => jsonResponse({ ok: true, list: Object.keys(saved).map((k) => normSubcon(saved[k], k)), ...extra }, headers);
       if (typeof b.sender === "string") {
-        const m = b.sender.trim();
-        if (m && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m)) return jsonResponse({ error: "That isn't an email address" }, headers, 400);
-        return jsonResponse({ ok: true, sender: await setSubconSender(env, tenantId, m) }, headers);
+        const m = b.sender.trim(), v = String(b.senderVia || "").trim();
+        const bad = (x) => x && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x);
+        if (bad(m) || bad(v)) return jsonResponse({ error: "That isn't an email address" }, headers, 400);
+        const r = await setSubconSender(env, tenantId, m, v);
+        return jsonResponse({ ok: true, sender: r.from, senderVia: r.mailbox }, headers);
       }
       if (b.importFromPO) {
         let names = [];
@@ -25420,26 +25425,33 @@ async function setSubconConfig(env, tid, map) {
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
   return clean;
 }
-async function getSubconSender(env, tid) {
+async function getSubconSenderCfg(env, tid) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subconsender:" + tid).first();
     const v = row ? JSON.parse(row.value) : null;
-    if (v && typeof v.mailbox === "string") return v.mailbox.trim();
+    if (v && (typeof v.mailbox === "string" || typeof v.from === "string")) {
+      const from = String(v.from || v.mailbox || "").trim();
+      return { from, mailbox: String(v.via || (v.from ? v.mailbox : "") || "").trim() };
+    }
   } catch {
   }
-  return SUBCON_SENDER_DEFAULT;
+  return { from: SUBCON_SENDER_DEFAULT, mailbox: "" };
 }
-async function setSubconSender(env, tid, mailbox) {
-  const m = String(mailbox || "").trim().slice(0, 120);
-  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subconsender:" + tid, JSON.stringify({ mailbox: m })).run();
-  return m;
+async function getSubconSender(env, tid) {
+  return (await getSubconSenderCfg(env, tid)).from;
+}
+async function setSubconSender(env, tid, from, via) {
+  const f = String(from || "").trim().slice(0, 120), v = String(via || "").trim().slice(0, 120);
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subconsender:" + tid, JSON.stringify({ from: f, via: v })).run();
+  return { from: f, mailbox: v };
 }
 async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html }) {
-  const mailbox = await getSubconSender(env, tid);
+  const cfg = await getSubconSenderCfg(env, tid);
+  const mailbox = cfg.from;
   let reason = "no sending mailbox set";
   if (mailbox) {
     const { graphSendMail: graphSendMail2 } = await Promise.resolve().then(() => (init_graphmail(), graphmail_exports));
-    const g = await graphSendMail2(env, mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html });
+    const g = await graphSendMail2(env, cfg.mailbox || mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html, from: mailbox });
     if (g.ok) return { ok: true, via: "m365", from: mailbox };
     reason = g.error || "Microsoft 365 send failed";
   }
