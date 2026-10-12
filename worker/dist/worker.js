@@ -21076,7 +21076,20 @@ async function handle13(request, env, ctx, url, sess) {
       if (was !== st || b.note != null) job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Marked ${label2}${sc.note ? " \u2014 " + sc.note : ""}` });
       job.updatedAt = now2;
       await saveJob(env, tenantId, job);
-      return jsonResponse({ ok: true, subcontract: sc, job: decorateJobWithLiveSla(job) }, headers);
+      let out = job, completed = false;
+      if (st === "done") {
+        const finished = await jobFinishedFor(env, tenantId);
+        if (!finished(job)) {
+          const updated = await patchJob(env, tenantId, id, { status: "Complete", changedBy: sess.user.username }, ctx);
+          if (updated) {
+            out = updated;
+            completed = true;
+            ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
+            }));
+          }
+        }
+      }
+      return jsonResponse({ ok: true, subcontract: sc, completed, job: decorateJobWithLiveSla(out) }, headers);
     }
     if (parts[2] === "subcontract-clear" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);

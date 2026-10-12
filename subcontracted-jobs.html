@@ -84,7 +84,7 @@
   <div class="wrap">
     <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
     <div id="board">
-      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> only marks the subcontractor’s part finished — it does not complete the job itself.</div>
+      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> marks the subcontractor’s part finished <b>and sets the job to Complete</b> (↩ and Reopen don’t change the job’s status).</div>
       <div class="bar" id="tabBar"></div>
       <div class="bar" id="subBar"></div>
       <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
@@ -176,7 +176,7 @@
     const cost = DATA.money ? `<td class="nw" style="text-align:right">${costIn}</td>` : "";
     const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
     const link = !r.jobId && r.pos.length ? `<button class="ib" data-link="${esc(r.pos[0].number)}" title="Link this PO to an incident / job">🔗 Link</button> ` : "";
-    const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", "Finished by the subcontractor — doesn't change the job's own status") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
+    const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", r.jobId ? "Finished by the subcontractor — also sets the job to Complete" : "Finished by the subcontractor") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
     const work = r.description || "";
     const open = OPENDET.has(r.key);
     let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="nw">${refHtml}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>

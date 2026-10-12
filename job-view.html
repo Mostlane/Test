@@ -1869,7 +1869,7 @@ function renderDrainBanner(){
       (sc.poRef ? "<br><span style=\"font-size:12.5px;opacity:.85\">Our PO <b>" + esc(sc.poRef) + "</b></span>" : "") +
       "<br><span style=\"font-size:12.5px;opacity:.85\">" + (sc.to ? "Emailed to " + esc(sc.to) + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") : "No email sent from the portal") + (sc.note ? " · " + esc(sc.note) : "") + "</span>" +
       '<div class="db-btns">' + (st === "open"
-        ? '<button class="db-go" data-db="st-done">✓ Done by them</button><button class="db-no" data-db="st-returned">↩ Back with us</button>'
+        ? '<button class="db-go" data-db="st-done" title="Also sets this job to Complete">✓ Done by them</button><button class="db-no" data-db="st-returned">↩ Back with us</button>'
         : '<button class="db-no" data-db="st-open">Reopen — still with them</button>') +
       (open && st === "returned" ? '<button class="db-link" data-db="pick">Send to another subcontractor</button>' : "") +
       '<a class="db-link" href="subcontracted-jobs.html" style="align-self:center">All jobs with subcontractors →</a>' +

@@ -5717,8 +5717,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   a single PO's cost saves to `po_log.cost_ex_vat` (as if priced in the PO system); a
   no-PO hand-off saves `job.subcontract.cost` (stripped from field reads by `stripMoney`);
   multiple POs are priced per PO in the detail row. POST `/sla/subcontracted/cost
-  {po|jobId, cost}`. Row `cost` = priced POs + record cost. **"✓ Done" never changes the
-  job's own status** — it only marks the subcontractor's part finished.
+  {po|jobId, cost}`. Row `cost` = priced POs + record cost. **"✓ Done" (this page AND
+  job-view's "Done by them") ALSO sets the job to Complete** (Jamie, 12 Oct 2026) —
+  subcontract-status `done` runs `patchJob({status:"Complete"})` as an office action (no
+  engineer completion gates) when the job isn't already finished; reply `completed:true`.
+  ↩ Back with us / Reopen never touch the job's status.
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
