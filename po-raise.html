@@ -173,6 +173,13 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
         <h1 style="margin-bottom:4px">Raise a PO</h1>
         <p class="muted">Pick a <strong>live project</strong> or <strong>your vehicle</strong>, then a supplier and description. For a reactive maintenance job, raise the PO from the <strong>“Raise PO for this job”</strong> button inside the job card so it ties to the job.</p>
         <div id="prefill-note" style="display:none;margin-top:12px;padding:10px 12px;border-radius:10px;background:#d6f5dd;color:#1e6c33;font-size:13px;font-weight:600"></div>
+        <div class="field" id="potype-field" style="display:none;margin-top:16px">
+          <label>PO type</label>
+          <div style="display:flex;gap:8px">
+            <button type="button" id="pt-materials" onclick="setPoType('materials')" style="flex:1;padding:11px;border:1px solid #c9d2dd;border-radius:10px;background:#003366;color:#fff;font-weight:700;cursor:pointer">📦 Materials</button>
+            <button type="button" id="pt-sub" onclick="setPoType('subcontractor')" style="flex:1;padding:11px;border:1px solid #c9d2dd;border-radius:10px;background:#eef2f7;color:#003366;font-weight:700;cursor:pointer">👷 Subcontractor</button>
+          </div>
+        </div>
         <div class="field" style="position:relative;margin-top:16px">
           <label>Project or vehicle</label>
           <div style="display:flex;gap:8px;align-items:stretch">
@@ -187,10 +194,14 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
           <input id="incident_no" type="text" autocomplete="off" readonly style="background:#f4f6f9">
           <input id="job_id" type="hidden"><input id="job_ref" type="hidden">
         </div>
-        <div class="field" style="position:relative">
+        <div class="field" id="supplier-field" style="position:relative">
           <label>Supplier</label>
           <input id="supplier" type="text" placeholder="Start typing..." autocomplete="off" oninput="onSupplierInput()" onfocus="filterSuppliers()" onblur="setTimeout(hideSuppliers,200)">
           <div id="supplier-dropdown" class="ac-dropdown" style="display:none"></div>
+        </div>
+        <div class="field" id="sub-select-field" style="display:none">
+          <label>Subcontractor</label>
+          <select id="sub-select"><option value="">— Select a subcontractor —</option></select>
         </div>
         <div class="field" id="trade-field" style="display:none">
           <label>Trade <span style="font-weight:400;color:#7a4ca0">👷 Subcontractor</span></label>
@@ -266,6 +277,7 @@ let SUBCONTRACTORS = [];   // office/admin only — pickable as the "supplier" o
 let SUB_NAMES = new Set(); // subcontractor names, for quick lookup
 let TRADES = [];           // trades for a subcontractor PO
 let IS_OFFICE = false;     // set in boot(); gates the subcontractor option
+let PO_TYPE = 'materials';  // office only: 'materials' | 'subcontractor'
 async function init() {
   const [status, suppliers, opts] = await Promise.all([
     authFetch('/po/api/status').then(r => r.json()),
@@ -299,6 +311,13 @@ async function init() {
       populateTrades();
       const si = document.getElementById('supplier');
       if (si) si.placeholder = 'Start typing a supplier or subcontractor…';
+      // Office/admin: an explicit Materials / Subcontractor toggle + a subcontractor
+      // picker, so a subcontractor PO is one obvious tap (not just a typed name).
+      const ss = document.getElementById('sub-select');
+      if (ss) ss.innerHTML = '<option value="">— Select a subcontractor —</option>' +
+        SUBCONTRACTORS.map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
+      const ptf = document.getElementById('potype-field');
+      if (ptf) { ptf.style.display = 'block'; setPoType('materials'); }
     } catch (e) { /* subcontractors are a nice-to-have; leave the form supplier-only */ }
   }
   prefillFromJobLink();
@@ -441,6 +460,18 @@ function populateTrades() {
   if (!sel) return;
   sel.innerHTML = '<option value="">— Select a trade —</option>' + TRADES.map(t => '<option value="'+escapeAttr(t.name)+'">'+escapeHtml(t.name)+'</option>').join('');
 }
+// Office/admin: flip between a materials PO (free-text supplier) and a
+// subcontractor PO (pick a subcontractor + trade — categorised for job costing).
+function setPoType(t) {
+  PO_TYPE = (t === 'subcontractor') ? 'subcontractor' : 'materials';
+  const sub = PO_TYPE === 'subcontractor';
+  const m = document.getElementById('pt-materials'), s = document.getElementById('pt-sub');
+  if (m) { m.style.background = sub ? '#eef2f7' : '#003366'; m.style.color = sub ? '#003366' : '#fff'; }
+  if (s) { s.style.background = sub ? '#7a4ca0' : '#eef2f7'; s.style.color = sub ? '#fff' : '#003366'; }
+  const supF = document.getElementById('supplier-field'); if (supF) supF.style.display = sub ? 'none' : 'block';
+  const ssF = document.getElementById('sub-select-field'); if (ssF) ssF.style.display = sub ? 'block' : 'none';
+  const tf = document.getElementById('trade-field'); if (tf) tf.style.display = sub ? 'block' : 'none';
+}
 function highlight(text, q) {
   const i = text.toLowerCase().indexOf(q);
   if (i < 0) return escapeHtml(text);
@@ -478,17 +509,22 @@ async function submitPO(btn) {
   if (submittingEngineerPO) return;
   const site = document.getElementById('site').value.trim();
   const incident = document.getElementById('incident_no').value.trim();
-  const supplier = document.getElementById('supplier').value.trim();
+  let supplier = document.getElementById('supplier').value.trim();
   const description = document.getElementById('description').value.trim();
   const vehicleReg = (document.getElementById('vehicle_reg') || {}).value || '';
   const jobId = (document.getElementById('job_id') || {}).value || '';
-  // Office/admin may pick a subcontractor as the supplier — that makes it a
-  // subcontractor PO (needs a trade; the server categorises it for job costing).
-  const isSub = IS_OFFICE && SUB_NAMES.has(supplier);
+  // Office/admin may raise a SUBCONTRACTOR PO — via the PO-type toggle (pick a
+  // subcontractor + trade) or by typing a known subcontractor name. The server
+  // categorises it for job costing.
+  const isSub = IS_OFFICE && (PO_TYPE === 'subcontractor' || SUB_NAMES.has(supplier));
+  if (IS_OFFICE && PO_TYPE === 'subcontractor') {
+    supplier = ((document.getElementById('sub-select') || {}).value || '').trim();
+    if (!supplier) { alert('Pick a subcontractor'); return; }
+  }
   const tradeEl = document.getElementById('trade');
   const trade = tradeEl ? (tradeEl.value || '').trim() : '';
   if (!site) { alert('Pick a live project or your vehicle'); return; }
-  if (!supplier) { alert('Supplier is required'); return; }
+  if (!supplier) { alert(isSub ? 'Pick a subcontractor' : 'Supplier is required'); return; }
   if (!description) { alert('Description is required'); return; }
   const valid = SUPPLIERS.some(s => s.name === supplier) || isSub;
   if (!valid) { alert('Please pick a supplier from the dropdown list'); return; }
@@ -496,7 +532,8 @@ async function submitPO(btn) {
   // Engineers raise ONLY against a live project, their vehicle, or a reactive job
   // opened from the job card (which carries the job id). A plainly-typed site is
   // rejected — reactive POs must come from the job card so they tie to a job.
-  if (!vehicleReg && !jobId && !PROJECTS.some(p => p.name === site)) {
+  // Office subcontractor POs are exempt (the server validates the site).
+  if (!vehicleReg && !jobId && !PROJECTS.some(p => p.name === site) && !(IS_OFFICE && isSub)) {
     alert('Pick a live project or your vehicle from the list. For a reactive job, raise the PO from the job card instead.'); return;
   }
   submittingEngineerPO = true;

@@ -5896,6 +5896,26 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      `IS_OFFICE` — the server already allows an office-source PO any time), so the
      feature works in the day, not just out of hours. Engineers still only reach
      the form outside hours. No SW/`?v=` bump (po-raise.html is network-first).
+     **Explicit PO-type toggle (12 Oct 2026):** the typed-subcontractor-name path
+     was too hidden (Jamie "couldn't find it"), so the job-card form now shows an
+     office-only **📦 Materials / 👷 Subcontractor** toggle (`#potype-field`,
+     `setPoType`, mirrors po-office.html). Subcontractor mode swaps the free-text
+     supplier box for a **subcontractor `<select>`** (`#sub-select`, populated from
+     `/po/api/subcontractors`) + the Trade dropdown; `submitPO` reads
+     `PO_TYPE==='subcontractor'` → `cost_category:'subcontractor'` + the picked
+     subcontractor as supplier + trade (the server keeps `source:'office'` from the
+     caller's role and categorises it). The old typed-name autocomplete still works
+     in Materials mode. The reactive-site guard is relaxed for an office
+     subcontractor PO (the server validates the site).
+   - **Chapplins (and any bulk-loaded portal) sites now show in the office PO site
+     picker (12 Oct 2026).** `/po/api/sites` read ONLY the PO system's own `sites`
+     table (PO_DB), so Chapplins sites — loaded straight into the portal `sites`
+     table (client='chapplins'), bypassing /add-site's add-only PO push — never
+     appeared when raising a PO. **`getSites(db, env)` now MERGES every active
+     PORTAL site (`env.DB sites`, by `site_name`) that isn't already in the PO list**
+     (deduped case-insensitively, fails soft), so Chapplins + any future import that
+     skipped the PO push are pickable on po-office.html's raise form (and anywhere
+     `/po/api/sites` feeds). Self-healing — no data migration needed.
    - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
      **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
      (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
