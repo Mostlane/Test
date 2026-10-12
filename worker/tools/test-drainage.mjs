@@ -329,5 +329,37 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   await call(E, "Office Admin", "/subcontracted", null, "GET");
   ok("an office status change afterwards is never overridden", E.saved["J-TAP"].status === "Scheduled", E.saved["J-TAP"].status); }
 
+{ // Microsoft 365 sending (as enquiries@) with fallback to the portal's mail
+  const calls = []; let graphOk = true;
+  globalThis.fetch = async (url, init) => {
+    url = String(url); calls.push({ url, body: init && init.body });
+    if (url.includes("login.microsoftonline.com")) return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 });
+    if (url.includes("/sendMail")) return graphOk ? new Response(null, { status: 202 }) : new Response(JSON.stringify({ error: { code: "ErrorAccessDenied", message: "Access is denied." } }), { status: 403 });
+    if (url.includes("api.resend.com")) return new Response("{}", { status: 200 });
+    return new Response("{}", { status: 404 });
+  };
+  const appConfig = {};
+  const db = { prepare(sql) { let b = []; const st = { bind(...a) { b = a; return st; },
+    async first() { return /app_config/.test(sql) && appConfig[b[1]] ? { value: appConfig[b[1]] } : null; },
+    async run() { if (/INSERT INTO app_config/.test(sql)) appConfig[b[1]] = b[2]; return {}; } }; return st; } };
+  const env = { DB: db, GRAPH_TENANT_ID: "x", GRAPH_CLIENT_ID: "y", GRAPH_CLIENT_SECRET: "z", RESEND_API_KEY: "k" };
+  let r = await sla.sendSubconMail(env, 1, { to: "a@b.c", cc: ["Enquiries@mostlane.com"], subject: "S", html: "<p>h</p>" });
+  const sm = calls.find(c => c.url.includes("/sendMail"));
+  ok("365: sends AS enquiries@ by default", r.ok && r.via === "m365" && sm && sm.url.includes("/users/enquiries%40mostlane.com/sendMail"), JSON.stringify(r));
+  const msg = JSON.parse(sm.body);
+  ok("365: saves to Sent Items, CC + reply-to carried", msg.saveToSentItems === true && msg.message.ccRecipients[0].emailAddress.address === "Enquiries@mostlane.com" && msg.message.replyTo[0].emailAddress.address === "enquiries@mostlane.com");
+  ok("365: no portal (Resend) send when 365 works", !calls.some(c => c.url.includes("resend")));
+  graphOk = false; calls.length = 0;
+  r = await sla.sendSubconMail(env, 1, { to: "a@b.c", subject: "S", html: "h" });
+  ok("365 refused → falls back to portal mail, says why", r.ok && r.via === "portal" && /403/.test(r.fallbackReason) && calls.some(c => c.url.includes("resend")), JSON.stringify(r));
+  const rs = JSON.parse(calls.find(c => c.url.includes("resend")).body);
+  ok("fallback keeps replies going to the mailbox", rs.reply_to === "enquiries@mostlane.com");
+  r = await sla.sendSubconMail({ DB: db, RESEND_API_KEY: "k" }, 1, { to: "a@b.c", subject: "S", html: "h" });
+  ok("no 365 connection → portal mail", r.ok && r.via === "portal" && /isn't set up/.test(r.fallbackReason));
+  appConfig["sla:subconsender:1"] = JSON.stringify({ mailbox: "orders@mostlane.com" }); graphOk = true; calls.length = 0;
+  r = await sla.sendSubconMail(env, 1, { to: "a@b.c", subject: "S", html: "h" });
+  ok("the sending mailbox is configurable", r.from === "orders@mostlane.com" && calls.some(c => c.url.includes("orders%40mostlane.com")));
+}
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
