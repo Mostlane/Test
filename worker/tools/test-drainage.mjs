@@ -8,7 +8,9 @@ const JOBS = {
     description: "Drain outside the toilet door is backed up and blocked.", createdAt: "2026-10-10T08:18:00.000Z" },
   "J-TAP": { id: "J-TAP", helpdeskRef: "00031474", status: "Co-op Pending", priority: "Priority 2", siteCode: "0380", description: "Hot tap leaking", createdAt: "2026-10-09T14:04:00.000Z" },
 };
-const PERMS = { "Office Admin": ["SLAAdmin"], "Boss": ["FullAccess"], "Field Eng": [] };
+const PERMS = { "Office Admin": ["SLAAdmin"], "Boss": ["FullAccess"], "Field Eng": [], "SLA Field": ["SLAAdmin"] };
+// staffType drives the office gate (canSeeMoney): office OR FullAccess may manage subcontractors, never field.
+const PROFILES = { "Office Admin": { staffType: "office" }, "Boss": {}, "Field Eng": { staffType: "field" }, "SLA Field": { staffType: "field" } };
 
 function makeEnv({ sendOk = true, pos = [] } = {}) {
   const saved = {}; const idem = new Set(); const sent = []; const pushes = []; const appConfig = {};
@@ -17,6 +19,7 @@ function makeEnv({ sendOk = true, pos = [] } = {}) {
     bind(...a) { b = a; return st; },
     async first() {
       if (/SELECT email FROM users/.test(sql)) return b[0] === "Office Admin" ? { email: "office@mostlane.test" } : null;
+      if (/SELECT profile FROM users/.test(sql)) { const u = b[1]; return PROFILES[u] ? { profile: JSON.stringify(PROFILES[u]) } : null; }
       if (/FROM sla_jobs WHERE tenant_id = \? AND id = \?/.test(sql)) { const j = rows().find(j => j.id === b[1]); return j ? { data: JSON.stringify(j) } : null; }
       if (/FROM app_config/.test(sql)) { const key = /key\s*=\s*\?/.test(sql) ? b[b.length - 1] : (sql.match(/key\s*=\s*'([^']+)'/) || [])[1]; return appConfig[key] != null ? { value: appConfig[key] } : null; }
       return null;
@@ -143,7 +146,12 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const g = await call(E, "Office Admin", "/subcontractors", null, "GET");
   ok("GET /subcontractors lists Metro Rod with its OOH default + areas", g.status === 200 && g.body.list.some(s => s.key === "metrorod" && s.ooh === true) && Array.isArray(g.body.areas), JSON.stringify(g.body && g.body.list && g.body.list.find(s=>s.key==="metrorod")));
   const f = await call(E, "Field Eng", "/subcontractors", null, "GET");
-  ok("a field engineer can't read the subcontractor list", f.status === 403); }
+  ok("a field engineer can't read the subcontractor list", f.status === 403);
+  // "all office users, no field" — an office user with no SLAAdmin grant CAN manage; a field user WITH SLAAdmin can't.
+  const of = await call(E, "SLA Field", "/subcontractors", null, "GET");
+  ok("a field engineer WITH an SLAAdmin grant still can't read it", of.status === 403);
+  const oe = await call(E, "SLA Field", "/subcontractors", { sub: { name: "X Co", to: "x@x.com" } });
+  ok("…nor edit it", oe.status === 403); }
 
 // override endpoint
 { const E = makeEnv();
@@ -164,7 +172,9 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const drain = rows.find(r => r.jobId === "J-DRAIN"), poOnly = rows.find(r => r.key === "po:10620");
   ok("PO matched to its job by incident number", drain && drain.pos.length === 1 && drain.subs[0] === "Handyman In Bristol" && drain.state === "open" && drain.days === 9, JSON.stringify(drain && { subs: drain.subs, days: drain.days }));
   ok("PO with no job still listed", poOnly && !poOnly.jobId && poOnly.state === "open");
-  ok("no £ for a non-money SLA admin", drain && drain.poTotal === undefined && !("cost" in drain.pos[0]));
+  const nm = await call(E, "SLA Field", "/subcontracted", null, "GET");
+  const nmDrain = (nm.body.rows || []).find(r => r.jobId === "J-DRAIN");
+  ok("no £ for a non-money SLA admin", nmDrain && nmDrain.poTotal === undefined && !("cost" in nmDrain.pos[0]));
   const m = await call(E, "Boss", "/subcontracted", null, "GET");
   const md = (m.body.rows || []).find(r => r.jobId === "J-DRAIN");
   ok("£ shown to Full Access", md && md.poTotal === 120 && md.pos[0].cost === 120);
@@ -196,7 +206,7 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("unlinking an incident-matched PO stops the auto match", ul2.status === 200 && (al2.body.rows || []).some(r => r.key === "po:10630"));
   ok("link refuses an unknown PO", (await call(E, "Office Admin", "/subcontracted/link", { po: "999", jobId: "J-TAP" })).status === 404);
   // costs: money users only
-  ok("cost: non-money SLA admin refused", (await call(E, "Office Admin", "/subcontracted/cost", { po: "10620", cost: "50" })).status === 403);
+  ok("cost: non-money SLA admin refused", (await call(E, "SLA Field", "/subcontracted/cost", { po: "10620", cost: "50" })).status === 403);
   const c1 = await call(E, "Boss", "/subcontracted/cost", { po: "10620", cost: "£1,250.5" });
   ok("cost onto the PO", c1.status === 200 && POS[1].cost_ex_vat === 1250.5, JSON.stringify(c1.body));
   const c2 = await call(E, "Boss", "/subcontracted/cost", { jobId: "J-TAP", cost: "300" });

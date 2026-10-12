@@ -146,9 +146,13 @@
   function authFetch(p,o){ o=o||{}; o.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},o.headers||{}); return fetch(API+p,o); }
   function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
   function yes(v){ return String(v||"").toLowerCase()==="yes"; }
+  function staffType(){ try{ return String(sessionStorage.getItem("mostlaneStaffType")||localStorage.getItem("mostlaneStaffType")||P.StaffType||"").toLowerCase(); }catch(e){ return String((P&&P.StaffType)||"").toLowerCase(); } }
   var P = perms();
-  var CAN_VIEW = yes(P.FullAccess) || yes(P.SLAAdmin);
-  var CAN_EDIT = yes(P.FullAccess);
+  // ANY office user may view + edit (Full Access or staffType "office"); field engineers never.
+  // Mirrors the worker's canSeeMoney gate on /sla/subcontractors.
+  var OFFICE = yes(P.FullAccess) || staffType() === "office";
+  var CAN_VIEW = OFFICE;
+  var CAN_EDIT = OFFICE;
   var FIELD_LABELS = { site:"Site", address:"Address", phone:"Phone", priority:"Priority / SLA", target:"Target time", description:"Job description" };
   var FIELD_KEYS = ["site","address","phone","priority","target","description"];
   var PRIORITIES = ["Priority 1","Priority 2","Priority 3","Priority 4"];
@@ -157,7 +161,7 @@
   var mapObj = null, mapLayer = null;
   var OPEN = {};   // keys of cards the user has expanded (kept across re-renders)
 
-  if(!CAN_VIEW){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">You don’t have access to subcontractor settings. Ask a Full Access user.</div>'; return; }
+  if(!CAN_VIEW){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Subcontractor settings are for office staff. Ask an office or Full Access user.</div>'; return; }
 
   function geocode(pc){
     var clean = String(pc||"").toUpperCase().replace(/\s+/g,"").trim();

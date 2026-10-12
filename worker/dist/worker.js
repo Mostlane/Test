@@ -18933,7 +18933,7 @@ async function handle13(request, env, ctx, url, sess) {
   if (subpath === "/subcontractors") {
     if (method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      if (!await canSeeMoney(env, tenantId, sess.user.username)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       await migrateWorkAreasOnce(env, tenantId).catch(() => {
       });
       const cfg = await getSubconConfig(env, tenantId);
@@ -18952,7 +18952,7 @@ async function handle13(request, env, ctx, url, sess) {
     }
     if (method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Full Access only" }, headers, 403);
+      if (!await canSeeMoney(env, tenantId, sess.user.username)) return jsonResponse({ error: "Office staff only" }, headers, 403);
       const b = await readJson2(request);
       const cfg = await getSubconConfig(env, tenantId);
       const raw = {};

@@ -5646,9 +5646,12 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   = everywhere) + OOH-eligibility, deterministic (no AI). `buildMetroRodEmail(job,
   hours, poRef, sc)` now honours `sc.fields` (omits a box the sub doesn't want;
   default = all on, so the old signature is unchanged).
-  - **Endpoints (sla.js):** **GET /sla/subcontractors** (office = SLAAdmin|FullAccess)
-    → `{list, areas}`, plus `{job, suggestions}` when `?jobId=` (the send-modal data).
-    **POST /sla/subcontractors** (FullAccess) — `{sub:{…}}` upsert one, `{delete:key}`,
+  - **Endpoints (sla.js):** **GET /sla/subcontractors** (ANY office user — the shared
+    **`canSeeMoney` gate = FullAccess OR `profile.staffType==="office"`**, so a field
+    engineer is refused even with an SLAAdmin grant — Jamie Oct 2026: "all office users
+    can edit the subcontractor emails/settings, no field users")
+    → `{list, areas, sender, senderVia}`, plus `{job, suggestions}` when `?jobId=` (the send-modal data).
+    **POST /sla/subcontractors** (same office gate — was FullAccess-only) — `{sub:{…}}` upsert one, `{delete:key}`,
     `{list:[…]}` replace all, or **`{importFromPO:true}`** (pulls active names from the
     PO system's `subcontractors` table via the new `po.js listPoSubcontractorNames` —
     adds them with a blank email to fill in; fails soft when PO_DB is unbound). The
@@ -5672,8 +5675,12 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     (`openSubconPicker`) listing every active subcontractor with the suggested one(s)
     highlighted (⭐ area + coverage chips, OOH chip), each with a Send button →
     `/sla/jobs/{id}/subcontract {to:key}`. **sla-main `drainTag`** shows sent/failed.
-    **subcontractors.html** (👷 Subcontractors in sla-main 🛠 Tools, SLAAdmin view /
-    FullAccess edit; `_headers` no-cache) is the management page — a card per
+    **subcontractors.html** (👷 Subcontractors — a `#subconMgrLink` button in sla-main
+    🛠 Tools shown to ANY office user [FullAccess OR staffType "office"], NOT field;
+    distinct from the SLA-admin `#subconLink` "🤝 With subcontractors" jobs list — the two
+    buttons used to SHARE an id, which hid the manager, now fixed. View + edit = the same
+    office rule, mirroring the server's `canSeeMoney` gate; `_headers` no-cache) is the
+    management page — a card per
     subcontractor (name · active · to/cc/replyTo · PO trade + number length · work-area
     chips · base postcode [client geocoded via postcodes.io] + radius · what-to-send
     field toggles · OOH + priorities) — each card is **collapsible, collapsed by default** (a one-line summary: email · areas · radius · OOH · inactive; tap the header/▸ to open; open state survives a save re-render; a new card opens), ＋ Add, ⤵ Import from the PO system, and a
