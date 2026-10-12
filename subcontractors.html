@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Subcontractors</title>
+  <script src="/portal-config.js?v=42"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root{--brand:#003468;--ok:#0a7d33;--bad:#b00020;--warn:#b45309;--line:#e2e8f0;}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:880px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;}
+    .btn.danger{background:#fff;color:#b91c1c;border:1px solid #fca5a5;} .btn:disabled{opacity:.5;cursor:not-allowed;}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;align-items:center;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .sc-head{display:flex;align-items:center;gap:10px;}
+    .sc-head input.nm{flex:1;min-width:0;font-size:16px;font-weight:700;color:#0f172a;border:1px solid transparent;border-radius:8px;padding:6px 8px;background:#f8fafc;}
+    .sc-head input.nm:focus{border-color:#ccd5dd;background:#fff;outline:none;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px;}
+    label.fld{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;margin-bottom:3px;}
+    input[type=text],input[type=email],input[type=number],textarea{width:100%;border:1px solid #ccd5dd;border-radius:9px;padding:8px 9px;font:14px inherit;font-family:inherit;background:#fff;}
+    textarea{min-height:52px;}
+    .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+    .chip{border:1px solid #ccd5dd;background:#fff;border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;user-select:none;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .sw{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;margin:2px 10px 2px 0;cursor:pointer;}
+    fieldset{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:10px 0 0;}
+    legend{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b7a90;padding:0 4px;}
+    .sc-foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;}
+    .sc-foot .msg{font-size:13px;} .msg.ok{color:var(--ok);} .msg.err{color:var(--bad);}
+    .off{opacity:.6;}
+    #map{height:260px;border-radius:12px;border:1px solid var(--line);margin-top:6px;}
+    .pin-modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:9000;padding:12px;}
+    .pin-sheet{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px;padding:16px;}
+    .pin-sheet h3{margin:0 0 8px;font-size:17px;color:var(--brand);}
+    .pin-map{height:320px;border-radius:12px;border:1px solid var(--line);margin:8px 0;}
+    .pin-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    .pin-row input{flex:1;min-width:120px;}
+    .note{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;font-size:13px;color:#9a3412;margin-bottom:12px;}
+    a.link{color:var(--brand);font-size:13px;}
+  </style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="sla-main.html" title="Back">‹ Back</a>
+  <h1>👷 Subcontractors</h1>
+</header>
+<div class="wrap">
+  <div id="gate" class="muted" style="padding:30px 4px;">Loading…</div>
+
+  <div id="main" hidden>
+    <p class="muted">The routing list for sending a job out to a subcontractor (Metro Rod and others). Set where each one's order email goes, <b>which job details it carries</b>, the <b>work areas</b> they cover, their <b>coverage area</b> (base postcode + radius) and whether they do <b>out-of-hours</b> — so the job card can suggest the right one and the portal can nudge you out-of-hours.</p>
+    <div id="roNote" class="note" hidden>You can view the setup but only a <b>Full&nbsp;Access</b> user can change it.</div>
+
+    <div class="toolbar">
+      <button class="btn" id="addBtn">＋ Add a subcontractor</button>
+      <button class="btn ghost" id="importBtn">⤵ Import names from the PO system</button>
+      <span class="msg" id="topMsg"></span>
+    </div>
+
+    <div id="list"></div>
+
+    <div class="card">
+      <h2 style="font-size:15px;margin:0 0 8px;color:var(--brand);">🗺️ Coverage map</h2>
+      <p class="muted">Each subcontractor with a base postcode + radius shows its coverage bubble, so you can see who reaches where.</p>
+      <div id="map"></div>
+    </div>
+  </div>
+</div>
+
+<template id="tpl">
+  <div class="card sc">
+    <div class="sc-head">
+      <span class="drag" style="font-size:18px;color:#94a3b8;">👷</span>
+      <input class="nm" type="text" data-f="name" placeholder="Subcontractor name" maxlength="80">
+      <label class="sw"><input type="checkbox" data-f="active"> Active</label>
+    </div>
+    <div class="grid">
+      <div><label class="fld">Order email to</label><input type="email" data-f="to" placeholder="orders@example.co.uk"></div>
+      <div><label class="fld">CC (comma-separated)</label><input type="text" data-f="cc" placeholder="accounts@example.co.uk"></div>
+      <div><label class="fld">Reply-to</label><input type="email" data-f="replyTo" placeholder="jamie@mostlane.com"></div>
+      <div><label class="fld">PO trade (costing)</label><input type="text" data-f="trade" placeholder="Drainage"></div>
+      <div><label class="fld">PO number length (0 = as-is)</label><input type="number" data-f="poDigits" min="0" max="12" step="1" placeholder="6"></div>
+    </div>
+    <div>
+      <label class="fld" style="margin-top:10px;">Work areas they cover</label>
+      <div class="chips" data-f="areas"></div>
+    </div>
+    <div class="grid">
+      <div><label class="fld">Base postcode (coverage centre)</label><input type="text" data-f="basePostcode" placeholder="PO15 5RQ"></div>
+      <div><label class="fld">Coverage radius (miles · 0 = everywhere)</label><input type="number" data-f="radiusMiles" min="0" max="500" step="1" placeholder="30"></div>
+    </div>
+    <div style="margin-top:6px;"><button type="button" class="btn sm ghost pin">📍 Set area on the map</button> <span class="pinned muted" style="font-size:12.5px;"></span></div>
+    <fieldset>
+      <legend>What the email includes</legend>
+      <div class="flds"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Out of hours</legend>
+      <label class="sw"><input type="checkbox" data-f="ooh"> This subcontractor does out-of-hours</label>
+      <div class="muted" style="margin-top:6px;">Suggest them out-of-hours for these priorities (none ticked = any priority):</div>
+      <div class="chips prio" data-f="oohPriorities"></div>
+    </fieldset>
+    <div class="sc-foot">
+      <button class="btn sm save">💾 Save</button>
+      <button class="btn sm ghost danger del">🗑 Remove</button>
+      <span class="msg rowmsg"></span>
+    </div>
+  </div>
+</template>
+
+<script>
+(function(){
+  var API = window.MOSTLANE_API;
+  var $ = function(id){ return document.getElementById(id); };
+  var esc = function(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]; }); };
+  function authFetch(p,o){ o=o||{}; o.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},o.headers||{}); return fetch(API+p,o); }
+  function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
+  function yes(v){ return String(v||"").toLowerCase()==="yes"; }
+  var P = perms();
+  var CAN_VIEW = yes(P.FullAccess) || yes(P.SLAAdmin);
+  var CAN_EDIT = yes(P.FullAccess);
+  var FIELD_LABELS = { site:"Site", address:"Address", phone:"Phone", priority:"Priority / SLA", target:"Target time", description:"Job description" };
+  var FIELD_KEYS = ["site","address","phone","priority","target","description"];
+  var PRIORITIES = ["Priority 1","Priority 2","Priority 3","Priority 4"];
+  var AREAS = [];
+  var SUBS = [];
+  var mapObj = null, mapLayer = null;
+
+  if(!CAN_VIEW){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">You don’t have access to subcontractor settings. Ask a Full Access user.</div>'; return; }
+
+  function geocode(pc){
+    var clean = String(pc||"").toUpperCase().replace(/\s+/g,"").trim();
+    if(!clean) return Promise.resolve(null);
+    return fetch("https://api.postcodes.io/postcodes/"+encodeURIComponent(clean)).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+      var r = d && d.result; return (r && isFinite(r.latitude)) ? [Number(r.latitude), Number(r.longitude)] : null;
+    }).catch(function(){ return null; });
+  }
+
+  function collect(card){
+    var g = function(f){ var el = card.querySelector('[data-f="'+f+'"]'); return el; };
+    var fields = {};
+    card.querySelectorAll('.flds input[data-field]').forEach(function(cb){ fields[cb.dataset.field] = cb.checked; });
+    var areas = []; card.querySelectorAll('[data-f="areas"] .chip.on').forEach(function(c){ areas.push(c.dataset.id); });
+    var prio = []; card.querySelectorAll('[data-f="oohPriorities"] .chip.on').forEach(function(c){ prio.push(c.dataset.id); });
+    return {
+      key: card.dataset.key || "",
+      name: g("name").value.trim(),
+      active: g("active").checked,
+      to: g("to").value.trim(),
+      cc: g("cc").value.split(",").map(function(s){return s.trim();}).filter(Boolean),
+      replyTo: g("replyTo").value.trim(),
+      trade: g("trade").value.trim(),
+      poDigits: parseInt(g("poDigits").value,10)||0,
+      areas: areas,
+      base: { postcode: g("basePostcode").value.trim(), lat: card._lat, lng: card._lng },
+      radiusMiles: parseInt(g("radiusMiles").value,10)||0,
+      ooh: g("ooh").checked,
+      oohPriorities: prio,
+      fields: fields
+    };
+  }
+
+  function buildCard(sub){
+    var frag = $("tpl").content.cloneNode(true);
+    var card = frag.querySelector(".sc");
+    card.dataset.key = sub.key || "";
+    card._lat = (sub.base && isFinite(sub.base.lat)) ? sub.base.lat : null;
+    card._lng = (sub.base && isFinite(sub.base.lng)) ? sub.base.lng : null;
+    var set = function(f,v){ var el = card.querySelector('[data-f="'+f+'"]'); if(el){ if(el.type==="checkbox") el.checked = !!v; else el.value = (v==null?"":v); } };
+    set("name", sub.name); set("active", sub.active!==false); set("to", sub.to); set("cc",(sub.cc||[]).join(", "));
+    set("replyTo", sub.replyTo); set("trade", sub.trade); set("poDigits", sub.poDigits||0);
+    set("basePostcode", (sub.base&&sub.base.postcode)||""); set("radiusMiles", sub.radiusMiles||0); set("ooh", !!sub.ooh);
+    // areas chips
+    var ac = card.querySelector('[data-f="areas"]');
+    ac.innerHTML = AREAS.map(function(a){ var on = (sub.areas||[]).indexOf(a.id)>=0; return '<span class="chip'+(on?' on':'')+'" data-id="'+esc(a.id)+'">'+esc(a.name)+'</span>'; }).join("") || '<span class="muted">No work areas configured.</span>';
+    ac.querySelectorAll(".chip").forEach(function(c){ c.onclick = function(){ if(CAN_EDIT) c.classList.toggle("on"); }; });
+    // priority chips
+    var pc = card.querySelector('[data-f="oohPriorities"]');
+    pc.innerHTML = PRIORITIES.map(function(p){ var on=(sub.oohPriorities||[]).indexOf(p)>=0; return '<span class="chip'+(on?' on':'')+'" data-id="'+esc(p)+'">'+esc(p)+'</span>'; }).join("");
+    pc.querySelectorAll(".chip").forEach(function(c){ c.onclick = function(){ if(CAN_EDIT) c.classList.toggle("on"); }; });
+    // field toggles
+    var f = sub.fields || {};
+    card.querySelector(".flds").innerHTML = FIELD_KEYS.map(function(k){ var on = f[k]!==false; return '<label class="sw"><input type="checkbox" data-field="'+k+'"'+(on?" checked":"")+'> '+esc(FIELD_LABELS[k])+'</label>'; }).join("");
+    // geocode base on blur so the pin + map stay in step
+    var pcEl = card.querySelector('[data-f="basePostcode"]');
+    pcEl.addEventListener("blur", function(){ geocode(pcEl.value).then(function(c){ if(c){ card._lat=c[0]; card._lng=c[1]; } else { card._lat=null; card._lng=null; } pinLabel(card); }); });
+    // save / delete / set-on-map
+    card.querySelector(".save").onclick = function(){ saveOne(card); };
+    card.querySelector(".del").onclick = function(){ delOne(card); };
+    card.querySelector(".pin").onclick = function(){ openPin(card); };
+    pinLabel(card);
+    if(!CAN_EDIT){ card.querySelectorAll("input,textarea,button.save,button.del,button.pin").forEach(function(el){ el.disabled = true; }); }
+    return card;
+  }
+  function pinLabel(card){
+    var el = card.querySelector(".pinned");
+    if(card._lat!=null && card._lng!=null) el.textContent = "✓ pin set (" + card._lat.toFixed(3) + ", " + card._lng.toFixed(3) + ")";
+    else el.textContent = "no pin yet — a base postcode alone also works";
+  }
+  // Pin-drop: tap / drag the coverage centre on a map, preview the radius circle.
+  async function openPin(card){
+    await loadLeaflet();
+    if(!window.L){ alert("Map couldn’t load — type a base postcode instead."); return; }
+    var startRad = parseInt(card.querySelector('[data-f="radiusMiles"]').value,10) || 0;
+    var startLat = card._lat, startLng = card._lng;
+    if(startLat==null){ var c = await geocode(card.querySelector('[data-f="basePostcode"]').value); if(c){ startLat=c[0]; startLng=c[1]; } }
+    var centre = (startLat!=null) ? [startLat,startLng] : [51.0,-1.2];
+    var wrap = document.createElement("div"); wrap.className = "pin-modal";
+    wrap.innerHTML = '<div class="pin-sheet"><h3>📍 Set the coverage area</h3>' +
+      '<div class="pin-row"><input type="text" id="pinPc" placeholder="Jump to a postcode (optional)"><button class="btn sm ghost" id="pinJump">Go</button></div>' +
+      '<p class="muted" style="margin:6px 0 0;">Tap the map (or drag the pin) to set the centre. The blue circle is the coverage radius.</p>' +
+      '<div class="pin-map" id="pinMap"></div>' +
+      '<div class="pin-row"><label class="fld" style="margin:0;">Radius (miles · 0 = everywhere)</label><input type="number" id="pinRad" min="0" max="500" step="1" value="'+startRad+'" style="max-width:120px;flex:0 0 auto;"></div>' +
+      '<div class="pin-row" style="justify-content:flex-end;margin-top:12px;"><button class="btn ghost" id="pinCancel">Cancel</button><button class="btn" id="pinSave">Use this area</button></div></div>';
+    document.body.appendChild(wrap);
+    var close = function(){ wrap.remove(); };
+    wrap.addEventListener("click", function(e){ if(e.target===wrap) close(); });
+    wrap.querySelector("#pinCancel").onclick = close;
+    var map = L.map(wrap.querySelector("#pinMap")).setView(centre, startLat!=null?9:7);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:"© OpenStreetMap", maxZoom:19 }).addTo(map);
+    var marker = L.marker(centre,{ draggable:true }).addTo(map);
+    var circle = L.circle(centre,{ radius:(startRad||0)*1609.34, color:"#15599d", weight:1, fillColor:"#15599d", fillOpacity:.1 }).addTo(map);
+    setTimeout(function(){ map.invalidateSize(); }, 150);
+    function setAt(ll){ marker.setLatLng(ll); circle.setLatLng(ll); }
+    function radM(){ return (parseInt(wrap.querySelector("#pinRad").value,10)||0)*1609.34; }
+    map.on("click", function(e){ setAt(e.latlng); });
+    marker.on("dragend", function(){ circle.setLatLng(marker.getLatLng()); });
+    wrap.querySelector("#pinRad").addEventListener("input", function(){ circle.setRadius(radM()); });
+    wrap.querySelector("#pinJump").onclick = function(){ geocode(wrap.querySelector("#pinPc").value).then(function(c){ if(c){ setAt(c); map.setView(c, 11); } else alert("Postcode not recognised."); }); };
+    wrap.querySelector("#pinPc").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); wrap.querySelector("#pinJump").click(); } });
+    wrap.querySelector("#pinSave").onclick = async function(){
+      var ll = marker.getLatLng();
+      card._lat = ll.lat; card._lng = ll.lng;
+      card.querySelector('[data-f="radiusMiles"]').value = parseInt(wrap.querySelector("#pinRad").value,10)||0;
+      // reverse-geocode so the postcode box stays consistent with the pin (best-effort)
+      try{ var r = await fetch("https://api.postcodes.io/postcodes?lon="+ll.lng+"&lat="+ll.lat+"&limit=1").then(function(x){return x.ok?x.json():null;});
+        var pc = r && r.result && r.result[0] && r.result[0].postcode; if(pc) card.querySelector('[data-f="basePostcode"]').value = pc; }catch(e){}
+      pinLabel(card); close();
+      var m = card.querySelector(".rowmsg"); m.className="msg rowmsg"; m.textContent="Pin set — press 💾 Save to keep it.";
+    };
+  }
+
+  function render(){
+    var l = $("list"); l.innerHTML = "";
+    SUBS.forEach(function(s){ l.appendChild(buildCard(s)); });
+    if(!SUBS.length) l.innerHTML = '<div class="card muted">No subcontractors yet — add one, or import names from the PO system.</div>';
+    drawMap();
+  }
+
+  async function saveOne(card){
+    var msg = card.querySelector(".rowmsg"); msg.className = "msg rowmsg"; msg.textContent = "Saving…";
+    var sub = collect(card);
+    if(!sub.name){ msg.className="msg rowmsg err"; msg.textContent="Give it a name."; return; }
+    // ensure pin matches the typed postcode if we haven't geocoded yet
+    if(sub.base.postcode && (sub.base.lat==null)){ var c = await geocode(sub.base.postcode); if(c){ sub.base.lat=c[0]; sub.base.lng=c[1]; card._lat=c[0]; card._lng=c[1]; } }
+    try{
+      var r = await authFetch("/sla/subcontractors",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ sub: sub }) });
+      var d = await r.json(); if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
+      SUBS = d.list || SUBS; msg.className="msg rowmsg ok"; msg.textContent="Saved ✓";
+      // re-render keeps keys/chips canonical; delay so the tick shows
+      setTimeout(render, 500);
+    }catch(e){ msg.className="msg rowmsg err"; msg.textContent="Couldn’t save: "+e.message; }
+  }
+  async function delOne(card){
+    var key = card.dataset.key;
+    if(!key){ card.remove(); return; }
+    var nm = card.querySelector('[data-f="name"]').value || "this subcontractor";
+    var ok = window.MLUI ? await MLUI.confirm("Remove "+nm+" from the routing list? (Jobs already sent keep their record.)",{title:"Remove subcontractor",okLabel:"Remove",danger:true}) : confirm("Remove "+nm+"?");
+    if(!ok) return;
+    try{
+      var r = await authFetch("/sla/subcontractors",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ delete:key }) });
+      var d = await r.json(); if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
+      SUBS = d.list || []; render();
+    }catch(e){ alert("Couldn’t remove: "+e.message); }
+  }
+
+  $("addBtn").onclick = function(){
+    if(!CAN_EDIT) return;
+    var card = buildCard({ name:"", active:true, fields:{}, areas:[], oohPriorities:[] });
+    $("list").insertBefore(card, $("list").firstChild);
+    card.querySelector('[data-f="name"]').focus();
+  };
+  $("importBtn").onclick = async function(){
+    if(!CAN_EDIT) return;
+    var m = $("topMsg"); m.className="msg"; m.textContent="Importing…";
+    try{
+      var r = await authFetch("/sla/subcontractors",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ importFromPO:true }) });
+      var d = await r.json(); if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
+      SUBS = d.list || SUBS; render();
+      m.className="msg ok"; m.textContent = d.imported ? ("Added "+d.imported+" name"+(d.imported===1?"":"s")+" from the PO system — fill in their email + details.") : "Nothing new to import (all PO subcontractors are already here).";
+    }catch(e){ m.className="msg err"; m.textContent="Import failed: "+e.message; }
+  };
+
+  // ---- coverage map (Leaflet, lazy) ----
+  function loadLeaflet(){
+    if(window.L) return Promise.resolve();
+    return new Promise(function(res){
+      var css = document.createElement("link"); css.rel="stylesheet"; css.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
+      var s = document.createElement("script"); s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.onload=res; s.onerror=res; document.head.appendChild(s);
+    });
+  }
+  async function drawMap(){
+    await loadLeaflet();
+    if(!window.L){ $("map").innerHTML = '<div class="muted" style="padding:14px;">Map couldn’t load.</div>'; return; }
+    if(!mapObj){ mapObj = L.map("map").setView([51.0,-1.2], 7); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:"© OpenStreetMap", maxZoom:19 }).addTo(mapObj); }
+    if(mapLayer){ mapObj.removeLayer(mapLayer); } mapLayer = L.layerGroup().addTo(mapObj);
+    var pts = [];
+    for(var i=0;i<SUBS.length;i++){
+      var s = SUBS[i]; if(!s.active) continue;
+      var lat = (s.base&&isFinite(s.base.lat))?s.base.lat:null, lng=(s.base&&isFinite(s.base.lng))?s.base.lng:null;
+      if(lat==null && s.base && s.base.postcode){ var c = await geocode(s.base.postcode); if(c){ lat=c[0]; lng=c[1]; } }
+      if(lat==null) continue;
+      L.marker([lat,lng]).addTo(mapLayer).bindPopup("<b>"+esc(s.name)+"</b>"+(s.radiusMiles?("<br>"+s.radiusMiles+" mi coverage"):"<br>covers everywhere"));
+      if(s.radiusMiles>0) L.circle([lat,lng],{ radius:s.radiusMiles*1609.34, color:"#15599d", weight:1, fillColor:"#15599d", fillOpacity:.08 }).addTo(mapLayer);
+      pts.push([lat,lng]);
+    }
+    if(pts.length){ try{ mapObj.fitBounds(pts, { padding:[30,30], maxZoom:10 }); }catch(e){} }
+  }
+
+  async function load(){
+    try{
+      var r = await authFetch("/sla/subcontractors").then(function(x){ return x.json(); });
+      if(!r || !r.ok) throw new Error((r&&r.error)||"load failed");
+      AREAS = r.areas || []; SUBS = r.list || [];
+      $("gate").hidden = true; $("main").hidden = false;
+      if(!CAN_EDIT){ $("roNote").hidden = false; $("addBtn").disabled = true; $("importBtn").disabled = true; }
+      render();
+    }catch(e){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Couldn’t load subcontractors: '+esc(e.message)+'</div>'; }
+  }
+  load();
+})();
+</script>
+</body>
+</html>

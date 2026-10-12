@@ -197,6 +197,10 @@
   Cache-Control: no-cache
 /quotes.html
   Cache-Control: no-cache
+/subcontractors.html
+  Cache-Control: no-cache
+/subcontracted-jobs.html
+  Cache-Control: no-cache
 /concerto-stats.html
   Cache-Control: no-cache
 /cert-status.html

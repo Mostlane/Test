@@ -138,6 +138,7 @@
     .cancel-tag.soft{color:#7c2d12;background:#ffedd5;border-color:#fdba74;}
     .drain-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#075985;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:999px;padding:1px 7px;vertical-align:middle;white-space:nowrap;}
     .drain-tag.sent{color:#14532d;background:#dcfce7;border-color:#86efac;}
+    .drain-tag.failed{color:#991b1b;background:#fef2f2;border-color:#fca5a5;}
     tr.cancelled td .sitename, .mjob.cancelled .mjob-title{text-decoration:line-through;color:#6b7280;}
     .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
     .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
@@ -270,10 +271,11 @@
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
             <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
-            <a href="subcontracted-jobs.html" class="btn" id="subconLink" style="display:none">🤝 Subcontractors<span id="subconBadge" style="display:none;background:#0369a1;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
+            <a href="subcontracted-jobs.html" class="btn" id="subconLink" style="display:none">🤝 With subcontractors<span id="subconBadge" style="display:none;background:#0369a1;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="concerto-stats.html" class="btn" id="coopStatsLink" style="display:none">📊 Co-op stats</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
+            <a href="subcontractors.html" class="btn" id="subconLink" style="display:none" title="Set up who jobs can be sent out to (Metro Rod + others)">👷 Subcontractors</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
             <a href="sla-settings.html" class="btn">⚙️ Settings</a>
@@ -290,6 +292,7 @@
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
+          var scl = document.getElementById("subconLink"); if (scl) scl.style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           var csl = document.getElementById("coopStatsLink"); if (csl) csl.style.display = "";
           var sl = document.getElementById("subconLink");
@@ -752,10 +755,11 @@ function cancelTag(j){
 function drainTag(j){
   const sc = j.subcontract;
   if(sc && sc.sentAt){
-    const st = sc.status || "open", ic = sc.key === "metrorod" ? "🚿" : "🤝";
-    const lbl = st === "done" ? "✅ Done by " + (sc.name||"") : st === "returned" ? "↩ Back from " + (sc.name||"") : ic + " With " + (sc.name||"Metro Rod") + " " + fmtWhen(sc.sentAt);
-    return ` <span class="drain-tag sent" title="${esc((sc.manual ? "Handed to " : "Sent to ") + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : ""))}">${esc(lbl)}</span>`;
+    const st = sc.status || "open";
+    const lbl = st === "done" ? "✅ Done by " + (sc.name||"") : st === "returned" ? "↩ Back from " + (sc.name||"") : "✅ With " + (sc.name||"subcontractor") + " " + fmtWhen(sc.sentAt) + (sc.poRef ? " · PO " + sc.poRef : "");
+    return ` <span class="drain-tag sent" title="${esc((sc.manual ? "Handed to " : "Sent to ") + (sc.name||"subcontractor") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : "") + (sc.poRef ? " · our PO " + sc.poRef : ""))}">${esc(lbl)}</span>`;
   }
+  if(sc && sc.failedAt) return ` <span class="drain-tag failed" title="${esc("Send to " + (sc.name||"subcontractor") + " FAILED " + fmtShort(parseDate(sc.failedAt)) + (sc.error ? " — " + sc.error : "") + " — open the job to try again")}">⚠ ${esc(sc.name||"subcontractor")} send failed</span>`;
   if(j.drainage && !["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status)) return ` <span class="drain-tag" title="Reads like a drainage job — open it to send to Metro Rod">🚿 Metro Rod?</span>`;
   return "";
 }

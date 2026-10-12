@@ -5534,45 +5534,116 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   FullAccess|SLAAdmin (office-only) an actionable **"🚿 Possible Metro Rod job"**
   (tag `drain:<id>` → job-view). **POST /sla/jobs/{id}/subcontract {to:"metrorod"}**
   (SLA admin): ONE press — lock = `firstTime(idempotency, "subcon:metrorod:<id>")`, a
-  second press anywhere returns `{already, subcontract}` and sends nothing; emails via
-  lib/email.js (Resend, From `EMAIL_FROM` no-reply@mostlane-portal.com, Reply-To +
-  CC from config) the same layout with the REAL ref (`buildMetroRodEmail`, exported);
-  a failed send releases the lock and records nothing; success stamps
-  **`job.subcontract = {key,name,to,sentAt,sentBy,subject,ref}`** + an event + resolves
-  the push. **POST …/drainage {value:true|false|null}** (override), **POST
-  …/subcontract-clear** (FullAccess — forget the record + lock; does NOT recall the
-  email). Recipients in app_config **`sla:subcontractors:<tid>`** (defaults
-  `SUBCON_DEFAULTS.metrorod` = to Call.Centre@metrorod.co.uk, cc Enquiries@,
-  replyTo jamie@). Front-end: **job-view.html `renderDrainBanner`** (office only —
-  blue "Possible Metro Rod job" + Send / Not drainage; green "With Metro Rod — sent
-  … by …"; a quiet "Mark as drainage" link on other open jobs); **sla-main
-  `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when>); **sla-scheduler** drops a
-  sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
+  second press anywhere returns `{already, subcontract}` and sends nothing. **It raises a
+  LEGITIMATE subcontractor PO in the PO system first** (Oct 2026 — Jamie: "they should
+  get a PO number from my PO system and not an incident number"): `po.js
+  raiseSubcontractorPO(env, {supplier,trade,site,description,jobId,jobRef,userName})`
+  allocates the next PO (`nextPoNumber`) + inserts a `po_log` row — source office,
+  `cost_category:"subcontractor"`, supplier = the subcontractor name, trade from config,
+  **`job_id` stamped** so the cost rolls onto the job in job costing exactly like a "Raise
+  PO for this job" PO (no office-hours/status gate — always allowed; fails if PO_DB
+  unbound). The PO number is then **padded to the subcontractor's `poDigits`**
+  (`formatPoRef`, exported — Metro Rod want **6 digits, leading zeros**: 10011 → "010011")
+  and that **PO ref is the Order No in the email** (the client's incident number is NOT
+  used). Emails via lib/email.js (Resend, From `EMAIL_FROM`, Reply-To + CC from config)
+  the same layout, `buildMetroRodEmail(job, hours, poRef)` (exported; falls back to the
+  incident ref only if no poRef). **Retry-safe:** the allocated PO is persisted on the
+  job as **`job.subconPO = {key,poNumber,…}`** the instant it's raised, BEFORE the email —
+  so if the email fails (502, lock released, no `subcontract` record) a re-press REUSES
+  the same PO (keyed by subcontractor `key`), never allocating a second PO for the same
+  works; pressing for a DIFFERENT subcontractor raises its own. Success stamps
+  **`job.subcontract = {key,name,to,sentAt,sentBy,subject,ref,poNumber,poRef}`** + an
+  event + resolves the push. **POST …/drainage {value:true|false|null}** (override),
+  **POST …/subcontract-clear** (FullAccess — forget the sent record + lock; does NOT
+  recall the email NOR void the PO; `subconPO` is kept so a re-send reuses the same PO).
+  Config in app_config **`sla:subcontractors:<tid>`** (defaults `SUBCON_DEFAULTS.metrorod`
+  = to Call.Centre@metrorod.co.uk, cc Enquiries@, replyTo jamie@, **trade "Drainage",
+  poDigits 6**). **Built to take more subcontractors:** add a key to that config (name/to/
+  cc/replyTo/trade/poDigits) and `{to:"<key>"}` behaves identically — its own PO trade +
+  number length. Front-end: **job-view.html `renderDrainBanner`** (office only — blue
+  "Possible Metro Rod job" + Send / Not drainage; green "With Metro Rod — sent … by …"
+  **+ "Our PO <poRef>"**; a quiet "Mark as drainage" link on other open jobs); **sla-main
+  `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when> · PO <poRef>); **sla-scheduler**
+  drops a sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
   cards still drop as `metrorod-report` notices (TODO: attach them to the job).
-  Test `node --no-warnings worker/tools/test-drainage.mjs` (38 cases).
-  **🤝 Jobs with subcontractors — subcontracted-jobs.html (12 Oct 2026).** One list of
-  everything sat with a subcontractor (🤝 Subcontractors button + open-count badge on
-  sla-main, SLA-admin). Built from TWO sources because the office mostly records sub
-  work as a **subcontractor PO** (`po_log.cost_category='subcontractor'` — 13 since Aug,
-  none carrying job_id): (1) `job.subcontract` (the Metro Rod send, or a manual
-  **"🤝 Hand to a subcontractor"** on job-view = POST /sla/jobs/{id}/subcontract
-  `{name, note}` with NO `to` → record only, no email); (2) subcontractor POs from the
-  last 180 days, matched to a job by job_id else `incidentKey(incident_no | job_ref |
+  Test `node --no-warnings worker/tools/test-drainage.mjs` (incl. the PO raise +
+  padding + retry-reuse, the generic send + per-field email, the config GET gate).
+  **Cut-over:** turn the drainage Zap OFF when this goes live — the two locks are
+  separate systems, so both running could email Metro Rod twice.
+- **Generic subcontractor dispatch (12 Oct 2026 — the Metro Rod flow generalised to
+  ANY subcontractor).** The drainage→Metro Rod path above is now one case of a full
+  subcontractor-routing system. Each subcontractor is a profile in app_config
+  **`sla:subcontractors:<tid>`** (keyed by a name slug): `{name, active, to, cc[],
+  replyTo, trade (PO trade for the costing split), poDigits (PO-number padding),
+  areas[] (sla_work_areas ids they cover), base{postcode,lat,lng} + radiusMiles
+  (coverage bubble), ooh + oohPriorities[] (does out-of-hours, for which
+  priorities), fields{site,address,phone,priority,target,description} (what the
+  order email carries)}`. Helpers in sla.js (near getSubconConfig): `normSubcon`,
+  `getSubconConfig` (union of defaults + stored), `setSubconConfig`, `subKey`,
+  `inferAreaKw` (keyword→work-area, NO AI — `AREA_KW` table + the area's own name),
+  `isOutOfHoursLondon` (weekend / <08:00 / ≥18:00), and
+  **`subcontractorSuggestions(env,tid,job)`** → ranks the active subcontractors for a
+  job by work-area match (job.workArea, else `inferAreaKw` of the description) +
+  coverage (haversine from the sub's base to the job's coords vs radiusMiles; radius 0
+  = everywhere) + OOH-eligibility, deterministic (no AI). `buildMetroRodEmail(job,
+  hours, poRef, sc)` now honours `sc.fields` (omits a box the sub doesn't want;
+  default = all on, so the old signature is unchanged).
+  - **Endpoints (sla.js):** **GET /sla/subcontractors** (office = SLAAdmin|FullAccess)
+    → `{list, areas}`, plus `{job, suggestions}` when `?jobId=` (the send-modal data).
+    **POST /sla/subcontractors** (FullAccess) — `{sub:{…}}` upsert one, `{delete:key}`,
+    `{list:[…]}` replace all, or **`{importFromPO:true}`** (pulls active names from the
+    PO system's `subcontractors` table via the new `po.js listPoSubcontractorNames` —
+    adds them with a blank email to fill in; fails soft when PO_DB is unbound). The
+    existing `/sla/jobs/{id}/subcontract {to:<key>}` + `/subcontract-clear` are
+    unchanged and already generic on the key.
+  - **Failed-send is now VISIBLE (request D part 1).** On an email failure the handler
+    records a marker on the job — `job.subcontract = {key,name,to,failedAt,failedBy,
+    error,poNumber,poRef}` with **no `sentAt`** — so it never blocks a retry and the
+    PO stays on `job.subconPO` for reuse. job-view shows a RED "⚠ Send to <name>
+    FAILED … — Try sending again" banner; sla-main shows a red "⚠ <name> send failed"
+    pill. A successful send overwrites it with the green sentAt record.
+  - **Out-of-hours suggestion push.** A new reactive job arriving OUT OF HOURS that
+    matches a subcontractor's area + coverage + `ooh` at the job's priority pushes
+    FullAccess|SLAAdmin (office-only) a "🌙 Out-of-hours — suggest <name>" actionable
+    notification (tag `subcon-ooh:<key>:<jobId>`, deep-links job-view — never
+    auto-sends). Skips Metro Rod on a drainage job (the drainage push already covers
+    it). The always-on drainage push is unchanged.
+  - **Front-end:** **job-view.html** (office) — the drainage banner became a general
+    one: green "✅ With <name> … · Our PO <ref>", red failed state, the drainage
+    suggestion, AND a **"📮 Send to subcontractor"** button that opens a picker
+    (`openSubconPicker`) listing every active subcontractor with the suggested one(s)
+    highlighted (⭐ area + coverage chips, OOH chip), each with a Send button →
+    `/sla/jobs/{id}/subcontract {to:key}`. **sla-main `drainTag`** shows sent/failed.
+    **subcontractors.html** (👷 Subcontractors in sla-main 🛠 Tools, SLAAdmin view /
+    FullAccess edit; `_headers` no-cache) is the management page — a card per
+    subcontractor (name · active · to/cc/replyTo · PO trade + number length · work-area
+    chips · base postcode [client geocoded via postcodes.io] + radius · what-to-send
+    field toggles · OOH + priorities), ＋ Add, ⤵ Import from the PO system, and a
+    Leaflet **coverage map** of everyone's bubbles. **TODO/next:** a sidebar NAV entry
+    (needs a portal-config `?v=` sweep); attach Metro Rod's reply/job-card emails to
+    the job; fold subcontractor PO £ into job costing (it already rolls up via the
+    stamped `job_id`).
+- **🤝 Jobs with subcontractors — subcontracted-jobs.html (12 Oct 2026).** ONE list of
+  everything sat with a subcontractor (🤝 With subcontractors button + open-count badge on
+  sla-main; SLA-admin; 👷 Manage → subcontractors.html). Two sources, because the office
+  mostly records sub work as a **subcontractor PO** (`po_log.cost_category='subcontractor'`
+  — 13 since Aug, none with job_id): (1) `job.subcontract` (a 📮 Send, or the new
+  **"🤝 Already with a subcontractor"** on job-view = POST /sla/jobs/{id}/subcontract
+  `{name, note}` with NO `to` → record only: no email, no PO); (2) subcontractor POs from
+  the last 180 days, matched to a job by job_id else `incidentKey(incident_no | job_ref |
   "Incident - NNNNN" in the description)`; an unmatched PO is still listed ("PO only").
-  `subcontractedRows()` (sla.js, exported) merges them per job, names collapse by
-  `subKey` ("Metrorod" = "Metro Rod"). `job.subcontract.status` = open|done|returned
-  (+ closedAt/closedBy/note) via **POST /sla/jobs/{id}/subcontract-status** (creates a
-  `fromPo` record for a PO-matched job); a PO-only row closes via **POST
-  /sla/subcontracted/po-status** `{key:"po:N", status}` (app_config `sla:subconpo:<tid>`).
-  State: office-set done/returned wins, else a finished job = done, else open. **GET
-  /sla/subcontracted** (`?count=1` → `{open}`), **GET /sla/subcontractors** (PO list +
-  email config, for the hand-off picker). £ (PO costs) only for canSeeMoney. Page: With
-  them / Done / Back with us / All tabs, per-subcontractor chips, grouped cards with
-  "N days with them" (amber >3, red >7). A "returned" job reappears in the scheduler
+  `subcontractedRows()` (sla.js, exported) merges per job; names collapse by `subKey`
+  ("Metrorod" = "Metro Rod"). `job.subcontract.status` = open|done|returned (+ closedAt/
+  closedBy/note; a real send now stamps `status:"open"`) via **POST
+  /sla/jobs/{id}/subcontract-status** (makes a `fromPo` record for a PO-matched job); a
+  PO-only row closes via **POST /sla/subcontracted/po-status** `{key:"po:N", status}`
+  (app_config `sla:subconpo:<tid>`). State: office-set done/returned wins, else a finished
+  job = done, else open. **GET /sla/subcontracted** (`?count=1` → `{open}`). PO £ only for
+  canSeeMoney. Page: With them / Done / Back with us / All, per-subcontractor chips, cards
+  grouped by sub with "N days with them" (amber >3, red >7). job-view's green banner gains
+  ✓ Done by them / ↩ Back with us / Reopen; a "returned" job reappears in the scheduler
   tray. `incidentKey` now also reads a SPACE after the number ("30389 Brislington DTU").
-  NOT in the portal-config sidebar (would need a ?v= bump across every page). **Cut-over:**
-  turn the drainage Zap OFF when this goes live — the two locks are separate systems,
-  so both running could email Metro Rod twice.
+  Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
@@ -5749,6 +5820,24 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      UNAFFECTED (the office manages the full site list on po-admin.html → Sites).
      `getRaiseOptions`/`liveProjectNames`/`isLiveProjectSite` are the po.js helpers;
      they read env.DB (projects + users.vehicle_assigned).
+   - **Office/admin can pick a SUBCONTRACTOR as the supplier on a job PO (Oct 2026):**
+     when an **office/admin** user raises a PO through a job (the job-card "Raise PO
+     for this job" → po-raise.html#mlpo), subcontractors now appear in the same
+     Supplier autocomplete, tagged "· 👷 subcontractor". Picking one reveals a
+     **Trade** dropdown and raises it as a **subcontractor PO** (`cost_category:
+     "subcontractor"` + `trade`) so job costing splits subcontractor vs materials.
+     **Frontend-only change** — the worker already handles it: `/po/api/pos` POST
+     sets `source` from the caller's role (office ⇒ "office"), and `issuePO`'s
+     office subcontractor branch (site+supplier+trade+description, all satisfied —
+     site is prefilled from the job) accepts it; engineers are forced to
+     `materials` server-side regardless, so they never get subcontractors. Gated
+     client-side by `IS_OFFICE` = `FullAccess || staffType office || (PurchaseOrders
+     && non-field)` (mirrors po.js `office`); po-raise fetches `/po/api/subcontractors`
+     + `/po/api/trades` only for office users. **Office users also see the form
+     DURING office hours** (the `office_hours` status screen is skipped for
+     `IS_OFFICE` — the server already allows an office-source PO any time), so the
+     feature works in the day, not just out of hours. Engineers still only reach
+     the form outside hours. No SW/`?v=` bump (po-raise.html is network-first).
    - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
      **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
      (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
