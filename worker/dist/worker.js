@@ -21113,6 +21113,7 @@ async function handle13(request, env, ctx, url, sess) {
       }
       const edited = typeof b.details === "string" ? b.details.slice(0, 4e3) : null;
       const pOpts = edited != null ? { details: edited } : {};
+      if (typeof b.target === "string") pOpts.target = b.target;
       if (sc.declineLink) pOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, true);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, pOpts);
       const warnings = [];
@@ -21129,6 +21130,7 @@ async function handle13(request, env, ctx, url, sess) {
         subject: mail.subject,
         html: mail.html,
         details: mail.details,
+        target: mail.target,
         poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)." : nextNo ? "PO " + poRef + " is the next number \u2014 it is only raised when you press Send. If someone raises another PO first, the next free number is used." : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].",
         warnings
       };
@@ -21222,6 +21224,7 @@ async function handle13(request, env, ctx, url, sess) {
       }
       const edited = typeof b.details === "string" ? b.details.slice(0, 4e3) : null;
       const sOpts = edited != null ? { details: edited } : {};
+      if (typeof b.target === "string") sOpts.target = b.target;
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
       const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
@@ -25549,7 +25552,8 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
-  const target = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
+  const autoTarget = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
+  const target = opts.target != null ? String(opts.target).trim().slice(0, 60) : autoTarget;
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : job.priority || "Job";
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
   const code = String(job.siteCode || "").trim();
@@ -25574,7 +25578,7 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
 </table></td></tr></table>`;
-  return { subject, html, ref, details };
+  return { subject, html, ref, details, target };
 }
 async function subcontractedRows(env, tid, money2) {
   const jobs = await listJobs(env, tid);
