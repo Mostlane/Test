@@ -21348,6 +21348,79 @@ async function handle13(request, env, ctx, url, sess) {
     await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:subconpo:" + tenantId, JSON.stringify(map)).run();
     return jsonResponse({ ok: true }, headers);
   }
+  if (subpath === "/subcontracted/job-search" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const q = String(searchParams.get("q") || "").trim().toLowerCase();
+    if (q.length < 2) return jsonResponse({ ok: true, jobs: [] }, headers);
+    const jobs = await listJobs(env, tenantId);
+    const finished = await jobFinishedFor(env, tenantId);
+    const qk = incidentKey(q);
+    const words = q.split(/\s+/).filter(Boolean);
+    const hits = jobs.filter((j) => {
+      if (qk) {
+        const k = incidentKey(j.helpdeskRef);
+        if (k && k.inc === qk.inc) return true;
+      }
+      const hay = [j.helpdeskRef, j.siteCode, j.siteName, j.description, j.id].join(" ").toLowerCase();
+      return words.every((w) => hay.includes(w));
+    }).sort((a, b) => finished(a) - finished(b) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 15).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, siteCode: j.siteCode || "", siteName: j.siteName || "", status: j.status || "", createdAt: j.createdAt || null, description: String(j.description || "").slice(0, 140) }));
+    return jsonResponse({ ok: true, jobs: hits }, headers);
+  }
+  if (subpath === "/subcontracted/link" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (!env.PO_DB) return jsonResponse({ error: "The PO system isn't connected" }, headers, 400);
+    const b = await readJson2(request);
+    const po = String(b.po || "").replace(/^po:/i, "").trim();
+    if (!/^\d+$/.test(po)) return jsonResponse({ error: "po number required" }, headers, 400);
+    const row = await env.PO_DB.prepare("SELECT po_number FROM po_log WHERE po_number=?").bind(po).first().catch(() => null);
+    if (!row) return jsonResponse({ error: "PO " + po + " not found" }, headers, 404);
+    const map = await getPoOnlyClosed(env, tenantId);
+    let job = null;
+    if (b.jobId) {
+      job = await getJob3(env, tenantId, String(b.jobId));
+      if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
+      await env.PO_DB.prepare("UPDATE po_log SET job_id=?, job_ref=? WHERE po_number=?").bind(job.id, job.helpdeskRef || job.id, po).run();
+      delete map["nolink:po:" + po];
+      delete map["po:" + po];
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
+      job.events ||= [];
+      job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Subcontractor PO ${po} linked to this job` });
+      await saveJob(env, tenantId, job);
+    } else {
+      await env.PO_DB.prepare("UPDATE po_log SET job_id=NULL, job_ref=NULL WHERE po_number=?").bind(po).run();
+      map["nolink:po:" + po] = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username };
+    }
+    await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:subconpo:" + tenantId, JSON.stringify(map)).run();
+    return jsonResponse({ ok: true, jobId: job ? job.id : null }, headers);
+  }
+  if (subpath === "/subcontracted/cost" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess) || !await canSeeMoney(env, tenantId, sess.user.username)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const raw = b.cost;
+    const cost = raw === "" || raw == null ? null : Math.round(parseFloat(String(raw).replace(/[£,\s]/g, "")) * 100) / 100;
+    if (cost !== null && !(Number.isFinite(cost) && cost >= 0 && cost < 1e7)) return jsonResponse({ error: "cost must be a number (ex VAT)" }, headers, 400);
+    if (b.po) {
+      if (!env.PO_DB) return jsonResponse({ error: "The PO system isn't connected" }, headers, 400);
+      const po = String(b.po).replace(/^po:/i, "").trim();
+      if (!/^\d+$/.test(po)) return jsonResponse({ error: "bad po number" }, headers, 400);
+      const r = await env.PO_DB.prepare("UPDATE po_log SET cost_ex_vat=?, cost_entered_at=? WHERE po_number=?").bind(cost, cost == null ? null : (/* @__PURE__ */ new Date()).toISOString(), po).run();
+      if (!r.meta || !r.meta.changes) return jsonResponse({ error: "PO " + po + " not found" }, headers, 404);
+      return jsonResponse({ ok: true, cost }, headers);
+    }
+    const job = b.jobId ? await getJob3(env, tenantId, String(b.jobId)) : null;
+    if (!job || !job.subcontract) return jsonResponse({ error: "No subcontractor record on that job" }, headers, 404);
+    if (cost == null) delete job.subcontract.cost;
+    else job.subcontract.cost = cost;
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    job.events ||= [];
+    job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: cost == null ? "Cleared the subcontractor cost" : `Subcontractor cost set to \xA3${cost.toFixed(2)} (ex VAT)` });
+    job.updatedAt = now2;
+    await saveJob(env, tenantId, job);
+    return jsonResponse({ ok: true, cost }, headers);
+  }
   if (subpath === "/quotes" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -24982,6 +25055,10 @@ function computeSlaTarget(raisedAt, priority, cfg) {
 function stripMoney(job) {
   if (!job || typeof job !== "object") return job;
   const { orderValue, ...rest } = job;
+  if (rest.subcontract && rest.subcontract.cost != null) {
+    rest.subcontract = { ...rest.subcontract };
+    delete rest.subcontract.cost;
+  }
   return rest;
 }
 function isDrainageJob(j) {
@@ -25192,6 +25269,7 @@ async function subcontractedRows(env, tid, money2) {
     }
     return null;
   };
+  const poMap = await getPoOnlyClosed(env, tid);
   const rows = /* @__PURE__ */ new Map();
   const rowFor = (j) => {
     let r = rows.get(j.id);
@@ -25219,12 +25297,19 @@ async function subcontractedRows(env, tid, money2) {
   for (const j of jobs) if (j.subcontract && j.subcontract.sentAt) rowFor(j);
   for (const p of pos) {
     let j = null;
-    if (p.job_id && byId.has(p.job_id)) j = byId.get(p.job_id);
-    if (!j) {
-      const k = incidentKey(p.incident_no) || incidentKey(p.job_ref) || incidentKey((/incident\D{0,6}(\d{5,8})/i.exec(p.description || "") || [])[1]);
-      if (k) j = pickForInc(k.inc);
+    let how = "";
+    if (p.job_id && byId.has(p.job_id)) {
+      j = byId.get(p.job_id);
+      how = "linked";
     }
-    const po = { number: p.po_number, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...money2 ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {} };
+    if (!j && !poMap["nolink:po:" + p.po_number]) {
+      const k = incidentKey(p.incident_no) || incidentKey(p.job_ref) || incidentKey((/incident\D{0,6}(\d{5,8})/i.exec(p.description || "") || [])[1]);
+      if (k) {
+        j = pickForInc(k.inc);
+        if (j) how = "incident";
+      }
+    }
+    const po = { number: p.po_number, match: how, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...money2 ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {} };
     if (j) rowFor(j).pos.push(po);
     else rows.set("po:" + p.po_number, {
       key: "po:" + p.po_number,
@@ -25262,10 +25347,15 @@ async function subcontractedRows(env, tid, money2) {
       const priced = r.pos.filter((p) => p.cost != null);
       r.poTotal = priced.reduce((a, p) => a + p.cost, 0);
       r.poUnpriced = r.pos.length - priced.length;
+      r.recordCost = r.record && r.record.cost != null ? Number(r.record.cost) : null;
+      r.cost = r.poTotal + (r.recordCost || 0);
+    } else if (r.record) {
+      r.record = { ...r.record };
+      delete r.record.cost;
     }
     return r;
   }).sort((a, b) => String(b.since || "").localeCompare(String(a.since || "")));
-  const poClosed = await getPoOnlyClosed(env, tid);
+  const poClosed = poMap;
   for (const r of list) if (!r.jobId && poClosed[r.key]) {
     r.state = poClosed[r.key].status;
     r.closedAt = poClosed[r.key].at;

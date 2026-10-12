@@ -5708,6 +5708,17 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   (e.g. Eastney Funeral - New Door, 0090 Havant FRA works) stay "PO only". job-view's green banner gains
   ✓ Done by them / ↩ Back with us / Reopen; a "returned" job reappears in the scheduler
   tray. `incidentKey` now also reads a SPACE after the number ("30389 Brislington DTU").
+  **Link + costs (12 Oct 2026):** a PO-only row has **🔗 Link** → search (GET
+  `/sla/subcontracted/job-search?q=` — incident/ref/site/words, open first) → POST
+  `/sla/subcontracted/link {po, jobId}` stamps `po_log.job_id/job_ref` (so job costing
+  gets it too); `jobId:null` unlinks and records `nolink:po:N` in `sla:subconpo` so the
+  automatic incident match won't re-attach it (each PO in a job's detail row has ✕ Unlink;
+  `po.match` = linked|incident). **Costs (money users only):** the PO £ cell is an input —
+  a single PO's cost saves to `po_log.cost_ex_vat` (as if priced in the PO system); a
+  no-PO hand-off saves `job.subcontract.cost` (stripped from field reads by `stripMoney`);
+  multiple POs are priced per PO in the detail row. POST `/sla/subcontracted/cost
+  {po|jobId, cost}`. Row `cost` = priced POs + record cost. **"✓ Done" never changes the
+  job's own status** — it only marks the subcontractor's part finished.
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
