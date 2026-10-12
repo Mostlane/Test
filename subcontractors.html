@@ -37,6 +37,12 @@
     .sc-foot .msg{font-size:13px;} .msg.ok{color:var(--ok);} .msg.err{color:var(--bad);}
     .off{opacity:.6;}
     #map{height:260px;border-radius:12px;border:1px solid var(--line);margin-top:6px;}
+    .pin-modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:9000;padding:12px;}
+    .pin-sheet{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px;padding:16px;}
+    .pin-sheet h3{margin:0 0 8px;font-size:17px;color:var(--brand);}
+    .pin-map{height:320px;border-radius:12px;border:1px solid var(--line);margin:8px 0;}
+    .pin-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    .pin-row input{flex:1;min-width:120px;}
     .note{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;font-size:13px;color:#9a3412;margin-bottom:12px;}
     a.link{color:var(--brand);font-size:13px;}
   </style>
@@ -91,6 +97,7 @@
       <div><label class="fld">Base postcode (coverage centre)</label><input type="text" data-f="basePostcode" placeholder="PO15 5RQ"></div>
       <div><label class="fld">Coverage radius (miles · 0 = everywhere)</label><input type="number" data-f="radiusMiles" min="0" max="500" step="1" placeholder="30"></div>
     </div>
+    <div style="margin-top:6px;"><button type="button" class="btn sm ghost pin">📍 Set area on the map</button> <span class="pinned muted" style="font-size:12.5px;"></span></div>
     <fieldset>
       <legend>What the email includes</legend>
       <div class="flds"></div>
@@ -184,12 +191,61 @@
     card.querySelector(".flds").innerHTML = FIELD_KEYS.map(function(k){ var on = f[k]!==false; return '<label class="sw"><input type="checkbox" data-field="'+k+'"'+(on?" checked":"")+'> '+esc(FIELD_LABELS[k])+'</label>'; }).join("");
     // geocode base on blur so the pin + map stay in step
     var pcEl = card.querySelector('[data-f="basePostcode"]');
-    pcEl.addEventListener("blur", function(){ geocode(pcEl.value).then(function(c){ if(c){ card._lat=c[0]; card._lng=c[1]; } else { card._lat=null; card._lng=null; } }); });
-    // save / delete
+    pcEl.addEventListener("blur", function(){ geocode(pcEl.value).then(function(c){ if(c){ card._lat=c[0]; card._lng=c[1]; } else { card._lat=null; card._lng=null; } pinLabel(card); }); });
+    // save / delete / set-on-map
     card.querySelector(".save").onclick = function(){ saveOne(card); };
     card.querySelector(".del").onclick = function(){ delOne(card); };
-    if(!CAN_EDIT){ card.querySelectorAll("input,textarea,button.save,button.del").forEach(function(el){ el.disabled = true; }); }
+    card.querySelector(".pin").onclick = function(){ openPin(card); };
+    pinLabel(card);
+    if(!CAN_EDIT){ card.querySelectorAll("input,textarea,button.save,button.del,button.pin").forEach(function(el){ el.disabled = true; }); }
     return card;
+  }
+  function pinLabel(card){
+    var el = card.querySelector(".pinned");
+    if(card._lat!=null && card._lng!=null) el.textContent = "✓ pin set (" + card._lat.toFixed(3) + ", " + card._lng.toFixed(3) + ")";
+    else el.textContent = "no pin yet — a base postcode alone also works";
+  }
+  // Pin-drop: tap / drag the coverage centre on a map, preview the radius circle.
+  async function openPin(card){
+    await loadLeaflet();
+    if(!window.L){ alert("Map couldn’t load — type a base postcode instead."); return; }
+    var startRad = parseInt(card.querySelector('[data-f="radiusMiles"]').value,10) || 0;
+    var startLat = card._lat, startLng = card._lng;
+    if(startLat==null){ var c = await geocode(card.querySelector('[data-f="basePostcode"]').value); if(c){ startLat=c[0]; startLng=c[1]; } }
+    var centre = (startLat!=null) ? [startLat,startLng] : [51.0,-1.2];
+    var wrap = document.createElement("div"); wrap.className = "pin-modal";
+    wrap.innerHTML = '<div class="pin-sheet"><h3>📍 Set the coverage area</h3>' +
+      '<div class="pin-row"><input type="text" id="pinPc" placeholder="Jump to a postcode (optional)"><button class="btn sm ghost" id="pinJump">Go</button></div>' +
+      '<p class="muted" style="margin:6px 0 0;">Tap the map (or drag the pin) to set the centre. The blue circle is the coverage radius.</p>' +
+      '<div class="pin-map" id="pinMap"></div>' +
+      '<div class="pin-row"><label class="fld" style="margin:0;">Radius (miles · 0 = everywhere)</label><input type="number" id="pinRad" min="0" max="500" step="1" value="'+startRad+'" style="max-width:120px;flex:0 0 auto;"></div>' +
+      '<div class="pin-row" style="justify-content:flex-end;margin-top:12px;"><button class="btn ghost" id="pinCancel">Cancel</button><button class="btn" id="pinSave">Use this area</button></div></div>';
+    document.body.appendChild(wrap);
+    var close = function(){ wrap.remove(); };
+    wrap.addEventListener("click", function(e){ if(e.target===wrap) close(); });
+    wrap.querySelector("#pinCancel").onclick = close;
+    var map = L.map(wrap.querySelector("#pinMap")).setView(centre, startLat!=null?9:7);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:"© OpenStreetMap", maxZoom:19 }).addTo(map);
+    var marker = L.marker(centre,{ draggable:true }).addTo(map);
+    var circle = L.circle(centre,{ radius:(startRad||0)*1609.34, color:"#15599d", weight:1, fillColor:"#15599d", fillOpacity:.1 }).addTo(map);
+    setTimeout(function(){ map.invalidateSize(); }, 150);
+    function setAt(ll){ marker.setLatLng(ll); circle.setLatLng(ll); }
+    function radM(){ return (parseInt(wrap.querySelector("#pinRad").value,10)||0)*1609.34; }
+    map.on("click", function(e){ setAt(e.latlng); });
+    marker.on("dragend", function(){ circle.setLatLng(marker.getLatLng()); });
+    wrap.querySelector("#pinRad").addEventListener("input", function(){ circle.setRadius(radM()); });
+    wrap.querySelector("#pinJump").onclick = function(){ geocode(wrap.querySelector("#pinPc").value).then(function(c){ if(c){ setAt(c); map.setView(c, 11); } else alert("Postcode not recognised."); }); };
+    wrap.querySelector("#pinPc").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); wrap.querySelector("#pinJump").click(); } });
+    wrap.querySelector("#pinSave").onclick = async function(){
+      var ll = marker.getLatLng();
+      card._lat = ll.lat; card._lng = ll.lng;
+      card.querySelector('[data-f="radiusMiles"]').value = parseInt(wrap.querySelector("#pinRad").value,10)||0;
+      // reverse-geocode so the postcode box stays consistent with the pin (best-effort)
+      try{ var r = await fetch("https://api.postcodes.io/postcodes?lon="+ll.lng+"&lat="+ll.lat+"&limit=1").then(function(x){return x.ok?x.json():null;});
+        var pc = r && r.result && r.result[0] && r.result[0].postcode; if(pc) card.querySelector('[data-f="basePostcode"]').value = pc; }catch(e){}
+      pinLabel(card); close();
+      var m = card.querySelector(".rowmsg"); m.className="msg rowmsg"; m.textContent="Pin set — press 💾 Save to keep it.";
+    };
   }
 
   function render(){
