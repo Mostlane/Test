@@ -590,6 +590,56 @@ function didSetCookie(token) {
   return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
 }
 
+// Device self-heal (Oct 2026). A phone can lose its locally stored device id
+// (browser storage wiped, private tab, a QR app's own viewer) while still
+// carrying the HttpOnly ml_did cookie the server set at registration. The
+// scanner asks GET /device-recover first; this covers a registration that
+// arrives with a fresh token but the cookie of the SAME named person — link the
+// token to them instead of creating a duplicate.
+// Returns the person_id the token now belongs to, or null.
+export async function adoptCookieDevice(env, request, tok, mustMatch) {
+  try {
+    if (!env.SITELOG_DB || !tok) return null;
+    const known = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ? LIMIT 1").bind(tok).first();
+    if (known) return known.person_id;
+    const cookieTok = readDidCookie(request);
+    if (!cookieTok || cookieTok === tok || cookieTok.length > 128) return null;
+    const owner = await env.SITELOG_DB.prepare(
+      `SELECT d.person_id, p.first_name, p.last_name FROM devices d JOIN people p ON p.id = d.person_id
+       WHERE d.device_token = ? AND COALESCE(p.archived,0) = 0 LIMIT 1`).bind(cookieTok).first();
+    if (!owner) return null;
+    // On a registration, only adopt when the typed name IS the cookie's owner —
+    // a phone handed to someone else ("Not you?") must never inherit them.
+    if (mustMatch) {
+      const n = v => String(v || "").trim().toLowerCase();
+      if (n(owner.first_name) !== n(mustMatch.firstName) || n(owner.last_name) !== n(mustMatch.lastName)) return null;
+    }
+    await env.SITELOG_DB.prepare(
+      "INSERT OR IGNORE INTO devices (device_token, person_id) VALUES (?, ?)").bind(tok, owner.person_id).run();
+    return owner.person_id;
+  } catch (e) { console.error("adoptCookieDevice", e); return null; }
+}
+
+// Name match for /register (Oct 2026). When an unrecognised phone registers
+// with the SAME first name, last name and company as one existing live person,
+// it is that person on a phone that forgot them — link it rather than create a
+// duplicate. Only an unambiguous single match is used.
+export async function findSamePerson(env, firstName, lastName, company) {
+  const f = String(firstName || "").trim().toLowerCase();
+  const l = String(lastName || "").trim().toLowerCase();
+  const c = String(company || "").trim().toLowerCase();
+  if (!f || !l) return null;
+  const rows = await env.SITELOG_DB.prepare(
+    `SELECT id, company FROM people
+     WHERE lower(trim(first_name)) = ? AND lower(trim(last_name)) = ?
+       AND COALESCE(archived,0) = 0 AND COALESCE(is_transfer_pending,0) = 0`).bind(f, l).all();
+  const all = rows.results || [];
+  const same = all.filter(r => String(r.company || "").trim().toLowerCase() === c);
+  if (same.length === 1) return same[0].id;
+  return null;
+}
+
 // Normalise a rules value (string or array) to a clean array of non-blank lines.
 function rulesLines(raw) {
   if (Array.isArray(raw)) return raw.map((r) => String(r).trim()).filter((r) => r.length > 0);
@@ -835,6 +885,7 @@ export async function handle(request, env, ctx) {
 
       try {
         await ensureOfflineSchema(env); // person_type / site_rules_visitor columns
+        await adoptCookieDevice(env, request, deviceToken, { firstName, lastName });
         const existing = await env.SITELOG_DB.prepare(`
           SELECT p.id as person_id, p.first_name, p.last_name, p.company, p.purpose, COALESCE(p.archived,0) as archived
           FROM devices d
@@ -856,6 +907,19 @@ export async function handle(request, env, ctx) {
             status: "already_registered",
             personId: existing.person_id
           }, 200, didSetCookie(deviceToken));
+        }
+
+        // Same name + company as someone already registered: their phone forgot
+        // them. Link this phone to the existing person — never a duplicate.
+        const samePerson = await findSamePerson(env, firstName, lastName, company);
+        if (samePerson) {
+          await env.SITELOG_DB.prepare(
+            "INSERT OR REPLACE INTO devices (device_token, person_id) VALUES (?, ?)"
+          ).bind(deviceToken, samePerson).run();
+          await env.SITELOG_DB.prepare(
+            "UPDATE people SET purpose = COALESCE(purpose, ?), person_type = COALESCE(person_type, ?) WHERE id = ?"
+          ).bind(purpose, personType, samePerson).run();
+          return json({ ok: true, status: "relinked", personId: samePerson }, 200, didSetCookie(deviceToken));
         }
 
         const personId = crypto.randomUUID();
@@ -2598,6 +2662,24 @@ export async function handle(request, env, ctx) {
       `).bind(device.person_id, limit).all();
 
       return json({ visits: rows.results || [] });
+    }
+
+    // POST /device-forget — "Not you?": drop the server's sign-in cookie so the
+    // next person on this phone starts clean.
+    if (url.pathname === "/device-forget" && request.method === "POST") {
+      return json({ ok: true }, 200, { "Set-Cookie": "ml_did=; Max-Age=0; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" });
+    }
+
+    // GET /device-recover — the phone has no stored device id. If it still
+    // carries the server's HttpOnly ml_did cookie for a live person, hand that
+    // token back so the scanner carries on as them (no re-registration).
+    if (url.pathname === "/device-recover" && request.method === "GET") {
+      const tok = readDidCookie(request);
+      if (!tok || tok.length > 128) return json({ ok: true, deviceToken: null });
+      const row = await env.SITELOG_DB.prepare(
+        `SELECT d.person_id FROM devices d JOIN people p ON p.id = d.person_id
+         WHERE d.device_token = ? AND COALESCE(p.archived,0) = 0 LIMIT 1`).bind(tok).first();
+      return json({ ok: true, deviceToken: row ? tok : null });
     }
 
     // GET /me — current profile for this device.
