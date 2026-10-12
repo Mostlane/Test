@@ -5739,15 +5739,6 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   header + sticky Subcontractor column, zebra rows, sortable headings (default Days, longest
   first), Work text one line with ellipsis — tap it for a detail row (full text, how/when sent,
   each PO), Days cell tinted green / amber >3 / red >7, ✓ Done + ↩ (back with us) per row.
-  **Responsive — NO side-scrolling (12 Oct 2026):** every column carries a class
-  (`c-sub`/`c-ref`/`c-site`/`c-work`/`c-since`/`c-days`/`c-status`/`c-pos`/`c-cost`/`c-act`) on both
-  the `<th>` and `<td>`, and a media-query ladder hides the columns that are ALSO in the tap-open
-  detail row as the viewport narrows — **Since + PO below 1040px, Site + the £ box below 760px, Job
-  status below 560px** (tighter cell padding there) — so the table fits a laptop AND a phone without
-  horizontal scroll. The subcontractor name / site / status wrap (never widen the table); Work stays
-  one-line ellipsis. The **detail row** gained a "Site · Status · With-them" facts line + a cost
-  input for no-PO job records, so nothing hidden on a narrow screen is lost. Any NEW column must get
-  a `c-<key>` class and, if droppable, be surfaced in the detail row before hiding it.
   A PO-only row whose PO site matches a portal **project** (project name / project site name /
   P-number, normalised) carries `project:{id,number,name,status}` and shows "📁 P0710 Lake Road…"
   linking project-hub (status pill "Project · live"). POs whose site isn't a portal project
