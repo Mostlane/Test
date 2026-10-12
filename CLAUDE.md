@@ -5688,6 +5688,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     (needs a portal-config `?v=` sweep); attach Metro Rod's reply/job-card emails to
     the job; fold subcontractor PO £ into job costing (it already rolls up via the
     stamped `job_id`).
+- **LIVE SETUP (12 Oct 2026): orders send FROM a dedicated shared mailbox `Mostlane Orders
+  <orders@mostlane.com>`** — config `sla:subconsender:1` = `{"from":"orders@mostlane.com","via":""}`,
+  Metro Rod's Reply-To = orders@ (CC still Enquiries@), test confirmed green via 365. An Exchange
+  mail-flow rule "Orders – copy to team" Bccs everything SENT TO orders@ (subcontractor replies)
+  to the team. The decline link is NOT an email — it pushes FullAccess|SLAAdmin office users only.
+  enquiries@ turned out to be neither mailbox, alias, contact nor group (routing unknown) — it was
+  abandoned as the sender. The enquiries@/via notes below are history.
 - **Subcontractor orders are SENT FROM enquiries@ via Microsoft 365 (12 Oct 2026).** A test
   to Tanya from `no-reply@mostlane-portal.com` (Resend) never arrived though Resend accepted it,
   so order + test emails now go through Graph **`sendMail` AS a real mailbox**
