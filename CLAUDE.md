@@ -2533,7 +2533,7 @@ with examples, AND what it does NOT (and where that goes instead)** — it is sh
 office and fed to the AI as the definition. Drainage = anything BLOCKED / backing up /
 SMELLING of drains (toilets, sinks, urinals, gullies, Saniflo, septic tanks); Plumbing =
 leaks, taps, cisterns, flushing, water supply; hot water, water hygiene, washroom fittings
-(seats, dryers, dispensers) are their own types.
+(seats, dryers, dispensers) are their own types. **Jamie's rulings (12 Oct):** fly zappers / insect killers = Electrical (an electrician job, not pest control — Concerto's Fly Zapper/Insecutor tags map there); cigarette bins / smoking points = General maintenance (not street furniture); admin asks like "set up an email for the new manager" = General; "needs an electrician" / "wiring needs checking" / "override not working" = Electrical even under a Light Switch or System tag; "no working toilets" = Drainage.
 - **`classifyWork(text)`** scores every type (sum of matching weights, `not` vetoes),
   after **`stripLocations`** removes words that only say WHERE ("light by the back-up
   chiller", "tiles on the shop floor by the chillers", "till area", "branch") — those used

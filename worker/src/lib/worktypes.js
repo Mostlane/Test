@@ -35,6 +35,7 @@ export const WORK_TYPES = [
       W(/\bblock(?:ed|age|ages|ing up)\b|\bclogged\b|\bkeeps? blocking\b/i, 3),
       W(/\bdrains?\b.{0,60}\bblock(?:ed|ing)\b|\bblock(?:ed|ing)\b.{0,20}\bdrains?\b|\bseptic tank\b|\bcess ?pit\b|\bsinks? (?:and|&) (?:the )?toilets?\b.{0,30}\bblock|\b(?:sinks?|toilets?|pipes?|drains?|basins?)\b.{0,30}\b(?:clogged|blocking up)\b/i, 8),
       W(/\bdrain covers?\b|\braised edge\b/i, -6),
+      W(/\bno (?:working )?toilets?\b|\btoilets? (?:are |is )?unavailable\b/i, 7),
       W(/\b(?:drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|inspection chambers?|soak ?aways?|interceptors?|grease traps?|fat traps?|aco\b|channel drain)/i, 5),
       W(/\b(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|pans?|waste)\s+(?:is |are |has |have |keeps? |still |now |completely |fully )*(?:blocked|backing up|backed up|overflowing|not draining|won'?t drain|not going down)/i, 8),
       W(/\bblocked\s+(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|drains?|pipes?|waste|pans?)\b/i, 8),
@@ -139,7 +140,7 @@ export const WORK_TYPES = [
 
   /* ── Electrical ──────────────────────────────────────────────────────── */
   { id: "electrical-power", name: "Electrical — power, sockets & tripping", group: "Electrical",
-    description: "Power problems. No power / partial power, power cuts, circuits or RCDs tripping, trip switches that won't reset, fuses, consumer units and distribution boards, sockets and spurs not working or damaged, burning smell or scorching at a socket, exposed or damaged cables and wiring, isolators, three-phase supply issues, electrical sub-mains, new circuits and sockets. NOT: lights (Lighting), emergency lights (Emergency lighting), tills / card readers / phones (IT, tills & telecoms), testing and certificates (Electrical testing).",
+    description: "Power problems. No power / partial power, power cuts, circuits or RCDs tripping, trip switches that won't reset, fuses, consumer units and distribution boards, sockets and spurs not working or damaged, burning smell or scorching at a socket, exposed or damaged cables and wiring, isolators, three-phase supply issues, electrical sub-mains, new circuits and sockets. Also fly zappers / insect killers (fitting, replacing, not working — an electrician job, not pest control), 'needs an electrician', wiring to be checked, overrides not working. NOT: lights (Lighting), emergency lights (Emergency lighting), tills / card readers / phones (IT, tills & telecoms), testing and certificates (Electrical testing).",
     concerto: ["electrics", "electrical", "electricity", "power", "system", "cables/wiring", "cables", "wiring", "sockets", "socket", "distribution board", "fuse board", "consumer unit"],
     kw: [
       W(/\bno power\b|\bpower (?:cut|outage|loss|failure|off)|\blost power\b|\bnothing is working\b|\btripp(?:ed|ing)\b|\btrips\b|\btrip switch\b|\brcds?\b|\brcbos?\b|\bmcbs?\b/i, 8),
@@ -147,6 +148,9 @@ export const WORK_TYPES = [
       W(/\bfuse(?:s|d| board| box)?\b|\bconsumer units?\b|\bdistribution boards?\b|\bdb\b|\bisolators?\b|\bthree[- ]phase\b|\bsub[- ]?mains?\b/i, 6),
       W(/\bexposed (?:copper )?wires?\b|\byellow ?\/ ?green\b|\bexternal (?:plug|socket)\b|\bip ?rated\b|\bplugs?\b(?!\s*holes?)|\b(?:cables?|wires?|wiring)\b.*\b(?:exposed|damaged|hanging|out|loose|live|bare)|\b(?:exposed|damaged|loose|live|bare) (?:cables?|wires?|wiring)\b|\bburning smell\b|\bscorch/i, 8),
       W(/\belectric(?:al|s|ity|ian)?\b|\bpower\b/i, 3),
+      W(/\bfly (?:zappers?|killers?|units?|control units?)\b|\binsect(?:ocutor|o-?cutor|killer)s?\b|\binsecutor\b|\blumn?ia\b|\bfly (?:sticker|glue) (?:paper|board)s?\b/i, 10),
+      W(/\bneeds? an electrician\b|\belectrician (?:to|needed|required)\b|\b(?:check|checking|test|testing) (?:the )?wiring\b|\bwiring (?:check(?:ing|ed)?|needs? checking)\b|\bneeds? (?:the )?wiring check/i, 10),
+      W(/\boverrides?\b/i, 5),
     ],
     not: [] },
 
@@ -391,10 +395,10 @@ export const WORK_TYPES = [
     not: [/\bexit signs?\b/i, /\bsign(?:ed|ing)? (?:off|in|out)\b/i, /\bsign(?:age)? light|\billuminated sign/i] },
 
   { id: "street-furniture", name: "External bins & street furniture", group: "Roofs & external",
-    description: "Free-standing and fixed items outside the store: cigarette bins and smoking points, litter bins, dog bins, benches, cycle racks and bike shelters, trolley bays and trolley shelters, smoking shelters, planters as fixtures, post boxes and parcel lockers on the forecourt. NOT: fences and railings (Fencing & barriers), waste collections (Cleaning, waste & clearance), car-park surfaces (Car parks & external surfaces).",
-    concerto: ["cigarette bin", "cigarette bins", "litter bin", "bins", "bench", "cycle rack", "trolley bay", "smoking shelter"],
+    description: "Free-standing and fixed items outside the store: litter bins, dog bins, benches, cycle racks and bike shelters, trolley bays and trolley shelters, smoking shelters, planters as fixtures, post boxes and parcel lockers on the forecourt. NOT: cigarette bins and smoking points (General maintenance), fences and railings (Fencing & barriers), waste collections (Cleaning, waste & clearance), car-park surfaces (Car parks & external surfaces).",
+    concerto: ["litter bin", "bins", "bench", "cycle rack", "trolley bay", "smoking shelter"],
     kw: [
-      W(/\b(?:outside|external|outdoor) bins?\b|\bbins? (?:has been |was |got )?(?:stolen|missing|taken)\b|\bcig(?:arette)? bins?\b|\bcig bins?\b|\bsmoking (?:point|shelter|bin)s?\b|\bbutt bins?\b|\blitter bins?\b|\bdog bins?\b|\bbenche?s?\b|\b(?:cycle|bike) (?:rack|shelter|stand)s?\b|\btrolley (?:bay|shelter|park)s?\b|\bparcel lockers?\b/i, 9),
+      W(/\b(?:outside|external|outdoor) bins?\b|\bbins? (?:has been |was |got )?(?:stolen|missing|taken)\b|\blitter bins?\b|\bdog bins?\b|\bbenche?s?\b|\b(?:cycle|bike) (?:rack|shelter|stand)s?\b|\btrolley (?:bay|shelter|park)s?\b|\bparcel lockers?\b/i, 9),
     ],
     not: [] },
 
@@ -478,10 +482,10 @@ export const WORK_TYPES = [
 
   /* ── Hygiene & environment ───────────────────────────────────────────── */
   { id: "pest-control", name: "Pest control & proofing", group: "Hygiene & environment",
-    description: "Pests and keeping them out: rats, mice, rodent droppings, cockroaches, flies, wasps' nests, pigeons and birds (netting, spikes), proofing gaps around pipes, doors and chillers to stop entry, cleaning and sterilising after an infestation (e.g. rat excrement in hatches), work recommended by Rentokil / pest contractors. NOT: rats coming up through drains (Drainage), fire-stopping gaps (Firestopping).",
+    description: "Pests and keeping them out: rats, mice, rodent droppings, cockroaches, flies, wasps' nests, pigeons and birds (netting, spikes), proofing gaps around pipes, doors and chillers to stop entry, cleaning and sterilising after an infestation (e.g. rat excrement in hatches), work recommended by Rentokil / pest contractors. NOT: fly zappers / insect killers (Electrical — power),  rats coming up through drains (Drainage), fire-stopping gaps (Firestopping).",
     concerto: ["pest control", "pests", "pest", "proofing", "rodents", "birds"],
     kw: [
-      W(/\bfly (?:zappers?|killers?|units?|control|screens?)\b|\binsect(?:ocutor|o-?cutor|killer)s?\b|\binsecutor\b|\blumn?ia\b|\bfruit fl(?:y|ies)\b|\bpests?\b|\brodents?\b|\brats?\b|\bmice\b|\bmouse\b|\bvermin\b|\bdroppings\b|\bcockroach|\binfest|\bwasps?\b|\bflies\b|\bpigeons?\b|\bbird (?:netting|spikes|mesh)\b|\bbirds?\b|\brentokil\b|\bproof(?:ing|ed)?\b|\bsteril(?:is|iz)/i, 9),
+      W(/\bfly (?:control(?! units?)|screens?)\b|\bfruit fl(?:y|ies)\b|\bpests?\b|\brodents?\b|\brats?\b|\bmice\b|\bmouse\b|\bvermin\b|\bdroppings\b|\bcockroach|\binfest|\bwasps?\b|\bflies\b|\bpigeons?\b|\bbird (?:netting|spikes|mesh)\b|\bbirds?\b|\brentokil\b|\bproof(?:ing|ed)?\b|\bsteril(?:is|iz)/i, 9),
       W(/\bgaps?\b.{0,40}\b(?:entry|enter|getting in)\b|\bprevent (?:the )?entry\b|\bplug (?:the |a )?holes?\b|\bstop (?:them|rodents|pests|mice|rats) (?:getting|coming) in\b/i, 7),
     ],
     not: [/\bwater ?proof|\bfire ?proof|\bweather ?proof/i] },
@@ -514,9 +518,11 @@ export const WORK_TYPES = [
     not: [] },
 
   { id: "general", name: "General maintenance", group: "Other",
-    description: "Small mixed repairs that don't fit one trade, or a list of several different small jobs for a handyman visit: put up a notice board, re-fix a bracket, adjust something, 'various' works. Use this only when no other type fits.",
-    concerto: ["general", "general maintenance", "work required", "other", "miscellaneous"],
-    kw: [W(/\bvarious\b|\bodd jobs?\b|\bhandyman\b|\bgeneral (?:maintenance|repairs?)\b|\bre-?fix\b|\bbrackets?\b/i, 2)],
+    description: "Small mixed repairs that don't fit one trade, or a list of several different small jobs for a handyman visit: put up a notice board, re-fix a bracket, adjust something, 'various' works. Also cigarette bins / smoking points (broken, missing, replace), and admin requests that aren't a repair (e.g. setting up an email for a new manager). Use this only when no other type fits.",
+    concerto: ["cigarette bin", "cigarette bins", "smoking shelter", "general", "general maintenance", "work required", "other", "miscellaneous"],
+    kw: [W(/\bvarious\b|\bodd jobs?\b|\bhandyman\b|\bgeneral (?:maintenance|repairs?)\b|\bre-?fix\b|\bbrackets?\b/i, 2),
+      W(/\bcig(?:arette)? bins?\b|\bsmoking (?:point|shelter|bin)s?\b|\bbutt bins?\b|\bcigarette butts\b/i, 9),
+      W(/\bemails?\b.{0,20}\bset ?up\b|\bset ?up\b.{0,30}\bemails?\b|\bholding manager\b/i, 12)],
     not: [] },
 ];
 
@@ -583,7 +589,7 @@ export function typeFromConcertoTag(tag) {
   if (a === "lockers") return /lock|key/.test(f) ? "locks-access" : "store-fixtures";
   if (/^(?:cables\/wiring|cables|wiring|sockets?)$/.test(a)) return "electrical-power";
   if (/^gas boiler$/.test(a)) return "gas";
-  if (/^(?:fly zapper|insecutor|fly killer)$/.test(a)) return "pest-control";
+  if (/^(?:fly zapper|insecutor|fly killer)$/.test(a)) return "electrical-power";
   if (/^(?:equipment collection|general waste)$/.test(a)) return "cleaning-waste";
   if (/^(?:car park|foot ?path)$/.test(a)) return "external-surfaces";
   if (/^(?:queuing systems?|store phone|site network|doms?)$/.test(a)) return a.startsWith("dom") ? "forecourt-ev" : "it-telecoms";
@@ -601,7 +607,7 @@ export function typeFromConcertoTag(tag) {
   if (/^(?:roof)$/.test(a)) return "roofing";
   if (/^(?:guttering)$/.test(a)) return "rainwater";
   if (/^(?:saniflow|saniflo)$/.test(a)) return "drainage";
-  if (/^(?:cigarette bin)$/.test(a)) return "street-furniture";
+  if (/^(?:cigarette bins?|smoking shelter)$/.test(a)) return "general";
   if (CONCERTO_INDEX.has(a)) return CONCERTO_INDEX.get(a);
   for (const [k, id] of CONCERTO_INDEX) if (k.length > 3 && (a.startsWith(k) || k.startsWith(a))) return id;
   return null;
