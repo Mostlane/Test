@@ -5578,7 +5578,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   areas[] (sla_work_areas ids they cover), base{postcode,lat,lng} + radiusMiles
   (coverage bubble), ooh + oohPriorities[] (does out-of-hours, for which
   priorities), fields{site,address,phone,priority,target,description} (what the
-  order email carries)}`. Helpers in sla.js (near getSubconConfig): `normSubcon`,
+  order email carries), requirePhone (won't accept a job without a valid phone —
+  default on for Metro Rod)}`. **Phone gate:** when `sc.requirePhone`, the
+  `/sla/jobs/{id}/subcontract` handler refuses with **400 `{needPhone:true}`** (no PO
+  raised, nothing locked/sent) unless the job has a ≥7-digit `telephone`; the client
+  (job-view `sendToSubcontractor` → `promptPhone` modal) asks for a number and
+  re-sends `{to,phone}`, which the worker SAVES onto the job before proceeding.
+  Helpers in sla.js (near getSubconConfig): `normSubcon`,
   `getSubconConfig` (union of defaults + stored), `setSubconConfig`, `subKey`,
   `inferAreaKw` (keyword→work-area, NO AI — `AREA_KW` table + the area's own name),
   `isOutOfHoursLondon` (weekend / <08:00 / ≥18:00), and

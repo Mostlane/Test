@@ -127,6 +127,14 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("subcontract record carries the right key + name", la.body.subcontract.key === "lbglazing" && la.body.subcontract.name === "L&B Glazing");
   ok("its PO used NO padding (poDigits 0)", la.body.subcontract.poRef === String(la.body.subcontract.poNumber)); }
 
+// phone gate: Metro Rod won't accept a job with no phone — block, then accept one
+{ const E = makeEnv();
+  const a = await call(E, "Office Admin", "/jobs/J-TAP/subcontract", { to: "metrorod" });   // J-TAP has no telephone
+  ok("no phone → 400 needPhone, NOTHING raised or sent", a.status === 400 && a.body.needPhone === true && E.poLog.length === 0 && E.sent.length === 0, JSON.stringify(a.body));
+  const b = await call(E, "Office Admin", "/jobs/J-TAP/subcontract", { to: "metrorod", phone: "023 9212 3456" });
+  ok("re-send WITH a phone → 200, PO raised, phone saved on the job", b.status === 200 && E.poLog.length === 1 && E.saved["J-TAP"] && E.saved["J-TAP"].telephone === "023 9212 3456", JSON.stringify({ tel: E.saved["J-TAP"] && E.saved["J-TAP"].telephone, po: E.poLog.length }));
+  ok("the emailed order carries the entered phone", /023 9212 3456/.test(E.sent[0] && E.sent[0].html || "")); }
+
 // subcontractor config GET + normalisation
 { const E = makeEnv();
   const g = await call(E, "Office Admin", "/subcontractors", null, "GET");

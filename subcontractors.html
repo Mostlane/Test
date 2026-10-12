@@ -101,6 +101,7 @@
     <fieldset>
       <legend>What the email includes</legend>
       <div class="flds"></div>
+      <label class="sw" style="margin-top:8px;"><input type="checkbox" data-f="requirePhone"> ⚠ Won’t accept a job without a phone number — block the send until one is entered <span class="muted">(Metro Rod)</span></label>
     </fieldset>
     <fieldset>
       <legend>Out of hours</legend>
@@ -164,6 +165,7 @@
       radiusMiles: parseInt(g("radiusMiles").value,10)||0,
       ooh: g("ooh").checked,
       oohPriorities: prio,
+      requirePhone: g("requirePhone").checked,
       fields: fields
     };
   }
@@ -177,7 +179,7 @@
     var set = function(f,v){ var el = card.querySelector('[data-f="'+f+'"]'); if(el){ if(el.type==="checkbox") el.checked = !!v; else el.value = (v==null?"":v); } };
     set("name", sub.name); set("active", sub.active!==false); set("to", sub.to); set("cc",(sub.cc||[]).join(", "));
     set("replyTo", sub.replyTo); set("trade", sub.trade); set("poDigits", sub.poDigits||0);
-    set("basePostcode", (sub.base&&sub.base.postcode)||""); set("radiusMiles", sub.radiusMiles||0); set("ooh", !!sub.ooh);
+    set("basePostcode", (sub.base&&sub.base.postcode)||""); set("radiusMiles", sub.radiusMiles||0); set("ooh", !!sub.ooh); set("requirePhone", !!sub.requirePhone);
     // areas chips
     var ac = card.querySelector('[data-f="areas"]');
     ac.innerHTML = AREAS.map(function(a){ var on = (sub.areas||[]).indexOf(a.id)>=0; return '<span class="chip'+(on?' on':'')+'" data-id="'+esc(a.id)+'">'+esc(a.name)+'</span>'; }).join("") || '<span class="muted">No work areas configured.</span>';
