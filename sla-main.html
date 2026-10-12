@@ -275,7 +275,7 @@
             <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="concerto-stats.html" class="btn" id="coopStatsLink" style="display:none">📊 Co-op stats</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
-            <a href="subcontractors.html" class="btn" id="subconLink" style="display:none" title="Set up who jobs can be sent out to (Metro Rod + others)">👷 Subcontractors</a>
+            <a href="subcontractors.html" class="btn" id="subconMgrLink" style="display:none" title="Set up who jobs can be sent out to (Metro Rod + others)">👷 Subcontractors</a>
             <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
             <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
             <a href="sla-settings.html" class="btn">⚙️ Settings</a>
@@ -317,6 +317,14 @@
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }
+        // Subcontractor SETTINGS — any OFFICE user (Full Access or staffType "office"),
+        // never a field engineer. Mirrors the worker's canSeeMoney gate on /sla/subcontractors.
+        (function(){ try{
+          var st = String(sessionStorage.getItem("mostlaneStaffType")||localStorage.getItem("mostlaneStaffType")||p.StaffType||"").toLowerCase();
+          if (yes(p.FullAccess) || st === "office") {
+            var m = document.getElementById("subconMgrLink"); if (m) m.style.display = "";
+          }
+        }catch(e){} })();
         // "Where's everyone" has its own permission (SLA Admin / Full Access always see it).
         if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.WhereEveryone)) {
           var wl = document.getElementById("whereLink"); if (wl) wl.style.display = "";
