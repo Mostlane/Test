@@ -2474,7 +2474,9 @@ export async function handle(request, env, ctx, url, sess) {
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
-      const mail = buildMetroRodEmail(job, hours, poRef, sc, edited != null ? { details: edited } : {});
+      const pOpts = edited != null ? { details: edited } : {};
+      if (sc.declineLink) pOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, true);
+      const mail = buildMetroRodEmail(job, hours, poRef, sc, pOpts);
       const warnings = [];
       if (!String(job.postcode || "").trim()) warnings.push("No postcode on the job.");
       if (String(job.telephone || "").replace(/\D/g, "").length < 7) warnings.push(sc.requirePhone ? "No valid phone number — you'll be asked for one when you send." : "No phone number on the job.");
@@ -2523,7 +2525,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (!sc.to) return jsonResponse({ error: sc.name + " has no email address — add one on the Subcontractors page." }, headers, 400);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
-      if (job.subcontract && job.subcontract.sentAt) return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
+      if (job.subcontract && job.subcontract.sentAt && job.subcontract.status !== "returned") return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
       // Phone gate — some subcontractors (Metro Rod) won't accept a job without a
       // valid phone number. The client may re-send with {phone}; we save it onto
       // the job (so the email carries it + it's kept) and only then proceed. No PO
@@ -2568,7 +2570,9 @@ export async function handle(request, env, ctx, url, sess) {
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
       const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
-      const mail = buildMetroRodEmail(job, hours, poRef, sc, edited != null ? { details: edited } : {});
+      const sOpts = edited != null ? { details: edited } : {};
+      if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
+      const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
       const { sendEmail } = await import("../lib/email.js");
       const r = await sendEmail(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
@@ -2933,6 +2937,51 @@ export async function handle(request, env, ctx, url, sess) {
     const out = await subcontractedRows(env, tenantId, money);
     if (searchParams.get("count")) return jsonResponse({ ok: true, open: out.rows.filter(r => r.state === "open").length }, headers);
     return jsonResponse({ ok: true, money, ...out }, headers);
+  }
+
+  // GET/POST /sla/subcon-reply?key=job|sub|po|test&exp=&sig= — PUBLIC (signed link in a
+  // subcontractor's order email). GET shows a confirm page (never acts — mail scanners
+  // pre-open links); POST records "can't take this job" and tells the office.
+  if (subpath === "/subcon-reply" && (method === "GET" || method === "POST")) {
+    const { fileSigningEnabled } = await import("../lib/filesign.js");
+    const key = searchParams.get("key") || "";
+    const page = (title, body, status = 200) => new Response(subconReplyPage(title, body), { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
+    if (!fileSigningEnabled(env) || !(await verifyFileSig(env, key, searchParams)))
+      return page("Link expired", "<p>This link has expired or isn't valid. Please reply to the order email or call us instead.</p>", 403);
+    const [jobId, subk, poRef, testFlag] = key.split("|");
+    const isTest = testFlag === "1";
+    const job = await getJob(env, tenantId, jobId);
+    const sc = job && job.subcontract;
+    const site = job ? [job.siteCode, job.siteName].filter(Boolean).join(" ") + (job.postcode ? ", " + job.postcode : "") : "";
+    if (!job) return page("Job not found", "<p>We couldn't find this job. Please reply to the order email or call us.</p>", 404);
+    if (!isTest && (!sc || sc.key !== subk || String(sc.poRef || "") !== String(poRef || "")))
+      return page("This job has moved on", "<p>This order (PO " + escH(poRef) + ") is no longer with you, so there's nothing to do. Thank you.</p>");
+    if (!isTest && sc.declined) return page("Already received", "<p>We've already recorded that you can't take PO " + escH(poRef) + " (" + escH(site) + "). Thank you for letting us know.</p>");
+    if (method === "GET") {
+      return page("Can't take this job?",
+        `<p>Order <b>PO ${escH(poRef)}</b><br>${escH(site)}</p>
+         <p>If you're unable to attend this job, confirm below and we'll arrange cover. If you can attend, you don't need to do anything — just close this page.</p>
+         <form method="post"><label style="display:block;font-weight:600;margin:14px 0 6px">Reason (optional)</label>
+         <textarea name="reason" rows="3" maxlength="500" style="width:100%;box-sizing:border-box;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:15px/1.4 inherit" placeholder="e.g. no engineer available until Thursday"></textarea>
+         <button type="submit" style="margin-top:14px;width:100%;background:#15599d;color:#fff;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:700;cursor:pointer">Confirm — we can't take this job</button></form>
+         ${isTest ? '<p style="color:#b45309;font-weight:600">This is a TEST link — nothing will be recorded.</p>' : ""}`);
+    }
+    let reason = "";
+    try { const f = await request.formData(); reason = String(f.get("reason") || "").trim().slice(0, 500); } catch {}
+    if (isTest) return page("Test only", "<p>This was a TEST email, so nothing was recorded. In a real order the office would now be told you can't take PO " + escH(poRef) + ".</p>");
+    const now = new Date().toISOString();
+    sc.declined = { at: now, reason };
+    sc.status = "returned"; sc.closedAt = now; sc.closedBy = sc.name + " (via email link)";
+    job.events ||= [];
+    job.events.push({ at: now, by: sc.name, type: "subcontract", note: `${sc.name} can't take this job (PO ${poRef})${reason ? " — " + reason : ""}` });
+    job.updatedAt = now;
+    await saveJob(env, tenantId, job);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+      title: "❌ " + sc.name + " can't take a job",
+      body: `${job.helpdeskRef || job.id} — ${site}${reason ? ": " + reason : ""}. PO ${poRef} was raised — cancel it in the PO system if it won't be used.`,
+      url: "/job-view.html?jobId=" + encodeURIComponent(job.id), tag: "subcon-declined:" + job.id, actionable: true
+    }, null, { officeOnly: true }).catch(() => {}));
+    return page("Thank you", "<p>We've recorded that you can't take <b>PO " + escH(poRef) + "</b> (" + escH(site) + ") and let the office know. You don't need to do anything else.</p>");
   }
 
   // POST /sla/subcontracted/po-status {key:"po:10630", status:"open"|"done"|"returned"} —
@@ -6824,6 +6873,8 @@ function normSubcon(sc, key) {
     ooh: sc.ooh === true,
     oohPriorities: Array.isArray(sc.oohPriorities) ? sc.oohPriorities.map(x => String(x).trim()).filter(Boolean) : [],
     requirePhone: sc.requirePhone === true,
+    // Put a "can't take this job?" link in their order emails (off unless ticked).
+    declineLink: sc.declineLink === true,
     fields
   };
 }
@@ -6843,7 +6894,7 @@ async function setSubconConfig(env, tid, map) {
   const clean = {};
   for (const k of Object.keys(map || {})) {
     const n = normSubcon(map[k], k); if (!n.name) continue;
-    clean[k] = { name: n.name, active: n.active, to: n.to, cc: n.cc, replyTo: n.replyTo, trade: n.trade, poDigits: n.poDigits, areas: n.areas, base: n.base, radiusMiles: n.radiusMiles, ooh: n.ooh, oohPriorities: n.oohPriorities, requirePhone: n.requirePhone, fields: n.fields };
+    clean[k] = { name: n.name, active: n.active, to: n.to, cc: n.cc, replyTo: n.replyTo, trade: n.trade, poDigits: n.poDigits, areas: n.areas, base: n.base, radiusMiles: n.radiusMiles, ooh: n.ooh, oohPriorities: n.oohPriorities, requirePhone: n.requirePhone, declineLink: n.declineLink, fields: n.fields };
   }
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
   return clean;
@@ -6896,6 +6947,22 @@ function escH(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
    No is OUR PO number (raised in the PO system, padded to the subcontractor's
    width — e.g. Metro Rod's 6 digits), passed in as `poRef`; it falls back to the
    client's incident ref only if no PO was raised (shouldn't happen in practice). */
+// Signed link for a subcontractor to say they can't take a job (30 days). The key
+// carries job|subKey|poRef|test; test links render the page but record nothing.
+// No signing secret → no link (an unsigned link would let anyone decline any job).
+export async function subconReplyUrl(env, origin, jobId, key, poRef, test) {
+  const { fileSigningEnabled } = await import("../lib/filesign.js");
+  if (!fileSigningEnabled(env)) return null;
+  return signedFileUrl(env, origin, "/sla/subcon-reply", [jobId, key, poRef, test ? 1 : 0].join("|"), 30 * 86400);
+}
+function subconReplyPage(title, body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mostlane — ${escH(title)}</title></head>
+<body style="margin:0;background:#eef1f5;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1c2733">
+<div style="max-width:520px;margin:24px auto;padding:0 16px"><div style="background:#fff;border:1px solid #e2e6ec;border-radius:16px;padding:22px">
+<div style="background:#15599d;color:#fff;border-radius:12px;padding:14px 18px;font-weight:700;margin-bottom:16px">Mostlane</div>
+<h1 style="font-size:20px;margin:0 0 10px">${escH(title)}</h1><div style="font-size:15px;line-height:1.5;color:#33424f">${body}</div>
+<p style="font-size:12px;color:#9aa5b1;margin-top:22px">Mostlane Ltd · PO15 5RQ</p></div></div></body></html>`;
+}
 // The job text a subcontractor should see: the description minus the portal's own
 // linking notes ("↩ Re-assigned incident — follows our earlier visit …") which are
 // for the office, not for a third party.
@@ -6927,10 +6994,12 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
     on("description") && box("Details", details, false),
   ].filter(Boolean).join("");
   const headPriority = (on("priority") || on("target"));
+  const invoiceBox = ref ? `<table style="width:100%;background:#fff7e6;border:1px solid #f3c969;border-radius:12px;margin:4px 0 10px 0"><tr><td style="padding:14px 18px;font-size:14px;color:#5c3d00;line-height:1.5"><b>Invoicing:</b> all invoices for this job <b>must quote our PO number ${escH(ref)}</b>. Invoices without it cannot be processed.</td></tr></table>` : "";
+  const declineBox = opts.declineUrl ? `<tr><td style="padding:16px 28px 0 28px"><table style="width:100%;border:1px solid #e2e6ec;border-radius:12px"><tr><td style="padding:14px 18px;font-size:14px;color:#33424f;line-height:1.5">We'll take it that you've <b>accepted this job</b> unless you tell us otherwise. If you're unable to attend, please let us know straight away so we can arrange cover:<div style="margin-top:12px"><a href="${escH(opts.declineUrl)}" style="display:inline-block;background:#ffffff;color:#15599d;border:2px solid #15599d;border-radius:10px;padding:10px 18px;font-weight:600;text-decoration:none">We can't take this job</a></div></td></tr></table></td></tr>` : "";
   const html = `<table style="width:100%;background:#eef1f5;margin:0;padding:24px 0"><tr><td align="center"><table style="width:600px;max-width:600px;background:#ffffff;border:1px solid #e2e6ec;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
 <tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? (target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")) : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
-<tr><td style="padding:18px 28px 4px 28px">${boxes}</td></tr>
-<tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">Please attend the above and confirm receipt. Contact the site on the number above to arrange access.</div></td></tr>
+<tr><td style="padding:18px 28px 4px 28px">${boxes}${invoiceBox}</td></tr>
+<tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref, details };

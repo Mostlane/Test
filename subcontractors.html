@@ -110,6 +110,7 @@
       <legend>What the email includes</legend>
       <div class="flds"></div>
       <label class="sw" style="margin-top:8px;"><input type="checkbox" data-f="requirePhone"> ⚠ Won’t accept a job without a phone number — block the send until one is entered <span class="muted">(Metro Rod)</span></label>
+      <label class="sw" style="margin-top:8px;"><input type="checkbox" data-f="declineLink"> 🙋 Add a “We can’t take this job” link to their order emails <span class="muted">(if they don’t press it, the job is taken as accepted)</span></label>
     </fieldset>
     <fieldset>
       <legend>Out of hours</legend>
@@ -176,6 +177,7 @@
       ooh: g("ooh").checked,
       oohPriorities: prio,
       requirePhone: g("requirePhone").checked,
+      declineLink: g("declineLink").checked,
       fields: fields
     };
   }
@@ -189,7 +191,7 @@
     var set = function(f,v){ var el = card.querySelector('[data-f="'+f+'"]'); if(el){ if(el.type==="checkbox") el.checked = !!v; else el.value = (v==null?"":v); } };
     set("name", sub.name); set("active", sub.active!==false); set("to", sub.to); set("cc",(sub.cc||[]).join(", "));
     set("replyTo", sub.replyTo); set("trade", sub.trade); set("poDigits", sub.poDigits||0);
-    set("basePostcode", (sub.base&&sub.base.postcode)||""); set("radiusMiles", sub.radiusMiles||0); set("ooh", !!sub.ooh); set("requirePhone", !!sub.requirePhone);
+    set("basePostcode", (sub.base&&sub.base.postcode)||""); set("radiusMiles", sub.radiusMiles||0); set("ooh", !!sub.ooh); set("requirePhone", !!sub.requirePhone); set("declineLink", !!sub.declineLink);
     // areas chips
     var ac = card.querySelector('[data-f="areas"]');
     var groups = []; AREAS.forEach(function(a){ var g = a.group || "Other"; if (groups.indexOf(g) < 0) groups.push(g); });

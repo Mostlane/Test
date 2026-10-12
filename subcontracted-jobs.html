@@ -165,7 +165,7 @@
       : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
     let dCls = "", dTxt = "";
     if (r.state === "open") { dCls = r.days == null ? "" : r.days > 7 ? "st-red" : r.days > 3 ? "st-amber" : "st-green"; dTxt = r.days == null ? "" : r.days === 0 ? "today" : r.days + "d"; }
-    else { dCls = r.state === "done" ? "st-green" : "st-grey"; dTxt = r.state === "done" ? "✓ Done" : "↩ Back"; }
+    else { dCls = r.state === "done" ? "st-green" : "st-grey"; dTxt = r.state === "done" ? "✓ Done" : (r.record && r.record.declined ? "❌ Can't take" : "↩ Back"); if (r.record && r.record.declined && r.state === "returned") dCls = "st-red"; }
     const status = r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>`
       : r.project ? `<span class="pill p-proj">Project · ${esc(r.project.status || "")}</span>` : `<span class="pill p-warn">No job found</span>`;
     const pos = r.pos.length ? r.pos.map(p => esc(p.number)).join(", ") : "";
@@ -185,7 +185,7 @@
     // detail row (always rendered to keep the zebra striping stable; hidden when closed)
     const rec = r.record;
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
-    const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
+    const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${rec && rec.declined ? " · <b>they can't take it</b>" + (rec.declined.reason ? ": “" + esc(rec.declined.reason) + "”" : "") : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
     const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" data-from="${esc(r.jobId)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
     html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
     return html;
