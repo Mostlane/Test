@@ -1844,6 +1844,7 @@ function renderDrainBanner(){
   if(sc && sc.sentAt){
     el.className = "drain-banner sent";
     el.innerHTML = "<b>🚿 With " + esc(sc.name || "Metro Rod") + "</b> — sent " + esc(when(sc.sentAt)) + (sc.sentBy ? " by " + esc(sc.sentBy) : "") +
+      (sc.poRef ? "<br><span style=\"font-size:12.5px;opacity:.85\">Our PO <b>" + esc(sc.poRef) + "</b></span>" : "") +
       "<br><span style=\"font-size:12.5px;opacity:.85\">Emailed to " + esc(sc.to || "") + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") + "</span>" +
       (isFullAccessJV() ? '<div class="db-btns"><button class="db-link" data-db="clear">Clear this record (sent by mistake)</button></div>' : "");
   } else if(job.drainage){

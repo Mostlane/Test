@@ -2393,17 +2393,38 @@ export async function handle(request, env, ctx, url, sess) {
         return jsonResponse({ ok: true, already: true, subcontract: (fresh && fresh.subcontract) || { name: sc.name, sentBy: "someone else", sentAt: null } }, headers);
       }
       const unlock = () => env.DB.prepare("DELETE FROM idempotency WHERE op_id=?").bind(lockId).run().catch(() => {});
+      // Raise a LEGITIMATE subcontractor PO in the PO system so they get OUR PO
+      // number (not the client's incident number). Reuse a PO from a prior attempt
+      // whose email failed (job.subconPO) so a retry never allocates a second PO.
+      let poNumber = (job.subconPO && job.subconPO.key === key && job.subconPO.poNumber) || null;
+      if (!poNumber) {
+        const { raiseSubcontractorPO } = await import("./po.js");
+        const po = await raiseSubcontractorPO(env, {
+          supplier: sc.name, trade: sc.trade || "", site: job.siteName || job.siteCode || "",
+          description: job.description || "", jobId: id, jobRef: job.helpdeskRef || "",
+          userSlug: null, userName: sess.user.username
+        });
+        if (!po || !po.success) {
+          await unlock();
+          return jsonResponse({ error: "Couldn't raise a PO for " + sc.name + (po && po.error ? " — " + po.error : "") + ". Nothing was sent; try again." }, headers, 502);
+        }
+        poNumber = po.po_number;
+        // Persist the allocated PO straight away so an email failure + retry reuses it.
+        job.subconPO = { key, poNumber, raisedAt: new Date().toISOString(), raisedBy: sess.user.username };
+        await saveJob(env, tenantId, job);
+      }
+      const poRef = formatPoRef(poNumber, sc.poDigits);
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
-      const mail = buildMetroRodEmail(job, hours);
+      const mail = buildMetroRodEmail(job, hours, poRef);
       const { sendEmail } = await import("../lib/email.js");
       const r = await sendEmail(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
         await unlock();
-        return jsonResponse({ error: "The email didn't send" + (r && (r.error || r.reason) ? " — " + String(r.error || r.reason).slice(0, 160) : "") + ". Nothing was recorded; try again." }, headers, 502);
+        return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " — " + String(r.error || r.reason).slice(0, 160) : "") + ". Press again to re-send (the same PO is kept)." }, headers, 502);
       }
       const now = new Date().toISOString();
-      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref };
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef };
       job.events ||= [];
       job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) — "${mail.subject}"` });
       job.updatedAt = now;
@@ -6430,9 +6451,21 @@ export function isDrainageJob(j) {
   const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");   // the EM "drain-down" is not a drain
   return DRAIN_RE.test(t);
 }
+// Each subcontractor: where the order email goes, the PO `trade` it's booked
+// under (for the subcontractor-vs-materials split in job costing), and `poDigits`
+// = the length the subcontractor needs the PO number padded to (Metro Rod want a
+// 6-digit number, leading zeros). Add a new subcontractor here (or in the
+// app_config `sla:subcontractors` override) and it behaves identically.
 const SUBCON_DEFAULTS = {
-  metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com" }
+  metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6 }
 };
+// Pad a raw PO number to the subcontractor's required width (leading zeros); an
+// unset/0 width leaves it as-is. 10011 @ 6 digits → "010011".
+export function formatPoRef(poNumber, digits) {
+  const s = String(poNumber == null ? "" : poNumber).trim();
+  const d = Number(digits) || 0;
+  return d > 0 ? s.padStart(d, "0") : s;
+}
 async function getSubconConfig(env, tid) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subcontractors:" + tid).first();
@@ -6443,10 +6476,12 @@ async function getSubconConfig(env, tid) {
   } catch { return JSON.parse(JSON.stringify(SUBCON_DEFAULTS)); }
 }
 function escH(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-/* The Metro Rod email — same layout + wording the Zap sent, with Concerto's REAL
-   order number (the Zap mangled "00031502/1" into "315021"). */
-export function buildMetroRodEmail(job, hours) {
-  const ref = String(job.helpdeskRef || job.id || "").trim();
+/* The subcontractor order email — same layout + wording the Zap sent. The Order
+   No is OUR PO number (raised in the PO system, padded to the subcontractor's
+   width — e.g. Metro Rod's 6 digits), passed in as `poRef`; it falls back to the
+   client's incident ref only if no PO was raised (shouldn't happen in practice). */
+export function buildMetroRodEmail(job, hours, poRef) {
+  const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
   const target = hrs ? (hrs % 24 === 0 && hrs >= 48 ? (hrs / 24) + " Days" : hrs + " Hours") : "";

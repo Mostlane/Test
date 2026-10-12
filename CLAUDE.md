@@ -5534,24 +5534,41 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   FullAccess|SLAAdmin (office-only) an actionable **"🚿 Possible Metro Rod job"**
   (tag `drain:<id>` → job-view). **POST /sla/jobs/{id}/subcontract {to:"metrorod"}**
   (SLA admin): ONE press — lock = `firstTime(idempotency, "subcon:metrorod:<id>")`, a
-  second press anywhere returns `{already, subcontract}` and sends nothing; emails via
-  lib/email.js (Resend, From `EMAIL_FROM` no-reply@mostlane-portal.com, Reply-To +
-  CC from config) the same layout with the REAL ref (`buildMetroRodEmail`, exported);
-  a failed send releases the lock and records nothing; success stamps
-  **`job.subcontract = {key,name,to,sentAt,sentBy,subject,ref}`** + an event + resolves
-  the push. **POST …/drainage {value:true|false|null}** (override), **POST
-  …/subcontract-clear** (FullAccess — forget the record + lock; does NOT recall the
-  email). Recipients in app_config **`sla:subcontractors:<tid>`** (defaults
-  `SUBCON_DEFAULTS.metrorod` = to Call.Centre@metrorod.co.uk, cc Enquiries@,
-  replyTo jamie@). Front-end: **job-view.html `renderDrainBanner`** (office only —
-  blue "Possible Metro Rod job" + Send / Not drainage; green "With Metro Rod — sent
-  … by …"; a quiet "Mark as drainage" link on other open jobs); **sla-main
-  `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when>); **sla-scheduler** drops a
-  sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
+  second press anywhere returns `{already, subcontract}` and sends nothing. **It raises a
+  LEGITIMATE subcontractor PO in the PO system first** (Oct 2026 — Jamie: "they should
+  get a PO number from my PO system and not an incident number"): `po.js
+  raiseSubcontractorPO(env, {supplier,trade,site,description,jobId,jobRef,userName})`
+  allocates the next PO (`nextPoNumber`) + inserts a `po_log` row — source office,
+  `cost_category:"subcontractor"`, supplier = the subcontractor name, trade from config,
+  **`job_id` stamped** so the cost rolls onto the job in job costing exactly like a "Raise
+  PO for this job" PO (no office-hours/status gate — always allowed; fails if PO_DB
+  unbound). The PO number is then **padded to the subcontractor's `poDigits`**
+  (`formatPoRef`, exported — Metro Rod want **6 digits, leading zeros**: 10011 → "010011")
+  and that **PO ref is the Order No in the email** (the client's incident number is NOT
+  used). Emails via lib/email.js (Resend, From `EMAIL_FROM`, Reply-To + CC from config)
+  the same layout, `buildMetroRodEmail(job, hours, poRef)` (exported; falls back to the
+  incident ref only if no poRef). **Retry-safe:** the allocated PO is persisted on the
+  job as **`job.subconPO = {key,poNumber,…}`** the instant it's raised, BEFORE the email —
+  so if the email fails (502, lock released, no `subcontract` record) a re-press REUSES
+  the same PO (keyed by subcontractor `key`), never allocating a second PO for the same
+  works; pressing for a DIFFERENT subcontractor raises its own. Success stamps
+  **`job.subcontract = {key,name,to,sentAt,sentBy,subject,ref,poNumber,poRef}`** + an
+  event + resolves the push. **POST …/drainage {value:true|false|null}** (override),
+  **POST …/subcontract-clear** (FullAccess — forget the sent record + lock; does NOT
+  recall the email NOR void the PO; `subconPO` is kept so a re-send reuses the same PO).
+  Config in app_config **`sla:subcontractors:<tid>`** (defaults `SUBCON_DEFAULTS.metrorod`
+  = to Call.Centre@metrorod.co.uk, cc Enquiries@, replyTo jamie@, **trade "Drainage",
+  poDigits 6**). **Built to take more subcontractors:** add a key to that config (name/to/
+  cc/replyTo/trade/poDigits) and `{to:"<key>"}` behaves identically — its own PO trade +
+  number length. Front-end: **job-view.html `renderDrainBanner`** (office only — blue
+  "Possible Metro Rod job" + Send / Not drainage; green "With Metro Rod — sent … by …"
+  **+ "Our PO <poRef>"**; a quiet "Mark as drainage" link on other open jobs); **sla-main
+  `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when> · PO <poRef>); **sla-scheduler**
+  drops a sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
   cards still drop as `metrorod-report` notices (TODO: attach them to the job).
-  Test `node --no-warnings worker/tools/test-drainage.mjs` (23 cases). **Cut-over:**
-  turn the drainage Zap OFF when this goes live — the two locks are separate systems,
-  so both running could email Metro Rod twice.
+  Test `node --no-warnings worker/tools/test-drainage.mjs` (33 cases, incl. the PO raise +
+  padding + retry-reuse). **Cut-over:** turn the drainage Zap OFF when this goes live — the
+  two locks are separate systems, so both running could email Metro Rod twice.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
