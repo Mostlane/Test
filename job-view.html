@@ -1919,9 +1919,9 @@ async function sendToSubcontractor(key, name){
   const id = (job && job.id) || getJobIdFromQuery();
   // Show EXACTLY what will be emailed (recipients, subject, the rendered email) and let
   // the office edit the details text before anything is raised or sent.
-  const details = await previewSubconEmail(id, key, name);
-  if(details == null) return false;
-  const body = { to: key, details: details };
+  const res = await previewSubconEmail(id, key, name);
+  if(res == null) return false;
+  const body = { to: key, details: res.details, target: res.target };
   for(;;){
     const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
     const d = await r.json().catch(()=>({}));
@@ -1948,6 +1948,8 @@ function previewSubconEmail(id, key, name){
       '<div id="pvHead" class="sc-sub">Loading preview…</div>' +
       '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Details sent to them (edit before sending — the job itself isn’t changed)</label>' +
       '<textarea id="pvDet" rows="4" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box"></textarea>' +
+      '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Target response time shown to them (defaults to the job’s SLA — leave blank to hide)</label>' +
+      '<input id="pvTarget" type="text" maxlength="60" placeholder="e.g. 4 Hours" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box">' +
       '<iframe id="pvFrame" sandbox="" title="Email preview" style="width:100%;height:420px;border:1px solid #e2e6ec;border-radius:12px;margin-top:10px;background:#eef1f5"></iframe>' +
       '<div id="pvMsg" style="font-size:12.5px;margin-top:8px"></div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">' +
@@ -1955,18 +1957,18 @@ function previewSubconEmail(id, key, name){
       '<button id="pvTest" style="border:1px solid #15599d;color:#15599d;background:#fff;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer">✉ Send a test to me</button>' +
       '<button id="pvSend" class="sc-send" style="flex:0 0 auto" disabled>Send to ' + esc(name||"them") + '</button></div></div>';
     document.body.appendChild(wrap);
-    const det = wrap.querySelector("#pvDet"), msg = wrap.querySelector("#pvMsg"), sendBtn = wrap.querySelector("#pvSend");
+    const det = wrap.querySelector("#pvDet"), tgt = wrap.querySelector("#pvTarget"), msg = wrap.querySelector("#pvMsg"), sendBtn = wrap.querySelector("#pvSend");
     const done = v => { wrap.remove(); resolve(v); };
     wrap.addEventListener("click", e => { if(e.target === wrap) done(null); });
     wrap.querySelector("#pvCancel").onclick = () => done(null);
     let first = true, t = 0;
     async function load(test){
       const body = { to: key, test: !!test };
-      if(!first) body.details = det.value;
+      if(!first){ body.details = det.value; body.target = tgt.value; }
       const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract-preview", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(()=>({}));
       if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
-      if(first){ det.value = d.details || ""; first = false; }
+      if(first){ det.value = d.details || ""; tgt.value = d.target || ""; first = false; }
       const cc = (d.cc||[]).length ? (d.cc||[]).join(", ") : "—";
       wrap.querySelector("#pvHead").innerHTML =
         '<div><b>To:</b> ' + esc(d.to) + ' &nbsp; <b>CC:</b> ' + esc(cc) + '</div>' +
@@ -1978,14 +1980,16 @@ function previewSubconEmail(id, key, name){
       sendBtn.disabled = false;
       return d;
     }
-    det.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => load(false).catch(e => { msg.style.color="#b91c1c"; msg.textContent = e.message||e; }), 400); });
+    const reload = () => { clearTimeout(t); t = setTimeout(() => load(false).catch(e => { msg.style.color="#b91c1c"; msg.textContent = e.message||e; }), 400); };
+    det.addEventListener("input", reload);
+    tgt.addEventListener("input", reload);
     wrap.querySelector("#pvTest").onclick = async function(){
       this.disabled = true; msg.style.color = "#334155"; msg.textContent = "Sending a test copy…";
       try{ const d = await load(true); if (d.testVia === "portal") { msg.style.color = "#92400e"; msg.textContent = "⚠ Test sent to " + d.testSentTo + ", but NOT through Microsoft 365 — it went from the portal's own address (" + (d.testFallbackReason || "365 unavailable") + "). Real orders would do the same until this is fixed."; } else { msg.style.color = "#166534"; msg.textContent = "✓ Test sent to " + d.testSentTo + " from " + (d.testFrom || "Microsoft 365") + " — nothing was sent to " + (name||"them") + " and no PO was raised."; } }
       catch(e){ msg.style.color = "#b91c1c"; msg.textContent = e.message || e; }
       this.disabled = false;
     };
-    sendBtn.onclick = () => done(det.value);
+    sendBtn.onclick = () => done({ details: det.value, target: tgt.value });
     load(false).catch(e => { wrap.querySelector("#pvHead").innerHTML = '<span style="color:#b91c1c">' + esc(e.message||e) + '</span>'; });
   });
 }

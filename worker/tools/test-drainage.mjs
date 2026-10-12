@@ -87,7 +87,13 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("order number in the email is the PO, not the incident", /Order No 010011/.test(m.html) && !/00031502/.test(m.html));
   ok("body carries site, phone, target, details", /0129 Gosport/.test(m.html) && /02392 582806/.test(m.html) && /Within 4 Hours/.test(m.html) && /backed up and blocked/.test(m.html));
   ok("body escapes HTML", !/<script/.test(sla.buildMetroRodEmail({ ...JOBS["J-DRAIN"], description: "<script>x</script>" }, 4, "010011").html));
-  ok("no poRef → falls back to the incident ref", sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4).subject === "Mostlane - Emergency - Order 00031502/1 at PO12 4EH"); }
+  ok("no poRef → falls back to the incident ref", sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4).subject === "Mostlane - Emergency - Order 00031502/1 at PO12 4EH");
+  // per-email target override
+  ok("target auto-derives from the priority hours", m.target === "4 Hours");
+  const ov = sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4, "010011", null, { target: "Same day" });
+  ok("a typed target overrides the SLA hours", ov.target === "Same day" && /Within Same day/.test(ov.html) && !/Within 4 Hours/.test(ov.html));
+  const hide = sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4, "010011", null, { target: "" });
+  ok("blank target hides the response-time line", hide.target === "" && !/SLA Response Time/.test(hide.html) && !/Target/.test(hide.html)); }
 
 // send: permission, one-press lock, record
 { const E = makeEnv();

@@ -5779,14 +5779,19 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   instead of a bare confirm — To / CC / Reply-To / From / Subject, the PO note, ⚠ warnings
   (no postcode / no phone / empty details), the rendered email in a sandboxed iframe, an
   **editable Details box** (only the email text — the job is not changed; re-previews as
-  you type) and **✉ Send a test to me** (to the presser's `users.email`, subject
+  you type), an **editable Target field** (12 Oct 2026 — the SLA response-time line; it
+  pre-fills from the job's priority [P1=4h/P2=24h/P3=72h/P4=7 days], the office can type
+  any value e.g. "Same day", and **blank hides** the "SLA Response Time Within …" header +
+  the Target box; threaded as `opts.target` through `buildMetroRodEmail` → preview returns
+  the effective `target`, send + preview + test all carry `b.target`, "" = hide), and
+  **✉ Send a test to me** (to the presser's `users.email`, subject
   "[TEST — not sent to X]", no PO, no lock, no record). The preview AND the test show the
   **expected next PO number** (`po.js peekNextPoNumber` — the same read-only lookup
   `nextPoNumber` does, nothing allocated); the note says it's only raised on Send and the
   next free number is used if someone raises a PO in between. A failed earlier attempt
   shows the PO it will re-use. **POST
-  /sla/jobs/{id}/subcontract-preview {to, details?, test?}** (SLA admin); the send takes
-  `details` and stores what went in `job.subcontract.details`. Email fixes in
+  /sla/jobs/{id}/subcontract-preview {to, details?, target?, test?}** (SLA admin); the send
+  (and the preview/test) take `details` + `target`; `details` is stored in `job.subcontract.details`. Email fixes in
   `buildMetroRodEmail` (5th arg `opts.details`): the Address box now carries the
   **postcode** (it was only in the subject), a 1–3 digit store code is padded ("0148"),
   and `subconDetails` strips the portal's own "↩ …" visit-link lines. A sub with no email
