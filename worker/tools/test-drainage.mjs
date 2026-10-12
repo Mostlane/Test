@@ -308,5 +308,26 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const r = await call(E, "Office Admin", "/subcontracted", null, "GET");
   ok("mistyped incident box but 'FOR JOB nnnnn' in the description → linked to that job", (r.body.rows || []).some(x => x.jobId === "J-DRAIN" && x.pos.some(p => p.number === 10450)), JSON.stringify((r.body.rows||[]).map(x=>x.key))); }
 
+// "Sent to Subcontractor" status
+{ const E = makeEnv();
+  const cats = await call(E, "Office Admin", "/categories", null, "GET");
+  const list = Array.isArray(cats.body) ? cats.body : (cats.body.categories || cats.body.list || []);
+  ok("the category is always there", list.some(c => c.name === "Sent to Subcontractor" && c.system), JSON.stringify(cats.body).slice(0, 200));
+  ok("…and can't be deleted", (await call(E, "Office Admin", "/categories/delete", { name: "Sent to Subcontractor" })).status === 400);
+  await call(E, "Office Admin", "/jobs/J-DRAIN", { status: "Scheduled" }, "PATCH");
+  await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
+  ok("sending moves the job into it, remembering the old status", E.saved["J-DRAIN"].status === "Sent to Subcontractor" && E.saved["J-DRAIN"].subcontract.prevStatus === "Scheduled", E.saved["J-DRAIN"].status);
+  await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-status", { status: "returned" });
+  ok("back with us → the old status comes back", E.saved["J-DRAIN"].status === "Scheduled", E.saved["J-DRAIN"].status);
+  await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-status", { status: "open" });
+  ok("reopen → Sent to Subcontractor again", E.saved["J-DRAIN"].status === "Sent to Subcontractor");
+  await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-status", { status: "done" });
+  ok("done by them → Complete", E.saved["J-DRAIN"].status === "Complete");
+  await call(E, "Office Admin", "/jobs/J-TAP/subcontract", { name: "L&B Plumbing" });
+  ok("a hand-off (no email) also moves it", E.saved["J-TAP"].status === "Sent to Subcontractor");
+  await call(E, "Office Admin", "/jobs/J-TAP", { status: "Scheduled" }, "PATCH");
+  await call(E, "Office Admin", "/subcontracted", null, "GET");
+  ok("an office status change afterwards is never overridden", E.saved["J-TAP"].status === "Scheduled", E.saved["J-TAP"].status); }
+
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

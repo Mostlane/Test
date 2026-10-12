@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -18681,6 +18686,7 @@ var init_certs = __esm({
 // src/routes/sla.js
 var sla_exports = {};
 __export(sla_exports, {
+  SUBCON_STATUS: () => SUBCON_STATUS,
   applyOrderToJob: () => applyOrderToJob,
   badScheduleDate: () => badScheduleDate,
   badScheduleIn: () => badScheduleIn,
@@ -18852,7 +18858,8 @@ async function handle13(request, env, ctx, url, sess) {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const body = await readJson2(request);
       const list = Array.isArray(body?.categories) ? body.categories : [];
-      return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
+      await setCategories(env, tenantId, list);
+      return jsonResponse({ ok: true, categories: await getCategories(env, tenantId) }, headers);
     }
   }
   if (subpath === "/work-areas") {
@@ -19246,6 +19253,7 @@ async function handle13(request, env, ctx, url, sess) {
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const body = await readJson2(request);
     const name = String(body?.name || "").trim();
+    if (name.toLowerCase() === SUBCON_STATUS.toLowerCase()) return jsonResponse({ error: "\u201C" + SUBCON_STATUS + "\u201D is built in and can't be removed (you can change its colour)." }, headers, 400);
     const moveTo = String(body?.moveTo || "Pending").trim() || "Pending";
     if (!name) return jsonResponse({ error: "name required" }, headers, 400);
     const who = sess.user && sess.user.username || "system";
@@ -19955,7 +19963,7 @@ async function handle13(request, env, ctx, url, sess) {
     };
     const parked = (s) => {
       const v = String(s || "").toLowerCase();
-      return v === "on hold" || v === "quote" || v === "order";
+      return v === "on hold" || v === "quote" || v === "order" || v === SUBCON_STATUS.toLowerCase();
     };
     const isSlaReactive = (j) => !jobIsProject(j) && !j.projectId && !j.fleetRenewal && !j.renewalType && String(j.storeType || "").toLowerCase() !== "fleet" && !j.fallback;
     const all = await listJobs(env, tenantId);
@@ -21100,7 +21108,8 @@ async function handle13(request, env, ctx, url, sess) {
         await saveJob(env, tenantId, job2);
         ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "\u{1F91D} Handed to " + name, body: `${job2.helpdeskRef || id} \u2014 by ${sess.user.username}` }).catch(() => {
         }));
-        return jsonResponse({ ok: true, subcontract: job2.subcontract, job: decorateJobWithLiveSla(job2) }, headers);
+        const hj = await toSubconStatus(env, tenantId, id, sess.user.username, ctx);
+        return jsonResponse({ ok: true, subcontract: hj.subcontract, job: decorateJobWithLiveSla(hj) }, headers);
       }
       const key = String(b.to || "metrorod").toLowerCase();
       const cfgAll = await getSubconConfig(env, tenantId);
@@ -21181,7 +21190,8 @@ async function handle13(request, env, ctx, url, sess) {
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "\u{1F6BF} Sent to " + sc.name, body: `${job.helpdeskRef || id} \u2014 sent by ${sess.user.username}` }).catch(() => {
       }));
-      return jsonResponse({ ok: true, subcontract: job.subcontract, job: decorateJobWithLiveSla(job) }, headers);
+      const sj = await toSubconStatus(env, tenantId, id, sess.user.username, ctx);
+      return jsonResponse({ ok: true, subcontract: sj.subcontract, job: decorateJobWithLiveSla(sj) }, headers);
     }
     if (parts[2] === "subcontract-status" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -21208,6 +21218,7 @@ async function handle13(request, env, ctx, url, sess) {
         sc.closedAt = now2;
         sc.closedBy = sess.user.username;
       }
+      if (st !== "done" && was !== st) delete sc.statusSet;
       const label2 = { open: "with " + sc.name, done: "done by " + sc.name, returned: "back with us from " + sc.name }[st];
       job.events ||= [];
       if (was !== st || b.note != null) job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Marked ${label2}${sc.note ? " \u2014 " + sc.note : ""}` });
@@ -21225,8 +21236,12 @@ async function handle13(request, env, ctx, url, sess) {
             }));
           }
         }
+      } else if (st === "returned") {
+        out = await fromSubconStatus(env, tenantId, id, sess.user.username, ctx) || out;
+      } else if (st === "open") {
+        out = await toSubconStatus(env, tenantId, id, sess.user.username, ctx) || out;
       }
-      return jsonResponse({ ok: true, subcontract: sc, completed, job: decorateJobWithLiveSla(out) }, headers);
+      return jsonResponse({ ok: true, subcontract: out.subcontract || sc, completed, job: decorateJobWithLiveSla(out) }, headers);
     }
     if (parts[2] === "subcontract-clear" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -21243,6 +21258,8 @@ async function handle13(request, env, ctx, url, sess) {
         delete job.subcontract;
         job.updatedAt = now2;
         await saveJob(env, tenantId, job);
+        const back = await fromSubconStatus(env, tenantId, id, sess.user.username, ctx, was.prevStatus);
+        if (back) return jsonResponse(decorateJobWithLiveSla(back), headers);
       }
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
@@ -21525,8 +21542,10 @@ async function handle13(request, env, ctx, url, sess) {
     sc.closedBy = sc.name + " (via email link)";
     job.events ||= [];
     job.events.push({ at: now2, by: sc.name, type: "subcontract", note: `${sc.name} can't take this job (PO ${poRef})${reason ? " \u2014 " + reason : ""}` });
+    delete sc.statusSet;
     job.updatedAt = now2;
     await saveJob(env, tenantId, job);
+    await fromSubconStatus(env, tenantId, job.id, sc.name, ctx);
     ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
       title: "\u274C " + sc.name + " can't take a job",
       body: `${job.helpdeskRef || job.id} \u2014 ${site}${reason ? ": " + reason : ""}. PO ${poRef} was raised \u2014 cancel it in the PO system if it won't be used.`,
@@ -21591,6 +21610,7 @@ async function handle13(request, env, ctx, url, sess) {
       job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Subcontractor PO ${po} linked to this job` });
       if (!job.subcontract && row.supplier) job.subcontract = poSubconRecord(row, (await jobFinishedFor(env, tenantId))(job), sess.user.username);
       await saveJob(env, tenantId, job);
+      if (job.subcontract && (job.subcontract.status || "open") === "open") await toSubconStatus(env, tenantId, job.id, sess.user.username, ctx);
     } else {
       const ids = /* @__PURE__ */ new Set();
       if (row.job_id) ids.add(String(row.job_id));
@@ -25599,6 +25619,20 @@ async function subcontractedRows(env, tid, money2) {
     } catch {
     }
   }
+  for (const r of rows.values()) {
+    const rec = r.record;
+    if (!r.jobId || !rec || rec.statusSet || r.jobFinished || (rec.status || "open") !== "open") continue;
+    const jj = byId.get(r.jobId);
+    if (jj && assignedList(jj).length) continue;
+    try {
+      const nj = await toSubconStatus(env, tid, r.jobId, "system", null);
+      if (nj) {
+        r.record = nj.subcontract;
+        r.jobStatus = nj.status;
+      }
+    } catch {
+    }
+  }
   const now2 = Date.now();
   const list = [...rows.values()].map((r) => {
     const names = /* @__PURE__ */ new Map();
@@ -25631,6 +25665,23 @@ async function subcontractedRows(env, tid, money2) {
     r.closedAt = poClosed[r.key].at;
   }
   return { rows: list };
+}
+async function toSubconStatus(env, tid, id, by, ctx) {
+  const job = await getJob3(env, tid, id);
+  if (!job || !job.subcontract || job.subcontract.statusSet) return job;
+  const finished = await jobFinishedFor(env, tid);
+  if (finished(job)) return job;
+  job.subcontract.statusSet = true;
+  if (job.status !== SUBCON_STATUS) job.subcontract.prevStatus = job.status || "Pending";
+  await saveJob(env, tid, job);
+  if (job.status === SUBCON_STATUS) return job;
+  return await patchJob(env, tid, id, { status: SUBCON_STATUS, changedBy: by || "system" }, ctx) || job;
+}
+async function fromSubconStatus(env, tid, id, by, ctx, prev) {
+  const job = await getJob3(env, tid, id);
+  if (!job || job.status !== SUBCON_STATUS) return job;
+  const back = prev || job.subcontract && job.subcontract.prevStatus || "Pending";
+  return await patchJob(env, tid, id, { status: back === SUBCON_STATUS ? "Pending" : back, changedBy: by || "system" }, ctx) || job;
 }
 function poSubconRecord(p, finished, by) {
   const name = String(p.supplier || "").trim().slice(0, 80);
@@ -25832,6 +25883,12 @@ async function getCategories(env, tenantId) {
     const colour = /^#[0-9a-fA-F]{6}$/.test(String(c && c.colour || "")) ? c.colour : "#64748b";
     out.push({ name, colour, done: !!(c && c.done) });
   }
+  const sys = out.find((c) => c.name.toLowerCase() === SUBCON_STATUS.toLowerCase());
+  if (sys) {
+    sys.name = SUBCON_STATUS;
+    sys.done = false;
+    sys.system = true;
+  } else out.push({ name: SUBCON_STATUS, colour: "#7c3aed", done: false, system: true });
   return out;
 }
 async function setCategories(env, tenantId, list) {
@@ -26827,7 +26884,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBCON_STATUS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -26883,6 +26940,7 @@ var init_sla = __esm({
       metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {}, requirePhone: true }
     };
     SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
+    SUBCON_STATUS = "Sent to Subcontractor";
     SUBKEY_STOP = /* @__PURE__ */ new Set(["the", "mr", "mrs", "ms", "and", "ltd", "limited", "services", "service", "group", "uk"]);
     PO_SUG_STOP = /* @__PURE__ */ new Set(["road", "street", "lane", "avenue", "close", "drive", "park", "retail", "store", "shop", "the", "and", "coop", "operative", "cooperative", "funeralcare", "funeral", "starbucks", "branch", "unit", "site", "with", "from", "attend", "attended", "works", "work", "please", "required", "quote", "quotation", "recommended", "needs", "needed", "fixing", "fixed", "repair", "repairs", "engineer", "check", "job", "jobs", "incident", "drainage"]);
     DEFAULT_CONFIG3 = {
@@ -42164,9 +42222,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -49392,7 +49450,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -49652,7 +49710,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

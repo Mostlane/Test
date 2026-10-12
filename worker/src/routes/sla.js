@@ -200,7 +200,8 @@ export async function handle(request, env, ctx, url, sess) {
       if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const body = await readJson(request);
       const list = Array.isArray(body?.categories) ? body.categories : [];
-      return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
+      await setCategories(env, tenantId, list);
+      return jsonResponse({ ok: true, categories: await getCategories(env, tenantId) }, headers);
     }
   }
 
@@ -566,6 +567,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const body = await readJson(request);
     const name = String(body?.name || "").trim();
+    if (name.toLowerCase() === SUBCON_STATUS.toLowerCase()) return jsonResponse({ error: "“" + SUBCON_STATUS + "” is built in and can't be removed (you can change its colour)." }, headers, 400);
     const moveTo = String(body?.moveTo || "Pending").trim() || "Pending";
     if (!name) return jsonResponse({ error: "name required" }, headers, 400);
     const who = (sess.user && sess.user.username) || "system";
@@ -1342,7 +1344,7 @@ export async function handle(request, env, ctx, url, sess) {
     const londonDay = (iso) => { try { const d = new Date(iso); return isNaN(d) ? "" : new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); } catch { return ""; } };
     const doneNames = new Set((await getCategories(env, tenantId)).filter(c => c.done).map(c => String(c.name).toLowerCase()));
     const finished = s => { const v = String(s || "").toLowerCase(); return DONE_STATES.has(v) || doneNames.has(v); };
-    const parked = s => { const v = String(s || "").toLowerCase(); return v === "on hold" || v === "quote" || v === "order"; };
+    const parked = s => { const v = String(s || "").toLowerCase(); return v === "on hold" || v === "quote" || v === "order" || v === SUBCON_STATUS.toLowerCase(); };   // with a subcontractor = not ours to attend
     // A genuine reactive SLA job: NOT a project, NOT a fleet renewal, NOT a
     // standby/fallback. (Dormant templates are already dropped by listJobs.)
     const isSlaReactive = j => !jobIsProject(j) && !j.projectId
@@ -2516,7 +2518,8 @@ export async function handle(request, env, ctx, url, sess) {
         job.updatedAt = now;
         await saveJob(env, tenantId, job);
         ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🤝 Handed to " + name, body: `${job.helpdeskRef || id} — by ${sess.user.username}` }).catch(() => {}));
-        return jsonResponse({ ok: true, subcontract: job.subcontract, job: decorateJobWithLiveSla(job) }, headers);
+        const hj = await toSubconStatus(env, tenantId, id, sess.user.username, ctx);
+        return jsonResponse({ ok: true, subcontract: hj.subcontract, job: decorateJobWithLiveSla(hj) }, headers);
       }
       const key = String(b.to || "metrorod").toLowerCase();
       const cfgAll = await getSubconConfig(env, tenantId);
@@ -2596,7 +2599,8 @@ export async function handle(request, env, ctx, url, sess) {
       job.updatedAt = now;
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🚿 Sent to " + sc.name, body: `${job.helpdeskRef || id} — sent by ${sess.user.username}` }).catch(() => {}));
-      return jsonResponse({ ok: true, subcontract: job.subcontract, job: decorateJobWithLiveSla(job) }, headers);
+      const sj = await toSubconStatus(env, tenantId, id, sess.user.username, ctx);
+      return jsonResponse({ ok: true, subcontract: sj.subcontract, job: decorateJobWithLiveSla(sj) }, headers);
     }
 
     // POST /sla/jobs/{id}/subcontract-status {status:"open"|"done"|"returned", note?, name?}
@@ -2623,6 +2627,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (b.note != null) sc.note = String(b.note).slice(0, 300);
       if (st === "open") { delete sc.closedAt; delete sc.closedBy; }
       else { sc.closedAt = now; sc.closedBy = sess.user.username; }
+      if (st !== "done" && was !== st) delete sc.statusSet;   // reopen re-applies "Sent to Subcontractor"; back-with-us restores
       const label = { open: "with " + sc.name, done: "done by " + sc.name, returned: "back with us from " + sc.name }[st];
       job.events ||= [];
       if (was !== st || b.note != null) job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Marked ${label}${sc.note ? " — " + sc.note : ""}` });
@@ -2638,8 +2643,12 @@ export async function handle(request, env, ctx, url, sess) {
           const updated = await patchJob(env, tenantId, id, { status: "Complete", changedBy: sess.user.username }, ctx);
           if (updated) { out = updated; completed = true; ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {})); }
         }
+      } else if (st === "returned") {
+        out = (await fromSubconStatus(env, tenantId, id, sess.user.username, ctx)) || out;
+      } else if (st === "open") {
+        out = (await toSubconStatus(env, tenantId, id, sess.user.username, ctx)) || out;
       }
-      return jsonResponse({ ok: true, subcontract: sc, completed, job: decorateJobWithLiveSla(out) }, headers);
+      return jsonResponse({ ok: true, subcontract: out.subcontract || sc, completed, job: decorateJobWithLiveSla(out) }, headers);
     }
 
     // POST /sla/jobs/{id}/subcontract-clear — Full Access: forget the "sent" record
@@ -2658,6 +2667,8 @@ export async function handle(request, env, ctx, url, sess) {
         delete job.subcontract;
         job.updatedAt = now;
         await saveJob(env, tenantId, job);
+        const back = await fromSubconStatus(env, tenantId, id, sess.user.username, ctx, was.prevStatus);
+        if (back) return jsonResponse(decorateJobWithLiveSla(back), headers);
       }
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
@@ -2974,8 +2985,10 @@ export async function handle(request, env, ctx, url, sess) {
     sc.status = "returned"; sc.closedAt = now; sc.closedBy = sc.name + " (via email link)";
     job.events ||= [];
     job.events.push({ at: now, by: sc.name, type: "subcontract", note: `${sc.name} can't take this job (PO ${poRef})${reason ? " — " + reason : ""}` });
+    delete sc.statusSet;
     job.updatedAt = now;
     await saveJob(env, tenantId, job);
+    await fromSubconStatus(env, tenantId, job.id, sc.name, ctx);
     ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
       title: "❌ " + sc.name + " can't take a job",
       body: `${job.helpdeskRef || job.id} — ${site}${reason ? ": " + reason : ""}. PO ${poRef} was raised — cancel it in the PO system if it won't be used.`,
@@ -3045,6 +3058,7 @@ export async function handle(request, env, ctx, url, sess) {
       // so the SLA board + job card show it's with the subcontractor
       if (!job.subcontract && row.supplier) job.subcontract = poSubconRecord(row, (await jobFinishedFor(env, tenantId))(job), sess.user.username);
       await saveJob(env, tenantId, job);
+      if (job.subcontract && (job.subcontract.status || "open") === "open") await toSubconStatus(env, tenantId, job.id, sess.user.username, ctx);
     } else {
       // drop the "with a subcontractor" record this PO put on the job (by link or incident match)
       const ids = new Set();
@@ -7099,6 +7113,16 @@ export async function subcontractedRows(env, tid, money) {
   for (const j of stamp) {
     try { const fresh = await getJob(env, tid, j.id); if (fresh && !fresh.subcontract) { fresh.subcontract = j.subcontract; await saveJob(env, tid, fresh); } } catch {}
   }
+  // Jobs with a subcontractor that haven't been moved into "Sent to Subcontractor" yet
+  // (sent before the category existed, or matched from a PO) — once each; an office
+  // status change afterwards is never overridden (statusSet).
+  for (const r of rows.values()) {
+    const rec = r.record;
+    if (!r.jobId || !rec || rec.statusSet || r.jobFinished || (rec.status || "open") !== "open") continue;
+    const jj = byId.get(r.jobId);
+    if (jj && assignedList(jj).length) continue;   // one of OUR engineers is booked on it too — leave its status alone
+    try { const nj = await toSubconStatus(env, tid, r.jobId, "system", null); if (nj) { r.record = nj.subcontract; r.jobStatus = nj.status; } } catch {}
+  }
   const now = Date.now();
   const list = [...rows.values()].map(r => {
     const names = new Map();
@@ -7126,6 +7150,28 @@ export async function subcontractedRows(env, tid, money) {
   const poClosed = poMap;
   for (const r of list) if (!r.jobId && poClosed[r.key]) { r.state = poClosed[r.key].status; r.closedAt = poClosed[r.key].at; }
   return { rows: list };
+}
+// ── "Sent to Subcontractor" status ─────────────────────────────────────────────
+// Sending / handing a job to a subcontractor moves it into this category (once — a
+// later manual status change by the office is never overridden: subcontract.statusSet).
+// Coming back to us restores the status it had before; Done by them → Complete.
+export const SUBCON_STATUS = "Sent to Subcontractor";
+async function toSubconStatus(env, tid, id, by, ctx) {
+  const job = await getJob(env, tid, id);
+  if (!job || !job.subcontract || job.subcontract.statusSet) return job;
+  const finished = await jobFinishedFor(env, tid);
+  if (finished(job)) return job;
+  job.subcontract.statusSet = true;
+  if (job.status !== SUBCON_STATUS) job.subcontract.prevStatus = job.status || "Pending";
+  await saveJob(env, tid, job);
+  if (job.status === SUBCON_STATUS) return job;
+  return (await patchJob(env, tid, id, { status: SUBCON_STATUS, changedBy: by || "system" }, ctx)) || job;
+}
+async function fromSubconStatus(env, tid, id, by, ctx, prev) {
+  const job = await getJob(env, tid, id);
+  if (!job || job.status !== SUBCON_STATUS) return job;
+  const back = prev || (job.subcontract && job.subcontract.prevStatus) || "Pending";
+  return (await patchJob(env, tid, id, { status: back === SUBCON_STATUS ? "Pending" : back, changedBy: by || "system" }, ctx)) || job;
 }
 // A job.subcontract record built from a subcontractor PO (no email was sent from
 // the portal) — what the SLA board tag + job-card banner read.
@@ -7373,6 +7419,11 @@ async function getCategories(env, tenantId) {
     const colour = /^#[0-9a-fA-F]{6}$/.test(String((c && c.colour) || "")) ? c.colour : "#64748b";
     out.push({ name, colour, done: !!(c && c.done) });
   }
+  // The built-in "Sent to Subcontractor" category is always there (it can be
+  // recoloured, never removed) — sending a job to a subcontractor moves it here.
+  const sys = out.find(c => c.name.toLowerCase() === SUBCON_STATUS.toLowerCase());
+  if (sys) { sys.name = SUBCON_STATUS; sys.done = false; sys.system = true; }
+  else out.push({ name: SUBCON_STATUS, colour: "#7c3aed", done: false, system: true });
   return out;
 }
 

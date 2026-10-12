@@ -5784,6 +5784,18 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   confirm → link; the 🔗 Link modal lists the likely jobs first. Tuned on live data: Worle
   striplights → 29339-Worle JS; Eastney door → 3 Eastney door jobs; Lambourn/Fairoak/
   Farnborough/Archers/Bristol aircon correctly get nothing.
+  **"Sent to Subcontractor" status (12 Oct 2026):** a BUILT-IN job category
+  (`SUBCON_STATUS`, sla.js) that `getCategories` always injects (purple #7c3aed,
+  `system:true`, recolourable, delete refused). `toSubconStatus` moves a job into it on a
+  📮 send, a 🤝 hand-off, a PO link and Reopen — remembering `subcontract.prevStatus` and
+  setting `subcontract.statusSet` so it happens ONCE (an office status change afterwards is
+  never overridden); `fromSubconStatus` restores prevStatus on ↩ Back with us, "can't take
+  this job" and Clear; ✓ Done → Complete (unchanged). A finished job is never moved.
+  Existing open subcontracted jobs are moved on the next /subcontracted load — EXCEPT jobs
+  with one of our engineers assigned (left alone). /not-attended treats the status as parked.
+  sla-main: the chip is a primary chip; selecting it shows `#subChips` (one per
+  subcontractor, `activeSub`) + "📋 Full history →" = subcontracted-jobs.html?tab=all&sub=<key>
+  (that page now reads ?tab/?sub).
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
