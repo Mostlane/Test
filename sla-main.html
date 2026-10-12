@@ -362,6 +362,7 @@
     </div>
 
     <div class="chips" id="statusChips"></div>
+    <div class="chips" id="subChips" style="display:none;margin-top:-4px"></div>
 
     <div class="toolbar">
       <select id="bulkAction">
@@ -650,7 +651,10 @@ let activeStatus = "all";      // default board view (restoreFilters may overrid
 let activePriority = "all";
 // Status chips: only a minimal primary set shows by default (too many on mobile).
 // "More ▾" reveals the rest for the current view; collapsed again on every load.
-const PRIMARY_STATUSES = new Set(["Pending", "Co-op Pending", "Scheduled", "Complete"]);
+const SUBCON_STATUS = "Sent to Subcontractor";
+const PRIMARY_STATUSES = new Set(["Pending", "Co-op Pending", "Scheduled", SUBCON_STATUS, "Complete"]);
+let activeSub = "";   // subcontractor filter inside "Sent to Subcontractor"
+const subKeyOf = n => String(n||"").toLowerCase().replace(/[^a-z0-9]+/g, "");
 let chipsExpanded = false;
 let activeClient = "all";       // client / site-type bucket (all | coop | chapplins | fbc | wenzels | projects | other)
 let siteClientByCode = {};      // siteCode (leading-zeros stripped) → raw storeType/client, from the sites register
@@ -907,6 +911,21 @@ function chipCounts(){
   boardJobs().forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
   return counts;
 }
+// Inside "Sent to Subcontractor": one chip per subcontractor, plus a link to every
+// job they've ever been sent (incl. finished / handed back) on the subcontractor page.
+function renderSubChips(){
+  const host = $("subChips"); if(!host) return;
+  if(activeStatus !== SUBCON_STATUS){ host.style.display = "none"; host.innerHTML = ""; return; }
+  const inCat = boardJobs().filter(j => j.status === SUBCON_STATUS);
+  const subs = new Map();
+  inCat.forEach(j => { const n = (j.subcontract && j.subcontract.name) || "Unknown"; const k = subKeyOf(n); const e = subs.get(k) || { name:n, n:0 }; e.n++; subs.set(k, e); });
+  if(activeSub && !subs.has(activeSub)) activeSub = "";
+  host.style.display = "";
+  host.innerHTML = `<button class="schip allchip${!activeSub ? " active" : ""}" data-subk="">Every subcontractor <span class="n">${inCat.length}</span></button>` +
+    [...subs.entries()].sort((a,b) => b[1].n - a[1].n).map(([k,e]) => `<button class="schip${activeSub === k ? " active" : ""}" style="--c:#7c3aed" data-subk="${esc(k)}">${esc(e.name)} <span class="n">${e.n}</span></button>`).join("") +
+    `<a class="schip" style="text-decoration:none" href="subcontracted-jobs.html?tab=all${activeSub ? "&sub=" + encodeURIComponent(activeSub) : ""}" title="Every job ever sent — including finished and handed back">📋 Full history →</a>`;
+  host.querySelectorAll("[data-subk]").forEach(b => b.onclick = () => { activeSub = b.dataset.subk; render(); });
+}
 function renderChips(){
   const counts = chipCounts();
   const host = $("statusChips");
@@ -953,6 +972,7 @@ function renderChips(){
   more.innerHTML = chipsExpanded ? "Fewer ▲" : `More <span class="n">${hidden}</span> ▾`;
   more.onclick = () => { chipsExpanded = !chipsExpanded; renderChips(); };
   host.appendChild(more);
+  renderSubChips();
 }
 // Jobs in the currently-active status chip (ignoring priority/client/search) —
 // the scope the client dropdown counts against.
@@ -992,6 +1012,7 @@ function filteredJobs(){
   return boardJobs().filter(j => {
     if(activeStatus === "open"){ if(isClosed(j)) return false; }
     else if(activeStatus !== "all" && j.status !== activeStatus) return false;
+    if(activeStatus === SUBCON_STATUS && activeSub && subKeyOf(j.subcontract && j.subcontract.name) !== activeSub) return false;
     if(activePriority !== "all" && (j.priority||"") !== activePriority) return false;
     if(activeClient !== "all" && clientBucketOf(j) !== activeClient) return false;
     if(search){

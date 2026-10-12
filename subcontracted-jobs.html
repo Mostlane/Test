@@ -111,6 +111,8 @@
   let DATA = { rows: [], money: false };
   let tab = "open", sub = "";
   try { tab = localStorage.getItem("mlSubconTab") || "open"; } catch (e) {}
+  { const qp = new URLSearchParams(location.search);   // deep link from the SLA board's "Full history"
+    if (qp.get("tab")) tab = qp.get("tab"); if (qp.get("sub")) sub = qp.get("sub"); }
   const TABS = [["open","With them"],["done","Done"],["returned","Back with us"],["all","All"]];
 
   async function load() {
