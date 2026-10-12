@@ -5877,7 +5877,8 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   phone never recovers the previous person; /scan and /me never adopt on their own. Also
   `navigator.storage.persist()` on load. Scanner SW `sitelog-v11`. Test
   `node --no-warnings worker/tools/test-sitelog-identity.mjs` (16). Duplicates before this: Zane
-  (merged 12 Oct), Mariusz Mlynarczyk ×3, Ryan Diggens ×2, Jamie Line ×3 (test) — not yet merged.
+  , Mariusz Mlynarczyk ×3, Ryan Diggens ×2, Jamie Line ×3 — all merged into the original record 12 Oct
+  (visits + devices repointed); SiteLog now has no duplicate names.
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
