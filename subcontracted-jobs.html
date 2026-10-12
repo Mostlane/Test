@@ -62,6 +62,15 @@
     .btn[disabled]{opacity:.55;cursor:default;}
     .msg.err{color:var(--bad);font-size:13px;}
     #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+    input.cost{width:92px;text-align:right;padding:3px 6px;font-size:13px;border-radius:7px;}
+    input.cost.saved{border-color:#86efac;background:#f0fdf4;} input.cost.bad{border-color:#fca5a5;background:#fef2f2;}
+    #linkBack{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:9000;padding:60px 12px;}
+    #linkBack.show{display:flex;}
+    #linkBox{background:#fff;border-radius:14px;width:100%;max-width:560px;padding:14px 16px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+    #linkBox h3{margin:0 0 4px;font-size:16px;color:var(--brand);}
+    #linkRes{max-height:52vh;overflow:auto;margin-top:8px;}
+    .lr{border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin:6px 0;cursor:pointer;font-size:13px;}
+    .lr:hover{background:#eef4ff;border-color:#93c5fd;}
     .help{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px;color:#475569;margin-bottom:10px;}
   </style>
 </head>
@@ -75,13 +84,20 @@
   <div class="wrap">
     <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
     <div id="board">
-      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort.</div>
+      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> only marks the subcontractor’s part finished — it does not complete the job itself.</div>
       <div class="bar" id="tabBar"></div>
       <div class="bar" id="subBar"></div>
       <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
       <div id="list"><p class="muted" style="padding:18px 4px;">Loading…</p></div>
     </div>
   </div>
+  <div id="linkBack"><div id="linkBox">
+    <h3 id="linkTitle">Link PO to a job</h3>
+    <div class="muted" id="linkSub"></div>
+    <input type="search" id="linkQ" placeholder="Incident / ref number, site or words…" style="width:100%;margin-top:8px;" autocomplete="off">
+    <div id="linkRes"></div>
+    <div style="text-align:right;margin-top:8px;"><button class="btn ghost" id="linkCancel">Cancel</button></div>
+  </div></div>
 <script>
   const API = window.MOSTLANE_API;
   const g = id => document.getElementById(id);
@@ -119,7 +135,7 @@
       .filter(r => !sub || (r.subs.length ? r.subs.map(subKey) : ["unknown"]).includes(sub))
       .filter(r => !q || [r.ref, r.project ? r.project.number + " " + r.project.name : "", r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
     let tot = list.length + " job" + (list.length === 1 ? "" : "s");
-    if (DATA.money) { const t = list.reduce((a, r) => a + (r.poTotal || 0), 0); if (t) tot += " · POs " + money(t); }
+    if (DATA.money) { const t = list.reduce((a, r) => a + (r.cost || 0), 0); if (t) tot += " · cost " + money(t); }
     g("tot").textContent = tot;
     if (!list.length) { g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">Nothing here.</p>'; return; }
     const cols = [["sub","Subcontractor"],["ref","Job"],["site","Site"],["work","Work",1],["since","Since"],["days","Days"],["status","Job status"],["pos","PO"]]
@@ -134,7 +150,7 @@
     sub: r => (r.subs[0] || "~").toLowerCase(), ref: r => String(r.project ? r.project.number + " " + r.project.name : r.ref || "").toLowerCase(),
     site: r => [r.siteCode, r.siteName].join(" ").toLowerCase(), since: r => r.since || "",
     days: r => r.days == null ? -1 : r.days, status: r => r.state + (r.jobStatus || ""),
-    pos: r => r.pos.length ? Number(r.pos[0].number) || 0 : -1, cost: r => r.poTotal || 0
+    pos: r => r.pos.length ? Number(r.pos[0].number) || 0 : -1, cost: r => r.cost || 0
   };
   function cmp(a, b) {
     const f = SORTV[sortKey] || SORTV.days, x = f(a), y = f(b);
@@ -153,9 +169,14 @@
     const status = r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>`
       : r.project ? `<span class="pill p-proj">Project · ${esc(r.project.status || "")}</span>` : `<span class="pill p-warn">No job found</span>`;
     const pos = r.pos.length ? r.pos.map(p => esc(p.number)).join(", ") : "";
-    const cost = DATA.money ? `<td class="nw" style="text-align:right">${r.pos.length ? (r.pos.some(p => p.cost == null) && !r.poTotal ? '<span style="color:#b45309">not priced</span>' : esc(money(r.poTotal))) : ""}</td>` : "";
+    let costIn = "";
+    if (r.pos.length === 1) costIn = costInput("po", r.pos[0].number, r.pos[0].cost);
+    else if (!r.pos.length && r.jobId && r.record) costIn = costInput("job", r.jobId, r.recordCost);
+    else if (r.pos.length > 1) costIn = esc(money(r.cost)) + (r.poUnpriced ? ` <span style="color:#b45309" title="${r.poUnpriced} not priced — set them in the detail row">+?</span>` : "");
+    const cost = DATA.money ? `<td class="nw" style="text-align:right">${costIn}</td>` : "";
     const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
-    const acts = r.state === "open" ? b("done", "✓ Done", "ok") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen");
+    const link = !r.jobId && r.pos.length ? `<button class="ib" data-link="${esc(r.pos[0].number)}" title="Link this PO to an incident / job">🔗 Link</button> ` : "";
+    const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", "Finished by the subcontractor — doesn't change the job's own status") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
     const work = r.description || "";
     const open = OPENDET.has(r.key);
     let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="nw">${refHtml}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
@@ -165,10 +186,71 @@
     const rec = r.record;
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
     const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
-    const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + (p.cost == null ? '<span style="color:#b45309">not priced</span>' : esc(money(p.cost))) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}</div>`).join("");
+    const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
     html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
     return html;
   }
+
+  function costInput(kind, id, v) {
+    return `<input class="cost" inputmode="decimal" placeholder="£ ex VAT" data-cost="${kind}" data-cid="${esc(id)}" value="${v == null ? "" : Number(v).toFixed(2)}" title="Cost ex VAT${kind === "po" ? " — saved onto PO " + esc(id) : ""}">`;
+  }
+  async function saveCost(inp) {
+    const v = inp.value.trim().replace(/[£,\s]/g, "");
+    if (v && !(isFinite(Number(v)) && Number(v) >= 0)) { inp.classList.add("bad"); return; }
+    inp.classList.remove("bad", "saved");
+    const body = inp.dataset.cost === "po" ? { po: inp.dataset.cid, cost: v } : { jobId: inp.dataset.cid, cost: v };
+    try {
+      const res = await authFetch("/sla/subcontracted/cost", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
+      inp.classList.add("saved");
+      const n = v === "" ? null : Number(v);
+      for (const r of DATA.rows || []) {
+        if (inp.dataset.cost === "po") r.pos.forEach(p => { if (String(p.number) === inp.dataset.cid) p.cost = n; });
+        else if (r.jobId === inp.dataset.cid) r.recordCost = n;
+        const priced = r.pos.filter(p => p.cost != null);
+        r.poTotal = priced.reduce((a, p) => a + p.cost, 0); r.poUnpriced = r.pos.length - priced.length; r.cost = r.poTotal + (r.recordCost || 0);
+      }
+      setTimeout(render, 600);
+    } catch (e) { inp.classList.add("bad"); alert("Couldn't save the cost: " + (e.message || e)); }
+  }
+
+  let LINK_PO = null, linkT = 0;
+  function openLink(po) {
+    LINK_PO = po;
+    const r = (DATA.rows || []).find(x => x.pos.some(p => String(p.number) === String(po)));
+    g("linkTitle").textContent = "Link PO " + po + " to a job";
+    g("linkSub").textContent = r ? [r.subs.join(", "), r.siteName, r.description].filter(Boolean).join(" · ").slice(0, 160) : "";
+    g("linkQ").value = r && r.ref ? r.ref : "";
+    g("linkRes").innerHTML = "";
+    g("linkBack").classList.add("show");
+    g("linkQ").focus();
+    if (g("linkQ").value) searchJobs();
+  }
+  async function searchJobs() {
+    const q = g("linkQ").value.trim();
+    if (q.length < 2) { g("linkRes").innerHTML = '<p class="muted">Type an incident / ref number, a site name or some words from the job.</p>'; return; }
+    const my = ++linkT;
+    g("linkRes").innerHTML = '<p class="muted">Searching…</p>';
+    let d = null; try { d = await authFetch("/sla/subcontracted/job-search?q=" + encodeURIComponent(q)).then(r => r.json()); } catch (e) {}
+    if (my !== linkT) return;
+    if (!d || !d.ok) { g("linkRes").innerHTML = '<p class="msg err">Search failed.</p>'; return; }
+    if (!d.jobs.length) { g("linkRes").innerHTML = '<p class="muted">No jobs found.</p>'; return; }
+    g("linkRes").innerHTML = d.jobs.map(j => `<div class="lr" data-pick="${esc(j.id)}"><b>${esc(j.ref)}</b> · ${esc([j.siteCode, j.siteName].filter(Boolean).join(" "))} <span class="pill p-job">${esc(j.status)}</span> <span class="muted2">${esc(fmtD(j.createdAt))}</span><div class="muted2">${esc(j.description)}</div></div>`).join("");
+  }
+  async function doLink(po, jobId) {
+    try {
+      const res = await authFetch("/sla/subcontracted/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ po, jobId }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
+    } catch (e) { alert("Couldn't do that: " + (e.message || e)); return false; }
+    g("linkBack").classList.remove("show");
+    load(); return true;
+  }
+  g("linkQ").addEventListener("input", () => { clearTimeout(g("linkQ")._t); g("linkQ")._t = setTimeout(searchJobs, 300); });
+  g("linkCancel").onclick = () => g("linkBack").classList.remove("show");
+  g("linkBack").addEventListener("click", e => { if (e.target.id === "linkBack") g("linkBack").classList.remove("show"); });
+  document.addEventListener("change", e => { if (e.target.matches("input.cost")) saveCost(e.target); });
 
   async function setState(key, st, btn) {
     const r = (DATA.rows || []).find(x => x.key === key); if (!r) return;
@@ -184,7 +266,10 @@
   }
 
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det]"); if (!t) return;
+    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick]"); if (!t) return;
+    if (t.dataset.link) { openLink(t.dataset.link); return; }
+    if (t.dataset.pick) { doLink(LINK_PO, t.dataset.pick); return; }
+    if (t.dataset.unlink) { (async () => { const ok = window.MLUI ? await MLUI.confirm("Unlink PO " + t.dataset.unlink + " from this job? It will show as a PO on its own.", { title:"Unlink PO" }) : confirm("Unlink PO " + t.dataset.unlink + "?"); if (ok) doLink(t.dataset.unlink, null); })(); return; }
     if (t.dataset.sort) { const k = t.dataset.sort; if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "days" || k === "since" || k === "cost") ? -1 : 1; } render(); return; }
     if (t.dataset.det) { const k = t.dataset.det; if (OPENDET.has(k)) OPENDET.delete(k); else OPENDET.add(k); render(); return; }
     if (t.dataset.tab) { tab = t.dataset.tab; try { localStorage.setItem("mlSubconTab", tab); } catch (x) {} render(); }

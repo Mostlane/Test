@@ -40,9 +40,11 @@ function makeEnv({ sendOk = true, pos = [] } = {}) {
   const poLog = [];
   const poDb = { prepare(sql) { let b = []; const st = {
     bind(...a) { b = a; return st; },
-    async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; return null; },
+    async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; if (/SELECT po_number FROM po_log WHERE po_number/.test(sql)) return pos.find(p => String(p.po_number) === String(b[0])) || null; return null; },
     async all() { if (/FROM po_log/.test(sql) && /subcontractor/.test(sql)) return { results: pos }; return { results: [] }; },
     async run() {
+      if (/UPDATE po_log SET job_id/.test(sql)) { const p = pos.find(x => String(x.po_number) === String(b[b.length - 1])); if (!p) return { meta: { changes: 0 } }; p.job_id = b.length > 1 ? b[0] : null; p.job_ref = b.length > 1 ? b[1] : null; }
+      if (/UPDATE po_log SET cost_ex_vat/.test(sql)) { const p = pos.find(x => String(x.po_number) === String(b[2])); if (!p) return { meta: { changes: 0 } }; p.cost_ex_vat = b[0]; }
       if (/INSERT INTO po_log/.test(sql)) poLog.push({ po_number: b[0], source: b[4], site: b[5], supplier: b[7], cost_category: b[12], trade: b[13], job_id: b[14] });
       return { meta: { changes: 1 } };
     },
@@ -176,6 +178,28 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("close a PO-only row", (await call(E, "Office Admin", "/subcontracted/po-status", { key: "po:10620", status: "done" })).status === 200);
   const n2 = await call(E, "Office Admin", "/subcontracted?count=1", null, "GET");
   ok("…and it leaves the open list", n2.body.open === 0, JSON.stringify(n2.body));
+  // link a PO-only row to a job by hand, then unlink it
+  const sr = await call(E, "Office Admin", "/subcontracted/job-search?q=tap", null, "GET");
+  ok("job search finds jobs", sr.status === 200 && Array.isArray(sr.body.jobs), JSON.stringify(sr.body));
+  const lk = await call(E, "Office Admin", "/subcontracted/link", { po: "10620", jobId: "J-TAP" });
+  ok("link PO-only → job", lk.status === 200 && POS[1].job_id === "J-TAP", JSON.stringify(lk.body));
+  const al = await call(E, "Boss", "/subcontracted", null, "GET");
+  const tapRow = (al.body.rows || []).find(r => r.jobId === "J-TAP");
+  ok("linked PO now sits on the job's row (and no PO-only row)", tapRow && tapRow.pos.some(p => p.number === 10620 && p.match === "linked") && !(al.body.rows || []).some(r => r.key === "po:10620"));
+  const ul = await call(E, "Office Admin", "/subcontracted/link", { po: "10620", jobId: null });
+  ok("unlink", ul.status === 200 && POS[1].job_id === null);
+  const ul2 = await call(E, "Office Admin", "/subcontracted/link", { po: "10630", jobId: null });
+  const al2 = await call(E, "Office Admin", "/subcontracted", null, "GET");
+  ok("unlinking an incident-matched PO stops the auto match", ul2.status === 200 && (al2.body.rows || []).some(r => r.key === "po:10630"));
+  ok("link refuses an unknown PO", (await call(E, "Office Admin", "/subcontracted/link", { po: "999", jobId: "J-TAP" })).status === 404);
+  // costs: money users only
+  ok("cost: non-money SLA admin refused", (await call(E, "Office Admin", "/subcontracted/cost", { po: "10620", cost: "50" })).status === 403);
+  const c1 = await call(E, "Boss", "/subcontracted/cost", { po: "10620", cost: "£1,250.5" });
+  ok("cost onto the PO", c1.status === 200 && POS[1].cost_ex_vat === 1250.5, JSON.stringify(c1.body));
+  const c2 = await call(E, "Boss", "/subcontracted/cost", { jobId: "J-TAP", cost: "300" });
+  ok("cost on a no-PO hand-off record", c2.status === 200 && E.saved["J-TAP"].subcontract.cost === 300);
+  ok("cost hidden from a field job read", !("cost" in (sla.stripMoney(E.saved["J-TAP"]).subcontract)));
+  ok("bad cost rejected", (await call(E, "Boss", "/subcontracted/cost", { po: "10620", cost: "abc" })).status === 400);
   ok("incidentKey reads 'NNNNN Site' with a space", (sla.incidentKey("30389 Brislington DTU") || {}).inc === "30389" && sla.incidentKey("0129 Gosport") === null); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
