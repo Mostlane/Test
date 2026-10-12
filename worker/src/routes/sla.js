@@ -2454,6 +2454,43 @@ export async function handle(request, env, ctx, url, sess) {
     // POST /sla/jobs/{id}/subcontract {to:"metrorod"} — ONE press emails the job to
     // the subcontractor and stamps job.subcontract. Locked: a second press (anyone,
     // any device) returns {already:true} with who/when and sends nothing.
+    // POST /sla/jobs/{id}/subcontract-preview {to, details?, test?} — exactly what the
+    // order email will say, before anything is raised or sent. {test:true} emails that
+    // preview to the person pressing it (marked TEST) — no PO, no lock, no record.
+    if (parts[2] === "subcontract-preview" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson(request);
+      const key = String(b.to || "metrorod").toLowerCase();
+      const sc = (await getSubconConfig(env, tenantId))[key];
+      if (!sc) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
+      if (!sc.to) return jsonResponse({ error: sc.name + " has no email address — add one on the Subcontractors page." }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const reused = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
+      const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : "[new PO no.]";
+      let hours = 0;
+      try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
+      const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
+      const mail = buildMetroRodEmail(job, hours, poRef, sc, edited != null ? { details: edited } : {});
+      const warnings = [];
+      if (!String(job.postcode || "").trim()) warnings.push("No postcode on the job.");
+      if (String(job.telephone || "").replace(/\D/g, "").length < 7) warnings.push(sc.requirePhone ? "No valid phone number — you'll be asked for one when you send." : "No phone number on the job.");
+      if (!String(mail.details || "").trim()) warnings.push("The details box is empty.");
+      const out = { ok: true, name: sc.name, from: env.EMAIL_FROM || "Mostlane <no-reply@mostlane-portal.com>", to: sc.to, cc: sc.cc || [], replyTo: sc.replyTo || "",
+        subject: mail.subject, html: mail.html, details: mail.details, poNote: reused ? "Re-uses PO " + poRef + " (raised on an earlier attempt)." : "A new PO is raised in the PO system when you press Send; its number replaces [new PO no.].", warnings };
+      if (b.test) {
+        const u = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(sess.user.username).first().catch(() => null);
+        const me = u && String(u.email || "").trim();
+        if (!me) return jsonResponse({ error: "There's no email address on your user — add one in Users Admin to get test copies." }, headers, 400);
+        const { sendEmail } = await import("../lib/email.js");
+        const r = await sendEmail(env, { to: me, subject: "[TEST — not sent to " + sc.name + "] " + mail.subject, html: mail.html });
+        if (!r || !r.ok) return jsonResponse({ error: "Test email didn't send" + (r && r.error ? " — " + String(r.error).slice(0, 160) : "") }, headers, 502);
+        out.testSentTo = me;
+      }
+      return jsonResponse(out, headers);
+    }
+
     if (parts[2] === "subcontract" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -2478,7 +2515,8 @@ export async function handle(request, env, ctx, url, sess) {
       const key = String(b.to || "metrorod").toLowerCase();
       const cfgAll = await getSubconConfig(env, tenantId);
       const sc = cfgAll[key];
-      if (!sc || !sc.to) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
+      if (!sc) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
+      if (!sc.to) return jsonResponse({ error: sc.name + " has no email address — add one on the Subcontractors page." }, headers, 400);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       if (job.subcontract && job.subcontract.sentAt) return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
@@ -2525,7 +2563,8 @@ export async function handle(request, env, ctx, url, sess) {
       const poRef = formatPoRef(poNumber, sc.poDigits);
       let hours = 0;
       try { const cfg = await getConfig(env, tenantId); hours = (cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours) || 0; } catch {}
-      const mail = buildMetroRodEmail(job, hours, poRef, sc);
+      const edited = typeof b.details === "string" ? b.details.slice(0, 4000) : null;
+      const mail = buildMetroRodEmail(job, hours, poRef, sc, edited != null ? { details: edited } : {});
       const { sendEmail } = await import("../lib/email.js");
       const r = await sendEmail(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
@@ -2543,7 +2582,7 @@ export async function handle(request, env, ctx, url, sess) {
         return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " — " + errTxt : "") + ". Press again to re-send (the same PO is kept).", subcontract: job.subcontract }, headers, 502);
       }
       const now = new Date().toISOString();
-      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open" };
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details };
       job.events ||= [];
       job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) — "${mail.subject}"` });
       job.updatedAt = now;
@@ -6853,7 +6892,14 @@ function escH(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
    No is OUR PO number (raised in the PO system, padded to the subcontractor's
    width — e.g. Metro Rod's 6 digits), passed in as `poRef`; it falls back to the
    client's incident ref only if no PO was raised (shouldn't happen in practice). */
-export function buildMetroRodEmail(job, hours, poRef, sc) {
+// The job text a subcontractor should see: the description minus the portal's own
+// linking notes ("↩ Re-assigned incident — follows our earlier visit …") which are
+// for the office, not for a third party.
+export function subconDetails(job) {
+  return String((job && job.description) || "").split(/\r?\n/)
+    .filter(l => !/^\s*↩/.test(l)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const f = (sc && sc.fields) ? sc.fields : {};
   const on = k => f[k] !== false;   // default every field ON when not configured
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
@@ -6862,14 +6908,19 @@ export function buildMetroRodEmail(job, hours, poRef, sc) {
   const target = hrs ? (hrs % 24 === 0 && hrs >= 48 ? (hrs / 24) + " Days" : hrs + " Hours") : "";
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
-  const site = [String(job.siteCode || "").trim(), String(job.siteName || "").trim()].filter(Boolean).join(" ");
+  const code = String(job.siteCode || "").trim();
+  const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
+  // The address box always carries the postcode (it used to be in the subject only).
+  let addr = String(job.address || job.siteName || "").trim();
+  if (pc && !addr.toUpperCase().replace(/\s/g, "").includes(pc.replace(/\s/g, ""))) addr = addr ? addr + ", " + pc : pc;
+  const details = opts.details != null ? String(opts.details) : subconDetails(job);
   const box = (label, val, big = true) => `<table style="width:100%;background:#f3f6fa;border-radius:12px;margin-bottom:10px"><tr><td style="padding:14px 18px"><div style="font-size:12px;color:#7a8794;text-transform:uppercase;letter-spacing:.04em">${escH(label)}</div><div style="font-size:${big ? 16 : 15}px;${big ? "font-weight:600;color:#1c2733" : "color:#33424f;line-height:1.5"};margin-top:3px">${escH(val || "—").replace(/\n/g, "<br>")}</div></td></tr></table>`;
   const boxes = [
     on("site") && box("Site", site),
-    on("address") && box("Address", job.address || job.siteName),
+    on("address") && box("Address", addr),
     on("phone") && box("Phone", job.telephone),
     (on("target") && target) && box("Target", target),
-    on("description") && box("Details", job.description, false),
+    on("description") && box("Details", details, false),
   ].filter(Boolean).join("");
   const headPriority = (on("priority") || on("target"));
   const html = `<table style="width:100%;background:#eef1f5;margin:0;padding:24px 0"><tr><td align="center"><table style="width:600px;max-width:600px;background:#ffffff;border:1px solid #e2e6ec;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
@@ -6878,7 +6929,7 @@ export function buildMetroRodEmail(job, hours, poRef, sc) {
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">Please attend the above and confirm receipt. Contact the site on the number above to arrange access.</div></td></tr>
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
 </table></td></tr></table>`;
-  return { subject, html, ref };
+  return { subject, html, ref, details };
 }
 
 /* Every job sat with a subcontractor: the portal record (job.subcontract — the Metro

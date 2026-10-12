@@ -201,7 +201,8 @@
     .sc-row .sc-info{flex:1;min-width:0}
     .sc-row .sc-name{font-weight:700;color:#0f172a;font-size:15px}
     .sc-row .sc-meta{font-size:12px;color:#64748b;margin-top:2px}
-    .sc-row .sc-send{border:0;border-radius:10px;background:#15599d;color:#fff;font-weight:700;padding:9px 14px;cursor:pointer;flex:0 0 auto}
+    .sc-sheet .sc-send{border:0;border-radius:10px;background:#15599d;color:#fff;font-weight:700;padding:9px 14px;cursor:pointer;flex:0 0 auto}
+    .sc-sheet .sc-send[disabled]{opacity:.55;cursor:default}
     .sc-chip{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;margin-right:5px}
     .sc-chip.ok{background:#dcfce7;color:#166534} .sc-chip.warn{background:#fef3c7;color:#92400e} .sc-chip.ooh{background:#e0e7ff;color:#3730a3}
     /* Custom categories carry their own colour via --cc (border + filled state). */
@@ -1914,9 +1915,11 @@ function promptPhone(name, site, current){
 }
 async function sendToSubcontractor(key, name){
   const id = (job && job.id) || getJobIdFromQuery();
-  const ok = window.MLUI ? await MLUI.confirm("Email this job to " + (name||"the subcontractor") + " now? It raises a PO in the PO system and emails them the order.", { title:"Send to " + (name||"subcontractor"), okLabel:"Send" }) : confirm("Email this job to " + (name||"the subcontractor") + " now?");
-  if(!ok) return false;
-  const body = { to: key };
+  // Show EXACTLY what will be emailed (recipients, subject, the rendered email) and let
+  // the office edit the details text before anything is raised or sent.
+  const details = await previewSubconEmail(id, key, name);
+  if(details == null) return false;
+  const body = { to: key, details: details };
   for(;;){
     const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
     const d = await r.json().catch(()=>({}));
@@ -1934,6 +1937,55 @@ async function sendToSubcontractor(key, name){
     }
     throw new Error(d.error || ("HTTP " + r.status));
   }
+}
+function previewSubconEmail(id, key, name){
+  return new Promise(function(resolve){
+    const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const wrap = document.createElement("div"); wrap.className = "sc-modal"; wrap.style.zIndex = "9050";
+    wrap.innerHTML = '<div class="sc-sheet" style="max-width:720px"><h3>📧 Check the email to ' + esc(name||"the subcontractor") + '</h3>' +
+      '<div id="pvHead" class="sc-sub">Loading preview…</div>' +
+      '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Details sent to them (edit before sending — the job itself isn’t changed)</label>' +
+      '<textarea id="pvDet" rows="4" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box"></textarea>' +
+      '<iframe id="pvFrame" sandbox="" title="Email preview" style="width:100%;height:420px;border:1px solid #e2e6ec;border-radius:12px;margin-top:10px;background:#eef1f5"></iframe>' +
+      '<div id="pvMsg" style="font-size:12.5px;margin-top:8px"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">' +
+      '<button id="pvCancel" style="border:0;background:#eef2f7;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer">Cancel</button>' +
+      '<button id="pvTest" style="border:1px solid #15599d;color:#15599d;background:#fff;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer">✉ Send a test to me</button>' +
+      '<button id="pvSend" class="sc-send" style="flex:0 0 auto" disabled>Send to ' + esc(name||"them") + '</button></div></div>';
+    document.body.appendChild(wrap);
+    const det = wrap.querySelector("#pvDet"), msg = wrap.querySelector("#pvMsg"), sendBtn = wrap.querySelector("#pvSend");
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.addEventListener("click", e => { if(e.target === wrap) done(null); });
+    wrap.querySelector("#pvCancel").onclick = () => done(null);
+    let first = true, t = 0;
+    async function load(test){
+      const body = { to: key, test: !!test };
+      if(!first) body.details = det.value;
+      const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract-preview", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      if(first){ det.value = d.details || ""; first = false; }
+      const cc = (d.cc||[]).length ? (d.cc||[]).join(", ") : "—";
+      wrap.querySelector("#pvHead").innerHTML =
+        '<div><b>To:</b> ' + esc(d.to) + ' &nbsp; <b>CC:</b> ' + esc(cc) + '</div>' +
+        '<div><b>Replies go to:</b> ' + esc(d.replyTo || d.from) + ' &nbsp; <b>From:</b> ' + esc(d.from) + '</div>' +
+        '<div><b>Subject:</b> ' + esc(d.subject) + '</div>' +
+        '<div style="color:#64748b">' + esc(d.poNote) + '</div>' +
+        (d.warnings && d.warnings.length ? '<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ ' + d.warnings.map(esc).join(" · ") + '</div>' : '');
+      wrap.querySelector("#pvFrame").srcdoc = d.html || "";
+      sendBtn.disabled = false;
+      return d;
+    }
+    det.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => load(false).catch(e => { msg.style.color="#b91c1c"; msg.textContent = e.message||e; }), 400); });
+    wrap.querySelector("#pvTest").onclick = async function(){
+      this.disabled = true; msg.style.color = "#334155"; msg.textContent = "Sending a test copy…";
+      try{ const d = await load(true); msg.style.color = "#166534"; msg.textContent = "✓ Test sent to " + d.testSentTo + " — nothing was sent to " + (name||"them") + " and no PO was raised."; }
+      catch(e){ msg.style.color = "#b91c1c"; msg.textContent = e.message || e; }
+      this.disabled = false;
+    };
+    sendBtn.onclick = () => done(det.value);
+    load(false).catch(e => { wrap.querySelector("#pvHead").innerHTML = '<span style="color:#b91c1c">' + esc(e.message||e) + '</span>'; });
+  });
 }
 async function openSubconPicker(){
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
