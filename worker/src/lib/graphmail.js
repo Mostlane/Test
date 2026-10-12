@@ -147,12 +147,15 @@ export async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, ht
   const ccl = list(cc); if (ccl.length) message.ccRecipients = ccl;
   const rtl = list(replyTo); if (rtl.length) message.replyTo = rtl;
   try {
-    const token = await getToken(env);
-    const r = await fetch(`${GRAPH}/users/${encodeURIComponent(mailbox)}/sendMail`, {
+    const send = async () => fetch(`${GRAPH}/users/${encodeURIComponent(mailbox)}/sendMail`, {
       method: "POST",
-      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      headers: { authorization: "Bearer " + (await getToken(env)), "content-type": "application/json" },
       body: JSON.stringify({ message, saveToSentItems: true }),
     });
+    let r = await send();
+    // A cached token minted before Mail.Send was granted carries no send role —
+    // drop it and sign in afresh once before giving up.
+    if (r.status === 401 || r.status === 403) { _tok = { value: "", exp: 0 }; r = await send(); }
     if (r.status === 202 || r.ok) return { ok: true, via: "m365" };
     let d = ""; try { const j = await r.json(); d = (j && j.error && (j.error.code ? j.error.code + ": " : "") + (j.error.message || "")) || ""; } catch {}
     return { ok: false, status: r.status, error: "Microsoft 365 refused (" + r.status + ")" + (d ? " — " + d.slice(0, 200) : "") };
