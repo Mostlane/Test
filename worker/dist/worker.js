@@ -18713,6 +18713,7 @@ __export(sla_exports, {
   releaseVisibleNow: () => releaseVisibleNow,
   remindPendingHolds: () => remindPendingHolds,
   sameSiteJob: () => sameSiteJob,
+  siteWordFreq: () => siteWordFreq,
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
   stripPricing: () => stripPricing,
@@ -18720,6 +18721,7 @@ __export(sla_exports, {
   subconKeysFromNames: () => subconKeysFromNames,
   subconReplyUrl: () => subconReplyUrl,
   subcontractedRows: () => subcontractedRows,
+  suggestJobsForPo: () => suggestJobsForPo,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
   unlinkOrderFromJob: () => unlinkOrderFromJob
@@ -25515,6 +25517,7 @@ async function subcontractedRows(env, tid, money2) {
   };
   const poMap = await getPoOnlyClosed(env, tid);
   const stamp = [];
+  let df = null;
   const rows = /* @__PURE__ */ new Map();
   const rowFor = (j) => {
     let r = rows.get(j.id);
@@ -25548,10 +25551,18 @@ async function subcontractedRows(env, tid, money2) {
       how = "linked";
     }
     if (!j && !poMap["nolink:po:" + p.po_number]) {
-      const k = incidentKey(p.incident_no) || incidentKey(p.job_ref) || incidentKey((/incident\D{0,6}(\d{5,8})/i.exec(p.description || "") || [])[1]);
-      if (k) {
+      const cands = [p.incident_no, p.job_ref];
+      const re = /(?:incident|job|ref(?:erence)?)\D{0,6}(\d{5,8}(?:\/\d{1,3})?)/gi;
+      let mm;
+      while (mm = re.exec(String(p.description || ""))) cands.push(mm[1]);
+      for (const c of cands) {
+        const k = incidentKey(c);
+        if (!k) continue;
         j = pickForInc(k.inc);
-        if (j) how = "incident";
+        if (j) {
+          how = "incident";
+          break;
+        }
       }
     }
     const po = { number: p.po_number, match: how, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...money2 ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {} };
@@ -25580,6 +25591,8 @@ async function subcontractedRows(env, tid, money2) {
       subs: [],
       project: projectFor(p.site)
     });
+    const pr = rows.get("po:" + p.po_number);
+    if (pr && !j && !pr.project) pr.suggest = suggestJobsForPo(p, jobs, df || (df = siteWordFreq(jobs)));
   }
   for (const j of stamp) {
     try {
@@ -25664,6 +25677,50 @@ function isKnownSubcon(supplier, keys) {
   if (k.length < 3) return false;
   if (keys.first.includes(k)) return true;
   return keys.full.some((x) => x === k || x.length >= 4 && k.length >= 4 && (k.includes(x) || x.includes(k)));
+}
+function suggestJobsForPo(po, jobs, df) {
+  const words = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length >= 4 && !PO_SUG_STOP.has(w) && !/^\d+$/.test(w));
+  const poDate = Date.parse(po.issued_at || "");
+  const poSite = String(po.site || "");
+  const codeM = /(?:^|\D)(\d{2,4})(?:\D|$)/.exec(poSite);
+  const poCode = codeM ? Number(codeM[1]) : null;
+  const siteW = [...new Set(words(poSite))];
+  const descW = [...new Set(words(po.description))].filter((w) => w.length >= 5);
+  const out = [];
+  for (const j of jobs) {
+    const t = Date.parse(j.createdAt || "");
+    if (isFinite(poDate) && isFinite(t) && (t > poDate + 3 * 864e5 || t < poDate - 120 * 864e5)) continue;
+    const jSite = [j.siteName, j.address, j.helpdeskRef].join(" ");
+    const jW = new Set(words(jSite));
+    let site = 0;
+    const why = [];
+    const jc = /^\d+$/.test(String(j.siteCode || "")) ? Number(j.siteCode) : null;
+    if (poCode != null && jc != null && poCode === jc) {
+      site += 3;
+      why.push("same store " + String(jc).padStart(4, "0"));
+    }
+    const nameW = new Set(words([j.siteName, j.helpdeskRef].join(" ")));
+    const shared = siteW.filter((w) => jW.has(w));
+    for (const w of shared) site += (nameW.has(w) ? 1 : 0.3) / Math.max(1, Math.log2(1 + (df.get(w) || 1)));
+    if (shared.length) why.push("site: " + shared.join(", "));
+    if (site < 0.2) continue;
+    const jd = String(j.description || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const work = [.../* @__PURE__ */ new Set([...descW, ...siteW.filter((w) => !jW.has(w))])].filter((w) => jd.includes(w));
+    if (site < 0.6 && !work.length) continue;
+    if (work.length) why.push("work: " + work.join(", "));
+    const days = isFinite(poDate) && isFinite(t) ? Math.round((poDate - t) / 864e5) : null;
+    const score = site + work.length * 1.5 + (days != null ? Math.max(0, 1 - Math.abs(days) / 60) : 0);
+    out.push({ jobId: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", status: j.status || "", createdAt: j.createdAt || null, score: Math.round(score * 100) / 100, why: why.join(" \xB7 ") + (days != null ? " \xB7 job raised " + (days >= 0 ? days + "d before the PO" : -days + "d after") : "") });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 3);
+}
+function siteWordFreq(jobs) {
+  const df = /* @__PURE__ */ new Map();
+  for (const j of jobs) {
+    const seen = new Set(String([j.siteName, j.address, j.helpdeskRef].join(" ")).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length >= 4));
+    for (const w of seen) df.set(w, (df.get(w) || 0) + 1);
+  }
+  return df;
 }
 async function getPoOnlyClosed(env, tid) {
   try {
@@ -26775,7 +26832,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBKEY_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -26832,6 +26889,7 @@ var init_sla = __esm({
     };
     SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
     SUBKEY_STOP = /* @__PURE__ */ new Set(["the", "mr", "mrs", "ms", "and", "ltd", "limited", "services", "service", "group", "uk"]);
+    PO_SUG_STOP = /* @__PURE__ */ new Set(["road", "street", "lane", "avenue", "close", "drive", "park", "retail", "store", "shop", "the", "and", "coop", "operative", "cooperative", "funeralcare", "funeral", "starbucks", "branch", "unit", "site", "with", "from", "attend", "attended", "works", "work", "please", "required", "quote", "quotation", "recommended", "needs", "needed", "fixing", "fixed", "repair", "repairs", "engineer", "check", "job", "jobs", "incident", "drainage"]);
     DEFAULT_CONFIG3 = {
       priorities: {
         "Priority 1": { hours: 4 },

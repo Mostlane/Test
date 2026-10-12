@@ -49,6 +49,8 @@
     .pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:700;white-space:nowrap;}
     .p-job{background:#f1f5f9;color:#334155;} .p-proj{background:#e0e7ff;color:#3730a3;} .p-warn{background:#fef3c7;color:#92400e;}
     .ib{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:3px 8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;color:#0f2438;white-space:nowrap;}
+    .ib.sug{border-color:#c7d2fe;background:#eef2ff;color:#3730a3;margin-top:3px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+    .lr.sg{border-color:#c7d2fe;background:#f5f7ff}
     .ib.ok{border-color:#86efac;color:#166534;} .ib.ok:hover{background:#dcfce7;}
     .ib:hover{background:#f1f5f9;}
     .ib[disabled]{opacity:.5;cursor:default;}
@@ -162,7 +164,9 @@
     const site = [r.siteCode, r.siteName].filter(Boolean).join(" ");
     const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>`
       : r.project ? `<a class="ref" href="project-hub.html?id=${encodeURIComponent(r.project.id)}" title="Project — open the project hub">📁 ${esc(r.project.number)} ${esc(r.project.name)}</a>`
-      : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
+      : (r.suggest && r.suggest.length)
+        ? `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span><br><button class="ib sug" data-sugpo="${esc(r.pos[0].number)}" data-sugjob="${esc(r.suggest[0].jobId)}" title="${esc(r.suggest[0].why)}">💡 ${esc(r.suggest[0].ref)}?</button>${r.suggest.length > 1 ? ` <span class="muted2">+${r.suggest.length - 1}</span>` : ""}`
+        : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
     let dCls = "", dTxt = "";
     if (r.state === "open") { dCls = r.days == null ? "" : r.days > 7 ? "st-red" : r.days > 3 ? "st-amber" : "st-green"; dTxt = r.days == null ? "" : r.days === 0 ? "today" : r.days + "d"; }
     else { dCls = r.state === "done" ? "st-green" : "st-grey"; dTxt = r.state === "done" ? "✓ Done" : (r.record && r.record.declined ? "❌ Can't take" : "↩ Back"); if (r.record && r.record.declined && r.state === "returned") dCls = "st-red"; }
@@ -215,28 +219,30 @@
     } catch (e) { inp.classList.add("bad"); alert("Couldn't save the cost: " + (e.message || e)); }
   }
 
-  let LINK_PO = null, linkT = 0;
+  let LINK_PO = null, linkT = 0, LINK_SUG = [];
+  const sugHtml = () => LINK_SUG.length ? '<div class="muted2" style="margin-top:6px;font-weight:700">💡 Likely jobs</div>' + LINK_SUG.map(j => `<div class="lr sg" data-pick="${esc(j.jobId)}"><b>${esc(j.ref)}</b> <span class="pill p-job">${esc(j.status)}</span> <span class="muted2">${esc(fmtD(j.createdAt))}</span><div class="muted2">${esc(j.why)}</div></div>`).join("") + '<div class="muted2" style="margin-top:10px;font-weight:700">Or search</div>' : "";
   function openLink(po) {
     LINK_PO = po;
     const r = (DATA.rows || []).find(x => x.pos.some(p => String(p.number) === String(po)));
     g("linkTitle").textContent = "Link PO " + po + " to a job";
     g("linkSub").textContent = r ? [r.subs.join(", "), r.siteName, r.description].filter(Boolean).join(" · ").slice(0, 160) : "";
     g("linkQ").value = r && r.ref ? r.ref : "";
-    g("linkRes").innerHTML = "";
+    LINK_SUG = (r && r.suggest) || [];
+    g("linkRes").innerHTML = sugHtml();
     g("linkBack").classList.add("show");
     g("linkQ").focus();
     if (g("linkQ").value) searchJobs();
   }
   async function searchJobs() {
     const q = g("linkQ").value.trim();
-    if (q.length < 2) { g("linkRes").innerHTML = '<p class="muted">Type an incident / ref number, a site name or some words from the job.</p>'; return; }
+    if (q.length < 2) { g("linkRes").innerHTML = sugHtml() + '<p class="muted">Type an incident / ref number, a site name or some words from the job.</p>'; return; }
     const my = ++linkT;
     g("linkRes").innerHTML = '<p class="muted">Searching…</p>';
     let d = null; try { d = await authFetch("/sla/subcontracted/job-search?q=" + encodeURIComponent(q)).then(r => r.json()); } catch (e) {}
     if (my !== linkT) return;
     if (!d || !d.ok) { g("linkRes").innerHTML = '<p class="msg err">Search failed.</p>'; return; }
-    if (!d.jobs.length) { g("linkRes").innerHTML = '<p class="muted">No jobs found.</p>'; return; }
-    g("linkRes").innerHTML = d.jobs.map(j => `<div class="lr" data-pick="${esc(j.id)}"><b>${esc(j.ref)}</b> · ${esc([j.siteCode, j.siteName].filter(Boolean).join(" "))} <span class="pill p-job">${esc(j.status)}</span> <span class="muted2">${esc(fmtD(j.createdAt))}</span><div class="muted2">${esc(j.description)}</div></div>`).join("");
+    if (!d.jobs.length) { g("linkRes").innerHTML = sugHtml() + '<p class="muted">No jobs found.</p>'; return; }
+    g("linkRes").innerHTML = sugHtml() + d.jobs.map(j => `<div class="lr" data-pick="${esc(j.id)}"><b>${esc(j.ref)}</b> · ${esc([j.siteCode, j.siteName].filter(Boolean).join(" "))} <span class="pill p-job">${esc(j.status)}</span> <span class="muted2">${esc(fmtD(j.createdAt))}</span><div class="muted2">${esc(j.description)}</div></div>`).join("");
   }
   async function doLink(po, jobId, fromJobId) {
     try {
@@ -266,8 +272,9 @@
   }
 
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick]"); if (!t) return;
+    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick],[data-sugpo]"); if (!t) return;
     if (t.dataset.link) { openLink(t.dataset.link); return; }
+    if (t.dataset.sugpo) { (async () => { const r = (DATA.rows || []).find(x => x.pos.some(p => String(p.number) === t.dataset.sugpo)); const sg = r && r.suggest && r.suggest[0]; const ok = window.MLUI ? await MLUI.confirm(`Link PO ${t.dataset.sugpo} to job ${sg ? sg.ref : ""}? Why it looks like a match: ${sg ? sg.why : ""}`, { title: "Link PO to this job?", okLabel: "Link" }) : confirm("Link PO " + t.dataset.sugpo + "?"); if (ok) doLink(t.dataset.sugpo, t.dataset.sugjob); })(); return; }
     if (t.dataset.pick) { doLink(LINK_PO, t.dataset.pick); return; }
     if (t.dataset.unlink) { (async () => { const ok = window.MLUI ? await MLUI.confirm("Unlink PO " + t.dataset.unlink + " from this job? It will show as a PO on its own.", { title:"Unlink PO" }) : confirm("Unlink PO " + t.dataset.unlink + "?"); if (ok) doLink(t.dataset.unlink, null, t.dataset.from); })(); return; }
     if (t.dataset.sort) { const k = t.dataset.sort; if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "days" || k === "since" || k === "cost") ? -1 : 1; } render(); return; }

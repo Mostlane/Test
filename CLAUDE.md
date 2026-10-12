@@ -5771,6 +5771,19 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   already declined shows a polite page. Send now allows a fresh send when the record is
   `returned` (was blocked as "already sent"). job-view shows a red "❌ X can't take this job"
   banner with the reason; subcontracted-jobs shows "❌ Can't take".
+  **POs raised outside the job (12 Oct 2026):** many subcontractor POs were raised in the
+  PO system with no / a mistyped incident. (1) Matching now tries EVERY number the PO
+  carries — incident box, job_ref, then a labelled number in the description ("FOR JOB
+  25589/2", "Incident - …", "Ref …") — first one that is a real job wins (10450's box said
+  22589/2, its description 25589/2). (2) A PO-only row gets `suggest[]` from
+  **`suggestJobsForPo(po, jobs, siteWordFreq(jobs))`** (exported): site = store code (+3)
+  or shared distinctive words (idf-weighted; a word only in the job's ADDRESS ×0.3), date
+  window job raised ≤120d before…3d after the PO, work words in common (spaces ignored,
+  incl. the PO's site box "Eastney Funeral - New Door"); a weak site match needs work
+  overlap. SUGGESTION ONLY — the page shows "💡 <ref>?" in the Job cell (tooltip = why) →
+  confirm → link; the 🔗 Link modal lists the likely jobs first. Tuned on live data: Worle
+  striplights → 29339-Worle JS; Eastney door → 3 Eastney door jobs; Lambourn/Fairoak/
+  Farnborough/Archers/Bristol aircon correctly get nothing.
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
