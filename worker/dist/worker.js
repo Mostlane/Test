@@ -5795,7 +5795,7 @@ async function handle6(request, env, ctx, url, sess) {
     if (path === "/api/suppliers" && method === "GET") return jr8(await getSuppliers(db));
     if (path === "/api/subcontractors" && method === "GET") return jr8(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr8(await getTrades(db));
-    if (path === "/api/sites" && method === "GET") return jr8(await getSites(db));
+    if (path === "/api/sites" && method === "GET") return jr8(await getSites(db, env));
     if (path === "/api/engineers" && method === "GET") return jr8(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr8(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr8(await getVehicles(env));
@@ -6136,8 +6136,27 @@ async function deleteTrade(db, id) {
   await db.prepare(`UPDATE trades SET active = 0 WHERE id = ?`).bind(id).run();
   return { success: true };
 }
-async function getSites(db) {
-  return (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results;
+async function getSites(db, env) {
+  const po = (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results || [];
+  const out = po.slice();
+  const seen = new Set(out.map((s) => String(s.name || "").trim().toLowerCase()).filter(Boolean));
+  try {
+    if (env && env.DB) {
+      const rows = (await env.DB.prepare(
+        `SELECT site_name, client FROM sites WHERE (active IS NULL OR active = 1) AND site_name IS NOT NULL AND TRIM(site_name) <> '' ORDER BY site_name`
+      ).all()).results || [];
+      for (const r of rows) {
+        const nm = String(r.site_name || "").trim();
+        const key = nm.toLowerCase();
+        if (!nm || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ name: nm, client: r.client || "", portal: 1 });
+      }
+    }
+  } catch {
+  }
+  out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return out;
 }
 async function addSite(db, body) {
   await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();

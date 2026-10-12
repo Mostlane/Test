@@ -281,7 +281,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/suppliers" && method === "GET") return jr(await getSuppliers(db));
     if (path === "/api/subcontractors" && method === "GET") return jr(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr(await getTrades(db));
-    if (path === "/api/sites" && method === "GET") return jr(await getSites(db));
+    if (path === "/api/sites" && method === "GET") return jr(await getSites(db, env));
     if (path === "/api/engineers" && method === "GET") return jr(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr(await getVehicles(env));
@@ -680,8 +680,31 @@ async function deleteTrade(db, id) {
   return { success: true };
 }
 
-async function getSites(db) {
-  return (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results;
+async function getSites(db, env) {
+  // The PO system's own master sites list…
+  const po = (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results || [];
+  const out = po.slice();
+  const seen = new Set(out.map(s => String(s.name || "").trim().toLowerCase()).filter(Boolean));
+  // …PLUS every active PORTAL site (env.DB) that isn't already in it — so customer
+  // sites bulk-loaded straight into the portal (Chapplins, and any future import
+  // that skipped /add-site's PO push) are still pickable for a PO. Deduped by name;
+  // fails soft so a PO-only deploy keeps working.
+  try {
+    if (env && env.DB) {
+      const rows = (await env.DB.prepare(
+        `SELECT site_name, client FROM sites WHERE (active IS NULL OR active = 1) AND site_name IS NOT NULL AND TRIM(site_name) <> '' ORDER BY site_name`
+      ).all()).results || [];
+      for (const r of rows) {
+        const nm = String(r.site_name || "").trim();
+        const key = nm.toLowerCase();
+        if (!nm || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ name: nm, client: r.client || "", portal: 1 });
+      }
+    }
+  } catch { /* portal merge is best-effort */ }
+  out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return out;
 }
 
 async function addSite(db, body) {
