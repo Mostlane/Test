@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9059,6 +9054,48 @@ function readDidCookie(request) {
 function didSetCookie(token) {
   return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
 }
+async function adoptCookieDevice(env, request, tok, mustMatch) {
+  try {
+    if (!env.SITELOG_DB || !tok) return null;
+    const known = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ? LIMIT 1"
+    ).bind(tok).first();
+    if (known) return known.person_id;
+    const cookieTok = readDidCookie(request);
+    if (!cookieTok || cookieTok === tok || cookieTok.length > 128) return null;
+    const owner = await env.SITELOG_DB.prepare(
+      `SELECT d.person_id, p.first_name, p.last_name FROM devices d JOIN people p ON p.id = d.person_id
+       WHERE d.device_token = ? AND COALESCE(p.archived,0) = 0 LIMIT 1`
+    ).bind(cookieTok).first();
+    if (!owner) return null;
+    if (mustMatch) {
+      const n = (v) => String(v || "").trim().toLowerCase();
+      if (n(owner.first_name) !== n(mustMatch.firstName) || n(owner.last_name) !== n(mustMatch.lastName)) return null;
+    }
+    await env.SITELOG_DB.prepare(
+      "INSERT OR IGNORE INTO devices (device_token, person_id) VALUES (?, ?)"
+    ).bind(tok, owner.person_id).run();
+    return owner.person_id;
+  } catch (e) {
+    console.error("adoptCookieDevice", e);
+    return null;
+  }
+}
+async function findSamePerson(env, firstName, lastName, company) {
+  const f = String(firstName || "").trim().toLowerCase();
+  const l = String(lastName || "").trim().toLowerCase();
+  const c = String(company || "").trim().toLowerCase();
+  if (!f || !l) return null;
+  const rows = await env.SITELOG_DB.prepare(
+    `SELECT id, company FROM people
+     WHERE lower(trim(first_name)) = ? AND lower(trim(last_name)) = ?
+       AND COALESCE(archived,0) = 0 AND COALESCE(is_transfer_pending,0) = 0`
+  ).bind(f, l).all();
+  const all = rows.results || [];
+  const same = all.filter((r) => String(r.company || "").trim().toLowerCase() === c);
+  if (same.length === 1) return same[0].id;
+  return null;
+}
 function rulesLines(raw) {
   if (Array.isArray(raw)) return raw.map((r) => String(r).trim()).filter((r) => r.length > 0);
   return String(raw || "").split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
@@ -9217,6 +9254,7 @@ async function handle7(request, env, ctx) {
     if (!firstName && !lastName) return json4({ ok: false, error: "Missing name" }, 400);
     try {
       await ensureOfflineSchema(env);
+      await adoptCookieDevice(env, request, deviceToken, { firstName, lastName });
       const existing = await env.SITELOG_DB.prepare(`
           SELECT p.id as person_id, p.first_name, p.last_name, p.company, p.purpose, COALESCE(p.archived,0) as archived
           FROM devices d
@@ -9236,6 +9274,16 @@ async function handle7(request, env, ctx) {
           status: "already_registered",
           personId: existing.person_id
         }, 200, didSetCookie(deviceToken));
+      }
+      const samePerson = await findSamePerson(env, firstName, lastName, company);
+      if (samePerson) {
+        await env.SITELOG_DB.prepare(
+          "INSERT OR REPLACE INTO devices (device_token, person_id) VALUES (?, ?)"
+        ).bind(deviceToken, samePerson).run();
+        await env.SITELOG_DB.prepare(
+          "UPDATE people SET purpose = COALESCE(purpose, ?), person_type = COALESCE(person_type, ?) WHERE id = ?"
+        ).bind(purpose, personType, samePerson).run();
+        return json4({ ok: true, status: "relinked", personId: samePerson }, 200, didSetCookie(deviceToken));
       }
       const personId = crypto.randomUUID();
       await env.SITELOG_DB.prepare(`
@@ -10551,6 +10599,18 @@ async function handle7(request, env, ctx) {
         LIMIT ?
       `).bind(device.person_id, limit).all();
     return json4({ visits: rows.results || [] });
+  }
+  if (url.pathname === "/device-forget" && request.method === "POST") {
+    return json4({ ok: true }, 200, { "Set-Cookie": "ml_did=; Max-Age=0; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" });
+  }
+  if (url.pathname === "/device-recover" && request.method === "GET") {
+    const tok = readDidCookie(request);
+    if (!tok || tok.length > 128) return json4({ ok: true, deviceToken: null });
+    const row = await env.SITELOG_DB.prepare(
+      `SELECT d.person_id FROM devices d JOIN people p ON p.id = d.person_id
+         WHERE d.device_token = ? AND COALESCE(p.archived,0) = 0 LIMIT 1`
+    ).bind(tok).first();
+    return json4({ ok: true, deviceToken: row ? tok : null });
   }
   if (url.pathname === "/me" && request.method === "GET") {
     const deviceToken = url.searchParams.get("deviceToken");
@@ -42317,9 +42377,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -49545,7 +49605,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -49805,7 +49865,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };

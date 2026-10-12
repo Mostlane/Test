@@ -5862,6 +5862,22 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   without a fix + sends lat/lng/accuracy/deviceToken; admin.html `gpsMark()` shows ✔/✘ (distance on
   hover). Test `node --no-warnings worker/tools/test-sitelog-gps.mjs` (14). NB the OLD standalone
   worker on api.site-log.co.uk is NOT patched — a direct call there bypasses the checks; retire it.
+- **One person per worker — a phone that forgets them never makes a duplicate (12 Oct 2026).**
+  Workers scan daily in the browser (no app); identity = a device token in IndexedDB/localStorage
+  plus the server's HttpOnly `ml_did` cookie (Domain=site-log.co.uk). Zane Leopold's browser kept
+  nothing (two new ids 30 s apart → private tab / QR-app viewer) and SiteLog silently created 3
+  "Zane Leopold"s. Now: (1) the scanner, finding no stored id, calls **GET /device-recover** (reads
+  the cookie; returns its token if it belongs to a live person) BEFORE minting a new id;
+  (2) **/register** links an unknown phone to an existing person instead of creating one when the
+  cookie's owner has the SAME typed name (`adoptCookieDevice`) or when exactly one live,
+  non-transfer person has the same first+last+company (`findSamePerson` → status `relinked`,
+  the scanner tells them to use a normal browser tab next time); ambiguous / different company /
+  archived → a new person as before. (3) "Not you?" (`clearDeviceToken`) now POSTs
+  **/device-forget** (clears the cookie) and sets localStorage `ml_no_recover`, so a handed-over
+  phone never recovers the previous person; /scan and /me never adopt on their own. Also
+  `navigator.storage.persist()` on load. Scanner SW `sitelog-v11`. Test
+  `node --no-warnings worker/tools/test-sitelog-identity.mjs` (16). Duplicates before this: Zane
+  (merged 12 Oct), Mariusz Mlynarczyk ×3, Ryan Diggens ×2, Jamie Line ×3 (test) — not yet merged.
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
