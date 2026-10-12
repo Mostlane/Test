@@ -6798,6 +6798,22 @@ export async function subcontractedRows(env, tid, money) {
       pos = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name FROM po_log WHERE cost_category='subcontractor' AND COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
     } catch { pos = []; }
   }
+  // A PO with no job is often raised against a PROJECT (engineers may only raise
+  // against a live project/vehicle/job) — match its site text to a portal project
+  // by project name, project site name or P-number.
+  let projects = [];
+  try {
+    projects = (await env.DB.prepare("SELECT p.id, p.number, p.name, p.status, s.site_name FROM projects p LEFT JOIN sites s ON s.site_number = p.site_number WHERE p.tenant_id = ?").bind(tid).all()).results || [];
+  } catch { projects = []; }
+  const pn = t => String(t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const projectFor = site => {
+    const k = pn(site); if (k.length < 4) return null;
+    for (const pr of projects) {
+      const keys = [pn(pr.name), pn(pr.site_name), pn(pr.number)].filter(x => x.length >= 4);
+      if (keys.some(x => x === k || (x.length >= 8 && k.includes(x)) || (k.length >= 8 && x.includes(k)))) return { id: pr.id, number: pr.number, name: pr.name, status: pr.status };
+    }
+    return null;
+  };
   const rows = new Map();
   const rowFor = (j) => {
     let r = rows.get(j.id);
@@ -6817,7 +6833,8 @@ export async function subcontractedRows(env, tid, money) {
     const po = { number: p.po_number, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...(money ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {}) };
     if (j) rowFor(j).pos.push(po);
     else rows.set("po:" + p.po_number, { key: "po:" + p.po_number, jobId: null, ref: p.incident_no || p.job_ref || "", siteCode: "", siteName: p.site || "", postcode: "",
-      description: String(p.description || "").slice(0, 300), jobStatus: "", priority: "", jobFinished: false, drainage: false, record: null, pos: [po], subs: [] });
+      description: String(p.description || "").slice(0, 300), jobStatus: "", priority: "", jobFinished: false, drainage: false, record: null, pos: [po], subs: [],
+      project: projectFor(p.site) });
   }
   const now = Date.now();
   const list = [...rows.values()].map(r => {

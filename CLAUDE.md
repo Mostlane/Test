@@ -5701,7 +5701,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   **compliance-chart-style TABLE** (12 Oct: was cards — "messy and hard to read"): sticky navy
   header + sticky Subcontractor column, zebra rows, sortable headings (default Days, longest
   first), Work text one line with ellipsis — tap it for a detail row (full text, how/when sent,
-  each PO), Days cell tinted green / amber >3 / red >7, ✓ Done + ↩ (back with us) per row. job-view's green banner gains
+  each PO), Days cell tinted green / amber >3 / red >7, ✓ Done + ↩ (back with us) per row.
+  A PO-only row whose PO site matches a portal **project** (project name / project site name /
+  P-number, normalised) carries `project:{id,number,name,status}` and shows "📁 P0710 Lake Road…"
+  linking project-hub (status pill "Project · live"). POs whose site isn't a portal project
+  (e.g. Eastney Funeral - New Door, 0090 Havant FRA works) stay "PO only". job-view's green banner gains
   ✓ Done by them / ↩ Back with us / Reopen; a "returned" job reappears in the scheduler
   tray. `incidentKey` now also reads a SPACE after the number ("30389 Brislington DTU").
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).

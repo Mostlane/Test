@@ -25176,6 +25176,22 @@ async function subcontractedRows(env, tid, money2) {
       pos = [];
     }
   }
+  let projects = [];
+  try {
+    projects = (await env.DB.prepare("SELECT p.id, p.number, p.name, p.status, s.site_name FROM projects p LEFT JOIN sites s ON s.site_number = p.site_number WHERE p.tenant_id = ?").bind(tid).all()).results || [];
+  } catch {
+    projects = [];
+  }
+  const pn = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const projectFor = (site) => {
+    const k = pn(site);
+    if (k.length < 4) return null;
+    for (const pr of projects) {
+      const keys = [pn(pr.name), pn(pr.site_name), pn(pr.number)].filter((x) => x.length >= 4);
+      if (keys.some((x) => x === k || x.length >= 8 && k.includes(x) || k.length >= 8 && x.includes(k))) return { id: pr.id, number: pr.number, name: pr.name, status: pr.status };
+    }
+    return null;
+  };
   const rows = /* @__PURE__ */ new Map();
   const rowFor = (j) => {
     let r = rows.get(j.id);
@@ -25224,7 +25240,8 @@ async function subcontractedRows(env, tid, money2) {
       drainage: false,
       record: null,
       pos: [po],
-      subs: []
+      subs: [],
+      project: projectFor(p.site)
     });
   }
   const now2 = Date.now();
