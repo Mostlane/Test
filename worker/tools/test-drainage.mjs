@@ -246,7 +246,7 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
 // preview before send + test copy + edited details actually sent
 { const E = makeEnv();
   const p = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
-  ok("preview: recipients + subject, nothing raised or sent", p.status === 200 && p.body.to === "Call.Centre@metrorod.co.uk" && /Order \[new PO no\.\]/.test(p.body.subject) && E.poLog.length === 0 && E.sent.length === 0, JSON.stringify(p.body && { s: p.body.subject, w: p.body.warnings }));
+  ok("preview: recipients + the NEXT PO number, nothing raised or sent", p.status === 200 && p.body.to === "Call.Centre@metrorod.co.uk" && /Order 010011 at/.test(p.body.subject) && /next number/.test(p.body.poNote) && E.poLog.length === 0 && E.sent.length === 0, JSON.stringify(p.body && { s: p.body.subject, w: p.body.warnings }));
   ok("field engineer can't preview", (await call(E, "Field Eng", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" })).status === 403);
   const t = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod", test: true, details: "Changed" });
   ok("test copy goes to ME only, marked TEST, no PO", t.status === 200 && E.sent.length === 1 && E.sent[0].to === "office@mostlane.test" && /^\[TEST/.test(E.sent[0].subject) && /Changed/.test(E.sent[0].html) && E.poLog.length === 0, JSON.stringify(E.sent[0] && E.sent[0].to));
@@ -254,6 +254,7 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("no email on my user → clear error", nb.status === 400 && /no email address/.test(nb.body.error));
   const s = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod", details: "Please jet the drain" });
   const last = E.sent[E.sent.length - 1];
+  ok("the real send uses the number the preview showed", /Order 010011 at/.test(E.sent[E.sent.length - 1].subject));
   ok("the edited details are what Metro Rod receives", s.status === 200 && last.to === "Call.Centre@metrorod.co.uk" && /Please jet the drain/.test(last.html) && E.saved["J-DRAIN"].description !== "Please jet the drain", JSON.stringify(s.body && s.body.error)); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
