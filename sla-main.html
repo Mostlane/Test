@@ -292,7 +292,7 @@
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
-          var scl = document.getElementById("subconLink"); if (scl) scl.style.display = "";
+          var scl = document.getElementById("subconMgrLink"); if (scl) scl.style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           var csl = document.getElementById("coopStatsLink"); if (csl) csl.style.display = "";
           var sl = document.getElementById("subconLink");
