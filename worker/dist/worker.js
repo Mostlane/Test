@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -8512,6 +8507,20 @@ async function ensureOfflineSchema(env) {
     await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN served_by TEXT").run();
   } catch (e) {
   }
+  for (const col of [
+    "sign_in_verified INTEGER DEFAULT 0",
+    "sign_in_distance_m REAL",
+    "out_lat REAL",
+    "out_lng REAL",
+    "out_accuracy REAL",
+    "sign_out_verified INTEGER DEFAULT 0",
+    "sign_out_distance_m REAL"
+  ]) {
+    try {
+      await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN " + col).run();
+    } catch (e) {
+    }
+  }
   try {
     await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN fuel_rate REAL").run();
   } catch (e) {
@@ -8818,6 +8827,23 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R2 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+async function verifySiteLocation(env, siteName, lat, lng) {
+  if (lat == null || lng == null || lat === "" || lng === "" || !isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+    return { ok: false, status: "no_location", error: "We couldn't get your location. Turn location on and try again \u2014 no location, no sign-in or sign-out." };
+  }
+  const site = await env.SITELOG_DB.prepare(
+    "SELECT lat, lng, radius_m FROM sites WHERE site_name = ? LIMIT 1"
+  ).bind(siteName).first();
+  if (!site || !isFiniteNumber(site.lat) || !isFiniteNumber(site.lng)) {
+    return { ok: false, status: "no_site_location", error: "This site has no location set, so your position can't be verified. Ask the office to set it." };
+  }
+  const radius = Number(site.radius_m) > 0 ? Number(site.radius_m) : 500;
+  const distance = Math.round(haversineMeters(Number(lat), Number(lng), Number(site.lat), Number(site.lng)));
+  if (distance > radius) {
+    return { ok: false, status: "outside_site", distance, radius, error: `You're ${distance} m from ${siteName} \u2014 you need to be on site (within ${radius} m) to sign in or out.` };
+  }
+  return { ok: true, distance, radius };
 }
 function isValidDateTimeString(str) {
   if (typeof str !== "string") return false;
@@ -9802,20 +9828,37 @@ async function handle7(request, env, ctx) {
       return json4({ ok: false, error: "check_out_at must be after check_in_at" }, 400);
     }
     await env.SITELOG_DB.prepare(
-      "UPDATE visits SET check_in_at = ?, check_out_at = ? WHERE id = ?"
-    ).bind(checkInAt, checkOutAt ?? null, visitId).run();
+      // An admin-edited time is no longer GPS-verified: clear the tick on
+      // whichever side actually changed (compared to the minute).
+      `UPDATE visits SET
+           sign_in_verified = CASE WHEN substr(check_in_at,1,16) = substr(replace(?,'T',' '),1,16) THEN sign_in_verified ELSE 0 END,
+           sign_out_verified = CASE WHEN check_out_at IS NOT NULL AND ? IS NOT NULL AND substr(check_out_at,1,16) = substr(replace(?,'T',' '),1,16) THEN sign_out_verified ELSE 0 END,
+           check_in_at = ?, check_out_at = ?
+         WHERE id = ?`
+    ).bind(checkInAt, checkOutAt ?? null, checkOutAt ?? null, checkInAt, checkOutAt ?? null, visitId).run();
     return json4({ ok: true });
   }
   if (url.pathname === "/confirm-checkout" && request.method === "POST") {
-    const { visitId } = await readBody(request);
+    await ensureOfflineSchema(env);
+    const { visitId, deviceToken: bodyToken, lat, lng, accuracy } = await readBody(request);
+    const deviceToken = bodyToken || readDidCookie(request);
     if (!visitId) return json4({ ok: false, error: "Missing visitId" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken \u2014 refresh the app and try again." }, 400);
+    const owner = await env.SITELOG_DB.prepare(
+      "SELECT v.person_id, v.site_code FROM visits v JOIN devices d ON d.person_id = v.person_id WHERE v.id = ? AND d.device_token = ? LIMIT 1"
+    ).bind(visitId, deviceToken).first();
+    if (!owner) return json4({ ok: false, error: "This visit doesn't belong to this phone." }, 403);
+    const geo = await verifySiteLocation(env, owner.site_code, lat, lng);
+    if (!geo.ok) return json4({ ok: false, status: geo.status, error: geo.error, distance_m: geo.distance ?? null }, 400);
     const result = await env.SITELOG_DB.prepare(`
         UPDATE visits
         SET check_out_at = MAX(check_in_at, COALESCE(check_out_at, CURRENT_TIMESTAMP)),
             auto_checkout = 0,
-            sign_out_confirmed = 1
+            sign_out_confirmed = 1,
+            out_lat = ?, out_lng = ?, out_accuracy = ?,
+            sign_out_verified = 1, sign_out_distance_m = ?
         WHERE id = ?
-      `).bind(visitId).run();
+      `).bind(Number(lat), Number(lng), isFiniteNumber(accuracy) ? Number(accuracy) : null, geo.distance, visitId).run();
     if (result.meta.changes === 0) {
       return json4({ ok: false, error: "Visit not found" }, 400);
     }
@@ -9855,12 +9898,9 @@ async function handle7(request, env, ctx) {
     if (!siteCheck) {
       return json4({ ok: false, error: "Site not found or archived" }, 404);
     }
-    if (lat != null && lat !== "" && !isFiniteNumber(lat)) {
-      return json4({ ok: false, error: "Invalid lat" }, 400);
-    }
-    if (lng != null && lng !== "" && !isFiniteNumber(lng)) {
-      return json4({ ok: false, error: "Invalid lng" }, 400);
-    }
+    await ensureOfflineSchema(env);
+    const geoIn = await verifySiteLocation(env, site, lat, lng);
+    if (!geoIn.ok) return json4({ ok: false, status: geoIn.status, error: geoIn.error, distance_m: geoIn.distance ?? null }, 400);
     const device = await env.SITELOG_DB.prepare(
       "SELECT person_id FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();
@@ -9959,18 +9999,19 @@ async function handle7(request, env, ctx) {
     }
     await env.SITELOG_DB.prepare(`
         INSERT INTO visits
-          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, check_in_at, travel_in_miles, travel_in_mins, served_by)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, ?, ?, ?, 'mostlane-api')
+          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, check_in_at, travel_in_miles, travel_in_mins, served_by, sign_in_verified, sign_in_distance_m)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, ?, ?, ?, 'mostlane-api', 1, ?)
       `).bind(
       newVisitId,
       device.person_id,
       site,
-      lat ?? null,
-      lng ?? null,
-      accuracy ?? null,
+      Number(lat),
+      Number(lng),
+      isFiniteNumber(accuracy) ? Number(accuracy) : null,
       nowSql,
       transferTravel ? transferTravel.miles : null,
-      transferTravel ? transferTravel.mins : null
+      transferTravel ? transferTravel.mins : null,
+      geoIn.distance
     ).run();
     try {
       if (transferTravel) {
@@ -9997,6 +10038,7 @@ async function handle7(request, env, ctx) {
     });
   }
   if (url.pathname === "/checkin-unmatched" && request.method === "POST") {
+    return json4({ ok: false, status: "disabled", error: "Signing in away from a set site is no longer allowed. Ask the office to add this site." }, 410);
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const deviceToken = (body.deviceToken || readDidCookie(request) || "").toString().trim();
@@ -10144,8 +10186,8 @@ async function handle7(request, env, ctx) {
       if (!openVisit) return await logPending(siteCode, "no_open_visit");
       const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
       await env.SITELOG_DB.prepare(
-        "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1 WHERE id = ? AND check_out_at IS NULL"
-      ).bind(outSql, openVisit.id).run();
+        "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1, out_lat = ?, out_lng = ?, out_accuracy = ?, sign_out_verified = 1, sign_out_distance_m = ? WHERE id = ? AND check_out_at IS NULL"
+      ).bind(outSql, latVal, lngVal, accuracy, Math.round(haversineMeters(latVal, lngVal, Number(matchedSite.lat), Number(matchedSite.lng))), openVisit.id).run();
       return json4({ ok: true, status: "checked_out", site: siteCode, offline: true });
     }
     if (openVisit) return json4({ ok: true, status: "already_in", site: siteCode, offline: true });
@@ -10185,8 +10227,8 @@ async function handle7(request, env, ctx) {
       ).bind(leftSql, siteCode, openOther.id).run();
     }
     await env.SITELOG_DB.prepare(
-      "INSERT INTO visits (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, offline_synced, check_in_at, travel_in_miles, travel_in_mins) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, 1, ?, ?, ?)"
-    ).bind(crypto.randomUUID(), device.person_id, siteCode, latVal, lngVal, accuracy, occurredSql, offTravel ? offTravel.miles : null, offTravel ? offTravel.mins : null).run();
+      "INSERT INTO visits (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, offline_synced, check_in_at, travel_in_miles, travel_in_mins, sign_in_verified, sign_in_distance_m) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, 1, ?, ?, ?, 1, ?)"
+    ).bind(crypto.randomUUID(), device.person_id, siteCode, latVal, lngVal, accuracy, occurredSql, offTravel ? offTravel.miles : null, offTravel ? offTravel.mins : null, Math.round(haversineMeters(latVal, lngVal, Number(matchedSite.lat), Number(matchedSite.lng)))).run();
     return json4({ ok: true, status: "checked_in", site: siteCode, offline: true, transferFrom: offTransferFrom });
   }
   if (url.pathname === "/pending-events" && request.method === "GET") {
@@ -10236,10 +10278,16 @@ async function handle7(request, env, ctx) {
           const perNoSite = await env.SITELOG_DB.prepare(
             "SELECT first_name, company FROM people WHERE id = ?"
           ).bind(devNoSite.person_id).first();
+          const openSite = await env.SITELOG_DB.prepare(
+            "SELECT lat, lng, radius_m FROM sites WHERE site_name = ?"
+          ).bind(openAny.site_code).first();
+          const distOpen = openSite ? Math.round(haversineMeters(latNum, lngNum, Number(openSite.lat), Number(openSite.lng))) : null;
           return json4({
-            status: "confirm_sign_out",
+            status: "outside_site_signed_in",
             visitId: openAny.id,
             site: openAny.site_code,
+            distance_m: distOpen,
+            radius_m: openSite ? Number(openSite.radius_m) || 500 : null,
             firstName: perNoSite?.first_name || null,
             company: perNoSite?.company || null
           });
@@ -10519,6 +10567,9 @@ async function handle7(request, env, ctx) {
                COALESCE(v.auto_checkout,0) AS auto_checkout,
                COALESCE(v.sign_in_confirmed,0) AS sign_in_confirmed,
                COALESCE(v.sign_out_confirmed,0) AS sign_out_confirmed,
+               COALESCE(v.sign_in_verified,0) AS sign_in_verified,
+               COALESCE(v.sign_out_verified,0) AS sign_out_verified,
+               v.sign_in_distance_m, v.sign_out_distance_m, v.out_lat, v.out_lng, v.out_accuracy,
                v.travel_in_miles, v.travel_in_mins,
                v.travel_out_miles, v.travel_out_mins,
                v.transferred_to,
@@ -41820,9 +41871,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -48566,7 +48617,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -48823,7 +48874,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
