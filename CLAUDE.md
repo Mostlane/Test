@@ -5697,8 +5697,11 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   PO-only row closes via **POST /sla/subcontracted/po-status** `{key:"po:N", status}`
   (app_config `sla:subconpo:<tid>`). State: office-set done/returned wins, else a finished
   job = done, else open. **GET /sla/subcontracted** (`?count=1` → `{open}`). PO £ only for
-  canSeeMoney. Page: With them / Done / Back with us / All, per-subcontractor chips, cards
-  grouped by sub with "N days with them" (amber >3, red >7). job-view's green banner gains
+  canSeeMoney. Page: With them / Done / Back with us / All, per-subcontractor chips, and a
+  **compliance-chart-style TABLE** (12 Oct: was cards — "messy and hard to read"): sticky navy
+  header + sticky Subcontractor column, zebra rows, sortable headings (default Days, longest
+  first), Work text one line with ellipsis — tap it for a detail row (full text, how/when sent,
+  each PO), Days cell tinted green / amber >3 / red >7, ✓ Done + ↩ (back with us) per row. job-view's green banner gains
   ✓ Done by them / ↩ Back with us / Reopen; a "returned" job reappears in the scheduler
   tray. `incidentKey` now also reads a SPACE after the number ("30389 Brislington DTU").
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).

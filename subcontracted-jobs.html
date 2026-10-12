@@ -14,7 +14,7 @@
     header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
     header.page h1{font-size:18px;margin:0;flex:1;}
     header.page .btn.ghost{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);}
-    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .wrap{max-width:1400px;margin:14px auto 90px;padding:0 12px;}
     .muted{color:#6b7a90;font-size:13px;}
     .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px;}
     .chip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#334;}
@@ -22,21 +22,40 @@
     .chip .n{opacity:.8;font-weight:700;margin-left:4px;}
     input{padding:7px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:13.5px;background:#fff;color:#0f2438;}
     .tot{margin-left:auto;font-size:13px;color:#334;}
-    .grp{font-size:13px;font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:.04em;margin:16px 2px 6px;}
-    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:11px 14px;margin-bottom:8px;border-left:5px solid #0369a1;}
-    .card.done{border-left-color:var(--ok);} .card.returned{border-left-color:#64748b;} .card.late{border-left-color:var(--amber);} .card.vlate{border-left-color:var(--bad);}
-    .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
-    .ref{font-weight:800;font-size:15px;color:var(--brand);text-decoration:none;}
-    .days{margin-left:auto;font-weight:800;font-size:13.5px;white-space:nowrap;}
-    .days.late{color:var(--amber);} .days.vlate{color:var(--bad);}
-    .site{font-weight:600;margin-top:2px;}
-    .desc{font-size:13px;color:#475569;margin:4px 0;white-space:pre-wrap;}
-    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
-    .p-sub{background:#e0f2fe;color:#075985;} .p-job{background:#f1f5f9;color:#334155;} .p-po{background:#f5f3ff;color:#5b21b6;} .p-warn{background:#fef3c7;color:#92400e;}
-    .meta{font-size:12.5px;color:#64748b;margin-top:4px;}
-    .pos{margin-top:6px;font-size:12.5px;color:#334155;}
-    .pos div{padding:2px 0;}
-    .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+    .tblwrap{overflow:auto;max-height:72vh;background:#fff;border:1px solid #d5dde5;border-radius:10px;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{border:1px solid #d5dde5;padding:4px 8px;font-size:13.5px;line-height:1.3;vertical-align:middle;text-align:left;}
+    th{background:#1A4F8F;color:#fff;position:sticky;top:0;z-index:5;padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;font-weight:700;}
+    th.nos{cursor:default;}
+    th .ar{opacity:.75;font-size:11px;margin-left:3px;}
+    th:first-child,td:first-child{position:sticky;left:0;z-index:4;}
+    th:first-child{z-index:6;}
+    td:first-child{background:#eef3f9;font-weight:700;white-space:nowrap;}
+    tbody tr.r:nth-child(4n+1) td:not(:first-child){background:#fff;}
+    tbody tr.r:nth-child(4n+3) td:not(:first-child){background:#f4f7fb;}
+    tbody tr.r:hover td{box-shadow:inset 0 0 0 9999px rgba(37,99,235,.07);}
+    td.nw{white-space:nowrap;}
+    td.c{text-align:center;}
+    td.site{max-width:190px;overflow:hidden;text-overflow:ellipsis;}
+    td.work{max-width:260px;min-width:160px;}
+    td.work .one{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;cursor:pointer;color:#334155;}
+    td.work .one:hover{color:var(--brand);text-decoration:underline;}
+    td.st-green{background:#e3f6e8 !important;color:#166534;font-weight:700;}
+    td.st-amber{background:#fff1c9 !important;color:#92400e;font-weight:700;}
+    td.st-red{background:#ffd9d9 !important;color:#991b1b;font-weight:700;}
+    td.st-grey{background:#eef1f4 !important;color:#475569;font-weight:700;}
+    a.ref{font-weight:700;color:var(--brand);text-decoration:none;}
+    a.ref:hover{text-decoration:underline;}
+    .pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+    .p-job{background:#f1f5f9;color:#334155;} .p-warn{background:#fef3c7;color:#92400e;}
+    .ib{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:3px 8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;color:#0f2438;white-space:nowrap;}
+    .ib.ok{border-color:#86efac;color:#166534;} .ib.ok:hover{background:#dcfce7;}
+    .ib:hover{background:#f1f5f9;}
+    .ib[disabled]{opacity:.5;cursor:default;}
+    tr.det td{background:#fbfcfe !important;font-size:13px;color:#334155;padding:8px 12px 10px;}
+    tr.det .dl{white-space:pre-wrap;margin-bottom:6px;}
+    tr.det .po{padding:1px 0;}
+    .muted2{color:#64748b;font-size:12.5px;}
     .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;}
     .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
     .btn.green{background:var(--ok);}
@@ -56,7 +75,7 @@
   <div class="wrap">
     <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
     <div id="board">
-      <div class="help">Every job sent to a subcontractor (📮 Send) or marked “already with a subcontractor” on the job card, plus every <b>subcontractor purchase order</b> from the last 6 months (matched to its job by the incident number). A job drops to <b>Done</b> when it's finished or when you tick it off here.</div>
+      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort.</div>
       <div class="bar" id="tabBar"></div>
       <div class="bar" id="subBar"></div>
       <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
@@ -103,32 +122,49 @@
     if (DATA.money) { const t = list.reduce((a, r) => a + (r.poTotal || 0), 0); if (t) tot += " · POs " + money(t); }
     g("tot").textContent = tot;
     if (!list.length) { g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">Nothing here.</p>'; return; }
-    // group by first subcontractor
-    const groups = new Map();
-    list.forEach(r => { const n = r.subs[0] || "Unknown"; const k = subKey(n); if (!groups.has(k)) groups.set(k, { name:n, rows:[] }); groups.get(k).rows.push(r); });
-    g("list").innerHTML = [...groups.values()].map(gr => `<div class="grp">${esc(gr.name)} · ${gr.rows.length}</div>` + gr.rows.map(card).join("")).join("");
+    const cols = [["sub","Subcontractor"],["ref","Job"],["site","Site"],["work","Work",1],["since","Since"],["days","Days"],["status","Job status"],["pos","PO"]]
+      .concat(DATA.money ? [["cost","PO £"]] : []).concat([["act","",1]]);
+    list.sort(cmp);
+    const head = "<tr>" + cols.map(([k, l, nos]) => nos ? `<th class="nos">${l}</th>` : `<th data-sort="${k}">${l}${sortKey === k ? `<span class="ar">${sortDir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("") + "</tr>";
+    g("list").innerHTML = `<div class="tblwrap"><table><thead>${head}</thead><tbody>${list.map(row).join("")}</tbody></table></div>`;
   }
 
-  function card(r) {
-    const late = r.state === "open" && r.days != null ? (r.days > 7 ? "vlate" : r.days > 3 ? "late" : "") : "";
-    const cls = r.state !== "open" ? r.state : late;
+  let sortKey = "days", sortDir = -1;
+  const SORTV = {
+    sub: r => (r.subs[0] || "~").toLowerCase(), ref: r => String(r.ref || "").toLowerCase(),
+    site: r => [r.siteCode, r.siteName].join(" ").toLowerCase(), since: r => r.since || "",
+    days: r => r.days == null ? -1 : r.days, status: r => r.state + (r.jobStatus || ""),
+    pos: r => r.pos.length ? Number(r.pos[0].number) || 0 : -1, cost: r => r.poTotal || 0
+  };
+  function cmp(a, b) {
+    const f = SORTV[sortKey] || SORTV.days, x = f(a), y = f(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
+  }
+  const OPENDET = new Set();
+
+  function row(r) {
     const site = [r.siteCode, r.siteName].filter(Boolean).join(" ");
-    const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>` : `<span class="ref">${esc(r.ref ? "Incident " + r.ref : "PO " + r.pos[0].number)}</span>`;
-    const days = r.days == null ? "" : r.state === "open" ? `<span class="days ${late}">${r.days === 0 ? "today" : r.days + " day" + (r.days === 1 ? "" : "s")} with them</span>`
-      : `<span class="days" style="color:#166534">${r.state === "done" ? "✓ done" : "↩ back with us"}${r.closedAt ? " " + esc(fmtD(r.closedAt)) : ""}</span>`;
-    const pills = [r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>` : `<span class="pill p-warn">PO only — no job found</span>`]
-      .concat(r.subs.map(n => `<span class="pill p-sub">${esc(n)}</span>`)).join(" ");
+    const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>` : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
+    let dCls = "", dTxt = "";
+    if (r.state === "open") { dCls = r.days == null ? "" : r.days > 7 ? "st-red" : r.days > 3 ? "st-amber" : "st-green"; dTxt = r.days == null ? "" : r.days === 0 ? "today" : r.days + "d"; }
+    else { dCls = r.state === "done" ? "st-green" : "st-grey"; dTxt = r.state === "done" ? "✓ Done" : "↩ Back"; }
+    const status = r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>` : `<span class="pill p-warn">No job found</span>`;
+    const pos = r.pos.length ? r.pos.map(p => esc(p.number)).join(", ") : "";
+    const cost = DATA.money ? `<td class="nw" style="text-align:right">${r.pos.length ? (r.pos.some(p => p.cost == null) && !r.poTotal ? '<span style="color:#b45309">not priced</span>' : esc(money(r.poTotal))) : ""}</td>` : "";
+    const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
+    const acts = r.state === "open" ? b("done", "✓ Done", "ok") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen");
+    const work = r.description || "";
+    const open = OPENDET.has(r.key);
+    let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="nw">${refHtml}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
+      <td class="work"><span class="one" data-det="${esc(r.key)}" title="${esc(work)}">${open ? "▾ " : "▸ "}${esc(work || "(no description)")}</span></td>
+      <td class="nw">${esc(fmtD(r.since))}</td><td class="nw c ${dCls}">${dTxt}</td><td class="nw">${status}</td><td class="nw">${pos}</td>${cost}<td class="nw">${acts}</td></tr>`;
+    // detail row (always rendered to keep the zebra striping stable; hidden when closed)
     const rec = r.record;
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
-    const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}`;
-    const pos = r.pos.length ? `<div class="pos">${r.pos.map(p => `<div><span class="pill p-po">PO ${esc(p.number)}</span> ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + (p.cost == null ? '<span style="color:#b45309">not priced</span>' : esc(money(p.cost))) : ""}</div>`).join("")}</div>` : "";
-    const btn = (st, label, c) => `<button class="btn ${c || "ghost"}" data-act="${st}" data-key="${esc(r.key)}">${label}</button>`;
-    const acts = (r.state === "open" ? btn("done", "✓ Done by them", "green") + btn("returned", "↩ Back with us") : btn("open", "Reopen — still with them")) +
-      (r.jobId ? ` <a class="btn ghost" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">Open job</a>` : "");
-    return `<div class="card ${cls}"><div class="top">${refHtml} ${pills}${days}</div>
-      <div class="site">${esc(site || "—")}</div>
-      ${r.description ? `<div class="desc">${esc(r.description)}</div>` : ""}
-      <div class="meta">${meta}</div>${pos}<div class="acts">${acts}</div></div>`;
+    const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
+    const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + (p.cost == null ? '<span style="color:#b45309">not priced</span>' : esc(money(p.cost))) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}</div>`).join("");
+    html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
+    return html;
   }
 
   async function setState(key, st, btn) {
@@ -145,7 +181,9 @@
   }
 
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-sub],[data-act]"); if (!t) return;
+    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det]"); if (!t) return;
+    if (t.dataset.sort) { const k = t.dataset.sort; if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "days" || k === "since" || k === "cost") ? -1 : 1; } render(); return; }
+    if (t.dataset.det) { const k = t.dataset.det; if (OPENDET.has(k)) OPENDET.delete(k); else OPENDET.add(k); render(); return; }
     if (t.dataset.tab) { tab = t.dataset.tab; try { localStorage.setItem("mlSubconTab", tab); } catch (x) {} render(); }
     else if (t.dataset.sub != null && !t.dataset.act) { sub = t.dataset.sub; render(); }
     else if (t.dataset.act) setState(t.dataset.key, t.dataset.act, t);
