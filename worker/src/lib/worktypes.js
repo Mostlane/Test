@@ -32,7 +32,9 @@ export const WORK_TYPES = [
     description: "Anything BLOCKED or BACKING UP, and anything that SMELLS of drains. Blocked toilets, WCs, urinals, sinks, basins and wastes; toilets that won't flush away / water rising in the bowl; overflowing or backed-up drains; sewage or 'human waste' on the floor; foul / sewage / drain smells and odours; outside drains, gullies, manholes, inspection chambers, soakaways, interceptors, grease or fat traps; Saniflo / macerator / pumped waste units; drain jetting, CCTV drain surveys, rodding; rats coming up from drains. Usually a Metro Rod job. NOT: a pipe, tap or toilet that is LEAKING (Plumbing), a toilet that won't fill or flush because of the cistern mechanism (Plumbing), gutters and downpipes (Roofline & rainwater).",
     concerto: ["drains", "drain", "drainage", "blocked", "toilets blocked", "sewage"],
     kw: [
-      W(/\bblock(?:ed|age|ages)\b/i, 3),
+      W(/\bblock(?:ed|age|ages|ing up)\b|\bclogged\b|\bkeeps? blocking\b/i, 3),
+      W(/\bdrains?\b.{0,60}\bblock(?:ed|ing)\b|\bblock(?:ed|ing)\b.{0,20}\bdrains?\b|\bseptic tank\b|\bcess ?pit\b|\bsinks? (?:and|&) (?:the )?toilets?\b.{0,30}\bblock|\b(?:sinks?|toilets?|pipes?|drains?|basins?)\b.{0,30}\b(?:clogged|blocking up)\b/i, 8),
+      W(/\bdrain covers?\b|\braised edge\b/i, -6),
       W(/\b(?:drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|inspection chambers?|soak ?aways?|interceptors?|grease traps?|fat traps?|aco\b|channel drain)/i, 5),
       W(/\b(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|pans?|waste)\s+(?:is |are |has |have |keeps? |still |now |completely |fully )*(?:blocked|backing up|backed up|overflowing|not draining|won'?t drain|not going down)/i, 8),
       W(/\bblocked\s+(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|drains?|pipes?|waste|pans?)\b/i, 8),
@@ -57,7 +59,8 @@ export const WORK_TYPES = [
       W(/\b(?:pipe|pipes|pipework|pipe work|joint|valve|fitting|connection)s?\b.*\bleak|\bleak.*\b(?:pipe|pipes|pipework|joint|valve)/i, 6),
       W(/\bcisterns?\b|\bballcock\b|\bfill(?:ing)? valve\b|\bsyphon\b|\bsiphon\b|\bflush(?:ing)? (?:button|handle|mechanism)\b|\bflush plate\b/i, 7),
       W(/\b(?:toilet|wc|loo|urinal)s?\b.*\b(?:not flushing|won'?t flush|constantly (?:flushing|running)|running constantly|keeps (?:flushing|running)|leak|not filling|won'?t fill)/i, 8),
-      W(/\b(?:not|won'?t|isn'?t|doesn'?t) (?:flushing|flush)\b/i, 5),
+      W(/\b(?:not|won'?t|isn'?t|doesn'?t) (?:flushing|flush)\b|\bflush\b|\bfloat\b|\brefill(?:ing)?\b|\btoilet (?:bowl|pan|handle)\b|\bpan (?:is )?cracked\b/i, 5),
+      W(/\btaps?\b.{0,30}\b(?:will not|won'?t|wont|doesn'?t|not) turn off\b|\bconstantly running\b/i, 8),
       W(/\bno (?:running |cold )?water\b|\bpipes? (?:are |have |has )?frozen\b|\bwater (?:has been |is )?(?:off|cut off)|\blow (?:water )?pressure\b|\bpoor flow\b|\bwon'?t flow\b/i, 6),
       W(/\bstop ?cocks?\b|\bisolat(?:ion|ing) valve\b|\bburst (?:pipe|main)\b|\bfrozen pipes?\b|\bwater main\b/i, 7),
       W(/\btoilets?\b|\bwcs?\b|\burinals?\b|\bsinks?\b|\bbasins?\b/i, 1),
@@ -103,7 +106,7 @@ export const WORK_TYPES = [
     concerto: ["gas", "gas supply", "gas appliance"],
     kw: [
       W(/\bgas\b(?! ?(?:lift|strut|spring))/i, 6),
-      W(/\bsmell of gas\b|\bgas (?:leak|smell)\b|\bsmells? (?:like |of )?gas\b|\bgas safe\b|\bgas safety\b|\bcp12\b|\bgas (?:boiler|cooker|hob|fire|meter|supply)/i, 10),
+      W(/\bcarbon monoxide\b|\bco alarm\b|\bsmell of gas\b|\bgas (?:leak|smell)\b|\bsmells? (?:like |of )?gas\b|\bgas safe\b|\bgas safety\b|\bcp12\b|\bgas (?:boiler|cooker|hob|fire|meter|supply)/i, 10),
     ],
     not: [] },
 
@@ -111,7 +114,7 @@ export const WORK_TYPES = [
     description: "Comfort cooling. Air-con units not cooling, leaking condensate, noisy, error codes, remote controls; split / cassette / VRF units, outdoor condensers for the AC; the store being too hot. NOT: fridges, freezers, chillers or cold rooms (Refrigeration), extract fans (Ventilation), heating (Heating).",
     concerto: ["air conditioning", "air con", "aircon", "hvac", "comfort cooling"],
     kw: [
-      W(/\bair ?con(?:dition(?:ing|er))?\b|\bairco(?:n|ndition)|\ba\/c\b|\bhvac\b|\bcassette units?\b|\bsplit units?\b|\bvrf\b|\bcomfort cooling\b/i, 8),
+      W(/\bair ?con(?:dition(?:ing|er))?\b|\bairco(?:n|ndition)|\ba\/c\b|\bhvac\b|\bcassette units?\b|\bsplit units?\b|\bvrf\b|\bcomfort cooling\b/i, 10),
       W(/\b(?:too |very |really )hot\b|\boverheating\b(?!.*(?:socket|plug|cable))/i, 3),
     ],
     not: [] },
@@ -142,7 +145,7 @@ export const WORK_TYPES = [
       W(/\bno power\b|\bpower (?:cut|outage|loss|failure|off)|\blost power\b|\bnothing is working\b|\btripp(?:ed|ing)\b|\btrips\b|\btrip switch\b|\brcds?\b|\brcbos?\b|\bmcbs?\b/i, 8),
       W(/\bsockets?\b|\bspurs?\b|\bplug socket\b|\bfused spur\b/i, 7),
       W(/\bfuse(?:s|d| board| box)?\b|\bconsumer units?\b|\bdistribution boards?\b|\bdb\b|\bisolators?\b|\bthree[- ]phase\b|\bsub[- ]?mains?\b/i, 6),
-      W(/\b(?:cables?|wires?|wiring)\b.*\b(?:exposed|damaged|hanging|out|loose|live|bare)|\b(?:exposed|damaged|loose|live|bare) (?:cables?|wires?|wiring)\b|\bburning smell\b|\bscorch/i, 8),
+      W(/\bexposed (?:copper )?wires?\b|\byellow ?\/ ?green\b|\bexternal (?:plug|socket)\b|\bip ?rated\b|\bplugs?\b(?!\s*holes?)|\b(?:cables?|wires?|wiring)\b.*\b(?:exposed|damaged|hanging|out|loose|live|bare)|\b(?:exposed|damaged|loose|live|bare) (?:cables?|wires?|wiring)\b|\bburning smell\b|\bscorch/i, 8),
       W(/\belectric(?:al|s|ity|ian)?\b|\bpower\b/i, 3),
     ],
     not: [] },
@@ -153,17 +156,19 @@ export const WORK_TYPES = [
     kw: [
       W(/\blights?\b|\blighting\b|\blamps?\b|\bbulbs?\b|\btubes?\b|\bled panels?\b|\bbattens?\b|\bfluorescent\b|\bstrip ?lights?\b|\bdownlights?\b|\bflood ?lights?\b|\bpir\b|\bsensor lights?\b/i, 6),
       W(/\bflicker(?:s|ing)?\b|\bbulb (?:gone|out)\b|\bin the dark\b|\bvery dark\b/i, 4),
+      W(/\b(?:lights?|lighting|lamp ?posts?|street ?lights?)\b.{0,40}\b(?:not (?:working|coming on|turning on|on)|haven'?t (?:turned|come) on|(?:are|is|went|gone|turned) (?:off|out)|won'?t (?:come|turn) on|no longer|keep(?:s)? going off|randomly)|\blamp ?posts?\b|\blight (?:fixture|fitting)s?\b|\blighting timer\b|\btimer\b.{0,30}\blight/i, 6),
       W(/\blight switch(?:es)?\b|\bsign(?:age)? light(?:s|ing)?\b|\billuminated sign/i, 8),
     ],
-    not: [/\bemergency (?:light|lighting|lights|fitting|bulkhead)/i, /\bem ?(?:light|lighting|fitting|test)\b|\bem ?\d{1,3}\b/i, /\bwarning light\b/i] },
+    not: [/\bgreen light\b|\bdid not stay (?:il)?luminated\b|\ba\d?em\b|\bem\/\d+/i, /\bem ?(?:light|lighting|fitting|test)\b|\bem ?\d{1,3}\b/i, /\bwarning light\b/i, /\bemergency (?:light|lighting) (?:test|failed|fail)/i] },
 
   { id: "emergency-lighting", name: "Emergency lighting", group: "Electrical",
     description: "Emergency lighting only. EM fittings / bulkheads / exit signs that fail the monthly flick test or the 3-hour duration test, stay on or won't charge, EM lights numbered on the site plan (EM12, EM24…), replacement EM fittings and batteries, EM certificates. NOT: ordinary lights (Lighting), fire alarms (Fire alarms & detection).",
     concerto: ["emergency lighting", "emergency lights", "emergency light", "em lighting"],
     kw: [
-      W(/\bemergency (?:light|lighting|lights|fitting|bulkhead|exit)/i, 10),
+      W(/\bemergency (?:light|lighting|lights|fitting|bulkhead|exit)/i, 13),
+      W(/\b(?:except|apart from|but) (?:for )?(?:the )?emergency light|\bemergency light(?:s|ing)? (?:still )?(?:work|on|came on|come on)|\b(?:switched|gone|went) (?:on )?(?:to|onto) emergency|\bon emergency\b/i, -14),
       W(/\bem ?\d{1,3}\b|\bem (?:light|lighting|fitting|test|cert)|\b3 ?h(?:ou)?r (?:em )?test\b|\bflick tests?\b|\bexit signs?\b|\brunning man\b|\(eml\)|\bem:/i, 9),
-      W(/\b(?:3|three)[- ]?h(?:ou)?r (?:em )?drain[- ]?down\b|\bdrain[- ]?down test\b|\bem drain[- ]?down\b/i, 12),
+      W(/\bgreen light\b.{0,30}\btest|\btest(?:ed)?\b.{0,40}\bgreen light|\bdid not stay (?:il)?luminated\b|\bemergency test\b|\ba\d?em\b|\bem\/\d+|\b(?:3|three)[- ]?h(?:ou)?r (?:em )?drain[- ]?down\b|\bdrain[- ]?down test\b|\bem drain[- ]?down\b/i, 12),
     ],
     not: [] },
 
@@ -188,7 +193,7 @@ export const WORK_TYPES = [
     description: "Doors whose job is fire safety. Fire doors that won't close or latch, damaged frames, missing or failed intumescent strips and smoke seals, gaps around fire doors, door closers on fire doors, hold-open / magnetic release devices, fire exit doors, panic bars / push bars, fire door inspections and signage on fire doors. NOT: ordinary internal or front doors (Doors), locks and keys (Locks, keys & access), fire stopping in walls (Firestopping).",
     concerto: ["fire door", "fire doors", "fire exit", "fire exits", "panic bar"],
     kw: [
-      W(/\bfire (?:exit |escape )?doors?\b|\bfire exits?\b|\bfire escape\b|\bpanic (?:bar|bolt|hardware)s?\b|\bpush bars?\b|\bhold[- ]open\b|\bmag(?:netic)? (?:release|hold)|\belectro ?magnetic hold|\bintumescent strips?\b|\bsmoke seals?\b/i, 10),
+      W(/\bfire (?:exit |escape )?doors?\b|\bfire exits?\b|\bfire escape\b|\bpanic (?:bar|bolt|hardware)s?\b|\bpush bars?\b|\bhold[- ]open\b|\bmag(?:netic)? (?:release|hold)|\belectro ?magnetic hold|\bintumescent strips?\b|\bsmoke seals?\b/i, 12),
     ],
     not: [] },
 
@@ -207,7 +212,7 @@ export const WORK_TYPES = [
     kw: [
       W(/\bdoors?\b/i, 4),
       W(/\bdoor ?(?:frames?|closers?|hinges?|handles?|stops?|bumpers?|buffers?|kick ?plates?)\b|\bhinges?\b|\bswing doors?\b|\bsaloon doors?\b/i, 7),
-      W(/\b(?:won'?t|doesn'?t|does not|not) (?:shut|close) (?:properly|fully)?\b|\bcatch(?:ing)? on the floor\b|\bdrop(?:ped)?\b|\bframe\b/i, 3),
+      W(/\b(?:won'?t|doesn'?t|does not|not) (?:shut|close) (?:properly|fully)?\b|\bcatch(?:ing)? on the floor\b|\bdrop(?:ped)?\b|\bframe\b|\bhandle\b|\bsticking\b|\bbristle strips?\b/i, 4),
       W(/\b(?:cabinet|cupboard|kiosk|wardrobe|fridge|freezer|chiller|unit|counter|oven|machine) doors?\b|\bdoors? (?:of|on) the (?:[\w-]+ )?(?:cabinet|cupboard|kiosk|fridge|freezer|chiller|unit|counter|oven|machine)s?\b/i, -8),
     ],
     not: [] },
@@ -217,7 +222,7 @@ export const WORK_TYPES = [
     concerto: ["locks", "lock", "locks/keys", "keys", "access control", "door entry", "intercom"],
     kw: [
       W(/\blocks?\b(?!er)|\blocked out\b|\bunlock|\bcylinders?\b|\bbarrels?\b|\bmortice\b|\bpadlocks?\b|\bbolts?\b|\blatch(?:es)?\b|\bkeys?\b(?!board|pad)/i, 6),
-      W(/\bkey ?(?:safe|box)\b|\bcode lock\b|\bdigi(?:tal)? lock\b|\bdoor entry\b|\bintercom\b|\baccess control\b|\bfobs?\b|\bmag ?lock\b|\bmaglock\b/i, 9),
+      W(/\bdigi ?lock\b|\bpasscode\b|\btill safe\b|\bkey ?(?:safe|box)\b|\bcode lock\b|\bdigi(?:tal)? lock\b|\bdoor entry\b|\bintercom\b|\baccess control\b|\bfobs?\b|\bmag ?lock\b|\bmaglock\b/i, 9),
       W(/\b(?:not|isn'?t) secure\b|\bcan(?:not|'?t) be locked\b|\bwon'?t lock\b/i, 7),
     ],
     not: [/\bblocked\b/i] },
@@ -244,7 +249,7 @@ export const WORK_TYPES = [
     kw: [
       W(/\bglaz(?:ing|ed|ier)\b|\bglass\b|\bdouble glazed\b|\bsealed units?\b|\bmisted\b|\bshop ?front\b|\btoughened\b|\bperspex\b|\bsafety film\b|\bshattered\b|\bcracked (?:pane|window|glass)\b/i, 9),
       W(/\bwindows?\b|\bpanes?\b|\bwindow (?:handle|hinge|restrictor|sill|frame)s?\b/i, 6),
-      W(/\breplace(?:ment)?\b.{0,40}\b(?:window|glass|glazing|pane)|\b(?:window|glass|glazing|pane)\b.{0,80}\breplace/i, 6),
+      W(/\bsmash(?:ed|ing)?\b|\bcrack(?:ed)?\b.{0,30}\b(?:panel|pane|glass)\b|\breglaz|\breplace(?:ment)?\b.{0,40}\b(?:window|glass|glazing|pane)|\b(?:window|glass|glazing|pane)\b.{0,80}\breplace/i, 6),
     ],
     not: [] },
 
@@ -252,7 +257,7 @@ export const WORK_TYPES = [
     description: "Emergency response after damage or a break-in: boarding up windows and doors, securing a site, making safe after a vehicle impact, storm damage, vandalism or an attempted break-in, temporary fencing or barriers to keep people away, removing a dangerous item. NOT: the permanent repair that follows (the matching type — Glazing, Doors, etc.).",
     concerto: ["make safe", "boarding", "board up", "break in", "vandalism", "storm damage"],
     kw: [
-      W(/\bboard(?:ed|ing)? ?up\b|\bboarded\b|\bmake (?:it )?safe\b|\bmaking safe\b|\bbreak[- ]?in\b|\bburglar|\bbroken into\b|\bram ?raid\b|\bvandal|\bvehicle (?:impact|hit|crashed)\b|\bstorm damage\b|\bsecure the (?:site|building|store)\b/i, 9),
+      W(/\bboard(?:ed|ing)? ?up\b|\bboarded\b|\bmake (?:it )?safe\b|\bmaking safe\b|\bbreak[- ]?in\b|\bburglar|\bbroken into\b|\bram ?raid\b|\bvandal|\bvehicle (?:impact|hit|crashed)\b|\bstorm damage\b|\bsecure the (?:site|building|store)\b/i, 7),
     ],
     not: [] },
 
@@ -260,16 +265,18 @@ export const WORK_TYPES = [
     description: "Electronic security: CCTV cameras and recorders, monitors, intruder / burglar alarm panels and PIRs, panic and attack alarms, alarm keypads and codes, security tagging gates (EAS), body-worn cameras. NOT: locks and access control (Locks, keys & access), fire alarms (Fire alarms & detection).",
     concerto: ["cctv", "intruder alarm", "security alarm", "panic alarm", "alarm"],
     kw: [
-      W(/\bcctv\b(?! (?:survey|camera down the drain))|\bcameras?\b|\bintruder alarm\b|\bburglar alarm\b|\bsecurity alarm\b|\bpanic (?:alarm|button)s?\b|\battack alarm\b|\balarm (?:panel|keypad|code)\b|\beas\b|\btagging gates?\b|\bbody ?cams?\b/i, 9),
+      W(/\bcameras?\b/i, 3),
+      W(/\bcctv\b(?! (?:survey|camera down the drain))|\bsmoke cloak\b|\bfog(?:ging)? (?:system|cannon)\b|\bintruder alarm\b|\bburglar alarm\b|\bsecurity alarm\b|\bpanic (?:alarm|button)s?\b|\battack alarm\b|\balarm (?:panel|keypad|code)\b|\beas\b|\btagging gates?\b|\bbody ?cams?\b/i, 9),
     ],
-    not: [/\bdrains?\b/i, /\bfire\b/i] },
+    not: [/\bdrains?\b/i, /\bfire\b/i, /\bflexi(?:ble)? camera\b|\bcamera survey\b/i] },
 
   /* ── Building fabric ─────────────────────────────────────────────────── */
   { id: "leaks-ingress", name: "Leaks & water ingress (source unknown)", group: "Building fabric",
     description: "Water appearing where it shouldn't when the source isn't known yet: water coming through the ceiling, dripping from above, leaking from the flat or unit above, water running down a wall, puddles appearing after rain, wet ceiling tiles. Someone needs to trace it — it may turn out to be the roof, gutters, a window or plumbing. NOT: a leak from an obvious pipe, tap or toilet (Plumbing), a known roof defect (Roofing).",
     concerto: ["ceiling", "ceiling leak", "water ingress", "leak", "leaks", "flooding"],
     kw: [
-      W(/\b(?:leak|leaking|water|dripping|drips)\b.{0,40}\b(?:ceiling|from above|from the flat|flats? above|above|through the (?:roof|ceiling|wall)|down the wall)\b|\bceiling\b.{0,30}\bleak/i, 9),
+      W(/\b(?:leak|leaks|leaking|water|dripping|drips)\b.{0,40}\b(?:ceiling|from above|from the flat|flats? above|block above|above|through the (?:roof|ceiling|wall|floor)|down the wall|up through the floor)\b|\bceiling\b.{0,30}\bleak/i, 11),
+      W(/\bpuddles?\b|\bwater pouring\b|\bpouring (?:in|through|down)\b|\bceiling\b.{0,30}\b(?:collapsed|fallen through|caved)\b|\bleaks? (?:have |has )?(?:appear|appeared|appearing)\b|\bleaks? in (?:the |our )?(?:warehouse|store|shop|office|stockroom)\b/i, 8),
       W(/\bwater ingress\b|\bwater coming (?:in|through)\b|\bwhen(?:ever)? it rains\b|\bafter (?:heavy )?rain\b|\brain ?water\b(?! goods)/i, 8),
       W(/\bflood(?:ed|ing)?\b/i, 4),
     ],
@@ -287,7 +294,7 @@ export const WORK_TYPES = [
     description: "Everything that carries rain off the building and finishes the roof edge: gutters (blocked, leaking, broken, overflowing), downpipes and hoppers, rainwater goods, fascia boards, soffits, bargeboards, gutter clearing. NOT: the roof covering (Roofing), below-ground drains (Drainage).",
     concerto: ["gutters", "guttering", "gutter", "downpipe", "downpipes", "fascia", "soffit", "rainwater goods"],
     kw: [
-      W(/\bgutter(?:s|ing)?\b|\bdown ?pipes?\b|\bhoppers?\b|\brain ?water goods\b|\bfascias?\b(?! sign)|\bsoffits?\b|\bbarge ?boards?\b|\bdownpipe collector\b/i, 9),
+      W(/\bgutter(?:s|ing)?\b|\bdown ?pipes?\b|\bhoppers?\b|\brain ?water goods\b|\bfascias?\b(?! sign)|\bsoffits?\b|\bbarge ?boards?\b|\bdownpipe collector\b/i, 11),
     ],
     not: [] },
 
@@ -297,6 +304,7 @@ export const WORK_TYPES = [
     kw: [
       W(/\bceiling ?tiles?\b|\bsuspended ceiling\b|\bceiling grid\b|\bceiling (?:has |is )?(?:come|coming|fallen|falling) down\b/i, 7),
       W(/\bceiling\b/i, 2),
+      W(/\bleak(?:s|ing)?\b(?!.{0,20}\b(?:has been|was|now) (?:fixed|repaired|resolved))/i, -4),
       W(/\btiles?\b.*\b(?:stained|missing|fallen|came down|come down)\b/i, 3),
     ],
     not: [] },
@@ -306,9 +314,9 @@ export const WORK_TYPES = [
     concerto: ["flooring", "floor", "floors", "floor tiles", "carpet", "matting"],
     kw: [
       W(/\bfloor ?(?:tiles?|ing|covering)\b|\bvinyl\b|\baltro\b|\bcarpets?\b|\bentrance mat|\bmatting\b|\bscreed\b|\bnosings?\b|\bstair treads?\b/i, 8),
-      W(/\btiles?\b.{0,40}\b(?:lift(?:ing|ed)|raised|coming up|loose|cracked)\b|\b(?:lift(?:ing|ed)|raised|coming up)\b.{0,30}\btiles?\b|\buneven\b/i, 6),
+      W(/\btiles?\b.{0,40}\b(?:lift(?:ing|ed)|raised|raising|coming up|come up|came up|loose|cracked|worn|damaged)\b|\bholes? in the (?:warehouse |shop )?floor\b|\brubber (?:type )?tiles?\b|\bstripping (?:has )?(?:come|coming) up\b|\b(?:lift(?:ing|ed)|raised|coming up)\b.{0,30}\btiles?\b|\buneven\b/i, 6),
       W(/\bfloor\b/i, 3),
-      W(/\btrip hazard\b/i, 2),
+      W(/\btrip hazard\b/i, 4),
     ],
     not: [] },
 
@@ -352,7 +360,7 @@ export const WORK_TYPES = [
     description: "The ground outside: potholes, tarmac and asphalt, block paving and slabs, kerbs, external trip hazards, car-park line marking, speed bumps, external drainage covers that are damaged (not blocked), ramps and paths outside, forecourt surfaces, bollards hit by vehicles. NOT: fencing (Fencing & barriers), blocked outside drains (Drainage).",
     concerto: ["car park", "carpark", "external areas", "external", "paving", "potholes", "forecourt"],
     kw: [
-      W(/\bpot ?holes?\b|\btarmac\b|\basphalt\b|\bcar ?park\b|\bblock paving\b|\bpaving\b|\bslabs?\b|\bkerbs?\b|\bline marking\b|\bspeed bumps?\b|\bbollards?\b|\bforecourt surface\b|\bfootpath\b|\bpavement\b/i, 9),
+      W(/\bdrain covers?\b|\bpathway\b|\bpaving slabs?\b|\bpot ?holes?\b|\btarmac\b|\basphalt\b|\bcar ?park\b|\bblock paving\b|\bpaving\b|\bslabs?\b|\bkerbs?\b|\bline marking\b|\bspeed bumps?\b|\bbollards?\b|\bforecourt surface\b|\bfootpath\b|\bpavement\b/i, 9),
       W(/\btrip hazard\b.*\b(?:outside|car ?park|path|front)\b|\boutside\b.*\btrip hazard\b/i, 5),
     ],
     not: [] },
@@ -361,7 +369,7 @@ export const WORK_TYPES = [
     description: "Boundary and yard structures: fences and fence panels, posts, railings, walls around bin stores, bin-store enclosures, trolley bays and shelters, cycle racks, handrails outside, crash barriers. NOT: gates and gate motors (Shutters, gates & grilles), bollards in the car park (Car parks & external surfaces).",
     concerto: ["fencing", "fence", "fences", "railings", "bin store", "trolley bay"],
     kw: [
-      W(/\bfenc(?:e|es|ing)\b|\bfence panels?\b|\brailings?\b|\bbin stores?\b|\btrolley (?:bay|shelter)s?\b|\bcycle racks?\b|\bhand ?rails?\b|\bcrash barriers?\b|\bpicket\b/i, 9),
+      W(/\bfenc(?:e|es|ing)\b|\bfence panels?\b|\brailings?\b|\bbin stores?\b|\bhand ?rails?\b|\b(?:crash|security) barriers?\b|\bpicket\b/i, 9),
     ],
     not: [] },
 
@@ -377,9 +385,26 @@ export const WORK_TYPES = [
     description: "Signs as objects: loose, wobbly or fallen signs, fascia signs, totem and pole signs, Post Office and partner signs, safety signs, wayfinding signs, sign brackets and fixings. If the sign's LIGHTS are out it is Lighting. NOT: illuminated sign lighting failures (Lighting), exit signs (Emergency lighting).",
     concerto: ["signage", "signs", "sign", "totem"],
     kw: [
-      W(/\bsigns?\b|\bsignage\b|\btotem\b|\bpole sign\b|\bfascia sign\b/i, 7),
+      W(/\bsignage\b|\btotem\b|\bpole sign\b|\bfascia sign\b|\bpost office'?\s+sign\b/i, 7),
+      W(/\bsigns?\b/i, 4),
     ],
     not: [/\bexit signs?\b/i, /\bsign(?:ed|ing)? (?:off|in|out)\b/i, /\bsign(?:age)? light|\billuminated sign/i] },
+
+  { id: "street-furniture", name: "External bins & street furniture", group: "Roofs & external",
+    description: "Free-standing and fixed items outside the store: cigarette bins and smoking points, litter bins, dog bins, benches, cycle racks and bike shelters, trolley bays and trolley shelters, smoking shelters, planters as fixtures, post boxes and parcel lockers on the forecourt. NOT: fences and railings (Fencing & barriers), waste collections (Cleaning, waste & clearance), car-park surfaces (Car parks & external surfaces).",
+    concerto: ["cigarette bin", "cigarette bins", "litter bin", "bins", "bench", "cycle rack", "trolley bay", "smoking shelter"],
+    kw: [
+      W(/\b(?:outside|external|outdoor) bins?\b|\bbins? (?:has been |was |got )?(?:stolen|missing|taken)\b|\bcig(?:arette)? bins?\b|\bcig bins?\b|\bsmoking (?:point|shelter|bin)s?\b|\bbutt bins?\b|\blitter bins?\b|\bdog bins?\b|\bbenche?s?\b|\b(?:cycle|bike) (?:rack|shelter|stand)s?\b|\btrolley (?:bay|shelter|park)s?\b|\bparcel lockers?\b/i, 9),
+    ],
+    not: [] },
+
+  { id: "solar-pv", name: "Solar PV & batteries", group: "Electrical",
+    description: "Solar panels and everything that goes with them: PV arrays on the roof, inverters and their alarms or fault lights, PV isolators, generation meters, battery storage, PV maintenance and annual PV inspections. NOT: general electrical faults (Electrical — power, sockets & tripping), EV chargers (Forecourt, fuel & EV charging).",
+    concerto: ["solar", "solar panels", "pv", "inverter"],
+    kw: [
+      W(/\bsolar\b|\bpv\b|\bphoto ?voltaic\b|\binverters?\b|\bbattery storage\b|\bgeneration meter\b/i, 10),
+    ],
+    not: [] },
 
   /* ── Fixtures & fittings ─────────────────────────────────────────────── */
   { id: "washroom-fittings", name: "Washroom fittings", group: "Fixtures & fittings",
@@ -394,7 +419,7 @@ export const WORK_TYPES = [
     description: "Shopfitting and fixtures in the sales area and warehouse: shelving, gondolas, shelf edges and stock limiters, plastic strips and ticket channels (meal-deal strips), kiosks and counters, tobacco / vape / spirits cabinets (the cabinet, not its lock), lockers, checkouts housings, trolleys and baskets bays, condiment and coffee bars to remove or alter, display stands, cages and racking. NOT: the lock on a cabinet (Locks, keys & access), fridges (Refrigeration), tills and card readers (IT, tills & telecoms).",
     concerto: ["shelving", "shelves", "fixtures", "fixtures & fittings", "plastic shelf stock limiters", "kiosk", "counter", "lockers", "racking", "cabinet"],
     kw: [
-      W(/\bshel(?:f|ves|ving)\b|\bgondolas?\b|\bstock limiters?\b|\bticket (?:strip|channel)s?\b|\bplastic strip|\bmeal deal\b|\bkiosks?\b|\bcounters?\b|\blockers?\b|\bracking\b|\bdisplay (?:stand|unit)s?\b|\bcondiment\b/i, 7),
+      W(/\bbase ?boards?\b|\bkick ?boards?\b|\bshelf edges?\b|\bgantry\b|\bnewspaper (?:stand|storage)\b|\bshel(?:f|ves|ving)\b|\bgondolas?\b|\bstock limiters?\b|\bticket (?:strip|channel)s?\b|\bplastic strip|\bmeal deal\b|\bkiosks?\b|\bcounters?\b|\blockers?\b|\bracking\b|\bdisplay (?:stand|unit)s?\b|\bcondiment\b/i, 7),
       W(/\bcabinets?\b/i, 4),
       W(/\b(?:vape|tobacco|spirits|cigarette|coffee|display|cabinet|kiosk|counter) (?:cabinet )?doors?\b|\bdoors? (?:of|on) the (?:[\w-]+ )?(?:cabinet|kiosk|counter)s?\b|\b(?:vape|tobacco|spirits|cigarette|display) cabinets?\b/i, 6),
     ],
@@ -413,7 +438,7 @@ export const WORK_TYPES = [
     description: "Appliances and catering kit: bake-off and bakery ovens, provers, hot cabinets and hot-food counters, coffee machines (Starbucks / Costa express), microwaves, kettles, toasters, dishwashers, glass washers, cookers, ovens and hobs in flats (electric), washing machines, white goods. NOT: gas cookers / hobs (Gas), fridges and freezers (Refrigeration), water heaters and boiling-water taps (Hot water).",
     concerto: ["bakery", "oven", "ovens", "coffee machine", "catering equipment", "hot food", "appliances", "cooker", "hob"],
     kw: [
-      W(/\bovens?\b|\bprovers?\b|\bbake[- ]?off\b|\bhot (?:cabinet|counter|food|plate|hold)\b|\bcoffee machines?\b|\bcosta\b|\bmicrowaves?\b|\bkettles?\b|\btoasters?\b|\bdish ?washers?\b|\bglass ?washers?\b|\bcookers?\b|\bhobs?\b|\bwashing machines?\b|\bwhite goods\b|\bextractor hood\b/i, 8),
+      W(/\bwater coolers?\b|\bwater dispensers?\b|\bovens?\b|\bprovers?\b|\bbake[- ]?off\b|\bhot (?:cabinet|counter|food|plate|hold)\b|\bcoffee machines?\b|\bcosta\b|\bmicrowaves?\b|\bkettles?\b|\btoasters?\b|\bdish ?washers?\b|\bglass ?washers?\b|\bcookers?\b|\bhobs?\b|\bwashing machines?\b|\bwhite goods\b|\bextractor hood\b/i, 8),
     ],
     not: [] },
 
@@ -421,7 +446,9 @@ export const WORK_TYPES = [
     description: "Store systems and data: tills / EPOS, self-checkouts (SCO), card readers and PIN pads, PayPoint, scales and label printers, phones and phone lines, broadband / network, Wi-Fi access points, data cabling (Cat5/Cat6) and comms cabinets, printers, back-office PCs, music and tannoy systems. Usually routed to the IT supplier. NOT: no power to the till circuit (Electrical — power, sockets & tripping).",
     concerto: ["it", "epos", "till", "tills", "telephony", "phones", "network", "data", "scales", "self checkout", "card reader"],
     kw: [
-      W(/\btills?\b|\bepos\b|\bself[- ]?check ?outs?\b|\bsco\b|\bcard (?:machine|reader|terminal)s?\b|\bpin ?pads?\b|\bpay ?point\b|\bscales?\b|\blabel printers?\b|\bprinters?\b|\bphones?\b|\bphone line\b|\bring out\b|\bbroadband\b|\bnetwork\b|\bwi-?fi\b|\baccess points?\b|\bap\d\b|\bcat ?[56]e?\b|\bdata (?:point|cable|cabling)\b|\bcomms\b|\bpcs?\b|\bcomputers?\b|\btannoy\b|\bmusic system\b|\boffline\b|\bnetwork switch\b|\baruba\b|\bports? \d+|\bpatch (?:panel|lead)s?\b|\bgateways?\b/i, 8),
+      W(/\b(?:till|safe) (?:door|safe)\b|\btill safe\b/i, -8),
+      W(/\bpcs?\b|\bcomputers?\b|\blaptops?\b|\boffline\b/i, 4),
+      W(/\btills?\b|\bepos\b|\bself[- ]?check ?outs?\b|\bsco ?\d*\b|\binternet\b|\bethernet\b|\blog ?in\b|\boutlook\b|\bpasswords?\b|\bemail address\b|\bqueu(?:e|ing) system\b|\brouter\b|\bups\b|\bscanners?\b|\btablet\b|\bcard (?:machine|reader|terminal)s?\b|\bpin ?pads?\b|\bpay ?point\b|\bscales?\b|\blabel printers?\b|\bprinters?\b|\bphones?\b|\bphone line\b|\bring out\b|\bbroadband\b|\bnetwork\b|\bwi-?fi\b|\baccess points?\b|\bap\d\b|\bcat ?[56]e?\b|\bdata (?:point|cable|cabling)\b|\bcomms\b|\btannoy\b|\bmusic system\b|\bnetwork switch\b|\baruba\b|\bports? \d+|\bpatch (?:panel|lead)s?\b|\bgateways?\b/i, 8),
     ],
     not: [] },
 
@@ -437,7 +464,7 @@ export const WORK_TYPES = [
     description: "Petrol-forecourt (PFS) equipment: fuel pumps and dispensers, nozzles and hoses, tank gauges and wet-stock alarms, interceptor alarms, canopy structure, AdBlue, air and water machines, car washes, EV chargers and charging bays. Canopy LIGHTS are Lighting. NOT: forecourt surfaces and potholes (Car parks & external surfaces), canopy lighting (Lighting).",
     concerto: ["forecourt", "forecourt/canopy", "fuel", "pumps", "ev charger", "ev chargers", "car wash", "air machine"],
     kw: [
-      W(/\bfuel\b|\bpetrol\b|\bdiesel\b|\bnozzles?\b|\bfuel pumps?\b|\bdispensers?\b.*\bfuel|\bcanopy\b|\badblue\b|\bair (?:and water )?machine\b|\bcar ?wash\b|\bev (?:charg|point)|\bcharging (?:bay|point)s?\b|\btank gauge\b|\bwet ?stock\b/i, 9),
+      W(/\bfuel\b|\bpetrol\b|\bdiesel\b|\b(?:fuel|pump|petrol|diesel) nozzles?\b|\bfuel pumps?\b|\bdispensers?\b.*\bfuel|\bcanopy\b|\badblue\b|\bair (?:and water )?machine\b|\bcar ?wash\b|\bev (?:charg|point)|\bcharging (?:bay|point)s?\b|\btank gauge\b|\bwet ?stock\b|\bdoms\b|\bforecourt\b|\bjet ?wash (?:bay|machine)\b/i, 9),
     ],
     not: [] },
 
@@ -454,7 +481,7 @@ export const WORK_TYPES = [
     description: "Pests and keeping them out: rats, mice, rodent droppings, cockroaches, flies, wasps' nests, pigeons and birds (netting, spikes), proofing gaps around pipes, doors and chillers to stop entry, cleaning and sterilising after an infestation (e.g. rat excrement in hatches), work recommended by Rentokil / pest contractors. NOT: rats coming up through drains (Drainage), fire-stopping gaps (Firestopping).",
     concerto: ["pest control", "pests", "pest", "proofing", "rodents", "birds"],
     kw: [
-      W(/\bpests?\b|\brodents?\b|\brats?\b|\bmice\b|\bmouse\b|\bvermin\b|\bdroppings\b|\bcockroach|\binfest|\bwasps?\b|\bflies\b|\bpigeons?\b|\bbird (?:netting|spikes|mesh)\b|\bbirds?\b|\brentokil\b|\bproof(?:ing|ed)?\b|\bsteril(?:is|iz)/i, 9),
+      W(/\bfly (?:zappers?|killers?|units?|control|screens?)\b|\binsect(?:ocutor|o-?cutor|killer)s?\b|\binsecutor\b|\blumn?ia\b|\bfruit fl(?:y|ies)\b|\bpests?\b|\brodents?\b|\brats?\b|\bmice\b|\bmouse\b|\bvermin\b|\bdroppings\b|\bcockroach|\binfest|\bwasps?\b|\bflies\b|\bpigeons?\b|\bbird (?:netting|spikes|mesh)\b|\bbirds?\b|\brentokil\b|\bproof(?:ing|ed)?\b|\bsteril(?:is|iz)/i, 9),
       W(/\bgaps?\b.{0,40}\b(?:entry|enter|getting in)\b|\bprevent (?:the )?entry\b|\bplug (?:the |a )?holes?\b|\bstop (?:them|rodents|pests|mice|rats) (?:getting|coming) in\b/i, 7),
     ],
     not: [/\bwater ?proof|\bfire ?proof|\bweather ?proof/i] },
@@ -463,7 +490,8 @@ export const WORK_TYPES = [
     description: "Cleaning and rubbish rather than repairs: graffiti removal, jet / pressure washing, deep cleans, cleaning up after a leak or flood, chewing gum removal, litter, fly-tipping, site and warehouse clearance (cages of metal / plastic / mixed waste), skips, urgent general-waste collections, removing redundant equipment for disposal. NOT: pest sterilisation (Pest control & proofing), garden clearance (Grounds, trees & landscaping).",
     concerto: ["general waste", "waste", "cleaning", "graffiti", "clearance", "fly tipping"],
     kw: [
-      W(/\bclean(?:ing|ed|-up| up)?\b|\bgraffiti\b|\bjet ?wash|\bpressure wash|\bdeep clean\b|\bchewing gum\b|\blitter\b|\bfly[- ]?tip|\bclearance\b|\bskips?\b|\brubbish\b|\bwaste collection\b|\bdispos(?:e|al)\b|\bremove and dispose\b/i, 7),
+      W(/\bfly[- ]?tip(?:ping|ped)?\b/i, 10),
+      W(/\bcleaned\b|\bdeep clean\b|\bclean(?:ed)? (?:up|the|down|off)\b|\bneeds? (?:a )?clean(?:ing)?\b|\bto be cleaned\b|\btip collection\b|\bgraffiti\b|\bjet ?wash|\bpressure wash|\bdeep clean\b|\bchewing gum\b|\blitter\b|\bfly[- ]?tip|\bclearance\b|\bskips?\b|\brubbish\b|\bwaste collection\b|\bdispos(?:e|al)\b|\bremove and dispose\b/i, 7),
     ],
     not: [] },
 
@@ -516,7 +544,7 @@ export function concertoTag(text) {
   const t = String(text || "");
   const m = /(?:^|\n|Fault\/Issue:\s*|Description:<\/b>\s*|:\s)\s*([A-Za-z][A-Za-z0-9 &\/'().-]{1,40}?)\s+:\s+([A-Za-z][A-Za-z0-9 &\/'.-]{1,50}?)\s*\(([A-Z][A-Za-z ,]{0,20})\)/.exec(t.slice(0, 600));
   if (!m) return null;
-  return { asset: m[1].trim(), fault: m[2].trim(), codes: m[3].trim() };
+  return { asset: m[1].trim(), fault: m[2].trim(), codes: m[3].trim(), raw: m[0] };
 }
 
 const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9/& ]+/g, " ").replace(/\s+/g, " ").trim();
@@ -530,25 +558,51 @@ const CONCERTO_INDEX = (() => {
    ("Toilets", "System", "External") and the FAULT says which trade it is. */
 export function typeFromConcertoTag(tag) {
   if (!tag) return null;
-  const a = norm(tag.asset), f = norm(tag.fault);
-  // asset+fault combos where the fault decides the trade
+  const a = norm(String(tag.asset || "").replace(/\([^)]*\)/g, "")), f = norm(tag.fault);
+  // generic assets — the fault or the description decides
+  // Concerto files ANY door under "Fire Door" (handles, closers, warehouse doors) — a
+  // weak pointer to Doors; the text saying "fire door / fire exit" still wins.
+  if (/^(?:fire door|fire doors)$/.test(a)) return "doors";
+  if (/^(?:system|external|external areas|not working|leaking|temperature issues?|recommendation|internal|ceiling)$/.test(a)) {
+    if (a === "recommendation" && /proof/.test(f)) return "pest-control";
+    if (a === "internal" && /clean/.test(f)) return "cleaning-waste";
+    if (a === "ceiling") return /leak|water/.test(f) ? "leaks-ingress" : /tile/.test(f) ? "ceilings" : null;
+    if (a === "system" && /supply tripped|tripp/.test(f)) return "electrical-power";
+    return null;
+  }
   if (/^(?:toilets?|wc|urinals?|sinks?|basins?)$/.test(a)) {
-    if (/block|single toilet|not draining|overflow|smell|odou?r/.test(f)) return "drainage";
+    if (/block|single toilet|no toilets|not draining|overflow|smell|odou?r/.test(f)) return "drainage";
     if (/seat|dryer|dispenser|cubicle|lock|alarm|cord/.test(f)) return "washroom-fittings";
     return "plumbing";
   }
   if (a === "blocked") return "drainage";
-  if (/^(?:system|electrics|electrical|power)$/.test(a)) {
-    if (/light/.test(f)) return "lighting";
-    return "electrical-power";
-  }
-  if (/^(?:fire door|fire doors|fire exit)$/.test(a)) return "fire-doors";
-  if (/^ceiling/.test(a) && /leak|water/.test(f)) return "leaks-ingress";
-  if (/^(?:external|external areas)$/.test(a)) return null;   // too broad — let the text decide
-  if (/^(?:temperature issues?|not working)$/.test(a)) return null;
-  if (/forecourt/.test(a) && /light/.test(f)) return "lighting";
+  if (/^(?:all lights|lights?|strip lights?|spot ?lights?|light switch|timer|forecourt\/canopy)$/.test(a) || (/forecourt|canopy/.test(a) && /light/.test(f))) return "lighting";
+  if (a === "auto door") return /glass|smash|crack/.test(f) ? "glazing" : "automatic-doors";
+  if (/^(?:metal door|wooden door|mortuary)$/.test(a)) return "doors";
+  if (a === "kiosk door") return /lock|key/.test(f) ? "locks-access" : "store-fixtures";
+  if (a === "lockers") return /lock|key/.test(f) ? "locks-access" : "store-fixtures";
+  if (/^(?:cables\/wiring|cables|wiring|sockets?)$/.test(a)) return "electrical-power";
+  if (/^gas boiler$/.test(a)) return "gas";
+  if (/^(?:fly zapper|insecutor|fly killer)$/.test(a)) return "pest-control";
+  if (/^(?:equipment collection|general waste)$/.test(a)) return "cleaning-waste";
+  if (/^(?:car park|foot ?path)$/.test(a)) return "external-surfaces";
+  if (/^(?:queuing systems?|store phone|site network|doms?)$/.test(a)) return a.startsWith("dom") ? "forecourt-ev" : "it-telecoms";
+  if (/^(?:smoke cloak)$/.test(a)) return "security-systems";
+  if (/^(?:fire signage)$/.test(a)) return "signage";
+  if (/^(?:newspaper storage|counter|shelving)$/.test(a)) return "store-fixtures";
+  if (/^(?:dishwasher|unox.*|oven)$/.test(a)) return "catering-appliances";
+  if (/^(?:jet wash)$/.test(a)) return "forecourt-ev";
+  if (/^pat$/.test(a)) return "electrical-testing";
+  if (/^(?:asbestos|survey)$/.test(a)) return "surveys-inspections";
+  if (/^(?:air con unit)$/.test(a)) return "air-con";
+  if (/^(?:walls?)$/.test(a)) return "walls-plaster";
+  if (/^(?:flooring)$/.test(a)) return /leak/.test(f) ? null : "flooring";
+  if (/^(?:windows?)$/.test(a)) return "glazing";
+  if (/^(?:roof)$/.test(a)) return "roofing";
+  if (/^(?:guttering)$/.test(a)) return "rainwater";
+  if (/^(?:saniflow|saniflo)$/.test(a)) return "drainage";
+  if (/^(?:cigarette bin)$/.test(a)) return "street-furniture";
   if (CONCERTO_INDEX.has(a)) return CONCERTO_INDEX.get(a);
-  // partial: "Emergency lighting" vs "emergency lighting system"
   for (const [k, id] of CONCERTO_INDEX) if (k.length > 3 && (a.startsWith(k) || k.startsWith(a))) return id;
   return null;
 }
@@ -559,19 +613,27 @@ export function typeFromConcertoTag(tag) {
    own location words ("shop floor", "sales floor", "branch"), before scoring. */
 export function stripLocations(t) {
   return String(t || "")
-    .replace(/\b(?:shop|sales|retail) floor\b/gi, " store ")
-    .replace(/\b(?:by|next to|near|nearest|nearest to|closest to|nearby|behind|beside|besides|alongside|around|round|underneath|beneath|opposite|in front of)(?:\/(?:behind|under|underneath|beside|by))?\s+(?:the |our |a |an |them |it |to the )?(?:back ?up |main |old |new |small |large |big |front |rear |left |right |top |bottom |customer |colleague |staff )?[\w-]+(?:\s+(?:area|section|machines?|units?|room|door|aisle|isle))?/gi, " ")
+    .replace(/\b(?:shop|sales|retail) floor\b|\btill (?:area|point|bank)\b/gi, " store ")
+    .replace(/\b(?:on the back of|on back of|the back of|by|next to|near|nearest|nearest to|closest to|nearby|behind|beside|besides|alongside|around|round|underneath|beneath|opposite|in front of)(?:\/(?:behind|under|underneath|beside|by))?\s+(?:the |our |a |an |them |it |to the )?(?:back ?up |main |old |new |small |large |big |front |rear |left |right |top |bottom |customer |colleague |staff )?[\w-]+(?:\s+(?:area|section|machines?|units?|room|door|aisle|isle))?/gi, " ")
     .replace(/\b(?:outside|under|above|below)\s+(?:the |our |a |an )(?:back ?up |main |old |new |front |rear |customer |colleague |staff )?[\w-]+(?:\s+(?:area|section|machines?|units?|room|door|aisle|isle))?/gi, " ");
 }
+
+const TAG_PRIOR = 6;
 
 /* Score every type against the text. Returns the best (with runner-ups) or null. */
 export function classifyWork(text, opts = {}) {
   const raw = String(text || "");
   if (!raw.trim()) return null;
   const tag = concertoTag(raw);
-  const fromTag = typeFromConcertoTag(tag);
+  let fromTag = typeFromConcertoTag(tag);
+  // a "Sockets" / "Cables/Wiring" tag on a DATA problem is an IT job, not power
+  if (fromTag === "doors" && tag && /^fire/i.test(tag.asset) && /\bfire (?:exit |escape )?doors?\b|\bfire exits?\b|\bpanic bar|\bintumescent|\bsmoke seal/i.test(raw.replace(tag.raw, " "))) fromTag = "fire-doors";
+  if (fromTag === "electrical-power" && /\b(?:data|ethernet|internet|network|wall ?ports?|dsl|cat ?[56]e?|router|broadband|wi-?fi|printers?|scanners?|tills?|card (?:reader|machine)s?|label)\b/i.test(raw)) fromTag = "it-telecoms";
   // strip boilerplate that matches nothing useful but trips keywords
-  const t = stripLocations(raw.replace(/ACCESS TIMES?\s*:[\s\S]*$/i, " ").replace(/\b(?:please|thanks?|thank you|good (?:morning|afternoon|evening))\b/gi, " "));
+  // score the DESCRIPTION only — the tag's own words ("Fire Door : Door Closer") would
+  // otherwise vote for the tag's trade a second time, even when the text disagrees
+  const body = tag ? raw.replace(tag.raw, " ") : raw;
+  const t = stripLocations(body.replace(/ACCESS TIMES?\s*:[\s\S]*$/i, " ").replace(/\b(?:please|thanks?|thank you|good (?:morning|afternoon|evening))\b/gi, " "));
   const scores = [];
   for (const wt of WORK_TYPES) {
     if (wt.not.some(re => re.test(t))) continue;
@@ -581,10 +643,18 @@ export function classifyWork(text, opts = {}) {
   }
   scores.sort((a, b) => b.score - a.score);
   const pick = (id, score, source) => { const wt = WORK_TYPE_BY_ID[id]; return { id, name: wt.name, group: wt.group, score, source, tag, alts: scores.filter(x => x.id !== id).slice(0, 3) }; };
-  if (fromTag) return pick(fromTag, 100, "concerto");
+  // Concerto's tag is a PRIOR, not the answer: 495 real jobs showed it is often
+  // generic or wrong ("System : No Power" on a till, "Fire Door" on any door,
+  // "Asbestos" on a bin complaint). It adds weight; the description decides.
+  if (fromTag) {
+    const hit = scores.find(x => x.id === fromTag);
+    if (hit) hit.score += TAG_PRIOR; else scores.push({ id: fromTag, score: TAG_PRIOR });
+    scores.sort((a, b) => b.score - a.score);
+  }
   const min = opts.minScore == null ? 4 : opts.minScore;
   if (!scores.length || scores[0].score < min) return null;
-  return pick(scores[0].id, scores[0].score, "keywords");
+  const top = scores[0];
+  return pick(top.id, top.score, fromTag && fromTag === top.id ? "concerto+text" : "keywords");
 }
 
 /* The type list for a prompt: "id — name: description" lines. */
