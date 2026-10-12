@@ -92,7 +92,9 @@
       WORK_AREAS = (d && d.areas) || [];
     } catch (e) { WORK_AREAS = []; }
     if (!WORK_AREAS.length) return;   // keep the field hidden
-    sel.innerHTML = '<option value="">— none —</option>' + WORK_AREAS.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
+    const groups = []; WORK_AREAS.forEach(a => { const g = a.group || "Other"; if (!groups.includes(g)) groups.push(g); });
+    sel.innerHTML = '<option value="">— none —</option>' + groups.map(g => `<optgroup label="${esc(g)}">` +
+      WORK_AREAS.filter(a => (a.group || "Other") === g).map(a => `<option value="${esc(a.id)}" title="${esc(a.description || "")}">${esc(a.name)}</option>`).join("") + "</optgroup>").join("");
     const wrap = $("mljeWorkAreaWrap"); if (wrap) wrap.style.display = "";
   }
   async function suggestWorkAreaEdit() {
