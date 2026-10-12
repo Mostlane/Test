@@ -18626,6 +18626,7 @@ __export(sla_exports, {
   handle: () => handle13,
   incidentKey: () => incidentKey,
   isDrainageJob: () => isDrainageJob,
+  isKnownSubcon: () => isKnownSubcon,
   linkOrderToExistingJob: () => linkOrderToExistingJob,
   linkOrderToJobById: () => linkOrderToJobById,
   listFallbackTemplates: () => listFallbackTemplates,
@@ -18641,6 +18642,7 @@ __export(sla_exports, {
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
   stripPricing: () => stripPricing,
+  subconKeysFromNames: () => subconKeysFromNames,
   subcontractedRows: () => subcontractedRows,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
@@ -25274,7 +25276,9 @@ async function subcontractedRows(env, tid, money2) {
   if (env.PO_DB) {
     try {
       const since = new Date(Date.now() - 180 * 864e5).toISOString();
-      pos = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name FROM po_log WHERE cost_category='subcontractor' AND COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
+      const all = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name, cost_category FROM po_log WHERE COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
+      const known = await knownSubconKeys(env, tid);
+      pos = all.filter((p) => p.cost_category === "subcontractor" || isKnownSubcon(p.supplier, known));
     } catch {
       pos = [];
     }
@@ -25415,6 +25419,37 @@ function poSubconRecord(p, finished, by) {
     r.closedBy = by || "system";
   }
   return r;
+}
+async function knownSubconKeys(env, tid) {
+  const names = [];
+  try {
+    const { listPoSubcontractorNames: listPoSubcontractorNames2 } = await Promise.resolve().then(() => (init_po(), po_exports));
+    names.push(...await listPoSubcontractorNames2(env));
+  } catch {
+  }
+  try {
+    const cfg = await getSubconConfig(env, tid);
+    for (const k of Object.keys(cfg || {})) names.push(cfg[k] && cfg[k].name || k);
+  } catch {
+  }
+  return subconKeysFromNames(names);
+}
+function subconKeysFromNames(names) {
+  const norm2 = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const full = /* @__PURE__ */ new Set(), first = /* @__PURE__ */ new Set();
+  for (const n of names) {
+    const k = norm2(n);
+    if (k.length >= 3) full.add(k);
+    const w = String(n || "").toLowerCase().split(/[^a-z0-9]+/).filter((x) => x && !SUBKEY_STOP.has(x))[0];
+    if (w && w.length >= 3) first.add(w);
+  }
+  return { full: [...full], first: [...first] };
+}
+function isKnownSubcon(supplier, keys) {
+  const k = String(supplier || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (k.length < 3) return false;
+  if (keys.first.includes(k)) return true;
+  return keys.full.some((x) => x === k || x.length >= 4 && k.length >= 4 && (k.includes(x) || x.includes(k)));
 }
 async function getPoOnlyClosed(env, tid) {
   try {
@@ -26526,7 +26561,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBKEY_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -26582,6 +26617,7 @@ var init_sla = __esm({
       metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {}, requirePhone: true }
     };
     SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
+    SUBKEY_STOP = /* @__PURE__ */ new Set(["the", "mr", "mrs", "ms", "and", "ltd", "limited", "services", "service", "group", "uk"]);
     DEFAULT_CONFIG3 = {
       priorities: {
         "Priority 1": { hours: 4 },
