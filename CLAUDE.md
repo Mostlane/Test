@@ -5722,6 +5722,12 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   subcontract-status `done` runs `patchJob({status:"Complete"})` as an office action (no
   engineer completion gates) when the job isn't already finished; reply `completed:true`.
   ↩ Back with us / Reopen never touch the job's status.
+  **A PO matched to a job puts the subcontractor ON the job** (so the SLA board 🤝 tag +
+  job-card banner show it): linking stamps `job.subcontract` from the PO
+  (`poSubconRecord` — supplier, issued_at, poNumber, `fromPo:true`, status open, or done
+  if the job's already finished) when the job has none; `subcontractedRows` lazily does
+  the same for any incident-/job_id-matched PO on load. Unlinking removes a `fromPo`
+  record carrying that PO number.
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:

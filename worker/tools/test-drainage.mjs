@@ -40,7 +40,7 @@ function makeEnv({ sendOk = true, pos = [] } = {}) {
   const poLog = [];
   const poDb = { prepare(sql) { let b = []; const st = {
     bind(...a) { b = a; return st; },
-    async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; if (/SELECT po_number FROM po_log WHERE po_number/.test(sql)) return pos.find(p => String(p.po_number) === String(b[0])) || null; return null; },
+    async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; if (/FROM po_log WHERE po_number=\?/.test(sql)) return pos.find(p => String(p.po_number) === String(b[0])) || null; return null; },
     async all() { if (/FROM po_log/.test(sql) && /subcontractor/.test(sql)) return { results: pos }; return { results: [] }; },
     async run() {
       if (/UPDATE po_log SET job_id/.test(sql)) { const p = pos.find(x => String(x.po_number) === String(b[b.length - 1])); if (!p) return { meta: { changes: 0 } }; p.job_id = b.length > 1 ? b[0] : null; p.job_ref = b.length > 1 ? b[1] : null; }
@@ -203,6 +203,21 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("cost hidden from a field job read", !("cost" in (sla.stripMoney(E.saved["J-TAP"]).subcontract)));
   ok("bad cost rejected", (await call(E, "Boss", "/subcontracted/cost", { po: "10620", cost: "abc" })).status === 400);
   ok("incidentKey reads 'NNNNN Site' with a space", (sla.incidentKey("30389 Brislington DTU") || {}).inc === "30389" && sla.incidentKey("0129 Gosport") === null); }
+
+// linking / matching a PO puts the "with a subcontractor" record ON the job (SLA board tag)
+{ const POS = [
+    { po_number: 10630, issued_at: "2026-10-03T09:00:00.000Z", site: "Gosport", supplier: "Handyman In Bristol", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: null },
+    { po_number: 10620, issued_at: "2026-10-10T09:00:00.000Z", site: "Crookhorn", supplier: "Metrorod", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null },
+  ];
+  const E = makeEnv({ pos: POS });
+  await call(E, "Office Admin", "/subcontracted", null, "GET");
+  const d = E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subcontract;
+  ok("incident-matched PO stamps a record on its job", d && d.fromPo && d.name === "Handyman In Bristol" && d.poNumber === 10630 && d.status === "open", JSON.stringify(d));
+  await call(E, "Office Admin", "/subcontracted/link", { po: "10620", jobId: "J-TAP" });
+  const t = E.saved["J-TAP"] && E.saved["J-TAP"].subcontract;
+  ok("hand-linked PO stamps a record on its job", t && t.fromPo && t.name === "Metrorod" && t.sentAt === "2026-10-10T09:00:00.000Z", JSON.stringify(t));
+  await call(E, "Office Admin", "/subcontracted/link", { po: "10620", jobId: null });
+  ok("unlink removes that record from the job", !E.saved["J-TAP"].subcontract); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
