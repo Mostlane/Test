@@ -33,11 +33,22 @@ function makeEnv({ sendOk = true } = {}) {
       return { meta: { changes: 1 } };
     },
   }; return st; }, batch(s) { return Promise.all(s.map(x => x.run())); } };
+  // Mock PO_DB (mostlane-po) so a real subcontractor PO is allocated + recorded.
+  const poLog = [];
+  const poDb = { prepare(sql) { let b = []; const st = {
+    bind(...a) { b = a; return st; },
+    async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; return null; },
+    async all() { return { results: [] }; },
+    async run() {
+      if (/INSERT INTO po_log/.test(sql)) poLog.push({ po_number: b[0], source: b[4], site: b[5], supplier: b[7], cost_category: b[12], trade: b[13], job_id: b[14] });
+      return { meta: { changes: 1 } };
+    },
+  }; return st; } };
   globalThis.fetch = async (url, init) => {
     if (String(url).includes("api.resend.com")) { sent.push(JSON.parse(init.body)); return new Response(sendOk ? "{}" : "boom", { status: sendOk ? 200 : 500 }); }
     return new Response("{}", { status: 200 });
   };
-  return { env: { DB: db, JOB_FILES: null, RESEND_API_KEY: "k", JOBS_INBOUND_TOKEN: "tok" }, saved, idem, sent, pushes };
+  return { env: { DB: db, PO_DB: poDb, JOB_FILES: null, RESEND_API_KEY: "k", JOBS_INBOUND_TOKEN: "tok" }, saved, idem, sent, pushes, poLog };
 }
 async function call(E, user, path, body, method = "POST") {
   const url = new URL("https://api.test/sla" + path);
@@ -56,11 +67,18 @@ ok("leaking tap NOT flagged", !sla.isDrainageJob({ description: "Hot tap in the 
 ok("project NOT flagged", !sla.isDrainageJob({ description: "new drain run", siteCode: "P0712" }));
 ok("manual override wins both ways", sla.isDrainageJob({ description: "tap", drainage: true }) && !sla.isDrainageJob({ description: "blocked drain", drainage: false }));
 
-// email content: Concerto's REAL ref (the Zap mangled 00031502/1 into 315021)
-{ const m = sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4);
-  ok("subject = Mostlane - Emergency - Order <real ref> at <postcode>", m.subject === "Mostlane - Emergency - Order 00031502/1 at PO12 4EH", m.subject);
+// PO-ref formatting (Metro Rod want a 6-digit number, leading zeros)
+ok("formatPoRef pads to width", sla.formatPoRef(10011, 6) === "010011", sla.formatPoRef(10011, 6));
+ok("formatPoRef no pad when already long enough", sla.formatPoRef(123456, 6) === "123456");
+ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
+
+// email content: the Order No is OUR padded PO number (passed in), not the incident
+{ const m = sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4, "010011");
+  ok("subject = Mostlane - Emergency - Order <our PO> at <postcode>", m.subject === "Mostlane - Emergency - Order 010011 at PO12 4EH", m.subject);
+  ok("order number in the email is the PO, not the incident", /Order No 010011/.test(m.html) && !/00031502/.test(m.html));
   ok("body carries site, phone, target, details", /0129 Gosport/.test(m.html) && /02392 582806/.test(m.html) && /Within 4 Hours/.test(m.html) && /backed up and blocked/.test(m.html));
-  ok("body escapes HTML", !/<script/.test(sla.buildMetroRodEmail({ ...JOBS["J-DRAIN"], description: "<script>x</script>" }, 4).html)); }
+  ok("body escapes HTML", !/<script/.test(sla.buildMetroRodEmail({ ...JOBS["J-DRAIN"], description: "<script>x</script>" }, 4, "010011").html));
+  ok("no poRef → falls back to the incident ref", sla.buildMetroRodEmail(JOBS["J-DRAIN"], 4).subject === "Mostlane - Emergency - Order 00031502/1 at PO12 4EH"); }
 
 // send: permission, one-press lock, record
 { const E = makeEnv();
@@ -68,6 +86,9 @@ ok("manual override wins both ways", sla.isDrainageJob({ description: "tap", dra
   ok("field engineer can't send", f.status === 403);
   const a = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
   ok("office send → 200 + recorded", a.status === 200 && a.body.subcontract && a.body.subcontract.sentBy === "Office Admin" && E.saved["J-DRAIN"].subcontract, JSON.stringify(a.body && a.body.subcontract));
+  ok("a real subcontractor PO was raised (Metro Rod, Drainage, tied to the job)", E.poLog.length === 1 && E.poLog[0].cost_category === "subcontractor" && E.poLog[0].supplier === "Metro Rod" && E.poLog[0].trade === "Drainage" && E.poLog[0].job_id === "J-DRAIN", JSON.stringify(E.poLog[0]));
+  ok("subcontract record carries our padded PO (010011)", a.body.subcontract.poNumber === 10011 && a.body.subcontract.poRef === "010011", JSON.stringify({ n: a.body.subcontract.poNumber, r: a.body.subcontract.poRef }));
+  ok("the email subject is our PO, not the incident", E.sent[0].subject === "Mostlane - Emergency - Order 010011 at PO12 4EH", E.sent[0].subject);
   ok("email went to the call centre, CC Enquiries, reply-to Jamie", E.sent.length === 1 && E.sent[0].to === "Call.Centre@metrorod.co.uk" && E.sent[0].cc.includes("Enquiries@mostlane.com") && E.sent[0].reply_to === "jamie@mostlane.com");
   const b = await call(E, "Boss", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
   ok("second press (anyone) → already, NOTHING re-sent", b.body.already && E.sent.length === 1 && b.body.subcontract.sentBy === "Office Admin");
@@ -78,12 +99,16 @@ ok("manual override wins both ways", sla.isDrainageJob({ description: "tap", dra
   const c2 = await call(E, "Boss", "/jobs/J-DRAIN/subcontract-clear", {});
   ok("Full Access clears the record + releases the lock", c2.status === 200 && !E.saved["J-DRAIN"].subcontract && !E.idem.has("subcon:metrorod:J-DRAIN"));
   const again = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
-  ok("after a clear it can be sent again", again.status === 200 && !again.body.already && E.sent.length === 2); }
+  ok("after a clear it can be sent again, REUSING the same PO (no duplicate)", again.status === 200 && !again.body.already && E.sent.length === 2 && E.poLog.length === 1 && again.body.subcontract.poRef === "010011"); }
 
-// a failed email records nothing and does NOT keep the lock
+// a failed email: no "sent" record + lock released, BUT the raised PO is kept so a
+// retry reuses it (never allocates a second PO for the same works)
 { const E = makeEnv({ sendOk: false });
   const a = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
-  ok("email failure → 502, nothing recorded, lock released", a.status === 502 && !E.saved["J-DRAIN"] && !E.idem.has("subcon:metrorod:J-DRAIN"), JSON.stringify(a.body)); }
+  ok("email failure → 502, no sent record, lock released", a.status === 502 && !E.idem.has("subcon:metrorod:J-DRAIN") && !(E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subcontract), JSON.stringify(a.body));
+  ok("the PO was raised + kept for retry", E.poLog.length === 1 && E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subconPO && E.saved["J-DRAIN"].subconPO.poNumber === 10011);
+  const b = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
+  ok("retry reuses the same PO, no second PO raised", b.status === 502 && E.poLog.length === 1); }
 
 // override endpoint
 { const E = makeEnv();

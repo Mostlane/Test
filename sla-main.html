@@ -742,7 +742,7 @@ function cancelTag(j){
    not yet sent; green "With Metro Rod" (+ when) once sent. Opened on the job card. */
 function drainTag(j){
   const sc = j.subcontract;
-  if(sc && sc.sentAt) return ` <span class="drain-tag sent" title="${esc("Sent to " + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : ""))}">🚿 With ${esc(sc.name||"Metro Rod")} ${esc(fmtWhen(sc.sentAt))}</span>`;
+  if(sc && sc.sentAt) return ` <span class="drain-tag sent" title="${esc("Sent to " + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : "") + (sc.poRef ? " · our PO " + sc.poRef : ""))}">🚿 With ${esc(sc.name||"Metro Rod")} ${esc(fmtWhen(sc.sentAt))}${sc.poRef ? " · PO " + esc(sc.poRef) : ""}</span>`;
   if(j.drainage && !["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status)) return ` <span class="drain-tag" title="Reads like a drainage job — open it to send to Metro Rod">🚿 Metro Rod?</span>`;
   return "";
 }

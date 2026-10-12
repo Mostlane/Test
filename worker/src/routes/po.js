@@ -1505,6 +1505,42 @@ async function issuePO(db, body, env) {
   return { error: "Could not allocate a PO number, please try again" };
 }
 
+// Raise a legitimate SUBCONTRACTOR purchase order against a job — used when the
+// office subcontracts a job (Metro Rod, and other subcontractors later) from the
+// SLA board/job card, so the subcontractor gets a REAL PO number from our PO
+// system instead of the client's incident number. It's an office action that is
+// always allowed (no office-hours / system-status gate — a leaner path than the
+// engineer/office raise form), stamped with job_id so the cost rolls onto the job
+// in job costing exactly like any "Raise PO for this job" PO. Returns
+// {success, po_number, issued_at} or {error}. Fails soft when PO_DB is unbound.
+export async function raiseSubcontractorPO(env, { supplier, trade, site, description, jobId, jobRef, userSlug, userName } = {}) {
+  const db = env && env.PO_DB;
+  if (!db) return { error: "PO system is not connected (PO_DB binding missing)" };
+  if (!supplier || !String(supplier).trim()) return { error: "Subcontractor name is required" };
+  try { await ensurePoInvoiceCols(db); } catch { /* columns already present on the live DB */ }
+  const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let poNumber;
+    try { poNumber = await nextPoNumber(db); }
+    catch (e) { return { error: "Could not read the PO number — " + String(e.message || e).slice(0, 120) }; }
+    try {
+      await db.prepare(`INSERT INTO po_log (po_number, engineer_slug, engineer_name, issued_at, source, site, incident_no, supplier, description, needs_review, office_user_slug, office_user_name, cost_category, trade, job_id, job_ref, vehicle_reg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+        poNumber, null, null, issuedAt, "office",
+        String(site || "").trim() || null, null,
+        String(supplier).trim(), String(description || "").trim() || null,
+        0, userSlug || null, userName || null,
+        "subcontractor", String(trade || "").trim() || null,
+        String(jobId || "").trim() || null, String(jobRef || "").trim() || null, null
+      ).run();
+      return { success: true, po_number: poNumber, issued_at: issuedAt };
+    } catch (e) {
+      if (!/UNIQUE|constraint|PRIMARY/i.test(e.message || "")) return { error: "Could not raise the PO — " + String(e.message || e).slice(0, 120) };
+      // PO number taken (race) — loop and try the next one
+    }
+  }
+  return { error: "Could not allocate a PO number, please try again" };
+}
+
 async function deletePoRecord(db, poNumber) {
   await db.prepare(`DELETE FROM po_log WHERE po_number = ?`).bind(poNumber).run();
   return { success: true };

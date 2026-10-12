@@ -5203,6 +5203,2123 @@ var init_statusemail = __esm({
   }
 });
 
+// src/lib/invoiceparse.js
+function isoDate(y, m, d) {
+  y = Number(y);
+  m = Number(m);
+  d = Number(d);
+  if (y < 100) y += 2e3;
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function parseInvoiceDate(text) {
+  const t = String(text || "");
+  const near = t.match(/(?:tax\s*point|invoice\s*date|date\s*of\s*invoice|transaction\s*date|document\s*date|inv(?:oice)?\.?\s*date)[^\n]{0,40}?(\d{1,2}[\/.\- ][A-Za-z0-9]{2,9}[\/.\- ]\d{2,4})/i);
+  const grab = near ? near[1] : null;
+  const dm = (s) => {
+    if (!s) return null;
+    let m = s.match(/(\d{1,2})[\/.\- ]([A-Za-z]{3,9})[\/.\- ](\d{2,4})/);
+    if (m) {
+      const mo = MONTHS[m[2].toLowerCase().slice(0, 4)] || MONTHS[m[2].toLowerCase().slice(0, 3)];
+      return isoDate(m[3], mo, m[1]);
+    }
+    m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+    if (m) return isoDate(m[3], m[2], m[1]);
+    m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return isoDate(m[1], m[2], m[3]);
+    return null;
+  };
+  if (grab) {
+    const d = dm(grab);
+    if (d) return d;
+  }
+  const all = t.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}[ \/.\-][A-Za-z]{3,9}[ \/.\-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b/g) || [];
+  for (const s of all) {
+    const d = dm(s);
+    if (d) return d;
+  }
+  return null;
+}
+function parsePoNumbers(text) {
+  const t = String(text || "");
+  const seen = /* @__PURE__ */ new Set(), out = [];
+  const add = (n, score) => {
+    n = Number(n);
+    if (n >= PO_MIN && n <= PO_MAX && !seen.has(n)) {
+      seen.add(n);
+      out.push({ n, score });
+    }
+  };
+  const lab = /(?:order\s*(?:no|number|ref)|purchase\s*order|\bp\.?o\.?\s*(?:no|number|ref)?|your\s*ref(?:erence)?|customer\s*(?:order|ref))[^\d]{0,18}(\d{4,6})/gi;
+  let m;
+  while (m = lab.exec(t)) add(m[1], 2);
+  const any = /\b(1\d{4})\b/g;
+  while (m = any.exec(t)) add(m[1], 1);
+  return out.sort((a, b) => b.score - a.score).map((o) => o.n);
+}
+function amounts(text) {
+  const out = [];
+  const re = /(?:£\s*)?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g;
+  let m;
+  while (m = re.exec(text)) {
+    const v = Number(m[1].replace(/,/g, ""));
+    if (Number.isFinite(v) && v > 0 && v < 1e7) out.push(v);
+  }
+  return out;
+}
+function reconcileTotals(text) {
+  const a = amounts(text);
+  let best = null;
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < a.length; j++) {
+    if (i === j) continue;
+    const net = a[i], vat = a[j];
+    if (vat > net) continue;
+    const gross = net + vat;
+    if (!a.some((x) => Math.abs(x - gross) <= 0.02)) continue;
+    const rate = net ? vat / net : 0;
+    if (rate < 1e-3 || rate > 0.26) continue;
+    if (!best || gross > best.gross + 1e-3) best = { net: round2(net), vat: round2(vat), gross: round2(gross) };
+  }
+  return best;
+}
+function normSupplierName(s) {
+  return String(s || "").toLowerCase().replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function matchSupplier(text, knownNames) {
+  const t = String(text || "").toLowerCase();
+  let best = null;
+  for (const name of knownNames || []) {
+    const norm = normSupplierName(name);
+    if (!norm) continue;
+    const words = norm.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
+    if (!words.length) continue;
+    if (!words.every((w) => t.includes(w))) continue;
+    const score = words.join("").length + words.length;
+    if (!best || score > best.score) best = { name, score };
+  }
+  return best ? best.name : null;
+}
+function looksLikeRemittance(text) {
+  const t = String(text || "").toLowerCase();
+  return /remittance\s*advice|\bremittance\b|statement of account|monthly statement/.test(t);
+}
+function invoiceNumber(text) {
+  const m = String(text || "").match(/(?:invoice|inv|document)\s*(?:no|number|#|:)?\s*[:#]?\s*([A-Z]{0,4}[\/\-]?\d{4,10})/i);
+  return m ? m[1].trim() : "";
+}
+function extractFields(text, knownSuppliers) {
+  const totals = reconcileTotals(text);
+  const pos = parsePoNumbers(text);
+  return {
+    poNumbers: pos,
+    poNumber: pos[0] || null,
+    net: totals ? totals.net : null,
+    vat: totals ? totals.vat : null,
+    gross: totals ? totals.gross : null,
+    invoiceDate: parseInvoiceDate(text),
+    invoiceNumber: invoiceNumber(text),
+    supplier: matchSupplier(text, knownSuppliers)
+  };
+}
+function tier1Confident(f) {
+  return !!(f && f.poNumber && f.net != null && f.gross != null);
+}
+async function aiExtract(env, bytes, filename) {
+  const key = env && env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const b64 = bytesToBase64(bytes);
+  if (!b64 || b64.length > 12 * 1024 * 1024) return null;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const schema = {
+    type: "object",
+    properties: {
+      docType: {
+        type: "string",
+        enum: ["invoice", "credit_note", "remittance", "statement", "other"],
+        description: "What kind of document this is. 'invoice' = a supplier's PURCHASE invoice billing Mostlane for goods/works. 'credit_note' = a supplier credit. 'remittance' = a REMITTANCE ADVICE / payment advice (a record that a payment was MADE or received \u2014 NOT a bill to pay). 'statement' = a monthly account statement listing several invoices. 'other' = anything else (a delivery note, quote, order acknowledgement, letter)."
+      },
+      supplier: { type: "string", description: "The supplier / merchant name that issued this document." },
+      invoiceNumber: { type: "string", description: "The supplier's own invoice number." },
+      invoiceDate: { type: "string", description: "The invoice / tax-point / transaction date in YYYY-MM-DD." },
+      poNumber: { type: "string", description: "The customer's purchase-order / order number if shown \u2014 a 5-digit Mostlane number in the 10000s. Empty if none is printed." },
+      net: { type: "number", description: "Goods / net total, excluding VAT, in GBP." },
+      vat: { type: "number", description: "VAT total in GBP." },
+      gross: { type: "number", description: "Invoice total including VAT, in GBP." }
+    },
+    required: ["docType", "net", "gross"]
+  };
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: 900,
+        tools: [{ name: "extract_invoice", description: "Return the invoice's key fields.", input_schema: schema }],
+        tool_choice: { type: "tool", name: "extract_invoice" },
+        messages: [{ role: "user", content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+          { type: "text", text: "This is a PDF received by Mostlane Construction (a UK building contractor). FIRST decide what kind of document it is (docType) \u2014 be careful to distinguish a supplier PURCHASE INVOICE (a bill for us to pay) from a REMITTANCE ADVICE / payment advice (a record that a payment was made \u2014 do NOT treat this as an invoice) and from a monthly STATEMENT of account. Then read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) \u2014 it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." }
+        ] }]
+      })
+    });
+    if (!r.ok) return null;
+    const p = await r.json();
+    const block = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use" && c.name === "extract_invoice") : null;
+    const o = block && block.input;
+    if (!o) return null;
+    const poRaw = String(o.poNumber || "").replace(/\D/g, "");
+    const poN = Number(poRaw);
+    return {
+      docType: String(o.docType || "").toLowerCase() || null,
+      supplier: o.supplier ? String(o.supplier).slice(0, 120) : null,
+      invoiceNumber: o.invoiceNumber ? String(o.invoiceNumber).slice(0, 40) : "",
+      invoiceDate: normIsoLoose(o.invoiceDate),
+      poNumber: poN >= PO_MIN && poN <= PO_MAX ? poN : null,
+      poNumbers: poN >= PO_MIN && poN <= PO_MAX ? [poN] : [],
+      net: numOrNull(o.net),
+      vat: numOrNull(o.vat),
+      gross: numOrNull(o.gross)
+    };
+  } catch {
+    return null;
+  }
+}
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? round2(n) : null;
+}
+function normIsoLoose(s) {
+  const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? isoDate(m[1], m[2], m[3]) : null;
+}
+function bytesToBase64(bytes) {
+  try {
+    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let s = "";
+    const CH = 8192;
+    for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+    return btoa(s);
+  } catch {
+    return "";
+  }
+}
+async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
+  const allowVision = !opts || opts.allowVision !== false;
+  let text = "";
+  try {
+    text = await pdfExtractText(bytes);
+  } catch {
+  }
+  const remittance = looksLikeRemittance(text);
+  const t1 = extractFields(text, knownSuppliers);
+  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : "invoice", notInvoice: remittance };
+  const t2 = allowVision ? await aiExtract(env, bytes, filename) : null;
+  if (t2) {
+    const merged = {
+      poNumber: t1.poNumber || t2.poNumber || null,
+      poNumbers: (t1.poNumbers && t1.poNumbers.length ? t1.poNumbers : t2.poNumbers) || [],
+      net: t2.net != null ? t2.net : t1.net,
+      vat: t2.vat != null ? t2.vat : t1.vat,
+      gross: t2.gross != null ? t2.gross : t1.gross,
+      invoiceDate: t2.invoiceDate || t1.invoiceDate || null,
+      invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
+      supplier: matchSupplier(text, knownSuppliers) || t2.supplier || t1.supplier || null
+    };
+    const docType = t2.docType || (remittance ? "remittance" : "invoice");
+    const notInvoice = remittance || docType === "remittance" || docType === "statement";
+    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance: remittance || notInvoice, docType, notInvoice };
+  }
+  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : null, notInvoice: remittance };
+}
+var PO_MIN, PO_MAX, MONTHS, round2, SUPPLIER_STOP;
+var init_invoiceparse = __esm({
+  "src/lib/invoiceparse.js"() {
+    init_pdftext();
+    PO_MIN = 10011;
+    PO_MAX = 99999;
+    MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+    round2 = (n) => Math.round(n * 100) / 100;
+    SUPPLIER_STOP = new Set(
+      "and group building products product electrical electric plumbing heating supplies supply trade uk ltd limited services service hire distribution wholesale centre center direct company holdings maintenance construction contractors contractor mechanical fabrication for the".split(/\s+/)
+    );
+  }
+});
+
+// src/lib/graphmail.js
+function graphConfigured(env) {
+  return !!(env && env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && env.GRAPH_CLIENT_SECRET);
+}
+async function getToken(env) {
+  const now2 = Date.now();
+  if (_tok.value && now2 < _tok.exp - 6e4) return _tok.value;
+  const url = `https://login.microsoftonline.com/${encodeURIComponent(env.GRAPH_TENANT_ID)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: env.GRAPH_CLIENT_ID,
+    client_secret: env.GRAPH_CLIENT_SECRET,
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials"
+  });
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    const msg = j && (j.error_description || j.error) || "HTTP " + r.status;
+    throw new Error("Graph sign-in failed: " + String(msg).split("\n")[0].slice(0, 200));
+  }
+  _tok = { value: j.access_token, exp: now2 + Number(j.expires_in || 3600) * 1e3 };
+  return _tok.value;
+}
+async function graphGet(env, path, { raw } = {}) {
+  const token = await getToken(env);
+  const r = await fetch(GRAPH + path, { headers: { authorization: "Bearer " + token } });
+  if (!r.ok) {
+    let d = "";
+    try {
+      d = (await r.json())?.error?.message || "";
+    } catch {
+    }
+    const e = new Error("Graph error " + r.status + (d ? ": " + d : ""));
+    e.status = r.status;
+    throw e;
+  }
+  return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
+}
+async function graphMailboxCheck(env, mailbox) {
+  if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
+  try {
+    await getToken(env);
+    await graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages?$top=1&$select=id`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since, before } = {}) {
+  let filter;
+  const iso = (s, endOfDay) => {
+    const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
+    return isNaN(d) ? null : d.toISOString();
+  };
+  const fIso = from ? iso(from, false) : null;
+  const tIso = to ? iso(to, true) : null;
+  const sinceIso = since ? iso(since, false) : null;
+  const beforeIso = before ? iso(before, false) : null;
+  const floorIso = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
+  if (fIso || tIso) {
+    const parts = [];
+    if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
+    if (tIso) parts.push(`receivedDateTime le ${tIso}`);
+    filter = parts.join(" and ");
+  } else if (sinceIso || beforeIso) {
+    const parts = [];
+    if (sinceIso) parts.push(`receivedDateTime gt ${sinceIso}`);
+    if (beforeIso) parts.push(`receivedDateTime lt ${beforeIso}`);
+    parts.push(`receivedDateTime ge ${floorIso}`);
+    filter = parts.join(" and ");
+  } else {
+    filter = `receivedDateTime ge ${floorIso}`;
+  }
+  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
+  const j = await graphGet(env, q);
+  let msgs = (j && j.value || []).filter((m) => m.hasAttachments);
+  const c = String(clue || "").trim().toLowerCase();
+  if (c) {
+    msgs = msgs.filter((m) => {
+      const subj = String(m.subject || "").toLowerCase();
+      const ea = m.from && m.from.emailAddress || {};
+      const frm = (String(ea.address || "") + " " + String(ea.name || "")).toLowerCase();
+      return subj.includes(c) || frm.includes(c);
+    });
+  }
+  return msgs.slice(0, top);
+}
+async function listPdfAttachments(env, mailbox, messageId) {
+  const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
+  const j = await graphGet(env, q);
+  const items = j && j.value || [];
+  return items.filter((a) => {
+    const isFile = String(a["@odata.type"] || "").includes("fileAttachment") || a.size != null;
+    const name = String(a.name || "").toLowerCase();
+    const ct = String(a.contentType || "").toLowerCase();
+    const pdfish = ct.includes("pdf") || name.endsWith(".pdf") || ct.includes("octet-stream") && name.endsWith(".pdf");
+    return isFile && pdfish && Number(a.size || 0) < 20 * 1024 * 1024;
+  });
+}
+async function downloadAttachment(env, mailbox, messageId, attachmentId) {
+  return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
+}
+var GRAPH, _tok;
+var init_graphmail = __esm({
+  "src/lib/graphmail.js"() {
+    GRAPH = "https://graph.microsoft.com/v1.0";
+    _tok = { value: "", exp: 0 };
+  }
+});
+
+// src/routes/po.js
+var po_exports = {};
+__export(po_exports, {
+  handle: () => handle6,
+  mergeSweepProposals: () => mergeSweepProposals,
+  raiseSubcontractorPO: () => raiseSubcontractorPO
+});
+async function ensurePoInvoiceCols__raw(db) {
+  for (const ddl of [
+    `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
+    `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`
+  ]) {
+    try {
+      await db.prepare(ddl).run();
+    } catch {
+    }
+  }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_flags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT,
+      net REAL, vat REAL, gross REAL,
+      engineer_slug TEXT, engineer_name TEXT,
+      job_id TEXT, job_ref TEXT, po_number INTEGER,
+      note TEXT, status TEXT DEFAULT 'open',
+      invoice_key TEXT, filename TEXT,
+      source TEXT, created_by TEXT, created_at TEXT, resolved_at TEXT
+    )`).run();
+  } catch {
+  }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS vat_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      source TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      dedupe_key TEXT UNIQUE,
+      filename TEXT, r2_key TEXT,
+      supplier TEXT, invoice_no TEXT, invoice_date TEXT, doc_type TEXT,
+      read_net REAL, read_vat REAL, read_gross REAL,
+      net REAL, vat REAL, gross REAL, vat_rate REAL,
+      category TEXT, reverse_charge INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'unverified',
+      po_number INTEGER, vat_period TEXT, notes TEXT,
+      verified_by TEXT, verified_at TEXT, created_at TEXT
+    )`).run();
+  } catch {
+  }
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_seen (
+      tenant_id TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
+      status TEXT, po_number INTEGER, at TEXT,
+      PRIMARY KEY (mailbox, message_id, attachment_id)
+    )`).run();
+  } catch {
+  }
+}
+function seenKey(mailbox, messageId, attachmentId) {
+  return String(mailbox || "") + "|" + String(messageId || "") + "|" + String(attachmentId || "");
+}
+async function recordSeen(db, tenantId, mailbox, messageId, attachmentId, status, poNumber) {
+  if (!mailbox || !messageId || !attachmentId) return;
+  try {
+    await ensurePoInvoiceCols(db);
+    await db.prepare(`INSERT INTO invoice_seen (tenant_id, mailbox, message_id, attachment_id, status, po_number, at)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(mailbox, message_id, attachment_id) DO UPDATE SET status = excluded.status, po_number = excluded.po_number, at = excluded.at`).bind(
+      String(tenantId || ""),
+      String(mailbox),
+      String(messageId),
+      String(attachmentId),
+      String(status || "handled"),
+      poNumber != null ? Number(poNumber) : null,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ).run();
+  } catch (e) {
+    console.error("PO recordSeen failed:", e && e.message);
+  }
+}
+async function getSeenSet(db, mailbox) {
+  const set = /* @__PURE__ */ new Set();
+  try {
+    const rows = (await db.prepare(`SELECT message_id, attachment_id FROM invoice_seen WHERE mailbox = ?`).bind(String(mailbox)).all()).results || [];
+    for (const r of rows) set.add(seenKey(mailbox, r.message_id, r.attachment_id));
+  } catch {
+  }
+  return set;
+}
+function sweepStateKey(mailbox) {
+  return "sweep_state:" + String(mailbox || "").toLowerCase();
+}
+async function getSweepState(db, mailbox) {
+  try {
+    const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value);
+      return {
+        lastReceived: s.lastReceived || null,
+        outstanding: Array.isArray(s.outstanding) ? s.outstanding : [],
+        oldestScanned: s.oldestScanned || null,
+        backfillDone: !!s.backfillDone
+      };
+    }
+  } catch {
+  }
+  return { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
+}
+async function saveSweepState(db, mailbox, state) {
+  try {
+    const value = JSON.stringify({
+      lastReceived: state.lastReceived || null,
+      outstanding: (state.outstanding || []).slice(0, 300),
+      oldestScanned: state.oldestScanned || null,
+      backfillDone: !!state.backfillDone
+    });
+    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(sweepStateKey(mailbox), value, value).run();
+  } catch (e) {
+    console.error("PO saveSweepState failed:", e && e.message);
+  }
+}
+function normMatchOne(name, list) {
+  const n = normSupplierName(name || "");
+  if (!n) return null;
+  for (const cand of list || []) {
+    const c = normSupplierName(cand);
+    if (!c) continue;
+    if (c === n || c.includes(n) || n.includes(c)) return cand;
+  }
+  return null;
+}
+function classifyProposal(f, po, supNames, subNames) {
+  if (po) return { category: "confident", subName: null, supName: null };
+  const subName = normMatchOne(f && f.supplier, subNames);
+  if (subName) return { category: "subcontractor", subName, supName: null };
+  const supName = normMatchOne(f && f.supplier, supNames);
+  if (supName && !(f && f.poNumber)) return { category: "flag", subName: null, supName };
+  return { category: "other", subName: null, supName: supName || null };
+}
+function staffTypeOf2(u) {
+  try {
+    const p = JSON.parse(u.profile || "{}");
+    return p && p.staffType === "office" ? "office" : "field";
+  } catch {
+    return "field";
+  }
+}
+function userName(sess) {
+  const u = sess && sess.user || {};
+  return (u.name || ((u.first_name || u.FirstName || "") + " " + (u.last_name || u.LastName || "")).trim() || u.username || "").trim();
+}
+function userSlug(sess) {
+  const u = sess && sess.user || {};
+  return slugify(u.username || userName(sess) || "user");
+}
+async function getVehicles(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const info = await db.prepare(`PRAGMA table_info(vehicles)`).all();
+    const cols = new Set((info.results || []).map((r) => r.name));
+    if (!cols.size) return [];
+    const regCol = ["reg", "registration", "vrm", "reg_number"].find((c) => cols.has(c));
+    if (!regCol) return [];
+    const pick = (c) => cols.has(c) ? c : `NULL AS ${c}`;
+    const where = [];
+    if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
+    if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
+    const rows = await db.prepare(sql).all();
+    return (rows.results || []).filter((r) => r.reg && String(r.reg).trim()).map((r) => {
+      const reg = String(r.reg).trim().toUpperCase();
+      const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} \u2014 ${desc}` : reg };
+    });
+  } catch (e) {
+    console.error("PO vehicle lookup failed:", e.message);
+    return [];
+  }
+}
+async function liveProjectNames(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const rows = await db.prepare(
+      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
+    ).all();
+    return (rows.results || []).map((r) => String(r.name || "").trim()).filter(Boolean);
+  } catch (e) {
+    console.error("PO live-project lookup failed:", e.message);
+    return [];
+  }
+}
+async function isLiveProjectSite(env, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  return (await liveProjectNames(env)).some((p) => p.toLowerCase() === n);
+}
+async function getRaiseOptions(env, username) {
+  const projects = (await liveProjectNames(env)).map((name) => ({ name }));
+  let mineReg = "";
+  try {
+    const u = await env.DB.prepare(
+      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
+    ).bind(String(username || "")).first();
+    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
+  } catch (e) {
+  }
+  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
+  return { projects, vehicles };
+}
+async function handle6(request, env, ctx, url, sess) {
+  const db = env.PO_DB;
+  if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
+  const path = url.pathname.replace(/^\/po/, "") || "/";
+  const method = request.method.toUpperCase();
+  await ensurePoInvoiceCols(db);
+  if (path === "/invoice-file" && method === "GET") return serveInvoiceFile(request, env, url);
+  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
+  if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const field = staffTypeOf2(sess.user) === "field";
+  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
+  if (!office && !field) return error("Not allowed", 403, env, request);
+  const q = url.searchParams;
+  const jr8 = (d, status) => json(d, status ? { status } : {}, env, request);
+  const bodyOf = async () => {
+    try {
+      return await request.json();
+    } catch {
+      return {};
+    }
+  };
+  try {
+    if (path === "/api/status" && method === "GET") return jr8(await getSystemStatus(db));
+    if (path === "/api/config" && method === "GET") return jr8(await getConfig(db));
+    if (path === "/api/suppliers" && method === "GET") return jr8(await getSuppliers(db));
+    if (path === "/api/subcontractors" && method === "GET") return jr8(await getSubcontractors(db));
+    if (path === "/api/trades" && method === "GET") return jr8(await getTrades(db));
+    if (path === "/api/sites" && method === "GET") return jr8(await getSites(db));
+    if (path === "/api/engineers" && method === "GET") return jr8(await getPortalEngineers(env, sess.tenantId));
+    if (path === "/api/office-users" && method === "GET") return jr8(await getOfficeUsers(db));
+    if (path === "/api/vehicles" && method === "GET") return jr8(await getVehicles(env));
+    if (path === "/api/raise-options" && method === "GET") return jr8(await getRaiseOptions(env, sess.user.username));
+    if (path === "/api/closures" && method === "GET") return jr8(await getClosures(db));
+    if (path === "/api/jobs/search" && method === "GET") return jr8(await searchJobs(db, q));
+    if (path === "/api/pos" && method === "POST") {
+      const b = await bodyOf();
+      if (office) {
+        b.source = "office";
+        b.office_user_slug = userSlug(sess);
+        b.office_user_name = userName(sess);
+      } else {
+        b.source = "engineer";
+        b.engineer_slug = userSlug(sess);
+        b.engineer_name = userName(sess);
+        b.cost_category = "materials";
+      }
+      const res = await issuePO(db, b, env);
+      return jr8(res, res.error ? 400 : 200);
+    }
+    if (path === "/api/my-pos" && method === "GET") {
+      const p = new URLSearchParams(q);
+      p.set("engineer", userSlug(sess));
+      p.set("hide_subcontractor", "1");
+      return jr8(await getPOs(db, p));
+    }
+    if (!office) return error("Not allowed", 403, env, request);
+    if (path === "/api/pos" && method === "GET") return jr8(await getPOs(db, q));
+    if (path.startsWith("/api/pos/") && method === "PATCH") {
+      const b = await bodyOf();
+      b.edited_by_slug = userSlug(sess);
+      b.edited_by_name = userName(sess);
+      return jr8(await updatePO(db, path.split("/").pop(), b));
+    }
+    if (path.startsWith("/api/pos/") && method === "DELETE") return jr8(await deletePoRecord(db, path.split("/").pop()));
+    if (path === "/api/dashboard" && method === "GET") return jr8(await getDashboard(db));
+    if (path === "/api/stats" && method === "GET") return jr8(await getStats(db, q));
+    if (path === "/api/summary" && method === "GET") return jr8(await getSummary(db, q));
+    if (path === "/api/jobcost" && method === "GET") return jr8(await getJobCost(db, q));
+    if (path === "/api/accounts" && method === "GET") return jr8(await getAccounts(db));
+    if (path === "/api/invoice/parse" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      const file = form && form.get("file");
+      if (!file || typeof file.arrayBuffer !== "function") return jr8({ error: "No file uploaded" }, 400);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (buf.length > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+      const known = (await getSuppliers(db)).map((s) => s.name);
+      const subNames = (await getSubcontractors(db)).map((s) => s.name);
+      const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
+      const f = res.fields || {};
+      let po = null, candidates = [];
+      if (f.poNumber) po = await poBrief(db, f.poNumber);
+      if (!po) candidates = matchInvoiceCandidates(db, f, await uncostedPoRows(db));
+      const cls = classifyProposal(f, po, known, subNames);
+      return jr8({
+        ok: true,
+        tier: res.tier,
+        aiUsed: res.aiUsed,
+        textLen: res.textLen,
+        fields: f,
+        po,
+        candidates,
+        docType: res.docType || null,
+        notInvoice: !!res.notInvoice,
+        category: cls.category,
+        subName: cls.subName,
+        supName: cls.supName,
+        filename: file.name || "invoice.pdf"
+      });
+    }
+    if (path === "/api/invoice/apply" && method === "POST") {
+      const form = await request.formData().catch(() => null);
+      if (!form) return jr8({ error: "Bad request" }, 400);
+      const poNumber = Number(form.get("po_number"));
+      const cost = Number(form.get("cost_ex_vat"));
+      if (!poNumber) return jr8({ error: "Pick a PO to attach this invoice to" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      const file = form.get("file");
+      let bytes = null, filename = null, contentType = null;
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
+        bytes = ab;
+        filename = file.name;
+        contentType = file.type;
+      }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(form.get("vat_rate")),
+        invoiceNo: form.get("invoice_no"),
+        invoiceDate: form.get("invoice_date"),
+        vat: numOrNull2(form.get("vat")),
+        gross: numOrNull2(form.get("gross")),
+        bytes,
+        filename,
+        contentType
+      });
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/sweep-config" && method === "GET") {
+      const cfg = await getConfigMap(db);
+      return jr8({
+        ok: true,
+        configured: graphConfigured(env),
+        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX,
+        days: Number(cfg.invoice_sweep_days) || 180
+      });
+    }
+    if (path === "/api/invoice/sweep" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(365, Number(b.days) || 180));
+      const from = String(b.from || "").trim();
+      const to = String(b.to || "").trim();
+      const clue = String(b.clue || "").trim();
+      const mode = String(b.mode || "").trim() === "full" ? "full" : "incremental";
+      await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
+      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode });
+      return jr8({ ok: true, mailbox, days, from, to, clue, mode, ...out });
+    }
+    if (path === "/api/invoice/sweep-view" && method === "GET") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const mailbox = String(q.get("mailbox") || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      const mid = q.get("message_id"), aid = q.get("attachment_id");
+      if (!mid || !aid) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, mid, aid);
+      } catch (e) {
+        return jr8({ error: String(e && e.message || e) }, 400);
+      }
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30", ...corsHeaders(env, request) } });
+    }
+    if (path === "/api/invoice/sweep-apply" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
+      const b = await bodyOf();
+      const poNumber = Number(b.po_number);
+      const cost = Number(b.cost_ex_vat);
+      if (!poNumber) return jr8({ error: "Pick a PO" }, 400);
+      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
+      if (!target) return jr8({ error: "That PO was not found" }, 400);
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, b.message_id, b.attachment_id);
+      } catch (e) {
+        return jr8({ error: "Couldn\u2019t fetch that invoice from the mailbox: " + String(e && e.message || e) }, 400);
+      }
+      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
+        poNumber,
+        cost,
+        existingKey: target.invoice_key || null,
+        vatRate: numOrNull2(b.vat_rate),
+        invoiceNo: b.invoice_no,
+        invoiceDate: b.invoice_date,
+        vat: numOrNull2(b.vat),
+        gross: numOrNull2(b.gross),
+        bytes,
+        filename: b.filename || "invoice.pdf",
+        contentType: "application/pdf",
+        graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
+      });
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
+      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
+    }
+    if (path === "/api/invoice/sweep-dismiss" && method === "POST") {
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
+      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
+      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "ignored", null);
+      return jr8({ ok: true });
+    }
+    if (path === "/api/invoice/url" && method === "GET") {
+      const n = Number(q.get("po"));
+      const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
+      if (!r || !r.invoice_key) return jr8({ error: "No invoice attached" }, 404);
+      return jr8({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
+    }
+    if (path === "/api/jobs/sla-search" && method === "GET") {
+      return jr8(await searchSlaJobs(env, sess.tenantId, q.get("q") || ""));
+    }
+    if (path === "/api/invoice/flag" && method === "POST") {
+      return jr8(await addInvoiceFlag(env, db, sess, request));
+    }
+    if (path === "/api/invoice/flags" && method === "GET") {
+      return jr8(await listInvoiceFlags(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/invoice/flag-update" && method === "POST") {
+      return jr8(await updateInvoiceFlag(db, sess, await bodyOf()));
+    }
+    if (path === "/api/invoice/flag-delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM invoice_flags WHERE id = ?`).bind(Number(b.id)).run();
+      return jr8({ ok: true });
+    }
+    if (path === "/api/vat/run" && method === "POST") {
+      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets)." }, 400);
+      const b = await bodyOf();
+      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
+      const days = Math.max(1, Math.min(400, Number(b.days) || 90));
+      const chk = await graphMailboxCheck(env, mailbox);
+      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
+      return jr8(await runVatCapture(env, db, sess, url.origin, { mailbox, days }));
+    }
+    if (path === "/api/vat/list" && method === "GET") {
+      return jr8(await listVatInvoices(env, db, sess, url.origin, q));
+    }
+    if (path === "/api/vat/save" && method === "POST") {
+      return jr8(await saveVatInvoice(db, sess, await bodyOf()));
+    }
+    if (path === "/api/vat/delete" && method === "POST") {
+      const b = await bodyOf();
+      await db.prepare(`DELETE FROM vat_invoices WHERE id = ?`).bind(Number(b.id)).run();
+      return jr8({ ok: true });
+    }
+    if (path === "/api/vat/upload" && method === "POST") {
+      return jr8(await uploadVatInvoice(env, db, sess, url.origin, request));
+    }
+    if (path === "/api/config" && method === "POST") return jr8(await updateConfig(db, await bodyOf()));
+    if (path === "/api/suppliers" && method === "POST") return jr8(await addSupplier(db, await bodyOf()));
+    if (path.startsWith("/api/suppliers/") && method === "PATCH") return jr8(await updateSupplier(db, path.split("/").pop(), await bodyOf()));
+    if (path.startsWith("/api/suppliers/") && method === "DELETE") return jr8(await deleteSupplier(db, path.split("/").pop()));
+    if (path === "/api/subcontractors" && method === "POST") return jr8(await addSubcontractor(db, await bodyOf()));
+    if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr8(await deleteSubcontractor(db, path.split("/").pop()));
+    if (path === "/api/trades" && method === "POST") return jr8(await addTrade(db, await bodyOf()));
+    if (path.startsWith("/api/trades/") && method === "DELETE") return jr8(await deleteTrade(db, path.split("/").pop()));
+    if (path === "/api/sites/usage" && method === "GET") return jr8(await siteUsage(db));
+    if (path === "/api/sites/merge" && method === "POST") return jr8(await mergeSites(db, await bodyOf()));
+    if (path === "/api/sites" && method === "POST") return jr8(await addSite(db, await bodyOf()));
+    if (path.startsWith("/api/sites/") && method === "DELETE") return jr8(await deleteSite(db, path.split("/").pop()));
+    if (path === "/api/closures" && method === "POST") return jr8(await addClosure(db, await bodyOf()));
+    if (path.startsWith("/api/closures/") && method === "DELETE") return jr8(await deleteClosure(db, decodeURIComponent(path.split("/").pop())));
+    return error("Not found: " + path, 404, env, request);
+  } catch (e) {
+    console.error("PO route error:", e && e.message);
+    return error("PO error: " + (e && e.message || "unknown"), 500, env, request);
+  }
+}
+async function getPortalEngineers(env, tenantId) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR LOWER(status)='active') ORDER BY first_name, last_name"
+    ).bind(tenantId).all();
+    return (results || []).filter((u) => {
+      try {
+        const p = JSON.parse(u.profile || "{}");
+        return (p.staffType || "field") === "field";
+      } catch {
+        return true;
+      }
+    }).map((u) => ({ slug: slugify(u.username), name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username, active: 1 }));
+  } catch (e) {
+    console.error("PO getPortalEngineers failed:", e && e.message);
+    return [];
+  }
+}
+async function getConfigMap(db) {
+  const rows = await db.prepare(`SELECT key, value FROM config`).all();
+  const map = {};
+  for (const r of rows.results) map[r.key] = r.value;
+  return map;
+}
+async function getConfig(db) {
+  return await getConfigMap(db);
+}
+async function updateConfig(db, body) {
+  for (const [k, v] of Object.entries(body)) {
+    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(k, String(v), String(v)).run();
+  }
+  return { success: true };
+}
+async function getSystemStatus(db) {
+  const config = await getConfigMap(db);
+  const now2 = /* @__PURE__ */ new Date();
+  const ukTime = new Date(now2.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const dayMap = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const today = dayMap[ukTime.getDay()];
+  const todayDate = ukTime.toISOString().split("T")[0];
+  const currentTime = ukTime.toTimeString().slice(0, 5);
+  const closure = await db.prepare(`SELECT * FROM closures WHERE date = ?`).bind(todayDate).first();
+  if (config.system_status === "disabled") return { mode: "disabled", message: "System is currently offline. Call office on " + config.office_phone };
+  if (config.force_open_ooh === "1") return { mode: "ooh", message: null, forced: true };
+  const officeDays = config.office_days.split(",");
+  if (!officeDays.includes(today) || closure) return { mode: "ooh", message: null, reason: closure ? closure.reason : "weekend" };
+  if (currentTime >= config.office_hours_start && currentTime <= config.office_hours_end) return { mode: "office_hours", message: "Please call the office on " + config.office_phone };
+  return { mode: "ooh", message: null };
+}
+async function getOfficeUsers(db) {
+  return (await db.prepare(`SELECT * FROM office_users ORDER BY name`).all()).results;
+}
+async function getSuppliers(db) {
+  return (await db.prepare(`SELECT * FROM suppliers WHERE active = 1 ORDER BY name`).all()).results;
+}
+async function addSupplier(db, body) {
+  await db.prepare(`INSERT INTO suppliers (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
+  return { success: true };
+}
+async function deleteSupplier(db, id) {
+  await db.prepare(`UPDATE suppliers SET active = 0 WHERE id = ?`).bind(id).run();
+  return { success: true };
+}
+async function updateSupplier(db, id, body) {
+  if (body.terms_days !== void 0) {
+    const days = Number(body.terms_days) === 60 ? 60 : 30;
+    await db.prepare(`UPDATE suppliers SET terms_days = ? WHERE id = ?`).bind(days, id).run();
+  }
+  return { success: true };
+}
+async function getSubcontractors(db) {
+  return (await db.prepare(`SELECT * FROM subcontractors WHERE active = 1 ORDER BY name`).all()).results;
+}
+async function addSubcontractor(db, body) {
+  await db.prepare(`INSERT INTO subcontractors (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
+  return { success: true };
+}
+async function deleteSubcontractor(db, id) {
+  await db.prepare(`UPDATE subcontractors SET active = 0 WHERE id = ?`).bind(id).run();
+  return { success: true };
+}
+async function getTrades(db) {
+  return (await db.prepare(`SELECT * FROM trades WHERE active = 1 ORDER BY name`).all()).results;
+}
+async function addTrade(db, body) {
+  await db.prepare(`INSERT INTO trades (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
+  return { success: true };
+}
+async function deleteTrade(db, id) {
+  await db.prepare(`UPDATE trades SET active = 0 WHERE id = ?`).bind(id).run();
+  return { success: true };
+}
+async function getSites(db) {
+  return (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results;
+}
+async function addSite(db, body) {
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
+  return { success: true };
+}
+async function deleteSite(db, id) {
+  await db.prepare(`UPDATE sites SET active = 0 WHERE id = ?`).bind(id).run();
+  return { success: true };
+}
+async function siteUsage(db) {
+  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map((r) => r.n));
+  const rows = (await db.prepare(
+    `SELECT site AS name, COUNT(*) AS pos FROM po_log
+       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
+  ).all()).results;
+  const seen = new Set(rows.map((r) => String(r.name).toLowerCase()));
+  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results.filter((r) => !seen.has(String(r.name).toLowerCase())).map((r) => ({ name: r.name, pos: 0 }));
+  return rows.concat(empties).map((r) => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) })).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+async function mergeSites(db, body) {
+  const into = (body && body.into || "").trim();
+  const from = Array.isArray(body && body.from) ? body.from.map((s) => String(s || "").trim()).filter(Boolean) : [];
+  if (!into) return { error: "Pick the site to merge into" };
+  const sources = from.filter((s) => s.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) return { error: "Pick at least one different site to merge in" };
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
+  const ph = sources.map(() => "?").join(",");
+  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
+  const moved = upd && upd.meta && upd.meta.changes || 0;
+  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
+  return { success: true, into, merged: sources.length, posMoved: moved };
+}
+async function searchJobs(db, params) {
+  const q = (params.get("q") || "").trim();
+  if (q.length < 2) return [];
+  const rows = await db.prepare(
+    `SELECT name FROM sites WHERE active = 1 AND name LIKE ? ORDER BY name LIMIT 10`
+  ).bind("%" + q + "%").all();
+  return rows.results.map((r) => ({ job_ref: r.name, site: r.name, client: null }));
+}
+async function getClosures(db) {
+  return (await db.prepare(`SELECT * FROM closures ORDER BY date DESC`).all()).results;
+}
+async function addClosure(db, body) {
+  await db.prepare(`INSERT INTO closures (date, reason) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET reason = ?`).bind(body.date, body.reason || "", body.reason || "").run();
+  return { success: true };
+}
+async function deleteClosure(db, date) {
+  await db.prepare(`DELETE FROM closures WHERE date = ?`).bind(date).run();
+  return { success: true };
+}
+async function serveInvoiceFile(request, env, url) {
+  const key = url.searchParams.get("key") || "";
+  if (!key.startsWith("po-invoices/")) return error("Bad key", 400, env, request);
+  const ok = await verifyFileSig(env, key, url.searchParams);
+  if (!ok) return error("Link expired or invalid", 403, env, request);
+  const obj = await env.JOB_FILES.get(key);
+  if (!obj) return error("Invoice not found", 404, env, request);
+  const h = new Headers();
+  h.set("Content-Type", obj.httpMetadata && obj.httpMetadata.contentType || "application/pdf");
+  h.set("Content-Disposition", "inline");
+  h.set("Cache-Control", "private, max-age=60");
+  h.set("Access-Control-Allow-Origin", "*");
+  return new Response(obj.body, { headers: h });
+}
+async function writeInvoiceToPo(env, db, sess, origin, o) {
+  let key = o.existingKey || null;
+  if (o.bytes) {
+    const safe = String(o.filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/${sess.tenantId}/${o.poNumber}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, o.bytes, { httpMetadata: { contentType: o.contentType || "application/pdf" } });
+  }
+  const meta = JSON.stringify({
+    no: (o.invoiceNo != null ? String(o.invoiceNo) : "") || null,
+    date: (o.invoiceDate != null ? String(o.invoiceDate) : "") || null,
+    net: o.cost,
+    vat: o.vat != null ? o.vat : null,
+    gross: o.gross != null ? o.gross : null,
+    filename: o.filename || null,
+    by: userName(sess),
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    graph: o.graph || null
+  });
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  const fields = [
+    "cost_ex_vat = ?",
+    "invoice_key = ?",
+    "invoice_meta = ?",
+    "cost_entered_at = ?",
+    "last_edited_by_slug = ?",
+    "last_edited_by_name = ?",
+    "last_edited_at = ?"
+  ];
+  const binds = [o.cost, key, meta, now2, userSlug(sess), userName(sess), now2];
+  if (o.vatRate != null) {
+    fields.push("vat_rate = ?");
+    binds.push(o.vatRate);
+  }
+  binds.push(o.poNumber);
+  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+  return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
+}
+async function searchSlaJobs(env, tenantId, qStr) {
+  const q = String(qStr || "").trim();
+  if (q.length < 2) return [];
+  const db = env.DB;
+  if (!db) return [];
+  const like = "%" + q.toLowerCase() + "%";
+  let rows = [];
+  try {
+    rows = (await db.prepare(
+      `SELECT id, helpdesk_ref, description, priority, status, site_code, scheduled_at, data
+         FROM sla_jobs WHERE tenant_id = ? AND (
+           lower(COALESCE(helpdesk_ref,'')) LIKE ? OR lower(COALESCE(description,'')) LIKE ?
+           OR lower(COALESCE(site_code,'')) LIKE ? OR lower(COALESCE(data,'')) LIKE ?)
+         ORDER BY COALESCE(scheduled_at, raised_at, created_at) DESC LIMIT 20`
+    ).bind(tenantId, like, like, like, like).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const jobs = rows.map((r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+    }
+    const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+    return {
+      type: "job",
+      job_id: r.id,
+      ref: r.helpdesk_ref || d.helpdeskRef || "",
+      site: d.siteName || r.site_code || "",
+      site_code: r.site_code || d.siteCode || "",
+      status: r.status || d.status || "",
+      priority: r.priority || d.priority || "",
+      scheduledAt: r.scheduled_at || d.scheduledAt || null,
+      engineers: engs,
+      description: String(r.description || d.description || "").slice(0, 220)
+    };
+  });
+  let projects = [];
+  try {
+    projects = (await db.prepare(
+      `SELECT number, name, site_client, site_number, status FROM projects
+         WHERE tenant_id IN ('1.0','1',1) AND (status = 'live' OR status IS NULL)
+           AND (lower(COALESCE(name,'')) LIKE ? OR lower(COALESCE(number,'')) LIKE ?)
+         ORDER BY name LIMIT 12`
+    ).bind(like, like).all()).results || [];
+  } catch {
+    projects = [];
+  }
+  const projRows = projects.map((p) => ({
+    type: "project",
+    project_id: p.number || "",
+    ref: p.number || "",
+    number: p.number || "",
+    name: p.name || "",
+    site: p.name || "",
+    site_number: p.site_number || p.number || "",
+    status: p.status || "live",
+    description: ""
+  }));
+  return projRows.concat(jobs);
+}
+async function addInvoiceFlag(env, db, sess, request) {
+  const ct = request.headers.get("content-type") || "";
+  let b = {}, bytes = null, filename = null, contentType = null;
+  if (ct.includes("multipart/form-data")) {
+    const form = await request.formData().catch(() => null);
+    if (form) {
+      for (const k of [
+        "supplier",
+        "invoice_no",
+        "invoice_date",
+        "net",
+        "vat",
+        "gross",
+        "engineer_slug",
+        "engineer_name",
+        "job_id",
+        "job_ref",
+        "po_number",
+        "note",
+        "source",
+        "filename",
+        "mailbox",
+        "message_id",
+        "attachment_id"
+      ]) {
+        const v = form.get(k);
+        if (v != null) b[k] = v;
+      }
+      const file = form.get("file");
+      if (file && typeof file.arrayBuffer === "function") {
+        const ab = await file.arrayBuffer();
+        if (ab.byteLength <= 15 * 1024 * 1024) {
+          bytes = ab;
+          filename = file.name;
+          contentType = file.type;
+        }
+      }
+    }
+  } else {
+    try {
+      b = await request.json();
+    } catch {
+    }
+  }
+  if (!bytes && b.message_id && b.attachment_id) {
+    try {
+      bytes = await downloadAttachment(env, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id);
+      filename = b.filename || "invoice.pdf";
+      contentType = "application/pdf";
+    } catch {
+    }
+  }
+  let key = null;
+  if (bytes) {
+    const safe = String(filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+    key = `po-invoices/flags/${sess.tenantId}/${Date.now()}-${safe}`;
+    try {
+      await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: contentType || "application/pdf" } });
+    } catch {
+      key = null;
+    }
+  }
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await db.prepare(`INSERT INTO invoice_flags
+    (tenant_id, supplier, invoice_no, invoice_date, net, vat, gross, engineer_slug, engineer_name,
+     job_id, job_ref, po_number, note, status, invoice_key, filename, source, created_by, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    b.supplier || null,
+    b.invoice_no || null,
+    b.invoice_date || null,
+    numOrNull2(b.net),
+    numOrNull2(b.vat),
+    numOrNull2(b.gross),
+    b.engineer_slug || null,
+    b.engineer_name || null,
+    b.job_id || "" || null,
+    b.job_ref || "" || null,
+    numOrNull2(b.po_number),
+    b.note || "" || null,
+    "open",
+    key,
+    filename || null,
+    b.source || "sweep",
+    userName(sess),
+    now2
+  ).run();
+  if (b.message_id && b.attachment_id) {
+    await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull2(b.po_number));
+  }
+  return { ok: true, id: res && res.meta && res.meta.last_row_id || null, invoice_key: key };
+}
+async function listInvoiceFlags(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM invoice_flags WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const eng = params.get("engineer");
+  if (eng) {
+    sql += ` AND engineer_slug = ?`;
+    binds.push(eng);
+  }
+  const status = params.get("status");
+  if (status) {
+    sql += ` AND COALESCE(status,'open') = ?`;
+    binds.push(status);
+  }
+  sql += ` ORDER BY created_at DESC LIMIT 500`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  for (const r of rows) {
+    r.invoiceUrl = r.invoice_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.invoice_key) : null;
+  }
+  return rows;
+}
+async function updateInvoiceFlag(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const allowed = ["engineer_slug", "engineer_name", "job_id", "job_ref", "po_number", "note", "status"];
+  const fields = [], binds = [];
+  for (const k of allowed) if (b[k] !== void 0) {
+    fields.push(`${k} = ?`);
+    binds.push(b[k] === "" ? null : b[k]);
+  }
+  if (b.status === "resolved") {
+    fields.push(`resolved_at = ?`);
+    binds.push((/* @__PURE__ */ new Date()).toISOString());
+  } else if (b.status === "open") {
+    fields.push(`resolved_at = ?`);
+    binds.push(null);
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE invoice_flags SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+function vatQuarter(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})/);
+  if (!m) return "";
+  return m[1] + "-Q" + (Math.floor((Number(m[2]) - 1) / 3) + 1);
+}
+async function runVatCapture(env, db, sess, origin, { mailbox, days }) {
+  const MAX_NEW = 40, AI_BUDGET = 25;
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  let msgs = [];
+  try {
+    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 80 });
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+  let added = 0, scanned = 0, aiUsed = 0, skippedExisting = 0, capped = false;
+  for (const m of msgs) {
+    if (added >= MAX_NEW) {
+      capped = true;
+      break;
+    }
+    let atts = [];
+    try {
+      atts = await listPdfAttachments(env, mailbox, m.id);
+    } catch {
+      continue;
+    }
+    for (const a of atts) {
+      if (added >= MAX_NEW) {
+        capped = true;
+        break;
+      }
+      const key = m.id + ":" + a.id;
+      let exists = null;
+      try {
+        exists = await db.prepare(`SELECT 1 FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
+      } catch {
+      }
+      if (exists) {
+        skippedExisting++;
+        continue;
+      }
+      let bytes;
+      try {
+        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+        scanned++;
+      } catch {
+        continue;
+      }
+      let res;
+      try {
+        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+      } catch {
+        continue;
+      }
+      if (res.aiUsed) aiUsed++;
+      const f = res.fields || {};
+      const safe = String(a.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+      const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+      try {
+        await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+      } catch {
+      }
+      const sub = normMatchOne(f.supplier, subNames);
+      const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
+      try {
+        await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+          (tenant_id, source, mailbox, message_id, attachment_id, dedupe_key, filename, r2_key,
+           supplier, invoice_no, invoice_date, doc_type, read_net, read_vat, read_gross,
+           net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+          String(sess.tenantId),
+          "mailbox",
+          mailbox,
+          m.id,
+          a.id,
+          key,
+          a.name || "invoice.pdf",
+          r2key,
+          f.supplier || null,
+          f.invoiceNumber || null,
+          f.invoiceDate || null,
+          res.docType || null,
+          numOrNull2(f.net),
+          numOrNull2(f.vat),
+          numOrNull2(f.gross),
+          numOrNull2(f.net),
+          numOrNull2(f.vat),
+          numOrNull2(f.gross),
+          rate,
+          sub ? "subcontractor" : "materials",
+          sub ? 1 : 0,
+          res.notInvoice ? "excluded" : "unverified",
+          vatQuarter(f.invoiceDate),
+          (/* @__PURE__ */ new Date()).toISOString()
+        ).run();
+        added++;
+      } catch {
+      }
+    }
+  }
+  return { ok: true, added, scanned, aiUsed, skippedExisting, capped, mailbox, days };
+}
+async function listVatInvoices(env, db, sess, origin, params) {
+  let sql = `SELECT * FROM vat_invoices WHERE tenant_id = ?`;
+  const binds = [String(sess.tenantId)];
+  const period = params.get("period");
+  if (period) {
+    sql += ` AND vat_period = ?`;
+    binds.push(period);
+  }
+  const status = params.get("status");
+  if (status) {
+    sql += ` AND COALESCE(status,'unverified') = ?`;
+    binds.push(status);
+  }
+  const qstr = (params.get("q") || "").trim();
+  if (qstr) {
+    const l = "%" + qstr.toLowerCase() + "%";
+    sql += ` AND (lower(COALESCE(supplier,'')) LIKE ? OR lower(COALESCE(invoice_no,'')) LIKE ?)`;
+    binds.push(l, l);
+  }
+  sql += ` ORDER BY COALESCE(invoice_date,'') DESC, id DESC LIMIT 2000`;
+  let rows = [];
+  try {
+    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  for (const r of rows) r.url = r.r2_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.r2_key) : null;
+  let periods = [];
+  try {
+    periods = (await db.prepare(`SELECT vat_period p, COUNT(*) n FROM vat_invoices WHERE tenant_id=? AND vat_period IS NOT NULL AND vat_period<>'' GROUP BY vat_period ORDER BY vat_period DESC`).bind(String(sess.tenantId)).all()).results || [];
+  } catch {
+  }
+  const totals = { count: rows.length, net: 0, vat: 0, gross: 0, unverified: 0, verified: 0, excluded: 0, flagged: 0, reverseCharge: 0 };
+  for (const r of rows) {
+    const st = r.status || "unverified";
+    totals[st === "verified" ? "verified" : st === "excluded" ? "excluded" : "unverified"]++;
+    if (r.reverse_charge) totals.reverseCharge++;
+    if (st !== "excluded") {
+      totals.net += Number(r.net) || 0;
+      totals.vat += Number(r.vat) || 0;
+      totals.gross += Number(r.gross) || 0;
+    }
+    if (st !== "excluded" && (r.net == null || r.gross == null || Number(r.net) === 0)) totals.flagged++;
+  }
+  totals.net = Math.round(totals.net * 100) / 100;
+  totals.vat = Math.round(totals.vat * 100) / 100;
+  totals.gross = Math.round(totals.gross * 100) / 100;
+  return { rows, periods, totals };
+}
+async function saveVatInvoice(db, sess, b) {
+  const id = Number(b && b.id);
+  if (!id) return { error: "No id" };
+  const fields = [], binds = [];
+  const set = (col, val2) => {
+    fields.push(col + " = ?");
+    binds.push(val2);
+  };
+  if (b.supplier !== void 0) set("supplier", b.supplier || null);
+  if (b.invoice_no !== void 0) set("invoice_no", b.invoice_no || null);
+  if (b.invoice_date !== void 0) {
+    set("invoice_date", b.invoice_date || null);
+    set("vat_period", vatQuarter(b.invoice_date));
+  }
+  if (b.net !== void 0) set("net", numOrNull2(b.net));
+  if (b.vat !== void 0) set("vat", numOrNull2(b.vat));
+  if (b.gross !== void 0) set("gross", numOrNull2(b.gross));
+  if (b.vat_rate !== void 0) set("vat_rate", numOrNull2(b.vat_rate));
+  if (b.category !== void 0) set("category", b.category || null);
+  if (b.reverse_charge !== void 0) set("reverse_charge", b.reverse_charge ? 1 : 0);
+  if (b.po_number !== void 0) set("po_number", numOrNull2(b.po_number));
+  if (b.notes !== void 0) set("notes", b.notes || null);
+  if (b.status !== void 0) {
+    set("status", b.status);
+    if (b.status === "verified") {
+      set("verified_by", userName(sess));
+      set("verified_at", (/* @__PURE__ */ new Date()).toISOString());
+    }
+  }
+  if (!fields.length) return { ok: true };
+  binds.push(id);
+  await db.prepare(`UPDATE vat_invoices SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return { ok: true };
+}
+async function uploadVatInvoice(env, db, sess, origin, request) {
+  const form = await request.formData().catch(() => null);
+  const file = form && form.get("file");
+  if (!file || typeof file.arrayBuffer !== "function") return { error: "No file uploaded" };
+  const ab = await file.arrayBuffer();
+  if (ab.byteLength > 15 * 1024 * 1024) return { error: "That PDF is too big (max 15 MB)" };
+  const bytes = new Uint8Array(ab);
+  let hash = "";
+  try {
+    const h = await crypto.subtle.digest("SHA-256", ab);
+    hash = [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  } catch {
+    hash = String(Date.now());
+  }
+  const key = "drop:" + hash;
+  const exists = await db.prepare(`SELECT id FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
+  if (exists) return { ok: true, duplicate: true, id: exists.id };
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  const res = await parseInvoice(env, bytes, file.name || "invoice.pdf", known);
+  const f = res.fields || {};
+  const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
+  const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
+  try {
+    await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: file.type || "application/pdf" } });
+  } catch {
+  }
+  const sub = normMatchOne(f.supplier, subNames);
+  const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
+  const r = await db.prepare(`INSERT OR IGNORE INTO vat_invoices
+    (tenant_id, source, dedupe_key, filename, r2_key, supplier, invoice_no, invoice_date, doc_type,
+     read_net, read_vat, read_gross, net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    String(sess.tenantId),
+    "drop",
+    key,
+    file.name || "invoice.pdf",
+    r2key,
+    f.supplier || null,
+    f.invoiceNumber || null,
+    f.invoiceDate || null,
+    res.docType || null,
+    numOrNull2(f.net),
+    numOrNull2(f.vat),
+    numOrNull2(f.gross),
+    numOrNull2(f.net),
+    numOrNull2(f.vat),
+    numOrNull2(f.gross),
+    rate,
+    sub ? "subcontractor" : "materials",
+    sub ? 1 : 0,
+    res.notInvoice ? "excluded" : "unverified",
+    vatQuarter(f.invoiceDate),
+    (/* @__PURE__ */ new Date()).toISOString()
+  ).run();
+  return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
+}
+function mergeSweepProposals(outstanding, fresh) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const p of outstanding || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  for (const p of fresh || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
+  return Array.from(byKey.values());
+}
+function slimProposal(p) {
+  return {
+    mailbox: p.mailbox,
+    messageId: p.messageId,
+    attachmentId: p.attachmentId,
+    filename: p.filename,
+    subject: p.subject,
+    from: p.from,
+    receivedDateTime: p.receivedDateTime,
+    tier: p.tier,
+    fields: p.fields || {}
+  };
+}
+async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
+  const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
+  const known = (await getSuppliers(db)).map((s) => s.name);
+  const subNames = (await getSubcontractors(db)).map((s) => s.name);
+  const isRange = !!(String(from || "").trim() || String(to || "").trim());
+  const hasClue = !!String(clue || "").trim();
+  const oneOff = isRange || hasClue;
+  const incremental = mode !== "full" && !oneOff;
+  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
+  const fresh = [];
+  let downloads = 0, aiUsed = 0, skipped = 0;
+  let newest = state.lastReceived;
+  let oldestScanned = state.oldestScanned;
+  let backfillDone = incremental ? state.backfillDone : false;
+  async function processMsgs(msgs) {
+    let oldestFull = null, hitCap = false, minSeen = null;
+    for (const m of msgs) {
+      const r = m.receivedDateTime || null;
+      if (r && (!newest || r > newest)) newest = r;
+      if (r && (!minSeen || r < minSeen)) minSeen = r;
+      if (downloads >= MAX_DOWNLOADS) {
+        hitCap = true;
+        break;
+      }
+      let atts = [];
+      try {
+        atts = await listPdfAttachments(env, mailbox, m.id);
+      } catch {
+        continue;
+      }
+      let complete = true;
+      for (const a of atts) {
+        if (downloads >= MAX_DOWNLOADS) {
+          hitCap = true;
+          complete = false;
+          break;
+        }
+        let bytes;
+        try {
+          bytes = await downloadAttachment(env, mailbox, m.id, a.id);
+          downloads++;
+        } catch {
+          continue;
+        }
+        let res;
+        try {
+          res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
+        } catch {
+          continue;
+        }
+        if (res.aiUsed) aiUsed++;
+        if (res.notInvoice || res.remittance) {
+          skipped++;
+          continue;
+        }
+        fresh.push({
+          mailbox,
+          messageId: m.id,
+          attachmentId: a.id,
+          filename: a.name || "invoice.pdf",
+          subject: m.subject || "",
+          from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
+          receivedDateTime: r,
+          tier: res.tier,
+          fields: res.fields || {}
+        });
+      }
+      if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;
+      if (hitCap) break;
+    }
+    return { oldestFull, hitCap, minSeen, count: msgs.length };
+  }
+  if (oneOff) {
+    let msgs = [];
+    try {
+      msgs = await listRecentWithAttachments(env, mailbox, { top: 40, days, from, to, clue });
+    } catch (e) {
+      return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+    }
+    await processMsgs(msgs);
+  } else {
+    if (mode === "full") {
+      newest = null;
+      oldestScanned = null;
+      backfillDone = false;
+    }
+    if (state.lastReceived) {
+      let fwd = [];
+      try {
+        fwd = await listRecentWithAttachments(env, mailbox, { top: 40, days, since: state.lastReceived });
+      } catch (e) {
+        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+      }
+      await processMsgs(fwd);
+    }
+    if (!backfillDone && downloads < MAX_DOWNLOADS) {
+      const opts = { top: 40, days };
+      if (oldestScanned) opts.before = oldestScanned;
+      let old = [];
+      try {
+        old = await listRecentWithAttachments(env, mailbox, opts);
+      } catch (e) {
+        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
+      }
+      if (!old.length) {
+        backfillDone = true;
+      } else {
+        const { oldestFull, hitCap, minSeen } = await processMsgs(old);
+        if (oldestFull) oldestScanned = oldestFull;
+        else if (!hitCap && minSeen) oldestScanned = minSeen;
+      }
+    }
+  }
+  const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
+  const seen = await getSeenSet(db, mailbox);
+  const poCache = await uncostedPoRows(db);
+  const proposals = [];
+  let doneNow = 0;
+  for (const p of merged) {
+    if (seen.has(seenKey(p.mailbox, p.messageId, p.attachmentId))) {
+      doneNow++;
+      continue;
+    }
+    const f = p.fields || {};
+    let po = null, candidates = [];
+    if (f.poNumber) po = await poBrief(db, f.poNumber);
+    if (po && po.priced && po.has_invoice) {
+      doneNow++;
+      continue;
+    }
+    if (!po) candidates = matchInvoiceCandidates(db, f, poCache);
+    const cls = classifyProposal(f, po, known, subNames);
+    const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
+    if (!actionable) continue;
+    proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
+  }
+  proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
+  if (incremental || mode === "full") {
+    await saveSweepState(db, mailbox, {
+      lastReceived: newest,
+      outstanding: proposals.map(slimProposal),
+      oldestScanned,
+      backfillDone
+    });
+  }
+  const moreToScan = !oneOff && (downloads >= MAX_DOWNLOADS || !backfillDone);
+  return {
+    proposals,
+    scanned: downloads,
+    aiUsed,
+    alreadyDone: skipped + doneNow,
+    capped: downloads >= MAX_DOWNLOADS,
+    incremental,
+    oneOff,
+    newProposals: fresh.length,
+    carriedOver: incremental ? state.outstanding.length : 0,
+    watermark: incremental || mode === "full" ? newest : null,
+    backfillDone,
+    moreToScan,
+    oldestScanned
+  };
+}
+async function poBrief(db, poNumber) {
+  const r = await db.prepare(
+    `SELECT po_number, supplier, issued_at, cost_ex_vat, engineer_name, office_user_name, site, incident_no, description, invoice_key
+       FROM po_log WHERE po_number = ? AND deleted = 0`
+  ).bind(poNumber).first();
+  if (!r) return null;
+  return {
+    po_number: r.po_number,
+    supplier: r.supplier || "",
+    issued_at: r.issued_at,
+    cost_ex_vat: r.cost_ex_vat,
+    priced: r.cost_ex_vat != null,
+    who: r.engineer_name || r.office_user_name || "",
+    site: r.site || "",
+    incident_no: r.incident_no || "",
+    description: String(r.description || "").slice(0, 300),
+    has_invoice: !!r.invoice_key
+  };
+}
+async function uncostedPoRows(db) {
+  try {
+    return (await db.prepare(
+      `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
+         FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
+    ).all()).results || [];
+  } catch {
+    return [];
+  }
+}
+function matchInvoiceCandidates(db, f, poCache) {
+  const date = f && f.invoiceDate;
+  const supN = normSupplierName(f && f.supplier || "");
+  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
+  const rows = Array.isArray(poCache) ? poCache : [];
+  const scored = rows.map((r) => {
+    const sup = normSupplierName(r.supplier || "");
+    const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
+    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 9999;
+    return {
+      po_number: r.po_number,
+      supplier: r.supplier || "",
+      issued_at: r.issued_at,
+      who: r.engineer_name || r.office_user_name || "",
+      site: r.site || "",
+      incident_no: r.incident_no || "",
+      description: String(r.description || "").slice(0, 200),
+      supplierMatch: supMatch,
+      daysApart: days
+    };
+  });
+  if (supN) {
+    return scored.filter((c) => c.supplierMatch).sort((a, b) => a.daysApart - b.daysApart).slice(0, 12);
+  }
+  return scored.filter((c) => c.daysApart <= 5).sort((a, b) => a.daysApart - b.daysApart).slice(0, 8);
+}
+async function getPOs(db, params) {
+  let query = `SELECT * FROM po_log WHERE deleted = 0`;
+  const binds = [];
+  if (params.get("needs_review") === "1") query += ` AND needs_review = 1`;
+  if (params.get("hide_subcontractor") === "1") query += ` AND COALESCE(cost_category, 'materials') != 'subcontractor'`;
+  if (params.get("category")) {
+    query += ` AND COALESCE(cost_category, 'materials') = ?`;
+    binds.push(params.get("category"));
+  }
+  if (params.get("trade")) {
+    query += ` AND trade = ?`;
+    binds.push(params.get("trade"));
+  }
+  if (params.get("site")) {
+    query += ` AND site = ?`;
+    binds.push(params.get("site"));
+  }
+  if (params.get("engineer")) {
+    query += ` AND engineer_slug = ?`;
+    binds.push(params.get("engineer"));
+  }
+  if (params.get("office_user")) {
+    query += ` AND office_user_slug = ?`;
+    binds.push(params.get("office_user"));
+  }
+  if (params.get("supplier")) {
+    query += ` AND supplier = ?`;
+    binds.push(params.get("supplier"));
+  }
+  if (params.get("from")) {
+    query += ` AND issued_at >= ?`;
+    binds.push(params.get("from"));
+  }
+  if (params.get("to")) {
+    query += ` AND issued_at <= ?`;
+    binds.push(params.get("to") + "T23:59:59");
+  }
+  if (params.get("status")) {
+    query += ` AND COALESCE(status, 'open') = ?`;
+    binds.push(params.get("status"));
+  }
+  if (params.get("uncosted") === "1") query += ` AND (cost_ex_vat IS NULL)`;
+  if (params.get("unmatched_site") === "1") {
+    query += ` AND (site IS NOT NULL AND site NOT IN (SELECT name FROM sites WHERE active = 1))`;
+  }
+  if (params.get("search")) {
+    const term = "%" + params.get("search").toLowerCase() + "%";
+    query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
+    binds.push(term, term, term, term, term, term, term, term);
+  }
+  if (params.get("job_id")) {
+    query += ` AND job_id = ?`;
+    binds.push(params.get("job_id"));
+  }
+  query += ` ORDER BY po_number DESC LIMIT 1000`;
+  return (await db.prepare(query).bind(...binds).all()).results;
+}
+async function getJobCost(db, params) {
+  let where = `WHERE deleted = 0 AND site IS NOT NULL AND TRIM(site) != ''`;
+  const binds = [];
+  if (params.get("from")) {
+    where += ` AND issued_at >= ?`;
+    binds.push(params.get("from"));
+  }
+  if (params.get("to")) {
+    where += ` AND issued_at <= ?`;
+    binds.push(params.get("to") + "T23:59:59");
+  }
+  const [byJob, byTrade] = await db.batch([
+    db.prepare(`SELECT site,
+        COUNT(*) AS po_count,
+        SUM(CASE WHEN cost_ex_vat IS NULL THEN 1 ELSE 0 END) AS uncosted,
+        COALESCE(SUM(CASE WHEN COALESCE(cost_category, 'materials') = 'materials' THEN cost_ex_vat ELSE 0 END), 0) AS materials_ex,
+        COALESCE(SUM(CASE WHEN cost_category = 'subcontractor' THEN cost_ex_vat ELSE 0 END), 0) AS subcontractor_ex,
+        COALESCE(SUM(cost_ex_vat), 0) AS total_ex
+      FROM po_log ${where} GROUP BY site`).bind(...binds),
+    db.prepare(`SELECT site, COALESCE(trade, '(no trade)') AS trade,
+        COUNT(*) AS count, COALESCE(SUM(cost_ex_vat), 0) AS ex
+      FROM po_log ${where} AND cost_category = 'subcontractor'
+      GROUP BY site, trade`).bind(...binds)
+  ]);
+  const tradesBySite = {};
+  for (const t of byTrade.results) {
+    (tradesBySite[t.site] = tradesBySite[t.site] || []).push({ trade: t.trade, count: t.count, ex: t.ex });
+  }
+  const jobs = byJob.results.map((j) => ({
+    site: j.site,
+    po_count: j.po_count,
+    uncosted: j.uncosted,
+    materials_ex: j.materials_ex,
+    subcontractor_ex: j.subcontractor_ex,
+    total_ex: j.total_ex,
+    by_trade: (tradesBySite[j.site] || []).sort((a, b) => b.ex - a.ex || b.count - a.count)
+  })).sort((a, b) => b.total_ex - a.total_ex || b.po_count - a.po_count);
+  return {
+    jobs,
+    totals: {
+      jobs: jobs.length,
+      po_count: jobs.reduce((s, j) => s + j.po_count, 0),
+      uncosted: jobs.reduce((s, j) => s + j.uncosted, 0),
+      materials_ex: jobs.reduce((s, j) => s + j.materials_ex, 0),
+      subcontractor_ex: jobs.reduce((s, j) => s + j.subcontractor_ex, 0),
+      total_ex: jobs.reduce((s, j) => s + j.total_ex, 0)
+    }
+  };
+}
+async function nextPoNumber(db) {
+  const row = await db.prepare(`
+    SELECT COALESCE(MIN(n), ?) AS next FROM (
+      SELECT ? AS n
+      UNION ALL
+      SELECT po_number + 1 FROM po_log
+    ) WHERE n >= ? AND n NOT IN (SELECT po_number FROM po_log)
+  `).bind(PO_START, PO_START, PO_START).first();
+  return row.next;
+}
+async function issuePO(db, body, env) {
+  const status = await getSystemStatus(db);
+  if (status.mode === "disabled") return { error: status.message };
+  if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
+  const isSubcontractor = body.cost_category === "subcontractor";
+  if (isSubcontractor) {
+    if (body.source !== "office") return { error: "Subcontractor POs can only be raised by the office" };
+    if (!body.site || !body.site.trim()) return { error: "Site (job) is required for a subcontractor PO" };
+    if (!body.supplier || !body.supplier.trim()) return { error: "Subcontractor is required" };
+    if (!body.trade || !body.trade.trim()) return { error: "Trade is required for a subcontractor PO" };
+    if (!body.description || !body.description.trim()) return { error: "Description is required" };
+  }
+  if (body.source === "engineer") {
+    if (body.engineer_slug) {
+      const eng = await db.prepare(`SELECT suspended FROM engineers WHERE slug = ?`).bind(body.engineer_slug).first();
+      if (eng && eng.suspended) return { error: "Access to Mostlane PO system has been suspended. Please contact the office for more info." };
+    }
+    const hasSite = body.site && body.site.trim();
+    const hasIncident = body.incident_no && body.incident_no.trim();
+    if (!hasSite && !hasIncident) return { error: "Enter a site or an incident number" };
+    if (!body.supplier || !body.supplier.trim()) return { error: "Supplier is required" };
+    if (!body.description || !body.description.trim()) return { error: "Description is required" };
+    const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
+    if (!supplierCheck) return { error: "Supplier must be picked from the list" };
+    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
+    const hasJob = body.job_id && String(body.job_id).trim();
+    if (hasSite && !hasVehicle && !hasJob) {
+      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
+        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use \u201CRaise PO for this job\u201D inside the job card." };
+      }
+    }
+  }
+  const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
+  let poNumber;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    poNumber = await nextPoNumber(db);
+    try {
+      await db.prepare(`INSERT INTO po_log (po_number, engineer_slug, engineer_name, issued_at, source, site, incident_no, supplier, description, needs_review, office_user_slug, office_user_name, cost_category, trade, job_id, job_ref, vehicle_reg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+        poNumber,
+        body.engineer_slug || null,
+        body.engineer_name || null,
+        issuedAt,
+        body.source || "office",
+        body.site || null,
+        body.incident_no || null,
+        body.supplier || null,
+        body.description || null,
+        body.source === "office" ? 0 : 1,
+        body.office_user_slug || null,
+        body.office_user_name || null,
+        isSubcontractor ? "subcontractor" : "materials",
+        isSubcontractor ? body.trade || null : null,
+        // Blank unless the PO was raised from a portal job link
+        (body.job_id || "").trim() || null,
+        (body.job_ref || "").trim() || null,
+        // Uppercase so the portal's UPPER(REPLACE(reg,' ','')) match always lines up
+        (body.vehicle_reg || "").trim().toUpperCase() || null
+      ).run();
+      return { success: true, po_number: poNumber, issued_at: issuedAt };
+    } catch (e) {
+      if (!/UNIQUE|constraint|PRIMARY/i.test(e.message)) throw e;
+    }
+  }
+  return { error: "Could not allocate a PO number, please try again" };
+}
+async function raiseSubcontractorPO(env, { supplier, trade, site, description, jobId, jobRef, userSlug: userSlug2, userName: userName3 } = {}) {
+  const db = env && env.PO_DB;
+  if (!db) return { error: "PO system is not connected (PO_DB binding missing)" };
+  if (!supplier || !String(supplier).trim()) return { error: "Subcontractor name is required" };
+  try {
+    await ensurePoInvoiceCols(db);
+  } catch {
+  }
+  const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let poNumber;
+    try {
+      poNumber = await nextPoNumber(db);
+    } catch (e) {
+      return { error: "Could not read the PO number \u2014 " + String(e.message || e).slice(0, 120) };
+    }
+    try {
+      await db.prepare(`INSERT INTO po_log (po_number, engineer_slug, engineer_name, issued_at, source, site, incident_no, supplier, description, needs_review, office_user_slug, office_user_name, cost_category, trade, job_id, job_ref, vehicle_reg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+        poNumber,
+        null,
+        null,
+        issuedAt,
+        "office",
+        String(site || "").trim() || null,
+        null,
+        String(supplier).trim(),
+        String(description || "").trim() || null,
+        0,
+        userSlug2 || null,
+        userName3 || null,
+        "subcontractor",
+        String(trade || "").trim() || null,
+        String(jobId || "").trim() || null,
+        String(jobRef || "").trim() || null,
+        null
+      ).run();
+      return { success: true, po_number: poNumber, issued_at: issuedAt };
+    } catch (e) {
+      if (!/UNIQUE|constraint|PRIMARY/i.test(e.message || "")) return { error: "Could not raise the PO \u2014 " + String(e.message || e).slice(0, 120) };
+    }
+  }
+  return { error: "Could not allocate a PO number, please try again" };
+}
+async function deletePoRecord(db, poNumber) {
+  await db.prepare(`DELETE FROM po_log WHERE po_number = ?`).bind(poNumber).run();
+  return { success: true };
+}
+async function updatePO(db, poNumber, body) {
+  const allowed = ["site", "incident_no", "supplier", "description", "needs_review", "reviewed_by", "engineer_slug", "engineer_name", "deleted", "cost_ex_vat", "vat_rate", "status", "flag_reason", "credit_note", "cost_category", "trade", "job_id", "job_ref", "vehicle_reg"];
+  const fields = [];
+  const binds = [];
+  for (const [k, v] of Object.entries(body)) {
+    if (allowed.includes(k)) {
+      fields.push(`${k} = ?`);
+      binds.push(v === "" ? null : v);
+    }
+  }
+  if (body.needs_review === 0) {
+    fields.push(`reviewed_at = ?`);
+    binds.push((/* @__PURE__ */ new Date()).toISOString());
+  }
+  if (body.cost_ex_vat !== void 0 && body.cost_ex_vat !== null && body.cost_ex_vat !== "") {
+    fields.push(`cost_entered_at = ?`);
+    binds.push((/* @__PURE__ */ new Date()).toISOString());
+  }
+  if (body.edited_by_slug && body.edited_by_name) {
+    fields.push(`last_edited_by_slug = ?`);
+    binds.push(body.edited_by_slug);
+    fields.push(`last_edited_by_name = ?`);
+    binds.push(body.edited_by_name);
+    fields.push(`last_edited_at = ?`);
+    binds.push((/* @__PURE__ */ new Date()).toISOString());
+  }
+  if (!fields.length) return { success: true };
+  binds.push(poNumber);
+  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
+  return { success: true };
+}
+async function getDashboard(db) {
+  const ukTime = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const todayDate = ukTime.toISOString().split("T")[0];
+  const [uncosted, review, flagged, creditDue, unmatched, today] = await db.batch([
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL AND COALESCE(status, 'open') != 'complete'`),
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND needs_review = 1`),
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND COALESCE(status, 'open') = 'flagged'`),
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND COALESCE(status, 'open') = 'credit_due'`),
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND site IS NOT NULL AND site NOT IN (SELECT name FROM sites WHERE active = 1)`),
+    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND substr(issued_at, 1, 10) = ?`).bind(todayDate)
+  ]);
+  return {
+    uncosted: uncosted.results[0].c,
+    needs_review: review.results[0].c,
+    flagged: flagged.results[0].c,
+    credit_due: creditDue.results[0].c,
+    unmatched_site: unmatched.results[0].c,
+    today: today.results[0].c
+  };
+}
+async function getStats(db, params) {
+  let where = `WHERE deleted = 0`;
+  const binds = [];
+  if (params.get("engineer")) {
+    where += ` AND engineer_slug = ?`;
+    binds.push(params.get("engineer"));
+  }
+  if (params.get("supplier")) {
+    where += ` AND supplier = ?`;
+    binds.push(params.get("supplier"));
+  }
+  if (params.get("from")) {
+    where += ` AND issued_at >= ?`;
+    binds.push(params.get("from"));
+  }
+  if (params.get("to")) {
+    where += ` AND issued_at <= ?`;
+    binds.push(params.get("to") + "T23:59:59");
+  }
+  if (params.get("source")) {
+    where += ` AND source = ?`;
+    binds.push(params.get("source"));
+  }
+  const [total, bySupplier, byEngineer, byOfficeUser, bySite, bySource, byDay, byMonth, needsReview, byStatus, totalSpend, uncosted] = await db.batch([
+    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where}`).bind(...binds),
+    db.prepare(`SELECT COALESCE(supplier, '(none)') as supplier, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY supplier ORDER BY count DESC`).bind(...binds),
+    db.prepare(`SELECT COALESCE(engineer_name, '(none)') as engineer, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY engineer_name ORDER BY count DESC`).bind(...binds),
+    db.prepare(`SELECT COALESCE(office_user_name, '(no office user)') as office_user, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} AND office_user_name IS NOT NULL GROUP BY office_user_name ORDER BY count DESC`).bind(...binds),
+    db.prepare(`SELECT COALESCE(site, '(none)') as site, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY site ORDER BY total_ex_vat DESC`).bind(...binds),
+    db.prepare(`SELECT source, COUNT(*) as count FROM po_log ${where} GROUP BY source ORDER BY count DESC`).bind(...binds),
+    db.prepare(`SELECT substr(issued_at, 1, 10) as day, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY day ORDER BY day DESC LIMIT 60`).bind(...binds),
+    db.prepare(`SELECT substr(issued_at, 1, 7) as month, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY month ORDER BY month DESC LIMIT 24`).bind(...binds),
+    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where} AND needs_review = 1`).bind(...binds),
+    db.prepare(`SELECT COALESCE(status, 'open') as status, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY status`).bind(...binds),
+    db.prepare(`SELECT COALESCE(SUM(cost_ex_vat), 0) as total FROM po_log ${where}`).bind(...binds),
+    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where} AND cost_ex_vat IS NULL`).bind(...binds)
+  ]);
+  return {
+    total: total.results[0].c,
+    needs_review: needsReview.results[0].c,
+    total_spend_ex_vat: totalSpend.results[0].total,
+    uncosted: uncosted.results[0].c,
+    by_supplier: bySupplier.results,
+    by_engineer: byEngineer.results,
+    by_office_user: byOfficeUser.results,
+    by_site: bySite.results,
+    by_source: bySource.results,
+    by_day: byDay.results,
+    by_month: byMonth.results,
+    by_status: byStatus.results
+  };
+}
+async function getAccounts(db) {
+  const [suppliers, months] = await db.batch([
+    db.prepare(`SELECT * FROM suppliers WHERE active = 1 ORDER BY name`),
+    db.prepare(`SELECT supplier, substr(issued_at, 1, 7) as ym,
+      SUM(CASE WHEN cost_ex_vat IS NOT NULL AND COALESCE(status, 'open') != 'complete' THEN cost_ex_vat * (1 + COALESCE(vat_rate, 20) / 100) ELSE 0 END) as unpaid_inc_vat,
+      SUM(CASE WHEN cost_ex_vat IS NULL AND COALESCE(status, 'open') != 'complete' THEN 1 ELSE 0 END) as uncosted_open
+      FROM po_log WHERE deleted = 0 AND supplier IS NOT NULL GROUP BY supplier, ym`)
+  ]);
+  return { suppliers: suppliers.results, months: months.results };
+}
+async function getSummaryRange(db, from, to) {
+  let where = "WHERE deleted = 0";
+  const binds = [];
+  if (from) {
+    where += " AND issued_at >= ?";
+    binds.push(from);
+  }
+  if (to) {
+    where += " AND issued_at <= ?";
+    binds.push(to + "T23:59:59");
+  }
+  const rows = (await db.prepare(
+    `SELECT po_number, issued_at, engineer_name, office_user_name, source, supplier, site, incident_no, description
+     FROM po_log ${where} ORDER BY issued_at DESC`
+  ).bind(...binds).all()).results;
+  const groups = {};
+  const supTotals = {};
+  for (const r of rows) {
+    const key = r.engineer_name || (r.office_user_name ? "Office \u2014 " + r.office_user_name : "(no engineer)");
+    const g = groups[key] || (groups[key] = { name: key, count: 0, sup: {}, pos: [] });
+    g.count++;
+    const sup = r.supplier || "(none)";
+    g.sup[sup] = (g.sup[sup] || 0) + 1;
+    supTotals[sup] = (supTotals[sup] || 0) + 1;
+    g.pos.push({ po_number: r.po_number, issued_at: r.issued_at, supplier: r.supplier, site: r.site, incident_no: r.incident_no, description: r.description });
+  }
+  const engineers = Object.values(groups).map((g) => ({
+    name: g.name,
+    count: g.count,
+    suppliers: g.sup,
+    by_supplier: Object.entries(g.sup).map(([supplier, count]) => ({ supplier, count })).sort((a, b) => b.count - a.count),
+    pos: g.pos
+  })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const by_supplier = Object.entries(supTotals).map(([supplier, count]) => ({ supplier, count })).sort((a, b) => b.count - a.count);
+  return { from: from || null, to: to || null, total: rows.length, engineers, by_supplier };
+}
+async function getSummary(db, params) {
+  return getSummaryRange(db, params.get("from"), params.get("to"));
+}
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+var DEFAULT_SWEEP_MAILBOX, ensurePoInvoiceCols, numOrNull2, PO_START;
+var init_po = __esm({
+  "src/routes/po.js"() {
+    init_http();
+    init_auth();
+    init_once();
+    init_filesign();
+    init_invoiceparse();
+    init_graphmail();
+    DEFAULT_SWEEP_MAILBOX = "accounts@mostlane.com";
+    ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
+    numOrNull2 = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    PO_START = 10011;
+  }
+});
+
 // src/lib/certpdf.js
 function fit(str, size, maxW) {
   str = S(str);
@@ -6074,7 +8191,7 @@ async function getArrivalRulesFor(env, site, type) {
   if (!rules.length) rules = await getArrivalDefaultRules(env, type);
   return rules;
 }
-async function handle6(request, env, ctx) {
+async function handle7(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsFor(request) });
@@ -8316,7 +10433,7 @@ var init_sitelog_api = __esm({
 });
 
 // src/routes/sites.js
-async function handle7(request, env, ctx, url, sess) {
+async function handle8(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -8657,7 +10774,7 @@ async function slCall(env, path, body) {
   const req = new Request(base + path, init);
   if (env.SITELOG_DB) {
     try {
-      const r = await handle6(req, env);
+      const r = await handle7(req, env);
       if (r) return await r.json().catch(() => ({ ok: r.ok }));
     } catch (e) {
     }
@@ -9064,7 +11181,7 @@ function importTokenOK(request, env) {
   for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
   return diff === 0;
 }
-async function handle8(request, env, ctx, url, sess) {
+async function handle9(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/compliance(?=\/|$)/, "") || "/";
@@ -9913,7 +12030,7 @@ function typeOf(text) {
 function periodOf(text) {
   const m = /([A-Za-z]+)\s+(20\d{2})/.exec(String(text || ""));
   if (!m) return "";
-  const i = MONTHS.indexOf(m[1].toLowerCase());
+  const i = MONTHS2.indexOf(m[1].toLowerCase());
   return i < 0 ? "" : `${m[2]}-${String(i + 1).padStart(2, "0")}`;
 }
 function parseOrderDescription(desc) {
@@ -10932,7 +13049,7 @@ async function fiveYearAudit(env, tid, year) {
   earlyRetest.sort((a, b) => a.gapMonths - b.gapMonths);
   return { year, offList, earlyRetest };
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
@@ -11255,7 +13372,7 @@ async function handle9(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS2, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -11265,7 +13382,7 @@ var init_concerto = __esm({
     ensureTables2 = onceMigration(ensureTables__raw);
     FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
     TYPE_LABEL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency lighting", pv: "PV", ev: "EV", pump: "Pump", other: "Other" };
-    MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    MONTHS2 = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
     addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
     todayIso = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     FINISHED = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
@@ -11829,7 +13946,7 @@ async function ensureTables__raw2(env) {
     created_at TEXT, updated_at TEXT, r2_final_key TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
 }
-async function getConfig(env, tid) {
+async function getConfig2(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
   if (row && row.value) {
     try {
@@ -12018,7 +14135,7 @@ async function resignMedia(env, origin, rec) {
   }
   return rec;
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (method === "GET" && url.pathname === "/pump/media") {
     const key = url.searchParams.get("key") || "";
@@ -12049,11 +14166,11 @@ async function handle10(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig2(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig(env, tid);
+      const cur = await getConfig2(env, tid);
       const next = { ...cur };
       if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
       if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
@@ -12073,13 +14190,13 @@ async function handle10(request, env, ctx, url, sess) {
     }
   }
   if (sub === "/stores" && method === "GET") {
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
   }
   if (sub === "/for-job" && method === "GET") {
     const jobId = q.get("jobId") || "";
     if (!jobId) return error("jobId required", 400, env, request);
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     const job = await getJob(env, tid, jobId);
     let storeId = q.get("store") || job && job.pumpStore || "";
     const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
@@ -12103,7 +14220,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (id) rec = await loadRec(id);
     if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
     if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cfg = await getConfig(env, tid);
+    const cfg = await getConfig2(env, tid);
     const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
     const sanSig = (v) => {
       const s = String(v || "");
@@ -12428,7 +14545,7 @@ var init_pump = __esm({
 var certs_exports = {};
 __export(certs_exports, {
   fiveYearWorksCompleted: () => fiveYearWorksCompleted,
-  handle: () => handle11,
+  handle: () => handle12,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob,
   upsertFiveYearFromJob: () => upsertFiveYearFromJob
 });
@@ -13191,7 +15308,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : linkedJob ? "job" : null, status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
-async function getConfig2(env, tid) {
+async function getConfig3(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
   let c = null;
   try {
@@ -13817,7 +15934,7 @@ async function fiveYearTestedMap(env, tid) {
   _fyrTestedCache = { tid, at: now2, map };
   return map;
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -13872,11 +15989,11 @@ async function handle11(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig2(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig3(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig2(env, tid);
+      const cur = await getConfig3(env, tid);
       const next = {
         client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
@@ -14166,7 +16283,7 @@ PAT: Import certificate number ${num3}-${yr}`;
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
-    const config = await getConfig2(env, tid);
+    const config = await getConfig3(env, tid);
     const job = await getJob2(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
@@ -14290,7 +16407,7 @@ PAT: Import certificate number ${num3}-${yr}`;
       url: "/cert-review.html",
       tag: "cert-review:" + cert.id
     };
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     const chosen = (cfg.reviewers || []).filter((u) => String(u).toLowerCase() !== String(me).toLowerCase());
     if (chosen.length) {
       ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
@@ -14323,7 +16440,7 @@ PAT: Import certificate number ${num3}-${yr}`;
     const oneRec = shapeRow2(cert);
     await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
-    return json({ ok: true, record: oneRec, config: await getConfig2(env, tid) }, {}, env, request);
+    return json({ ok: true, record: oneRec, config: await getConfig3(env, tid) }, {}, env, request);
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -15099,7 +17216,7 @@ PAT: Import certificate number ${num3}-${yr}`;
     const cert = await loadCert(String(q.get("certId") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow2(cert);
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     const code = padCode2(cert.site_code || rec.siteCode) || "";
     const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
     const reference = `${code}-EM-${yr}`;
@@ -15239,7 +17356,7 @@ ${con.tradingTitle || "Mostlane"}`;
       }
     } else return error("certId or code required", 400, env, request);
     if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     let logo = null;
     try {
       logo = logoBytes();
@@ -15701,8 +17818,9 @@ __export(sla_exports, {
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
   createWorksJobFromRemedials: () => createWorksJobFromRemedials,
   findBlockingJob: () => findBlockingJob,
+  formatPoRef: () => formatPoRef,
   getJob: () => getJob3,
-  handle: () => handle12,
+  handle: () => handle13,
   incidentKey: () => incidentKey,
   isDrainageJob: () => isDrainageJob,
   linkOrderToExistingJob: () => linkOrderToExistingJob,
@@ -15751,7 +17869,7 @@ function badScheduleIn(body) {
   }
   return null;
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -15759,7 +17877,7 @@ async function handle12(request, env, ctx, url, sess) {
   const subpath = url.pathname.replace(/^\/sla(?=\/|$)/, "") || "/";
   const searchParams = url.searchParams;
   if (subpath === "/config") {
-    if (method === "GET") return jsonResponse(await getConfig3(env, tenantId), headers);
+    if (method === "GET") return jsonResponse(await getConfig4(env, tenantId), headers);
     if (method === "POST") {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
@@ -17950,21 +20068,43 @@ async function handle12(request, env, ctx, url, sess) {
       }
       const unlock = () => env.DB.prepare("DELETE FROM idempotency WHERE op_id=?").bind(lockId).run().catch(() => {
       });
+      let poNumber = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber || null;
+      if (!poNumber) {
+        const { raiseSubcontractorPO: raiseSubcontractorPO2 } = await Promise.resolve().then(() => (init_po(), po_exports));
+        const po = await raiseSubcontractorPO2(env, {
+          supplier: sc.name,
+          trade: sc.trade || "",
+          site: job.siteName || job.siteCode || "",
+          description: job.description || "",
+          jobId: id,
+          jobRef: job.helpdeskRef || "",
+          userSlug: null,
+          userName: sess.user.username
+        });
+        if (!po || !po.success) {
+          await unlock();
+          return jsonResponse({ error: "Couldn't raise a PO for " + sc.name + (po && po.error ? " \u2014 " + po.error : "") + ". Nothing was sent; try again." }, headers, 502);
+        }
+        poNumber = po.po_number;
+        job.subconPO = { key, poNumber, raisedAt: (/* @__PURE__ */ new Date()).toISOString(), raisedBy: sess.user.username };
+        await saveJob(env, tenantId, job);
+      }
+      const poRef = formatPoRef(poNumber, sc.poDigits);
       let hours = 0;
       try {
-        const cfg = await getConfig3(env, tenantId);
+        const cfg = await getConfig4(env, tenantId);
         hours = cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours || 0;
       } catch {
       }
-      const mail = buildMetroRodEmail(job, hours);
+      const mail = buildMetroRodEmail(job, hours, poRef);
       const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
       const r = await sendEmail2(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
         await unlock();
-        return jsonResponse({ error: "The email didn't send" + (r && (r.error || r.reason) ? " \u2014 " + String(r.error || r.reason).slice(0, 160) : "") + ". Nothing was recorded; try again." }, headers, 502);
+        return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " \u2014 " + String(r.error || r.reason).slice(0, 160) : "") + ". Press again to re-send (the same PO is kept)." }, headers, 502);
       }
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
-      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref };
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef };
       job.events ||= [];
       job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) \u2014 "${mail.subject}"` });
       job.updatedAt = now2;
@@ -20036,7 +22176,7 @@ async function saveJob(env, tenantId, job) {
   ).run();
 }
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
-  const cfg = await getConfig3(env, tenantId);
+  const cfg = await getConfig4(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
   const existing = await getJob3(env, tenantId, id);
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
@@ -20408,7 +22548,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
-    const cfg = await getConfig3(env, tenantId);
+    const cfg = await getConfig4(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now2, job.priority, cfg);
   }
   if (jobIsProject(job)) {
@@ -21867,6 +24007,11 @@ function isDrainageJob(j) {
   const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");
   return DRAIN_RE.test(t);
 }
+function formatPoRef(poNumber, digits) {
+  const s = String(poNumber == null ? "" : poNumber).trim();
+  const d = Number(digits) || 0;
+  return d > 0 ? s.padStart(d, "0") : s;
+}
 async function getSubconConfig(env, tid) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subcontractors:" + tid).first();
@@ -21881,8 +24026,8 @@ async function getSubconConfig(env, tid) {
 function escH(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
-function buildMetroRodEmail(job, hours) {
-  const ref = String(job.helpdeskRef || job.id || "").trim();
+function buildMetroRodEmail(job, hours, poRef) {
+  const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
   const target = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
@@ -21937,7 +24082,7 @@ function inboundEngineerFor(cfg, priority) {
   }
   return "";
 }
-async function getConfig3(env, tenantId) {
+async function getConfig4(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_config'").bind(tenantId).first();
   return row ? JSON.parse(row.value) : DEFAULT_CONFIG3;
@@ -22991,7 +25136,7 @@ var init_sla = __esm({
     _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
     DRAIN_RE = /\b(drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|soak ?aways?|interceptors?|grease traps?|fat traps?|jetting|foul water|backed up|overflowing|sani ?fl[oa]w?s?|cctv (?:survey|camera|down the drains?))\b|\bblocked (?:toilets?|wcs?|sinks?|urinals?|loos?|basins?|pans?|pipes?|waste)\b|\b(?:toilets?|wcs?|sinks?|urinals?|loos?|basins?)\s+(?:is |are )?(?:still )?blocked\b/i;
     SUBCON_DEFAULTS = {
-      metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com" }
+      metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6 }
     };
     DEFAULT_CONFIG3 = {
       priorities: {
@@ -23061,7 +25206,7 @@ var holidays_exports = {};
 __export(holidays_exports, {
   approvedLeaveInRange: () => approvedLeaveInRange,
   bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle13,
+  handle: () => handle14,
   jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
   remindPendingHolidays: () => remindPendingHolidays
 });
@@ -23166,7 +25311,7 @@ async function remindPendingHolidays(env, tid = 1) {
   } catch {
   }
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -23703,7 +25848,7 @@ async function handle13(request, env, ctx, url, sess) {
           const day = d.getUTCDay();
           if (day === 0 || day === 6) continue;
           if (d < monthStart || d > monthEnd) continue;
-          const di = isoDate(d);
+          const di = isoDate2(d);
           cells[di] = {
             kind: "holiday",
             type: h.type || "Annual Leave",
@@ -23738,7 +25883,7 @@ async function handle13(request, env, ctx, url, sess) {
       }
       engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
     }
-    return json4({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
+    return json4({ year, month, daysInMonth, monthStart: isoDate2(monthStart), monthEnd: isoDate2(monthEnd), engineers });
   }
   if (path === "/holiday/uk-bank-holidays" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -23814,7 +25959,7 @@ function getMonth(url) {
   const month = m ? parseInt(m, 10) : (/* @__PURE__ */ new Date()).getMonth() + 1;
   return Number.isFinite(month) && month >= 1 && month <= 12 ? month : (/* @__PURE__ */ new Date()).getMonth() + 1;
 }
-function isoDate(d) {
+function isoDate2(d) {
   return new Date(d).toISOString().split("T")[0];
 }
 function countWeekdaysInclusive(startISO, endISO) {
@@ -24830,7 +26975,7 @@ function isSuppressed(rules, type, user, key) {
 
 // src/routes/assets.js
 init_push();
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -25756,7 +27901,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -26121,7 +28266,7 @@ init_auth();
 init_sitelog_api();
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -26162,7 +28307,7 @@ async function handle16(request, env, ctx, url, sess) {
   let res;
   try {
     if (env.SITELOG_DB) {
-      res = await handle6(new Request(target, init), env, ctx);
+      res = await handle7(new Request(target, init), env, ctx);
     } else {
       res = await fetch(target, init);
     }
@@ -26705,7 +28850,7 @@ async function appendFbcMessage(env, tid, jobId, msg = {}) {
     console.log("appendFbcMessage", String(e && e.message || e));
   }
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess || !sess.user) return error("Login required", 401, env, request);
   const tid = Number(await resolveTenantId(env, request)) || 1;
@@ -27002,7 +29147,7 @@ function unwrapForward(subject, text) {
   }
   return { subject: subj, origFrom };
 }
-async function aiExtract(env, { from, subject, text }) {
+async function aiExtract2(env, { from, subject, text }) {
   const key = env.ANTHROPIC_API_KEY;
   if (!key) return null;
   const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
@@ -27230,7 +29375,7 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     return { ...out2, fields: fields2, ...made };
   }
   let fields = null;
-  if (!opts.noAi) fields = await aiExtract(env, { from: sender, subject, text });
+  if (!opts.noAi) fields = await aiExtract2(env, { from: sender, subject, text });
   const out = { ...base, fields, source: fields ? "ai" : "none" };
   if (fields && fields.isJob === false) return { ...out, outcome: "dropped", reason: "No template for this layout; the AI read it as not a job (reply / order / quote / status update)" };
   const usable = fields && (String(fields.reference || "").trim() || String(fields.description || "").trim());
@@ -27536,7 +29681,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -27754,7 +29899,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -27875,7 +30020,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -28051,7 +30196,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -28870,7 +31015,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -29589,7 +31734,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -29844,7 +31989,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -30211,7 +32356,7 @@ async function computeDriverChecks(db) {
     };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -30755,7 +32900,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -30857,7 +33002,7 @@ async function sitelogAdminFetch(env, pathQuery, ms) {
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
-      const res = await handle6(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      const res = await handle7(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
       if (res && res.ok) return res;
     } catch (e) {
     }
@@ -30868,7 +33013,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -32088,7 +34233,7 @@ async function pushSiteToSiteLog(env, name, lat, lng, client) {
     let res;
     if (env.SITELOG_DB) {
       try {
-        res = await handle6(new Request(target, init), env);
+        res = await handle7(new Request(target, init), env);
       } catch (e) {
         res = null;
       }
@@ -33168,7 +35313,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -35844,7 +37989,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -36238,7 +38383,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -36447,11 +38592,11 @@ var W5 = R - L;
 var NAVY4 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
-var MONTHS2 = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+var MONTHS3 = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function fmtDate2(iso) {
   try {
     const d = new Date(iso);
-    return `${d.getUTCDate()} ${MONTHS2[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return `${d.getUTCDate()} ${MONTHS3[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   } catch {
     return String(iso || "");
   }
@@ -36460,7 +38605,7 @@ function fmtWhen3(iso) {
   try {
     const d = new Date(iso);
     const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
-    return `${d.getUTCDate()} ${MONTHS2[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
+    return `${d.getUTCDate()} ${MONTHS3[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${hh}:${mm} UTC`;
   } catch {
     return String(iso || "");
   }
@@ -36748,7 +38893,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -37029,7 +39174,7 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -37193,2058 +39338,8 @@ async function handle32(request, env, ctx, url, sess) {
   return error("Unknown chapplins route", 404, env, request);
 }
 
-// src/routes/po.js
-init_http();
-init_auth();
-init_once();
-init_filesign();
-
-// src/lib/invoiceparse.js
-init_pdftext();
-var PO_MIN = 10011;
-var PO_MAX = 99999;
-var MONTHS3 = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
-function isoDate2(y, m, d) {
-  y = Number(y);
-  m = Number(m);
-  d = Number(d);
-  if (y < 100) y += 2e3;
-  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-function parseInvoiceDate(text) {
-  const t = String(text || "");
-  const near = t.match(/(?:tax\s*point|invoice\s*date|date\s*of\s*invoice|transaction\s*date|document\s*date|inv(?:oice)?\.?\s*date)[^\n]{0,40}?(\d{1,2}[\/.\- ][A-Za-z0-9]{2,9}[\/.\- ]\d{2,4})/i);
-  const grab = near ? near[1] : null;
-  const dm = (s) => {
-    if (!s) return null;
-    let m = s.match(/(\d{1,2})[\/.\- ]([A-Za-z]{3,9})[\/.\- ](\d{2,4})/);
-    if (m) {
-      const mo = MONTHS3[m[2].toLowerCase().slice(0, 4)] || MONTHS3[m[2].toLowerCase().slice(0, 3)];
-      return isoDate2(m[3], mo, m[1]);
-    }
-    m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
-    if (m) return isoDate2(m[3], m[2], m[1]);
-    m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (m) return isoDate2(m[1], m[2], m[3]);
-    return null;
-  };
-  if (grab) {
-    const d = dm(grab);
-    if (d) return d;
-  }
-  const all = t.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b|\b\d{1,2}[ \/.\-][A-Za-z]{3,9}[ \/.\-]\d{2,4}\b|\b\d{4}-\d{1,2}-\d{1,2}\b/g) || [];
-  for (const s of all) {
-    const d = dm(s);
-    if (d) return d;
-  }
-  return null;
-}
-function parsePoNumbers(text) {
-  const t = String(text || "");
-  const seen = /* @__PURE__ */ new Set(), out = [];
-  const add = (n, score) => {
-    n = Number(n);
-    if (n >= PO_MIN && n <= PO_MAX && !seen.has(n)) {
-      seen.add(n);
-      out.push({ n, score });
-    }
-  };
-  const lab = /(?:order\s*(?:no|number|ref)|purchase\s*order|\bp\.?o\.?\s*(?:no|number|ref)?|your\s*ref(?:erence)?|customer\s*(?:order|ref))[^\d]{0,18}(\d{4,6})/gi;
-  let m;
-  while (m = lab.exec(t)) add(m[1], 2);
-  const any = /\b(1\d{4})\b/g;
-  while (m = any.exec(t)) add(m[1], 1);
-  return out.sort((a, b) => b.score - a.score).map((o) => o.n);
-}
-function amounts(text) {
-  const out = [];
-  const re = /(?:£\s*)?(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g;
-  let m;
-  while (m = re.exec(text)) {
-    const v = Number(m[1].replace(/,/g, ""));
-    if (Number.isFinite(v) && v > 0 && v < 1e7) out.push(v);
-  }
-  return out;
-}
-function reconcileTotals(text) {
-  const a = amounts(text);
-  let best = null;
-  for (let i = 0; i < a.length; i++) for (let j = 0; j < a.length; j++) {
-    if (i === j) continue;
-    const net = a[i], vat = a[j];
-    if (vat > net) continue;
-    const gross = net + vat;
-    if (!a.some((x) => Math.abs(x - gross) <= 0.02)) continue;
-    const rate = net ? vat / net : 0;
-    if (rate < 1e-3 || rate > 0.26) continue;
-    if (!best || gross > best.gross + 1e-3) best = { net: round2(net), vat: round2(vat), gross: round2(gross) };
-  }
-  return best;
-}
-var round2 = (n) => Math.round(n * 100) / 100;
-function normSupplierName(s) {
-  return String(s || "").toLowerCase().replace(/\b(ltd|limited|plc|llp|uk|group|the|co|company|services|holdings|trading|as)\b/g, " ").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-}
-var SUPPLIER_STOP = new Set(
-  "and group building products product electrical electric plumbing heating supplies supply trade uk ltd limited services service hire distribution wholesale centre center direct company holdings maintenance construction contractors contractor mechanical fabrication for the".split(/\s+/)
-);
-function matchSupplier(text, knownNames) {
-  const t = String(text || "").toLowerCase();
-  let best = null;
-  for (const name of knownNames || []) {
-    const norm = normSupplierName(name);
-    if (!norm) continue;
-    const words = norm.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
-    if (!words.length) continue;
-    if (!words.every((w) => t.includes(w))) continue;
-    const score = words.join("").length + words.length;
-    if (!best || score > best.score) best = { name, score };
-  }
-  return best ? best.name : null;
-}
-function looksLikeRemittance(text) {
-  const t = String(text || "").toLowerCase();
-  return /remittance\s*advice|\bremittance\b|statement of account|monthly statement/.test(t);
-}
-function invoiceNumber(text) {
-  const m = String(text || "").match(/(?:invoice|inv|document)\s*(?:no|number|#|:)?\s*[:#]?\s*([A-Z]{0,4}[\/\-]?\d{4,10})/i);
-  return m ? m[1].trim() : "";
-}
-function extractFields(text, knownSuppliers) {
-  const totals = reconcileTotals(text);
-  const pos = parsePoNumbers(text);
-  return {
-    poNumbers: pos,
-    poNumber: pos[0] || null,
-    net: totals ? totals.net : null,
-    vat: totals ? totals.vat : null,
-    gross: totals ? totals.gross : null,
-    invoiceDate: parseInvoiceDate(text),
-    invoiceNumber: invoiceNumber(text),
-    supplier: matchSupplier(text, knownSuppliers)
-  };
-}
-function tier1Confident(f) {
-  return !!(f && f.poNumber && f.net != null && f.gross != null);
-}
-async function aiExtract2(env, bytes, filename) {
-  const key = env && env.ANTHROPIC_API_KEY;
-  if (!key) return null;
-  const b64 = bytesToBase64(bytes);
-  if (!b64 || b64.length > 12 * 1024 * 1024) return null;
-  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
-  const schema = {
-    type: "object",
-    properties: {
-      docType: {
-        type: "string",
-        enum: ["invoice", "credit_note", "remittance", "statement", "other"],
-        description: "What kind of document this is. 'invoice' = a supplier's PURCHASE invoice billing Mostlane for goods/works. 'credit_note' = a supplier credit. 'remittance' = a REMITTANCE ADVICE / payment advice (a record that a payment was MADE or received \u2014 NOT a bill to pay). 'statement' = a monthly account statement listing several invoices. 'other' = anything else (a delivery note, quote, order acknowledgement, letter)."
-      },
-      supplier: { type: "string", description: "The supplier / merchant name that issued this document." },
-      invoiceNumber: { type: "string", description: "The supplier's own invoice number." },
-      invoiceDate: { type: "string", description: "The invoice / tax-point / transaction date in YYYY-MM-DD." },
-      poNumber: { type: "string", description: "The customer's purchase-order / order number if shown \u2014 a 5-digit Mostlane number in the 10000s. Empty if none is printed." },
-      net: { type: "number", description: "Goods / net total, excluding VAT, in GBP." },
-      vat: { type: "number", description: "VAT total in GBP." },
-      gross: { type: "number", description: "Invoice total including VAT, in GBP." }
-    },
-    required: ["docType", "net", "gross"]
-  };
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model,
-        max_tokens: 900,
-        tools: [{ name: "extract_invoice", description: "Return the invoice's key fields.", input_schema: schema }],
-        tool_choice: { type: "tool", name: "extract_invoice" },
-        messages: [{ role: "user", content: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-          { type: "text", text: "This is a PDF received by Mostlane Construction (a UK building contractor). FIRST decide what kind of document it is (docType) \u2014 be careful to distinguish a supplier PURCHASE INVOICE (a bill for us to pay) from a REMITTANCE ADVICE / payment advice (a record that a payment was made \u2014 do NOT treat this as an invoice) and from a monthly STATEMENT of account. Then read its key fields. The purchase-order number, when printed, is a 5-digit number in the 10000s (e.g. 10505) \u2014 it is NOT the supplier's own account code. Give the net (ex-VAT) and gross (inc-VAT) totals in pounds." }
-        ] }]
-      })
-    });
-    if (!r.ok) return null;
-    const p = await r.json();
-    const block = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use" && c.name === "extract_invoice") : null;
-    const o = block && block.input;
-    if (!o) return null;
-    const poRaw = String(o.poNumber || "").replace(/\D/g, "");
-    const poN = Number(poRaw);
-    return {
-      docType: String(o.docType || "").toLowerCase() || null,
-      supplier: o.supplier ? String(o.supplier).slice(0, 120) : null,
-      invoiceNumber: o.invoiceNumber ? String(o.invoiceNumber).slice(0, 40) : "",
-      invoiceDate: normIsoLoose(o.invoiceDate),
-      poNumber: poN >= PO_MIN && poN <= PO_MAX ? poN : null,
-      poNumbers: poN >= PO_MIN && poN <= PO_MAX ? [poN] : [],
-      net: numOrNull(o.net),
-      vat: numOrNull(o.vat),
-      gross: numOrNull(o.gross)
-    };
-  } catch {
-    return null;
-  }
-}
-function numOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? round2(n) : null;
-}
-function normIsoLoose(s) {
-  const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-  return m ? isoDate2(m[1], m[2], m[3]) : null;
-}
-function bytesToBase64(bytes) {
-  try {
-    const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    let s = "";
-    const CH = 8192;
-    for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
-    return btoa(s);
-  } catch {
-    return "";
-  }
-}
-async function parseInvoice(env, bytes, filename, knownSuppliers, opts) {
-  const allowVision = !opts || opts.allowVision !== false;
-  let text = "";
-  try {
-    text = await pdfExtractText(bytes);
-  } catch {
-  }
-  const remittance = looksLikeRemittance(text);
-  const t1 = extractFields(text, knownSuppliers);
-  if (tier1Confident(t1)) return { tier: "text", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : "invoice", notInvoice: remittance };
-  const t2 = allowVision ? await aiExtract2(env, bytes, filename) : null;
-  if (t2) {
-    const merged = {
-      poNumber: t1.poNumber || t2.poNumber || null,
-      poNumbers: (t1.poNumbers && t1.poNumbers.length ? t1.poNumbers : t2.poNumbers) || [],
-      net: t2.net != null ? t2.net : t1.net,
-      vat: t2.vat != null ? t2.vat : t1.vat,
-      gross: t2.gross != null ? t2.gross : t1.gross,
-      invoiceDate: t2.invoiceDate || t1.invoiceDate || null,
-      invoiceNumber: t1.invoiceNumber || t2.invoiceNumber || "",
-      supplier: matchSupplier(text, knownSuppliers) || t2.supplier || t1.supplier || null
-    };
-    const docType = t2.docType || (remittance ? "remittance" : "invoice");
-    const notInvoice = remittance || docType === "remittance" || docType === "statement";
-    return { tier: "vision", fields: merged, textLen: text.length, aiUsed: true, remittance: remittance || notInvoice, docType, notInvoice };
-  }
-  return { tier: text.length > 40 ? "text" : "none", fields: t1, textLen: text.length, aiUsed: false, remittance, docType: remittance ? "remittance" : null, notInvoice: remittance };
-}
-
-// src/lib/graphmail.js
-var GRAPH = "https://graph.microsoft.com/v1.0";
-function graphConfigured(env) {
-  return !!(env && env.GRAPH_TENANT_ID && env.GRAPH_CLIENT_ID && env.GRAPH_CLIENT_SECRET);
-}
-var _tok = { value: "", exp: 0 };
-async function getToken(env) {
-  const now2 = Date.now();
-  if (_tok.value && now2 < _tok.exp - 6e4) return _tok.value;
-  const url = `https://login.microsoftonline.com/${encodeURIComponent(env.GRAPH_TENANT_ID)}/oauth2/v2.0/token`;
-  const body = new URLSearchParams({
-    client_id: env.GRAPH_CLIENT_ID,
-    client_secret: env.GRAPH_CLIENT_SECRET,
-    scope: "https://graph.microsoft.com/.default",
-    grant_type: "client_credentials"
-  });
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.access_token) {
-    const msg = j && (j.error_description || j.error) || "HTTP " + r.status;
-    throw new Error("Graph sign-in failed: " + String(msg).split("\n")[0].slice(0, 200));
-  }
-  _tok = { value: j.access_token, exp: now2 + Number(j.expires_in || 3600) * 1e3 };
-  return _tok.value;
-}
-async function graphGet(env, path, { raw } = {}) {
-  const token = await getToken(env);
-  const r = await fetch(GRAPH + path, { headers: { authorization: "Bearer " + token } });
-  if (!r.ok) {
-    let d = "";
-    try {
-      d = (await r.json())?.error?.message || "";
-    } catch {
-    }
-    const e = new Error("Graph error " + r.status + (d ? ": " + d : ""));
-    e.status = r.status;
-    throw e;
-  }
-  return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
-}
-async function graphMailboxCheck(env, mailbox) {
-  if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
-  try {
-    await getToken(env);
-    await graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages?$top=1&$select=id`);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
-  }
-}
-async function listRecentWithAttachments(env, mailbox, { days = 60, top = 40, from, to, clue, since, before } = {}) {
-  let filter;
-  const iso = (s, endOfDay) => {
-    const d = new Date(String(s).length <= 10 ? s + (endOfDay ? "T23:59:59Z" : "T00:00:00Z") : s);
-    return isNaN(d) ? null : d.toISOString();
-  };
-  const fIso = from ? iso(from, false) : null;
-  const tIso = to ? iso(to, true) : null;
-  const sinceIso = since ? iso(since, false) : null;
-  const beforeIso = before ? iso(before, false) : null;
-  const floorIso = new Date(Date.now() - Math.max(1, days) * 864e5).toISOString();
-  if (fIso || tIso) {
-    const parts = [];
-    if (fIso) parts.push(`receivedDateTime ge ${fIso}`);
-    if (tIso) parts.push(`receivedDateTime le ${tIso}`);
-    filter = parts.join(" and ");
-  } else if (sinceIso || beforeIso) {
-    const parts = [];
-    if (sinceIso) parts.push(`receivedDateTime gt ${sinceIso}`);
-    if (beforeIso) parts.push(`receivedDateTime lt ${beforeIso}`);
-    parts.push(`receivedDateTime ge ${floorIso}`);
-    filter = parts.join(" and ");
-  } else {
-    filter = `receivedDateTime ge ${floorIso}`;
-  }
-  const q = `/users/${encodeURIComponent(mailbox)}/messages?$select=id,subject,receivedDateTime,from,hasAttachments&$filter=${encodeURIComponent(filter)}&$orderby=receivedDateTime desc&$top=${Math.max(1, Math.min(300, top * 4))}`;
-  const j = await graphGet(env, q);
-  let msgs = (j && j.value || []).filter((m) => m.hasAttachments);
-  const c = String(clue || "").trim().toLowerCase();
-  if (c) {
-    msgs = msgs.filter((m) => {
-      const subj = String(m.subject || "").toLowerCase();
-      const ea = m.from && m.from.emailAddress || {};
-      const frm = (String(ea.address || "") + " " + String(ea.name || "")).toLowerCase();
-      return subj.includes(c) || frm.includes(c);
-    });
-  }
-  return msgs.slice(0, top);
-}
-async function listPdfAttachments(env, mailbox, messageId) {
-  const q = `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size`;
-  const j = await graphGet(env, q);
-  const items = j && j.value || [];
-  return items.filter((a) => {
-    const isFile = String(a["@odata.type"] || "").includes("fileAttachment") || a.size != null;
-    const name = String(a.name || "").toLowerCase();
-    const ct = String(a.contentType || "").toLowerCase();
-    const pdfish = ct.includes("pdf") || name.endsWith(".pdf") || ct.includes("octet-stream") && name.endsWith(".pdf");
-    return isFile && pdfish && Number(a.size || 0) < 20 * 1024 * 1024;
-  });
-}
-async function downloadAttachment(env, mailbox, messageId, attachmentId) {
-  return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
-}
-
-// src/routes/po.js
-var DEFAULT_SWEEP_MAILBOX = "accounts@mostlane.com";
-async function ensurePoInvoiceCols__raw(db) {
-  for (const ddl of [
-    `ALTER TABLE po_log ADD COLUMN invoice_key TEXT`,
-    `ALTER TABLE po_log ADD COLUMN invoice_meta TEXT`
-  ]) {
-    try {
-      await db.prepare(ddl).run();
-    } catch {
-    }
-  }
-  try {
-    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_flags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      tenant_id TEXT,
-      supplier TEXT, invoice_no TEXT, invoice_date TEXT,
-      net REAL, vat REAL, gross REAL,
-      engineer_slug TEXT, engineer_name TEXT,
-      job_id TEXT, job_ref TEXT, po_number INTEGER,
-      note TEXT, status TEXT DEFAULT 'open',
-      invoice_key TEXT, filename TEXT,
-      source TEXT, created_by TEXT, created_at TEXT, resolved_at TEXT
-    )`).run();
-  } catch {
-  }
-  try {
-    await db.prepare(`CREATE TABLE IF NOT EXISTS vat_invoices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      tenant_id TEXT,
-      source TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
-      dedupe_key TEXT UNIQUE,
-      filename TEXT, r2_key TEXT,
-      supplier TEXT, invoice_no TEXT, invoice_date TEXT, doc_type TEXT,
-      read_net REAL, read_vat REAL, read_gross REAL,
-      net REAL, vat REAL, gross REAL, vat_rate REAL,
-      category TEXT, reverse_charge INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'unverified',
-      po_number INTEGER, vat_period TEXT, notes TEXT,
-      verified_by TEXT, verified_at TEXT, created_at TEXT
-    )`).run();
-  } catch {
-  }
-  try {
-    await db.prepare(`CREATE TABLE IF NOT EXISTS invoice_seen (
-      tenant_id TEXT, mailbox TEXT, message_id TEXT, attachment_id TEXT,
-      status TEXT, po_number INTEGER, at TEXT,
-      PRIMARY KEY (mailbox, message_id, attachment_id)
-    )`).run();
-  } catch {
-  }
-}
-var ensurePoInvoiceCols = onceMigration(ensurePoInvoiceCols__raw);
-function seenKey(mailbox, messageId, attachmentId) {
-  return String(mailbox || "") + "|" + String(messageId || "") + "|" + String(attachmentId || "");
-}
-async function recordSeen(db, tenantId, mailbox, messageId, attachmentId, status, poNumber) {
-  if (!mailbox || !messageId || !attachmentId) return;
-  try {
-    await ensurePoInvoiceCols(db);
-    await db.prepare(`INSERT INTO invoice_seen (tenant_id, mailbox, message_id, attachment_id, status, po_number, at)
-      VALUES (?,?,?,?,?,?,?)
-      ON CONFLICT(mailbox, message_id, attachment_id) DO UPDATE SET status = excluded.status, po_number = excluded.po_number, at = excluded.at`).bind(
-      String(tenantId || ""),
-      String(mailbox),
-      String(messageId),
-      String(attachmentId),
-      String(status || "handled"),
-      poNumber != null ? Number(poNumber) : null,
-      (/* @__PURE__ */ new Date()).toISOString()
-    ).run();
-  } catch (e) {
-    console.error("PO recordSeen failed:", e && e.message);
-  }
-}
-async function getSeenSet(db, mailbox) {
-  const set = /* @__PURE__ */ new Set();
-  try {
-    const rows = (await db.prepare(`SELECT message_id, attachment_id FROM invoice_seen WHERE mailbox = ?`).bind(String(mailbox)).all()).results || [];
-    for (const r of rows) set.add(seenKey(mailbox, r.message_id, r.attachment_id));
-  } catch {
-  }
-  return set;
-}
-function sweepStateKey(mailbox) {
-  return "sweep_state:" + String(mailbox || "").toLowerCase();
-}
-async function getSweepState(db, mailbox) {
-  try {
-    const row = await db.prepare(`SELECT value FROM config WHERE key = ?`).bind(sweepStateKey(mailbox)).first();
-    if (row && row.value) {
-      const s = JSON.parse(row.value);
-      return {
-        lastReceived: s.lastReceived || null,
-        outstanding: Array.isArray(s.outstanding) ? s.outstanding : [],
-        oldestScanned: s.oldestScanned || null,
-        backfillDone: !!s.backfillDone
-      };
-    }
-  } catch {
-  }
-  return { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
-}
-async function saveSweepState(db, mailbox, state) {
-  try {
-    const value = JSON.stringify({
-      lastReceived: state.lastReceived || null,
-      outstanding: (state.outstanding || []).slice(0, 300),
-      oldestScanned: state.oldestScanned || null,
-      backfillDone: !!state.backfillDone
-    });
-    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(sweepStateKey(mailbox), value, value).run();
-  } catch (e) {
-    console.error("PO saveSweepState failed:", e && e.message);
-  }
-}
-var numOrNull2 = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-function normMatchOne(name, list) {
-  const n = normSupplierName(name || "");
-  if (!n) return null;
-  for (const cand of list || []) {
-    const c = normSupplierName(cand);
-    if (!c) continue;
-    if (c === n || c.includes(n) || n.includes(c)) return cand;
-  }
-  return null;
-}
-function classifyProposal(f, po, supNames, subNames) {
-  if (po) return { category: "confident", subName: null, supName: null };
-  const subName = normMatchOne(f && f.supplier, subNames);
-  if (subName) return { category: "subcontractor", subName, supName: null };
-  const supName = normMatchOne(f && f.supplier, supNames);
-  if (supName && !(f && f.poNumber)) return { category: "flag", subName: null, supName };
-  return { category: "other", subName: null, supName: supName || null };
-}
-function staffTypeOf2(u) {
-  try {
-    const p = JSON.parse(u.profile || "{}");
-    return p && p.staffType === "office" ? "office" : "field";
-  } catch {
-    return "field";
-  }
-}
-function userName(sess) {
-  const u = sess && sess.user || {};
-  return (u.name || ((u.first_name || u.FirstName || "") + " " + (u.last_name || u.LastName || "")).trim() || u.username || "").trim();
-}
-function userSlug(sess) {
-  const u = sess && sess.user || {};
-  return slugify(u.username || userName(sess) || "user");
-}
-async function getVehicles(env) {
-  const db = env.DB;
-  if (!db) return [];
-  try {
-    const info = await db.prepare(`PRAGMA table_info(vehicles)`).all();
-    const cols = new Set((info.results || []).map((r) => r.name));
-    if (!cols.size) return [];
-    const regCol = ["reg", "registration", "vrm", "reg_number"].find((c) => cols.has(c));
-    if (!regCol) return [];
-    const pick = (c) => cols.has(c) ? c : `NULL AS ${c}`;
-    const where = [];
-    if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
-    if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
-    const rows = await db.prepare(sql).all();
-    return (rows.results || []).filter((r) => r.reg && String(r.reg).trim()).map((r) => {
-      const reg = String(r.reg).trim().toUpperCase();
-      const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} \u2014 ${desc}` : reg };
-    });
-  } catch (e) {
-    console.error("PO vehicle lookup failed:", e.message);
-    return [];
-  }
-}
-async function liveProjectNames(env) {
-  const db = env.DB;
-  if (!db) return [];
-  try {
-    const rows = await db.prepare(
-      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
-    ).all();
-    return (rows.results || []).map((r) => String(r.name || "").trim()).filter(Boolean);
-  } catch (e) {
-    console.error("PO live-project lookup failed:", e.message);
-    return [];
-  }
-}
-async function isLiveProjectSite(env, name) {
-  const n = String(name || "").trim().toLowerCase();
-  if (!n) return false;
-  return (await liveProjectNames(env)).some((p) => p.toLowerCase() === n);
-}
-async function getRaiseOptions(env, username) {
-  const projects = (await liveProjectNames(env)).map((name) => ({ name }));
-  let mineReg = "";
-  try {
-    const u = await env.DB.prepare(
-      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
-    ).bind(String(username || "")).first();
-    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
-  } catch (e) {
-  }
-  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
-  return { projects, vehicles };
-}
-async function handle33(request, env, ctx, url, sess) {
-  const db = env.PO_DB;
-  if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
-  const path = url.pathname.replace(/^\/po/, "") || "/";
-  const method = request.method.toUpperCase();
-  await ensurePoInvoiceCols(db);
-  if (path === "/invoice-file" && method === "GET") return serveInvoiceFile(request, env, url);
-  if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
-  if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const field = staffTypeOf2(sess.user) === "field";
-  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
-  if (!office && !field) return error("Not allowed", 403, env, request);
-  const q = url.searchParams;
-  const jr8 = (d, status) => json(d, status ? { status } : {}, env, request);
-  const bodyOf = async () => {
-    try {
-      return await request.json();
-    } catch {
-      return {};
-    }
-  };
-  try {
-    if (path === "/api/status" && method === "GET") return jr8(await getSystemStatus(db));
-    if (path === "/api/config" && method === "GET") return jr8(await getConfig4(db));
-    if (path === "/api/suppliers" && method === "GET") return jr8(await getSuppliers(db));
-    if (path === "/api/subcontractors" && method === "GET") return jr8(await getSubcontractors(db));
-    if (path === "/api/trades" && method === "GET") return jr8(await getTrades(db));
-    if (path === "/api/sites" && method === "GET") return jr8(await getSites(db));
-    if (path === "/api/engineers" && method === "GET") return jr8(await getPortalEngineers(env, sess.tenantId));
-    if (path === "/api/office-users" && method === "GET") return jr8(await getOfficeUsers(db));
-    if (path === "/api/vehicles" && method === "GET") return jr8(await getVehicles(env));
-    if (path === "/api/raise-options" && method === "GET") return jr8(await getRaiseOptions(env, sess.user.username));
-    if (path === "/api/closures" && method === "GET") return jr8(await getClosures(db));
-    if (path === "/api/jobs/search" && method === "GET") return jr8(await searchJobs(db, q));
-    if (path === "/api/pos" && method === "POST") {
-      const b = await bodyOf();
-      if (office) {
-        b.source = "office";
-        b.office_user_slug = userSlug(sess);
-        b.office_user_name = userName(sess);
-      } else {
-        b.source = "engineer";
-        b.engineer_slug = userSlug(sess);
-        b.engineer_name = userName(sess);
-        b.cost_category = "materials";
-      }
-      const res = await issuePO(db, b, env);
-      return jr8(res, res.error ? 400 : 200);
-    }
-    if (path === "/api/my-pos" && method === "GET") {
-      const p = new URLSearchParams(q);
-      p.set("engineer", userSlug(sess));
-      p.set("hide_subcontractor", "1");
-      return jr8(await getPOs(db, p));
-    }
-    if (!office) return error("Not allowed", 403, env, request);
-    if (path === "/api/pos" && method === "GET") return jr8(await getPOs(db, q));
-    if (path.startsWith("/api/pos/") && method === "PATCH") {
-      const b = await bodyOf();
-      b.edited_by_slug = userSlug(sess);
-      b.edited_by_name = userName(sess);
-      return jr8(await updatePO(db, path.split("/").pop(), b));
-    }
-    if (path.startsWith("/api/pos/") && method === "DELETE") return jr8(await deletePoRecord(db, path.split("/").pop()));
-    if (path === "/api/dashboard" && method === "GET") return jr8(await getDashboard(db));
-    if (path === "/api/stats" && method === "GET") return jr8(await getStats(db, q));
-    if (path === "/api/summary" && method === "GET") return jr8(await getSummary(db, q));
-    if (path === "/api/jobcost" && method === "GET") return jr8(await getJobCost(db, q));
-    if (path === "/api/accounts" && method === "GET") return jr8(await getAccounts(db));
-    if (path === "/api/invoice/parse" && method === "POST") {
-      const form = await request.formData().catch(() => null);
-      const file = form && form.get("file");
-      if (!file || typeof file.arrayBuffer !== "function") return jr8({ error: "No file uploaded" }, 400);
-      const buf = new Uint8Array(await file.arrayBuffer());
-      if (buf.length > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
-      const known = (await getSuppliers(db)).map((s) => s.name);
-      const subNames = (await getSubcontractors(db)).map((s) => s.name);
-      const res = await parseInvoice(env, buf, file.name || "invoice.pdf", known);
-      const f = res.fields || {};
-      let po = null, candidates = [];
-      if (f.poNumber) po = await poBrief(db, f.poNumber);
-      if (!po) candidates = matchInvoiceCandidates(db, f, await uncostedPoRows(db));
-      const cls = classifyProposal(f, po, known, subNames);
-      return jr8({
-        ok: true,
-        tier: res.tier,
-        aiUsed: res.aiUsed,
-        textLen: res.textLen,
-        fields: f,
-        po,
-        candidates,
-        docType: res.docType || null,
-        notInvoice: !!res.notInvoice,
-        category: cls.category,
-        subName: cls.subName,
-        supName: cls.supName,
-        filename: file.name || "invoice.pdf"
-      });
-    }
-    if (path === "/api/invoice/apply" && method === "POST") {
-      const form = await request.formData().catch(() => null);
-      if (!form) return jr8({ error: "Bad request" }, 400);
-      const poNumber = Number(form.get("po_number"));
-      const cost = Number(form.get("cost_ex_vat"));
-      if (!poNumber) return jr8({ error: "Pick a PO to attach this invoice to" }, 400);
-      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
-      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
-      if (!target) return jr8({ error: "That PO was not found" }, 400);
-      const file = form.get("file");
-      let bytes = null, filename = null, contentType = null;
-      if (file && typeof file.arrayBuffer === "function") {
-        const ab = await file.arrayBuffer();
-        if (ab.byteLength > 15 * 1024 * 1024) return jr8({ error: "That PDF is too big (max 15 MB)" }, 400);
-        bytes = ab;
-        filename = file.name;
-        contentType = file.type;
-      }
-      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
-        poNumber,
-        cost,
-        existingKey: target.invoice_key || null,
-        vatRate: numOrNull2(form.get("vat_rate")),
-        invoiceNo: form.get("invoice_no"),
-        invoiceDate: form.get("invoice_date"),
-        vat: numOrNull2(form.get("vat")),
-        gross: numOrNull2(form.get("gross")),
-        bytes,
-        filename,
-        contentType
-      });
-      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
-    }
-    if (path === "/api/invoice/sweep-config" && method === "GET") {
-      const cfg = await getConfigMap(db);
-      return jr8({
-        ok: true,
-        configured: graphConfigured(env),
-        mailbox: cfg.invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX,
-        days: Number(cfg.invoice_sweep_days) || 180
-      });
-    }
-    if (path === "/api/invoice/sweep" && method === "POST") {
-      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets missing on the worker)." }, 400);
-      const b = await bodyOf();
-      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
-      const days = Math.max(1, Math.min(365, Number(b.days) || 180));
-      const from = String(b.from || "").trim();
-      const to = String(b.to || "").trim();
-      const clue = String(b.clue || "").trim();
-      const mode = String(b.mode || "").trim() === "full" ? "full" : "incremental";
-      await updateConfig(db, { invoice_sweep_mailbox: mailbox, invoice_sweep_days: String(days) });
-      const chk = await graphMailboxCheck(env, mailbox);
-      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
-      const out = await runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode });
-      return jr8({ ok: true, mailbox, days, from, to, clue, mode, ...out });
-    }
-    if (path === "/api/invoice/sweep-view" && method === "GET") {
-      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
-      const mailbox = String(q.get("mailbox") || "").trim() || DEFAULT_SWEEP_MAILBOX;
-      const mid = q.get("message_id"), aid = q.get("attachment_id");
-      if (!mid || !aid) return jr8({ error: "Missing the mailbox message reference" }, 400);
-      let bytes;
-      try {
-        bytes = await downloadAttachment(env, mailbox, mid, aid);
-      } catch (e) {
-        return jr8({ error: String(e && e.message || e) }, 400);
-      }
-      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline", "Cache-Control": "private, max-age=30", ...corsHeaders(env, request) } });
-    }
-    if (path === "/api/invoice/sweep-apply" && method === "POST") {
-      if (!graphConfigured(env)) return jr8({ error: "Mailbox connection not set up" }, 400);
-      const b = await bodyOf();
-      const poNumber = Number(b.po_number);
-      const cost = Number(b.cost_ex_vat);
-      if (!poNumber) return jr8({ error: "Pick a PO" }, 400);
-      if (!Number.isFinite(cost) || cost < 0) return jr8({ error: "Enter the net (ex-VAT) cost" }, 400);
-      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
-      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
-      const target = await db.prepare(`SELECT po_number, invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(poNumber).first();
-      if (!target) return jr8({ error: "That PO was not found" }, 400);
-      let bytes;
-      try {
-        bytes = await downloadAttachment(env, mailbox, b.message_id, b.attachment_id);
-      } catch (e) {
-        return jr8({ error: "Couldn\u2019t fetch that invoice from the mailbox: " + String(e && e.message || e) }, 400);
-      }
-      const invoiceUrl = await writeInvoiceToPo(env, db, sess, url.origin, {
-        poNumber,
-        cost,
-        existingKey: target.invoice_key || null,
-        vatRate: numOrNull2(b.vat_rate),
-        invoiceNo: b.invoice_no,
-        invoiceDate: b.invoice_date,
-        vat: numOrNull2(b.vat),
-        gross: numOrNull2(b.gross),
-        bytes,
-        filename: b.filename || "invoice.pdf",
-        contentType: "application/pdf",
-        graph: { mailbox, messageId: b.message_id, attachmentId: b.attachment_id }
-      });
-      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "attached", poNumber);
-      return jr8({ ok: true, po_number: poNumber, invoiceUrl });
-    }
-    if (path === "/api/invoice/sweep-dismiss" && method === "POST") {
-      const b = await bodyOf();
-      const mailbox = String(b.mailbox || "").trim() || DEFAULT_SWEEP_MAILBOX;
-      if (!b.message_id || !b.attachment_id) return jr8({ error: "Missing the mailbox message reference" }, 400);
-      await recordSeen(db, sess.tenantId, mailbox, b.message_id, b.attachment_id, "ignored", null);
-      return jr8({ ok: true });
-    }
-    if (path === "/api/invoice/url" && method === "GET") {
-      const n = Number(q.get("po"));
-      const r = await db.prepare(`SELECT invoice_key FROM po_log WHERE po_number = ? AND deleted = 0`).bind(n).first();
-      if (!r || !r.invoice_key) return jr8({ error: "No invoice attached" }, 404);
-      return jr8({ ok: true, url: await signedFileUrl(env, url.origin, "/po/invoice-file", r.invoice_key) });
-    }
-    if (path === "/api/jobs/sla-search" && method === "GET") {
-      return jr8(await searchSlaJobs(env, sess.tenantId, q.get("q") || ""));
-    }
-    if (path === "/api/invoice/flag" && method === "POST") {
-      return jr8(await addInvoiceFlag(env, db, sess, request));
-    }
-    if (path === "/api/invoice/flags" && method === "GET") {
-      return jr8(await listInvoiceFlags(env, db, sess, url.origin, q));
-    }
-    if (path === "/api/invoice/flag-update" && method === "POST") {
-      return jr8(await updateInvoiceFlag(db, sess, await bodyOf()));
-    }
-    if (path === "/api/invoice/flag-delete" && method === "POST") {
-      const b = await bodyOf();
-      await db.prepare(`DELETE FROM invoice_flags WHERE id = ?`).bind(Number(b.id)).run();
-      return jr8({ ok: true });
-    }
-    if (path === "/api/vat/run" && method === "POST") {
-      if (!graphConfigured(env)) return jr8({ error: "The mailbox connection isn\u2019t set up yet (GRAPH_* secrets)." }, 400);
-      const b = await bodyOf();
-      const mailbox = String(b.mailbox || "").trim() || (await getConfigMap(db)).invoice_sweep_mailbox || DEFAULT_SWEEP_MAILBOX;
-      const days = Math.max(1, Math.min(400, Number(b.days) || 90));
-      const chk = await graphMailboxCheck(env, mailbox);
-      if (!chk.ok) return jr8({ error: "Couldn\u2019t open " + mailbox + ": " + chk.error }, 400);
-      return jr8(await runVatCapture(env, db, sess, url.origin, { mailbox, days }));
-    }
-    if (path === "/api/vat/list" && method === "GET") {
-      return jr8(await listVatInvoices(env, db, sess, url.origin, q));
-    }
-    if (path === "/api/vat/save" && method === "POST") {
-      return jr8(await saveVatInvoice(db, sess, await bodyOf()));
-    }
-    if (path === "/api/vat/delete" && method === "POST") {
-      const b = await bodyOf();
-      await db.prepare(`DELETE FROM vat_invoices WHERE id = ?`).bind(Number(b.id)).run();
-      return jr8({ ok: true });
-    }
-    if (path === "/api/vat/upload" && method === "POST") {
-      return jr8(await uploadVatInvoice(env, db, sess, url.origin, request));
-    }
-    if (path === "/api/config" && method === "POST") return jr8(await updateConfig(db, await bodyOf()));
-    if (path === "/api/suppliers" && method === "POST") return jr8(await addSupplier(db, await bodyOf()));
-    if (path.startsWith("/api/suppliers/") && method === "PATCH") return jr8(await updateSupplier(db, path.split("/").pop(), await bodyOf()));
-    if (path.startsWith("/api/suppliers/") && method === "DELETE") return jr8(await deleteSupplier(db, path.split("/").pop()));
-    if (path === "/api/subcontractors" && method === "POST") return jr8(await addSubcontractor(db, await bodyOf()));
-    if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr8(await deleteSubcontractor(db, path.split("/").pop()));
-    if (path === "/api/trades" && method === "POST") return jr8(await addTrade(db, await bodyOf()));
-    if (path.startsWith("/api/trades/") && method === "DELETE") return jr8(await deleteTrade(db, path.split("/").pop()));
-    if (path === "/api/sites/usage" && method === "GET") return jr8(await siteUsage(db));
-    if (path === "/api/sites/merge" && method === "POST") return jr8(await mergeSites(db, await bodyOf()));
-    if (path === "/api/sites" && method === "POST") return jr8(await addSite(db, await bodyOf()));
-    if (path.startsWith("/api/sites/") && method === "DELETE") return jr8(await deleteSite(db, path.split("/").pop()));
-    if (path === "/api/closures" && method === "POST") return jr8(await addClosure(db, await bodyOf()));
-    if (path.startsWith("/api/closures/") && method === "DELETE") return jr8(await deleteClosure(db, decodeURIComponent(path.split("/").pop())));
-    return error("Not found: " + path, 404, env, request);
-  } catch (e) {
-    console.error("PO route error:", e && e.message);
-    return error("PO error: " + (e && e.message || "unknown"), 500, env, request);
-  }
-}
-async function getPortalEngineers(env, tenantId) {
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR LOWER(status)='active') ORDER BY first_name, last_name"
-    ).bind(tenantId).all();
-    return (results || []).filter((u) => {
-      try {
-        const p = JSON.parse(u.profile || "{}");
-        return (p.staffType || "field") === "field";
-      } catch {
-        return true;
-      }
-    }).map((u) => ({ slug: slugify(u.username), name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username, active: 1 }));
-  } catch (e) {
-    console.error("PO getPortalEngineers failed:", e && e.message);
-    return [];
-  }
-}
-async function getConfigMap(db) {
-  const rows = await db.prepare(`SELECT key, value FROM config`).all();
-  const map = {};
-  for (const r of rows.results) map[r.key] = r.value;
-  return map;
-}
-async function getConfig4(db) {
-  return await getConfigMap(db);
-}
-async function updateConfig(db, body) {
-  for (const [k, v] of Object.entries(body)) {
-    await db.prepare(`INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(k, String(v), String(v)).run();
-  }
-  return { success: true };
-}
-async function getSystemStatus(db) {
-  const config = await getConfigMap(db);
-  const now2 = /* @__PURE__ */ new Date();
-  const ukTime = new Date(now2.toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const dayMap = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-  const today = dayMap[ukTime.getDay()];
-  const todayDate = ukTime.toISOString().split("T")[0];
-  const currentTime = ukTime.toTimeString().slice(0, 5);
-  const closure = await db.prepare(`SELECT * FROM closures WHERE date = ?`).bind(todayDate).first();
-  if (config.system_status === "disabled") return { mode: "disabled", message: "System is currently offline. Call office on " + config.office_phone };
-  if (config.force_open_ooh === "1") return { mode: "ooh", message: null, forced: true };
-  const officeDays = config.office_days.split(",");
-  if (!officeDays.includes(today) || closure) return { mode: "ooh", message: null, reason: closure ? closure.reason : "weekend" };
-  if (currentTime >= config.office_hours_start && currentTime <= config.office_hours_end) return { mode: "office_hours", message: "Please call the office on " + config.office_phone };
-  return { mode: "ooh", message: null };
-}
-async function getOfficeUsers(db) {
-  return (await db.prepare(`SELECT * FROM office_users ORDER BY name`).all()).results;
-}
-async function getSuppliers(db) {
-  return (await db.prepare(`SELECT * FROM suppliers WHERE active = 1 ORDER BY name`).all()).results;
-}
-async function addSupplier(db, body) {
-  await db.prepare(`INSERT INTO suppliers (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
-  return { success: true };
-}
-async function deleteSupplier(db, id) {
-  await db.prepare(`UPDATE suppliers SET active = 0 WHERE id = ?`).bind(id).run();
-  return { success: true };
-}
-async function updateSupplier(db, id, body) {
-  if (body.terms_days !== void 0) {
-    const days = Number(body.terms_days) === 60 ? 60 : 30;
-    await db.prepare(`UPDATE suppliers SET terms_days = ? WHERE id = ?`).bind(days, id).run();
-  }
-  return { success: true };
-}
-async function getSubcontractors(db) {
-  return (await db.prepare(`SELECT * FROM subcontractors WHERE active = 1 ORDER BY name`).all()).results;
-}
-async function addSubcontractor(db, body) {
-  await db.prepare(`INSERT INTO subcontractors (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
-  return { success: true };
-}
-async function deleteSubcontractor(db, id) {
-  await db.prepare(`UPDATE subcontractors SET active = 0 WHERE id = ?`).bind(id).run();
-  return { success: true };
-}
-async function getTrades(db) {
-  return (await db.prepare(`SELECT * FROM trades WHERE active = 1 ORDER BY name`).all()).results;
-}
-async function addTrade(db, body) {
-  await db.prepare(`INSERT INTO trades (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
-  return { success: true };
-}
-async function deleteTrade(db, id) {
-  await db.prepare(`UPDATE trades SET active = 0 WHERE id = ?`).bind(id).run();
-  return { success: true };
-}
-async function getSites(db) {
-  return (await db.prepare(`SELECT * FROM sites WHERE active = 1 ORDER BY name`).all()).results;
-}
-async function addSite(db, body) {
-  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(body.name).run();
-  return { success: true };
-}
-async function deleteSite(db, id) {
-  await db.prepare(`UPDATE sites SET active = 0 WHERE id = ?`).bind(id).run();
-  return { success: true };
-}
-async function siteUsage(db) {
-  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map((r) => r.n));
-  const rows = (await db.prepare(
-    `SELECT site AS name, COUNT(*) AS pos FROM po_log
-       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
-  ).all()).results;
-  const seen = new Set(rows.map((r) => String(r.name).toLowerCase()));
-  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results.filter((r) => !seen.has(String(r.name).toLowerCase())).map((r) => ({ name: r.name, pos: 0 }));
-  return rows.concat(empties).map((r) => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) })).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-}
-async function mergeSites(db, body) {
-  const into = (body && body.into || "").trim();
-  const from = Array.isArray(body && body.from) ? body.from.map((s) => String(s || "").trim()).filter(Boolean) : [];
-  if (!into) return { error: "Pick the site to merge into" };
-  const sources = from.filter((s) => s.toLowerCase() !== into.toLowerCase());
-  if (!sources.length) return { error: "Pick at least one different site to merge in" };
-  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
-  const ph = sources.map(() => "?").join(",");
-  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
-  const moved = upd && upd.meta && upd.meta.changes || 0;
-  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
-  return { success: true, into, merged: sources.length, posMoved: moved };
-}
-async function searchJobs(db, params) {
-  const q = (params.get("q") || "").trim();
-  if (q.length < 2) return [];
-  const rows = await db.prepare(
-    `SELECT name FROM sites WHERE active = 1 AND name LIKE ? ORDER BY name LIMIT 10`
-  ).bind("%" + q + "%").all();
-  return rows.results.map((r) => ({ job_ref: r.name, site: r.name, client: null }));
-}
-async function getClosures(db) {
-  return (await db.prepare(`SELECT * FROM closures ORDER BY date DESC`).all()).results;
-}
-async function addClosure(db, body) {
-  await db.prepare(`INSERT INTO closures (date, reason) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET reason = ?`).bind(body.date, body.reason || "", body.reason || "").run();
-  return { success: true };
-}
-async function deleteClosure(db, date) {
-  await db.prepare(`DELETE FROM closures WHERE date = ?`).bind(date).run();
-  return { success: true };
-}
-async function serveInvoiceFile(request, env, url) {
-  const key = url.searchParams.get("key") || "";
-  if (!key.startsWith("po-invoices/")) return error("Bad key", 400, env, request);
-  const ok = await verifyFileSig(env, key, url.searchParams);
-  if (!ok) return error("Link expired or invalid", 403, env, request);
-  const obj = await env.JOB_FILES.get(key);
-  if (!obj) return error("Invoice not found", 404, env, request);
-  const h = new Headers();
-  h.set("Content-Type", obj.httpMetadata && obj.httpMetadata.contentType || "application/pdf");
-  h.set("Content-Disposition", "inline");
-  h.set("Cache-Control", "private, max-age=60");
-  h.set("Access-Control-Allow-Origin", "*");
-  return new Response(obj.body, { headers: h });
-}
-async function writeInvoiceToPo(env, db, sess, origin, o) {
-  let key = o.existingKey || null;
-  if (o.bytes) {
-    const safe = String(o.filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-    key = `po-invoices/${sess.tenantId}/${o.poNumber}/${Date.now()}-${safe}`;
-    await env.JOB_FILES.put(key, o.bytes, { httpMetadata: { contentType: o.contentType || "application/pdf" } });
-  }
-  const meta = JSON.stringify({
-    no: (o.invoiceNo != null ? String(o.invoiceNo) : "") || null,
-    date: (o.invoiceDate != null ? String(o.invoiceDate) : "") || null,
-    net: o.cost,
-    vat: o.vat != null ? o.vat : null,
-    gross: o.gross != null ? o.gross : null,
-    filename: o.filename || null,
-    by: userName(sess),
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    graph: o.graph || null
-  });
-  const now2 = (/* @__PURE__ */ new Date()).toISOString();
-  const fields = [
-    "cost_ex_vat = ?",
-    "invoice_key = ?",
-    "invoice_meta = ?",
-    "cost_entered_at = ?",
-    "last_edited_by_slug = ?",
-    "last_edited_by_name = ?",
-    "last_edited_at = ?"
-  ];
-  const binds = [o.cost, key, meta, now2, userSlug(sess), userName(sess), now2];
-  if (o.vatRate != null) {
-    fields.push("vat_rate = ?");
-    binds.push(o.vatRate);
-  }
-  binds.push(o.poNumber);
-  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
-  return key ? await signedFileUrl(env, origin, "/po/invoice-file", key) : null;
-}
-async function searchSlaJobs(env, tenantId, qStr) {
-  const q = String(qStr || "").trim();
-  if (q.length < 2) return [];
-  const db = env.DB;
-  if (!db) return [];
-  const like = "%" + q.toLowerCase() + "%";
-  let rows = [];
-  try {
-    rows = (await db.prepare(
-      `SELECT id, helpdesk_ref, description, priority, status, site_code, scheduled_at, data
-         FROM sla_jobs WHERE tenant_id = ? AND (
-           lower(COALESCE(helpdesk_ref,'')) LIKE ? OR lower(COALESCE(description,'')) LIKE ?
-           OR lower(COALESCE(site_code,'')) LIKE ? OR lower(COALESCE(data,'')) LIKE ?)
-         ORDER BY COALESCE(scheduled_at, raised_at, created_at) DESC LIMIT 20`
-    ).bind(tenantId, like, like, like, like).all()).results || [];
-  } catch {
-    rows = [];
-  }
-  const jobs = rows.map((r) => {
-    let d = {};
-    try {
-      d = JSON.parse(r.data || "{}");
-    } catch {
-    }
-    const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
-    return {
-      type: "job",
-      job_id: r.id,
-      ref: r.helpdesk_ref || d.helpdeskRef || "",
-      site: d.siteName || r.site_code || "",
-      site_code: r.site_code || d.siteCode || "",
-      status: r.status || d.status || "",
-      priority: r.priority || d.priority || "",
-      scheduledAt: r.scheduled_at || d.scheduledAt || null,
-      engineers: engs,
-      description: String(r.description || d.description || "").slice(0, 220)
-    };
-  });
-  let projects = [];
-  try {
-    projects = (await db.prepare(
-      `SELECT number, name, site_client, site_number, status FROM projects
-         WHERE tenant_id IN ('1.0','1',1) AND (status = 'live' OR status IS NULL)
-           AND (lower(COALESCE(name,'')) LIKE ? OR lower(COALESCE(number,'')) LIKE ?)
-         ORDER BY name LIMIT 12`
-    ).bind(like, like).all()).results || [];
-  } catch {
-    projects = [];
-  }
-  const projRows = projects.map((p) => ({
-    type: "project",
-    project_id: p.number || "",
-    ref: p.number || "",
-    number: p.number || "",
-    name: p.name || "",
-    site: p.name || "",
-    site_number: p.site_number || p.number || "",
-    status: p.status || "live",
-    description: ""
-  }));
-  return projRows.concat(jobs);
-}
-async function addInvoiceFlag(env, db, sess, request) {
-  const ct = request.headers.get("content-type") || "";
-  let b = {}, bytes = null, filename = null, contentType = null;
-  if (ct.includes("multipart/form-data")) {
-    const form = await request.formData().catch(() => null);
-    if (form) {
-      for (const k of [
-        "supplier",
-        "invoice_no",
-        "invoice_date",
-        "net",
-        "vat",
-        "gross",
-        "engineer_slug",
-        "engineer_name",
-        "job_id",
-        "job_ref",
-        "po_number",
-        "note",
-        "source",
-        "filename",
-        "mailbox",
-        "message_id",
-        "attachment_id"
-      ]) {
-        const v = form.get(k);
-        if (v != null) b[k] = v;
-      }
-      const file = form.get("file");
-      if (file && typeof file.arrayBuffer === "function") {
-        const ab = await file.arrayBuffer();
-        if (ab.byteLength <= 15 * 1024 * 1024) {
-          bytes = ab;
-          filename = file.name;
-          contentType = file.type;
-        }
-      }
-    }
-  } else {
-    try {
-      b = await request.json();
-    } catch {
-    }
-  }
-  if (!bytes && b.message_id && b.attachment_id) {
-    try {
-      bytes = await downloadAttachment(env, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id);
-      filename = b.filename || "invoice.pdf";
-      contentType = "application/pdf";
-    } catch {
-    }
-  }
-  let key = null;
-  if (bytes) {
-    const safe = String(filename || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-    key = `po-invoices/flags/${sess.tenantId}/${Date.now()}-${safe}`;
-    try {
-      await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: contentType || "application/pdf" } });
-    } catch {
-      key = null;
-    }
-  }
-  const now2 = (/* @__PURE__ */ new Date()).toISOString();
-  const res = await db.prepare(`INSERT INTO invoice_flags
-    (tenant_id, supplier, invoice_no, invoice_date, net, vat, gross, engineer_slug, engineer_name,
-     job_id, job_ref, po_number, note, status, invoice_key, filename, source, created_by, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-    String(sess.tenantId),
-    b.supplier || null,
-    b.invoice_no || null,
-    b.invoice_date || null,
-    numOrNull2(b.net),
-    numOrNull2(b.vat),
-    numOrNull2(b.gross),
-    b.engineer_slug || null,
-    b.engineer_name || null,
-    b.job_id || "" || null,
-    b.job_ref || "" || null,
-    numOrNull2(b.po_number),
-    b.note || "" || null,
-    "open",
-    key,
-    filename || null,
-    b.source || "sweep",
-    userName(sess),
-    now2
-  ).run();
-  if (b.message_id && b.attachment_id) {
-    await recordSeen(db, sess.tenantId, String(b.mailbox || DEFAULT_SWEEP_MAILBOX), b.message_id, b.attachment_id, "flagged", numOrNull2(b.po_number));
-  }
-  return { ok: true, id: res && res.meta && res.meta.last_row_id || null, invoice_key: key };
-}
-async function listInvoiceFlags(env, db, sess, origin, params) {
-  let sql = `SELECT * FROM invoice_flags WHERE tenant_id = ?`;
-  const binds = [String(sess.tenantId)];
-  const eng = params.get("engineer");
-  if (eng) {
-    sql += ` AND engineer_slug = ?`;
-    binds.push(eng);
-  }
-  const status = params.get("status");
-  if (status) {
-    sql += ` AND COALESCE(status,'open') = ?`;
-    binds.push(status);
-  }
-  sql += ` ORDER BY created_at DESC LIMIT 500`;
-  let rows = [];
-  try {
-    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
-  } catch {
-    rows = [];
-  }
-  for (const r of rows) {
-    r.invoiceUrl = r.invoice_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.invoice_key) : null;
-  }
-  return rows;
-}
-async function updateInvoiceFlag(db, sess, b) {
-  const id = Number(b && b.id);
-  if (!id) return { error: "No id" };
-  const allowed = ["engineer_slug", "engineer_name", "job_id", "job_ref", "po_number", "note", "status"];
-  const fields = [], binds = [];
-  for (const k of allowed) if (b[k] !== void 0) {
-    fields.push(`${k} = ?`);
-    binds.push(b[k] === "" ? null : b[k]);
-  }
-  if (b.status === "resolved") {
-    fields.push(`resolved_at = ?`);
-    binds.push((/* @__PURE__ */ new Date()).toISOString());
-  } else if (b.status === "open") {
-    fields.push(`resolved_at = ?`);
-    binds.push(null);
-  }
-  if (!fields.length) return { ok: true };
-  binds.push(id);
-  await db.prepare(`UPDATE invoice_flags SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
-  return { ok: true };
-}
-function vatQuarter(iso) {
-  const m = String(iso || "").match(/^(\d{4})-(\d{2})/);
-  if (!m) return "";
-  return m[1] + "-Q" + (Math.floor((Number(m[2]) - 1) / 3) + 1);
-}
-async function runVatCapture(env, db, sess, origin, { mailbox, days }) {
-  const MAX_NEW = 40, AI_BUDGET = 25;
-  const known = (await getSuppliers(db)).map((s) => s.name);
-  const subNames = (await getSubcontractors(db)).map((s) => s.name);
-  let msgs = [];
-  try {
-    msgs = await listRecentWithAttachments(env, mailbox, { days, top: 80 });
-  } catch (e) {
-    return { error: String(e && e.message || e) };
-  }
-  let added = 0, scanned = 0, aiUsed = 0, skippedExisting = 0, capped = false;
-  for (const m of msgs) {
-    if (added >= MAX_NEW) {
-      capped = true;
-      break;
-    }
-    let atts = [];
-    try {
-      atts = await listPdfAttachments(env, mailbox, m.id);
-    } catch {
-      continue;
-    }
-    for (const a of atts) {
-      if (added >= MAX_NEW) {
-        capped = true;
-        break;
-      }
-      const key = m.id + ":" + a.id;
-      let exists = null;
-      try {
-        exists = await db.prepare(`SELECT 1 FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
-      } catch {
-      }
-      if (exists) {
-        skippedExisting++;
-        continue;
-      }
-      let bytes;
-      try {
-        bytes = await downloadAttachment(env, mailbox, m.id, a.id);
-        scanned++;
-      } catch {
-        continue;
-      }
-      let res;
-      try {
-        res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
-      } catch {
-        continue;
-      }
-      if (res.aiUsed) aiUsed++;
-      const f = res.fields || {};
-      const safe = String(a.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-      const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
-      try {
-        await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: "application/pdf" } });
-      } catch {
-      }
-      const sub = normMatchOne(f.supplier, subNames);
-      const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
-      try {
-        await db.prepare(`INSERT OR IGNORE INTO vat_invoices
-          (tenant_id, source, mailbox, message_id, attachment_id, dedupe_key, filename, r2_key,
-           supplier, invoice_no, invoice_date, doc_type, read_net, read_vat, read_gross,
-           net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-          String(sess.tenantId),
-          "mailbox",
-          mailbox,
-          m.id,
-          a.id,
-          key,
-          a.name || "invoice.pdf",
-          r2key,
-          f.supplier || null,
-          f.invoiceNumber || null,
-          f.invoiceDate || null,
-          res.docType || null,
-          numOrNull2(f.net),
-          numOrNull2(f.vat),
-          numOrNull2(f.gross),
-          numOrNull2(f.net),
-          numOrNull2(f.vat),
-          numOrNull2(f.gross),
-          rate,
-          sub ? "subcontractor" : "materials",
-          sub ? 1 : 0,
-          res.notInvoice ? "excluded" : "unverified",
-          vatQuarter(f.invoiceDate),
-          (/* @__PURE__ */ new Date()).toISOString()
-        ).run();
-        added++;
-      } catch {
-      }
-    }
-  }
-  return { ok: true, added, scanned, aiUsed, skippedExisting, capped, mailbox, days };
-}
-async function listVatInvoices(env, db, sess, origin, params) {
-  let sql = `SELECT * FROM vat_invoices WHERE tenant_id = ?`;
-  const binds = [String(sess.tenantId)];
-  const period = params.get("period");
-  if (period) {
-    sql += ` AND vat_period = ?`;
-    binds.push(period);
-  }
-  const status = params.get("status");
-  if (status) {
-    sql += ` AND COALESCE(status,'unverified') = ?`;
-    binds.push(status);
-  }
-  const qstr = (params.get("q") || "").trim();
-  if (qstr) {
-    const l = "%" + qstr.toLowerCase() + "%";
-    sql += ` AND (lower(COALESCE(supplier,'')) LIKE ? OR lower(COALESCE(invoice_no,'')) LIKE ?)`;
-    binds.push(l, l);
-  }
-  sql += ` ORDER BY COALESCE(invoice_date,'') DESC, id DESC LIMIT 2000`;
-  let rows = [];
-  try {
-    rows = (await db.prepare(sql).bind(...binds).all()).results || [];
-  } catch {
-    rows = [];
-  }
-  for (const r of rows) r.url = r.r2_key ? await signedFileUrl(env, origin, "/po/invoice-file", r.r2_key) : null;
-  let periods = [];
-  try {
-    periods = (await db.prepare(`SELECT vat_period p, COUNT(*) n FROM vat_invoices WHERE tenant_id=? AND vat_period IS NOT NULL AND vat_period<>'' GROUP BY vat_period ORDER BY vat_period DESC`).bind(String(sess.tenantId)).all()).results || [];
-  } catch {
-  }
-  const totals = { count: rows.length, net: 0, vat: 0, gross: 0, unverified: 0, verified: 0, excluded: 0, flagged: 0, reverseCharge: 0 };
-  for (const r of rows) {
-    const st = r.status || "unverified";
-    totals[st === "verified" ? "verified" : st === "excluded" ? "excluded" : "unverified"]++;
-    if (r.reverse_charge) totals.reverseCharge++;
-    if (st !== "excluded") {
-      totals.net += Number(r.net) || 0;
-      totals.vat += Number(r.vat) || 0;
-      totals.gross += Number(r.gross) || 0;
-    }
-    if (st !== "excluded" && (r.net == null || r.gross == null || Number(r.net) === 0)) totals.flagged++;
-  }
-  totals.net = Math.round(totals.net * 100) / 100;
-  totals.vat = Math.round(totals.vat * 100) / 100;
-  totals.gross = Math.round(totals.gross * 100) / 100;
-  return { rows, periods, totals };
-}
-async function saveVatInvoice(db, sess, b) {
-  const id = Number(b && b.id);
-  if (!id) return { error: "No id" };
-  const fields = [], binds = [];
-  const set = (col, val2) => {
-    fields.push(col + " = ?");
-    binds.push(val2);
-  };
-  if (b.supplier !== void 0) set("supplier", b.supplier || null);
-  if (b.invoice_no !== void 0) set("invoice_no", b.invoice_no || null);
-  if (b.invoice_date !== void 0) {
-    set("invoice_date", b.invoice_date || null);
-    set("vat_period", vatQuarter(b.invoice_date));
-  }
-  if (b.net !== void 0) set("net", numOrNull2(b.net));
-  if (b.vat !== void 0) set("vat", numOrNull2(b.vat));
-  if (b.gross !== void 0) set("gross", numOrNull2(b.gross));
-  if (b.vat_rate !== void 0) set("vat_rate", numOrNull2(b.vat_rate));
-  if (b.category !== void 0) set("category", b.category || null);
-  if (b.reverse_charge !== void 0) set("reverse_charge", b.reverse_charge ? 1 : 0);
-  if (b.po_number !== void 0) set("po_number", numOrNull2(b.po_number));
-  if (b.notes !== void 0) set("notes", b.notes || null);
-  if (b.status !== void 0) {
-    set("status", b.status);
-    if (b.status === "verified") {
-      set("verified_by", userName(sess));
-      set("verified_at", (/* @__PURE__ */ new Date()).toISOString());
-    }
-  }
-  if (!fields.length) return { ok: true };
-  binds.push(id);
-  await db.prepare(`UPDATE vat_invoices SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
-  return { ok: true };
-}
-async function uploadVatInvoice(env, db, sess, origin, request) {
-  const form = await request.formData().catch(() => null);
-  const file = form && form.get("file");
-  if (!file || typeof file.arrayBuffer !== "function") return { error: "No file uploaded" };
-  const ab = await file.arrayBuffer();
-  if (ab.byteLength > 15 * 1024 * 1024) return { error: "That PDF is too big (max 15 MB)" };
-  const bytes = new Uint8Array(ab);
-  let hash = "";
-  try {
-    const h = await crypto.subtle.digest("SHA-256", ab);
-    hash = [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, "0")).join("");
-  } catch {
-    hash = String(Date.now());
-  }
-  const key = "drop:" + hash;
-  const exists = await db.prepare(`SELECT id FROM vat_invoices WHERE dedupe_key = ?`).bind(key).first();
-  if (exists) return { ok: true, duplicate: true, id: exists.id };
-  const known = (await getSuppliers(db)).map((s) => s.name);
-  const subNames = (await getSubcontractors(db)).map((s) => s.name);
-  const res = await parseInvoice(env, bytes, file.name || "invoice.pdf", known);
-  const f = res.fields || {};
-  const safe = String(file.name || "invoice.pdf").replace(/[^\w.\-]+/g, "_").slice(-80);
-  const r2key = `po-invoices/vat/${sess.tenantId}/${Date.now()}-${safe}`;
-  try {
-    await env.JOB_FILES.put(r2key, bytes, { httpMetadata: { contentType: file.type || "application/pdf" } });
-  } catch {
-  }
-  const sub = normMatchOne(f.supplier, subNames);
-  const rate = f.net && f.vat != null && f.net > 0 ? Math.round(f.vat / f.net * 100) : null;
-  const r = await db.prepare(`INSERT OR IGNORE INTO vat_invoices
-    (tenant_id, source, dedupe_key, filename, r2_key, supplier, invoice_no, invoice_date, doc_type,
-     read_net, read_vat, read_gross, net, vat, gross, vat_rate, category, reverse_charge, status, vat_period, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
-    String(sess.tenantId),
-    "drop",
-    key,
-    file.name || "invoice.pdf",
-    r2key,
-    f.supplier || null,
-    f.invoiceNumber || null,
-    f.invoiceDate || null,
-    res.docType || null,
-    numOrNull2(f.net),
-    numOrNull2(f.vat),
-    numOrNull2(f.gross),
-    numOrNull2(f.net),
-    numOrNull2(f.vat),
-    numOrNull2(f.gross),
-    rate,
-    sub ? "subcontractor" : "materials",
-    sub ? 1 : 0,
-    res.notInvoice ? "excluded" : "unverified",
-    vatQuarter(f.invoiceDate),
-    (/* @__PURE__ */ new Date()).toISOString()
-  ).run();
-  return { ok: true, id: r && r.meta && r.meta.last_row_id || null, fields: f, docType: res.docType || null, notInvoice: !!res.notInvoice };
-}
-function mergeSweepProposals(outstanding, fresh) {
-  const byKey = /* @__PURE__ */ new Map();
-  for (const p of outstanding || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
-  for (const p of fresh || []) byKey.set(seenKey(p.mailbox, p.messageId, p.attachmentId), p);
-  return Array.from(byKey.values());
-}
-function slimProposal(p) {
-  return {
-    mailbox: p.mailbox,
-    messageId: p.messageId,
-    attachmentId: p.attachmentId,
-    filename: p.filename,
-    subject: p.subject,
-    from: p.from,
-    receivedDateTime: p.receivedDateTime,
-    tier: p.tier,
-    fields: p.fields || {}
-  };
-}
-async function runInvoiceSweep(env, db, { mailbox, days, from, to, clue, mode }) {
-  const MAX_DOWNLOADS = 40, AI_BUDGET = 12;
-  const known = (await getSuppliers(db)).map((s) => s.name);
-  const subNames = (await getSubcontractors(db)).map((s) => s.name);
-  const isRange = !!(String(from || "").trim() || String(to || "").trim());
-  const hasClue = !!String(clue || "").trim();
-  const oneOff = isRange || hasClue;
-  const incremental = mode !== "full" && !oneOff;
-  const state = incremental ? await getSweepState(db, mailbox) : { lastReceived: null, outstanding: [], oldestScanned: null, backfillDone: false };
-  const fresh = [];
-  let downloads = 0, aiUsed = 0, skipped = 0;
-  let newest = state.lastReceived;
-  let oldestScanned = state.oldestScanned;
-  let backfillDone = incremental ? state.backfillDone : false;
-  async function processMsgs(msgs) {
-    let oldestFull = null, hitCap = false, minSeen = null;
-    for (const m of msgs) {
-      const r = m.receivedDateTime || null;
-      if (r && (!newest || r > newest)) newest = r;
-      if (r && (!minSeen || r < minSeen)) minSeen = r;
-      if (downloads >= MAX_DOWNLOADS) {
-        hitCap = true;
-        break;
-      }
-      let atts = [];
-      try {
-        atts = await listPdfAttachments(env, mailbox, m.id);
-      } catch {
-        continue;
-      }
-      let complete = true;
-      for (const a of atts) {
-        if (downloads >= MAX_DOWNLOADS) {
-          hitCap = true;
-          complete = false;
-          break;
-        }
-        let bytes;
-        try {
-          bytes = await downloadAttachment(env, mailbox, m.id, a.id);
-          downloads++;
-        } catch {
-          continue;
-        }
-        let res;
-        try {
-          res = await parseInvoice(env, bytes, a.name || "invoice.pdf", known, { allowVision: aiUsed < AI_BUDGET });
-        } catch {
-          continue;
-        }
-        if (res.aiUsed) aiUsed++;
-        if (res.notInvoice || res.remittance) {
-          skipped++;
-          continue;
-        }
-        fresh.push({
-          mailbox,
-          messageId: m.id,
-          attachmentId: a.id,
-          filename: a.name || "invoice.pdf",
-          subject: m.subject || "",
-          from: m.from && m.from.emailAddress && m.from.emailAddress.address || "",
-          receivedDateTime: r,
-          tier: res.tier,
-          fields: res.fields || {}
-        });
-      }
-      if (complete && r && (!oldestFull || r < oldestFull)) oldestFull = r;
-      if (hitCap) break;
-    }
-    return { oldestFull, hitCap, minSeen, count: msgs.length };
-  }
-  if (oneOff) {
-    let msgs = [];
-    try {
-      msgs = await listRecentWithAttachments(env, mailbox, { top: 40, days, from, to, clue });
-    } catch (e) {
-      return { proposals: [], scanned: 0, error: String(e && e.message || e) };
-    }
-    await processMsgs(msgs);
-  } else {
-    if (mode === "full") {
-      newest = null;
-      oldestScanned = null;
-      backfillDone = false;
-    }
-    if (state.lastReceived) {
-      let fwd = [];
-      try {
-        fwd = await listRecentWithAttachments(env, mailbox, { top: 40, days, since: state.lastReceived });
-      } catch (e) {
-        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
-      }
-      await processMsgs(fwd);
-    }
-    if (!backfillDone && downloads < MAX_DOWNLOADS) {
-      const opts = { top: 40, days };
-      if (oldestScanned) opts.before = oldestScanned;
-      let old = [];
-      try {
-        old = await listRecentWithAttachments(env, mailbox, opts);
-      } catch (e) {
-        return { proposals: [], scanned: 0, error: String(e && e.message || e) };
-      }
-      if (!old.length) {
-        backfillDone = true;
-      } else {
-        const { oldestFull, hitCap, minSeen } = await processMsgs(old);
-        if (oldestFull) oldestScanned = oldestFull;
-        else if (!hitCap && minSeen) oldestScanned = minSeen;
-      }
-    }
-  }
-  const merged = mergeSweepProposals(incremental ? state.outstanding : [], fresh);
-  const seen = await getSeenSet(db, mailbox);
-  const poCache = await uncostedPoRows(db);
-  const proposals = [];
-  let doneNow = 0;
-  for (const p of merged) {
-    if (seen.has(seenKey(p.mailbox, p.messageId, p.attachmentId))) {
-      doneNow++;
-      continue;
-    }
-    const f = p.fields || {};
-    let po = null, candidates = [];
-    if (f.poNumber) po = await poBrief(db, f.poNumber);
-    if (po && po.priced && po.has_invoice) {
-      doneNow++;
-      continue;
-    }
-    if (!po) candidates = matchInvoiceCandidates(db, f, poCache);
-    const cls = classifyProposal(f, po, known, subNames);
-    const actionable = po && !po.priced || candidates && candidates.length || (f.net != null || f.gross != null);
-    if (!actionable) continue;
-    proposals.push({ ...p, po, candidates, category: cls.category, subName: cls.subName, supName: cls.supName });
-  }
-  proposals.sort((a, b) => String(b.receivedDateTime || "").localeCompare(String(a.receivedDateTime || "")));
-  if (incremental || mode === "full") {
-    await saveSweepState(db, mailbox, {
-      lastReceived: newest,
-      outstanding: proposals.map(slimProposal),
-      oldestScanned,
-      backfillDone
-    });
-  }
-  const moreToScan = !oneOff && (downloads >= MAX_DOWNLOADS || !backfillDone);
-  return {
-    proposals,
-    scanned: downloads,
-    aiUsed,
-    alreadyDone: skipped + doneNow,
-    capped: downloads >= MAX_DOWNLOADS,
-    incremental,
-    oneOff,
-    newProposals: fresh.length,
-    carriedOver: incremental ? state.outstanding.length : 0,
-    watermark: incremental || mode === "full" ? newest : null,
-    backfillDone,
-    moreToScan,
-    oldestScanned
-  };
-}
-async function poBrief(db, poNumber) {
-  const r = await db.prepare(
-    `SELECT po_number, supplier, issued_at, cost_ex_vat, engineer_name, office_user_name, site, incident_no, description, invoice_key
-       FROM po_log WHERE po_number = ? AND deleted = 0`
-  ).bind(poNumber).first();
-  if (!r) return null;
-  return {
-    po_number: r.po_number,
-    supplier: r.supplier || "",
-    issued_at: r.issued_at,
-    cost_ex_vat: r.cost_ex_vat,
-    priced: r.cost_ex_vat != null,
-    who: r.engineer_name || r.office_user_name || "",
-    site: r.site || "",
-    incident_no: r.incident_no || "",
-    description: String(r.description || "").slice(0, 300),
-    has_invoice: !!r.invoice_key
-  };
-}
-async function uncostedPoRows(db) {
-  try {
-    return (await db.prepare(
-      `SELECT po_number, supplier, issued_at, engineer_name, office_user_name, site, incident_no, description
-         FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL ORDER BY issued_at DESC LIMIT 500`
-    ).all()).results || [];
-  } catch {
-    return [];
-  }
-}
-function matchInvoiceCandidates(db, f, poCache) {
-  const date = f && f.invoiceDate;
-  const supN = normSupplierName(f && f.supplier || "");
-  const tp = date ? Date.parse(date + "T12:00:00Z") : null;
-  const rows = Array.isArray(poCache) ? poCache : [];
-  const scored = rows.map((r) => {
-    const sup = normSupplierName(r.supplier || "");
-    const supMatch = !!(supN && sup && (sup === supN || sup.includes(supN) || supN.includes(sup)));
-    const days = tp && r.issued_at ? Math.abs(Math.round((tp - Date.parse(r.issued_at)) / 864e5)) : 9999;
-    return {
-      po_number: r.po_number,
-      supplier: r.supplier || "",
-      issued_at: r.issued_at,
-      who: r.engineer_name || r.office_user_name || "",
-      site: r.site || "",
-      incident_no: r.incident_no || "",
-      description: String(r.description || "").slice(0, 200),
-      supplierMatch: supMatch,
-      daysApart: days
-    };
-  });
-  if (supN) {
-    return scored.filter((c) => c.supplierMatch).sort((a, b) => a.daysApart - b.daysApart).slice(0, 12);
-  }
-  return scored.filter((c) => c.daysApart <= 5).sort((a, b) => a.daysApart - b.daysApart).slice(0, 8);
-}
-async function getPOs(db, params) {
-  let query = `SELECT * FROM po_log WHERE deleted = 0`;
-  const binds = [];
-  if (params.get("needs_review") === "1") query += ` AND needs_review = 1`;
-  if (params.get("hide_subcontractor") === "1") query += ` AND COALESCE(cost_category, 'materials') != 'subcontractor'`;
-  if (params.get("category")) {
-    query += ` AND COALESCE(cost_category, 'materials') = ?`;
-    binds.push(params.get("category"));
-  }
-  if (params.get("trade")) {
-    query += ` AND trade = ?`;
-    binds.push(params.get("trade"));
-  }
-  if (params.get("site")) {
-    query += ` AND site = ?`;
-    binds.push(params.get("site"));
-  }
-  if (params.get("engineer")) {
-    query += ` AND engineer_slug = ?`;
-    binds.push(params.get("engineer"));
-  }
-  if (params.get("office_user")) {
-    query += ` AND office_user_slug = ?`;
-    binds.push(params.get("office_user"));
-  }
-  if (params.get("supplier")) {
-    query += ` AND supplier = ?`;
-    binds.push(params.get("supplier"));
-  }
-  if (params.get("from")) {
-    query += ` AND issued_at >= ?`;
-    binds.push(params.get("from"));
-  }
-  if (params.get("to")) {
-    query += ` AND issued_at <= ?`;
-    binds.push(params.get("to") + "T23:59:59");
-  }
-  if (params.get("status")) {
-    query += ` AND COALESCE(status, 'open') = ?`;
-    binds.push(params.get("status"));
-  }
-  if (params.get("uncosted") === "1") query += ` AND (cost_ex_vat IS NULL)`;
-  if (params.get("unmatched_site") === "1") {
-    query += ` AND (site IS NOT NULL AND site NOT IN (SELECT name FROM sites WHERE active = 1))`;
-  }
-  if (params.get("search")) {
-    const term = "%" + params.get("search").toLowerCase() + "%";
-    query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
-    binds.push(term, term, term, term, term, term, term, term);
-  }
-  if (params.get("job_id")) {
-    query += ` AND job_id = ?`;
-    binds.push(params.get("job_id"));
-  }
-  query += ` ORDER BY po_number DESC LIMIT 1000`;
-  return (await db.prepare(query).bind(...binds).all()).results;
-}
-async function getJobCost(db, params) {
-  let where = `WHERE deleted = 0 AND site IS NOT NULL AND TRIM(site) != ''`;
-  const binds = [];
-  if (params.get("from")) {
-    where += ` AND issued_at >= ?`;
-    binds.push(params.get("from"));
-  }
-  if (params.get("to")) {
-    where += ` AND issued_at <= ?`;
-    binds.push(params.get("to") + "T23:59:59");
-  }
-  const [byJob, byTrade] = await db.batch([
-    db.prepare(`SELECT site,
-        COUNT(*) AS po_count,
-        SUM(CASE WHEN cost_ex_vat IS NULL THEN 1 ELSE 0 END) AS uncosted,
-        COALESCE(SUM(CASE WHEN COALESCE(cost_category, 'materials') = 'materials' THEN cost_ex_vat ELSE 0 END), 0) AS materials_ex,
-        COALESCE(SUM(CASE WHEN cost_category = 'subcontractor' THEN cost_ex_vat ELSE 0 END), 0) AS subcontractor_ex,
-        COALESCE(SUM(cost_ex_vat), 0) AS total_ex
-      FROM po_log ${where} GROUP BY site`).bind(...binds),
-    db.prepare(`SELECT site, COALESCE(trade, '(no trade)') AS trade,
-        COUNT(*) AS count, COALESCE(SUM(cost_ex_vat), 0) AS ex
-      FROM po_log ${where} AND cost_category = 'subcontractor'
-      GROUP BY site, trade`).bind(...binds)
-  ]);
-  const tradesBySite = {};
-  for (const t of byTrade.results) {
-    (tradesBySite[t.site] = tradesBySite[t.site] || []).push({ trade: t.trade, count: t.count, ex: t.ex });
-  }
-  const jobs = byJob.results.map((j) => ({
-    site: j.site,
-    po_count: j.po_count,
-    uncosted: j.uncosted,
-    materials_ex: j.materials_ex,
-    subcontractor_ex: j.subcontractor_ex,
-    total_ex: j.total_ex,
-    by_trade: (tradesBySite[j.site] || []).sort((a, b) => b.ex - a.ex || b.count - a.count)
-  })).sort((a, b) => b.total_ex - a.total_ex || b.po_count - a.po_count);
-  return {
-    jobs,
-    totals: {
-      jobs: jobs.length,
-      po_count: jobs.reduce((s, j) => s + j.po_count, 0),
-      uncosted: jobs.reduce((s, j) => s + j.uncosted, 0),
-      materials_ex: jobs.reduce((s, j) => s + j.materials_ex, 0),
-      subcontractor_ex: jobs.reduce((s, j) => s + j.subcontractor_ex, 0),
-      total_ex: jobs.reduce((s, j) => s + j.total_ex, 0)
-    }
-  };
-}
-var PO_START = 10011;
-async function nextPoNumber(db) {
-  const row = await db.prepare(`
-    SELECT COALESCE(MIN(n), ?) AS next FROM (
-      SELECT ? AS n
-      UNION ALL
-      SELECT po_number + 1 FROM po_log
-    ) WHERE n >= ? AND n NOT IN (SELECT po_number FROM po_log)
-  `).bind(PO_START, PO_START, PO_START).first();
-  return row.next;
-}
-async function issuePO(db, body, env) {
-  const status = await getSystemStatus(db);
-  if (status.mode === "disabled") return { error: status.message };
-  if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
-  const isSubcontractor = body.cost_category === "subcontractor";
-  if (isSubcontractor) {
-    if (body.source !== "office") return { error: "Subcontractor POs can only be raised by the office" };
-    if (!body.site || !body.site.trim()) return { error: "Site (job) is required for a subcontractor PO" };
-    if (!body.supplier || !body.supplier.trim()) return { error: "Subcontractor is required" };
-    if (!body.trade || !body.trade.trim()) return { error: "Trade is required for a subcontractor PO" };
-    if (!body.description || !body.description.trim()) return { error: "Description is required" };
-  }
-  if (body.source === "engineer") {
-    if (body.engineer_slug) {
-      const eng = await db.prepare(`SELECT suspended FROM engineers WHERE slug = ?`).bind(body.engineer_slug).first();
-      if (eng && eng.suspended) return { error: "Access to Mostlane PO system has been suspended. Please contact the office for more info." };
-    }
-    const hasSite = body.site && body.site.trim();
-    const hasIncident = body.incident_no && body.incident_no.trim();
-    if (!hasSite && !hasIncident) return { error: "Enter a site or an incident number" };
-    if (!body.supplier || !body.supplier.trim()) return { error: "Supplier is required" };
-    if (!body.description || !body.description.trim()) return { error: "Description is required" };
-    const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
-    if (!supplierCheck) return { error: "Supplier must be picked from the list" };
-    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
-    const hasJob = body.job_id && String(body.job_id).trim();
-    if (hasSite && !hasVehicle && !hasJob) {
-      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
-        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use \u201CRaise PO for this job\u201D inside the job card." };
-      }
-    }
-  }
-  const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
-  let poNumber;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    poNumber = await nextPoNumber(db);
-    try {
-      await db.prepare(`INSERT INTO po_log (po_number, engineer_slug, engineer_name, issued_at, source, site, incident_no, supplier, description, needs_review, office_user_slug, office_user_name, cost_category, trade, job_id, job_ref, vehicle_reg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
-        poNumber,
-        body.engineer_slug || null,
-        body.engineer_name || null,
-        issuedAt,
-        body.source || "office",
-        body.site || null,
-        body.incident_no || null,
-        body.supplier || null,
-        body.description || null,
-        body.source === "office" ? 0 : 1,
-        body.office_user_slug || null,
-        body.office_user_name || null,
-        isSubcontractor ? "subcontractor" : "materials",
-        isSubcontractor ? body.trade || null : null,
-        // Blank unless the PO was raised from a portal job link
-        (body.job_id || "").trim() || null,
-        (body.job_ref || "").trim() || null,
-        // Uppercase so the portal's UPPER(REPLACE(reg,' ','')) match always lines up
-        (body.vehicle_reg || "").trim().toUpperCase() || null
-      ).run();
-      return { success: true, po_number: poNumber, issued_at: issuedAt };
-    } catch (e) {
-      if (!/UNIQUE|constraint|PRIMARY/i.test(e.message)) throw e;
-    }
-  }
-  return { error: "Could not allocate a PO number, please try again" };
-}
-async function deletePoRecord(db, poNumber) {
-  await db.prepare(`DELETE FROM po_log WHERE po_number = ?`).bind(poNumber).run();
-  return { success: true };
-}
-async function updatePO(db, poNumber, body) {
-  const allowed = ["site", "incident_no", "supplier", "description", "needs_review", "reviewed_by", "engineer_slug", "engineer_name", "deleted", "cost_ex_vat", "vat_rate", "status", "flag_reason", "credit_note", "cost_category", "trade", "job_id", "job_ref", "vehicle_reg"];
-  const fields = [];
-  const binds = [];
-  for (const [k, v] of Object.entries(body)) {
-    if (allowed.includes(k)) {
-      fields.push(`${k} = ?`);
-      binds.push(v === "" ? null : v);
-    }
-  }
-  if (body.needs_review === 0) {
-    fields.push(`reviewed_at = ?`);
-    binds.push((/* @__PURE__ */ new Date()).toISOString());
-  }
-  if (body.cost_ex_vat !== void 0 && body.cost_ex_vat !== null && body.cost_ex_vat !== "") {
-    fields.push(`cost_entered_at = ?`);
-    binds.push((/* @__PURE__ */ new Date()).toISOString());
-  }
-  if (body.edited_by_slug && body.edited_by_name) {
-    fields.push(`last_edited_by_slug = ?`);
-    binds.push(body.edited_by_slug);
-    fields.push(`last_edited_by_name = ?`);
-    binds.push(body.edited_by_name);
-    fields.push(`last_edited_at = ?`);
-    binds.push((/* @__PURE__ */ new Date()).toISOString());
-  }
-  if (!fields.length) return { success: true };
-  binds.push(poNumber);
-  await db.prepare(`UPDATE po_log SET ${fields.join(", ")} WHERE po_number = ?`).bind(...binds).run();
-  return { success: true };
-}
-async function getDashboard(db) {
-  const ukTime = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const todayDate = ukTime.toISOString().split("T")[0];
-  const [uncosted, review, flagged, creditDue, unmatched, today] = await db.batch([
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL AND COALESCE(status, 'open') != 'complete'`),
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND needs_review = 1`),
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND COALESCE(status, 'open') = 'flagged'`),
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND COALESCE(status, 'open') = 'credit_due'`),
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND site IS NOT NULL AND site NOT IN (SELECT name FROM sites WHERE active = 1)`),
-    db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND substr(issued_at, 1, 10) = ?`).bind(todayDate)
-  ]);
-  return {
-    uncosted: uncosted.results[0].c,
-    needs_review: review.results[0].c,
-    flagged: flagged.results[0].c,
-    credit_due: creditDue.results[0].c,
-    unmatched_site: unmatched.results[0].c,
-    today: today.results[0].c
-  };
-}
-async function getStats(db, params) {
-  let where = `WHERE deleted = 0`;
-  const binds = [];
-  if (params.get("engineer")) {
-    where += ` AND engineer_slug = ?`;
-    binds.push(params.get("engineer"));
-  }
-  if (params.get("supplier")) {
-    where += ` AND supplier = ?`;
-    binds.push(params.get("supplier"));
-  }
-  if (params.get("from")) {
-    where += ` AND issued_at >= ?`;
-    binds.push(params.get("from"));
-  }
-  if (params.get("to")) {
-    where += ` AND issued_at <= ?`;
-    binds.push(params.get("to") + "T23:59:59");
-  }
-  if (params.get("source")) {
-    where += ` AND source = ?`;
-    binds.push(params.get("source"));
-  }
-  const [total, bySupplier, byEngineer, byOfficeUser, bySite, bySource, byDay, byMonth, needsReview, byStatus, totalSpend, uncosted] = await db.batch([
-    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where}`).bind(...binds),
-    db.prepare(`SELECT COALESCE(supplier, '(none)') as supplier, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY supplier ORDER BY count DESC`).bind(...binds),
-    db.prepare(`SELECT COALESCE(engineer_name, '(none)') as engineer, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY engineer_name ORDER BY count DESC`).bind(...binds),
-    db.prepare(`SELECT COALESCE(office_user_name, '(no office user)') as office_user, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} AND office_user_name IS NOT NULL GROUP BY office_user_name ORDER BY count DESC`).bind(...binds),
-    db.prepare(`SELECT COALESCE(site, '(none)') as site, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY site ORDER BY total_ex_vat DESC`).bind(...binds),
-    db.prepare(`SELECT source, COUNT(*) as count FROM po_log ${where} GROUP BY source ORDER BY count DESC`).bind(...binds),
-    db.prepare(`SELECT substr(issued_at, 1, 10) as day, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY day ORDER BY day DESC LIMIT 60`).bind(...binds),
-    db.prepare(`SELECT substr(issued_at, 1, 7) as month, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY month ORDER BY month DESC LIMIT 24`).bind(...binds),
-    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where} AND needs_review = 1`).bind(...binds),
-    db.prepare(`SELECT COALESCE(status, 'open') as status, COUNT(*) as count, COALESCE(SUM(cost_ex_vat), 0) as total_ex_vat FROM po_log ${where} GROUP BY status`).bind(...binds),
-    db.prepare(`SELECT COALESCE(SUM(cost_ex_vat), 0) as total FROM po_log ${where}`).bind(...binds),
-    db.prepare(`SELECT COUNT(*) as c FROM po_log ${where} AND cost_ex_vat IS NULL`).bind(...binds)
-  ]);
-  return {
-    total: total.results[0].c,
-    needs_review: needsReview.results[0].c,
-    total_spend_ex_vat: totalSpend.results[0].total,
-    uncosted: uncosted.results[0].c,
-    by_supplier: bySupplier.results,
-    by_engineer: byEngineer.results,
-    by_office_user: byOfficeUser.results,
-    by_site: bySite.results,
-    by_source: bySource.results,
-    by_day: byDay.results,
-    by_month: byMonth.results,
-    by_status: byStatus.results
-  };
-}
-async function getAccounts(db) {
-  const [suppliers, months] = await db.batch([
-    db.prepare(`SELECT * FROM suppliers WHERE active = 1 ORDER BY name`),
-    db.prepare(`SELECT supplier, substr(issued_at, 1, 7) as ym,
-      SUM(CASE WHEN cost_ex_vat IS NOT NULL AND COALESCE(status, 'open') != 'complete' THEN cost_ex_vat * (1 + COALESCE(vat_rate, 20) / 100) ELSE 0 END) as unpaid_inc_vat,
-      SUM(CASE WHEN cost_ex_vat IS NULL AND COALESCE(status, 'open') != 'complete' THEN 1 ELSE 0 END) as uncosted_open
-      FROM po_log WHERE deleted = 0 AND supplier IS NOT NULL GROUP BY supplier, ym`)
-  ]);
-  return { suppliers: suppliers.results, months: months.results };
-}
-async function getSummaryRange(db, from, to) {
-  let where = "WHERE deleted = 0";
-  const binds = [];
-  if (from) {
-    where += " AND issued_at >= ?";
-    binds.push(from);
-  }
-  if (to) {
-    where += " AND issued_at <= ?";
-    binds.push(to + "T23:59:59");
-  }
-  const rows = (await db.prepare(
-    `SELECT po_number, issued_at, engineer_name, office_user_name, source, supplier, site, incident_no, description
-     FROM po_log ${where} ORDER BY issued_at DESC`
-  ).bind(...binds).all()).results;
-  const groups = {};
-  const supTotals = {};
-  for (const r of rows) {
-    const key = r.engineer_name || (r.office_user_name ? "Office \u2014 " + r.office_user_name : "(no engineer)");
-    const g = groups[key] || (groups[key] = { name: key, count: 0, sup: {}, pos: [] });
-    g.count++;
-    const sup = r.supplier || "(none)";
-    g.sup[sup] = (g.sup[sup] || 0) + 1;
-    supTotals[sup] = (supTotals[sup] || 0) + 1;
-    g.pos.push({ po_number: r.po_number, issued_at: r.issued_at, supplier: r.supplier, site: r.site, incident_no: r.incident_no, description: r.description });
-  }
-  const engineers = Object.values(groups).map((g) => ({
-    name: g.name,
-    count: g.count,
-    suppliers: g.sup,
-    by_supplier: Object.entries(g.sup).map(([supplier, count]) => ({ supplier, count })).sort((a, b) => b.count - a.count),
-    pos: g.pos
-  })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const by_supplier = Object.entries(supTotals).map(([supplier, count]) => ({ supplier, count })).sort((a, b) => b.count - a.count);
-  return { from: from || null, to: to || null, total: rows.length, engineers, by_supplier };
-}
-async function getSummary(db, params) {
-  return getSummaryRange(db, params.get("from"), params.get("to"));
-}
-function slugify(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
+// src/index.js
+init_po();
 
 // src/routes/accounts.js
 init_http();
@@ -44195,7 +44290,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
       const req = new Request(base + path, init);
       if (env.SITELOG_DB) {
         try {
-          const r = await handle6(req, env);
+          const r = await handle7(req, env);
           if (r && r.ok) return r;
         } catch {
         }
@@ -46838,84 +46933,84 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle3],
   ["*", "/po-config", handle3],
   ["*", "/device", handle4],
-  ["*", "/holiday", handle13],
-  ["*", "/asset", handle14],
+  ["*", "/holiday", handle14],
+  ["*", "/asset", handle15],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle14],
+  ["*", "/transfer", handle15],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle14],
-  ["*", "/upload-asset-thumb", handle14],
-  ["*", "/delete-asset-image", handle14],
+  ["*", "/upload-asset-image", handle15],
+  ["*", "/upload-asset-thumb", handle15],
+  ["*", "/delete-asset-image", handle15],
   ["*", "/sla/workever", handle46],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle12],
-  ["*", "/stats", handle23],
-  ["*", "/staff", handle24],
+  ["*", "/sla", handle13],
+  ["*", "/stats", handle24],
+  ["*", "/staff", handle25],
   // staff personal + company documents
-  ["*", "/hr/", handle25],
+  ["*", "/hr/", handle26],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle26],
+  ["*", "/privacy", handle27],
   // GDPR data export + erasure
-  ["*", "/fleet", handle28],
+  ["*", "/fleet", handle29],
   // fleet reports + driver mapping
   ["*", "/push", handle],
   // web push subscriptions + test send
-  ["*", "/messages", handle29],
+  ["*", "/messages", handle30],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle30],
+  ["*", "/memos", handle31],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle31],
+  ["*", "/documents", handle32],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle5],
   // engineer timesheets + invoices + mileage
   ["*", "/ai", handle35],
   // AI job assistant (draft → preview → create)
-  ["*", "/get-sites", handle7],
-  ["*", "/add-site", handle7],
-  ["*", "/update-site", handle7],
-  ["*", "/delete-site", handle7],
-  ["*", "/next-project-job-number", handle7],
-  ["*", "/upload-image", handle7],
-  ["*", "/customers", handle7],
-  ["*", "/import-sites", handle7],
-  ["*", "/sites", handle7],
+  ["*", "/get-sites", handle8],
+  ["*", "/add-site", handle8],
+  ["*", "/update-site", handle8],
+  ["*", "/delete-site", handle8],
+  ["*", "/next-project-job-number", handle8],
+  ["*", "/upload-image", handle8],
+  ["*", "/customers", handle8],
+  ["*", "/import-sites", handle8],
+  ["*", "/sites", handle8],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle27],
+  ["*", "/sites/register", handle28],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle27],
+  ["*", "/ledger", handle28],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle27],
+  ["*", "/costing", handle28],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle27],
+  ["*", "/exceptions", handle28],
   // needs-a-human-eye list
-  ["*", "/compliance", handle8],
+  ["*", "/compliance", handle9],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle32],
+  ["*", "/chapplins", handle33],
   // Chapplins customer: site tenants (current/previous) + directory
-  ["*", "/settings", handle15],
-  ["*", "/oncall", handle15],
-  ["*", "/daily-logs", handle15],
-  ["*", "/notify", handle15],
+  ["*", "/settings", handle16],
+  ["*", "/oncall", handle16],
+  ["*", "/daily-logs", handle16],
+  ["*", "/notify", handle16],
   // notification audit log
-  ["*", "/prefs", handle15],
+  ["*", "/prefs", handle16],
   // per-user cross-device markers
-  ["*", "/menu-config", handle15],
+  ["*", "/menu-config", handle16],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle15],
+  ["*", "/audit", handle16],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle16],
-  ["*", "/sitelog-launch", handle16],
-  ["*", "/office", handle18],
+  ["*", "/sitelog", handle17],
+  ["*", "/sitelog-launch", handle17],
+  ["*", "/office", handle19],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle19],
+  ["*", "/key", handle20],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle20],
+  ["*", "/theme", handle21],
   // per-user colour theme + background
-  ["*", "/hs/", handle21],
+  ["*", "/hs/", handle22],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle22],
+  ["*", "/vancheck", handle23],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle33],
+  ["*", "/po", handle6],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/accounts", handle34],
   // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
@@ -46925,13 +47020,13 @@ var ROUTES = [
   // office view of the email→job intake (log, test box, re-run, allow-list)
   ["*", "/tasks", handle37],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/fbc", handle17],
+  ["*", "/fbc", handle18],
   // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
-  ["*", "/concerto", handle9],
+  ["*", "/concerto", handle10],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
-  ["*", "/certs", handle11],
+  ["*", "/certs", handle12],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle10],
+  ["*", "/pump", handle11],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/cablecalc", handle39],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
@@ -46962,7 +47057,7 @@ var worker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
-      return handle6(request, env, ctx);
+      return handle7(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {
