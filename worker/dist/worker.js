@@ -5560,6 +5560,7 @@ var init_graphmail = __esm({
 var po_exports = {};
 __export(po_exports, {
   handle: () => handle6,
+  listPoSubcontractorNames: () => listPoSubcontractorNames,
   mergeSweepProposals: () => mergeSweepProposals,
   raiseSubcontractorPO: () => raiseSubcontractorPO
 });
@@ -7141,6 +7142,16 @@ async function raiseSubcontractorPO(env, { supplier, trade, site, description, j
     }
   }
   return { error: "Could not allocate a PO number, please try again" };
+}
+async function listPoSubcontractorNames(env) {
+  const db = env && env.PO_DB;
+  if (!db) return [];
+  try {
+    const r = await db.prepare(`SELECT name FROM subcontractors WHERE active = 1 ORDER BY name`).all();
+    return (r.results || []).map((x) => String(x.name || "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 async function deletePoRecord(db, poNumber) {
   await db.prepare(`DELETE FROM po_log WHERE po_number = ?`).bind(poNumber).run();
@@ -17995,6 +18006,69 @@ async function handle13(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, skills: await setEngSkills(env, tenantId, body?.skills || {}) }, headers);
     }
   }
+  if (subpath === "/subcontractors") {
+    if (method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const cfg = await getSubconConfig(env, tenantId);
+      const out = { ok: true, list: Object.keys(cfg).map((k) => cfg[k]), areas: await getWorkAreas(env, tenantId) };
+      const jobId = url.searchParams.get("jobId");
+      if (jobId) {
+        const job = await getJob3(env, tenantId, jobId);
+        if (job) {
+          const s = await subcontractorSuggestions(env, tenantId, job);
+          out.job = { id: job.id, ref: job.helpdeskRef || "", priority: job.priority || "", areaId: s.areaId, areaName: s.areaName, hasCoords: s.hasJobCoords };
+          out.suggestions = s.suggestions;
+        }
+      }
+      return jsonResponse(out, headers);
+    }
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Full Access only" }, headers, 403);
+      const b = await readJson2(request);
+      const cfg = await getSubconConfig(env, tenantId);
+      const raw = {};
+      for (const k of Object.keys(cfg)) raw[k] = cfg[k];
+      const reply = async (saved, extra = {}) => jsonResponse({ ok: true, list: Object.keys(saved).map((k) => normSubcon(saved[k], k)), ...extra }, headers);
+      if (b.importFromPO) {
+        let names = [];
+        try {
+          const { listPoSubcontractorNames: listPoSubcontractorNames2 } = await Promise.resolve().then(() => (init_po(), po_exports));
+          names = await listPoSubcontractorNames2(env);
+        } catch {
+        }
+        let added = 0;
+        for (const nm of names) {
+          const k = subKey(nm);
+          if (!raw[k]) {
+            raw[k] = { name: nm, active: true, to: "", areas: [], fields: {} };
+            added++;
+          }
+        }
+        return reply(await setSubconConfig(env, tenantId, raw), { imported: added });
+      }
+      if (b.delete) {
+        delete raw[String(b.delete)];
+        return reply(await setSubconConfig(env, tenantId, raw));
+      }
+      if (b.sub && b.sub.name) {
+        const s = b.sub;
+        const k = String(s.key || subKey(s.name)).trim() || "sub" + Date.now();
+        raw[k] = s;
+        return reply(await setSubconConfig(env, tenantId, raw), { key: k });
+      }
+      if (Array.isArray(b.list)) {
+        const m = {};
+        for (const s of b.list) {
+          const k = String(s.key || subKey(s.name || "")).trim();
+          if (k && s.name) m[k] = s;
+        }
+        return reply(await setSubconConfig(env, tenantId, m));
+      }
+      return jsonResponse({ error: "Nothing to save" }, headers, 400);
+    }
+  }
   if (subpath === "/infer-work-area" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const b = await readJson2(request);
@@ -18446,6 +18520,24 @@ async function handle13(request, env, ctx, url, sess) {
         actionable: true
       }, null, { officeOnly: true }).catch(() => {
       }));
+    }
+    if (!before && !job.subcontract && isOutOfHoursLondon() && !(job.emTest || job.pat || job.pumpMaintenance || job.elecTest || job.firestopping || job.fleetRenewal) && !jobIsProject(job)) {
+      ctx?.waitUntil((async () => {
+        try {
+          const s = await subcontractorSuggestions(env, tenantId, job);
+          const hits = s.suggestions.filter((x) => x.oohThisPriority && x.inCoverage && x.matchArea && !(x.key === "metrorod" && isDrainageJob(job))).slice(0, 2);
+          for (const h of hits) {
+            await sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+              title: "\u{1F319} Out-of-hours \u2014 suggest " + h.name,
+              body: `${job.priority || "Job"} at ${job.siteName || job.siteCode || ""}${s.areaName ? " (" + s.areaName + ")" : ""}: ${String(job.description || "").slice(0, 90)} \u2014 tap to send to ${h.name}.`,
+              url: "/job-view.html?jobId=" + encodeURIComponent(job.id),
+              tag: "subcon-ooh:" + h.key + ":" + job.id,
+              actionable: true
+            }, null, { officeOnly: true });
+          }
+        } catch {
+        }
+      })());
     }
     if (payload.visitGroupId) {
       try {
@@ -20096,12 +20188,19 @@ async function handle13(request, env, ctx, url, sess) {
         hours = cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours || 0;
       } catch {
       }
-      const mail = buildMetroRodEmail(job, hours, poRef);
+      const mail = buildMetroRodEmail(job, hours, poRef, sc);
       const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
       const r = await sendEmail2(env, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
       if (!r || !r.ok) {
         await unlock();
-        return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " \u2014 " + String(r.error || r.reason).slice(0, 160) : "") + ". Press again to re-send (the same PO is kept)." }, headers, 502);
+        const fAt = (/* @__PURE__ */ new Date()).toISOString();
+        const errTxt = String(r && (r.error || r.reason) || "email send failed").slice(0, 160);
+        job.subcontract = { key, name: sc.name, to: sc.to, failedAt: fAt, failedBy: sess.user.username, error: errTxt, poNumber, poRef };
+        job.events ||= [];
+        job.events.push({ at: fAt, by: sess.user.username, type: "subcontract", note: `Send to ${sc.name} FAILED (PO ${poRef} raised) \u2014 ${errTxt}` });
+        job.updatedAt = fAt;
+        await saveJob(env, tenantId, job);
+        return jsonResponse({ error: "PO " + poRef + " was raised, but the email didn't send" + (r && (r.error || r.reason) ? " \u2014 " + errTxt : "") + ". Press again to re-send (the same PO is kept).", subcontract: job.subcontract }, headers, 502);
       }
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef };
@@ -24007,26 +24106,142 @@ function isDrainageJob(j) {
   const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");
   return DRAIN_RE.test(t);
 }
+function subKey(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 40) || "sub";
+}
 function formatPoRef(poNumber, digits) {
   const s = String(poNumber == null ? "" : poNumber).trim();
   const d = Number(digits) || 0;
   return d > 0 ? s.padStart(d, "0") : s;
 }
+function normSubcon(sc, key) {
+  sc = sc || {};
+  const fields = {};
+  for (const k of SUBCON_FIELD_KEYS) fields[k] = sc.fields ? sc.fields[k] !== false : true;
+  const base = {};
+  if (sc.base) {
+    if (String(sc.base.postcode || "").trim()) base.postcode = String(sc.base.postcode).trim();
+    const la = Number(sc.base.lat), ln = Number(sc.base.lng ?? sc.base.lon);
+    if (isFinite(la) && isFinite(ln) && (la || ln)) {
+      base.lat = la;
+      base.lng = ln;
+    }
+  }
+  return {
+    key: key || subKey(sc.name),
+    name: String(sc.name || key || "").trim(),
+    active: sc.active !== false,
+    to: String(sc.to || "").trim(),
+    cc: Array.isArray(sc.cc) ? sc.cc.map((x) => String(x).trim()).filter(Boolean) : sc.cc ? [String(sc.cc).trim()] : [],
+    replyTo: String(sc.replyTo || "").trim(),
+    trade: String(sc.trade || "").trim(),
+    poDigits: Number(sc.poDigits) || 0,
+    areas: Array.isArray(sc.areas) ? [...new Set(sc.areas.map((x) => String(x).trim()).filter(Boolean))] : [],
+    base,
+    radiusMiles: Math.max(0, Number(sc.radiusMiles) || 0),
+    ooh: sc.ooh === true,
+    oohPriorities: Array.isArray(sc.oohPriorities) ? sc.oohPriorities.map((x) => String(x).trim()).filter(Boolean) : [],
+    fields
+  };
+}
 async function getSubconConfig(env, tid) {
+  let v = {};
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subcontractors:" + tid).first();
-    const v = row ? JSON.parse(row.value) : {};
-    const out = {};
-    for (const k of Object.keys(SUBCON_DEFAULTS)) out[k] = { ...SUBCON_DEFAULTS[k], ...v[k] || {} };
-    return out;
+    v = row ? JSON.parse(row.value) : {};
   } catch {
-    return JSON.parse(JSON.stringify(SUBCON_DEFAULTS));
+    v = {};
   }
+  const out = {};
+  for (const k of /* @__PURE__ */ new Set([...Object.keys(SUBCON_DEFAULTS), ...Object.keys(v || {})])) {
+    out[k] = normSubcon({ ...SUBCON_DEFAULTS[k] || {}, ...v[k] || {} }, k);
+  }
+  return out;
+}
+async function setSubconConfig(env, tid, map) {
+  const clean = {};
+  for (const k of Object.keys(map || {})) {
+    const n = normSubcon(map[k], k);
+    if (!n.name) continue;
+    clean[k] = { name: n.name, active: n.active, to: n.to, cc: n.cc, replyTo: n.replyTo, trade: n.trade, poDigits: n.poDigits, areas: n.areas, base: n.base, radiusMiles: n.radiusMiles, ooh: n.ooh, oohPriorities: n.oohPriorities, fields: n.fields };
+  }
+  await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
+  return clean;
+}
+function inferAreaKw(description, areas) {
+  const t = String(description || "");
+  if (!t.trim()) return null;
+  for (const a of areas || []) {
+    let re = AREA_KW[a.id];
+    if (!re) {
+      const w = String(a.name || "").trim().split(/\s+/)[0];
+      if (w && w.length > 2) try {
+        re = new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      } catch {
+      }
+    }
+    if (re && re.test(t)) return { id: a.id, name: a.name };
+  }
+  return null;
+}
+function isOutOfHoursLondon() {
+  const { dow, hour } = londonNow();
+  return dow === 0 || dow === 6 || hour < 8 || hour >= 18;
+}
+async function subcontractorSuggestions(env, tid, job) {
+  const cfg = await getSubconConfig(env, tid);
+  const areas = await getWorkAreas(env, tid);
+  let areaId = String(job.workArea || "").trim(), areaName = "";
+  if (areaId) {
+    const a = areas.find((x) => x.id === areaId);
+    if (a) areaName = a.name;
+    else areaId = "";
+  }
+  if (!areaId) {
+    const inf = inferAreaKw(job.description || "", areas);
+    if (inf) {
+      areaId = inf.id;
+      areaName = inf.name;
+    }
+  }
+  let jc = null;
+  try {
+    jc = await jobCoordServer(env, job);
+  } catch {
+  }
+  const list = [];
+  for (const k of Object.keys(cfg)) {
+    const sc = cfg[k];
+    if (!sc.active || !sc.to) continue;
+    const matchArea = !!(areaId && sc.areas.includes(areaId));
+    let distance = null, inCoverage = true;
+    const coversEverywhere = !sc.radiusMiles;
+    if (sc.radiusMiles > 0) {
+      let bc = isFinite(sc.base.lat) && sc.base.lat != null ? [sc.base.lat, sc.base.lng] : null;
+      if (!bc && sc.base.postcode) {
+        try {
+          bc = await geocodePcServer(sc.base.postcode);
+        } catch {
+        }
+      }
+      if (bc && jc) {
+        distance = Math.round(haversineMi(bc, jc) * 10) / 10;
+        inCoverage = distance <= sc.radiusMiles;
+      } else inCoverage = false;
+    }
+    const oohThisPriority = sc.ooh && (!sc.oohPriorities.length || sc.oohPriorities.includes(job.priority));
+    const score = (matchArea ? 2 : 0) + (inCoverage ? 1 : 0) + (oohThisPriority ? 0.5 : 0);
+    list.push({ key: k, name: sc.name, to: sc.to, trade: sc.trade, areas: sc.areas, matchArea, inCoverage, coversEverywhere, distance, radiusMiles: sc.radiusMiles, ooh: sc.ooh, oohThisPriority, score });
+  }
+  list.sort((a, b) => b.score - a.score || (a.distance ?? 1e9) - (b.distance ?? 1e9) || a.name.localeCompare(b.name));
+  return { areaId, areaName, hasJobCoords: !!jc, suggestions: list };
 }
 function escH(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
-function buildMetroRodEmail(job, hours, poRef) {
+function buildMetroRodEmail(job, hours, poRef, sc) {
+  const f = sc && sc.fields ? sc.fields : {};
+  const on = (k) => f[k] !== false;
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
@@ -24035,9 +24250,17 @@ function buildMetroRodEmail(job, hours, poRef) {
   const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
   const site = [String(job.siteCode || "").trim(), String(job.siteName || "").trim()].filter(Boolean).join(" ");
   const box = (label2, val2, big = true) => `<table style="width:100%;background:#f3f6fa;border-radius:12px;margin-bottom:10px"><tr><td style="padding:14px 18px"><div style="font-size:12px;color:#7a8794;text-transform:uppercase;letter-spacing:.04em">${escH(label2)}</div><div style="font-size:${big ? 16 : 15}px;${big ? "font-weight:600;color:#1c2733" : "color:#33424f;line-height:1.5"};margin-top:3px">${escH(val2 || "\u2014").replace(/\n/g, "<br>")}</div></td></tr></table>`;
+  const boxes = [
+    on("site") && box("Site", site),
+    on("address") && box("Address", job.address || job.siteName),
+    on("phone") && box("Phone", job.telephone),
+    on("target") && target && box("Target", target),
+    on("description") && box("Details", job.description, false)
+  ].filter(Boolean).join("");
+  const headPriority = on("priority") || on("target");
   const html = `<table style="width:100%;background:#eef1f5;margin:0;padding:24px 0"><tr><td align="center"><table style="width:600px;max-width:600px;background:#ffffff;border:1px solid #e2e6ec;border-radius:16px;overflow:hidden;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-<tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
-<tr><td style="padding:18px 28px 4px 28px">${box("Site", site)}${box("Address", job.address || job.siteName)}${box("Phone", job.telephone)}${target ? box("Target", target) : ""}${box("Details", job.description, false)}</td></tr>
+<tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "") : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
+<tr><td style="padding:18px 28px 4px 28px">${boxes}</td></tr>
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">Please attend the above and confirm receipt. Contact the site on the number above to arrange access.</div></td></tr>
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
 </table></td></tr></table>`;
@@ -25083,7 +25306,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DRAIN_RE, SUBCON_DEFAULTS, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADES, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DRAIN_RE, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, AREA_KW, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADES, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -25136,7 +25359,21 @@ var init_sla = __esm({
     _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
     DRAIN_RE = /\b(drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|soak ?aways?|interceptors?|grease traps?|fat traps?|jetting|foul water|backed up|overflowing|sani ?fl[oa]w?s?|cctv (?:survey|camera|down the drains?))\b|\bblocked (?:toilets?|wcs?|sinks?|urinals?|loos?|basins?|pans?|pipes?|waste)\b|\b(?:toilets?|wcs?|sinks?|urinals?|loos?|basins?)\s+(?:is |are )?(?:still )?blocked\b/i;
     SUBCON_DEFAULTS = {
-      metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6 }
+      metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {} }
+    };
+    SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
+    AREA_KW = {
+      electrical: /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|emergency light|\bpat\b|consumer unit|distribution board/i,
+      plumbing: /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock/i,
+      drainage: /drain|sewer|sewage|gull|manhole|jetting|blocked (?:toilet|drain|waste|sink|urinal|wc)|foul water|soak ?away|interceptor|grease trap|saniflo/i,
+      hvac: /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i,
+      fabric: /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|masonry/i,
+      firestopping: /firestop|fire ?stop|fire ?barrier|penetration seal|intumescent/i,
+      "fire-alarms": /fire ?alarm|smoke detector|\bems\b|sprinkler|extinguisher|fire door/i,
+      joinery: /timber|worktop|shelv|cabinet|joinery|carpentry|counter|\bwood\b|\bdoor\b|hinge|\block/i,
+      decorating: /paint|decorat|wallpaper/i,
+      glazing: /glaz|\bglass\b|window ?pane|shopfront|shatter|toughened|perspex/i,
+      groundworks: /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|external area|grounds/i
     };
     DEFAULT_CONFIG3 = {
       priorities: {

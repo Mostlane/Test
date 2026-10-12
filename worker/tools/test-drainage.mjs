@@ -11,12 +11,13 @@ const JOBS = {
 const PERMS = { "Office Admin": ["SLAAdmin"], "Boss": ["FullAccess"], "Field Eng": [] };
 
 function makeEnv({ sendOk = true } = {}) {
-  const saved = {}; const idem = new Set(); const sent = []; const pushes = [];
+  const saved = {}; const idem = new Set(); const sent = []; const pushes = []; const appConfig = {};
   const rows = () => Object.values({ ...JOBS, ...saved });
   const db = { prepare(sql) { let b = []; const st = {
     bind(...a) { b = a; return st; },
     async first() {
       if (/FROM sla_jobs WHERE tenant_id = \? AND id = \?/.test(sql)) { const j = rows().find(j => j.id === b[1]); return j ? { data: JSON.stringify(j) } : null; }
+      if (/FROM app_config/.test(sql)) { const key = /key\s*=\s*\?/.test(sql) ? b[b.length - 1] : (sql.match(/key\s*=\s*'([^']+)'/) || [])[1]; return appConfig[key] != null ? { value: appConfig[key] } : null; }
       return null;
     },
     async all() {
@@ -29,6 +30,7 @@ function makeEnv({ sendOk = true } = {}) {
       if (/INSERT INTO idempotency/.test(sql)) { if (idem.has(b[1])) throw new Error("UNIQUE"); idem.add(b[1]); }
       if (/DELETE FROM idempotency/.test(sql)) idem.delete(b[0]);
       if (/INSERT INTO sla_jobs/.test(sql)) { const j = JSON.parse(b[b.length - 1]); saved[j.id] = j; }
+      if (/INSERT INTO app_config/.test(sql)) appConfig[b[1]] = b[2];   // (tenant_id, key, value)
       if (/INSERT INTO user_notifications/.test(sql)) pushes.push(b[3]);
       return { meta: { changes: 1 } };
     },
@@ -105,10 +107,31 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
 // retry reuses it (never allocates a second PO for the same works)
 { const E = makeEnv({ sendOk: false });
   const a = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
-  ok("email failure → 502, no sent record, lock released", a.status === 502 && !E.idem.has("subcon:metrorod:J-DRAIN") && !(E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subcontract), JSON.stringify(a.body));
+  const fail1 = E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subcontract;
+  ok("email failure → 502, lock released, a FAILED marker recorded (no sentAt)", a.status === 502 && !E.idem.has("subcon:metrorod:J-DRAIN") && fail1 && !fail1.sentAt && fail1.failedAt, JSON.stringify(a.body));
   ok("the PO was raised + kept for retry", E.poLog.length === 1 && E.saved["J-DRAIN"] && E.saved["J-DRAIN"].subconPO && E.saved["J-DRAIN"].subconPO.poNumber === 10011);
   const b = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });
-  ok("retry reuses the same PO, no second PO raised", b.status === 502 && E.poLog.length === 1); }
+  ok("retry reuses the same PO, no second PO raised", b.status === 502 && E.poLog.length === 1);
+  const c = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod" });  // signal comes back
+  // (sendOk is still false here, so still fails — just confirm a failed marker never blocks a retry)
+  ok("a failed marker never blocks a retry (not treated as 'already sent')", !c.body.already); }
+
+// generic send to a CONFIGURED subcontractor (not just Metro Rod), honouring its fields
+{ const E = makeEnv();
+  // seed a second subcontractor into the routing list via the admin POST
+  const save = await call(E, "Boss", "/subcontractors", { sub: { name: "L&B Glazing", to: "jobs@lbglaze.co.uk", trade: "Glazing", poDigits: 0, areas: ["glazing"], fields: { phone: false } } });
+  ok("Full Access can add a subcontractor to the routing list", save.status === 200 && save.body.list.some(s => s.key === "lbglazing"), JSON.stringify(save.body && save.body.list && save.body.list.map(s=>s.key)));
+  const la = await call(E, "Office Admin", "/jobs/J-TAP/subcontract", { to: "lbglazing" });
+  ok("send to the new subcontractor → emailed to ITS address", la.status === 200 && E.sent[E.sent.length-1].to === "jobs@lbglaze.co.uk", JSON.stringify(la.body && la.body.subcontract));
+  ok("subcontract record carries the right key + name", la.body.subcontract.key === "lbglazing" && la.body.subcontract.name === "L&B Glazing");
+  ok("its PO used NO padding (poDigits 0)", la.body.subcontract.poRef === String(la.body.subcontract.poNumber)); }
+
+// subcontractor config GET + normalisation
+{ const E = makeEnv();
+  const g = await call(E, "Office Admin", "/subcontractors", null, "GET");
+  ok("GET /subcontractors lists Metro Rod with its OOH default + areas", g.status === 200 && g.body.list.some(s => s.key === "metrorod" && s.ooh === true) && Array.isArray(g.body.areas), JSON.stringify(g.body && g.body.list && g.body.list.find(s=>s.key==="metrorod")));
+  const f = await call(E, "Field Eng", "/subcontractors", null, "GET");
+  ok("a field engineer can't read the subcontractor list", f.status === 403); }
 
 // override endpoint
 { const E = makeEnv();

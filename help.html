@@ -438,6 +438,13 @@
           ["Each job keeps a <b>conversation log</b> — the original incident email is stored against it, and you can add your own notes (calls, access arranged, updates). Open the job and scroll to <b>Conversation</b>."],
           ["<b>Open job card →</b> takes you to the full SLA job to schedule an engineer, add photos, complete it and so on — FBC Jobs is the tracking layer over the normal job."],
         ]},
+        { icon: "👷", title: "Send a job to a subcontractor", perms: ["SLAAdmin"], steps: [
+          ["Open the job (<b>job card</b>) and tap <b>📮 Send to subcontractor</b>. You'll see every subcontractor set up, with the best match for <b>this job</b> highlighted — it works out the trade from the description and checks who covers the area."],
+          ["Tap <b>Send</b> next to the one you want. The portal raises a <b>real PO in your PO system</b> (so it's a proper subcontractor order, tied to the job for costing) and emails them the order — with the details you chose to share. Metro Rod jobs go out with a 6-digit PO number."],
+          ["Once it's gone the job shows a green <b>✅ With &lt;name&gt;</b> and <b>Our PO number</b>. If an email ever fails you'll see a clear red <b>⚠ Send FAILED — Try sending again</b> (the PO is kept, so a re-send never makes a second one) — so you always know whether it actually went."],
+          ["A drainage job still shows the quick <b>Send to Metro Rod</b> prompt. <b>Out of hours</b>, if a job comes in that matches a subcontractor who does out-of-hours work, you'll get a notification suggesting them — tap it to send. Nothing ever goes out on its own; you always press Send."],
+          ["<b>Set them up:</b> on the job board tap <b>🛠 Tools → 👷 Subcontractors</b> (Full Access to edit). For each one set their <b>order email</b>, the <b>work areas</b> they cover, a <b>base postcode + coverage radius</b> (shown on a map), whether they do <b>out-of-hours</b> and which <b>job details</b> their email includes. <b>⤵ Import from the PO system</b> pulls in the names you already have."],
+        ]},
         { icon: "⚡", title: "My Day (guided mode)", perms: ["StoryMode"], steps: [
           ["Your whole day runs from <b>My Day</b> — three tabs across the top: <b>1 · Start</b>, <b>2 · Jobs</b>, <b>3 · Finish</b>.", "myday.png"],
           ["<b>Start:</b> on Wednesdays complete the weekly vehicle check (tick each item, note any defects), enter your van's mileage, and tap <b>▶ Start my day</b> — your start time and location are recorded."],

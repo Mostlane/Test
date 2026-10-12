@@ -1541,6 +1541,18 @@ export async function raiseSubcontractorPO(env, { supplier, trade, site, descrip
   return { error: "Could not allocate a PO number, please try again" };
 }
 
+// The active subcontractor NAMES from the PO system — so the SLA subcontractor
+// routing list (subcontractors.html) can import them in one tap rather than
+// retyping. Fails soft to [] when PO_DB is unbound or the table is missing.
+export async function listPoSubcontractorNames(env) {
+  const db = env && env.PO_DB;
+  if (!db) return [];
+  try {
+    const r = await db.prepare(`SELECT name FROM subcontractors WHERE active = 1 ORDER BY name`).all();
+    return (r.results || []).map(x => String(x.name || "").trim()).filter(Boolean);
+  } catch { return []; }
+}
+
 async function deletePoRecord(db, poNumber) {
   await db.prepare(`DELETE FROM po_log WHERE po_number = ?`).bind(poNumber).run();
   return { success: true };
