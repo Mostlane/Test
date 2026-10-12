@@ -5676,7 +5676,7 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
     FullAccess edit; `_headers` no-cache) is the management page — a card per
     subcontractor (name · active · to/cc/replyTo · PO trade + number length · work-area
     chips · base postcode [client geocoded via postcodes.io] + radius · what-to-send
-    field toggles · OOH + priorities), ＋ Add, ⤵ Import from the PO system, and a
+    field toggles · OOH + priorities) — each card is **collapsible, collapsed by default** (a one-line summary: email · areas · radius · OOH · inactive; tap the header/▸ to open; open state survives a save re-render; a new card opens), ＋ Add, ⤵ Import from the PO system, and a
     Leaflet **coverage map** of everyone's bubbles. **TODO/next:** a sidebar NAV entry
     (needs a portal-config `?v=` sweep); attach Metro Rod's reply/job-card emails to
     the job; fold subcontractor PO £ into job costing (it already rolls up via the
