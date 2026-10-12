@@ -254,7 +254,7 @@
   async function drawMap(){
     await loadLeaflet();
     if(!window.L){ $("map").innerHTML = '<div class="muted" style="padding:14px;">Map couldn’t load.</div>'; return; }
-    if(!mapObj){ mapObj = L.map("map").setView([51.0,-1.2], 7); L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{ attribution:"© OpenStreetMap, © CARTO", maxZoom:19 }).addTo(mapObj); }
+    if(!mapObj){ mapObj = L.map("map").setView([51.0,-1.2], 7); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{ attribution:"© OpenStreetMap", maxZoom:19 }).addTo(mapObj); }
     if(mapLayer){ mapObj.removeLayer(mapLayer); } mapLayer = L.layerGroup().addTo(mapObj);
     var pts = [];
     for(var i=0;i<SUBS.length;i++){
