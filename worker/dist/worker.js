@@ -15720,6 +15720,7 @@ __export(sla_exports, {
   stopSeries: () => stopSeries,
   stripMoney: () => stripMoney,
   stripPricing: () => stripPricing,
+  subcontractedRows: () => subcontractedRows,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
   unlinkOrderFromJob: () => unlinkOrderFromJob
@@ -17936,6 +17937,22 @@ async function handle12(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
+      if (b.name && !b.to) {
+        const name = String(b.name).trim().slice(0, 80);
+        const job2 = await getJob3(env, tenantId, id);
+        if (!job2) return jsonResponse({ error: "Not found" }, headers, 404);
+        if (job2.subcontract && job2.subcontract.sentAt && job2.subcontract.status !== "returned" && job2.subcontract.status !== "done")
+          return jsonResponse({ ok: true, already: true, subcontract: job2.subcontract }, headers);
+        const now3 = (/* @__PURE__ */ new Date()).toISOString();
+        job2.subcontract = { key: subKey(name), name, sentAt: now3, sentBy: sess.user.username, manual: true, status: "open", note: String(b.note || "").slice(0, 300) };
+        job2.events ||= [];
+        job2.events.push({ at: now3, by: sess.user.username, type: "subcontract", note: `Handed to ${name} (no email sent from the portal)${b.note ? " \u2014 " + String(b.note).slice(0, 200) : ""}` });
+        job2.updatedAt = now3;
+        await saveJob(env, tenantId, job2);
+        ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "\u{1F91D} Handed to " + name, body: `${job2.helpdeskRef || id} \u2014 by ${sess.user.username}` }).catch(() => {
+        }));
+        return jsonResponse({ ok: true, subcontract: job2.subcontract, job: decorateJobWithLiveSla(job2) }, headers);
+      }
       const key = String(b.to || "metrorod").toLowerCase();
       const cfgAll = await getSubconConfig(env, tenantId);
       const sc = cfgAll[key];
@@ -17964,7 +17981,7 @@ async function handle12(request, env, ctx, url, sess) {
         return jsonResponse({ error: "The email didn't send" + (r && (r.error || r.reason) ? " \u2014 " + String(r.error || r.reason).slice(0, 160) : "") + ". Nothing was recorded; try again." }, headers, 502);
       }
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
-      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref };
+      job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, status: "open" };
       job.events ||= [];
       job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) \u2014 "${mail.subject}"` });
       job.updatedAt = now2;
@@ -17972,6 +17989,38 @@ async function handle12(request, env, ctx, url, sess) {
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "\u{1F6BF} Sent to " + sc.name, body: `${job.helpdeskRef || id} \u2014 sent by ${sess.user.username}` }).catch(() => {
       }));
       return jsonResponse({ ok: true, subcontract: job.subcontract, job: decorateJobWithLiveSla(job) }, headers);
+    }
+    if (parts[2] === "subcontract-status" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson2(request);
+      const st = String(b.status || "").toLowerCase();
+      if (!["open", "done", "returned"].includes(st)) return jsonResponse({ error: "status must be open, done or returned" }, headers, 400);
+      const job = await getJob3(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
+      if (!job.subcontract) {
+        const name = String(b.name || "").trim().slice(0, 80);
+        if (!name) return jsonResponse({ error: "This job has no subcontractor \u2014 say who (name)" }, headers, 400);
+        job.subcontract = { key: subKey(name), name, sentAt: b.since && !isNaN(Date.parse(b.since)) ? new Date(b.since).toISOString() : now2, sentBy: "purchase order", manual: true, fromPo: true };
+      }
+      const sc = job.subcontract;
+      const was = sc.status || "open";
+      sc.status = st;
+      if (b.note != null) sc.note = String(b.note).slice(0, 300);
+      if (st === "open") {
+        delete sc.closedAt;
+        delete sc.closedBy;
+      } else {
+        sc.closedAt = now2;
+        sc.closedBy = sess.user.username;
+      }
+      const label2 = { open: "with " + sc.name, done: "done by " + sc.name, returned: "back with us from " + sc.name }[st];
+      job.events ||= [];
+      if (was !== st || b.note != null) job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Marked ${label2}${sc.note ? " \u2014 " + sc.note : ""}` });
+      job.updatedAt = now2;
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, subcontract: sc, job: decorateJobWithLiveSla(job) }, headers);
     }
     if (parts[2] === "subcontract-clear" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -18221,6 +18270,45 @@ async function handle12(request, env, ctx, url, sess) {
       if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) dOut = stripMoney(dOut);
       return jsonResponse(dOut, headers);
     }
+  }
+  if (subpath === "/subcontracted" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const money2 = await canSeeMoney(env, tenantId, sess.user.username);
+    const out = await subcontractedRows(env, tenantId, money2);
+    if (searchParams.get("count")) return jsonResponse({ ok: true, open: out.rows.filter((r) => r.state === "open").length }, headers);
+    return jsonResponse({ ok: true, money: money2, ...out }, headers);
+  }
+  if (subpath === "/subcontracted/po-status" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const key = String(b.key || "");
+    const st = String(b.status || "").toLowerCase();
+    if (!/^po:\d+$/.test(key) || !["open", "done", "returned"].includes(st)) return jsonResponse({ error: "key po:<number> + status open|done|returned" }, headers, 400);
+    const map = await getPoOnlyClosed(env, tenantId);
+    if (st === "open") delete map[key];
+    else map[key] = { status: st, at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username };
+    await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:subconpo:" + tenantId, JSON.stringify(map)).run();
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/subcontractors" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const names = /* @__PURE__ */ new Map();
+    const cfg = await getSubconConfig(env, tenantId);
+    for (const [k, v] of Object.entries(cfg)) names.set(subKey(v.name), { name: v.name, emailKey: k });
+    if (env.PO_DB) {
+      try {
+        const r = await env.PO_DB.prepare("SELECT name FROM subcontractors WHERE COALESCE(active,1)=1 ORDER BY name").all();
+        for (const x of r.results || []) {
+          const k = subKey(x.name);
+          if (k && !names.has(k)) names.set(k, { name: x.name });
+        }
+      } catch {
+      }
+    }
+    return jsonResponse({ ok: true, subcontractors: [...names.values()].sort((a, b) => a.name.localeCompare(b.name)) }, headers);
   }
   if (subpath === "/quotes" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Unauthorized" }, headers, 401);
@@ -19287,7 +19375,7 @@ async function jobFinishedFor(env, tenantId) {
   };
 }
 function incidentKey(ref) {
-  const m = /^0*(\d{5,12})(?:\/(\d{1,3}))?(?:\s*-.*)?$/s.exec(String(ref || "").trim());
+  const m = /^0*(\d{5,12})(?:\/(\d{1,3}))?(?:\s*[-\s].*)?$/s.exec(String(ref || "").trim());
   return m ? { inc: m[1], suf: m[2] || "" } : null;
 }
 async function jobsForIncidentKey(env, tenantId, inc) {
@@ -21897,6 +21985,122 @@ function buildMetroRodEmail(job, hours) {
 <tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref };
+}
+function subKey(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+async function subcontractedRows(env, tid, money2) {
+  const jobs = await listJobs(env, tid);
+  const finished = await jobFinishedFor(env, tid);
+  const byId = new Map(jobs.map((j) => [j.id, j]));
+  const byInc = /* @__PURE__ */ new Map();
+  for (const j of jobs) {
+    const k = incidentKey(j.helpdeskRef);
+    if (!k) continue;
+    const list2 = byInc.get(k.inc) || [];
+    list2.push(j);
+    byInc.set(k.inc, list2);
+  }
+  const pickForInc = (inc) => {
+    const list2 = byInc.get(inc) || [];
+    const open = list2.filter((j) => !finished(j)).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return open[0] || list2.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0] || null;
+  };
+  let pos = [];
+  if (env.PO_DB) {
+    try {
+      const since = new Date(Date.now() - 180 * 864e5).toISOString();
+      pos = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name FROM po_log WHERE cost_category='subcontractor' AND COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
+    } catch {
+      pos = [];
+    }
+  }
+  const rows = /* @__PURE__ */ new Map();
+  const rowFor = (j) => {
+    let r = rows.get(j.id);
+    if (!r) {
+      r = {
+        key: j.id,
+        jobId: j.id,
+        ref: j.helpdeskRef || j.id,
+        siteCode: j.siteCode || "",
+        siteName: j.siteName || "",
+        postcode: j.postcode || "",
+        description: String(j.description || "").slice(0, 300),
+        jobStatus: j.status || "",
+        priority: j.priority || "",
+        jobFinished: finished(j),
+        drainage: isDrainageJob(j),
+        record: j.subcontract || null,
+        pos: [],
+        subs: []
+      };
+      rows.set(j.id, r);
+    }
+    return r;
+  };
+  for (const j of jobs) if (j.subcontract && j.subcontract.sentAt) rowFor(j);
+  for (const p of pos) {
+    let j = null;
+    if (p.job_id && byId.has(p.job_id)) j = byId.get(p.job_id);
+    if (!j) {
+      const k = incidentKey(p.incident_no) || incidentKey(p.job_ref) || incidentKey((/incident\D{0,6}(\d{5,8})/i.exec(p.description || "") || [])[1]);
+      if (k) j = pickForInc(k.inc);
+    }
+    const po = { number: p.po_number, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...money2 ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {} };
+    if (j) rowFor(j).pos.push(po);
+    else rows.set("po:" + p.po_number, {
+      key: "po:" + p.po_number,
+      jobId: null,
+      ref: p.incident_no || p.job_ref || "",
+      siteCode: "",
+      siteName: p.site || "",
+      postcode: "",
+      description: String(p.description || "").slice(0, 300),
+      jobStatus: "",
+      priority: "",
+      jobFinished: false,
+      drainage: false,
+      record: null,
+      pos: [po],
+      subs: []
+    });
+  }
+  const now2 = Date.now();
+  const list = [...rows.values()].map((r) => {
+    const names = /* @__PURE__ */ new Map();
+    if (r.record && r.record.name) names.set(subKey(r.record.name), r.record.name);
+    for (const p of r.pos) if (p.supplier && !names.has(subKey(p.supplier))) names.set(subKey(p.supplier), p.supplier);
+    r.subs = [...names.values()];
+    r.subKeys = [...names.keys()];
+    const starts = [r.record && r.record.sentAt, ...r.pos.map((p) => p.issuedAt)].filter(Boolean).sort();
+    r.since = starts[0] || null;
+    r.sentBy = r.record && r.record.sentBy || r.pos[0] && r.pos[0].by || "";
+    const rs = r.record && r.record.status;
+    r.state = rs === "done" || rs === "returned" ? rs : r.jobFinished ? "done" : "open";
+    r.closedAt = r.record && r.record.closedAt || null;
+    r.days = r.since ? Math.max(0, Math.floor((now2 - Date.parse(r.since)) / 864e5)) : null;
+    if (money2) {
+      const priced = r.pos.filter((p) => p.cost != null);
+      r.poTotal = priced.reduce((a, p) => a + p.cost, 0);
+      r.poUnpriced = r.pos.length - priced.length;
+    }
+    return r;
+  }).sort((a, b) => String(b.since || "").localeCompare(String(a.since || "")));
+  const poClosed = await getPoOnlyClosed(env, tid);
+  for (const r of list) if (!r.jobId && poClosed[r.key]) {
+    r.state = poClosed[r.key].status;
+    r.closedAt = poClosed[r.key].at;
+  }
+  return { rows: list };
+}
+async function getPoOnlyClosed(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subconpo:" + tid).first();
+    return row ? JSON.parse(row.value) || {} : {};
+  } catch {
+    return {};
+  }
 }
 function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);

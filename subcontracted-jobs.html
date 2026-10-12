@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Subcontracted Jobs</title>
+  <script src="/portal-config.js?v=42"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --amber:#b45309; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    header.page .btn.ghost{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);}
+    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px;}
+    .chip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#334;}
+    .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    .chip .n{opacity:.8;font-weight:700;margin-left:4px;}
+    input{padding:7px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:13.5px;background:#fff;color:#0f2438;}
+    .tot{margin-left:auto;font-size:13px;color:#334;}
+    .grp{font-size:13px;font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:.04em;margin:16px 2px 6px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:11px 14px;margin-bottom:8px;border-left:5px solid #0369a1;}
+    .card.done{border-left-color:var(--ok);} .card.returned{border-left-color:#64748b;} .card.late{border-left-color:var(--amber);} .card.vlate{border-left-color:var(--bad);}
+    .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;}
+    .ref{font-weight:800;font-size:15px;color:var(--brand);text-decoration:none;}
+    .days{margin-left:auto;font-weight:800;font-size:13.5px;white-space:nowrap;}
+    .days.late{color:var(--amber);} .days.vlate{color:var(--bad);}
+    .site{font-weight:600;margin-top:2px;}
+    .desc{font-size:13px;color:#475569;margin:4px 0;white-space:pre-wrap;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+    .p-sub{background:#e0f2fe;color:#075985;} .p-job{background:#f1f5f9;color:#334155;} .p-po{background:#f5f3ff;color:#5b21b6;} .p-warn{background:#fef3c7;color:#92400e;}
+    .meta{font-size:12.5px;color:#64748b;margin-top:4px;}
+    .pos{margin-top:6px;font-size:12.5px;color:#334155;}
+    .pos div{padding:2px 0;}
+    .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);}
+    .btn.green{background:var(--ok);}
+    .btn[disabled]{opacity:.55;cursor:default;}
+    .msg.err{color:var(--bad);font-size:13px;}
+    #forbidden{display:none;background:#fff;border:1px solid #fecaca;border-radius:14px;padding:18px;margin-top:20px;color:#7f1d1d;}
+    .help{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px;color:#475569;margin-bottom:10px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html?reset=1" style="text-decoration:none;">‹ Back</a>
+    <h1>🤝 Jobs with subcontractors</h1>
+    <button class="btn ghost" id="refresh">↻</button>
+  </header>
+  <div class="wrap">
+    <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
+    <div id="board">
+      <div class="help">Every job sent to Metro Rod or handed to a subcontractor from the job card, plus every <b>subcontractor purchase order</b> from the last 6 months (matched to its job by the incident number). A job drops to <b>Done</b> when it's finished or when you tick it off here.</div>
+      <div class="bar" id="tabBar"></div>
+      <div class="bar" id="subBar"></div>
+      <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
+      <div id="list"><p class="muted" style="padding:18px 4px;">Loading…</p></div>
+    </div>
+  </div>
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+  const authFetch = (p, o = {}) => { o.headers = Object.assign({ "Authorization":"Bearer " + localStorage.getItem("mostlaneToken") }, o.headers || {}); return fetch(API + p, o); };
+  const money = n => (n == null || !isFinite(Number(n))) ? "" : "£" + Number(n).toLocaleString("en-GB", { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const fmtD = iso => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"2-digit" }); };
+  const subKey = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  let DATA = { rows: [], money: false };
+  let tab = "open", sub = "";
+  try { tab = localStorage.getItem("mlSubconTab") || "open"; } catch (e) {}
+  const TABS = [["open","With them"],["done","Done"],["returned","Back with us"],["all","All"]];
+
+  async function load() {
+    let d = null;
+    try { d = await authFetch("/sla/subcontracted").then(r => r.json()); } catch (e) {}
+    if (!d || !d.ok) {
+      if (d && /Forbidden/i.test(d.error || "")) { g("forbidden").style.display = "block"; g("board").style.display = "none"; return; }
+      g("list").innerHTML = '<p class="msg err" style="padding:12px 4px;">Couldn\'t load' + (d && d.error ? ": " + esc(d.error) : " — check your connection and tap ↻.") + '</p>'; return;
+    }
+    DATA = d; render();
+  }
+
+  function render() {
+    const rows = DATA.rows || [];
+    const inTab = r => tab === "all" || r.state === tab;
+    g("tabBar").innerHTML = TABS.map(([k, l]) => `<button class="chip${tab === k ? " on" : ""}" data-tab="${k}">${l}<span class="n">${rows.filter(r => k === "all" || r.state === k).length}</span></button>`).join("");
+    const subs = new Map();
+    rows.filter(inTab).forEach(r => (r.subs.length ? r.subs : ["Unknown"]).forEach(n => { const k = subKey(n); const e = subs.get(k) || { name:n, n:0 }; e.n++; subs.set(k, e); }));
+    if (sub && !subs.has(sub)) sub = "";
+    g("subBar").innerHTML = `<button class="chip${!sub ? " on" : ""}" data-sub="">Everyone</button>` +
+      [...subs.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, e]) => `<button class="chip${sub === k ? " on" : ""}" data-sub="${esc(k)}">${esc(e.name)}<span class="n">${e.n}</span></button>`).join("");
+    const q = g("q").value.trim().toLowerCase();
+    const list = rows.filter(inTab)
+      .filter(r => !sub || (r.subs.length ? r.subs.map(subKey) : ["unknown"]).includes(sub))
+      .filter(r => !q || [r.ref, r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
+    let tot = list.length + " job" + (list.length === 1 ? "" : "s");
+    if (DATA.money) { const t = list.reduce((a, r) => a + (r.poTotal || 0), 0); if (t) tot += " · POs " + money(t); }
+    g("tot").textContent = tot;
+    if (!list.length) { g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">Nothing here.</p>'; return; }
+    // group by first subcontractor
+    const groups = new Map();
+    list.forEach(r => { const n = r.subs[0] || "Unknown"; const k = subKey(n); if (!groups.has(k)) groups.set(k, { name:n, rows:[] }); groups.get(k).rows.push(r); });
+    g("list").innerHTML = [...groups.values()].map(gr => `<div class="grp">${esc(gr.name)} · ${gr.rows.length}</div>` + gr.rows.map(card).join("")).join("");
+  }
+
+  function card(r) {
+    const late = r.state === "open" && r.days != null ? (r.days > 7 ? "vlate" : r.days > 3 ? "late" : "") : "";
+    const cls = r.state !== "open" ? r.state : late;
+    const site = [r.siteCode, r.siteName].filter(Boolean).join(" ");
+    const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>` : `<span class="ref">${esc(r.ref ? "Incident " + r.ref : "PO " + r.pos[0].number)}</span>`;
+    const days = r.days == null ? "" : r.state === "open" ? `<span class="days ${late}">${r.days === 0 ? "today" : r.days + " day" + (r.days === 1 ? "" : "s")} with them</span>`
+      : `<span class="days" style="color:#166534">${r.state === "done" ? "✓ done" : "↩ back with us"}${r.closedAt ? " " + esc(fmtD(r.closedAt)) : ""}</span>`;
+    const pills = [r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>` : `<span class="pill p-warn">PO only — no job found</span>`]
+      .concat(r.subs.map(n => `<span class="pill p-sub">${esc(n)}</span>`)).join(" ");
+    const rec = r.record;
+    const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
+    const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}`;
+    const pos = r.pos.length ? `<div class="pos">${r.pos.map(p => `<div><span class="pill p-po">PO ${esc(p.number)}</span> ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + (p.cost == null ? '<span style="color:#b45309">not priced</span>' : esc(money(p.cost))) : ""}</div>`).join("")}</div>` : "";
+    const btn = (st, label, c) => `<button class="btn ${c || "ghost"}" data-act="${st}" data-key="${esc(r.key)}">${label}</button>`;
+    const acts = (r.state === "open" ? btn("done", "✓ Done by them", "green") + btn("returned", "↩ Back with us") : btn("open", "Reopen — still with them")) +
+      (r.jobId ? ` <a class="btn ghost" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">Open job</a>` : "");
+    return `<div class="card ${cls}"><div class="top">${refHtml} ${pills}${days}</div>
+      <div class="site">${esc(site || "—")}</div>
+      ${r.description ? `<div class="desc">${esc(r.description)}</div>` : ""}
+      <div class="meta">${meta}</div>${pos}<div class="acts">${acts}</div></div>`;
+  }
+
+  async function setState(key, st, btn) {
+    const r = (DATA.rows || []).find(x => x.key === key); if (!r) return;
+    btn.disabled = true;
+    try {
+      let res;
+      if (r.jobId) res = await authFetch("/sla/jobs/" + encodeURIComponent(r.jobId) + "/subcontract-status", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ status: st, name: r.subs[0] || "", since: r.since }) });
+      else res = await authFetch("/sla/subcontracted/po-status", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ key, status: st }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
+    } catch (e) { alert("Couldn't do that: " + (e.message || e)); btn.disabled = false; return; }
+    load();
+  }
+
+  document.addEventListener("click", e => {
+    const t = e.target.closest("[data-tab],[data-sub],[data-act]"); if (!t) return;
+    if (t.dataset.tab) { tab = t.dataset.tab; try { localStorage.setItem("mlSubconTab", tab); } catch (x) {} render(); }
+    else if (t.dataset.sub != null && !t.dataset.act) { sub = t.dataset.sub; render(); }
+    else if (t.dataset.act) setState(t.dataset.key, t.dataset.act, t);
+  });
+  g("q").addEventListener("input", render);
+  g("refresh").onclick = load;
+  load();
+</script>
+</body>
+</html>

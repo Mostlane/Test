@@ -5549,7 +5549,28 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `drainTag`** (🚿 Metro Rod? / 🚿 With Metro Rod <when>); **sla-scheduler** drops a
   sent job with no engineer from the tray/suggestions. Metro Rod's own replies/job
   cards still drop as `metrorod-report` notices (TODO: attach them to the job).
-  Test `node --no-warnings worker/tools/test-drainage.mjs` (23 cases). **Cut-over:**
+  Test `node --no-warnings worker/tools/test-drainage.mjs` (38 cases).
+  **🤝 Jobs with subcontractors — subcontracted-jobs.html (12 Oct 2026).** One list of
+  everything sat with a subcontractor (🤝 Subcontractors button + open-count badge on
+  sla-main, SLA-admin). Built from TWO sources because the office mostly records sub
+  work as a **subcontractor PO** (`po_log.cost_category='subcontractor'` — 13 since Aug,
+  none carrying job_id): (1) `job.subcontract` (the Metro Rod send, or a manual
+  **"🤝 Hand to a subcontractor"** on job-view = POST /sla/jobs/{id}/subcontract
+  `{name, note}` with NO `to` → record only, no email); (2) subcontractor POs from the
+  last 180 days, matched to a job by job_id else `incidentKey(incident_no | job_ref |
+  "Incident - NNNNN" in the description)`; an unmatched PO is still listed ("PO only").
+  `subcontractedRows()` (sla.js, exported) merges them per job, names collapse by
+  `subKey` ("Metrorod" = "Metro Rod"). `job.subcontract.status` = open|done|returned
+  (+ closedAt/closedBy/note) via **POST /sla/jobs/{id}/subcontract-status** (creates a
+  `fromPo` record for a PO-matched job); a PO-only row closes via **POST
+  /sla/subcontracted/po-status** `{key:"po:N", status}` (app_config `sla:subconpo:<tid>`).
+  State: office-set done/returned wins, else a finished job = done, else open. **GET
+  /sla/subcontracted** (`?count=1` → `{open}`), **GET /sla/subcontractors** (PO list +
+  email config, for the hand-off picker). £ (PO costs) only for canSeeMoney. Page: With
+  them / Done / Back with us / All tabs, per-subcontractor chips, grouped cards with
+  "N days with them" (amber >3, red >7). A "returned" job reappears in the scheduler
+  tray. `incidentKey` now also reads a SPACE after the number ("30389 Brislington DTU").
+  NOT in the portal-config sidebar (would need a ?v= bump across every page). **Cut-over:**
   turn the drainage Zap OFF when this goes live — the two locks are separate systems,
   so both running could email Metro Rod twice.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen

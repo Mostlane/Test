@@ -270,6 +270,7 @@
             <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
             <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
             <a href="client-orders.html" class="btn" id="ordersLink" style="display:none">📥 Client orders</a>
+            <a href="subcontracted-jobs.html" class="btn" id="subconLink" style="display:none">🤝 Subcontractors<span id="subconBadge" style="display:none;background:#0369a1;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="quotes.html" class="btn" id="quotesLink" style="display:none">💷 Quotes<span id="quotesBadge" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:0 7px;margin-left:6px;font-size:12px;font-weight:700"></span></a>
             <a href="concerto-stats.html" class="btn" id="coopStatsLink" style="display:none">📊 Co-op stats</a>
             <a href="cert-review.html" class="btn" id="pumpReviewLink" style="display:none">🚰 Pump review</a>
@@ -291,6 +292,14 @@
           document.getElementById("archiveLink").style.display = "";
           var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           var csl = document.getElementById("coopStatsLink"); if (csl) csl.style.display = "";
+          var sl = document.getElementById("subconLink");
+          if (sl) { sl.style.display = "";
+            try{ var tk=localStorage.getItem("mostlaneToken")||"";
+              fetch((window.MOSTLANE_API||"")+"/sla/subcontracted?count=1",{headers:tk?{Authorization:"Bearer "+tk}:{}}).then(function(r){return r.json();}).then(function(d){
+                var n=d&&d.open||0, b=document.getElementById("subconBadge"); if(b&&n>0){ b.textContent=n; b.style.display=""; }
+              }).catch(function(){});
+            }catch(e){}
+          }
           var ql = document.getElementById("quotesLink");
           if (ql) { ql.style.display = "";
             // Awaiting-quote count badge (best-effort; API bypasses the SW).
@@ -742,7 +751,11 @@ function cancelTag(j){
    not yet sent; green "With Metro Rod" (+ when) once sent. Opened on the job card. */
 function drainTag(j){
   const sc = j.subcontract;
-  if(sc && sc.sentAt) return ` <span class="drain-tag sent" title="${esc("Sent to " + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : ""))}">🚿 With ${esc(sc.name||"Metro Rod")} ${esc(fmtWhen(sc.sentAt))}</span>`;
+  if(sc && sc.sentAt){
+    const st = sc.status || "open", ic = sc.key === "metrorod" ? "🚿" : "🤝";
+    const lbl = st === "done" ? "✅ Done by " + (sc.name||"") : st === "returned" ? "↩ Back from " + (sc.name||"") : ic + " With " + (sc.name||"Metro Rod") + " " + fmtWhen(sc.sentAt);
+    return ` <span class="drain-tag sent" title="${esc((sc.manual ? "Handed to " : "Sent to ") + (sc.name||"Metro Rod") + " " + fmtShort(parseDate(sc.sentAt)) + (sc.sentBy ? " by " + sc.sentBy : ""))}">${esc(lbl)}</span>`;
+  }
   if(j.drainage && !["Complete","Closed Jobs","Invoiced","Cancelled"].includes(j.status)) return ` <span class="drain-tag" title="Reads like a drainage job — open it to send to Metro Rod">🚿 Metro Rod?</span>`;
   return "";
 }

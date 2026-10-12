@@ -871,7 +871,7 @@ async function loadJobs(){
     .filter(j => !["Closed Jobs","Invoiced","Cancelled"].includes(j.status))
     // 🚿 a job sent to Metro Rod is theirs — keep it out of the tray + suggestions
     // unless one of our engineers is still on it.
-    .filter(j => !(j.subcontract && j.subcontract.sentAt && !(j.assignedEngineers || []).length));
+    .filter(j => !(j.subcontract && j.subcontract.sentAt && (j.subcontract.status || "open") !== "returned" && !(j.assignedEngineers || []).length));
 }
 
 // Approved holidays overlaid on the board so you never schedule someone on leave.

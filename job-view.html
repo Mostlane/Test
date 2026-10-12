@@ -1842,17 +1842,25 @@ function renderDrainBanner(){
   const sc = job.subcontract;
   const when = iso => { const d = parseDate(iso); return d ? fmtDateTimeLong(d) : ""; };
   if(sc && sc.sentAt){
+    const icon = sc.key === "metrorod" ? "🚿" : "🤝";
+    const st = sc.status || "open";
     el.className = "drain-banner sent";
-    el.innerHTML = "<b>🚿 With " + esc(sc.name || "Metro Rod") + "</b> — sent " + esc(when(sc.sentAt)) + (sc.sentBy ? " by " + esc(sc.sentBy) : "") +
-      "<br><span style=\"font-size:12.5px;opacity:.85\">Emailed to " + esc(sc.to || "") + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") + "</span>" +
-      (isFullAccessJV() ? '<div class="db-btns"><button class="db-link" data-db="clear">Clear this record (sent by mistake)</button></div>' : "");
+    const head = st === "done" ? "✅ Done by " + esc(sc.name) : st === "returned" ? "↩ Back with us from " + esc(sc.name) : icon + " With " + esc(sc.name || "Metro Rod");
+    el.innerHTML = "<b>" + head + "</b> — " + (sc.manual ? "handed over " : "sent ") + esc(when(sc.sentAt)) + (sc.sentBy ? " by " + esc(sc.sentBy) : "") +
+      (st !== "open" && sc.closedAt ? " · marked " + esc(when(sc.closedAt)) + (sc.closedBy ? " by " + esc(sc.closedBy) : "") : "") +
+      "<br><span style=\"font-size:12.5px;opacity:.85\">" + (sc.to ? "Emailed to " + esc(sc.to) + (sc.subject ? " · “" + esc(sc.subject) + "”" : "") : "No email sent from the portal") + (sc.note ? " · " + esc(sc.note) : "") + "</span>" +
+      '<div class="db-btns">' + (st === "open"
+        ? '<button class="db-go" data-db="st-done">✓ Done by them</button><button class="db-no" data-db="st-returned">↩ Back with us</button>'
+        : '<button class="db-no" data-db="st-open">Reopen — still with them</button>') +
+      '<a class="db-link" href="subcontracted-jobs.html" style="align-self:center">All jobs with subcontractors →</a>' +
+      (isFullAccessJV() ? '<button class="db-link" data-db="clear">Clear this record</button>' : "") + '</div>';
   } else if(job.drainage){
     el.className = "drain-banner";
     el.innerHTML = "<b>🚿 Possible Metro Rod job</b> — this reads like a drainage job." +
       '<div class="db-btns"><button class="db-go" data-db="send">Send to Metro Rod</button><button class="db-no" data-db="no">Not drainage</button></div>';
   } else if(!["Complete","Closed Jobs","Invoiced","Cancelled"].includes(job.status)){
     el.className = "drain-banner"; el.style.background = "transparent"; el.style.border = "0"; el.style.padding = "0 2px";
-    el.innerHTML = '<button class="db-link" data-db="yes" style="font-size:13px">🚿 Mark as drainage (Metro Rod)</button>';
+    el.innerHTML = '<button class="db-link" data-db="yes" style="font-size:13px">🚿 Mark as drainage (Metro Rod)</button> <button class="db-link" data-db="hand" style="font-size:13px;margin-left:10px">🤝 Hand to a subcontractor</button>';
   } else { el.style.display = "none"; return; }
   if(el.className.indexOf("sent") >= 0 || job.drainage){ el.style.background = ""; el.style.border = ""; el.style.padding = ""; }
   el.style.display = "";
@@ -1876,6 +1884,12 @@ async function drainAction(act, btn){
       const r = await post("/drainage", { value: act === "yes" }); const d = await r.json().catch(()=>({}));
       if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       job = d;
+    } else if(act.indexOf("st-") === 0){
+      const r = await post("/subcontract-status", { status: act.slice(3) }); const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      if(d.job) job = d.job;
+    } else if(act === "hand"){
+      return openHandForm();
     } else if(act === "clear"){
       const ok = window.MLUI ? await MLUI.confirm("Forget that this was sent to Metro Rod? (It does NOT recall the email — use this only if it was sent by mistake or needs sending again.)", { title:"Clear sent record", okLabel:"Clear", danger:true }) : confirm("Clear the sent record?");
       if(!ok) return;
@@ -1885,6 +1899,31 @@ async function drainAction(act, btn){
     }
   }catch(e){ alert("Couldn't do that: " + (e.message || e)); }
   renderDrainBanner();
+}
+/* 🤝 Hand a job to any subcontractor (record only — no email; ring/email them as usual). */
+async function openHandForm(){
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const el = $("drainBanner"); if(!el) return;
+  el.className = "drain-banner"; el.style.background = ""; el.style.border = ""; el.style.padding = "";
+  el.innerHTML = "<b>🤝 Hand to a subcontractor</b><div style=\"font-size:12.5px;opacity:.85\">Records that this job is with them — the portal doesn't email them.</div>" +
+    '<div class="db-btns" style="flex-wrap:wrap"><input list="subconList" id="handName" placeholder="Who? (pick or type)" style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;min-width:200px">' +
+    '<datalist id="subconList"></datalist><input id="handNote" placeholder="Note (optional)" style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;flex:1;min-width:160px">' +
+    '<button class="db-go" id="handGo">Hand over</button><button class="db-no" id="handCancel">Cancel</button></div>';
+  $("handCancel").onclick = () => renderDrainBanner();
+  try{ const r = await mApi("/sla/subcontractors"); const d = await r.json(); $("subconList").innerHTML = (d.subcontractors||[]).map(x => '<option value="' + esc(x.name) + '">').join(""); }catch(e){}
+  $("handGo").onclick = async () => {
+    const name = $("handName").value.trim(); if(!name){ $("handName").focus(); return; }
+    const id = (job && job.id) || getJobIdFromQuery();
+    $("handGo").disabled = true;
+    try{
+      const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, note: $("handNote").value.trim() }) });
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      if(d.already) alert("Already with " + ((d.subcontract && d.subcontract.name) || "a subcontractor") + ".");
+      if(d.job) job = d.job; else if(d.subcontract) job.subcontract = d.subcontract;
+    }catch(e){ alert("Couldn't do that: " + (e.message || e)); }
+    renderDrainBanner();
+  };
 }
 /* ---- ❌ Cancelled banner: WHEN, by whom, why (Sep 2026) ---- */
 function renderCancelBanner(){
