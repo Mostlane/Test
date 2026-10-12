@@ -186,7 +186,7 @@
     const rec = r.record;
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
     const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
-    const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
+    const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" data-from="${esc(r.jobId)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
     html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
     return html;
   }
@@ -238,9 +238,9 @@
     if (!d.jobs.length) { g("linkRes").innerHTML = '<p class="muted">No jobs found.</p>'; return; }
     g("linkRes").innerHTML = d.jobs.map(j => `<div class="lr" data-pick="${esc(j.id)}"><b>${esc(j.ref)}</b> · ${esc([j.siteCode, j.siteName].filter(Boolean).join(" "))} <span class="pill p-job">${esc(j.status)}</span> <span class="muted2">${esc(fmtD(j.createdAt))}</span><div class="muted2">${esc(j.description)}</div></div>`).join("");
   }
-  async function doLink(po, jobId) {
+  async function doLink(po, jobId, fromJobId) {
     try {
-      const res = await authFetch("/sla/subcontracted/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ po, jobId }) });
+      const res = await authFetch("/sla/subcontracted/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ po, jobId, fromJobId }) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
     } catch (e) { alert("Couldn't do that: " + (e.message || e)); return false; }
@@ -269,7 +269,7 @@
     const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick]"); if (!t) return;
     if (t.dataset.link) { openLink(t.dataset.link); return; }
     if (t.dataset.pick) { doLink(LINK_PO, t.dataset.pick); return; }
-    if (t.dataset.unlink) { (async () => { const ok = window.MLUI ? await MLUI.confirm("Unlink PO " + t.dataset.unlink + " from this job? It will show as a PO on its own.", { title:"Unlink PO" }) : confirm("Unlink PO " + t.dataset.unlink + "?"); if (ok) doLink(t.dataset.unlink, null); })(); return; }
+    if (t.dataset.unlink) { (async () => { const ok = window.MLUI ? await MLUI.confirm("Unlink PO " + t.dataset.unlink + " from this job? It will show as a PO on its own.", { title:"Unlink PO" }) : confirm("Unlink PO " + t.dataset.unlink + "?"); if (ok) doLink(t.dataset.unlink, null, t.dataset.from); })(); return; }
     if (t.dataset.sort) { const k = t.dataset.sort; if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "days" || k === "since" || k === "cost") ? -1 : 1; } render(); return; }
     if (t.dataset.det) { const k = t.dataset.det; if (OPENDET.has(k)) OPENDET.delete(k); else OPENDET.add(k); render(); return; }
     if (t.dataset.tab) { tab = t.dataset.tab; try { localStorage.setItem("mlSubconTab", tab); } catch (x) {} render(); }

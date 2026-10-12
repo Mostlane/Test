@@ -2937,7 +2937,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await readJson(request);
     const po = String(b.po || "").replace(/^po:/i, "").trim();
     if (!/^\d+$/.test(po)) return jsonResponse({ error: "po number required" }, headers, 400);
-    const row = await env.PO_DB.prepare("SELECT po_number FROM po_log WHERE po_number=?").bind(po).first().catch(() => null);
+    const row = await env.PO_DB.prepare("SELECT po_number, supplier, issued_at, job_id, incident_no, job_ref, description FROM po_log WHERE po_number=?").bind(po).first().catch(() => null);
     if (!row) return jsonResponse({ error: "PO " + po + " not found" }, headers, 404);
     const map = await getPoOnlyClosed(env, tenantId);
     let job = null;
@@ -2950,9 +2950,24 @@ export async function handle(request, env, ctx, url, sess) {
       const now = new Date().toISOString();
       job.events ||= [];
       job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Subcontractor PO ${po} linked to this job` });
+      // so the SLA board + job card show it's with the subcontractor
+      if (!job.subcontract && row.supplier) job.subcontract = poSubconRecord(row, (await jobFinishedFor(env, tenantId))(job), sess.user.username);
       await saveJob(env, tenantId, job);
     } else {
+      // drop the "with a subcontractor" record this PO put on the job (by link or incident match)
+      const ids = new Set();
+      if (row.job_id) ids.add(String(row.job_id));
+      if (b.fromJobId) ids.add(String(b.fromJobId));
       await env.PO_DB.prepare("UPDATE po_log SET job_id=NULL, job_ref=NULL WHERE po_number=?").bind(po).run();
+      for (const jid of ids) {
+        const j = await getJob(env, tenantId, jid).catch(() => null);
+        if (j && j.subcontract && j.subcontract.fromPo && String(j.subcontract.poNumber) === String(row.po_number)) {
+          delete j.subcontract;
+          j.events ||= [];
+          j.events.push({ at: new Date().toISOString(), by: sess.user.username, type: "subcontract", note: `Subcontractor PO ${po} unlinked from this job` });
+          await saveJob(env, tenantId, j);
+        }
+      }
       map["nolink:po:" + po] = { at: new Date().toISOString(), by: sess.user.username };
     }
     await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:subconpo:" + tenantId, JSON.stringify(map)).run();
@@ -6909,6 +6924,7 @@ export async function subcontractedRows(env, tid, money) {
     return null;
   };
   const poMap = await getPoOnlyClosed(env, tid);
+  const stamp = [];   // PO-matched jobs that get their "with a subcontractor" record now
   const rows = new Map();
   const rowFor = (j) => {
     let r = rows.get(j.id);
@@ -6927,10 +6943,21 @@ export async function subcontractedRows(env, tid, money) {
     if (p.job_id && byId.has(p.job_id)) { j = byId.get(p.job_id); how = "linked"; }
     if (!j && !poMap["nolink:po:" + p.po_number]) { const k = incidentKey(p.incident_no) || incidentKey(p.job_ref) || incidentKey((/incident\D{0,6}(\d{5,8})/i.exec(p.description || "") || [])[1]); if (k) { j = pickForInc(k.inc); if (j) how = "incident"; } }
     const po = { number: p.po_number, match: how, issuedAt: p.issued_at, supplier: p.supplier || "", trade: p.trade || "", description: String(p.description || "").slice(0, 200), by: p.office_user_name || p.engineer_name || "", ...(money ? { cost: p.cost_ex_vat == null ? null : Number(p.cost_ex_vat) } : {}) };
-    if (j) rowFor(j).pos.push(po);
+    if (j) {
+      const r0 = rowFor(j);
+      r0.pos.push(po);
+      if (!j.subcontract && p.supplier) {
+        j.subcontract = poSubconRecord(p, finished(j), "system");
+        r0.record = j.subcontract;
+        stamp.push(j);
+      }
+    }
     else rows.set("po:" + p.po_number, { key: "po:" + p.po_number, jobId: null, ref: p.incident_no || p.job_ref || "", siteCode: "", siteName: p.site || "", postcode: "",
       description: String(p.description || "").slice(0, 300), jobStatus: "", priority: "", jobFinished: false, drainage: false, record: null, pos: [po], subs: [],
       project: projectFor(p.site) });
+  }
+  for (const j of stamp) {
+    try { const fresh = await getJob(env, tid, j.id); if (fresh && !fresh.subcontract) { fresh.subcontract = j.subcontract; await saveJob(env, tid, fresh); } } catch {}
   }
   const now = Date.now();
   const list = [...rows.values()].map(r => {
@@ -6959,6 +6986,15 @@ export async function subcontractedRows(env, tid, money) {
   const poClosed = poMap;
   for (const r of list) if (!r.jobId && poClosed[r.key]) { r.state = poClosed[r.key].status; r.closedAt = poClosed[r.key].at; }
   return { rows: list };
+}
+// A job.subcontract record built from a subcontractor PO (no email was sent from
+// the portal) — what the SLA board tag + job-card banner read.
+function poSubconRecord(p, finished, by) {
+  const name = String(p.supplier || "").trim().slice(0, 80);
+  const at = p.issued_at && !isNaN(Date.parse(p.issued_at)) ? new Date(p.issued_at).toISOString() : new Date().toISOString();
+  const r = { key: subKey(name), name, sentAt: at, sentBy: "purchase order", manual: true, fromPo: true, poNumber: p.po_number, poRef: String(p.po_number), status: finished ? "done" : "open" };
+  if (finished) { r.closedAt = new Date().toISOString(); r.closedBy = by || "system"; }
+  return r;
 }
 async function getPoOnlyClosed(env, tid) {
   try { const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subconpo:" + tid).first(); return row ? JSON.parse(row.value) || {} : {}; } catch { return {}; }
