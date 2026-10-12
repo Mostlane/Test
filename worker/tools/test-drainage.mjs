@@ -16,6 +16,7 @@ function makeEnv({ sendOk = true, pos = [] } = {}) {
   const db = { prepare(sql) { let b = []; const st = {
     bind(...a) { b = a; return st; },
     async first() {
+      if (/SELECT email FROM users/.test(sql)) return b[0] === "Office Admin" ? { email: "office@mostlane.test" } : null;
       if (/FROM sla_jobs WHERE tenant_id = \? AND id = \?/.test(sql)) { const j = rows().find(j => j.id === b[1]); return j ? { data: JSON.stringify(j) } : null; }
       if (/FROM app_config/.test(sql)) { const key = /key\s*=\s*\?/.test(sql) ? b[b.length - 1] : (sql.match(/key\s*=\s*'([^']+)'/) || [])[1]; return appConfig[key] != null ? { value: appConfig[key] } : null; }
       return null;
@@ -232,6 +233,28 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   const k = sla.subconKeysFromNames(["EPM Plumbing & Heating", "The Shower Man", "Montrose Glass", "Mr Electric"]);
   ok("name matching: EPM / Showerman / Montrose yes, merchants no",
     ["EPM", "Showerman", "Montrose"].every(n => sla.isKnownSubcon(n, k)) && !["CEF (City Electrical Factors)", "Electric Center", "Screwfix", "City Plumbing"].some(n => sla.isKnownSubcon(n, k))); }
+
+// the email itself: postcode in the address, padded store code, portal notes stripped
+{ const m = sla.buildMetroRodEmail({ siteCode: "148", siteName: "Verwood", address: "Ringwood Road, Verwood", postcode: "bh31 7al", telephone: "01202 823901", priority: "Priority 2",
+    description: "Toilet blocked\n↩ Re-assigned incident — follows our earlier visit 31538 (Complete)" }, 24, "010700");
+  ok("address carries the postcode", /Ringwood Road, Verwood, BH31 7AL/.test(m.html));
+  ok("store code padded to 4 digits", />0148 Verwood</.test(m.html));
+  ok("portal ↩ notes are not sent", !/earlier visit/.test(m.html) && m.details === "Toilet blocked");
+  const e = sla.buildMetroRodEmail({ address: "1 High St, PO12 4EH", postcode: "PO12 4EH" }, 0, "1", null, { details: "Edited text" });
+  ok("postcode not doubled + details override used", !/PO12 4EH, PO12 4EH/.test(e.html) && /Edited text/.test(e.html)); }
+
+// preview before send + test copy + edited details actually sent
+{ const E = makeEnv();
+  const p = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" });
+  ok("preview: recipients + subject, nothing raised or sent", p.status === 200 && p.body.to === "Call.Centre@metrorod.co.uk" && /Order \[new PO no\.\]/.test(p.body.subject) && E.poLog.length === 0 && E.sent.length === 0, JSON.stringify(p.body && { s: p.body.subject, w: p.body.warnings }));
+  ok("field engineer can't preview", (await call(E, "Field Eng", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod" })).status === 403);
+  const t = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod", test: true, details: "Changed" });
+  ok("test copy goes to ME only, marked TEST, no PO", t.status === 200 && E.sent.length === 1 && E.sent[0].to === "office@mostlane.test" && /^\[TEST/.test(E.sent[0].subject) && /Changed/.test(E.sent[0].html) && E.poLog.length === 0, JSON.stringify(E.sent[0] && E.sent[0].to));
+  const nb = await call(E, "Boss", "/jobs/J-DRAIN/subcontract-preview", { to: "metrorod", test: true });
+  ok("no email on my user → clear error", nb.status === 400 && /no email address/.test(nb.body.error));
+  const s = await call(E, "Office Admin", "/jobs/J-DRAIN/subcontract", { to: "metrorod", details: "Please jet the drain" });
+  const last = E.sent[E.sent.length - 1];
+  ok("the edited details are what Metro Rod receives", s.status === 200 && last.to === "Call.Centre@metrorod.co.uk" && /Please jet the drain/.test(last.html) && E.saved["J-DRAIN"].description !== "Please jet the drain", JSON.stringify(s.body && s.body.error)); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
