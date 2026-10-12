@@ -20,7 +20,12 @@
     .btn.danger{background:#fff;color:#b91c1c;border:1px solid #fca5a5;} .btn:disabled{opacity:.5;cursor:not-allowed;}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;align-items:center;}
     .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
-    .sc-head{display:flex;align-items:center;gap:10px;}
+    .sc-head{display:flex;align-items:center;gap:10px;cursor:pointer;}
+    .sc-tog{border:none;background:none;font-size:15px;color:#64748b;cursor:pointer;padding:4px;width:28px;flex:none;transition:transform .15s;}
+    .sc.open .sc-tog{transform:rotate(90deg);}
+    .sc-sum{font-size:12.5px;color:#6b7a90;margin:2px 0 0 66px;}
+    .sc:not(.open) .sc-body{display:none;}
+    .sc.open .sc-sum{display:none;}
     .sc-head input.nm{flex:1;min-width:0;font-size:16px;font-weight:700;color:#0f172a;border:1px solid transparent;border-radius:8px;padding:6px 8px;background:#f8fafc;}
     .sc-head input.nm:focus{border-color:#ccd5dd;background:#fff;outline:none;}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px;}
@@ -78,10 +83,13 @@
 <template id="tpl">
   <div class="card sc">
     <div class="sc-head">
+      <button type="button" class="sc-tog" title="Show / hide details" aria-label="Show / hide details">▸</button>
       <span class="drag" style="font-size:18px;color:#94a3b8;">👷</span>
       <input class="nm" type="text" data-f="name" placeholder="Subcontractor name" maxlength="80">
       <label class="sw"><input type="checkbox" data-f="active"> Active</label>
     </div>
+    <div class="sc-sum"></div>
+    <div class="sc-body">
     <div class="grid">
       <div><label class="fld">Order email to</label><input type="email" data-f="to" placeholder="orders@example.co.uk"></div>
       <div><label class="fld">CC (comma-separated)</label><input type="text" data-f="cc" placeholder="accounts@example.co.uk"></div>
@@ -114,6 +122,7 @@
       <button class="btn sm ghost danger del">🗑 Remove</button>
       <span class="msg rowmsg"></span>
     </div>
+    </div>
   </div>
 </template>
 
@@ -134,6 +143,7 @@
   var AREAS = [];
   var SUBS = [];
   var mapObj = null, mapLayer = null;
+  var OPEN = {};   // keys of cards the user has expanded (kept across re-renders)
 
   if(!CAN_VIEW){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">You don’t have access to subcontractor settings. Ask a Full Access user.</div>'; return; }
 
@@ -203,6 +213,19 @@
     card.querySelector(".del").onclick = function(){ delOne(card); };
     card.querySelector(".pin").onclick = function(){ openPin(card); };
     pinLabel(card);
+    var sumBits = [];
+    sumBits.push(sub.to ? esc(sub.to) : '<span style="color:#b45309;">no order email</span>');
+    var na = (sub.areas||[]).length; sumBits.push(na ? na+" work area"+(na===1?"":"s") : "no work areas");
+    if(sub.radiusMiles) sumBits.push(esc(sub.radiusMiles)+" mi radius");
+    if(sub.ooh) sumBits.push("🌙 OOH");
+    if(sub.active===false) sumBits.push("inactive");
+    card.querySelector(".sc-sum").innerHTML = sumBits.join(" · ");
+    if(sub.key && OPEN[sub.key]) card.classList.add("open");
+    card.querySelector(".sc-head").addEventListener("click", function(e){
+      if(e.target.closest("input,label") && !e.target.closest(".sc-tog")) return;
+      card.classList.toggle("open");
+      var k = card.dataset.key; if(k){ if(card.classList.contains("open")) OPEN[k]=1; else delete OPEN[k]; }
+    });
     if(!CAN_EDIT){ card.querySelectorAll("input,textarea,button.save,button.del,button.pin").forEach(function(el){ el.disabled = true; }); }
     return card;
   }
@@ -271,6 +294,8 @@
       var r = await authFetch("/sla/subcontractors",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ sub: sub }) });
       var d = await r.json(); if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
       SUBS = d.list || SUBS; msg.className="msg rowmsg ok"; msg.textContent="Saved ✓";
+      var savedK = sub.key || ((SUBS.filter(function(x){ return x.name===sub.name; })[0]||{}).key);
+      if(savedK) OPEN[savedK] = 1;   // keep the card being edited open after the re-render
       // re-render keeps keys/chips canonical; delay so the tick shows
       setTimeout(render, 500);
     }catch(e){ msg.className="msg rowmsg err"; msg.textContent="Couldn’t save: "+e.message; }
@@ -291,6 +316,7 @@
   $("addBtn").onclick = function(){
     if(!CAN_EDIT) return;
     var card = buildCard({ name:"", active:true, fields:{}, areas:[], oohPriorities:[] });
+    card.classList.add("open");
     $("list").insertBefore(card, $("list").firstChild);
     card.querySelector('[data-f="name"]').focus();
   };
