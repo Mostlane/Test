@@ -24,6 +24,11 @@
     .row .meta{ font-size:12px; color:var(--muted); margin-left:auto; white-space:nowrap; }
     .msg{ font-size:13px; margin-top:8px; min-height:16px; }
     .msg.err{ color:#b91c1c; }
+    .tsrow{ display:flex; gap:10px; align-items:flex-start; padding:6px 0; font-size:14px; }
+    .tsrow input{ margin-top:3px; width:18px; height:18px; }
+    .tsbtns{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .tsbtn{ border:1px solid var(--border); background:#fff; color:var(--ml-blue); border-radius:10px; padding:10px 14px; font-size:14px; font-weight:600; cursor:pointer; }
+    .tsbtn.primary{ background:var(--ml-blue); color:#fff; border-color:var(--ml-blue); }
   </style>
 </head>
 <body>
@@ -45,6 +50,22 @@
     <div class="msg" id="pushMsg"></div>
     <a class="bigbtn" href="site-arrival.html" style="background:linear-gradient(90deg,#0e7a3b,#12a150);">📋 Set what visitors see on arrival</a>
     <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
+  </div>
+
+  <div class="card" id="tsCard" style="display:none;">
+    <h2>🧾 Timesheet emails</h2>
+    <p class="muted" style="margin:0 0 10px;">A PDF of everyone's visits — hours on site, with a green tick or red cross showing whether each sign-in and sign-out was GPS-checked at the site, and missed sign-outs highlighted.</p>
+    <label class="tsrow"><input type="checkbox" id="tsDaily"> <span><b>Daily</b> — once everyone has signed out (from 4pm), or at 8pm with anyone still in shown as such</span></label>
+    <label class="tsrow"><input type="checkbox" id="tsWeekly"> <span><b>Weekly</b> — Monday 7am, covering the previous Monday to Sunday</span></label>
+    <label class="muted" for="tsTo" style="display:block;margin:10px 0 4px;">Send to (one email address per line)</label>
+    <textarea id="tsTo" rows="3" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;"></textarea>
+    <div class="tsbtns">
+      <button class="tsbtn primary" id="tsSave">Save</button>
+      <button class="tsbtn" data-pdf="daily">📄 Today's PDF</button>
+      <button class="tsbtn" data-pdf="weekly">📄 Last week's PDF</button>
+      <button class="tsbtn" id="tsSendNow">✉ Send today's now</button>
+    </div>
+    <div class="msg" id="tsMsg"></div>
   </div>
 </div>
 
@@ -91,7 +112,56 @@ async function loadOnSite(){
 if (perms().FullAccess === "Yes") {
   $("adminCard").style.display = "block";
   loadOnSite();
+  loadTimesheetCfg();
 }
+
+// ── Timesheet emails (daily + weekly PDF) ──
+function tsMsg(t, err){ const m = $("tsMsg"); m.className = "msg" + (err ? " err" : ""); m.style.color = err ? "" : "#0e7a3b"; m.textContent = t; }
+async function loadTimesheetCfg(){
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/config`, {cache:"no-store"});
+    if(!r.ok) return;
+    const d = await r.json();
+    $("tsCard").style.display = "block";
+    $("tsDaily").checked = d.config.daily;
+    $("tsWeekly").checked = d.config.weekly;
+    $("tsTo").value = (d.config.recipients || []).join("\n");
+    if(!d.emailConfigured) tsMsg("Email isn't set up on the portal yet, so nothing can be sent.", true);
+    else if(!d.config.recipients.length) tsMsg("Add an email address and press Save to start the emails.", true);
+    else tsMsg(d.sent && d.sent.daily ? `Last daily sent for ${d.sent.daily}.` : "On — the first one goes out today.");
+  }catch(e){}
+}
+$("tsSave").addEventListener("click", async () => {
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/config`, { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ daily: $("tsDaily").checked, weekly: $("tsWeekly").checked, recipients: $("tsTo").value.split(/[\s,;]+/) }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || "Couldn't save");
+    $("tsTo").value = d.config.recipients.join("\n");
+    tsMsg(d.config.recipients.length ? `Saved ✓ — sending to ${d.config.recipients.length} address${d.config.recipients.length > 1 ? "es" : ""}.` : "Saved — no addresses, so nothing will be sent.", !d.config.recipients.length);
+  }catch(e){ tsMsg(e.message, true); }
+});
+document.querySelectorAll("[data-pdf]").forEach(b => b.addEventListener("click", async () => {
+  const w = window.open("", "_blank");
+  tsMsg("Building the PDF…");
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/pdf`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kind: b.dataset.pdf }) });
+    if(!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't build the PDF");
+    const url = URL.createObjectURL(await r.blob());
+    if(w) w.location = url; else location.href = url;
+    tsMsg("");
+  }catch(e){ if(w) w.close(); tsMsg(e.message, true); }
+}));
+$("tsSendNow").addEventListener("click", async () => {
+  if(!confirm("Email today's timesheet now to the addresses above?")) return;
+  tsMsg("Sending…");
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/send`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kind:"daily" }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || "Couldn't send");
+    tsMsg(`Sent ✓ to ${d.sentTo.join(", ")}`);
+  }catch(e){ tsMsg(e.message, true); }
+});
 
 // Bulk-sync: send every portal site with coordinates to SiteLog as a
 // geofenced site. SiteLog skips names it already has, so re-running is safe
