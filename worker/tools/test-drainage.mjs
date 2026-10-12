@@ -41,7 +41,7 @@ function makeEnv({ sendOk = true, pos = [] } = {}) {
   const poDb = { prepare(sql) { let b = []; const st = {
     bind(...a) { b = a; return st; },
     async first() { if (/COALESCE\(MIN\(n\)/.test(sql)) return { next: 10011 + poLog.length }; if (/FROM po_log WHERE po_number=\?/.test(sql)) return pos.find(p => String(p.po_number) === String(b[0])) || null; return null; },
-    async all() { if (/FROM po_log/.test(sql) && /subcontractor/.test(sql)) return { results: pos }; return { results: [] }; },
+    async all() { if (/FROM po_log/.test(sql) && /issued_at >= \?/.test(sql)) return { results: pos }; return { results: [] }; },
     async run() {
       if (/UPDATE po_log SET job_id/.test(sql)) { const p = pos.find(x => String(x.po_number) === String(b[b.length - 1])); if (!p) return { meta: { changes: 0 } }; p.job_id = b.length > 1 ? b[0] : null; p.job_ref = b.length > 1 ? b[1] : null; }
       if (/UPDATE po_log SET cost_ex_vat/.test(sql)) { const p = pos.find(x => String(x.po_number) === String(b[2])); if (!p) return { meta: { changes: 0 } }; p.cost_ex_vat = b[0]; }
@@ -153,8 +153,8 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
 
 // jobs with subcontractors (the list page)
 { const POS = [
-    { po_number: 10630, issued_at: new Date(Date.now() - 9 * 864e5).toISOString(), site: "Gosport", supplier: "Handyman In Bristol", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: 120, engineer_name: "", office_user_name: "Tanya" },
-    { po_number: 10620, issued_at: new Date(Date.now() - 2 * 864e5).toISOString(), site: "Crookhorn", supplier: "Metrorod", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null, engineer_name: "", office_user_name: "Tanya" },
+    { po_number: 10630, issued_at: new Date(Date.now() - 9 * 864e5).toISOString(), site: "Gosport", supplier: "Handyman In Bristol", cost_category: "subcontractor", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: 120, engineer_name: "", office_user_name: "Tanya" },
+    { po_number: 10620, issued_at: new Date(Date.now() - 2 * 864e5).toISOString(), site: "Crookhorn", supplier: "Metrorod", cost_category: "subcontractor", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null, engineer_name: "", office_user_name: "Tanya" },
   ];
   const E = makeEnv({ pos: POS });
   ok("list is office only", (await call(E, "Field Eng", "/subcontracted", null, "GET")).status === 403);
@@ -206,8 +206,8 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
 
 // linking / matching a PO puts the "with a subcontractor" record ON the job (SLA board tag)
 { const POS = [
-    { po_number: 10630, issued_at: "2026-10-03T09:00:00.000Z", site: "Gosport", supplier: "Handyman In Bristol", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: null },
-    { po_number: 10620, issued_at: "2026-10-10T09:00:00.000Z", site: "Crookhorn", supplier: "Metrorod", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null },
+    { po_number: 10630, issued_at: "2026-10-03T09:00:00.000Z", site: "Gosport", supplier: "Handyman In Bristol", cost_category: "subcontractor", trade: "Plumbing", description: "Incident - 31502 leak", incident_no: "31502", job_id: null, job_ref: null, cost_ex_vat: null },
+    { po_number: 10620, issued_at: "2026-10-10T09:00:00.000Z", site: "Crookhorn", supplier: "Metrorod", cost_category: "subcontractor", trade: "Drainage", description: "blocked sink", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: null },
   ];
   const E = makeEnv({ pos: POS });
   await call(E, "Office Admin", "/subcontracted", null, "GET");
@@ -218,6 +218,20 @@ ok("formatPoRef no width → raw", sla.formatPoRef(10011, 0) === "10011");
   ok("hand-linked PO stamps a record on its job", t && t.fromPo && t.name === "Metrorod" && t.sentAt === "2026-10-10T09:00:00.000Z", JSON.stringify(t));
   await call(E, "Office Admin", "/subcontracted/link", { po: "10620", jobId: null });
   ok("unlink removes that record from the job", !E.saved["J-TAP"].subcontract); }
+
+// older subcontractor POs saved as "materials" are still picked up by supplier name
+{ const POS = [
+    { po_number: 9001, issued_at: new Date(Date.now() - 40 * 864e5).toISOString(), site: "Gosport", supplier: "MetroRod", cost_category: "materials", description: "jetting", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: 200 },
+    { po_number: 9002, issued_at: new Date(Date.now() - 40 * 864e5).toISOString(), site: "Gosport", supplier: "Screwfix", cost_category: "materials", description: "screws", incident_no: null, job_id: null, job_ref: null, cost_ex_vat: 5 },
+  ];
+  const E = makeEnv({ pos: POS });
+  const a = await call(E, "Office Admin", "/subcontracted", null, "GET");
+  const keys = (a.body.rows || []).map(r => r.key);
+  ok("a 'materials' PO to a known subcontractor is listed", keys.includes("po:9001"), JSON.stringify(keys));
+  ok("an ordinary supplier PO is not", !keys.includes("po:9002"));
+  const k = sla.subconKeysFromNames(["EPM Plumbing & Heating", "The Shower Man", "Montrose Glass", "Mr Electric"]);
+  ok("name matching: EPM / Showerman / Montrose yes, merchants no",
+    ["EPM", "Showerman", "Montrose"].every(n => sla.isKnownSubcon(n, k)) && !["CEF (City Electrical Factors)", "Electric Center", "Screwfix", "City Plumbing"].some(n => sla.isKnownSubcon(n, k))); }
 
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

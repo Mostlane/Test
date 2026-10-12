@@ -5728,6 +5728,15 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   if the job's already finished) when the job has none; `subcontractedRows` lazily does
   the same for any incident-/job_id-matched PO on load. Unlinking removes a `fromPo`
   record carrying that PO number.
+  **Older subcontractor POs saved as "materials" are included (12 Oct 2026):** the
+  `cost_category` only exists since 5 Aug 2026 (14 POs), but Metrorod ×11 / EPM ×4 /
+  Showerman / Montrose had been raised as materials. `subcontractedRows` now reads every
+  PO in the 180-day window and keeps one when it is categorised subcontractor OR its
+  supplier matches a known subcontractor (`knownSubconKeys` = PO `subcontractors` table +
+  portal routing config; `isKnownSubcon`: same normalised key, one containing the other
+  (≥4 chars), or exactly a sub's first non-stop word — "EPM"). Checked against every live
+  supplier: only those 5 names match (no merchant false positives). The PO rows themselves
+  are NOT re-categorised, so job costing still counts them as materials.
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:

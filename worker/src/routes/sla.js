@@ -6904,7 +6904,12 @@ export async function subcontractedRows(env, tid, money) {
   if (env.PO_DB) {
     try {
       const since = new Date(Date.now() - 180 * 864e5).toISOString();
-      pos = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name FROM po_log WHERE cost_category='subcontractor' AND COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
+      // Every PO in the window: a subcontractor PO is one CATEGORISED as such, OR one
+      // whose supplier is a known subcontractor (before Aug 2026 there was no category,
+      // so Metrorod/EPM/… POs were saved as "materials" and would otherwise be missed).
+      const all = (await env.PO_DB.prepare("SELECT po_number, issued_at, site, supplier, trade, description, incident_no, job_id, job_ref, cost_ex_vat, engineer_name, office_user_name, cost_category FROM po_log WHERE COALESCE(deleted,0)=0 AND issued_at >= ? ORDER BY issued_at DESC").bind(since).all()).results || [];
+      const known = await knownSubconKeys(env, tid);
+      pos = all.filter(p => p.cost_category === "subcontractor" || isKnownSubcon(p.supplier, known));
     } catch { pos = []; }
   }
   // A PO with no job is often raised against a PROJECT (engineers may only raise
@@ -6995,6 +7000,36 @@ function poSubconRecord(p, finished, by) {
   const r = { key: subKey(name), name, sentAt: at, sentBy: "purchase order", manual: true, fromPo: true, poNumber: p.po_number, poRef: String(p.po_number), status: finished ? "done" : "open" };
   if (finished) { r.closedAt = new Date().toISOString(); r.closedBy = by || "system"; }
   return r;
+}
+// Normalised keys of every subcontractor we know of — the PO system's own list plus
+// the portal's subcontractor routing config.
+async function knownSubconKeys(env, tid) {
+  const names = [];
+  try { const { listPoSubcontractorNames } = await import("./po.js"); names.push(...await listPoSubcontractorNames(env)); } catch {}
+  try { const cfg = await getSubconConfig(env, tid); for (const k of Object.keys(cfg || {})) names.push(cfg[k] && cfg[k].name || k); } catch {}
+  return subconKeysFromNames(names);
+}
+const SUBKEY_STOP = new Set(["the", "mr", "mrs", "ms", "and", "ltd", "limited", "services", "service", "group", "uk"]);
+// full = whole-name keys; first = each name's first real word (e.g. "EPM" from
+// "EPM Plumbing & Heating"), matched EXACTLY so initials never swallow other names.
+export function subconKeysFromNames(names) {
+  const norm = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const full = new Set(), first = new Set();
+  for (const n of names) {
+    const k = norm(n); if (k.length >= 3) full.add(k);
+    const w = String(n || "").toLowerCase().split(/[^a-z0-9]+/).filter(x => x && !SUBKEY_STOP.has(x))[0];
+    if (w && w.length >= 3) first.add(w);
+  }
+  return { full: [...full], first: [...first] };
+}
+// A PO supplier is a subcontractor when its name matches one we know: the same key,
+// one containing the other ("Showerman" ⊂ "The Shower Man", "Montrose" ⊂ "Montrose
+// Glass"), or exactly a subcontractor's first word ("EPM").
+export function isKnownSubcon(supplier, keys) {
+  const k = String(supplier || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (k.length < 3) return false;
+  if (keys.first.includes(k)) return true;
+  return keys.full.some(x => x === k || (x.length >= 4 && k.length >= 4 && (k.includes(x) || x.includes(k))));
 }
 async function getPoOnlyClosed(env, tid) {
   try { const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:subconpo:" + tid).first(); return row ? JSON.parse(row.value) || {} : {}; } catch { return {}; }
