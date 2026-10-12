@@ -2520,6 +2520,58 @@ default 400) makes route-optimise/infer fall back to non-AI when hit. **GET/POST
 engineer-skills.html "📊 AI usage this month". (Programme AI is occasional + NOT yet
 metered.)
 
+## Work types — one detailed taxonomy (lib/worktypes.js — 12 Oct 2026)
+Jamie: "Drainage related, toilets, smell etc is all under one, plumbing is a different
+thing. These areas all need detailed descriptions… the more categories the better."
+**`worker/src/lib/worktypes.js` is the ONE list of what kind of job something is** —
+51 types in 13 trade groups (Drainage · Plumbing & water · Heating, cooling & gas ·
+Electrical · Fire safety · Doors, windows & security · Building fabric · Roofs &
+external · Fixtures & fittings · Equipment & systems · Hygiene & environment ·
+Compliance & testing · Other). Each type = `{id, name, group, description, kw:[[regex,
+weight]], not:[regex], concerto:[asset names]}`; the **description says what it covers,
+with examples, AND what it does NOT (and where that goes instead)** — it is shown to the
+office and fed to the AI as the definition. Drainage = anything BLOCKED / backing up /
+SMELLING of drains (toilets, sinks, urinals, gullies, Saniflo, septic tanks); Plumbing =
+leaks, taps, cisterns, flushing, water supply; hot water, water hygiene, washroom fittings
+(seats, dryers, dispensers) are their own types.
+- **`classifyWork(text)`** scores every type (sum of matching weights, `not` vetoes),
+  after **`stripLocations`** removes words that only say WHERE ("light by the back-up
+  chiller", "tiles on the shop floor by the chillers", "till area", "branch") — those used
+  to decide the trade. Min score 4, else null.
+- **Concerto's own tag** ("Fault/Issue: Drains : Blocked (R, E) - …", kept by the email
+  intake; Zapier-era jobs lost it) is parsed by `concertoTag` and mapped by
+  `typeFromConcertoTag`, but it is only a **PRIOR (+6), never the answer**: the mailbox
+  harvest (495 real jobs) showed it is often generic or wrong — "System : No Power" on a
+  till, **"Fire Door" on any door** (→ weak pointer to Doors; text saying fire door/exit →
+  Fire doors), "Sockets"/"Cables" on DATA faults (text with ethernet/internet/printer/till
+  → IT), "Asbestos" on a bin complaint. The tag's own words are removed before scoring.
+- **Measured:** 402 Concerto job alerts — 8 unclassified; two random 60-job samples judged
+  by hand ≈ 90% → ~95% after fixes. Regression: `node --no-warnings
+  worker/tools/test-worktypes.mjs` (165 real, paraphrased descriptions, must stay 100%).
+  The harvested dataset lives only in the session scratchpad (customer data — never the repo).
+- **Where it's used (sla.js):** the default `sla_work_areas` list IS the taxonomy
+  (`DEFAULT_WORK_AREAS`, coloured per group; get/setWorkAreas keep `group`+`description`);
+  `inferAreaKw` (job area, subcontractor suggestions); **POST /sla/infer-work-area tries the
+  free classifier first** (Concerto tag, or score ≥8 with a 4-point lead) and only calls the
+  AI otherwise — the AI prompt now carries every type's description; `isDrainageJob` =
+  classifier says drainage (the Metro Rod flag); Co-op stats "trades" = type names (AI
+  refine uses the descriptions).
+- **One-time migration `migrateWorkAreasOnce`** (runs on the first GET of /work-areas,
+  /eng-skills or /subcontractors; flag app_config `sla:workareas:v2:<tid>`; skipped if the
+  tenant saved a custom list): engineer stars on the 9 old areas are copied onto every type
+  each covered (`LEGACY_AREA_MAP`, max wins — NB old "plumbing" stars now also rate
+  Drainage); each job tagged with an old area is re-read from its description (a confident
+  read wins even outside the old family — the "3 hour drain down" EM jobs tagged plumbing);
+  subcontractor coverage maps the same way, except a sub whose PO trade names one type
+  (**Metro Rod "Drainage" → drainage only**, was "plumbing"); the old trade caches
+  (`sla:jobtrade`, `sla:concertostats`) are cleared. Test `test-workarea-migrate.mjs`.
+- **Pages:** engineer-skills.html is TRANSPOSED (types down the side grouped by trade, tap a
+  name for its description; engineers across; a grey **trade row sets every type in that
+  trade** at once) and the editor has group + description per type; subcontractors.html,
+  add-job.html and sla-jobedit.js (`?v=36`) group the picker by trade with descriptions as
+  tooltips. **Adding a type:** add it to WORK_TYPES with a sharp description + kw, add
+  real examples to test-worktypes.mjs. A tenant's saved custom list is never overwritten.
+
 ## Scheduler day blocks / "block off time" (sla.js `/sla/blocks*` + sla-scheduler.html)
 Admin reserves a window on an engineer's day (e.g. a dentist appointment) that
 nothing schedules into and the optimiser routes around. **Admin-only visibility:**

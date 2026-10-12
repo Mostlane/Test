@@ -1108,7 +1108,10 @@ async function initWorkArea(){
     var areas = (d && d.areas) || [];
     if(!areas.length) return;   // no areas configured → hide the field entirely
     var sel = $("workArea");
-    areas.forEach(function(a){ var o=document.createElement("option"); o.value=a.id; o.textContent=a.name; sel.appendChild(o); });
+    var byG = {}; areas.forEach(function(a){ var g=a.group||"Other"; (byG[g]=byG[g]||[]).push(a); });
+    Object.keys(byG).forEach(function(g){ var og=document.createElement("optgroup"); og.label=g;
+      byG[g].forEach(function(a){ var o=document.createElement("option"); o.value=a.id; o.textContent=a.name; if(a.description) o.title=a.description; og.appendChild(o); });
+      sel.appendChild(og); });
     $("workAreaGroup").style.display = "";
     WA_LOADED = true;
     // Auto-detect only: the office never needs to set this. "✎ Change" un-greys

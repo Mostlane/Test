@@ -1815,7 +1815,7 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
     nextD.setUTCDate(nextD.getUTCDate() + 1);
     const next = nextD.toISOString().slice(0, 10);
     const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const norm2 = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
     const map = {};
     try {
       const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
@@ -1826,11 +1826,11 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
       }
     } catch {
     }
-    const meN = norm(who);
+    const meN = norm2(who);
     const isMe = (e) => {
       const r = map[normId2(e)];
       if (r != null) return r === who;
-      const n = norm(e);
+      const n = norm2(e);
       return !!n && (n === meN || n.includes(meN) || meN.includes(n));
     };
     const londonDate4 = (iso) => {
@@ -2648,7 +2648,7 @@ async function scheduledSitesForWeek(env, tid, username, monday) {
   const byDate = {};
   try {
     const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const norm2 = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
     const map = {};
     const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
     for (const u of users || []) {
@@ -2656,11 +2656,11 @@ async function scheduledSitesForWeek(env, tid, username, monday) {
       const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
       if (full) map[normId2(full)] = u.username;
     }
-    const meN = norm(username);
+    const meN = norm2(username);
     const isMe = (e) => {
       const r = map[normId2(e)];
       if (r != null) return r === username;
-      const n = norm(e);
+      const n = norm2(e);
       return !!n && (n === meN || n.includes(meN) || meN.includes(n));
     };
     const lDate = (iso) => {
@@ -2718,7 +2718,7 @@ async function assignedJobsByDay(env, tid, username, monday) {
   const byDay = {};
   try {
     const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const norm2 = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
     const map = {};
     const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
     for (const u of users || []) {
@@ -2726,11 +2726,11 @@ async function assignedJobsByDay(env, tid, username, monday) {
       const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
       if (full) map[normId2(full)] = u.username;
     }
-    const meN = norm(username);
+    const meN = norm2(username);
     const isMe = (e) => {
       const r = map[normId2(e)];
       if (r != null) return r === username;
-      const n = norm(e);
+      const n = norm2(e);
       return !!n && (n === meN || n.includes(meN) || meN.includes(n));
     };
     const lDate = (iso) => {
@@ -3259,7 +3259,7 @@ async function handle5(request, env, ctx, url, sess) {
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
       ).bind(tid, monday, end).all();
       const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-      const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+      const norm2 = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
       const map = {};
       try {
         const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
@@ -3270,12 +3270,12 @@ async function handle5(request, env, ctx, url, sess) {
         }
       } catch {
       }
-      const meN = norm(who);
+      const meN = norm2(who);
       const cap2 = await capturedMinsWeek(env, tid, who, monday);
       const isMe = (e) => {
         const resolved = map[normId2(e)];
         if (resolved != null) return resolved === who;
-        const n = norm(e);
+        const n = norm2(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };
       const londonDate4 = (iso) => {
@@ -4744,6 +4744,771 @@ var init_pngdecode = __esm({
   }
 });
 
+// src/lib/worktypes.js
+function concertoTag(text) {
+  const t = String(text || "");
+  const m = /(?:^|\n|Fault\/Issue:\s*|Description:<\/b>\s*|:\s)\s*([A-Za-z][A-Za-z0-9 &\/'().-]{1,40}?)\s+:\s+([A-Za-z][A-Za-z0-9 &\/'.-]{1,50}?)\s*\(([A-Z][A-Za-z ,]{0,20})\)/.exec(t.slice(0, 600));
+  if (!m) return null;
+  return { asset: m[1].trim(), fault: m[2].trim(), codes: m[3].trim(), raw: m[0] };
+}
+function typeFromConcertoTag(tag) {
+  if (!tag) return null;
+  const a = norm(String(tag.asset || "").replace(/\([^)]*\)/g, "")), f = norm(tag.fault);
+  if (/^(?:fire door|fire doors)$/.test(a)) return "doors";
+  if (/^(?:system|external|external areas|not working|leaking|temperature issues?|recommendation|internal|ceiling)$/.test(a)) {
+    if (a === "recommendation" && /proof/.test(f)) return "pest-control";
+    if (a === "internal" && /clean/.test(f)) return "cleaning-waste";
+    if (a === "ceiling") return /leak|water/.test(f) ? "leaks-ingress" : /tile/.test(f) ? "ceilings" : null;
+    if (a === "system" && /supply tripped|tripp/.test(f)) return "electrical-power";
+    return null;
+  }
+  if (/^(?:toilets?|wc|urinals?|sinks?|basins?)$/.test(a)) {
+    if (/block|single toilet|no toilets|not draining|overflow|smell|odou?r/.test(f)) return "drainage";
+    if (/seat|dryer|dispenser|cubicle|lock|alarm|cord/.test(f)) return "washroom-fittings";
+    return "plumbing";
+  }
+  if (a === "blocked") return "drainage";
+  if (/^(?:all lights|lights?|strip lights?|spot ?lights?|light switch|timer|forecourt\/canopy)$/.test(a) || /forecourt|canopy/.test(a) && /light/.test(f)) return "lighting";
+  if (a === "auto door") return /glass|smash|crack/.test(f) ? "glazing" : "automatic-doors";
+  if (/^(?:metal door|wooden door|mortuary)$/.test(a)) return "doors";
+  if (a === "kiosk door") return /lock|key/.test(f) ? "locks-access" : "store-fixtures";
+  if (a === "lockers") return /lock|key/.test(f) ? "locks-access" : "store-fixtures";
+  if (/^(?:cables\/wiring|cables|wiring|sockets?)$/.test(a)) return "electrical-power";
+  if (/^gas boiler$/.test(a)) return "gas";
+  if (/^(?:fly zapper|insecutor|fly killer)$/.test(a)) return "pest-control";
+  if (/^(?:equipment collection|general waste)$/.test(a)) return "cleaning-waste";
+  if (/^(?:car park|foot ?path)$/.test(a)) return "external-surfaces";
+  if (/^(?:queuing systems?|store phone|site network|doms?)$/.test(a)) return a.startsWith("dom") ? "forecourt-ev" : "it-telecoms";
+  if (/^(?:smoke cloak)$/.test(a)) return "security-systems";
+  if (/^(?:fire signage)$/.test(a)) return "signage";
+  if (/^(?:newspaper storage|counter|shelving)$/.test(a)) return "store-fixtures";
+  if (/^(?:dishwasher|unox.*|oven)$/.test(a)) return "catering-appliances";
+  if (/^(?:jet wash)$/.test(a)) return "forecourt-ev";
+  if (/^pat$/.test(a)) return "electrical-testing";
+  if (/^(?:asbestos|survey)$/.test(a)) return "surveys-inspections";
+  if (/^(?:air con unit)$/.test(a)) return "air-con";
+  if (/^(?:walls?)$/.test(a)) return "walls-plaster";
+  if (/^(?:flooring)$/.test(a)) return /leak/.test(f) ? null : "flooring";
+  if (/^(?:windows?)$/.test(a)) return "glazing";
+  if (/^(?:roof)$/.test(a)) return "roofing";
+  if (/^(?:guttering)$/.test(a)) return "rainwater";
+  if (/^(?:saniflow|saniflo)$/.test(a)) return "drainage";
+  if (/^(?:cigarette bin)$/.test(a)) return "street-furniture";
+  if (CONCERTO_INDEX.has(a)) return CONCERTO_INDEX.get(a);
+  for (const [k, id] of CONCERTO_INDEX) if (k.length > 3 && (a.startsWith(k) || k.startsWith(a))) return id;
+  return null;
+}
+function stripLocations(t) {
+  return String(t || "").replace(/\b(?:shop|sales|retail) floor\b|\btill (?:area|point|bank)\b/gi, " store ").replace(/\b(?:on the back of|on back of|the back of|by|next to|near|nearest|nearest to|closest to|nearby|behind|beside|besides|alongside|around|round|underneath|beneath|opposite|in front of)(?:\/(?:behind|under|underneath|beside|by))?\s+(?:the |our |a |an |them |it |to the )?(?:back ?up |main |old |new |small |large |big |front |rear |left |right |top |bottom |customer |colleague |staff )?[\w-]+(?:\s+(?:area|section|machines?|units?|room|door|aisle|isle))?/gi, " ").replace(/\b(?:outside|under|above|below)\s+(?:the |our |a |an )(?:back ?up |main |old |new |front |rear |customer |colleague |staff )?[\w-]+(?:\s+(?:area|section|machines?|units?|room|door|aisle|isle))?/gi, " ");
+}
+function classifyWork(text, opts = {}) {
+  const raw = String(text || "");
+  if (!raw.trim()) return null;
+  const tag = concertoTag(raw);
+  let fromTag = typeFromConcertoTag(tag);
+  if (fromTag === "doors" && tag && /^fire/i.test(tag.asset) && /\bfire (?:exit |escape )?doors?\b|\bfire exits?\b|\bpanic bar|\bintumescent|\bsmoke seal/i.test(raw.replace(tag.raw, " "))) fromTag = "fire-doors";
+  if (fromTag === "electrical-power" && /\b(?:data|ethernet|internet|network|wall ?ports?|dsl|cat ?[56]e?|router|broadband|wi-?fi|printers?|scanners?|tills?|card (?:reader|machine)s?|label)\b/i.test(raw)) fromTag = "it-telecoms";
+  const body = tag ? raw.replace(tag.raw, " ") : raw;
+  const t = stripLocations(body.replace(/ACCESS TIMES?\s*:[\s\S]*$/i, " ").replace(/\b(?:please|thanks?|thank you|good (?:morning|afternoon|evening))\b/gi, " "));
+  const scores = [];
+  for (const wt of WORK_TYPES) {
+    if (wt.not.some((re) => re.test(t))) continue;
+    let s = 0;
+    for (const [re, w] of wt.kw) if (re.test(t)) s += w;
+    if (s > 0) scores.push({ id: wt.id, score: s });
+  }
+  scores.sort((a, b) => b.score - a.score);
+  const pick = (id, score, source) => {
+    const wt = WORK_TYPE_BY_ID[id];
+    return { id, name: wt.name, group: wt.group, score, source, tag, alts: scores.filter((x) => x.id !== id).slice(0, 3) };
+  };
+  if (fromTag) {
+    const hit = scores.find((x) => x.id === fromTag);
+    if (hit) hit.score += TAG_PRIOR;
+    else scores.push({ id: fromTag, score: TAG_PRIOR });
+    scores.sort((a, b) => b.score - a.score);
+  }
+  const min = opts.minScore == null ? 4 : opts.minScore;
+  if (!scores.length || scores[0].score < min) return null;
+  const top = scores[0];
+  return pick(top.id, top.score, fromTag && fromTag === top.id ? "concerto+text" : "keywords");
+}
+function workTypesPrompt(types = WORK_TYPES) {
+  return types.map((t) => `- ${t.id} \u2014 ${t.name} [${t.group}]: ${t.description}`).join("\n");
+}
+var W2, WORK_TYPES, WORK_TYPE_BY_ID, LEGACY_AREA_MAP, norm, CONCERTO_INDEX, TAG_PRIOR;
+var init_worktypes = __esm({
+  "src/lib/worktypes.js"() {
+    W2 = (re, w) => [re, w];
+    WORK_TYPES = [
+      /* ── Drainage ─────────────────────────────────────────────────────────── */
+      {
+        id: "drainage",
+        name: "Drainage & blockages",
+        group: "Drainage",
+        description: "Anything BLOCKED or BACKING UP, and anything that SMELLS of drains. Blocked toilets, WCs, urinals, sinks, basins and wastes; toilets that won't flush away / water rising in the bowl; overflowing or backed-up drains; sewage or 'human waste' on the floor; foul / sewage / drain smells and odours; outside drains, gullies, manholes, inspection chambers, soakaways, interceptors, grease or fat traps; Saniflo / macerator / pumped waste units; drain jetting, CCTV drain surveys, rodding; rats coming up from drains. Usually a Metro Rod job. NOT: a pipe, tap or toilet that is LEAKING (Plumbing), a toilet that won't fill or flush because of the cistern mechanism (Plumbing), gutters and downpipes (Roofline & rainwater).",
+        concerto: ["drains", "drain", "drainage", "blocked", "toilets blocked", "sewage"],
+        kw: [
+          W2(/\bblock(?:ed|age|ages|ing up)\b|\bclogged\b|\bkeeps? blocking\b/i, 3),
+          W2(/\bdrains?\b.{0,60}\bblock(?:ed|ing)\b|\bblock(?:ed|ing)\b.{0,20}\bdrains?\b|\bseptic tank\b|\bcess ?pit\b|\bsinks? (?:and|&) (?:the )?toilets?\b.{0,30}\bblock|\b(?:sinks?|toilets?|pipes?|drains?|basins?)\b.{0,30}\b(?:clogged|blocking up)\b/i, 8),
+          W2(/\bdrain covers?\b|\braised edge\b/i, -6),
+          W2(/\b(?:drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|inspection chambers?|soak ?aways?|interceptors?|grease traps?|fat traps?|aco\b|channel drain)/i, 5),
+          W2(/\b(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|pans?|waste)\s+(?:is |are |has |have |keeps? |still |now |completely |fully )*(?:blocked|backing up|backed up|overflowing|not draining|won'?t drain|not going down)/i, 8),
+          W2(/\bblocked\s+(?:toilets?|wcs?|loos?|urinals?|sinks?|basins?|drains?|pipes?|waste|pans?)\b/i, 8),
+          W2(/\b(?:backing|backed) up\b|\boverflowing\b|\bnot draining\b|\bwon'?t drain\b|\bslow(?:ly)? draining\b|water not going down/i, 5),
+          W2(/\b(?:smell|smells|smelly|odou?rs?|stinks?|stench|whiff)\b/i, 4),
+          W2(/\b(?:sewage|drain|drains|foul|sewer|egg|rotten)\s*(?:smell|odou?r)|smells? (?:like|of) (?:sewage|drains?|sewer|poo|rotten)/i, 8),
+          W2(/\bhuman waste\b|\bfaec|\bpoo\b|\bexcrement\b(?!.*\brat)/i, 5),
+          W2(/\bsani ?fl[oa]w?s?\b|\bmacerator\b|\bpumped waste\b|\bwaste pump\b/i, 8),
+          W2(/\bjetting\b|\bjet the drain|\brodding\b|\bcctv\b.{0,25}\bdrains?\b|drain survey/i, 8),
+          W2(/\bfoul water\b|\bsurface water\b.*\bdrain|\bstanding water\b/i, 4),
+          W2(/\bmetro ?rod\b|\blanes\b group/i, 6)
+        ],
+        not: [/drain[\s-]*down/i, /\bem\b.*\bdrain/i]
+      },
+      /* ── Plumbing & water ─────────────────────────────────────────────────── */
+      {
+        id: "plumbing",
+        name: "Plumbing \u2014 leaks, taps & toilets",
+        group: "Plumbing & water",
+        description: "Water pipework and sanitaryware that LEAKS or doesn't work, where the problem is the supply side, not a blockage. Leaking pipes, joints, valves and fittings; dripping or broken taps, taps that won't turn off, low flow; toilets / cisterns that leak, run constantly, won't fill or won't flush (flush button, ballcock, fill valve, syphon); urinal flush controls; no water / no cold water; low water pressure; stopcocks and isolation valves; burst or frozen pipes; water leaking from under a sink, coffee machine or appliance connection. NOT: blocked toilets / sinks or smells (Drainage), no HOT water or water heaters (Hot water & water heaters), toilet seats, hand dryers or dispensers (Washroom fittings), water coming through a ceiling from an unknown source (Leaks & water ingress).",
+        concerto: ["pipe work", "pipework", "toilets", "toilet", "taps", "tap", "water supply", "cistern", "urinal", "urinals", "sink", "sinks", "plumbing", "toilets leaking"],
+        kw: [
+          W2(/\bleak(?:s|ing|ed|y)?\b|\bdrip(?:s|ping|py)?\b/i, 5),
+          W2(/\btaps?\b/i, 4),
+          W2(/\b(?:pipe|pipes|pipework|pipe work|joint|valve|fitting|connection)s?\b.*\bleak|\bleak.*\b(?:pipe|pipes|pipework|joint|valve)/i, 6),
+          W2(/\bcisterns?\b|\bballcock\b|\bfill(?:ing)? valve\b|\bsyphon\b|\bsiphon\b|\bflush(?:ing)? (?:button|handle|mechanism)\b|\bflush plate\b/i, 7),
+          W2(/\b(?:toilet|wc|loo|urinal)s?\b.*\b(?:not flushing|won'?t flush|constantly (?:flushing|running)|running constantly|keeps (?:flushing|running)|leak|not filling|won'?t fill)/i, 8),
+          W2(/\b(?:not|won'?t|isn'?t|doesn'?t) (?:flushing|flush)\b|\bflush\b|\bfloat\b|\brefill(?:ing)?\b|\btoilet (?:bowl|pan|handle)\b|\bpan (?:is )?cracked\b/i, 5),
+          W2(/\btaps?\b.{0,30}\b(?:will not|won'?t|wont|doesn'?t|not) turn off\b|\bconstantly running\b/i, 8),
+          W2(/\bno (?:running |cold )?water\b|\bpipes? (?:are |have |has )?frozen\b|\bwater (?:has been |is )?(?:off|cut off)|\blow (?:water )?pressure\b|\bpoor flow\b|\bwon'?t flow\b/i, 6),
+          W2(/\bstop ?cocks?\b|\bisolat(?:ion|ing) valve\b|\bburst (?:pipe|main)\b|\bfrozen pipes?\b|\bwater main\b/i, 7),
+          W2(/\btoilets?\b|\bwcs?\b|\burinals?\b|\bsinks?\b|\bbasins?\b/i, 1),
+          W2(/\bplumb(?:er|ing)\b/i, 4)
+        ],
+        not: []
+      },
+      {
+        id: "hot-water",
+        name: "Hot water & water heaters",
+        group: "Plumbing & water",
+        description: "No hot water, or the unit that makes it. Under-sink and over-sink water heaters (Heatrae, Zip, Redring, Ariston, Hyco), instantaneous heaters, boiling-water taps and urns (Zip HydroTap, Instanta, Marco), immersion heaters, unvented hot-water cylinders and calorifiers, water heaters that dribble, scald, trip or make noise. NOT: space heating / radiators (Heating), a cold tap that leaks (Plumbing), kettles (Catering & appliances).",
+        concerto: ["water heater", "water heaters", "hot water", "boiling water"],
+        kw: [
+          W2(/\bwater heaters?\b|\bheatrae\b|\bzip\b(?! ?tie)|\bredring\b|\bred ring\b|\bhyco\b|\bariston\b|\bmegaflo\b|\bunvented\b|\bcalorifiers?\b|\bimmersion\b/i, 8),
+          W2(/\b(?:no|not providing|not producing|not giving|without) (?:any )?hot water\b|\bno hot water\b|\bhot water\b.*\b(?:not|isn'?t|won'?t)\b|\bwater (?:is |isn'?t |not )*(?:getting |going )?(?:hot|warm)\b|\bluke ?warm\b/i, 7),
+          W2(/\bhot water\b/i, 4),
+          W2(/\bboiling water\b|\bhydro ?tap\b|\binstanta\b|\burn\b|\bhot tap\b/i, 6)
+        ],
+        not: []
+      },
+      {
+        id: "water-hygiene",
+        name: "Water hygiene & legionella",
+        group: "Plumbing & water",
+        description: "Keeping the water system safe rather than fixing a fault. Legionella risk assessments and remedials, dead legs and redundant pipework ('causing a deadleg'), TMVs (thermostatic mixing valves) servicing, cold-water storage tanks, water sampling, descaling and disinfection, flushing regimes, redundant calorifiers and tanks being drained down and removed. NOT: a tap or pipe that simply leaks (Plumbing).",
+        concerto: ["legionella", "water hygiene", "tmv"],
+        kw: [
+          W2(/\blegionell?a\b|\bdead ?legs?\b|\bdead ?end\b|\bdeadlog\b|\btmvs?\b|\bthermostatic mixing\b|\bwater (?:sampl|hygiene|tank)|\bcold water (?:storage )?tank\b|\bdisinfect|\bdescal/i, 8),
+          W2(/\bredundant (?:pipe|pipework|calorifier|tank|system)|\bcap(?:ped)? off\b/i, 5)
+        ],
+        not: []
+      },
+      /* ── Heating, cooling & gas ──────────────────────────────────────────── */
+      {
+        id: "heating",
+        name: "Heating \u2014 heaters, radiators & boilers",
+        group: "Heating, cooling & gas",
+        description: "Keeping the building warm. Heating not coming on, shop floor / office / colleague room too cold; radiators (cold, leaking valves, brackets pulled off the wall, TRVs); wall and panel heaters, fan heaters, storage heaters, over-door / air-curtain heaters, thermostats and timers, heat pumps used for heating, boilers (non-gas-safety faults), pressure loss. NOT: no hot water at the tap (Hot water), gas safety certificates or smell of gas (Gas), air-con not cooling (Air conditioning), fridge/freezer temperatures (Refrigeration).",
+        concerto: ["heating", "heater", "heaters", "radiator", "radiators", "boiler", "thermostat", "air curtain", "door heater"],
+        kw: [
+          W2(/\bheating\b|\bheaters?\b|\bradiators?\b|\btrvs?\b|\bthermostats?\b|\bair ?curtains?\b|\bover ?door heater|\bstorage heaters?\b|\bheat pumps?\b/i, 7),
+          W2(/\bboilers?\b/i, 5),
+          W2(/\b(?:too|very|freezing|really|particularly|so|quite|extremely|bitterly) cold\b|\bcold (?:in|on) the\b|\bfreezing in\b/i, 5),
+          W2(/\bdegrees\b/i, 2),
+          W2(/\bnot (?:heating|warming|warm)\b|\bno heat\b/i, 6)
+        ],
+        not: []
+      },
+      {
+        id: "gas",
+        name: "Gas \u2014 appliances, safety & smell of gas",
+        group: "Heating, cooling & gas",
+        description: "Anything that needs a Gas Safe engineer. Smell of gas / suspected gas leak, gas boilers, gas cookers and hobs, gas fires, landlord gas safety certificates (CP12) and annual gas safety inspections, gas meters and supply pipework. NOT: electric heaters or radiators with no gas fault (Heating), electric cookers (Catering & appliances).",
+        concerto: ["gas", "gas supply", "gas appliance"],
+        kw: [
+          W2(/\bgas\b(?! ?(?:lift|strut|spring))/i, 6),
+          W2(/\bcarbon monoxide\b|\bco alarm\b|\bsmell of gas\b|\bgas (?:leak|smell)\b|\bsmells? (?:like |of )?gas\b|\bgas safe\b|\bgas safety\b|\bcp12\b|\bgas (?:boiler|cooker|hob|fire|meter|supply)/i, 10)
+        ],
+        not: []
+      },
+      {
+        id: "air-con",
+        name: "Air conditioning",
+        group: "Heating, cooling & gas",
+        description: "Comfort cooling. Air-con units not cooling, leaking condensate, noisy, error codes, remote controls; split / cassette / VRF units, outdoor condensers for the AC; the store being too hot. NOT: fridges, freezers, chillers or cold rooms (Refrigeration), extract fans (Ventilation), heating (Heating).",
+        concerto: ["air conditioning", "air con", "aircon", "hvac", "comfort cooling"],
+        kw: [
+          W2(/\bair ?con(?:dition(?:ing|er))?\b|\bairco(?:n|ndition)|\ba\/c\b|\bhvac\b|\bcassette units?\b|\bsplit units?\b|\bvrf\b|\bcomfort cooling\b/i, 10),
+          W2(/\b(?:too |very |really )hot\b|\boverheating\b(?!.*(?:socket|plug|cable))/i, 3)
+        ],
+        not: []
+      },
+      {
+        id: "refrigeration",
+        name: "Refrigeration \u2014 fridges, freezers & chillers",
+        group: "Heating, cooling & gas",
+        description: "Cold-chain kit. Fridges, freezers, multideck chillers, back-up chillers, cold rooms and walk-ins, wine chillers, ice machines, display cabinets out of temperature, temperature alarms, compressors and condensers for the refrigeration, iced-up evaporators, door seals on fridges. Co-op usually sends these to their refrigeration contractor. NOT: air-con (Air conditioning), the FLOOR inside a freezer room (Flooring), pest-proofing behind a chiller (Pest control).",
+        concerto: ["refrigeration", "chiller", "chillers", "freezer", "freezers", "fridge", "fridges", "cold room", "temperature issues", "multideck", "ice machine"],
+        kw: [
+          W2(/\bfridges?\b|\bfreezers?\b|\bchillers?\b|\bmulti ?decks?\b|\bcold ?rooms?\b|\bwalk[- ]in\b|\bice (?:machine|maker)s?\b|\brefrigerat/i, 7),
+          W2(/\bcompressors?\b|\bcondensers?\b|\bevaporator\b|\bout of temp|\btemperature (?:alarm|issue|problem)|\bnot (?:cooling|cold|chilling|freezing)\b|\bdefrost/i, 5)
+        ],
+        not: [/\bproof(?:ing)?\b/i]
+      },
+      {
+        id: "ventilation",
+        name: "Ventilation & extraction",
+        group: "Heating, cooling & gas",
+        description: "Moving air out. Extractor fans in toilets and kitchens, bakery and catering extract canopies, ducting, air handling units, louvres, ventilation grilles, noisy or seized fans, filters. NOT: air-con cooling (Air conditioning), heating (Heating).",
+        concerto: ["ventilation", "extraction", "extract fan", "extractor fan"],
+        kw: [
+          W2(/\bextract(?:or)?(?: fans?| canopy| hood| system)?\b|\bventilat|\bducting\b|\bair handling\b|\bahus?\b|\blouvres?\b|\bvent(?:s)?\b(?!ure)/i, 7),
+          W2(/\bfans?\b/i, 2)
+        ],
+        not: []
+      },
+      /* ── Electrical ──────────────────────────────────────────────────────── */
+      {
+        id: "electrical-power",
+        name: "Electrical \u2014 power, sockets & tripping",
+        group: "Electrical",
+        description: "Power problems. No power / partial power, power cuts, circuits or RCDs tripping, trip switches that won't reset, fuses, consumer units and distribution boards, sockets and spurs not working or damaged, burning smell or scorching at a socket, exposed or damaged cables and wiring, isolators, three-phase supply issues, electrical sub-mains, new circuits and sockets. NOT: lights (Lighting), emergency lights (Emergency lighting), tills / card readers / phones (IT, tills & telecoms), testing and certificates (Electrical testing).",
+        concerto: ["electrics", "electrical", "electricity", "power", "system", "cables/wiring", "cables", "wiring", "sockets", "socket", "distribution board", "fuse board", "consumer unit"],
+        kw: [
+          W2(/\bno power\b|\bpower (?:cut|outage|loss|failure|off)|\blost power\b|\bnothing is working\b|\btripp(?:ed|ing)\b|\btrips\b|\btrip switch\b|\brcds?\b|\brcbos?\b|\bmcbs?\b/i, 8),
+          W2(/\bsockets?\b|\bspurs?\b|\bplug socket\b|\bfused spur\b/i, 7),
+          W2(/\bfuse(?:s|d| board| box)?\b|\bconsumer units?\b|\bdistribution boards?\b|\bdb\b|\bisolators?\b|\bthree[- ]phase\b|\bsub[- ]?mains?\b/i, 6),
+          W2(/\bexposed (?:copper )?wires?\b|\byellow ?\/ ?green\b|\bexternal (?:plug|socket)\b|\bip ?rated\b|\bplugs?\b(?!\s*holes?)|\b(?:cables?|wires?|wiring)\b.*\b(?:exposed|damaged|hanging|out|loose|live|bare)|\b(?:exposed|damaged|loose|live|bare) (?:cables?|wires?|wiring)\b|\bburning smell\b|\bscorch/i, 8),
+          W2(/\belectric(?:al|s|ity|ian)?\b|\bpower\b/i, 3)
+        ],
+        not: []
+      },
+      {
+        id: "lighting",
+        name: "Lighting (general)",
+        group: "Electrical",
+        description: "Normal lights that are off, flickering or damaged \u2014 inside and out. Shop-floor LED panels and battens, strip lights / fluorescent tubes, warehouse and office lights, sensor / PIR lights, external and car-park lights, signage and fascia lighting, forecourt canopy lighting, lamps and drivers, light switches. NOT: emergency lights / EM fittings that fail their test (Emergency lighting), the sign itself being loose or damaged (Signage).",
+        concerto: ["lighting", "lights", "light", "external lighting", "internal lighting", "forecourt/canopy lighting", "led lighting"],
+        kw: [
+          W2(/\blights?\b|\blighting\b|\blamps?\b|\bbulbs?\b|\btubes?\b|\bled panels?\b|\bbattens?\b|\bfluorescent\b|\bstrip ?lights?\b|\bdownlights?\b|\bflood ?lights?\b|\bpir\b|\bsensor lights?\b/i, 6),
+          W2(/\bflicker(?:s|ing)?\b|\bbulb (?:gone|out)\b|\bin the dark\b|\bvery dark\b/i, 4),
+          W2(/\b(?:lights?|lighting|lamp ?posts?|street ?lights?)\b.{0,40}\b(?:not (?:working|coming on|turning on|on)|haven'?t (?:turned|come) on|(?:are|is|went|gone|turned) (?:off|out)|won'?t (?:come|turn) on|no longer|keep(?:s)? going off|randomly)|\blamp ?posts?\b|\blight (?:fixture|fitting)s?\b|\blighting timer\b|\btimer\b.{0,30}\blight/i, 6),
+          W2(/\blight switch(?:es)?\b|\bsign(?:age)? light(?:s|ing)?\b|\billuminated sign/i, 8)
+        ],
+        not: [/\bgreen light\b|\bdid not stay (?:il)?luminated\b|\ba\d?em\b|\bem\/\d+/i, /\bem ?(?:light|lighting|fitting|test)\b|\bem ?\d{1,3}\b/i, /\bwarning light\b/i, /\bemergency (?:light|lighting) (?:test|failed|fail)/i]
+      },
+      {
+        id: "emergency-lighting",
+        name: "Emergency lighting",
+        group: "Electrical",
+        description: "Emergency lighting only. EM fittings / bulkheads / exit signs that fail the monthly flick test or the 3-hour duration test, stay on or won't charge, EM lights numbered on the site plan (EM12, EM24\u2026), replacement EM fittings and batteries, EM certificates. NOT: ordinary lights (Lighting), fire alarms (Fire alarms & detection).",
+        concerto: ["emergency lighting", "emergency lights", "emergency light", "em lighting"],
+        kw: [
+          W2(/\bemergency (?:light|lighting|lights|fitting|bulkhead|exit)/i, 13),
+          W2(/\b(?:except|apart from|but) (?:for )?(?:the )?emergency light|\bemergency light(?:s|ing)? (?:still )?(?:work|on|came on|come on)|\b(?:switched|gone|went) (?:on )?(?:to|onto) emergency|\bon emergency\b/i, -14),
+          W2(/\bem ?\d{1,3}\b|\bem (?:light|lighting|fitting|test|cert)|\b3 ?h(?:ou)?r (?:em )?test\b|\bflick tests?\b|\bexit signs?\b|\brunning man\b|\(eml\)|\bem:/i, 9),
+          W2(/\bgreen light\b.{0,30}\btest|\btest(?:ed)?\b.{0,40}\bgreen light|\bdid not stay (?:il)?luminated\b|\bemergency test\b|\ba\d?em\b|\bem\/\d+|\b(?:3|three)[- ]?h(?:ou)?r (?:em )?drain[- ]?down\b|\bdrain[- ]?down test\b|\bem drain[- ]?down\b/i, 12)
+        ],
+        not: []
+      },
+      {
+        id: "electrical-testing",
+        name: "Electrical testing & certificates",
+        group: "Compliance & testing",
+        description: "Planned electrical testing, not a fault. EICRs / 5-year fixed-wire tests, PAT testing, importing or issuing electrical certificates, remedial works listed on an EICR (C1/C2/FI codes), periodic inspections. NOT: a fault reported by the store (the matching Electrical / Lighting type), emergency-light tests (Emergency lighting).",
+        concerto: ["eicr", "fixed wire", "pat testing", "electrical testing"],
+        kw: [
+          W2(/\(pat\)|\beicr\b|\b5[- ]?y(?:ea)?r (?:electrical )?test|\bfive[- ]year\b|\bfixed[- ]wire\b|\bperiodic inspection\b|\bpat test|\bpat\b|\bimport certificate\b|\bc1\b|\bc2\b/i, 10)
+        ],
+        not: [/\(eml\)/i, /\bem:/i, /\bdrain[- ]?down\b/i]
+      },
+      /* ── Fire safety ─────────────────────────────────────────────────────── */
+      {
+        id: "fire-alarms",
+        name: "Fire alarms & detection",
+        group: "Fire safety",
+        description: "Fire detection and fire-fighting kit. Fire alarm panels showing a fault, false alarms, call points, smoke and heat detectors (and beeping smoke alarms in flats), sounders and beacons, sprinklers, fire extinguishers and fire blankets, fire alarm servicing. NOT: fire doors (Fire doors & fire exits), emergency lights (Emergency lighting), fire stopping (Firestopping).",
+        concerto: ["fire alarm", "fire alarms", "fire panel", "smoke detector", "smoke alarms", "fire extinguisher", "fire extinguishers", "sprinklers", "fire detection"],
+        kw: [
+          W2(/\bfire ?alarms?\b|\bfire panel\b|\bsmoke (?:alarm|detector|head)s?\b|\bheat detectors?\b|\bcall points?\b|\bsounders?\b|\bsprinklers?\b|\bextinguishers?\b|\bfire blankets?\b|\bfalse alarms?\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "fire-doors",
+        name: "Fire doors & fire exits",
+        group: "Fire safety",
+        description: "Doors whose job is fire safety. Fire doors that won't close or latch, damaged frames, missing or failed intumescent strips and smoke seals, gaps around fire doors, door closers on fire doors, hold-open / magnetic release devices, fire exit doors, panic bars / push bars, fire door inspections and signage on fire doors. NOT: ordinary internal or front doors (Doors), locks and keys (Locks, keys & access), fire stopping in walls (Firestopping).",
+        concerto: ["fire door", "fire doors", "fire exit", "fire exits", "panic bar"],
+        kw: [
+          W2(/\bfire (?:exit |escape )?doors?\b|\bfire exits?\b|\bfire escape\b|\bpanic (?:bar|bolt|hardware)s?\b|\bpush bars?\b|\bhold[- ]open\b|\bmag(?:netic)? (?:release|hold)|\belectro ?magnetic hold|\bintumescent strips?\b|\bsmoke seals?\b/i, 12)
+        ],
+        not: []
+      },
+      {
+        id: "firestopping",
+        name: "Firestopping & compartmentation",
+        group: "Fire safety",
+        description: "Fire stopping in walls, floors and ceilings: penetration seals around pipes and cables, fire collars, fire batts, intumescent mastic and pillows, compartmentation surveys and remedial works from a fire risk assessment (FRA works). NOT: fire doors (Fire doors & fire exits), pest-proofing gaps (Pest control).",
+        concerto: ["fire stopping", "firestopping", "compartmentation"],
+        kw: [
+          W2(/\bfire ?stop(?:ping)?\b|\bpenetration seals?\b|\bfire (?:collar|batt|pillow|barrier)s?\b|\bcompartmentation\b|\bfra works?\b|\bfire risk (?:assessment )?works\b|\bintumescent (?:mastic|sealant)\b/i, 10)
+        ],
+        not: []
+      },
+      /* ── Doors, windows & security ───────────────────────────────────────── */
+      {
+        id: "doors",
+        name: "Doors, frames & closers",
+        group: "Doors, windows & security",
+        description: "Ordinary doors that stick, drop, won't close, are damaged or coming off: warehouse doors, colleague-room and toilet doors, front and back doors, door frames, hinges, door closers, kick plates, door bumpers and buffers, handles that are loose, swing doors, saloon doors. NOT: fire doors / fire exits / panic bars (Fire doors & fire exits), locks, keys, bolts and access control (Locks, keys & access), automatic sliding entrance doors (Automatic doors), roller shutters (Shutters, gates & grilles).",
+        concerto: ["door", "doors", "internal door", "external door", "warehouse door", "door closer", "doors/frames"],
+        kw: [
+          W2(/\bdoors?\b/i, 4),
+          W2(/\bdoor ?(?:frames?|closers?|hinges?|handles?|stops?|bumpers?|buffers?|kick ?plates?)\b|\bhinges?\b|\bswing doors?\b|\bsaloon doors?\b/i, 7),
+          W2(/\b(?:won'?t|doesn'?t|does not|not) (?:shut|close) (?:properly|fully)?\b|\bcatch(?:ing)? on the floor\b|\bdrop(?:ped)?\b|\bframe\b|\bhandle\b|\bsticking\b|\bbristle strips?\b/i, 4),
+          W2(/\b(?:cabinet|cupboard|kiosk|wardrobe|fridge|freezer|chiller|unit|counter|oven|machine) doors?\b|\bdoors? (?:of|on) the (?:[\w-]+ )?(?:cabinet|cupboard|kiosk|fridge|freezer|chiller|unit|counter|oven|machine)s?\b/i, -8)
+        ],
+        not: []
+      },
+      {
+        id: "locks-access",
+        name: "Locks, keys & access",
+        group: "Doors, windows & security",
+        description: "Getting in and keeping secure. Locks that are broken, stiff or jammed, cylinders and barrels, mortice locks, padlocks, bolts (top and bottom), keys snapped in locks, lost keys and key cutting, key safes and key boxes, digital / code locks, door entry and intercom systems, access control fobs, cabinets (vape / tobacco / cash) that won't lock. NOT: the door itself not closing (Doors), CCTV and intruder alarms (Security systems).",
+        concerto: ["locks", "lock", "locks/keys", "keys", "access control", "door entry", "intercom"],
+        kw: [
+          W2(/\blocks?\b(?!er)|\blocked out\b|\bunlock|\bcylinders?\b|\bbarrels?\b|\bmortice\b|\bpadlocks?\b|\bbolts?\b|\blatch(?:es)?\b|\bkeys?\b(?!board|pad)/i, 6),
+          W2(/\bdigi ?lock\b|\bpasscode\b|\btill safe\b|\bkey ?(?:safe|box)\b|\bcode lock\b|\bdigi(?:tal)? lock\b|\bdoor entry\b|\bintercom\b|\baccess control\b|\bfobs?\b|\bmag ?lock\b|\bmaglock\b/i, 9),
+          W2(/\b(?:not|isn'?t) secure\b|\bcan(?:not|'?t) be locked\b|\bwon'?t lock\b/i, 7)
+        ],
+        not: [/\bblocked\b/i]
+      },
+      {
+        id: "automatic-doors",
+        name: "Automatic doors",
+        group: "Doors, windows & security",
+        description: "Powered entrance doors. Automatic sliding or swing doors that won't open, won't close, open on their own, stick or bang; door sensors and motion detectors, door operators and controllers, program switches, bi-parting entrance doors, revolving doors. NOT: manual doors (Doors), roller shutters (Shutters, gates & grilles).",
+        concerto: ["automatic door", "automatic doors", "auto doors", "entrance doors", "sliding doors"],
+        kw: [
+          W2(/\bauto(?:matic)? (?:sliding )?(?:entrance )?doors?\b|\bsliding doors?\b|\bauto doors?\b|\bentrance doors?\b|\bdoor sensors?\b|\bdoor operators?\b|\brevolving doors?\b|\bbi[- ]?parting\b|\bdormakaba\b|\bdorma\b|\bgeze\b|\bassa abloy\b|\brecord doors?\b/i, 10)
+        ],
+        not: []
+      },
+      {
+        id: "shutters-gates",
+        name: "Shutters, gates & grilles",
+        group: "Doors, windows & security",
+        description: "Roller shutters (manual and electric) that are stuck, noisy, off their guides or won't lock; security grilles; loading-bay and up-and-over doors; sliding and swing gates; car-park and yard gates and barriers; gate motors and keypads. NOT: automatic glass entrance doors (Automatic doors), fencing (Fencing & barriers).",
+        concerto: ["shutter", "shutters", "roller shutter", "roller shutters", "gates", "gate", "grilles", "loading bay"],
+        kw: [
+          W2(/\b(?:roller )?shutters?\b|\bgrilles?\b|\bloading bay\b|\bup[- ]and[- ]over\b|\bdock levell?er\b|\bgates?\b|\bbarrier arm\b|\bentry barrier\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "glazing",
+        name: "Glazing & windows",
+        group: "Doors, windows & security",
+        description: "Glass and windows. Cracked, shattered or broken glass and double-glazed units, shopfront glazing, glass doors, misted units, windows that won't open or close, window handles, hinges and restrictors, window sills, leaking windows, perspex and safety film, mirrors that are glass panels. NOT: boarding up after a break-in (Boarding up & make safe \u2014 unless the glass itself is being replaced), automatic entrance doors (Automatic doors).",
+        concerto: ["glazing", "glass", "windows", "window", "shopfront", "double glazing"],
+        kw: [
+          W2(/\bglaz(?:ing|ed|ier)\b|\bglass\b|\bdouble glazed\b|\bsealed units?\b|\bmisted\b|\bshop ?front\b|\btoughened\b|\bperspex\b|\bsafety film\b|\bshattered\b|\bcracked (?:pane|window|glass)\b/i, 9),
+          W2(/\bwindows?\b|\bpanes?\b|\bwindow (?:handle|hinge|restrictor|sill|frame)s?\b/i, 6),
+          W2(/\bsmash(?:ed|ing)?\b|\bcrack(?:ed)?\b.{0,30}\b(?:panel|pane|glass)\b|\breglaz|\breplace(?:ment)?\b.{0,40}\b(?:window|glass|glazing|pane)|\b(?:window|glass|glazing|pane)\b.{0,80}\breplace/i, 6)
+        ],
+        not: []
+      },
+      {
+        id: "make-safe",
+        name: "Boarding up & make safe",
+        group: "Doors, windows & security",
+        description: "Emergency response after damage or a break-in: boarding up windows and doors, securing a site, making safe after a vehicle impact, storm damage, vandalism or an attempted break-in, temporary fencing or barriers to keep people away, removing a dangerous item. NOT: the permanent repair that follows (the matching type \u2014 Glazing, Doors, etc.).",
+        concerto: ["make safe", "boarding", "board up", "break in", "vandalism", "storm damage"],
+        kw: [
+          W2(/\bboard(?:ed|ing)? ?up\b|\bboarded\b|\bmake (?:it )?safe\b|\bmaking safe\b|\bbreak[- ]?in\b|\bburglar|\bbroken into\b|\bram ?raid\b|\bvandal|\bvehicle (?:impact|hit|crashed)\b|\bstorm damage\b|\bsecure the (?:site|building|store)\b/i, 7)
+        ],
+        not: []
+      },
+      {
+        id: "security-systems",
+        name: "CCTV & intruder alarms",
+        group: "Doors, windows & security",
+        description: "Electronic security: CCTV cameras and recorders, monitors, intruder / burglar alarm panels and PIRs, panic and attack alarms, alarm keypads and codes, security tagging gates (EAS), body-worn cameras. NOT: locks and access control (Locks, keys & access), fire alarms (Fire alarms & detection).",
+        concerto: ["cctv", "intruder alarm", "security alarm", "panic alarm", "alarm"],
+        kw: [
+          W2(/\bcameras?\b/i, 3),
+          W2(/\bcctv\b(?! (?:survey|camera down the drain))|\bsmoke cloak\b|\bfog(?:ging)? (?:system|cannon)\b|\bintruder alarm\b|\bburglar alarm\b|\bsecurity alarm\b|\bpanic (?:alarm|button)s?\b|\battack alarm\b|\balarm (?:panel|keypad|code)\b|\beas\b|\btagging gates?\b|\bbody ?cams?\b/i, 9)
+        ],
+        not: [/\bdrains?\b/i, /\bfire\b/i, /\bflexi(?:ble)? camera\b|\bcamera survey\b/i]
+      },
+      /* ── Building fabric ─────────────────────────────────────────────────── */
+      {
+        id: "leaks-ingress",
+        name: "Leaks & water ingress (source unknown)",
+        group: "Building fabric",
+        description: "Water appearing where it shouldn't when the source isn't known yet: water coming through the ceiling, dripping from above, leaking from the flat or unit above, water running down a wall, puddles appearing after rain, wet ceiling tiles. Someone needs to trace it \u2014 it may turn out to be the roof, gutters, a window or plumbing. NOT: a leak from an obvious pipe, tap or toilet (Plumbing), a known roof defect (Roofing).",
+        concerto: ["ceiling", "ceiling leak", "water ingress", "leak", "leaks", "flooding"],
+        kw: [
+          W2(/\b(?:leak|leaks|leaking|water|dripping|drips)\b.{0,40}\b(?:ceiling|from above|from the flat|flats? above|block above|above|through the (?:roof|ceiling|wall|floor)|down the wall|up through the floor)\b|\bceiling\b.{0,30}\bleak/i, 11),
+          W2(/\bpuddles?\b|\bwater pouring\b|\bpouring (?:in|through|down)\b|\bceiling\b.{0,30}\b(?:collapsed|fallen through|caved)\b|\bleaks? (?:have |has )?(?:appear|appeared|appearing)\b|\bleaks? in (?:the |our )?(?:warehouse|store|shop|office|stockroom)\b/i, 8),
+          W2(/\bwater ingress\b|\bwater coming (?:in|through)\b|\bwhen(?:ever)? it rains\b|\bafter (?:heavy )?rain\b|\brain ?water\b(?! goods)/i, 8),
+          W2(/\bflood(?:ed|ing)?\b/i, 4)
+        ],
+        not: []
+      },
+      {
+        id: "roofing",
+        name: "Roofing",
+        group: "Roofs & external",
+        description: "The roof itself: flat-roof felt and membranes, pitched-roof tiles and slates, roof leaks with a known roof cause, skylights and roof lights, lead flashing, chimneys, roof access hatches and ladders, moss and vegetation on the roof, storm-damaged roofs. NOT: gutters, downpipes, fascias and soffits (Roofline & rainwater), water through a ceiling where the cause is unknown (Leaks & water ingress).",
+        concerto: ["roof", "roofs", "roofing", "flat roof", "roof leak", "skylight", "roof light"],
+        kw: [
+          W2(/\broof(?:s|ing)?\b|\bflat roof\b|\bfelt\b|\bslates?\b|\bridge tiles?\b|\bskylights?\b|\broof ?lights?\b|\blead flashing\b|\bflashing\b|\bchimney\b|\broof hatch\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "rainwater",
+        name: "Roofline & rainwater (gutters, downpipes, fascias)",
+        group: "Roofs & external",
+        description: "Everything that carries rain off the building and finishes the roof edge: gutters (blocked, leaking, broken, overflowing), downpipes and hoppers, rainwater goods, fascia boards, soffits, bargeboards, gutter clearing. NOT: the roof covering (Roofing), below-ground drains (Drainage).",
+        concerto: ["gutters", "guttering", "gutter", "downpipe", "downpipes", "fascia", "soffit", "rainwater goods"],
+        kw: [
+          W2(/\bgutter(?:s|ing)?\b|\bdown ?pipes?\b|\bhoppers?\b|\brain ?water goods\b|\bfascias?\b(?! sign)|\bsoffits?\b|\bbarge ?boards?\b|\bdownpipe collector\b/i, 11)
+        ],
+        not: []
+      },
+      {
+        id: "ceilings",
+        name: "Ceilings & ceiling tiles",
+        group: "Building fabric",
+        description: "The ceiling itself: missing, stained, sagging or fallen suspended-ceiling tiles, ceiling grid, plasterboard ceilings that are cracked or coming down, access panels, replacing tiles after a leak has been fixed. NOT: the leak that caused it (Leaks & water ingress / Plumbing / Roofing), lights in the ceiling (Lighting).",
+        concerto: ["ceilings", "ceiling tiles", "suspended ceiling"],
+        kw: [
+          W2(/\bceiling ?tiles?\b|\bsuspended ceiling\b|\bceiling grid\b|\bceiling (?:has |is )?(?:come|coming|fallen|falling) down\b/i, 7),
+          W2(/\bceiling\b/i, 2),
+          W2(/\bleak(?:s|ing)?\b(?!.{0,20}\b(?:has been|was|now) (?:fixed|repaired|resolved))/i, -4),
+          W2(/\btiles?\b.*\b(?:stained|missing|fallen|came down|come down)\b/i, 3)
+        ],
+        not: []
+      },
+      {
+        id: "flooring",
+        name: "Flooring",
+        group: "Building fabric",
+        description: "Floors inside the building: lifting, cracked or missing floor tiles, vinyl and safety flooring (Altro), carpet, matting and entrance mats, screed, raised or uneven floors that are a trip hazard indoors, freezer-room floors, floor nosings and stair treads. NOT: external paving and car parks (Car parks & external surfaces), wall tiles (Walls, plaster & tiling).",
+        concerto: ["flooring", "floor", "floors", "floor tiles", "carpet", "matting"],
+        kw: [
+          W2(/\bfloor ?(?:tiles?|ing|covering)\b|\bvinyl\b|\baltro\b|\bcarpets?\b|\bentrance mat|\bmatting\b|\bscreed\b|\bnosings?\b|\bstair treads?\b/i, 8),
+          W2(/\btiles?\b.{0,40}\b(?:lift(?:ing|ed)|raised|raising|coming up|come up|came up|loose|cracked|worn|damaged)\b|\bholes? in the (?:warehouse |shop )?floor\b|\brubber (?:type )?tiles?\b|\bstripping (?:has )?(?:come|coming) up\b|\b(?:lift(?:ing|ed)|raised|coming up)\b.{0,30}\btiles?\b|\buneven\b/i, 6),
+          W2(/\bfloor\b/i, 3),
+          W2(/\btrip hazard\b/i, 4)
+        ],
+        not: []
+      },
+      {
+        id: "walls-plaster",
+        name: "Walls, plaster & tiling",
+        group: "Building fabric",
+        description: "Inside walls and partitions: holes, cracks and damage to plasterboard and plaster, wall tiles and grout, hygienic wall cladding (PVC / Whiterock), wall protection and corner guards, crash rails and bump strips on walls, partitions and stud walls, silicone and sealant around worktops, sinks and walls. NOT: damp and mould (Damp & mould), outside masonry and render (Brickwork & external walls), painting (Decorating).",
+        concerto: ["walls", "wall", "internal walls", "wall tiles", "cladding", "wall protection"],
+        kw: [
+          W2(/\bwalls?\b|\bplaster(?:board|ing)?\b|\bstud wall\b|\bpartitions?\b|\bwall tiles?\b|\bgrout\b|\bwhiterock\b|\bhygienic (?:wall|cladding)\b|\bcladding\b|\bcorner guards?\b|\bcrash rails?\b|\bwall protection\b/i, 6),
+          W2(/\bsealant\b|\bsilicone\b|\bmastic\b/i, 4),
+          W2(/\bholes? in the wall\b|\bcrack(?:s|ed)? in the wall\b/i, 6)
+        ],
+        not: []
+      },
+      {
+        id: "damp-mould",
+        name: "Damp & mould",
+        group: "Building fabric",
+        description: "Damp patches, rising or penetrating damp, condensation, black mould, mildew, musty rooms \u2014 common on lettings / residential work. NOT: an active leak (Plumbing / Leaks & water ingress).",
+        concerto: ["damp", "mould", "condensation"],
+        kw: [
+          W2(/\bdamp\b|\bmou?ld(?:y)?\b|\bcondensation\b|\bmildew\b|\bmusty\b/i, 9)
+        ],
+        not: [/\bmould(?:ed|ing)\b/i]
+      },
+      {
+        id: "brickwork",
+        name: "Brickwork & external walls",
+        group: "Roofs & external",
+        description: "Outside walls and structure: brickwork, pointing, render, external cladding, cracks in external walls, spalling concrete, lintels, copings, retaining walls, steps and ramps built into the building, structural concerns. NOT: car parks and paving (Car parks & external surfaces), fascia boards (Roofline & rainwater).",
+        concerto: ["external", "external walls", "brickwork", "masonry", "render", "structure"],
+        kw: [
+          W2(/\bbrick(?:work|s)?\b|\bpointing\b|\brender(?:ing)?\b|\bmasonry\b|\blintels?\b|\bcopings?\b|\bretaining wall\b|\bstructural\b|\bspalling\b|\bconcrete\b/i, 7),
+          W2(/\bramps?\b|\bsteps\b/i, 3)
+        ],
+        not: []
+      },
+      {
+        id: "decorating",
+        name: "Decorating",
+        group: "Building fabric",
+        description: "Painting and finishes: redecoration inside and out, painting walls, ceilings, doors and window frames, flaking or bubbling paintwork, wallpaper, filling and making good before painting, line marking on floors inside. NOT: graffiti removal (Cleaning & waste), car-park line painting (Car parks & external surfaces).",
+        concerto: ["decorating", "decoration", "painting", "paintwork"],
+        kw: [
+          W2(/\bpaint(?:ing|work|ed)?\b|\bdecorat|\bre-?paint|\bwall ?paper\b|\bdulux\b|\bemulsion\b|\bgloss\b|\bundercoat\b|\bmaking good\b/i, 7)
+        ],
+        not: []
+      },
+      /* ── Roofs & external ────────────────────────────────────────────────── */
+      {
+        id: "external-surfaces",
+        name: "Car parks & external surfaces",
+        group: "Roofs & external",
+        description: "The ground outside: potholes, tarmac and asphalt, block paving and slabs, kerbs, external trip hazards, car-park line marking, speed bumps, external drainage covers that are damaged (not blocked), ramps and paths outside, forecourt surfaces, bollards hit by vehicles. NOT: fencing (Fencing & barriers), blocked outside drains (Drainage).",
+        concerto: ["car park", "carpark", "external areas", "external", "paving", "potholes", "forecourt"],
+        kw: [
+          W2(/\bdrain covers?\b|\bpathway\b|\bpaving slabs?\b|\bpot ?holes?\b|\btarmac\b|\basphalt\b|\bcar ?park\b|\bblock paving\b|\bpaving\b|\bslabs?\b|\bkerbs?\b|\bline marking\b|\bspeed bumps?\b|\bbollards?\b|\bforecourt surface\b|\bfootpath\b|\bpavement\b/i, 9),
+          W2(/\btrip hazard\b.*\b(?:outside|car ?park|path|front)\b|\boutside\b.*\btrip hazard\b/i, 5)
+        ],
+        not: []
+      },
+      {
+        id: "fencing",
+        name: "Fencing & barriers",
+        group: "Roofs & external",
+        description: "Boundary and yard structures: fences and fence panels, posts, railings, walls around bin stores, bin-store enclosures, trolley bays and shelters, cycle racks, handrails outside, crash barriers. NOT: gates and gate motors (Shutters, gates & grilles), bollards in the car park (Car parks & external surfaces).",
+        concerto: ["fencing", "fence", "fences", "railings", "bin store", "trolley bay"],
+        kw: [
+          W2(/\bfenc(?:e|es|ing)\b|\bfence panels?\b|\brailings?\b|\bbin stores?\b|\bhand ?rails?\b|\b(?:crash|security) barriers?\b|\bpicket\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "grounds",
+        name: "Grounds, trees & landscaping",
+        group: "Roofs & external",
+        description: "Soft landscaping and grounds maintenance: overgrown trees and branches, hedges, weeds, grass cutting, planters, garden clearance, leaves, fallen trees after a storm, ivy on buildings. NOT: litter and waste clearance (Cleaning & waste), fencing (Fencing & barriers).",
+        concerto: ["grounds", "grounds maintenance", "landscaping", "trees"],
+        kw: [
+          W2(/\btrees?\b|\bbranches\b|\bhedges?\b|\bweeds?\b|\bgrass\b|\bplanters?\b|\bgarden\b|\blandscap|\bivy\b|\bovergrown\b|\bshrubs?\b|\bleaves\b/i, 8)
+        ],
+        not: []
+      },
+      {
+        id: "signage",
+        name: "Signage",
+        group: "Roofs & external",
+        description: "Signs as objects: loose, wobbly or fallen signs, fascia signs, totem and pole signs, Post Office and partner signs, safety signs, wayfinding signs, sign brackets and fixings. If the sign's LIGHTS are out it is Lighting. NOT: illuminated sign lighting failures (Lighting), exit signs (Emergency lighting).",
+        concerto: ["signage", "signs", "sign", "totem"],
+        kw: [
+          W2(/\bsignage\b|\btotem\b|\bpole sign\b|\bfascia sign\b|\bpost office'?\s+sign\b/i, 7),
+          W2(/\bsigns?\b/i, 4)
+        ],
+        not: [/\bexit signs?\b/i, /\bsign(?:ed|ing)? (?:off|in|out)\b/i, /\bsign(?:age)? light|\billuminated sign/i]
+      },
+      {
+        id: "street-furniture",
+        name: "External bins & street furniture",
+        group: "Roofs & external",
+        description: "Free-standing and fixed items outside the store: cigarette bins and smoking points, litter bins, dog bins, benches, cycle racks and bike shelters, trolley bays and trolley shelters, smoking shelters, planters as fixtures, post boxes and parcel lockers on the forecourt. NOT: fences and railings (Fencing & barriers), waste collections (Cleaning, waste & clearance), car-park surfaces (Car parks & external surfaces).",
+        concerto: ["cigarette bin", "cigarette bins", "litter bin", "bins", "bench", "cycle rack", "trolley bay", "smoking shelter"],
+        kw: [
+          W2(/\b(?:outside|external|outdoor) bins?\b|\bbins? (?:has been |was |got )?(?:stolen|missing|taken)\b|\bcig(?:arette)? bins?\b|\bcig bins?\b|\bsmoking (?:point|shelter|bin)s?\b|\bbutt bins?\b|\blitter bins?\b|\bdog bins?\b|\bbenche?s?\b|\b(?:cycle|bike) (?:rack|shelter|stand)s?\b|\btrolley (?:bay|shelter|park)s?\b|\bparcel lockers?\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "solar-pv",
+        name: "Solar PV & batteries",
+        group: "Electrical",
+        description: "Solar panels and everything that goes with them: PV arrays on the roof, inverters and their alarms or fault lights, PV isolators, generation meters, battery storage, PV maintenance and annual PV inspections. NOT: general electrical faults (Electrical \u2014 power, sockets & tripping), EV chargers (Forecourt, fuel & EV charging).",
+        concerto: ["solar", "solar panels", "pv", "inverter"],
+        kw: [
+          W2(/\bsolar\b|\bpv\b|\bphoto ?voltaic\b|\binverters?\b|\bbattery storage\b|\bgeneration meter\b/i, 10)
+        ],
+        not: []
+      },
+      /* ── Fixtures & fittings ─────────────────────────────────────────────── */
+      {
+        id: "washroom-fittings",
+        name: "Washroom fittings",
+        group: "Fixtures & fittings",
+        description: "Things fixed in toilets and washrooms that aren't plumbing: toilet seats and hinges, hand dryers, soap / paper towel / toilet-roll dispensers, sanitary bins, baby-change units, grab rails and disabled-toilet alarms (pull cords), mirrors, cubicle partitions and their locks. NOT: blocked toilets (Drainage), leaking or non-flushing toilets (Plumbing).",
+        concerto: ["hand dryer", "hand dryers", "toilet seat", "washroom", "washrooms", "dispensers", "baby change", "disabled toilet alarm"],
+        kw: [
+          W2(/\btoilet seats?\b|\bseat\b.{0,30}\b(?:hinge|broken|loose)|\bhand ?dryers?\b|\bdispensers?\b|\bsoap\b|\bpaper towel|\btoilet roll holder|\bsanitary bins?\b|\bbaby chang|\bgrab rails?\b|\bpull cord\b|\bdisabled (?:toilet )?alarm\b|\bcubicles?\b|\bcubicals?\b|\bmirrors?\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "store-fixtures",
+        name: "Store fixtures & shelving",
+        group: "Fixtures & fittings",
+        description: "Shopfitting and fixtures in the sales area and warehouse: shelving, gondolas, shelf edges and stock limiters, plastic strips and ticket channels (meal-deal strips), kiosks and counters, tobacco / vape / spirits cabinets (the cabinet, not its lock), lockers, checkouts housings, trolleys and baskets bays, condiment and coffee bars to remove or alter, display stands, cages and racking. NOT: the lock on a cabinet (Locks, keys & access), fridges (Refrigeration), tills and card readers (IT, tills & telecoms).",
+        concerto: ["shelving", "shelves", "fixtures", "fixtures & fittings", "plastic shelf stock limiters", "kiosk", "counter", "lockers", "racking", "cabinet"],
+        kw: [
+          W2(/\bbase ?boards?\b|\bkick ?boards?\b|\bshelf edges?\b|\bgantry\b|\bnewspaper (?:stand|storage)\b|\bshel(?:f|ves|ving)\b|\bgondolas?\b|\bstock limiters?\b|\bticket (?:strip|channel)s?\b|\bplastic strip|\bmeal deal\b|\bkiosks?\b|\bcounters?\b|\blockers?\b|\bracking\b|\bdisplay (?:stand|unit)s?\b|\bcondiment\b/i, 7),
+          W2(/\bcabinets?\b/i, 4),
+          W2(/\b(?:vape|tobacco|spirits|cigarette|coffee|display|cabinet|kiosk|counter) (?:cabinet )?doors?\b|\bdoors? (?:of|on) the (?:[\w-]+ )?(?:cabinet|kiosk|counter)s?\b|\b(?:vape|tobacco|spirits|cigarette|display) cabinets?\b/i, 6)
+        ],
+        not: [/\bkey ?cabinet\b/i]
+      },
+      {
+        id: "joinery",
+        name: "Joinery & carpentry",
+        group: "Fixtures & fittings",
+        description: "Timber work and fitted furniture: kitchen units and worktops (supply / fit / repair), cupboard doors and drawers, skirting and architrave, boxing in, timber frames and battens, timber repairs to rotten window boards, stud work, bespoke joinery. NOT: shop shelving and gondolas (Store fixtures & shelving), doors and their closers (Doors).",
+        concerto: ["joinery", "carpentry", "worktop", "kitchen units", "cupboards"],
+        kw: [
+          W2(/\bjoiner(?:y)?\b|\bcarpent(?:ry|er)\b|\btimber\b|\bworktops?\b|\bkitchen units?\b|\bbase units?\b|\bwall units?\b|\bcupboards?\b|\bdrawers?\b|\bskirting\b|\barchitrave\b|\bboxing\b|\bwooden\b|\bwood\b|\bply(?:wood)?\b|\brotten\b/i, 6)
+        ],
+        not: []
+      },
+      /* ── Equipment & systems ─────────────────────────────────────────────── */
+      {
+        id: "catering-appliances",
+        name: "Catering & appliances",
+        group: "Equipment & systems",
+        description: "Appliances and catering kit: bake-off and bakery ovens, provers, hot cabinets and hot-food counters, coffee machines (Starbucks / Costa express), microwaves, kettles, toasters, dishwashers, glass washers, cookers, ovens and hobs in flats (electric), washing machines, white goods. NOT: gas cookers / hobs (Gas), fridges and freezers (Refrigeration), water heaters and boiling-water taps (Hot water).",
+        concerto: ["bakery", "oven", "ovens", "coffee machine", "catering equipment", "hot food", "appliances", "cooker", "hob"],
+        kw: [
+          W2(/\bwater coolers?\b|\bwater dispensers?\b|\bovens?\b|\bprovers?\b|\bbake[- ]?off\b|\bhot (?:cabinet|counter|food|plate|hold)\b|\bcoffee machines?\b|\bcosta\b|\bmicrowaves?\b|\bkettles?\b|\btoasters?\b|\bdish ?washers?\b|\bglass ?washers?\b|\bcookers?\b|\bhobs?\b|\bwashing machines?\b|\bwhite goods\b|\bextractor hood\b/i, 8)
+        ],
+        not: []
+      },
+      {
+        id: "it-telecoms",
+        name: "IT, tills & telecoms",
+        group: "Equipment & systems",
+        description: "Store systems and data: tills / EPOS, self-checkouts (SCO), card readers and PIN pads, PayPoint, scales and label printers, phones and phone lines, broadband / network, Wi-Fi access points, data cabling (Cat5/Cat6) and comms cabinets, printers, back-office PCs, music and tannoy systems. Usually routed to the IT supplier. NOT: no power to the till circuit (Electrical \u2014 power, sockets & tripping).",
+        concerto: ["it", "epos", "till", "tills", "telephony", "phones", "network", "data", "scales", "self checkout", "card reader"],
+        kw: [
+          W2(/\b(?:till|safe) (?:door|safe)\b|\btill safe\b/i, -8),
+          W2(/\bpcs?\b|\bcomputers?\b|\blaptops?\b|\boffline\b/i, 4),
+          W2(/\btills?\b|\bepos\b|\bself[- ]?check ?outs?\b|\bsco ?\d*\b|\binternet\b|\bethernet\b|\blog ?in\b|\boutlook\b|\bpasswords?\b|\bemail address\b|\bqueu(?:e|ing) system\b|\brouter\b|\bups\b|\bscanners?\b|\btablet\b|\bcard (?:machine|reader|terminal)s?\b|\bpin ?pads?\b|\bpay ?point\b|\bscales?\b|\blabel printers?\b|\bprinters?\b|\bphones?\b|\bphone line\b|\bring out\b|\bbroadband\b|\bnetwork\b|\bwi-?fi\b|\baccess points?\b|\bap\d\b|\bcat ?[56]e?\b|\bdata (?:point|cable|cabling)\b|\bcomms\b|\btannoy\b|\bmusic system\b|\bnetwork switch\b|\baruba\b|\bports? \d+|\bpatch (?:panel|lead)s?\b|\bgateways?\b/i, 8)
+        ],
+        not: []
+      },
+      {
+        id: "lifts",
+        name: "Lifts & hoists",
+        group: "Equipment & systems",
+        description: "Goods lifts, passenger lifts, platform and stair lifts, dumb waiters, hoists, lift alarms and lift phones, LOLER inspections. NOT: lift lighting (Lighting).",
+        concerto: ["lift", "lifts", "goods lift", "hoist", "platform lift"],
+        kw: [
+          W2(/\b(?:goods |passenger |platform |stair ?)?lifts?\b(?! (?:up|off|the))|\bhoists?\b|\bdumb ?waiter\b|\bloler\b/i, 8)
+        ],
+        not: [/\blift(?:ing|ed)\b/i, /\btiles?\b/i]
+      },
+      {
+        id: "forecourt-ev",
+        name: "Forecourt, fuel & EV charging",
+        group: "Equipment & systems",
+        description: "Petrol-forecourt (PFS) equipment: fuel pumps and dispensers, nozzles and hoses, tank gauges and wet-stock alarms, interceptor alarms, canopy structure, AdBlue, air and water machines, car washes, EV chargers and charging bays. Canopy LIGHTS are Lighting. NOT: forecourt surfaces and potholes (Car parks & external surfaces), canopy lighting (Lighting).",
+        concerto: ["forecourt", "forecourt/canopy", "fuel", "pumps", "ev charger", "ev chargers", "car wash", "air machine"],
+        kw: [
+          W2(/\bfuel\b|\bpetrol\b|\bdiesel\b|\b(?:fuel|pump|petrol|diesel) nozzles?\b|\bfuel pumps?\b|\bdispensers?\b.*\bfuel|\bcanopy\b|\badblue\b|\bair (?:and water )?machine\b|\bcar ?wash\b|\bev (?:charg|point)|\bcharging (?:bay|point)s?\b|\btank gauge\b|\bwet ?stock\b|\bdoms\b|\bforecourt\b|\bjet ?wash (?:bay|machine)\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "pumps-plant",
+        name: "Pumps & plant",
+        group: "Equipment & systems",
+        description: "Mechanical plant that isn't heating or cooling: sump and pump-station pumps, booster pumps, sewage pump stations and their alarms, cold-water booster sets, generators, compressors for non-refrigeration use, plant-room equipment generally. NOT: a blocked drain or Saniflo (Drainage), refrigeration plant (Refrigeration).",
+        concerto: ["pumps", "pump", "sump pump", "plant", "generator", "booster"],
+        kw: [
+          W2(/\bsump\b|\bpump ?(?:station|room)\b|\bbooster (?:pump|set)s?\b|\bgenerators?\b|\bplant ?room\b|\bpumps?\b/i, 7)
+        ],
+        not: [/\bfuel pumps?\b|\bwaste pump\b/i]
+      },
+      /* ── Hygiene & environment ───────────────────────────────────────────── */
+      {
+        id: "pest-control",
+        name: "Pest control & proofing",
+        group: "Hygiene & environment",
+        description: "Pests and keeping them out: rats, mice, rodent droppings, cockroaches, flies, wasps' nests, pigeons and birds (netting, spikes), proofing gaps around pipes, doors and chillers to stop entry, cleaning and sterilising after an infestation (e.g. rat excrement in hatches), work recommended by Rentokil / pest contractors. NOT: rats coming up through drains (Drainage), fire-stopping gaps (Firestopping).",
+        concerto: ["pest control", "pests", "pest", "proofing", "rodents", "birds"],
+        kw: [
+          W2(/\bfly (?:zappers?|killers?|units?|control|screens?)\b|\binsect(?:ocutor|o-?cutor|killer)s?\b|\binsecutor\b|\blumn?ia\b|\bfruit fl(?:y|ies)\b|\bpests?\b|\brodents?\b|\brats?\b|\bmice\b|\bmouse\b|\bvermin\b|\bdroppings\b|\bcockroach|\binfest|\bwasps?\b|\bflies\b|\bpigeons?\b|\bbird (?:netting|spikes|mesh)\b|\bbirds?\b|\brentokil\b|\bproof(?:ing|ed)?\b|\bsteril(?:is|iz)/i, 9),
+          W2(/\bgaps?\b.{0,40}\b(?:entry|enter|getting in)\b|\bprevent (?:the )?entry\b|\bplug (?:the |a )?holes?\b|\bstop (?:them|rodents|pests|mice|rats) (?:getting|coming) in\b/i, 7)
+        ],
+        not: [/\bwater ?proof|\bfire ?proof|\bweather ?proof/i]
+      },
+      {
+        id: "cleaning-waste",
+        name: "Cleaning, waste & clearance",
+        group: "Hygiene & environment",
+        description: "Cleaning and rubbish rather than repairs: graffiti removal, jet / pressure washing, deep cleans, cleaning up after a leak or flood, chewing gum removal, litter, fly-tipping, site and warehouse clearance (cages of metal / plastic / mixed waste), skips, urgent general-waste collections, removing redundant equipment for disposal. NOT: pest sterilisation (Pest control & proofing), garden clearance (Grounds, trees & landscaping).",
+        concerto: ["general waste", "waste", "cleaning", "graffiti", "clearance", "fly tipping"],
+        kw: [
+          W2(/\bfly[- ]?tip(?:ping|ped)?\b/i, 10),
+          W2(/\bcleaned\b|\bdeep clean\b|\bclean(?:ed)? (?:up|the|down|off)\b|\bneeds? (?:a )?clean(?:ing)?\b|\bto be cleaned\b|\btip collection\b|\bgraffiti\b|\bjet ?wash|\bpressure wash|\bdeep clean\b|\bchewing gum\b|\blitter\b|\bfly[- ]?tip|\bclearance\b|\bskips?\b|\brubbish\b|\bwaste collection\b|\bdispos(?:e|al)\b|\bremove and dispose\b/i, 7)
+        ],
+        not: []
+      },
+      /* ── Compliance & surveys ────────────────────────────────────────────── */
+      {
+        id: "surveys-inspections",
+        name: "Surveys, inspections & quotes",
+        group: "Compliance & testing",
+        description: "Visits to look and report, not fix: site surveys, condition surveys, H&S audit actions to assess, asbestos surveys, dilapidations, measure-ups, 'please quote for\u2026', photographs requested of consumer units / store areas, fire risk assessments. NOT: the works that follow (the matching type), EICRs (Electrical testing & certificates), gas safety certificates (Gas).",
+        concerto: ["survey", "surveys", "inspection", "quote", "quotation", "asbestos"],
+        kw: [
+          W2(/\bsurvey\b|\binspection\b|\binspect\b|\bquot(?:e|ation)\b|\bmeasure[- ]?up\b|\bdilapidation|\basbestos\b|\bassess(?:ment)?\b|\baudit\b|\bsupply pictures\b|\bphotos? of\b/i, 5)
+        ],
+        not: []
+      },
+      /* ── Other ───────────────────────────────────────────────────────────── */
+      {
+        id: "logistics",
+        name: "Logistics & admin (not a site fault)",
+        group: "Other",
+        description: "Internal tasks booked as jobs: delivering or collecting materials, picking up from merchants, dropping kit at site, deliveries such as ECO boxes, vehicle MOTs and services, van swaps, travel (ferries), staff days off and holidays booked onto the board, office and yard tasks. Kept separate so they don't pollute fault statistics.",
+        concerto: [],
+        kw: [
+          W2(/^\s*(?:please )?(?:deliver|collect|pick ?up|drop(?: off)?|go to)\b|\bready to collect\b|\bmaterials for\b|\bcollect (?:all|the following|\d)|\bdeliver materials\b|\braise po (?:number )?through (?:this )?job\b|\bdeliver (?:eco|the)\b|\beco ?box\b|\bcollect (?:materials|from)|\bpick up\b|\bdrop materials\b|\bmot\b|\bvan (?:booked|service|swap)|\bswap vans\b|\bferry\b|\bday off\b|\bholiday\b|\boff (?:monday|tuesday|wednesday|thursday|friday)\b/i, 9)
+        ],
+        not: []
+      },
+      {
+        id: "general",
+        name: "General maintenance",
+        group: "Other",
+        description: "Small mixed repairs that don't fit one trade, or a list of several different small jobs for a handyman visit: put up a notice board, re-fix a bracket, adjust something, 'various' works. Use this only when no other type fits.",
+        concerto: ["general", "general maintenance", "work required", "other", "miscellaneous"],
+        kw: [W2(/\bvarious\b|\bodd jobs?\b|\bhandyman\b|\bgeneral (?:maintenance|repairs?)\b|\bre-?fix\b|\bbrackets?\b/i, 2)],
+        not: []
+      }
+    ];
+    WORK_TYPE_BY_ID = Object.fromEntries(WORK_TYPES.map((t) => [t.id, t]));
+    LEGACY_AREA_MAP = {
+      "electrical": ["electrical-power", "lighting", "emergency-lighting", "electrical-testing", "it-telecoms"],
+      "plumbing": ["plumbing", "hot-water", "water-hygiene", "drainage"],
+      "fabric-building": ["walls-plaster", "ceilings", "flooring", "leaks-ingress", "brickwork", "damp-mould", "roofing", "rainwater", "glazing", "external-surfaces"],
+      "firestopping": ["firestopping"],
+      "fire-alarms": ["fire-alarms", "fire-doors"],
+      "heating-hvac": ["heating", "air-con", "ventilation", "refrigeration"],
+      "joinery-carpentry": ["joinery", "doors", "store-fixtures", "washroom-fittings"],
+      "decorating": ["decorating"],
+      "general-maintenance": ["general", "locks-access", "make-safe", "washroom-fittings", "store-fixtures", "fencing", "signage", "cleaning-waste"]
+    };
+    norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9/& ]+/g, " ").replace(/\s+/g, " ").trim();
+    CONCERTO_INDEX = (() => {
+      const m = /* @__PURE__ */ new Map();
+      for (const t of WORK_TYPES) for (const a of t.concerto || []) if (!m.has(norm(a))) m.set(norm(a), t.id);
+      return m;
+    })();
+    TAG_PRIOR = 6;
+  }
+});
+
 // src/lib/zip.js
 function crc32(buf) {
   let c = 4294967295;
@@ -5289,9 +6054,9 @@ function matchSupplier(text, knownNames) {
   const t = String(text || "").toLowerCase();
   let best = null;
   for (const name of knownNames || []) {
-    const norm = normSupplierName(name);
-    if (!norm) continue;
-    const words = norm.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
+    const norm2 = normSupplierName(name);
+    if (!norm2) continue;
+    const words = norm2.split(" ").filter((w) => w.length >= 4 && !SUPPLIER_STOP.has(w));
     if (!words.length) continue;
     if (!words.every((w) => t.includes(w))) continue;
     const score = words.join("").length + words.length;
@@ -7415,7 +8180,7 @@ function detailsH(rec) {
   return h + CARD_PAD;
 }
 function pageBg(doc) {
-  doc.rect(0, 0, W2, H, { fill: BG });
+  doc.rect(0, 0, W3, H, { fill: BG });
 }
 function headerFull(doc, rec, meta) {
   const y = 30, h = HEADER_H;
@@ -7431,11 +8196,11 @@ function headerFull(doc, rec, meta) {
   }
   const st = statusOf(rec);
   pill(doc, M3 + 20, y + 58, st.label, { fill: st.color, size: 7 });
-  tracked(doc, W2 - M3 - 20, y + 26, TITLES[rec.type] + " Certificate", { size: 7.5, color: HEADSUB, track: 1.5, alignRight: true });
-  doc.text(W2 - M3 - 20, y + 50, rec.certNumber ? "No. " + S(rec.certNumber) : "Draft \u2014 number on issue", { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  tracked(doc, W3 - M3 - 20, y + 26, TITLES[rec.type] + " Certificate", { size: 7.5, color: HEADSUB, track: 1.5, alignRight: true });
+  doc.text(W3 - M3 - 20, y + 50, rec.certNumber ? "No. " + S(rec.certNumber) : "Draft \u2014 number on issue", { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
   const dt = rec.contractor && rec.contractor.date ? rec.contractor.date : "";
-  if (dt) doc.text(W2 - M3 - 20, y + 68, "Tested " + S(dt), { size: 9, color: HEADSUB, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W2 - M3 - 20, y + 84, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  if (dt) doc.text(W3 - M3 - 20, y + 68, "Tested " + S(dt), { size: 9, color: HEADSUB, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W3 - M3 - 20, y + 84, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
   return y + h;
 }
 function headerSlim(doc, rec, meta) {
@@ -7449,8 +8214,8 @@ function headerSlim(doc, rec, meta) {
     } catch {
     }
   }
-  tracked(doc, W2 - M3 - 16, y + 17, TITLES[rec.type] + " \u2014 continued", { size: 7, color: HEADSUB, alignRight: true });
-  if (rec.certNumber) doc.text(W2 - M3 - 16, y + 31, "No. " + S(rec.certNumber), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+  tracked(doc, W3 - M3 - 16, y + 17, TITLES[rec.type] + " \u2014 continued", { size: 7, color: HEADSUB, alignRight: true });
+  if (rec.certNumber) doc.text(W3 - M3 - 16, y + 31, "No. " + S(rec.certNumber), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
   return y + h;
 }
 function infoCard(doc, x, y, w, label2, o) {
@@ -7490,7 +8255,7 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
   const h = 20 + THEAD_H + bodyH + 12;
   cardBox(doc, M3, y, CW, h);
   tracked(doc, M3 + CARD_PAD, y + 18, titleType === "pat" ? "Appliances tested" : "Emergency lighting tests", { size: 6.5, color: ACCENT });
-  if (count != null) doc.text(W2 - M3 - CARD_PAD, y + 18, String(count) + (titleType === "pat" ? " appliances" : " luminaires"), { size: 7.5, color: FAINT, alignRight: true });
+  if (count != null) doc.text(W3 - M3 - CARD_PAD, y + 18, String(count) + (titleType === "pat" ? " appliances" : " luminaires"), { size: 7.5, color: FAINT, alignRight: true });
   const x0 = M3 + CARD_PAD, tw = CW - CARD_PAD * 2;
   let cx = x0;
   const cols = layout.map((c) => {
@@ -7558,7 +8323,7 @@ function signatureCard(doc, y, rec, meta) {
     doc.text(M3 + CARD_PAD, yy2, l, { size: 8.5, color: MUTE });
     yy2 += 11;
   });
-  const sigX = W2 - M3 - 190;
+  const sigX = W3 - M3 - 190;
   if (meta.signature) {
     try {
       const g = jpegInfo(meta.signature);
@@ -7576,7 +8341,7 @@ function signatureCard(doc, y, rec, meta) {
 function footer(doc, rec, pageNo, pageCount) {
   const note = rec.type === "em" ? "Tested to BS 5266-1:2016." : "Tested to the IET Code of Practice for In-service Inspection & Testing.";
   doc.text(M3, H - 22, note + "  Generated by the Mostlane Portal.", { size: 7, color: FAINT });
-  doc.text(W2 - M3, H - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT, alignRight: true });
+  doc.text(W3 - M3, H - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT, alignRight: true });
 }
 function buildCertPdf(record, meta = {}) {
   const rec = record || {};
@@ -7602,9 +8367,9 @@ function buildCertPdf(record, meta = {}) {
   const lastBottom = last.tableTop + 20 + THEAD_H + last.rows.length * ROW_H + 12;
   const sigOwnPage = lastBottom + GAP + 96 > H - 40;
   const totalPages = pages.length + (sigOwnPage ? 1 : 0);
-  const doc = new PdfDoc(W2, H);
+  const doc = new PdfDoc(W3, H);
   pages.forEach((pg, idx) => {
-    if (idx > 0) doc.newPage(W2, H);
+    if (idx > 0) doc.newPage(W3, H);
     pageBg(doc);
     if (pg.intro) {
       headerFull(doc, rec, meta);
@@ -7621,7 +8386,7 @@ function buildCertPdf(record, meta = {}) {
   });
   let sigY;
   if (sigOwnPage) {
-    doc.newPage(W2, H);
+    doc.newPage(W3, H);
     pageBg(doc);
     headerSlim(doc, rec, meta);
     footer(doc, rec, totalPages, totalPages);
@@ -7630,14 +8395,14 @@ function buildCertPdf(record, meta = {}) {
   signatureCard(doc, sigY, rec, meta);
   return doc.bytes();
 }
-var W2, H, M3, CW, NAVY, NAVY_D, INK2, MUTE, FAINT, BG, CARD, BORDER, HAIR, ZEBRA, ACCENT, GREEN, RED, GREY3, HEADSUB, S, okColor, COLS, TITLES, HEADER_H, GAP, ROW_H, THEAD_H, CARD_PAD;
+var W3, H, M3, CW, NAVY, NAVY_D, INK2, MUTE, FAINT, BG, CARD, BORDER, HAIR, ZEBRA, ACCENT, GREEN, RED, GREY3, HEADSUB, S, okColor, COLS, TITLES, HEADER_H, GAP, ROW_H, THEAD_H, CARD_PAD;
 var init_certpdf = __esm({
   "src/lib/certpdf.js"() {
     init_pdf();
-    W2 = 595;
+    W3 = 595;
     H = 842;
     M3 = 40;
-    CW = W2 - M3 * 2;
+    CW = W3 - M3 * 2;
     NAVY = [0, 0.204, 0.408];
     NAVY_D = [0, 0.145, 0.29];
     INK2 = [0.1, 0.13, 0.18];
@@ -13469,7 +14234,7 @@ function wrapLines(str, size, maxW, maxLines) {
   return lines.length ? lines : [""];
 }
 function header(doc, meta) {
-  doc.rect(0, 0, W3, 74, { fill: NAVY2 });
+  doc.rect(0, 0, W4, 74, { fill: NAVY2 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
@@ -13478,14 +14243,14 @@ function header(doc, meta) {
     } catch {
     }
   }
-  doc.text(W3 - M4, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W3 - M4, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
+  doc.text(W4 - M4, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W4 - M4, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
   let y = 92;
   const con = meta.contractor || {};
   const bits = [con.tradingTitle, meta.site ? "Site: " + meta.site : "", meta.certNumber ? "EM cert " + meta.certNumber : ""].filter(Boolean);
   doc.text(M4, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
   y += 8;
-  doc.line(M4, y, W3 - M4, y, { stroke: HAIR2, lw: 0.8 });
+  doc.line(M4, y, W4 - M4, y, { stroke: HAIR2, lw: 0.8 });
   return y + 16;
 }
 function prepPhotos(list) {
@@ -13513,22 +14278,22 @@ function prepPhotos(list) {
 function itemBlock(doc, it, idx, y) {
   const { draw: photos, skipped } = prepPhotos(it.photos);
   const photoH = photos.length ? 96 : 0;
-  const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M4 * 2 - 24, 2) : [];
+  const noteLines = it.note ? wrapLines(it.note, 8.5, W4 - M4 * 2 - 24, 2) : [];
   const skipLine = skipped.length ? skipped.length + " photo" + (skipped.length > 1 ? "s" : "") + " on file not embedded: " + skipped.join("; ") : "";
   const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + (skipLine ? 11 : 0) + 14;
   if (y + blockH > H2 - M4) {
-    doc.newPage(W3, H2);
+    doc.newPage(W4, H2);
     y = M4 + 6;
   }
-  doc.rect(M4, y, W3 - M4 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
+  doc.rect(M4, y, W4 - M4 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
   const px = M4 + 12;
   let ty = y + 18;
   doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK3 });
-  if (it.site) doc.text(W3 - M4 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
+  if (it.site) doc.text(W4 - M4 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
   ty += 18;
   doc.text(px, ty, "Battery: ", { size: 9, bold: true, color: [0.3, 0.36, 0.44] });
-  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M4 * 2 - 120), { size: 9, color: INK3 });
-  doc.text(W3 - M4 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
+  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W4 - M4 * 2 - 120), { size: 9, color: INK3 });
+  doc.text(W4 - M4 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
   ty += 15;
   noteLines.forEach((l) => {
     doc.text(px, ty, l, { size: 8.5, color: MUTE2 });
@@ -13539,7 +14304,7 @@ function itemBlock(doc, it, idx, y) {
     let cx = px;
     for (const p of photos) {
       const w = Math.min(150, photoH * (p.w / p.h));
-      if (cx + w > W3 - M4 - 8) break;
+      if (cx + w > W4 - M4 - 8) break;
       try {
         if (p.rgb) doc.imageRGB(p.rgb.rgb, p.rgb.w, p.rgb.h, cx, ty, w, photoH, { deflated: !!p.rgb.deflated });
         else doc.image(p.b, cx, ty, w, photoH);
@@ -13550,12 +14315,12 @@ function itemBlock(doc, it, idx, y) {
     ty += photoH + 8;
   }
   if (skipLine) {
-    doc.text(px, ty, fit2(skipLine, 8, W3 - M4 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
+    doc.text(px, ty, fit2(skipLine, 8, W4 - M4 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
   }
   return y + blockH + 12;
 }
 function buildBatteryEnquiryPdf(items, meta = {}) {
-  const doc = new PdfDoc(W3, H2);
+  const doc = new PdfDoc(W4, H2);
   let y = header(doc, meta);
   (items || []).forEach((it, idx) => {
     y = itemBlock(doc, it, idx, y);
@@ -13563,11 +14328,11 @@ function buildBatteryEnquiryPdf(items, meta = {}) {
   if (!(items || []).length) doc.text(M4, y, "No battery items.", { size: 10, color: MUTE2 });
   return doc.bytes();
 }
-var W3, H2, M4, NAVY2, INK3, MUTE2, HAIR2, CARD2, S2;
+var W4, H2, M4, NAVY2, INK3, MUTE2, HAIR2, CARD2, S2;
 var init_batterypdf = __esm({
   "src/lib/batterypdf.js"() {
     init_pdf();
-    W3 = 595;
+    W4 = 595;
     H2 = 842;
     M4 = 36;
     NAVY2 = [0, 0.204, 0.408];
@@ -13644,7 +14409,7 @@ function cardBox2(doc, x, y, w, h, r = 12, fill2 = CARD3) {
   doc.roundRect(x, y, w, h, r, { fill: fill2 });
 }
 function pageBg2(doc) {
-  doc.rect(0, 0, W4, H3, { fill: BG2 });
+  doc.rect(0, 0, W5, H3, { fill: BG2 });
 }
 function imgSize(img) {
   if (!img) return null;
@@ -13698,21 +14463,21 @@ function header2(doc, rec, meta, slim) {
     }
   }
   if (slim) {
-    tracked2(doc, W4 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
-    doc.text(W4 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+    tracked2(doc, W5 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
+    doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
     return y + h;
   }
   const st = statusOf2(rec);
   pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
-  tracked2(doc, W4 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
-  doc.text(W4 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
-  if (rec.date) doc.text(W4 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W4 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
+  doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  if (rec.date) doc.text(W5 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
   return y + h;
 }
 function footer2(doc, pageNo, pageCount) {
   doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
-  doc.text(W4 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
+  doc.text(W5 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
 }
 function instrH(rec) {
   return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
@@ -13744,7 +14509,7 @@ function safetyCard(doc, y, rec) {
     const ok = ansOf(s.answer) === "yes";
     dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
     doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
-    pill2(doc, W4 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
+    pill2(doc, W5 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
     yy2 += 16;
   });
   return h;
@@ -13753,7 +14518,7 @@ function checksCard(doc, rows, startIndex, y, count) {
   const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
   cardBox2(doc, M5, y, CW2, h);
   tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
-  if (count != null) doc.text(W4 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
+  if (count != null) doc.text(W5 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
   const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
   const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
   const headY = y + 26 + THEAD_H2 - 8;
@@ -13848,7 +14613,7 @@ function signatureCard2(doc, y, rec, meta) {
   const bw = 200, y2 = y + h - 54;
   const blocks = [
     { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
-    { x: W4 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
+    { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
   ];
   blocks.forEach((b) => {
     if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
@@ -13880,9 +14645,9 @@ function buildPumpPdf(record, meta = {}) {
   const trailOwnPage = lastBottom + GAP2 + trailH > H3 - 40;
   const nPhotoPages = photoPages(meta);
   const totalPages = pages.length + (trailOwnPage ? 1 : 0) + nPhotoPages;
-  const doc = new PdfDoc(W4, H3);
+  const doc = new PdfDoc(W5, H3);
   pages.forEach((pg, idx) => {
-    if (idx > 0) doc.newPage(W4, H3);
+    if (idx > 0) doc.newPage(W5, H3);
     pageBg2(doc);
     if (pg.intro) {
       header2(doc, rec, meta, false);
@@ -13898,7 +14663,7 @@ function buildPumpPdf(record, meta = {}) {
   });
   let ty;
   if (trailOwnPage) {
-    doc.newPage(W4, H3);
+    doc.newPage(W5, H3);
     pageBg2(doc);
     header2(doc, rec, meta, true);
     footer2(doc, totalPages, totalPages);
@@ -13909,7 +14674,7 @@ function buildPumpPdf(record, meta = {}) {
   signatureCard2(doc, ty, rec, meta);
   const before = pages.length + (trailOwnPage ? 1 : 0);
   for (let p = 0; p < nPhotoPages; p++) {
-    doc.newPage(W4, H3);
+    doc.newPage(W5, H3);
     pageBg2(doc);
     header2(doc, rec, meta, true);
     footer2(doc, before + p + 1, totalPages);
@@ -13917,14 +14682,14 @@ function buildPumpPdf(record, meta = {}) {
   }
   return doc.bytes();
 }
-var W4, H3, M5, CW2, NAVY3, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA2, ACCENT2, GREEN2, RED2, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
+var W5, H3, M5, CW2, NAVY3, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA2, ACCENT2, GREEN2, RED2, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
 var init_pumppdf = __esm({
   "src/lib/pumppdf.js"() {
     init_pdf();
-    W4 = 595;
+    W5 = 595;
     H3 = 842;
     M5 = 40;
-    CW2 = W4 - M5 * 2;
+    CW2 = W5 - M5 * 2;
     NAVY3 = [0, 0.204, 0.408];
     INK4 = [0.1, 0.13, 0.18];
     MUTE3 = [0.46, 0.51, 0.58];
@@ -16188,15 +16953,15 @@ PAT: Import certificate number ${num3}-${yr}`;
     const items = Array.isArray(b.items) ? b.items.slice(0, 60) : [];
     if (!items.length) return error("No items", 400, env, request);
     const rows = (await env.DB.prepare("SELECT site_number, site_name, client, postcode, data FROM sites WHERE tenant_id=? AND client='fbc'").bind(tid).all()).results || [];
-    const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const norm2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
     const byName = {};
     rows.forEach((r) => {
-      byName[norm(r.site_name)] = r;
+      byName[norm2(r.site_name)] = r;
     });
     const out = [];
     for (const it of items) {
       const words = String(it.words || "").replace(/^\/+/, "").trim();
-      const site = byName[norm(it.name)];
+      const site = byName[norm2(it.name)];
       if (!site) {
         out.push({ name: it.name, ok: false, error: "no matching FBC site" });
         continue;
@@ -17989,6 +18754,8 @@ async function handle13(request, env, ctx, url, sess) {
     }
   }
   if (subpath === "/work-areas") {
+    if (method === "GET") await migrateWorkAreasOnce(env, tenantId).catch(() => {
+    });
     if (method === "GET") return jsonResponse({ areas: await getWorkAreas(env, tenantId) }, headers);
     if (method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -17999,6 +18766,8 @@ async function handle13(request, env, ctx, url, sess) {
     }
   }
   if (subpath === "/eng-skills") {
+    if (method === "GET") await migrateWorkAreasOnce(env, tenantId).catch(() => {
+    });
     if (method === "GET") return jsonResponse({ skills: await getEngSkills(env, tenantId), areas: await getWorkAreas(env, tenantId) }, headers);
     if (method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -18011,6 +18780,8 @@ async function handle13(request, env, ctx, url, sess) {
     if (method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      await migrateWorkAreasOnce(env, tenantId).catch(() => {
+      });
       const cfg = await getSubconConfig(env, tenantId);
       const out = { ok: true, list: Object.keys(cfg).map((k) => cfg[k]), areas: await getWorkAreas(env, tenantId) };
       const jobId = url.searchParams.get("jobId");
@@ -18073,6 +18844,14 @@ async function handle13(request, env, ctx, url, sess) {
   if (subpath === "/infer-work-area" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const b = await readJson2(request);
+    {
+      const desc = String(b.description || "");
+      const k = classifyWork(desc);
+      if (k && (k.source === "concerto" || k.score >= 8 && (!k.alts[0] || k.score >= k.alts[0].score + 4))) {
+        const hit = inferAreaKw(desc, await getWorkAreas(env, tenantId));
+        if (hit) return jsonResponse({ ok: true, areaId: hit.id, name: hit.name, confidence: "high", source: k.source }, headers);
+      }
+    }
     const cap2 = await aiCapCheck(env, tenantId);
     if (cap2.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap2.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
     const r = await inferWorkArea(env, tenantId, b.description || "");
@@ -19032,12 +19811,12 @@ async function handle13(request, env, ctx, url, sess) {
       isFallback: !!a.job.fallback
     } : null;
     const engineers = fieldUsers.map((u) => {
-      const norm = normId(u.username);
+      const norm2 = normId(u.username);
       const name = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
-      const onLeave = !!(leave[u.username] || leave[norm] || {})[today];
-      const mine = allJobs.filter((j) => assignedList(j).some((a) => normId(a) === norm)).map((j) => {
-        const st = effStatus(j, norm), sc = effSchedule(j, norm);
-        const es = j.engStatus && j.engStatus[norm] || null;
+      const onLeave = !!(leave[u.username] || leave[norm2] || {})[today];
+      const mine = allJobs.filter((j) => assignedList(j).some((a) => normId(a) === norm2)).map((j) => {
+        const st = effStatus(j, norm2), sc = effSchedule(j, norm2);
+        const es = j.engStatus && j.engStatus[norm2] || null;
         return { job: j, status: st, scheduledAt: sc.scheduledAt, scheduledEnd: sc.scheduledEnd, day: sc.scheduledAt ? londonDay(sc.scheduledAt) : "", since: es ? es.at : isActive(st) ? j.updatedAt : "" };
       });
       const todays = mine.filter((a) => a.day === today || isActive(a.status));
@@ -19090,15 +19869,15 @@ async function handle13(request, env, ctx, url, sess) {
       const missed = [];
       let earliest = "";
       for (const a of assignedList(j)) {
-        const norm = normId(a);
-        const sc = effSchedule(j, norm);
+        const norm2 = normId(a);
+        const sc = effSchedule(j, norm2);
         if (!sc.scheduledAt) continue;
         const day = londonDay(sc.scheduledAt);
         if (!day || day >= today) continue;
         if (day < cutoff) continue;
-        const st = String(effStatus(j, norm) || "");
+        const st = String(effStatus(j, norm2) || "");
         if (finished(st) || parked(st)) continue;
-        missed.push({ engineer: nameByNorm[norm] || a, status: st, day });
+        missed.push({ engineer: nameByNorm[norm2] || a, status: st, day });
         if (!earliest || day < earliest) earliest = day;
       }
       if (!missed.length) continue;
@@ -23826,7 +24605,7 @@ async function estimateJobDurations(env, tid) {
   } catch {
     rows = [];
   }
-  const norm = (p) => {
+  const norm2 = (p) => {
     const m = /(\d)/.exec(String(p || ""));
     return m ? "Priority " + m[1] : "";
   };
@@ -23839,7 +24618,7 @@ async function estimateJobDurations(env, tid) {
     } catch {
       continue;
     }
-    const prio = norm(r.priority || d.priority);
+    const prio = norm2(r.priority || d.priority);
     const explicit = Number(d.durationMinutes);
     let actual = null, ip = null;
     for (const e of Array.isArray(d.statusHistory) ? d.statusHistory : []) {
@@ -24184,8 +24963,8 @@ function isDrainageJob(j) {
   if (j.drainage === false) return false;
   if (j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping || j.fleetRenewal) return false;
   if (jobIsProject(j)) return false;
-  const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");
-  return DRAIN_RE.test(t);
+  const r = classifyWork(String(j.description || ""));
+  return !!r && r.id === "drainage";
 }
 function subKey(name) {
   return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 40) || "sub";
@@ -24251,20 +25030,16 @@ async function setSubconConfig(env, tid, map) {
   return clean;
 }
 function inferAreaKw(description, areas) {
-  const t = String(description || "");
-  if (!t.trim()) return null;
-  for (const a of areas || []) {
-    let re = AREA_KW[a.id];
-    if (!re) {
-      const w = String(a.name || "").trim().split(/\s+/)[0];
-      if (w && w.length > 2) try {
-        re = new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      } catch {
-      }
-    }
-    if (re && re.test(t)) return { id: a.id, name: a.name };
+  const r = classifyWork(description);
+  if (!r) return null;
+  const list = areas || [];
+  let a = list.find((x) => x.id === r.id);
+  if (!a) a = list.find((x) => (LEGACY_AREA_MAP[x.id] || []).includes(r.id));
+  if (!a) {
+    const nm = r.name.toLowerCase().split(/[^a-z]+/)[0];
+    a = list.find((x) => String(x.name || "").toLowerCase().startsWith(nm));
   }
-  return null;
+  return a ? { id: a.id, name: a.name } : null;
 }
 function isOutOfHoursLondon() {
   const { dow, hour } = londonNow();
@@ -24920,7 +25695,8 @@ async function getWorkAreas(env, tenantId) {
     if (seen.has(id)) id = areaSlug(name) + "-" + out.length;
     seen.add(id);
     const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
-    out.push({ id, name, colour });
+    const std = WORK_TYPE_BY_ID[id];
+    out.push({ id, name, colour, group: String(x && x.group || std && std.group || "Other"), description: String(x && x.description || std && std.description || "") });
   }
   return out;
 }
@@ -24933,7 +25709,8 @@ async function setWorkAreas(env, tenantId, list) {
     if (seen.has(id)) id = areaSlug(name) + "-" + clean.length;
     seen.add(id);
     const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
-    clean.push({ id, name: name.slice(0, 60), colour });
+    const std = WORK_TYPE_BY_ID[id];
+    clean.push({ id, name: name.slice(0, 60), colour, group: String(x && x.group || std && std.group || "Other").slice(0, 40), description: String(x && x.description || std && std.description || "").slice(0, 1500) });
   }
   const db = tenantDB(env, tenantId);
   await db.prepare(
@@ -24942,9 +25719,8 @@ async function setWorkAreas(env, tenantId, list) {
   return clean;
 }
 function classifyTradeKw(text) {
-  const s = String(text || "");
-  for (const [name, re] of CONCERTO_TRADES) if (re.test(s)) return name;
-  return "";
+  const r = classifyWork(text);
+  return r ? r.name : "";
 }
 function isCoopJob(j) {
   const st = String(j && j.storeType || "").toLowerCase();
@@ -25103,13 +25879,13 @@ async function aiRefineTrades(env, tid, ctx, cap2 = 300) {
     for (const r of arch.results || []) consider(r.id, r.descr);
   }
   if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
-  const names = CONCERTO_TRADES.map((t) => t[0]);
+  const names = WORK_TYPES.map((t) => t.name);
   const schema = { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, trade: { type: "string", enum: names.concat("General / other") } }, required: ["i", "trade"] } } }, required: ["results"] };
   let classified = 0;
   const CH = 40;
   for (let k = 0; k < todo.length; k += CH) {
     const batch = todo.slice(k, k + CH);
-    const user = "Classify each UK Co-op shop maintenance job into ONE trade from this list:\n" + names.join(", ") + ", General / other.\n\nJobs:\n" + batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
+    const user = "Classify each UK Co-op shop maintenance job into ONE work type. The types, with what each covers and does NOT cover:\n" + workTypesPrompt().replace(/^- [a-z0-9-]+ — /gm, "- ") + "\n- General / other: nothing above fits.\n\nAnswer with the type NAME exactly as written.\n\nJobs:\n" + batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
     const r = await anthropicTool(env, { system: "You classify building/shop maintenance jobs into a single trade. Use only the provided trade names.", user, toolName: "set_trades", schema, maxTokens: 1500 });
     if (!r.ok) return { ok: false, error: r.error, classified };
     for (const item of r.input.results || []) {
@@ -25126,6 +25902,67 @@ async function aiRefineTrades(env, tid, ctx, cap2 = 300) {
   await setJobTradeOverrides(env, tid, overrides);
   await buildConcertoStats(env, tid);
   return { ok: true, classified, remaining: Math.max(0, todo.length - classified) };
+}
+async function migrateWorkAreasOnce(env, tid) {
+  const db = tenantDB(env, tid);
+  const FLAG = "sla:workareas:v2:" + tid;
+  if (await db.prepare("SELECT 1 FROM app_config WHERE tenant_id=? AND key=?").bind(tid, FLAG).first()) return;
+  const custom = await db.prepare("SELECT 1 FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tid).first();
+  const done = async (note) => db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, FLAG, JSON.stringify({ at: (/* @__PURE__ */ new Date()).toISOString(), note })).run();
+  if (custom) return done("custom area list \u2014 left alone");
+  const legacy = (id) => LEGACY_AREA_MAP[id] && !WORK_TYPE_BY_ID[id] || id === "plumbing" || id === "fire-alarms" ? LEGACY_AREA_MAP[id] : null;
+  const skills = await getEngSkills(env, tid);
+  const nextSkills = {};
+  for (const [u, row] of Object.entries(skills)) {
+    const out = {};
+    for (const [a, n] of Object.entries(row || {})) {
+      const set = legacy(a);
+      if (set) for (const t of set) out[t] = Math.max(out[t] || 0, Number(n) || 0);
+      else out[a] = Math.max(out[a] || 0, Number(n) || 0);
+    }
+    nextSkills[u] = out;
+  }
+  await setEngSkills(env, tid, nextSkills);
+  let moved = 0;
+  const rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND json_extract(data,'$.workArea') IS NOT NULL AND json_extract(data,'$.workArea')<>''").bind(tid).all()).results || [];
+  for (const r of rows) {
+    let j;
+    try {
+      j = JSON.parse(r.data);
+    } catch {
+      continue;
+    }
+    const set = legacy(j.workArea);
+    if (!set) continue;
+    const c = classifyWork(j.description || "");
+    const next = c && (set.includes(c.id) || c.score >= 10 || c.source === "concerto") ? c.id : WORK_TYPE_BY_ID[j.workArea] ? j.workArea : set[0];
+    if (next !== j.workArea) {
+      j.workArea = next;
+      await saveJob(env, tid, j);
+      moved++;
+    }
+  }
+  try {
+    const cfg = await getSubconConfig(env, tid);
+    const raw = {};
+    for (const [k, sc] of Object.entries(cfg)) {
+      const tradeType = WORK_TYPES.find((t) => sc.trade && t.name.toLowerCase().startsWith(String(sc.trade).toLowerCase()));
+      const areas = [];
+      for (const a of sc.areas || []) {
+        const set = legacy(a);
+        if (set) {
+          if (tradeType && set.includes(tradeType.id)) areas.push(tradeType.id);
+          else areas.push(...set);
+        } else areas.push(a);
+      }
+      raw[k] = { ...sc, areas: [...new Set(areas)] };
+    }
+    await setSubconConfig(env, tid, raw);
+  } catch {
+  }
+  await db.prepare("DELETE FROM app_config WHERE tenant_id=? AND key IN (?,?)").bind(tid, "sla:jobtrade:" + tid, "sla:concertostats:" + tid).run().catch(() => {
+  });
+  return done(`skills for ${Object.keys(nextSkills).length} engineers; ${moved} jobs re-typed`);
 }
 async function getEngSkills(env, tenantId) {
   const db = tenantDB(env, tenantId);
@@ -25263,7 +26100,7 @@ async function anthropicTool(env, { system, user, toolName, schema, maxTokens })
 async function inferWorkArea(env, tenantId, description) {
   const areas = await getWorkAreas(env, tenantId);
   if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
-  const list = areas.map((a) => `${a.id}: ${a.name}`).join("\n");
+  const list = areas.map((a) => `${a.id}: ${a.name}${a.description ? " \u2014 " + a.description : ""}`).join("\n");
   const schema = {
     type: "object",
     properties: {
@@ -25272,7 +26109,7 @@ async function inferWorkArea(env, tenantId, description) {
     },
     required: ["areaId"]
   };
-  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const system = `You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Each area says what it covers and what it does NOT \u2014 follow those boundaries (e.g. a BLOCKED toilet is drainage, a LEAKING toilet is plumbing). Words that only say where the fault is ("by the chiller", "on the shop floor") don't decide the area. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.`;
   const user = `Areas (id: name):
 ${list}
 
@@ -25501,7 +26338,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, DRAIN_RE, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, AREA_KW, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADES, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -25514,6 +26351,7 @@ var init_sla = __esm({
     init_firestoppdf();
     init_jobsheetpdf();
     init_pngdecode();
+    init_worktypes();
     init_zip();
     init_logo();
     init_pdftext();
@@ -25552,24 +26390,10 @@ var init_sla = __esm({
     _archiveReady = false;
     _archiveFilesReady = false;
     _safeSeg = (s) => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
-    DRAIN_RE = /\b(drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|soak ?aways?|interceptors?|grease traps?|fat traps?|jetting|foul water|backed up|overflowing|sani ?fl[oa]w?s?|cctv (?:survey|camera|down the drains?))\b|\bblocked (?:toilets?|wcs?|sinks?|urinals?|loos?|basins?|pans?|pipes?|waste)\b|\b(?:toilets?|wcs?|sinks?|urinals?|loos?|basins?)\s+(?:is |are )?(?:still )?blocked\b/i;
     SUBCON_DEFAULTS = {
       metrorod: { name: "Metro Rod", to: "Call.Centre@metrorod.co.uk", cc: ["Enquiries@mostlane.com"], replyTo: "jamie@mostlane.com", trade: "Drainage", poDigits: 6, areas: [], ooh: true, oohPriorities: [], radiusMiles: 0, base: {}, requirePhone: true }
     };
     SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
-    AREA_KW = {
-      electrical: /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|emergency light|\bpat\b|consumer unit|distribution board/i,
-      plumbing: /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock/i,
-      drainage: /drain|sewer|sewage|gull|manhole|jetting|blocked (?:toilet|drain|waste|sink|urinal|wc)|foul water|soak ?away|interceptor|grease trap|saniflo/i,
-      hvac: /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i,
-      fabric: /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|masonry/i,
-      firestopping: /firestop|fire ?stop|fire ?barrier|penetration seal|intumescent/i,
-      "fire-alarms": /fire ?alarm|smoke detector|\bems\b|sprinkler|extinguisher|fire door/i,
-      joinery: /timber|worktop|shelv|cabinet|joinery|carpentry|counter|\bwood\b|\bdoor\b|hinge|\block/i,
-      decorating: /paint|decorat|wallpaper/i,
-      glazing: /glaz|\bglass\b|window ?pane|shopfront|shatter|toughened|perspex/i,
-      groundworks: /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|external area|grounds/i
-    };
     DEFAULT_CONFIG3 = {
       priorities: {
         "Priority 1": { hours: 4 },
@@ -25600,33 +26424,25 @@ var init_sla = __esm({
       { key: "signature", label: "Customer signature", m: true, c: true }
     ];
     areaSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "area-" + crypto.randomUUID().slice(0, 6);
-    DEFAULT_WORK_AREAS = [
-      "Electrical",
-      "Plumbing",
-      "Fabric / Building",
-      "Firestopping",
-      "Fire alarms",
-      "Heating / HVAC",
-      "Joinery / Carpentry",
-      "Decorating",
-      "General maintenance"
-    ].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+    GROUP_COLOUR = {
+      "Drainage": "#0e7490",
+      "Plumbing & water": "#2563eb",
+      "Heating, cooling & gas": "#dc2626",
+      "Electrical": "#ca8a04",
+      "Fire safety": "#b91c1c",
+      "Doors, windows & security": "#7c3aed",
+      "Building fabric": "#78716c",
+      "Roofs & external": "#15803d",
+      "Fixtures & fittings": "#a16207",
+      "Equipment & systems": "#0f766e",
+      "Hygiene & environment": "#65a30d",
+      "Compliance & testing": "#1e3a8a",
+      "Other": "#64748b"
+    };
+    DEFAULT_WORK_AREAS = WORK_TYPES.map((t) => ({ id: t.id, name: t.name, group: t.group, description: t.description, colour: GROUP_COLOUR[t.group] || "#64748b" }));
     FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
     FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
-    CONCERTO_TRADES = [
-      ["Glazing", /glaz|\bglass\b|window ?pane|\bpane\b|shopfront|shatter|toughened|perspex/i],
-      ["Doors & shutters", /\bdoor\b|shutter|roller|hinge|door ?closer|mortice|cylinder|\block(s|ed|ing)?\b|barrel|\blatch\b|automatic door|fob\b/i],
-      ["Groundworks & external", /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|trip hazard|drain cover|manhole|external area|grounds/i],
-      ["Refrigeration & HVAC", /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\ba\/c\b|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i],
-      ["Plumbing & drainage", /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|drain|drainage|blocked|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock|sewage/i],
-      ["Electrical", /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|distribution board|consumer unit|emergency light|\bpat\b|\bfault\b.*power/i],
-      ["Fire & safety", /fire ?alarm|extinguisher|sprinkler|firestop|fire ?stop|smoke detector|fire door|\bems\b/i],
-      ["Building fabric", /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|leak.*roof|masonry/i],
-      ["Joinery", /timber|worktop|shelv|cabinet|joinery|carpentry|counter|kiosk|\bwood\b/i],
-      ["Cleaning & signage", /\bclean|graffiti|\bsign\b|signage|jet ?wash|pressure wash/i],
-      ["Pest control", /\bpest|rodent|vermin|\bwasp|\brat\b|\bmice\b|\bmouse\b|infest|\bbird/i]
-    ];
-    CONCERTO_TRADE_NAMES = CONCERTO_TRADES.map((t) => t[0]).concat("General / other");
+    CONCERTO_TRADE_NAMES = WORK_TYPES.map((t) => t.name).concat("General / other");
     _londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
     AI_CAP_DEFAULT = 400;
     FS_DEFAULT_DECL = "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. All materials used are correctly installed in accordance with training and to a good standard. Local identification labelling installed to each penetration seal.";
@@ -31550,7 +32366,7 @@ async function handle23(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const reg = String(b.reg || "").trim();
     if (!reg) return error("No vehicle given.", 400, env, request);
-    const norm = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
+    const norm2 = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
     const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(db.tenantId).all();
     let un;
     if (b.username) {
@@ -31558,7 +32374,7 @@ async function handle23(request, env, ctx, url, sess) {
       if (!chosen) return error("That engineer wasn't found.", 400, env, request);
       un = chosen.username;
     } else {
-      const driver = (urows || []).find((u) => norm(u.vehicle_assigned) === norm(reg));
+      const driver = (urows || []).find((u) => norm2(u.vehicle_assigned) === norm2(reg));
       if (!driver) return error("No active driver is assigned to " + reg + " \u2014 pick an engineer to request the check from.", 400, env, request);
       un = driver.username;
     }
@@ -34619,9 +35435,9 @@ async function loadRegister(env, tid) {
   } catch {
   }
   const aliases = await cfgGet(env, tid, "site_aliases", {});
-  for (const [norm, tgt] of Object.entries(aliases)) {
+  for (const [norm2, tgt] of Object.entries(aliases)) {
     const target = list.find((s) => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
-    if (target && !byNorm[norm]) byNorm[norm] = target;
+    if (target && !byNorm[norm2]) byNorm[norm2] = target;
   }
   const byCode = {};
   for (const e of list) {
@@ -37638,13 +38454,13 @@ async function handle29(request, env, ctx, url, sess) {
     let appliedAliases = 0;
     if (Array.isArray(out.siteAliases)) {
       const cur = await cfgReadWrap(env, tid, "site_aliases", {});
-      const norm = (s) => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const norm2 = (s) => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
       for (const a of out.siteAliases) {
         if (!a || !a.text || !a.siteNumber) continue;
         if (Number(a.confidence) < 0.9) continue;
         if (!validNums.has(String(a.siteNumber))) continue;
         const site = sites.find((s) => String(s.num) === String(a.siteNumber));
-        cur[norm(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
+        cur[norm2(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
         appliedAliases++;
       }
       await cfgWriteWrap(env, tid, "site_aliases", cur);
@@ -38727,7 +39543,7 @@ function wrap5(str, size, maxW) {
 }
 function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
-  const L2 = 56, R2 = 539, W7 = R2 - L2;
+  const L2 = 56, R2 = 539, W8 = R2 - L2;
   let y = 44;
   try {
     const lw = 150, lh = lw * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
@@ -38742,7 +39558,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label2, val2) => {
     doc.text(L2, y, label2, { size: 11, bold: true });
-    for (const ln of wrap5(val2 || "", 11, W7 - 70)) {
+    for (const ln of wrap5(val2 || "", 11, W8 - 70)) {
       doc.text(L2 + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -38761,7 +39577,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap5(para, 11, W7)) {
+    for (const ln of wrap5(para, 11, W8)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -38780,7 +39596,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L2, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap5("I confirm that I have read and understood the content of this memo.", 11, W7)) {
+  for (const ln of wrap5("I confirm that I have read and understood the content of this memo.", 11, W8)) {
     doc.text(L2, y, ln, { size: 11 });
     y += 16;
   }
@@ -39020,7 +39836,7 @@ init_pdf();
 init_logo();
 var L = 56;
 var R = 539;
-var W5 = R - L;
+var W6 = R - L;
 var NAVY4 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
@@ -39066,7 +39882,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch {
     y = 96;
   }
-  for (const ln of wrap6(String(docObj.title || "Document"), 20, W5)) {
+  for (const ln of wrap6(String(docObj.title || "Document"), 20, W6)) {
     doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
     y += 26;
   }
@@ -39105,7 +39921,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       const t = line2.replace(/^#\s+/, "");
       need(24);
       y += 6;
-      for (const ln of wrap6(t, 15, W5)) {
+      for (const ln of wrap6(t, 15, W6)) {
         doc.text(L, y, ln, { size: 15, bold: true, color: NAVY4 });
         y += 20;
       }
@@ -39116,7 +39932,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       const t = line2.replace(/^##\s+/, "");
       need(20);
       y += 4;
-      for (const ln of wrap6(t, 12, W5)) {
+      for (const ln of wrap6(t, 12, W6)) {
         doc.text(L, y, ln, { size: 12, bold: true, color: NAVY4 });
         y += 16;
       }
@@ -39124,7 +39940,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
     }
     if (/^[-•]\s+/.test(line2)) {
       const t = line2.replace(/^[-•]\s+/, "");
-      const parts2 = wrap6(t, 10.5, W5 - 16);
+      const parts2 = wrap6(t, 10.5, W6 - 16);
       need(parts2.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
       for (let i = 0; i < parts2.length; i++) {
@@ -39134,7 +39950,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y += 2;
       continue;
     }
-    const parts = wrap6(line2, 10.5, W5);
+    const parts = wrap6(line2, 10.5, W6);
     need(parts.length * 15);
     for (const ln of parts) {
       doc.text(L, y, ln, { size: 10.5 });
@@ -40383,9 +41199,9 @@ async function resolveEngineer(env, tid, name) {
   if (!q) return { ok: false, none: true };
   try {
     const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
-    const norm = (s) => String(s || "").toLowerCase().trim();
+    const norm2 = (s) => String(s || "").toLowerCase().trim();
     const matches = (results || []).filter((u) => {
-      const full = norm(u.first_name + " " + u.last_name), fn = norm(u.first_name), un = norm(u.username);
+      const full = norm2(u.first_name + " " + u.last_name), fn = norm2(u.first_name), un = norm2(u.username);
       return un === q || full === q || fn === q || full.startsWith(q) || q.length >= 3 && full.includes(q);
     });
     if (matches.length === 1) return { ok: true, username: matches[0].username, name: (matches[0].first_name + " " + matches[0].last_name).trim() };
@@ -40481,9 +41297,9 @@ async function resolveJobTarget(env, tid, a) {
   const ref = String(a.jobRef || a.ref || a.jobId || "").trim();
   if (!ref) return { ok: false, notfound: true };
   const rows = await searchJobs2(env, tid, ref);
-  const norm = (s) => String(s || "").toLowerCase();
+  const norm2 = (s) => String(s || "").toLowerCase();
   const numRun = (ref.match(/\d{3,}/) || [])[0];
-  let hits = rows.filter((r) => norm(r.ref).includes(norm(ref)) || numRun && String(r.ref).includes(numRun));
+  let hits = rows.filter((r) => norm2(r.ref).includes(norm2(ref)) || numRun && String(r.ref).includes(numRun));
   if (!hits.length) hits = rows;
   const open = hits.filter((r) => !FINISHED2.test(r.status));
   const pool = open.length ? open : hits;
@@ -43051,10 +43867,10 @@ init_auth();
 
 // src/lib/cablecalcpdf.js
 init_pdf();
-var W6 = 595;
+var W7 = 595;
 var H4 = 842;
 var M6 = 40;
-var CW3 = W6 - M6 * 2;
+var CW3 = W7 - M6 * 2;
 var S4 = (v) => toWinAnsi(String(v == null ? "" : v));
 var NAVY5 = [0, 0.2, 0.41];
 var INK5 = [0.09, 0.14, 0.22];
@@ -43101,12 +43917,12 @@ function wrap7(str, width, size) {
   return lines;
 }
 function buildCableCalcPdf(record, meta = {}) {
-  const doc = new PdfDoc(W6, H4);
+  const doc = new PdfDoc(W7, H4);
   const inp = record.inputs || {};
   const v = record.values || {};
   const checks = record.checks || [];
   const m = record.meta || {};
-  doc.rect(0, 0, W6, 92, { fill: NAVY5 });
+  doc.rect(0, 0, W7, 92, { fill: NAVY5 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
@@ -43116,9 +43932,9 @@ function buildCableCalcPdf(record, meta = {}) {
     }
   }
   doc.text(M6, 70, "Cable Calculation Report", { size: 17, bold: true, color: [1, 1, 1] });
-  doc.text(W6 - M6, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W6 - M6, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
-  doc.text(W6 - M6, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W7 - M6, 34, S4(m.company || "Mostlane"), { size: 10, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W7 - M6, 50, S4("Ref: " + (record.ref || record.id || "\u2014")), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
+  doc.text(W7 - M6, 64, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 8.5, color: [0.8, 0.86, 0.94], alignRight: true });
   const overall = record.incomplete ? "INCOMPLETE" : record.pass ? "COMPLIANT" : "NOT COMPLIANT";
   const oc = record.incomplete ? AMBER : record.pass ? GREEN3 : RED3;
   const pw = textWidth(overall, 9) + 22;
@@ -43238,20 +44054,20 @@ function buildCableCalcPdf(record, meta = {}) {
     y += 4;
   }
   if (y > H4 - 120) {
-    doc.newPage(W6, H4);
+    doc.newPage(W7, H4);
     y = M6;
   }
   card(doc, M6, y, CW3, 66);
   label(doc, M6 + 12, y + 15, "Declaration");
   doc.text(M6 + 12, y + 30, S4("Calculated by: " + (m.engineer || "\u2014")), { size: 9, color: INK5 });
   doc.text(M6 + 12, y + 44, S4("Position / qualification: " + (m.qualification || "\u2014")), { size: 9, color: INK5 });
-  doc.text(W6 - M6 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
+  doc.text(W7 - M6 - 12, y + 30, S4("Date: " + (m.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10))), { size: 9, color: INK5, alignRight: true });
   doc.text(M6 + 12, y + 58, S4("This report is a design-verification aid. All values must be confirmed by a competent person against BS 7671 and the manufacturer's data before use."), { size: 6.8, color: GREY5 });
   const total = doc.pages.length;
   for (let p = 0; p < total; p++) {
-    doc.lineOn(p, M6, H4 - 30, W6 - M6, { grey: true });
+    doc.lineOn(p, M6, H4 - 30, W7 - M6, { grey: true });
     doc.textOn(p, M6, H4 - 18, "Mostlane Cable Calculator \u2014 checking aid, not a substitute for BS 7671 / a competent person", { size: 6.6, grey: true });
-    doc.textOn(p, W6 - M6, H4 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
+    doc.textOn(p, W7 - M6, H4 - 18, "Page " + (p + 1) + " of " + total, { size: 6.6, grey: true, alignRight: true });
   }
   return doc.bytes();
 }

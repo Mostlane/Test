@@ -24,6 +24,7 @@ import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildJobSheetPdf } from "../lib/jobsheetpdf.js";
 import { decodePngToRgb } from "../lib/pngdecode.js";
+import { WORK_TYPES, WORK_TYPE_BY_ID, LEGACY_AREA_MAP, classifyWork, workTypesPrompt } from "../lib/worktypes.js";
 import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
 import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
@@ -206,6 +207,7 @@ export async function handle(request, env, ctx, url, sess) {
   /* Areas of work — a managed list (app_config sla_work_areas) used to match a
      job's `workArea` to engineers competent in it. GET any session; POST SLA admin. */
   if (subpath === "/work-areas") {
+    if (method === "GET") await migrateWorkAreasOnce(env, tenantId).catch(() => {});
     if (method === "GET") return jsonResponse({ areas: await getWorkAreas(env, tenantId) }, headers);
     if (method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -220,6 +222,7 @@ export async function handle(request, env, ctx, url, sess) {
      sla_eng_skills. GET any session (the scheduler weights suggestions with it);
      POST SLA admin (the rock-sheet page). */
   if (subpath === "/eng-skills") {
+    if (method === "GET") await migrateWorkAreasOnce(env, tenantId).catch(() => {});
     if (method === "GET") return jsonResponse({ skills: await getEngSkills(env, tenantId), areas: await getWorkAreas(env, tenantId) }, headers);
     if (method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -240,6 +243,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      await migrateWorkAreasOnce(env, tenantId).catch(() => {});
       const cfg = await getSubconConfig(env, tenantId);
       const out = { ok: true, list: Object.keys(cfg).map(k => cfg[k]), areas: await getWorkAreas(env, tenantId) };
       const jobId = url.searchParams.get("jobId");
@@ -280,6 +284,14 @@ export async function handle(request, env, ctx, url, sess) {
   if (subpath === "/infer-work-area" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const b = await readJson(request);
+    // Free first: the shared classifier. Only a CONFIDENT keyword match (Concerto's own
+    // tag, or a strong specific phrase with a clear winner) skips the AI.
+    { const desc = String(b.description || "");
+      const k = classifyWork(desc);
+      if (k && (k.source === "concerto" || (k.score >= 8 && (!k.alts[0] || k.score >= k.alts[0].score + 4)))) {
+        const hit = inferAreaKw(desc, await getWorkAreas(env, tenantId));
+        if (hit) return jsonResponse({ ok: true, areaId: hit.id, name: hit.name, confidence: "high", source: k.source }, headers);
+      } }
     const cap = await aiCapCheck(env, tenantId);
     if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
     const r = await inferWorkArea(env, tenantId, b.description || "");
@@ -6605,15 +6617,15 @@ export function stripMoney(job) {
    and ONE press of "Send to Metro Rod" emails the job to their call centre and
    stamps job.subcontract — the lock is an idempotency row, so a second press by
    anyone just reports who sent it and when. */
-const DRAIN_RE = /\b(drains?|drainage|gull(?:y|ies)|sewers?|sewage|manholes?|soak ?aways?|interceptors?|grease traps?|fat traps?|jetting|foul water|backed up|overflowing|sani ?fl[oa]w?s?|cctv (?:survey|camera|down the drains?))\b|\bblocked (?:toilets?|wcs?|sinks?|urinals?|loos?|basins?|pans?|pipes?|waste)\b|\b(?:toilets?|wcs?|sinks?|urinals?|loos?|basins?)\s+(?:is |are )?(?:still )?blocked\b/i;
+// Drainage detection = the shared work-type classifier (lib/worktypes.js) saying "drainage".
 export function isDrainageJob(j) {
   if (!j) return false;
   if (j.drainage === true) return true;
   if (j.drainage === false) return false;
   if (j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping || j.fleetRenewal) return false;
   if (jobIsProject(j)) return false;
-  const t = String(j.description || "").replace(/drain[\s-]*down/gi, " ");   // the EM "drain-down" is not a drain
-  return DRAIN_RE.test(t);
+  const r = classifyWork(String(j.description || ""));
+  return !!r && r.id === "drainage";
 }
 // Each subcontractor is a routing profile: where the order email goes, which job
 // fields the email carries, the PO `trade` it's booked under (for the
@@ -6684,31 +6696,17 @@ async function setSubconConfig(env, tid, map) {
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subcontractors:" + tid, JSON.stringify(clean)).run();
   return clean;
 }
-// Keyword → work-area id, so a job's trade can be auto-detected (NO AI cost) when
-// job.workArea isn't set. Keyed by the standard area slugs; a tenant area with a
-// non-standard id still matches via its NAME's leading word (inferAreaKw below).
-const AREA_KW = {
-  electrical: /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|emergency light|\bpat\b|consumer unit|distribution board/i,
-  plumbing: /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock/i,
-  drainage: /drain|sewer|sewage|gull|manhole|jetting|blocked (?:toilet|drain|waste|sink|urinal|wc)|foul water|soak ?away|interceptor|grease trap|saniflo/i,
-  hvac: /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i,
-  fabric: /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|masonry/i,
-  firestopping: /firestop|fire ?stop|fire ?barrier|penetration seal|intumescent/i,
-  "fire-alarms": /fire ?alarm|smoke detector|\bems\b|sprinkler|extinguisher|fire door/i,
-  joinery: /timber|worktop|shelv|cabinet|joinery|carpentry|counter|\bwood\b|\bdoor\b|hinge|\block/i,
-  decorating: /paint|decorat|wallpaper/i,
-  glazing: /glaz|\bglass\b|window ?pane|shopfront|shatter|toughened|perspex/i,
-  groundworks: /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|external area|grounds/i,
-};
+// Description → work area, NO AI cost: the shared classifier (lib/worktypes.js),
+// mapped onto the tenant's area list. A tenant still on an old area id ("plumbing"
+// covering drainage) gets the old area that covers the detected type.
 function inferAreaKw(description, areas) {
-  const t = String(description || "");
-  if (!t.trim()) return null;
-  for (const a of (areas || [])) {
-    let re = AREA_KW[a.id];
-    if (!re) { const w = String(a.name || "").trim().split(/\s+/)[0]; if (w && w.length > 2) try { re = new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); } catch {} }
-    if (re && re.test(t)) return { id: a.id, name: a.name };
-  }
-  return null;
+  const r = classifyWork(description);
+  if (!r) return null;
+  const list = areas || [];
+  let a = list.find(x => x.id === r.id);
+  if (!a) a = list.find(x => (LEGACY_AREA_MAP[x.id] || []).includes(r.id));
+  if (!a) { const nm = r.name.toLowerCase().split(/[^a-z]+/)[0]; a = list.find(x => String(x.name || "").toLowerCase().startsWith(nm)); }
+  return a ? { id: a.id, name: a.name } : null;
 }
 // Out-of-hours (Europe/London): any weekend, or before 08:00 / from 18:00.
 function isOutOfHoursLondon() { const { dow, hour } = londonNow(); return dow === 0 || dow === 6 || hour < 8 || hour >= 18; }
@@ -7028,10 +7026,14 @@ async function setCategories(env, tenantId, list) {
    sla_work_areas = [{id,name,colour}] ; sla_eng_skills = {normUsername:{areaId:1-5}}
    Used to match a job's workArea to engineers competent in it (scheduler). */
 const areaSlug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || ("area-" + crypto.randomUUID().slice(0, 6));
-const DEFAULT_WORK_AREAS = [
-  "Electrical", "Plumbing", "Fabric / Building", "Firestopping", "Fire alarms",
-  "Heating / HVAC", "Joinery / Carpentry", "Decorating", "General maintenance",
-].map(name => ({ id: areaSlug(name), name, colour: "#64748b" }));
+// The default list IS the shared work-type taxonomy (lib/worktypes.js — 49 types in
+// 13 trade groups, each with a description of what it covers and what it doesn't).
+const GROUP_COLOUR = {
+  "Drainage": "#0e7490", "Plumbing & water": "#2563eb", "Heating, cooling & gas": "#dc2626", "Electrical": "#ca8a04",
+  "Fire safety": "#b91c1c", "Doors, windows & security": "#7c3aed", "Building fabric": "#78716c", "Roofs & external": "#15803d",
+  "Fixtures & fittings": "#a16207", "Equipment & systems": "#0f766e", "Hygiene & environment": "#65a30d", "Compliance & testing": "#1e3a8a", "Other": "#64748b",
+};
+const DEFAULT_WORK_AREAS = WORK_TYPES.map(t => ({ id: t.id, name: t.name, group: t.group, description: t.description, colour: GROUP_COLOUR[t.group] || "#64748b" }));
 
 // ── EM (emergency-lighting) certificate "set numbers" per store ─────────────
 // The EM cert filename ends "<setNumber>-<YY>" (e.g. "0177-25"). The set number
@@ -7336,7 +7338,8 @@ async function getWorkAreas(env, tenantId) {
     if (seen.has(id)) id = areaSlug(name) + "-" + out.length;
     seen.add(id);
     const colour = /^#[0-9a-fA-F]{6}$/.test(String((x && x.colour) || "")) ? x.colour : "#64748b";
-    out.push({ id, name, colour });
+    const std = WORK_TYPE_BY_ID[id];
+    out.push({ id, name, colour, group: String((x && x.group) || (std && std.group) || "Other"), description: String((x && x.description) || (std && std.description) || "") });
   }
   return out;
 }
@@ -7348,7 +7351,8 @@ async function setWorkAreas(env, tenantId, list) {
     if (seen.has(id)) id = areaSlug(name) + "-" + clean.length;
     seen.add(id);
     const colour = /^#[0-9a-fA-F]{6}$/.test(String((x && x.colour) || "")) ? x.colour : "#64748b";
-    clean.push({ id, name: name.slice(0, 60), colour });
+    const std = WORK_TYPE_BY_ID[id];
+    clean.push({ id, name: name.slice(0, 60), colour, group: String((x && x.group) || (std && std.group) || "Other").slice(0, 40), description: String((x && x.description) || (std && std.description) || "").slice(0, 1500) });
   }
   const db = tenantDB(env, tenantId);
   await db.prepare(
@@ -7363,24 +7367,11 @@ async function setWorkAreas(env, tenantId, list) {
    a keyword classifier by default; the office can "Refine with AI" the unknowns
    (cached per job in app_config sla:jobtrade). The whole aggregate is cached in
    app_config sla:concertostats and rebuilt on demand / when >6h stale. */
-const CONCERTO_TRADES = [
-  ["Glazing", /glaz|\bglass\b|window ?pane|\bpane\b|shopfront|shatter|toughened|perspex/i],
-  ["Doors & shutters", /\bdoor\b|shutter|roller|hinge|door ?closer|mortice|cylinder|\block(s|ed|ing)?\b|barrel|\blatch\b|automatic door|fob\b/i],
-  ["Groundworks & external", /car ?park|tarmac|pothole|\bfenc|bollard|\bkerb|paving|forecourt|trip hazard|drain cover|manhole|external area|grounds/i],
-  ["Refrigeration & HVAC", /fridge|freezer|chiller|refrigerat|cold ?room|air ?con|aircon|\ba\/c\b|\bhvac\b|heating|\bboiler\b|condenser|compressor|ventilat/i],
-  ["Plumbing & drainage", /\bleak|water|\btap\b|toilet|\bwc\b|urinal|cistern|drain|drainage|blocked|\bsink\b|\bpipe|waste|flood|overflow|stopcock|ballcock|sewage/i],
-  ["Electrical", /electric|socket|\blight|lighting|\bpower\b|\bfuse|wiring|isolator|\brcd|distribution board|consumer unit|emergency light|\bpat\b|\bfault\b.*power/i],
-  ["Fire & safety", /fire ?alarm|extinguisher|sprinkler|firestop|fire ?stop|smoke detector|fire door|\bems\b/i],
-  ["Building fabric", /\bwall|ceiling|\bfloor|\btile|render|\bbrick|plaster|\broof|gutter|fascia|soffit|\bdamp\b|leak.*roof|masonry/i],
-  ["Joinery", /timber|worktop|shelv|cabinet|joinery|carpentry|counter|kiosk|\bwood\b/i],
-  ["Cleaning & signage", /\bclean|graffiti|\bsign\b|signage|jet ?wash|pressure wash/i],
-  ["Pest control", /\bpest|rodent|vermin|\bwasp|\brat\b|\bmice\b|\bmouse\b|infest|\bbird/i],
-];
-const CONCERTO_TRADE_NAMES = CONCERTO_TRADES.map(t => t[0]).concat("General / other");
+// Trade = the shared work type (lib/worktypes.js). Unknown → "General / other".
+const CONCERTO_TRADE_NAMES = WORK_TYPES.map(t => t.name).concat("General / other");
 function classifyTradeKw(text) {
-  const s = String(text || "");
-  for (const [name, re] of CONCERTO_TRADES) if (re.test(s)) return name;
-  return "";   // unknown → "General / other" at rollup (and an AI-refine candidate)
+  const r = classifyWork(text);
+  return r ? r.name : "";   // unknown → "General / other" at rollup (and an AI-refine candidate)
 }
 // A Co-op reactive job = anything that ISN'T a project / Chapplins / Fareham job.
 function isCoopJob(j) {
@@ -7517,12 +7508,12 @@ async function aiRefineTrades(env, tid, ctx, cap = 300) {
     for (const r of (arch.results || [])) consider(r.id, r.descr);
   }
   if (!todo.length) return { ok: true, classified: 0, remaining: 0 };
-  const names = CONCERTO_TRADES.map(t => t[0]);
+  const names = WORK_TYPES.map(t => t.name);
   const schema = { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, trade: { type: "string", enum: names.concat("General / other") } }, required: ["i", "trade"] } } }, required: ["results"] };
   let classified = 0; const CH = 40;
   for (let k = 0; k < todo.length; k += CH) {
     const batch = todo.slice(k, k + CH);
-    const user = "Classify each UK Co-op shop maintenance job into ONE trade from this list:\n" + names.join(", ") + ", General / other.\n\nJobs:\n" +
+    const user = "Classify each UK Co-op shop maintenance job into ONE work type. The types, with what each covers and does NOT cover:\n" + workTypesPrompt().replace(/^- [a-z0-9-]+ — /gm, "- ") + "\n- General / other: nothing above fits.\n\nAnswer with the type NAME exactly as written.\n\nJobs:\n" +
       batch.map((b, i) => `${i}. ${b.descr}`).join("\n") + "\n\nReturn one {i, trade} per job.";
     const r = await anthropicTool(env, { system: "You classify building/shop maintenance jobs into a single trade. Use only the provided trade names.", user, toolName: "set_trades", schema, maxTokens: 1500 });
     if (!r.ok) return { ok: false, error: r.error, classified };
@@ -7536,6 +7527,64 @@ async function aiRefineTrades(env, tid, ctx, cap = 300) {
   await setJobTradeOverrides(env, tid, overrides);
   await buildConcertoStats(env, tid);
   return { ok: true, classified, remaining: Math.max(0, todo.length - classified) };
+}
+
+/* One-time move from the 9 old work areas to the work-type taxonomy (Oct 2026).
+   Only when the tenant is on the DEFAULT list (no custom sla_work_areas saved):
+   - engineer stars on an old area are copied onto every type it covered (max wins);
+   - each job tagged with an old area is re-read from its description and given the
+     detected type IF that type is one the old area covered, else the old area's main type;
+   - subcontractor coverage on an old area becomes every type it covered — except a
+     subcontractor whose PO trade names one type (Metro Rod "Drainage") gets just that.
+   Flagged in app_config so it runs once. */
+async function migrateWorkAreasOnce(env, tid) {
+  const db = tenantDB(env, tid);
+  const FLAG = "sla:workareas:v2:" + tid;
+  if (await db.prepare("SELECT 1 FROM app_config WHERE tenant_id=? AND key=?").bind(tid, FLAG).first()) return;
+  const custom = await db.prepare("SELECT 1 FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tid).first();
+  const done = async (note) => db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, FLAG, JSON.stringify({ at: new Date().toISOString(), note })).run();
+  if (custom) return done("custom area list — left alone");
+  const legacy = id => (LEGACY_AREA_MAP[id] && !WORK_TYPE_BY_ID[id]) || id === "plumbing" || id === "fire-alarms" ? LEGACY_AREA_MAP[id] : null;
+  // skills
+  const skills = await getEngSkills(env, tid);
+  const nextSkills = {};
+  for (const [u, row] of Object.entries(skills)) {
+    const out = {};
+    for (const [a, n] of Object.entries(row || {})) {
+      const set = legacy(a);
+      if (set) for (const t of set) out[t] = Math.max(out[t] || 0, Number(n) || 0);
+      else out[a] = Math.max(out[a] || 0, Number(n) || 0);
+    }
+    nextSkills[u] = out;
+  }
+  await setEngSkills(env, tid, nextSkills);
+  // jobs
+  let moved = 0;
+  const rows = (await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND json_extract(data,'$.workArea') IS NOT NULL AND json_extract(data,'$.workArea')<>''").bind(tid).all()).results || [];
+  for (const r of rows) {
+    let j; try { j = JSON.parse(r.data); } catch { continue; }
+    const set = legacy(j.workArea); if (!set) continue;
+    const c = classifyWork(j.description || "");
+    // a confident read wins even outside the old family (the "3 hour drain down" EM
+    // jobs that had been tagged plumbing); a weak one stays within it.
+    const next = c && (set.includes(c.id) || c.score >= 10 || c.source === "concerto") ? c.id : (WORK_TYPE_BY_ID[j.workArea] ? j.workArea : set[0]);
+    if (next !== j.workArea) { j.workArea = next; await saveJob(env, tid, j); moved++; }
+  }
+  // subcontractors
+  try {
+    const cfg = await getSubconConfig(env, tid);
+    const raw = {};
+    for (const [k, sc] of Object.entries(cfg)) {
+      const tradeType = WORK_TYPES.find(t => sc.trade && t.name.toLowerCase().startsWith(String(sc.trade).toLowerCase()));
+      const areas = [];
+      for (const a of sc.areas || []) { const set = legacy(a); if (set) { if (tradeType && set.includes(tradeType.id)) areas.push(tradeType.id); else areas.push(...set); } else areas.push(a); }
+      raw[k] = { ...sc, areas: [...new Set(areas)] };
+    }
+    await setSubconConfig(env, tid, raw);
+  } catch {}
+  // caches keyed by the old trade names
+  await db.prepare("DELETE FROM app_config WHERE tenant_id=? AND key IN (?,?)").bind(tid, "sla:jobtrade:" + tid, "sla:concertostats:" + tid).run().catch(() => {});
+  return done(`skills for ${Object.keys(nextSkills).length} engineers; ${moved} jobs re-typed`);
 }
 
 async function getEngSkills(env, tenantId) {
@@ -7646,7 +7695,7 @@ async function anthropicTool(env, { system, user, toolName, schema, maxTokens })
 async function inferWorkArea(env, tenantId, description) {
   const areas = await getWorkAreas(env, tenantId);
   if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
-  const list = areas.map(a => `${a.id}: ${a.name}`).join("\n");
+  const list = areas.map(a => `${a.id}: ${a.name}${a.description ? " — " + a.description : ""}`).join("\n");
   const schema = {
     type: "object",
     properties: {
@@ -7655,7 +7704,7 @@ async function inferWorkArea(env, tenantId, description) {
     },
     required: ["areaId"],
   };
-  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Each area says what it covers and what it does NOT — follow those boundaries (e.g. a BLOCKED toilet is drainage, a LEAKING toilet is plumbing). Words that only say where the fault is (\"by the chiller\", \"on the shop floor\") don't decide the area. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
   const user = `Areas (id: name):\n${list}\n\nJob description:\n"""${String(description || "").slice(0, 1500)}"""\n\nWhich single area id best fits this work?`;
   const r = await anthropicTool(env, { system, user, toolName: "set_area", schema, maxTokens: 120 });
   if (!r.ok) return r;
