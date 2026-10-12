@@ -47,7 +47,7 @@
     a.ref{font-weight:700;color:var(--brand);text-decoration:none;}
     a.ref:hover{text-decoration:underline;}
     .pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:700;white-space:nowrap;}
-    .p-job{background:#f1f5f9;color:#334155;} .p-warn{background:#fef3c7;color:#92400e;}
+    .p-job{background:#f1f5f9;color:#334155;} .p-proj{background:#e0e7ff;color:#3730a3;} .p-warn{background:#fef3c7;color:#92400e;}
     .ib{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:3px 8px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;color:#0f2438;white-space:nowrap;}
     .ib.ok{border-color:#86efac;color:#166534;} .ib.ok:hover{background:#dcfce7;}
     .ib:hover{background:#f1f5f9;}
@@ -117,7 +117,7 @@
     const q = g("q").value.trim().toLowerCase();
     const list = rows.filter(inTab)
       .filter(r => !sub || (r.subs.length ? r.subs.map(subKey) : ["unknown"]).includes(sub))
-      .filter(r => !q || [r.ref, r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
+      .filter(r => !q || [r.ref, r.project ? r.project.number + " " + r.project.name : "", r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
     let tot = list.length + " job" + (list.length === 1 ? "" : "s");
     if (DATA.money) { const t = list.reduce((a, r) => a + (r.poTotal || 0), 0); if (t) tot += " · POs " + money(t); }
     g("tot").textContent = tot;
@@ -131,7 +131,7 @@
 
   let sortKey = "days", sortDir = -1;
   const SORTV = {
-    sub: r => (r.subs[0] || "~").toLowerCase(), ref: r => String(r.ref || "").toLowerCase(),
+    sub: r => (r.subs[0] || "~").toLowerCase(), ref: r => String(r.project ? r.project.number + " " + r.project.name : r.ref || "").toLowerCase(),
     site: r => [r.siteCode, r.siteName].join(" ").toLowerCase(), since: r => r.since || "",
     days: r => r.days == null ? -1 : r.days, status: r => r.state + (r.jobStatus || ""),
     pos: r => r.pos.length ? Number(r.pos[0].number) || 0 : -1, cost: r => r.poTotal || 0
@@ -144,11 +144,14 @@
 
   function row(r) {
     const site = [r.siteCode, r.siteName].filter(Boolean).join(" ");
-    const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>` : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
+    const refHtml = r.jobId ? `<a class="ref" href="job-view.html?jobId=${encodeURIComponent(r.jobId)}">${esc(r.ref || "Job")}</a>`
+      : r.project ? `<a class="ref" href="project-hub.html?id=${encodeURIComponent(r.project.id)}" title="Project — open the project hub">📁 ${esc(r.project.number)} ${esc(r.project.name)}</a>`
+      : `<span class="muted2">${esc(r.ref ? "Incident " + r.ref : "PO only")}</span>`;
     let dCls = "", dTxt = "";
     if (r.state === "open") { dCls = r.days == null ? "" : r.days > 7 ? "st-red" : r.days > 3 ? "st-amber" : "st-green"; dTxt = r.days == null ? "" : r.days === 0 ? "today" : r.days + "d"; }
     else { dCls = r.state === "done" ? "st-green" : "st-grey"; dTxt = r.state === "done" ? "✓ Done" : "↩ Back"; }
-    const status = r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>` : `<span class="pill p-warn">No job found</span>`;
+    const status = r.jobId ? `<span class="pill p-job">${esc(r.jobStatus || "—")}</span>`
+      : r.project ? `<span class="pill p-proj">Project · ${esc(r.project.status || "")}</span>` : `<span class="pill p-warn">No job found</span>`;
     const pos = r.pos.length ? r.pos.map(p => esc(p.number)).join(", ") : "";
     const cost = DATA.money ? `<td class="nw" style="text-align:right">${r.pos.length ? (r.pos.some(p => p.cost == null) && !r.poTotal ? '<span style="color:#b45309">not priced</span>' : esc(money(r.poTotal))) : ""}</td>` : "";
     const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
