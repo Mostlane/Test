@@ -1880,7 +1880,7 @@ function renderDrainBanner(){
       '<div class="db-btns"><button class="db-go" data-db="send">Send to Metro Rod</button><button class="db-no" data-db="no">Not drainage</button>' + sendBtn + "</div>";
   } else if(open){
     el.className = "drain-banner"; el.style.background = "transparent"; el.style.border = "0"; el.style.padding = "0 2px";
-    el.innerHTML = '<div class="db-btns">' + sendBtn + '<button class="db-link" data-db="yes" style="font-size:13px">🚿 Mark as drainage</button></div>';
+    el.innerHTML = '<div class="db-btns">' + sendBtn + '</div>';
   } else { el.style.display = "none"; return; }
   el.style.display = "";
   el.querySelectorAll("[data-db]").forEach(b => b.onclick = () => drainAction(b.dataset.db, b, b.dataset.key));
