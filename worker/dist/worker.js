@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -5642,10 +5647,35 @@ function latin1(u82) {
 async function inflate(u82) {
   for (const fmt of ["deflate", "deflate-raw"]) {
     try {
-      const stream = new Response(u82).body.pipeThrough(new DecompressionStream(fmt));
-      const buf = await new Response(stream).arrayBuffer();
-      const out = new Uint8Array(buf);
-      if (out.length) return out;
+      const ds = new DecompressionStream(fmt);
+      const writer = ds.writable.getWriter();
+      writer.write(u82).catch(() => {
+      });
+      writer.close().catch(() => {
+      });
+      const reader = ds.readable.getReader();
+      const chunks = [];
+      let total = 0;
+      try {
+        for (; ; ) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.length) {
+            chunks.push(value);
+            total += value.length;
+          }
+        }
+      } catch {
+      }
+      if (total) {
+        const out = new Uint8Array(total);
+        let o = 0;
+        for (const c of chunks) {
+          out.set(c, o);
+          o += c.length;
+        }
+        return out;
+      }
     } catch {
     }
   }
@@ -42377,9 +42407,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -49605,7 +49635,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -49865,7 +49895,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

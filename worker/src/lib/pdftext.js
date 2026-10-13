@@ -12,12 +12,33 @@ function latin1(u8) {
 }
 
 async function inflate(u8) {
+  // Read chunks manually and KEEP whatever decoded before any error. A PDF
+  // content stream is often a complete zlib body followed by stray padding
+  // bytes (the dict's /Length is shorter than the gap to `endstream`); piping
+  // through a single Response rejects the WHOLE stream on that trailing junk,
+  // throwing away a fully-decoded page — so we accumulate and tolerate the
+  // tail error instead. (Seen on Screwfix/Trade UK invoices: identical layout,
+  // one file decoded, the next fell through to the AI/vision tier for free.)
   for (const fmt of ["deflate", "deflate-raw"]) {
     try {
-      const stream = new Response(u8).body.pipeThrough(new DecompressionStream(fmt));
-      const buf = await new Response(stream).arrayBuffer();
-      const out = new Uint8Array(buf);
-      if (out.length) return out;
+      const ds = new DecompressionStream(fmt);
+      const writer = ds.writable.getWriter();
+      writer.write(u8).catch(() => {});
+      writer.close().catch(() => {});
+      const reader = ds.readable.getReader();
+      const chunks = []; let total = 0;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.length) { chunks.push(value); total += value.length; }
+        }
+      } catch { /* trailing-byte / checksum error after the real data — keep it */ }
+      if (total) {
+        const out = new Uint8Array(total); let o = 0;
+        for (const c of chunks) { out.set(c, o); o += c.length; }
+        return out;
+      }
     } catch {}
   }
   return null;
