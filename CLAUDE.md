@@ -6192,6 +6192,27 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
        **The old bug:** a single watermark advanced to the newest email each run, so
        after the first sweep everything older than the newest ~40 was permanently
        behind it and never re-read.
+     - **Text-tier inflate hardening (13 Oct 2026 — invoices silently falling to the
+       AI/vision tier).** `parseInvoice` (lib/invoiceparse.js) reads the PO number +
+       net/VAT/gross from the PDF TEXT layer first (`lib/pdftext.js pdfExtractText`),
+       only calling Claude vision when tier-1 comes up short (`tier1Confident` = a PO
+       number AND a reconciling net+VAT=gross triple). pdftext.js inflated each
+       FlateDecode stream by piping it through ONE `Response`, which **rejects the
+       whole stream on stray padding bytes after the zlib body** (a PDF dict's
+       `/Length` is often shorter than the gap to `endstream`) — so a fully-decoded
+       page was discarded over a trailing byte and the invoice fell through to the AI
+       tier (cost + needs ANTHROPIC_API_KEY) or to manual entry. Two real Screwfix/
+       Trade UK invoices in an IDENTICAL layout differed only by that quirk: one read,
+       one didn't. Fix: `inflate()` now reads the DecompressionStream output
+       chunk-by-chunk and **keeps whatever decoded before the trailing-byte/checksum
+       error** instead of piping through a single Response. Both now read on the free
+       text tier (PO 10659/10660, net £21.96/£31.66 correct). **Screwfix/Trade UK
+       layout notes** (holds for the drag-drop matcher + the sweep): the PO to link is
+       the 5-digit Mostlane number under **"Purchase Order Number:"** (NOT Account /
+       Sales Order / Card number); the cost is the **"Sub Total" / NET** figure (ex-VAT),
+       never the "Total". The columnar label/value layout means `invoiceNumber()`
+       (adjacent-label regex) can't pick the invoice number up — it stays blank on the
+       text tier (cosmetic; PO + cost are what the matcher needs, and both are correct).
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a
