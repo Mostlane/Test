@@ -745,6 +745,29 @@ let showOffice = false;
 try { showOffice = localStorage.getItem("mlSchedShowOffice") === "1"; } catch (e) {}
 function isFieldEng(e){ return String(e.staffType || "field") !== "office"; }
 
+// ── Instant paint (Oct 2026) ──────────────────────────────────────────────
+// The scheduler should appear the instant it's tapped. The last snapshot of
+// engineers + jobs is stashed locally and painted immediately on open
+// (stale-while-revalidate); the full load below then refreshes it. Admin only
+// (the /user check is still the authority), per-user, size-guarded.
+const SCHED_CACHE_KEY = "mlSchedCache:" + ((sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || "").toLowerCase());
+function saveSchedCache(){
+  try{ localStorage.setItem(SCHED_CACHE_KEY, JSON.stringify({ at: Date.now(), engineers, jobs })); }catch(e){}
+}
+function readSchedCache(){
+  try{
+    const d = JSON.parse(localStorage.getItem(SCHED_CACHE_KEY) || "null");
+    if(!d || !Array.isArray(d.jobs) || !Array.isArray(d.engineers)) return null;
+    if(d.at && (Date.now() - d.at) > 2*24*3600*1000) return null;   // too stale → fresh load instead
+    return d;
+  }catch(e){ return null; }
+}
+function schedIsAdmin(){
+  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+       const yes = v => String(v||"").toLowerCase() === "yes";
+       return yes(p.FullAccess) || yes(p.SLAAdmin); }catch(e){ return false; }
+}
+
 let dragState = { active:false, jobId:null, fromTray:false, moved:false, pointerId:null, offsetX:0, ghost:null, targetEngineer:null, targetMins:null };
 
 function setStatus(msg, isError = false){
@@ -3027,6 +3050,26 @@ async function init(){
   currentUser = u;
   $("userLabel").textContent = "Logged in as " + u;
 
+  // Instant paint: show the last snapshot of the board the moment the page opens
+  // (admin only — the /user check below is still the authority, and the full load
+  // refreshes everything with holiday/block overlays). Reads the deep-link date so
+  // the painted day matches where the full load will land.
+  try{
+    if(schedIsAdmin()){
+      const _qs = new URLSearchParams(location.search);
+      const _qd = _qs.get("date");
+      if(_qd && /^\d{4}-\d{2}-\d{2}$/.test(_qd)){ const d = parseDateInput(_qd); if(d && !isNaN(d)) selectedDate = d; }
+      if(_qs.get("job")){ viewMode = "day"; }
+      const snap = readSchedCache();
+      if(snap){
+        engineers = snap.engineers; jobs = snap.jobs;
+        try{ populateEngineerFilter(); }catch(e){}
+        render();
+        setStatus("Refreshing…");
+      }
+    }
+  }catch(e){}
+
   // The scheduler is an SLA-Admin area. Engineers (SLA only) go to My Jobs.
   try{
     const who = await authFetch("/user?u=" + encodeURIComponent(u)).then(r => r.json());
@@ -3126,12 +3169,15 @@ async function init(){
   });
 
   try{
-    await loadEngineers();
     loadSkills();   // fire-and-forget; suggestions weight by it once loaded
     // The server copy of the "show office staff" preference wins if present, so
     // it follows the user across devices (localStorage gave the instant default).
+    const prefsP = authFetch("/prefs").then(r => r.ok ? r.json() : null).catch(() => null);
+    // These four fetches are independent of one another — run them in PARALLEL so
+    // the refresh is ONE round trip, not five chained ones.
+    await Promise.all([ loadEngineers(), loadJobs(), loadHolidays(), loadBlocks() ]);
     try {
-      const pf = await authFetch("/prefs").then(r => r.ok ? r.json() : null).catch(() => null);
+      const pf = await prefsP;
       const p = pf && (pf.prefs || pf);
       if(p && typeof p.schedShowOffice === "boolean"){
         showOffice = p.schedShowOffice;
@@ -3140,9 +3186,7 @@ async function init(){
       }
     } catch(e){}
     populateEngineerFilter();
-    await loadJobs();
-    await loadHolidays();
-    await loadBlocks();
+    saveSchedCache();   // refresh the instant-paint snapshot
     render();
     setStatus("Scheduler ready");
     if(focusJobId) focusJobBlock(focusJobId);
@@ -3177,7 +3221,7 @@ init();
   async function tick(){
     if(busy || uiBusy()) return;
     busy = true;
-    try{ await loadJobs(true); if(typeof render === "function") render(); }catch(e){}
+    try{ await loadJobs(true); if(typeof render === "function") render(); try{ saveSchedCache(); }catch(_){}}catch(e){}
     busy = false;
   }
   window.mlLiveRefresh = tick;

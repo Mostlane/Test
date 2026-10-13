@@ -2821,6 +2821,38 @@ day); loaded via `loadNotAttended()` on board init, office-gated by `nabIsOffice
 table; reuses listJobs. TODO/next (offered, not built): a morning cron PUSH to SLA
 admins so the warning reaches the phone proactively without opening the board.
 
+## SLA board + scheduler INSTANT PAINT (Oct 2026)
+Jamie: "the main SLA page and scheduler are a bit slow to load — I'd like them to
+appear to load instantly on clicking." The cause was NOT a slow query (`GET /sla/jobs`
+never logs slow, <2.5s) — it was the CHAIN of sequential round trips with the board
+hidden the whole time: **sla-main** did `/user` (gate, hides `#mainCard`) → `/users` →
+`/sla/jobs`; **sla-scheduler** did `/user` → `/users` → `/prefs` → `/sla/jobs` →
+`/holiday/calendar` → `/sla/blocks` before its FIRST render. Fix is pure front-end
+(no worker change, no `?v=` bump — HTML is network-first):
+- **Stale-while-revalidate instant paint** (same idea as the theme engine's
+  "localStorage instant paint then server truth"). Each successful load stashes the
+  board to localStorage — sla-main `mlSlaBoardCache:<user>` = `{at, jobs, cats}`
+  (`saveBoardCache`/`readBoardCache`); scheduler `mlSchedCache:<user>` = `{at,
+  engineers, jobs}` (`saveSchedCache`/`readSchedCache`). On open, BEFORE the gate/
+  load, the page paints that snapshot immediately (`render()`), then the normal fetch
+  refreshes it. Gated on **cached office/admin perms** (sla-main `nabIsOffice()`;
+  scheduler `schedIsAdmin()` = cached FullAccess|SLAAdmin) so a field/non-admin user
+  never gets an early paint — the `/user` gate is still the authority and redirects
+  them. Snapshots older than **2 days** are ignored (fresh load instead). Best-effort:
+  a quota error / private window just skips (try/catch). sla-main sets `boardPainted`
+  so loadJobs doesn't flash "Loading jobs…" over a painted board; the scheduler shows
+  "Refreshing…". Holiday/block overlays are absent on the instant paint and fill in on
+  the refresh (they already start empty, so render tolerates it).
+- **Parallelised the refresh.** sla-main now fires `loadJobs()` + `ensureUsers()` in
+  parallel (names refresh when users land) instead of chaining them. The scheduler
+  runs `Promise.all([loadEngineers, loadJobs, loadHolidays, loadBlocks])` (+ `/prefs`
+  in flight) — five sequential round trips collapsed into one wait; `showOffice` from
+  prefs is applied before `populateEngineerFilter()`.
+- Verified headless (scratchpad `instant.cjs` / `sched.cjs`): with the API stubbed at
+  1500ms the board paints from cache at ~1s / ~0.4s, then refreshes to live data, zero
+  page errors. **If you add a pre-render blocking fetch to either page, keep it OFF the
+  instant-paint path** (paint from cache first, fetch after).
+
 ## Board ↔ scheduler hand-offs (9 Sep 2026)
 - **EM/PAT jobs are ON the SLA board again.** sla-main.html's `loadJobs` used to DROP
   every `emTest`/`pat` job (28 Aug "EM/PAT jobs hub" — to keep the yearly run off the

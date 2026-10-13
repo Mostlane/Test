@@ -639,6 +639,24 @@ async function loadCategories(){
 function doneCatNames(){ return CUSTOM_CATS.filter(c => c.done).map(c => c.name); }
 
 let allJobs = [];
+// ── Instant paint (Oct 2026) ──────────────────────────────────────────────
+// SLA should appear the instant it's tapped. The last board a user saw is
+// stashed locally and painted immediately on open (stale-while-revalidate);
+// loadJobs() then refreshes it in the background. Per-user, size-guarded,
+// best-effort — a quota error / private window just skips it.
+const BOARD_CACHE_KEY = "mlSlaBoardCache:" + (getCurrentUser() || "").toLowerCase();
+let boardPainted = false;   // true once a cached snapshot has been painted
+function saveBoardCache(){
+  try{ localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ at: Date.now(), jobs: allJobs, cats: CUSTOM_CATS })); }catch(e){}
+}
+function readBoardCache(){
+  try{
+    const d = JSON.parse(localStorage.getItem(BOARD_CACHE_KEY) || "null");
+    if(!d || !Array.isArray(d.jobs)) return null;
+    if(d.at && (Date.now() - d.at) > 2*24*3600*1000) return null;   // too stale → show a fresh load instead
+    return d;
+  }catch(e){ return null; }
+}
 // 📄 EM/PAT chip: show/hide the certificate jobs (emTest/pat). Remembered per
 // device — the chip itself shows the state + count, so a hidden set is never silent.
 let showCertJobs = true;
@@ -871,7 +889,7 @@ async function loadNotAttended(){
 
 /* ============ data ============ */
 async function loadJobs(quiet){
-  if(!quiet) $("statusBar").textContent = "Loading jobs…";
+  if(!quiet && !boardPainted) $("statusBar").textContent = "Loading jobs…";
   try{
     const res = await authFetch("/sla/jobs?t=" + Date.now());
     const json = await res.json();
@@ -886,6 +904,7 @@ async function loadJobs(quiet){
         : (j.assignedTo ? [j.assignedTo] : [])
     }));
     render();
+    saveBoardCache();               // keep the instant-paint snapshot fresh
     if(!quiet) fetchPhotoFlags();   // once per load; render() then just applies the cached set (a quiet live refresh keeps it)
   }catch(err){
     console.error(err);
@@ -1808,11 +1827,32 @@ window.addEventListener("DOMContentLoaded", async () => {
   } else {
     restoreFilters();
   }
+  // Instant paint: show the last snapshot of the board the moment the page
+  // opens (office users only — gate() below is still the authority and the
+  // fetches refresh everything). Runs after restoreFilters() so the painted
+  // board matches the saved search/status/priority.
+  try{
+    if(nabIsOffice()){
+      const snap = readBoardCache();
+      if(snap){
+        CUSTOM_CATS = Array.isArray(snap.cats) ? snap.cats : [];
+        rebuildStatuses();
+        allJobs = snap.jobs;
+        boardPainted = true;
+        const mc = $("mainCard"); if(mc) mc.style.display = "block";
+        render();
+      }
+    }
+  }catch(e){}
   if(await gate()){
     // Jobs load independently of categories — a slow/failed category fetch must
     // never hold up (or blank) the board. Categories merge into the chips/
-    // dropdown as soon as they arrive.
-    ensureUsers().then(() => loadJobs()).then(() => {
+    // dropdown as soon as they arrive. Jobs + users fetch IN PARALLEL (not
+    // chained) so fresh data lands a round trip sooner; names refresh when users
+    // arrive.
+    const jobsP = loadJobs();
+    ensureUsers().then(() => { if(allJobs.length) render(); });
+    jobsP.then(() => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
