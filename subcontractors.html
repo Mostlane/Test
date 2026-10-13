@@ -161,7 +161,12 @@
   var mapObj = null, mapLayer = null;
   var OPEN = {};   // keys of cards the user has expanded (kept across re-renders)
 
-  if(!CAN_VIEW){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Subcontractor settings are for office staff. Ask an office or Full Access user.</div>'; return; }
+  // NB we do NOT hard-bail on the cached perms here. The cached permissions blob
+  // often lacks StaffType for a non-Full-Access office user (the slim cache drops
+  // it, and mostlaneStaffType may be unset), which wrongly made CAN_EDIT false and
+  // disabled Save for genuine office staff. The server GET + POST share the SAME
+  // office gate (canSeeMoney), so load() below is the authority: a successful load
+  // means this user may view AND edit; a 403 shows the office-only note.
 
   function geocode(pc){
     var clean = String(pc||"").toUpperCase().replace(/\s+/g,"").trim();
@@ -376,13 +381,19 @@
 
   async function load(){
     try{
-      var r = await authFetch("/sla/subcontractors").then(function(x){ return x.json(); });
+      var resp = await authFetch("/sla/subcontractors");
+      if(resp.status === 403){
+        $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Subcontractor settings are for office staff. Ask an office or Full Access user.</div>';
+        return;
+      }
+      var r = await resp.json();
       if(!r || !r.ok) throw new Error((r&&r.error)||"load failed");
+      // Server confirmed office access (same canSeeMoney gate as POST), so enable
+      // editing regardless of what the cached perms blob did or didn't carry.
+      CAN_VIEW = true; CAN_EDIT = true;
       AREAS = r.areas || []; SUBS = r.list || [];
       $("senderBox").value = r.sender || ""; $("senderVia").value = r.senderVia || "";
-      if(!CAN_EDIT){ $("senderBox").disabled = true; $("senderVia").disabled = true; $("senderSave").disabled = true; }
       $("gate").hidden = true; $("main").hidden = false;
-      if(!CAN_EDIT){ $("roNote").hidden = false; $("addBtn").disabled = true; $("importBtn").disabled = true; }
       render();
     }catch(e){ $("gate").innerHTML = '<div class="note" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Couldn’t load subcontractors: '+esc(e.message)+'</div>'; }
   }
