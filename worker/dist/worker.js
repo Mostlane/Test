@@ -31303,23 +31303,24 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
   const me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
   if (!(perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes")) return error("SLA admin access required", 403, env, request);
+  const ltid = String(Math.trunc(Number(tid)) || 1);
   await ensureTable2(env);
   if (sub === "/status" && method === "GET") {
     const cfg = await getIntakeConfig(env, tid);
     let last = null, counts = {};
     const since = new Date(Date.now() - 7 * 864e5).toISOString();
     try {
-      last = await env.DB.prepare(`SELECT id, received_at, subject, outcome, reference FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT 1`).bind(tid).first();
+      last = await env.DB.prepare(`SELECT id, received_at, subject, outcome, reference FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT 1`).bind(ltid).first();
     } catch {
     }
     try {
-      const { results } = await env.DB.prepare(`SELECT outcome, COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND received_at>=? GROUP BY outcome`).bind(tid, since).all();
+      const { results } = await env.DB.prepare(`SELECT outcome, COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND received_at>=? GROUP BY outcome`).bind(ltid, since).all();
       for (const r of results || []) counts[r.outcome] = r.n;
     } catch {
     }
     let review = 0;
     try {
-      const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND outcome='review'`).bind(tid).first();
+      const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${T2} WHERE tenant_id=? AND outcome='review'`).bind(ltid).first();
       review = r && r.n || 0;
     } catch {
     }
@@ -31329,7 +31330,7 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 60));
     let rows = [];
     try {
-      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, substr(text,1,4000) AS text FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(tid, limit).all();
+      const { results } = await env.DB.prepare(`SELECT id, message_id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id, status_code, fields, substr(text,1,4000) AS text FROM ${T2} WHERE tenant_id=? ORDER BY id DESC LIMIT ?`).bind(ltid, limit).all();
       rows = results || [];
     } catch {
     }
@@ -31347,16 +31348,16 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     if (!subject && !body) return error("Paste the email's subject and body", 400, env, request);
     const text = /<[a-z][\s\S]*>/i.test(body) ? stripHtml2(body) : body;
     const commit = b.commit === true;
-    const res = await processEmail(env, ctx, fetchSelf, { tid, from: String(b.from || me + "@test").toLowerCase(), subject, text, messageId: "" }, { dryRun: !commit, force: true });
-    if (commit) await logIntake(env, tid, { messageId: "", from: "test:" + me, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
+    const res = await processEmail(env, ctx, fetchSelf, { tid: ltid, from: String(b.from || me + "@test").toLowerCase(), subject, text, messageId: "" }, { dryRun: !commit, force: true });
+    if (commit) await logIntake(env, ltid, { messageId: "", from: "test:" + me, origFrom: res.origFrom, subject, outcome: res.outcome, reason: res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text });
     return json({ ok: true, ...res, text: text.slice(0, 4e3) }, {}, env, request);
   }
   if (sub === "/rerun" && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(ltid, Number(b.id) || 0).first().catch(() => null);
     if (!row) return error("Log entry not found", 404, env, request);
-    const res = await processEmail(env, ctx, fetchSelf, { tid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "", receivedAt: row.received_at || "" }, { force: true });
-    await logIntake(env, tid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
+    const res = await processEmail(env, ctx, fetchSelf, { tid: ltid, from: row.from_addr || "", subject: row.subject || "", text: row.text || "", messageId: row.message_id || "", receivedAt: row.received_at || "" }, { force: true });
+    await logIntake(env, ltid, { messageId: row.message_id, from: row.from_addr, origFrom: res.origFrom, subject: row.subject, outcome: res.outcome, reason: "Re-run by " + me + ": " + res.reason, reference: res.reference, jobId: res.jobId, status: res.status, fields: res.fields, text: row.text });
     return json({ ok: true, ...res }, {}, env, request);
   }
   if (sub === "/templates" && method === "GET") {
@@ -31364,10 +31365,10 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
   }
   if ((sub === "/approve" || sub === "/dismiss") && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(tid, Number(b.id) || 0).first().catch(() => null);
+    const row = await env.DB.prepare(`SELECT * FROM ${T2} WHERE tenant_id=? AND id=?`).bind(ltid, Number(b.id) || 0).first().catch(() => null);
     if (!row) return error("Log entry not found", 404, env, request);
     if (sub === "/dismiss") {
-      await env.DB.prepare(`UPDATE ${T2} SET outcome='dismissed', reason=? WHERE tenant_id=? AND id=?`).bind(("Dismissed by " + me + (b.note ? ": " + String(b.note).slice(0, 200) : "")).slice(0, 300), tid, row.id).run();
+      await env.DB.prepare(`UPDATE ${T2} SET outcome='dismissed', reason=? WHERE tenant_id=? AND id=?`).bind(("Dismissed by " + me + (b.note ? ": " + String(b.note).slice(0, 200) : "")).slice(0, 300), ltid, row.id).run();
       ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email dismissed", body: (row.subject || "").slice(0, 120) + " \u2014 dismissed by " + me }).catch(() => {
       }));
       return json({ ok: true, outcome: "dismissed" }, {}, env, request);
@@ -31381,7 +31382,7 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     if (!String(fields.reference || "").trim() && !String(fields.description || "").trim()) return error("A reference or a description is needed to create the job", 400, env, request);
     const res = await createJob(env, ctx, fetchSelf, fields, row.orig_from || row.from_addr || "");
     if (res.outcome === "failed") return json({ ok: false, error: res.reason, ...res }, { status: 502 }, env, request);
-    await env.DB.prepare(`UPDATE ${T2} SET outcome=?, reason=?, reference=?, job_id=?, status_code=?, fields=? WHERE tenant_id=? AND id=?`).bind(res.outcome, ("Approved by " + me + " \u2014 " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), tid, row.id).run();
+    await env.DB.prepare(`UPDATE ${T2} SET outcome=?, reason=?, reference=?, job_id=?, status_code=?, fields=? WHERE tenant_id=? AND id=?`).bind(res.outcome, ("Approved by " + me + " \u2014 " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), ltid, row.id).run();
     ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email \u2192 job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " \u2014 created by " + me }).catch(() => {
     }));
     return json({ ok: true, ...res, fields }, {}, env, request);
