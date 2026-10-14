@@ -184,12 +184,30 @@
     .tlbody svg, .tlaxis svg{display:block;}
     .tlempty{color:#6b7a90;font-size:14px;padding:16px 4px;}
     .viewtab.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+    /* Engineer diary modal */
+    .edsel{width:100%;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font:inherit;font-size:14px;margin:12px 0 4px;}
+    .edcount{font-size:13px;margin-bottom:6px;}
+    .edcount b{color:var(--brand);}
+    .edday{margin-top:12px;}
+    .edday .d{font-weight:800;color:var(--brand);font-size:13px;border-bottom:2px solid #eef2f6;padding-bottom:3px;margin-bottom:4px;}
+    .edv{display:flex;align-items:baseline;gap:8px;padding:7px 2px;border-top:1px solid rgba(0,0,0,.05);font-size:13.5px;flex-wrap:wrap;}
+    .edv:first-of-type{border-top:0;}
+    .edv .site{font-weight:700;color:#1d2a38;}
+    .edv .meta{color:#54637a;}
+    .edv a{color:var(--brand);font-weight:700;text-decoration:none;}
+    .edv a:hover{text-decoration:underline;}
+    .edbadge{display:inline-block;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;}
+    .edbadge.future{background:#fff4d6;color:#92400e;border:1px solid #f1d38a;}
+    .edbadge.done{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;}
+    .edbadge.open{background:#e0edff;color:#1e40af;border:1px solid #c3d8f5;}
+    .edempty{color:#6b7a90;font-size:14px;padding:16px 2px;}
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" href="/cert-review.html" style="text-decoration:none;">‹ Back</a>
     <h1>⚡ 5-Year EICR schedule</h1>
+    <button id="engDiaryBtn" class="hbtn" title="All EICR jobs for one engineer, day by day">👷 Engineer diary</button>
     <button id="alexBtn" class="hbtn" title="Items to discuss with Alex">📋 Alex list<span class="n" id="alexCount" hidden></span></button>
     <select id="yearSel" title="Which year's schedule"></select>
   </header>
@@ -204,6 +222,18 @@
         <button id="alexAdd">Add</button>
       </div>
       <div id="alexList"></div>
+    </div>
+  </div>
+
+  <!-- Engineer diary: every EICR / 5-year test a chosen engineer has been on, day by day (live + Workever archive). Auto-updates as new jobs are added. -->
+  <div class="mback" id="engBack">
+    <div class="mcard" style="max-width:720px;">
+      <button class="mx" id="engClose" title="Close">×</button>
+      <h2>👷 Engineer diary — EICR / 5-year</h2>
+      <div class="muted">Every 5-year electrical test assigned to one engineer, newest first, so you can see day by day what they've been up to and nothing gets missed. New jobs appear here as they're added.</div>
+      <select id="engDiarySel" class="edsel"><option value="">Choose an engineer…</option></select>
+      <div class="edcount muted" id="engDiaryCount"></div>
+      <div id="engDiaryList"><div class="edempty">Pick an engineer to see their day-by-day EICR list.</div></div>
     </div>
   </div>
 
@@ -301,6 +331,10 @@
       g("alexBtn").onclick = openAlex;
       g("alexClose").onclick = closeAlex;
       g("alexBack").onclick = e => { if (e.target === g("alexBack")) closeAlex(); };
+      g("engDiaryBtn").onclick = openEngDiary;
+      g("engClose").onclick = closeEngDiary;
+      g("engBack").onclick = e => { if (e.target === g("engBack")) closeEngDiary(); };
+      g("engDiarySel").onchange = () => { ED_SEL = g("engDiarySel").value; renderEngDiary(); };
       const alexSubmit = () => { const v = g("alexInput").value.trim(); if (!v) return; g("alexInput").value=""; alexPost({ add: v }); };
       g("alexAdd").onclick = alexSubmit;
       g("alexInput").addEventListener("keydown", e => { if (e.key==="Enter"){ e.preventDefault(); alexSubmit(); } });
@@ -1070,6 +1104,75 @@
     }
     function openAlex(){ g("alexBack").classList.add("on"); if (!ALEX.length) loadAlex(); g("alexInput").focus(); }
     function closeAlex(){ g("alexBack").classList.remove("on"); }
+
+    /* ── Engineer diary — every EICR / 5-year test assigned to ONE engineer, day by
+       day, so you can see what they've been up to and nothing slips through.
+       Reuses the My-schedule data (/concerto/my-schedule?year=all → live portal +
+       Workever archive visits, each carrying its engineer + date), fetched fresh on
+       open so a newly-added job shows straight away. ── */
+    let ED_SEL = "", ED_VISITS = [], ED_ENGS = [];
+    const edTokens = s => String(s||"").split(/[,;/]+/).map(t=>t.trim()).filter(Boolean);
+    async function openEngDiary(){
+      g("engBack").classList.add("on");
+      g("engDiaryList").innerHTML = '<div class="edempty">Loading everyone’s EICR jobs…</div>';
+      g("engDiaryCount").textContent = "";
+      try {
+        const d = await authFetch("/concerto/my-schedule?year=all").then(r=>r.json());
+        if (!d || !d.ok) throw 0;
+        buildEngDiary(d.rows || []);
+      } catch {
+        g("engDiaryList").innerHTML = '<div class="edempty">Couldn’t load the EICR jobs — close and try again.</div>';
+        return;
+      }
+      // Default to the engineer already filtered on the page, if there is one.
+      if (!ED_SEL && ENG && ENG !== "all") { const hit = ED_ENGS.find(e => e.key === ENG.toLowerCase()); if (hit) ED_SEL = hit.name; }
+      g("engDiarySel").innerHTML = '<option value="">Choose an engineer…</option>'
+        + ED_ENGS.map(e => '<option value="'+esc(e.name)+'"'+(ED_SEL&&ED_SEL.toLowerCase()===e.key?" selected":"")+'>'+esc(e.name)+' ('+e.count+')</option>').join("");
+      renderEngDiary();
+    }
+    function closeEngDiary(){ g("engBack").classList.remove("on"); }
+    function buildEngDiary(rows){
+      const visits = [], engMap = new Map();
+      for (const r of rows) for (const v of (r.myVisits || [])) {
+        const toks = edTokens(v.engineer);
+        visits.push({ date:(v.date||"").slice(0,10), status:v.status||"", source:v.source, jobId:v.id, done:!!v.done,
+          siteCode:r.storeCode||"", siteName:r.siteName||v.name||r.storeCode||"", engTokens:toks.map(t=>t.toLowerCase()) });
+        for (const t of toks){ const k=t.toLowerCase(); if(!engMap.has(k)) engMap.set(k,{key:k,name:t,count:0}); engMap.get(k).count++; }
+      }
+      ED_VISITS = visits;
+      ED_ENGS = [...engMap.values()].sort((a,b)=> b.count-a.count || a.name.localeCompare(b.name));
+    }
+    function renderEngDiary(){
+      const box = g("engDiaryList"), cnt = g("engDiaryCount");
+      if (!ED_SEL){ box.innerHTML = '<div class="edempty">Pick an engineer to see their day-by-day EICR list.</div>'; cnt.textContent=""; return; }
+      const key = ED_SEL.toLowerCase();
+      const mine = ED_VISITS.filter(v => v.engTokens.includes(key));
+      if (!mine.length){ box.innerHTML = '<div class="edempty">No EICR / 5-year jobs found for '+esc(ED_SEL)+'.</div>'; cnt.textContent=""; return; }
+      const today = new Date().toISOString().slice(0,10);
+      let done=0, booked=0, outstanding=0; const sites=new Set();
+      for (const v of mine){ sites.add(v.siteCode||v.siteName); if(v.done) done++; else if(v.date && v.date>today) booked++; else outstanding++; }
+      cnt.innerHTML = '<b>'+mine.length+'</b> EICR visit'+(mine.length===1?"":"s")+' across <b>'+sites.size+'</b> site'+(sites.size===1?"":"s")
+        + ' · '+done+' complete · '+booked+' booked · '+outstanding+' outstanding';
+      const byDay = new Map();
+      for (const v of mine){ const d=v.date||"0000"; if(!byDay.has(d)) byDay.set(d,[]); byDay.get(d).push(v); }
+      const days = [...byDay.keys()].sort((a,b)=> b.localeCompare(a));
+      const srcTag = s => s==="archive" ? '<span class="vsrc arch">🗄 Workever</span>' : '<span class="vsrc live">⚡ Portal</span>';
+      const badge = v => v.done ? '<span class="edbadge done">✓ complete</span>'
+        : (v.date && v.date>today ? '<span class="edbadge future">📅 booked</span>' : '<span class="edbadge open">● outstanding</span>');
+      box.innerHTML = days.map(d => {
+        const vs = byDay.get(d).sort((a,b)=> (a.siteName||"").localeCompare(b.siteName||""));
+        const head = d==="0000" ? "No date recorded" : fmtD(d);
+        return '<div class="edday"><div class="d">'+esc(head)+'</div>'
+          + vs.map(v => '<div class="edv">'+srcTag(v.source)+' '+badge(v)
+              + ' <span class="site">'+esc(v.siteName||v.siteCode||"—")+'</span>'
+              + (v.siteCode?' <span class="meta">('+esc(v.siteCode)+')</span>':'')
+              + (v.status?' <span class="meta">· '+esc(v.status)+'</span>':'')
+              + (v.source==="live"&&v.jobId ? ' · <a href="/job-view.html?jobId='+encodeURIComponent(v.jobId)+'">open job ↗</a>' : '')
+              + (v.siteCode ? ' · <a href="/site-folder.html?site='+encodeURIComponent(v.siteCode)+'">site ↗</a>' : '')
+              + '</div>').join("")
+          + '</div>';
+      }).join("");
+    }
   </script>
 </body>
 </html>
