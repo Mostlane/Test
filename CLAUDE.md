@@ -3713,6 +3713,26 @@ these jobs.
     site Concerto still lists, ignoring the year filter). An inactive row carries a
     grey "🚫 Inactive" pill in the store cell; the audit cards are hidden in the
     inactive view. Front-end tab state `VIEW` ("active"|"inactive"); no `?v=` bump.
+  - **"Archive only" marking + compliance-style table (14 Oct 2026, Jamie: "jobs
+    that are not in the portal and are archived should be marked… make it more a
+    table like the compliance ones, it all blurs into one").** Two front-end-only
+    changes to five-year-remedials.html (no worker change — the rows already carry
+    `job`/`lastDone`/`myVisits`): (1) **`testSrc(r)`/`isArchiveOnly(r)`** — a site whose
+    most-recent 5-year test lives ONLY in the imported Workever archive (no live
+    portal `job`, and `lastDone.source==="archive"` rather than `cert`/`job`; on the
+    My-schedule tab it reads `myVisits` = all archive, no `source:"live"`) gets a grey
+    **🗄 Archive only** pill in the store cell, a summary tile, and a **🗄 Archive only**
+    filter chip (FILTER==="archive" in `visible()`). A filed certificate (`cert`) or a
+    live job counts as "in the portal" and is NOT marked. (2) **The table now looks
+    like the compliance chart** (`eicr-portal.html`): a solid **navy sticky header
+    band** (`thead th{background:var(--brand)}`, was pale grey uppercase),
+    **zebra striping by DATA row** via a `.zeb` class added in `rowHtml(r,i)` on odd
+    rows — NOT `nth-child`, because the full-width `<tr class="detail">` expansion rows
+    would throw the stripe off — and a right-hand divider on the sticky store column.
+    Hover rules target `> td` (incl. `td.store`) after the zebra rules so hover wins.
+    Verified headless (scratchpad `fyr.cjs`): 4 mock rows (portal job / archive-only /
+    filed cert / needs-booking) → exactly ONE 🗄 pill on the archive-only store, zebra
+    on alternate rows, navy header, the chip isolates the archive row, 0 JS errors.
   - **"📋 My schedule" tab (29 Sep 2026, Jamie: "a new page in the 5-year remedial
     area — my full schedule this year, current status of each site from
     compliance/remedials, with clear notes + a clear status on each, reflected
