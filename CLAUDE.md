@@ -3733,6 +3733,29 @@ these jobs.
     Verified headless (scratchpad `fyr.cjs`): 4 mock rows (portal job / archive-only /
     filed cert / needs-booking) → exactly ONE 🗄 pill on the archive-only store, zebra
     on alternate rows, navy header, the chip isolates the archive row, 0 JS errors.
+  - **"👷 Engineer diary" button (14 Oct 2026, Jamie: "a button to view all the EICRs
+    assigned to Daniel Walker with dates, day by day… so none will be missed; as jobs
+    are added they add to the list").** A header button on five-year-remedials.html
+    opens a modal (`#engBack`, reuses the `.mback`/`.mcard` pattern) showing every
+    EICR / 5-year test assigned to ONE engineer, grouped by DAY (newest first).
+    Front-end only (no worker change): on open it fetches `/concerto/my-schedule?year=all`
+    fresh (so a newly-added job appears straight away), flattens every row's `myVisits`
+    (live portal + Workever archive, each carrying its own `engineer` + `date`) into a
+    per-visit list via `buildEngDiary`, and builds the engineer picker from the DISTINCT
+    visit-level engineer tokens (`edTokens` splits a joined "Daniel Walker, Bob Smith"
+    assignment on `,;/`, so a shared job counts for each name — matching is per-VISIT
+    `v.engineer`, not the row's `engineers[]`, and is case-insensitive). The picker
+    defaults to the engineer already filtered on the My-schedule tab (`ENG`) if set.
+    `renderEngDiary` filters to the chosen engineer, groups by date desc, and shows a
+    count strip ("N EICR visits across M sites · X complete · Y booked · Z outstanding")
+    + per-day rows with a ⚡Portal/🗄Workever source tag, a status badge (✓ complete /
+    📅 booked [future-dated, not done] / ● outstanding [past, not done — the ones that
+    get missed]), the site + code + status, and open-job / site-folder links. State
+    `ED_SEL`/`ED_VISITS`/`ED_ENGS`. Verified headless (scratchpad `engdiary.cjs`):
+    "Daniel Walker (4)" correctly folds in a shared multi-eng job + a row whose visit
+    engineer was Daniel though its `engineers[]` read "Dan Walker", badges + newest-first
+    + no cross-engineer leak, 0 page errors. **TODO/next:** same per-engineer diary could
+    cover EM/PAT/pump cert jobs, not just EICR.
   - **"📋 My schedule" tab (29 Sep 2026, Jamie: "a new page in the 5-year remedial
     area — my full schedule this year, current status of each site from
     compliance/remedials, with clear notes + a clear status on each, reflected
