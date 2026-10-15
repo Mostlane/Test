@@ -52,6 +52,13 @@
     <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
   </div>
 
+  <div class="card" id="refCard" style="display:none;">
+    <h2>🚫 Scans that didn't sign anyone in <span class="muted" id="refCount"></span></h2>
+    <p class="muted" style="margin:0 0 8px;">Every time a phone scanned but nobody was signed in or out — and why. Last
+      <select id="refDays" style="font:inherit;"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select>.</p>
+    <div id="refList" class="muted">Loading…</div>
+  </div>
+
   <div class="card" id="tsCard" style="display:none;">
     <h2>🧾 Timesheet emails</h2>
     <p class="muted" style="margin:0 0 10px;">A PDF of everyone's visits — hours on site, with a green tick or red cross showing whether each sign-in and sign-out was GPS-checked at the site, and missed sign-outs highlighted.</p>
@@ -112,7 +119,57 @@ async function loadOnSite(){
 if (perms().FullAccess === "Yes") {
   $("adminCard").style.display = "block";
   loadOnSite();
+  loadRefusals();
+  $("refDays").addEventListener("change", loadRefusals);
   loadTimesheetCfg();
+}
+
+// ── Refused / abandoned scans (scan_log) ──
+const REF_WHY = {
+  unknown_site: "Not at any SiteLog site",
+  outside_site: "Outside the site boundary",
+  outside_site_signed_in: "Tried to sign out away from the site",
+  no_location: "No location sent with the sign-in/out",
+  no_site_location: "Site has no location set",
+  blocked: "Person is archived",
+  phone_denied: "Location permission turned off on the phone",
+  phone_unavailable: "Phone couldn't get a location",
+  phone_timeout: "Location timed out on the phone",
+  phone_no_fix: "No location when registering",
+  error: "Refused",
+  abandoned: "Offered a sign-in but never confirmed it"
+};
+function fmtDay(v){ try { const d = new Date(v); return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}) + " " + d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+async function loadRefusals(){
+  const days = $("refDays").value;
+  try{
+    const r = await authFetch(`${API}/sitelog/scan-log?days=${days}`, {cache:"no-store"});
+    if(!r.ok) return;
+    const d = await r.json();
+    $("refCard").style.display = "block";
+    const rows = d.rows || [];
+    // Offered a sign-in/out but no sign-in/out from the same phone within 20 minutes.
+    const out = [];
+    rows.forEach(x => {
+      if (x.refused) { out.push(x); return; }
+      if (x.kind === "scan" && (x.outcome === "confirm_check_in" || x.outcome === "confirm_sign_out")) {
+        const t = new Date(x.at).getTime();
+        const done = rows.some(y => (y.kind === "sign_in" || y.kind === "sign_out") && y.device_token === x.device_token
+          && new Date(y.at).getTime() >= t && new Date(y.at).getTime() - t < 20*60000);
+        if (!done) out.push(Object.assign({}, x, { outcome: "abandoned", reason: null }));
+      }
+    });
+    $("refCount").textContent = `(${out.length})`;
+    if(!out.length){ $("refList").textContent = "None — every scan in this period ended in a sign-in or sign-out."; return; }
+    $("refList").innerHTML = out.map(x => {
+      const name = [x.first_name, x.last_name].filter(Boolean).join(" ") || "Unknown phone";
+      const why = REF_WHY[x.outcome] || x.outcome;
+      const where = x.site || (x.nearest_site ? "nearest: " + x.nearest_site : "");
+      const dist = x.distance_m != null ? ` · ${x.distance_m >= 1000 ? (x.distance_m/1000).toFixed(1)+" km" : x.distance_m+" m"} away` : "";
+      const acc = x.accuracy != null ? ` · ±${Math.round(x.accuracy)} m` : "";
+      return `<div class="row" style="flex-wrap:wrap"><b>${esc(name)}</b><span>${esc(why)}${where ? " — " + esc(where) : ""}${esc(dist)}${esc(acc)}</span><span class="meta">${esc(fmtDay(x.at))}</span>${x.reason && x.reason !== why ? `<span class="meta" style="flex-basis:100%">${esc(x.reason)}</span>` : ""}</div>`;
+    }).join("");
+  }catch(e){ $("refList").textContent = "Couldn't load the scan log."; }
 }
 
 // ── Timesheet emails (daily + weekly PDF) ──
