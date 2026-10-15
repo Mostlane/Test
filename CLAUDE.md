@@ -2075,6 +2075,21 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
   (postcode-first) to stamp `siteCode`. A sibling **`fbc-jotform-digest`** template
   drops the weekly "Weekly Incident Report Update" summary. DEFAULT allow-list adds
   `jotform.com`.
+  - **"Other" site + plain-text forwards (15 Oct 2026):** on a forwarded Jotform the
+    dropdown fields (Site, Priority) render label-on-one-line / value-on-the-next, and
+    when the reporter picks **"Other"** the real place is in the **`"Other" Site
+    Address`** line — so the old same-line `Site`/`Priority` regexes read nothing and
+    the job stuck in review with a blank site AND blank priority (two live examples,
+    both the cricket club). `fbcJotform` now reads Site + Priority same-line OR
+    next-line, and on "Other"/blank takes the address block's leading place-name
+    ("Fareham and Crofton Cricket Club") + postcode for the lookup → auto-matches the
+    known FBC site. **A genuinely unknown place is NO LONGER held for review:** the job
+    is created with the address as its site name (work never lost) and **emailjob raises
+    a "📍 Link to a site" task** (category "Fareham sites") so the office ties it to /
+    creates the proper site — the same create+task path now also covers an unmatched
+    **Chapplins** property ("Sites to link"). Gated on `r.siteLookup && siteMatched===false`,
+    so Concerto jobs (site by code) never trigger it. Tests in test-email-intake.mjs
+    ("fbc 'Other'…" + "chapplins unmatched → link to a site task").
 - **emailjob.js** calls **`recordFbcJob`** (writes the `fbc_meta` marker + carries
   the incident fields, never clobbering office-entered cost/PO/quote/invoice on a
   re-delivery) and **`appendFbcMessage`** (logs the incident email; dedupe by
@@ -5288,9 +5303,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Action, Call status, and classifies by ACTION: **AM01. Approved** / **FM
   Approved - Send to Contractor** → `job` (create/update); **G01. Add a note,
   photo or document** / **"Additional information has been added"** → `note`
-  (kind:"note" → emailjob logs it, NEVER creates — TODO: append to the open job
-  via an update-only /sla/inbound call); any OTHER action → `job`+missing →
-  review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
+  (kind:"note" → **outcome `note`**, never a job: emailjob `appendJobNote` POSTs
+  **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it to the
+  matching incident's job CARD (`job.events` timeline, prefers the OPEN job, else
+  the newest; 404 if we hold none) AND `createIntakeTask` raises a **📝 Concerto
+  note** task on My Tasks (category "Concerto notes", link → job-view) so it's
+  actioned + ticked off; no live job → the task alone); any OTHER action →
+  `job`+missing → review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
   came back Sep as BARE `00025826` AM01 + `Order 00025826/2` £2,105 seconds
   apart) is handled by /sla/inbound's existing matchSameIncident: bare dispatch →
   new linked visit off the finished job; the /N order → client-orders + £ on the

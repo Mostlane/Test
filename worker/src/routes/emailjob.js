@@ -257,6 +257,34 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
+/* Append a store's note/photo/document to the matching job's card (events
+   timeline) via POST /sla/inbound {action:"note"} in-process. Returns the job it
+   landed on, or null when the incident has no job on the board. */
+async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at }) {
+  const req = new Request("https://mostlane-api.internal/sla/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
+    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: "Southern Co-op (Concerto)", at })
+  });
+  const resp = await fetchSelf(req, env, ctx);
+  let out = {}; try { out = await resp.json(); } catch {}
+  return (out && out.ok && out.noted) ? { jobId: out.id || "", reference: out.reference || incident || "" } : null;
+}
+/* Put an intake item that needs a human onto the admin TASK LIST (My Tasks) via
+   POST /tasks/inbound — the office's existing tick-off checklist. Idempotent on
+   externalId (a re-delivered email updates the one task, never piles up). */
+async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail, link, category }) {
+  const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim();
+  if (!secret) return null;
+  const req = new Request("https://mostlane-api.internal/tasks/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + secret },
+    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake" })
+  });
+  const resp = await fetchSelf(req, env, ctx);
+  let out = {}; try { out = await resp.json(); } catch {}
+  return out;
+}
 /* The client cancelled a job / withdrew a quote request → POST /sla/inbound
    {action:"cancel"} in-process. Outcomes: cancelled (a job marked Cancelled, or
    the cancellation NOTED on an already-finished job), review (no job on the board
@@ -343,11 +371,27 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     const r = tm.result, out = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out, outcome: "dropped", reason: r.reason || "Not a job" };
     if (r.kind === "note") {
-      // A store's note/chase on an EXISTING job (not a new dispatch). Never
-      // creates a job. TODO: append the note to the matching open job via an
-      // update-only /sla/inbound call; for now it's logged against the incident.
-      return { ...out, outcome: "dropped", reference: r.incident || "",
-        reason: "Concerto note/update on job " + (r.incident || "?") + " — logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)" };
+      // A store's note/chase/photo on an EXISTING job (not a new dispatch). Never
+      // creates a job — but it must not vanish: it's appended to the matching
+      // job's CARD (the notes/timeline the office reads) AND raised as a task so
+      // someone actions it and ticks it off (My Tasks). No live job → task only.
+      const n = r.note || {}, inc = r.incident || n.incident || "";
+      if (opts.dryRun) return { ...out, outcome: "dryrun", reference: inc, reason: "Would add this Concerto note to job " + (inc || "?") + "’s card + raise a task to action it" };
+      let noted = null;
+      try { noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt }); } catch {}
+      try {
+        await createIntakeTask(env, ctx, fetchSelf, {
+          externalId: "note:" + (msg.messageId || inc || (subject + ":" + Date.now())),
+          title: "📝 Concerto note — " + (noted && noted.reference ? "job " + noted.reference : (inc ? "incident " + inc : "a job")),
+          detail: ((n.action ? n.action + " — " : "") + (n.text || "")).slice(0, 400),
+          link: (noted && noted.jobId) ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
+          category: "Concerto notes",
+        });
+      } catch {}
+      return { ...out, outcome: "note", reference: inc, jobId: (noted && noted.jobId) || "",
+        reason: (noted && noted.jobId)
+          ? "Note added to job " + (noted.reference || inc) + "’s card + a task raised to action it"
+          : "Concerto note on " + (inc || "?") + " — no live job on the board, so a task was raised to action it" };
     }
     if (r.kind === "cancel") {
       const c = { ...(r.cancel || {}), action: "cancel", isJob: false };
@@ -374,6 +418,21 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     if (r.fbc && made.jobId && (made.outcome === "created" || made.outcome === "updated")) {
       try { await recordFbcJob(env, tid, made.jobId, { ...r.fbc, siteCode: fields.siteCode, siteName: fields.siteName || r.fbc.siteName, reference: made.reference || fields.reference }); } catch {}
       try { await appendFbcMessage(env, tid, made.jobId, { direction: "in", from: origFrom || sender, subject, body: text, messageId: msg.messageId, at: msg.receivedAt }); } catch {}
+    }
+    // A job that CREATED but couldn't be tied to a KNOWN site (an "Other"/new FBC
+    // location, an unmatched Chapplins property) → a task to create/link the
+    // proper site, so an unknown place is never forgotten. The work is already on
+    // the board (the address carries it); this just chases the tidy-up.
+    if (r.siteLookup && fields.siteMatched === false && made.jobId && (made.outcome === "created" || made.outcome === "updated")) {
+      try {
+        await createIntakeTask(env, ctx, fetchSelf, {
+          externalId: "site:" + made.jobId,
+          title: "📍 Link to a site — " + (fields.siteName || fields.reference || made.jobId),
+          detail: ((fields.address || fields.siteName || "") + (fields.postcode ? " · " + fields.postcode : "")).slice(0, 300) + " — this job isn’t tied to a known site. Create or link the site so its history & compliance join up.",
+          link: "/job-view.html?jobId=" + encodeURIComponent(made.jobId),
+          category: fields.storeType === "fbc" ? "Fareham sites" : "Sites to link",
+        });
+      } catch {}
     }
     return { ...out, fields, ...made };
   }

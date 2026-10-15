@@ -19473,6 +19473,10 @@ async function handle13(request, env, ctx, url, sess) {
       const r = await cancelIncidentJobs(env, tenantId, ctx, b);
       return jsonResponse(r, headers, r.ok ? 200 : r.notFound ? 404 : 400);
     }
+    if (b && String(b.action || "").toLowerCase() === "note") {
+      const r = await appendIncidentNote(env, tenantId, b);
+      return jsonResponse(r, headers, r.ok ? 200 : r.notFound ? 404 : 400);
+    }
     if (!b || !String(b.reference || "").trim() && !String(b.description || "").trim())
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
     const pm = /^p(?:riority)?\s*[.:-]?\s*([1-4])$/i.exec(String(b.priority || "").trim());
@@ -23293,6 +23297,23 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
   const key = incidentKey(inc) || incidentKey(ref);
   if (key) add(await jobsForIncidentKey(env, tenantId, key.inc));
   return [...seen.values()];
+}
+async function appendIncidentNote(env, tenantId, b) {
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const open = jobs.filter((j2) => !finished(j2));
+  const newest = (list) => list.slice().sort((a, c) => String(c.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  const j = open.length ? newest(open) : newest(jobs);
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+  const by = String(b.by || "Southern Co-op (Concerto)").slice(0, 80);
+  const label2 = String(b.noteAction || "").replace(/\s+/g, " ").trim();
+  const text = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 1e3);
+  const note = (label2 ? label2 + ": " : "") + (text || "(note added \u2014 no text)");
+  (j.events ||= []).push({ at, by, type: "note", note });
+  j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  await saveJob(env, tenantId, j);
+  return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status };
 }
 async function cancelIncidentJobs(env, tenantId, ctx, b) {
   const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
@@ -30548,12 +30569,17 @@ function fbcJotform(subject, t) {
     const m = re.exec(t);
     return m ? String(m[1] || "").replace(/\s+/g, " ").trim() : "";
   };
-  const site = val2(/^\s*Site[ \t]+(?!Address)(.+)$/im);
-  const addrBlock = (/^\s*Site Address[ \t]+([\s\S]+?)\n\s*(?:Priority|Reported By)\b/im.exec(t) || [])[1] || "";
+  let site = val2(/^\s*Site[ \t]+(?!Address)(.+)$/im);
+  if (!site) {
+    const nx = (/^\s*Site[ \t]*\r?\n[ \t]*([^\r\n]+)/im.exec(t) || [])[1] || "";
+    if (nx && !/^(?:["']?Other["']?\s*)?Site Address\b/i.test(nx)) site = nx.replace(/\s+/g, " ").trim();
+  }
+  const isOther = /^other$/i.test(site);
+  const addrBlock = (/^\s*(?:["']?Other["']?\s+)?Site Address[ \t]+([\s\S]+?)\n\s*(?:(?:["']?Other["']?\s+)?Site Access|Priority|Reported By)\b/im.exec(t) || [])[1] || "";
   const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
   const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
   const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
-  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im);
+  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-4][^\n]*)/im.exec(t) || [])[1] || "");
   const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
   const reportedBy = val2(/^\s*Reported By[ \t]+(.+)$/im);
   const jobTitle = val2(/^\s*Job Title[ \t]+(.+)$/im);
@@ -30561,24 +30587,26 @@ function fbcJotform(subject, t) {
   desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
   const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
-  const reference = "FBC-" + djb2([site, reportedBy, desc.slice(0, 120), prNum].join("|"));
+  const otherName = (addrBlock.split(/[,\n]/)[0] || "").replace(/\s+/g, " ").trim();
+  const siteName = site && !isOther ? site : otherName;
+  const reference = "FBC-" + djb2([siteName, reportedBy, desc.slice(0, 120), prNum].join("|"));
   const missing = [];
-  if (!site) missing.push("site");
+  if (!siteName && !postcode) missing.push("site");
   if (!desc) missing.push("description");
   return {
     kind: "job",
     missing,
     // Match on the SITE NAME (the "Site" pill = the register's site_name); the
     // postcode narrows first, the name disambiguates when a postcode is shared.
-    siteLookup: { client: "fbc", address: site, postcode },
-    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName: site },
+    siteLookup: { client: "fbc", address: siteName, postcode },
+    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName },
     fields: {
       isJob: true,
       reference,
       priority: prNum ? "Priority " + prNum : "",
       siteCode: "",
-      siteName: site,
-      address: streetAddr || site,
+      siteName,
+      address: streetAddr || siteName,
       postcode,
       telephone: "",
       description: desc,
@@ -31222,6 +31250,36 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
+async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at }) {
+  const req = new Request("https://mostlane-api.internal/sla/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
+    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: "Southern Co-op (Concerto)", at })
+  });
+  const resp = await fetchSelf(req, env, ctx);
+  let out = {};
+  try {
+    out = await resp.json();
+  } catch {
+  }
+  return out && out.ok && out.noted ? { jobId: out.id || "", reference: out.reference || incident || "" } : null;
+}
+async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail, link, category }) {
+  const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim();
+  if (!secret) return null;
+  const req = new Request("https://mostlane-api.internal/tasks/inbound", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": "Bearer " + secret },
+    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake" })
+  });
+  const resp = await fetchSelf(req, env, ctx);
+  let out = {};
+  try {
+    out = await resp.json();
+  } catch {
+  }
+  return out;
+}
 async function cancelJob(env, ctx, fetchSelf, c, msg) {
   const body = {
     action: "cancel",
@@ -31314,11 +31372,29 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     const r = tm.result, out2 = { ...base, template: tm.tpl.id, source: "template" };
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
     if (r.kind === "note") {
+      const n = r.note || {}, inc = r.incident || n.incident || "";
+      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this Concerto note to job " + (inc || "?") + "\u2019s card + raise a task to action it" };
+      let noted = null;
+      try {
+        noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt });
+      } catch {
+      }
+      try {
+        await createIntakeTask(env, ctx, fetchSelf, {
+          externalId: "note:" + (msg.messageId || inc || subject + ":" + Date.now()),
+          title: "\u{1F4DD} Concerto note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : "a job"),
+          detail: ((n.action ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
+          link: noted && noted.jobId ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
+          category: "Concerto notes"
+        });
+      } catch {
+      }
       return {
         ...out2,
-        outcome: "dropped",
-        reference: r.incident || "",
-        reason: "Concerto note/update on job " + (r.incident || "?") + " \u2014 logged, not a new job (jobs are only created from an Approved / Send-to-Contractor dispatch)"
+        outcome: "note",
+        reference: inc,
+        jobId: noted && noted.jobId || "",
+        reason: noted && noted.jobId ? "Note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : "Concerto note on " + (inc || "?") + " \u2014 no live job on the board, so a task was raised to action it"
       };
     }
     if (r.kind === "cancel") {
@@ -31351,6 +31427,18 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       }
       try {
         await appendFbcMessage(env, tid, made.jobId, { direction: "in", from: origFrom || sender, subject, body: text, messageId: msg.messageId, at: msg.receivedAt });
+      } catch {
+      }
+    }
+    if (r.siteLookup && fields2.siteMatched === false && made.jobId && (made.outcome === "created" || made.outcome === "updated")) {
+      try {
+        await createIntakeTask(env, ctx, fetchSelf, {
+          externalId: "site:" + made.jobId,
+          title: "\u{1F4CD} Link to a site \u2014 " + (fields2.siteName || fields2.reference || made.jobId),
+          detail: ((fields2.address || fields2.siteName || "") + (fields2.postcode ? " \xB7 " + fields2.postcode : "")).slice(0, 300) + " \u2014 this job isn\u2019t tied to a known site. Create or link the site so its history & compliance join up.",
+          link: "/job-view.html?jobId=" + encodeURIComponent(made.jobId),
+          category: fields2.storeType === "fbc" ? "Fareham sites" : "Sites to link"
+        });
       } catch {
       }
     }
