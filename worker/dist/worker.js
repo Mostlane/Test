@@ -31270,7 +31270,7 @@ async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail
   const req = new Request("https://mostlane-api.internal/tasks/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + secret },
-    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake" })
+    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake", assignee: "@office", shared: true })
   });
   const resp = await fetchSelf(req, env, ctx);
   let out = {};
@@ -43617,7 +43617,7 @@ async function ensureTables__raw6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
     tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
     PRIMARY KEY (task_id, username, period_key))`).run();
-  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT", "shared INTEGER DEFAULT 0"]) {
     try {
       await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run();
     } catch {
@@ -43708,6 +43708,26 @@ function parseAssignees(t) {
     return [];
   }
 }
+async function officeUsernames2(env, tid) {
+  const out = /* @__PURE__ */ new Set();
+  const owner = String(env.OWNER_USERNAME || "Jamie Line").trim();
+  if (owner) out.add(owner);
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      const st = (u.status || "").trim().toLowerCase();
+      if (st && st !== "active") continue;
+      let staffType = "";
+      try {
+        staffType = String((JSON.parse(u.profile || "{}") || {}).staffType || "").toLowerCase();
+      } catch {
+      }
+      if (staffType === "office") out.add(u.username);
+    }
+  } catch {
+  }
+  return [...out];
+}
 async function autoDone(env, tid, task, user, startAt) {
   if (!task.auto_match) return false;
   try {
@@ -43721,16 +43741,25 @@ async function autoDone(env, tid, task, user, startAt) {
 }
 async function statusFor(env, tid, task, user, now2, doneMap) {
   const occ = occurrence(task, now2);
-  const manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
-    "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
-  ).bind(tid, task.id, user, occ.periodKey).first().then((r) => r && r.done_at);
+  let manual = null, doneBy = null;
+  if (task.shared) {
+    const r = await env.DB.prepare(
+      "SELECT done_at, done_by FROM admin_task_done WHERE tenant_id=? AND task_id=? AND period_key=? AND done_at IS NOT NULL ORDER BY done_at LIMIT 1"
+    ).bind(tid, task.id, occ.periodKey).first();
+    manual = r && r.done_at;
+    doneBy = r && r.done_by;
+  } else {
+    manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
+      "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
+    ).bind(tid, task.id, user, occ.periodKey).first().then((r) => r && r.done_at);
+  }
   let doneAt = manual || null, auto = false;
   if (!doneAt && await autoDone(env, tid, task, user, occ.startAt)) {
     doneAt = "auto";
     auto = true;
   }
   const done = !!doneAt;
-  return { periodKey: occ.periodKey, dueAt: occ.dueAt, done, auto, doneAt: auto ? null : doneAt, overdue: !done && Date.now() > Date.parse(occ.dueAt) };
+  return { periodKey: occ.periodKey, dueAt: occ.dueAt, done, auto, doneAt: auto ? null : doneAt, doneBy: auto ? null : doneBy, shared: !!task.shared, overdue: !done && Date.now() > Date.parse(occ.dueAt) };
 }
 function shapeTask(t) {
   return {
@@ -43753,7 +43782,8 @@ function shapeTask(t) {
     category: t.category || "",
     refDate: t.ref_date || "",
     createdAt: t.created_at || "",
-    link: t.link || ""
+    link: t.link || "",
+    shared: !!t.shared
   };
 }
 async function handle37(request, env, ctx, url, sess) {
@@ -43807,7 +43837,9 @@ async function handle37(request, env, ctx, url, sess) {
       const owner = String(env.OWNER_USERNAME || "Jamie Line");
       let want = Array.isArray(b.assignees) ? b.assignees : b.assignee ? [b.assignee] : [];
       want = want.map((s) => String(s || "").trim()).filter(Boolean);
-      if (!want.length) want = [owner];
+      const wantsOffice = b.office === true || want.some((w) => w.toLowerCase() === "@office");
+      const shared = b.shared === true || wantsOffice;
+      want = want.filter((w) => w.toLowerCase() !== "@office");
       const assignees = [];
       for (const w of want) {
         let u = null;
@@ -43818,6 +43850,10 @@ async function handle37(request, env, ctx, url, sess) {
         }
         assignees.push(u || w);
       }
+      if (wantsOffice) {
+        for (const u of await officeUsernames2(env, tid2)) if (!assignees.includes(u)) assignees.push(u);
+      }
+      if (!assignees.length) assignees.push(owner);
       let detail = String(b.detail || "").replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{2,}/g, "\n").trim().slice(0, 1800);
       const urlInDetail = (String(b.detail || "").match(/https?:\/\/\S+/) || [])[0] || "";
       const link = String(b.link || urlInDetail || "").slice(0, 800);
@@ -43841,11 +43877,11 @@ async function handle37(request, env, ctx, url, sess) {
       }
       if (!id) id = "email-" + crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
           due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`).bind(
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`).bind(
         id,
         tid2,
         title,
@@ -43867,7 +43903,8 @@ async function handle37(request, env, ctx, url, sess) {
         extKey || null,
         category,
         refDate,
-        link || null
+        link || null,
+        shared ? 1 : 0
       ).run();
       if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid2, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
       }))));
@@ -43914,7 +43951,8 @@ async function handle37(request, env, ctx, url, sess) {
     if (!parseAssignees(t).includes(me)) return error("This task isn't assigned to you.", 403, env, request);
     const occ = occurrence(t, /* @__PURE__ */ new Date());
     if (b.undo) {
-      await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?").bind(tid, id, me, occ.periodKey).run();
+      if (t.shared) await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND period_key=?").bind(tid, id, occ.periodKey).run();
+      else await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?").bind(tid, id, me, occ.periodKey).run();
     } else {
       await env.DB.prepare(
         "INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at"

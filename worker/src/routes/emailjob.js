@@ -276,10 +276,13 @@ async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, n
 async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail, link, category }) {
   const secret = (env.TASKS_INBOUND_TOKEN || env.JOBS_INBOUND_TOKEN || "").trim();
   if (!secret) return null;
+  // These intake chores (a Concerto note to action, an unknown site to link) belong
+  // to the OFFICE, not one person — so assign to everyone in the office (`@office`)
+  // and make them SHARED: the first person to press Done clears it for all of them.
   const req = new Request("https://mostlane-api.internal/tasks/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + secret },
-    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake" })
+    body: JSON.stringify({ externalId, title, detail, link, category: category || "Email intake", source: "email-intake", assignee: "@office", shared: true })
   });
   const resp = await fetchSelf(req, env, ctx);
   let out = {}; try { out = await resp.json(); } catch {}

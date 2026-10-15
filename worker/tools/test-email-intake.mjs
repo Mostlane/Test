@@ -196,7 +196,8 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
     const nt = await run(E2, rawNote, "noreply@concerto.co.uk");
     ok("helpdesk G01. Add a note → added to the job card + a task, never a job",
       nt.outcome === "note" && E2.inbound.length === 1 && E2.notes.length === 1 && E2.notes[0].body.incident === "00099912"
-      && E2.tasks.length === 1 && /Concerto note/.test(E2.tasks[0].body.title) && /job-view\.html/.test(E2.tasks[0].body.link),
+      && E2.tasks.length === 1 && /Concerto note/.test(E2.tasks[0].body.title) && /job-view\.html/.test(E2.tasks[0].body.link)
+      && E2.tasks[0].body.assignee === "@office" && E2.tasks[0].body.shared === true,
       nt.outcome + " / " + nt.reason + " / notes=" + E2.notes.length + " tasks=" + E2.tasks.length);
     const uk = await run(E2, rawUnknownAction, "noreply@concerto.co.uk");
     ok("helpdesk unrecognised action → held for a look (review)", uk.outcome === "review" && /unrecognised Concerto action/.test(uk.reason) && E2.inbound.length === 1, uk.outcome + " / " + uk.reason);
@@ -210,7 +211,7 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   // support@ layout, property NOT in the register (Flat 8 vs Flat 15) → job still lands, no site code
   const r2 = await run(E, rawChap2, "support@chapplins.co.uk"); const p2 = E.inbound[1] && E.inbound[1].body;
   ok("chapplins support@ layout: job created, unmatched property carries the address", r2.outcome === "updated" && p2.reference === "CHAP-4999" && p2.priority === "Priority 2" && !p2.siteCode && /Flat 8 Badger Court/.test(p2.siteName) && /second bedroom door/.test(p2.description) && !/Many Thanks|Chapplins Support/.test(p2.description), JSON.stringify(p2));
-  ok("chapplins unmatched property → a 'link to a site' task is raised", E.tasks.some(t => /Link to a site/.test(t.body.title) && /Flat 8 Badger Court/.test(t.body.detail)), "tasks=" + JSON.stringify(E.tasks.map(t => t.body.title)));
+  ok("chapplins unmatched property → a shared office 'link to a site' task is raised", E.tasks.some(t => /Link to a site/.test(t.body.title) && /Flat 8 Badger Court/.test(t.body.detail) && t.body.assignee === "@office" && t.body.shared === true), "tasks=" + JSON.stringify(E.tasks.map(t => ({ t: t.body.title, a: t.body.assignee, s: t.body.shared }))));
   // estimate request: communal site matched exactly, subject type kept in front
   const r3 = await run(E, rawChap3, "ashley@chapplins.co.uk"); const p3 = E.inbound[2] && E.inbound[2].body;
   ok("chapplins estimate: communal site matched + 'Estimate required' prefix", p3 && p3.siteCode === "4026" && /^Urgent Estimate required — /.test(p3.description) && !p3.priority, JSON.stringify(p3));

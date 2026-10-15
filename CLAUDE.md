@@ -2087,7 +2087,10 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     is created with the address as its site name (work never lost) and **emailjob raises
     a "📍 Link to a site" task** (category "Fareham sites") so the office ties it to /
     creates the proper site — the same create+task path now also covers an unmatched
-    **Chapplins** property ("Sites to link"). Gated on `r.siteLookup && siteMatched===false`,
+    **Chapplins** property ("Sites to link"). **These tasks go to the WHOLE OFFICE and are
+    SHARED** (`createIntakeTask` posts `assignee:"@office", shared:true`) — they show on
+    every office user's My Tasks and the first person to press Done clears it for everyone
+    (see the /tasks/inbound section). Gated on `r.siteLookup && siteMatched===false`,
     so Concerto jobs (site by code) never trigger it. Tests in test-email-intake.mjs
     ("fbc 'Other'…" + "chapplins unmatched → link to a site task").
 - **emailjob.js** calls **`recordFbcJob`** (writes the `fbc_meta` marker + carries
@@ -4318,11 +4321,20 @@ returns `category`/`refDate`/`createdAt`; POST /tasks/save accepts `category`.
 token verified in-handler — **TASKS_INBOUND_TOKEN** if set, else the shared
 **JOBS_INBOUND_TOKEN**) lets an external tool (e.g. an Outlook "emails I need to
 reply to" bot / Grok) create a **one-off** task in someone's list. Body
-`{title (req), detail?, link?, assignee?/assignees[]?, dueDate? (YYYY-MM-DD,
+`{title (req), detail?, link?, assignee?/assignees[]?, office?, shared?, dueDate? (YYYY-MM-DD,
 default today), dueTime? (HH:MM, default 17:00), externalId?, source?, category?
 (default "Emails"), date? (the email's received date → age + >7-day warning)}`. Assignee
 defaults to **OWNER_USERNAME**; each is resolved to a real portal username (exact →
-case-insensitive → "first last"). **Dedupe by `externalId`** (an email message-id):
+case-insensitive → "first last"). **`@office` / `office:true` = assign to EVERYONE in
+the office** (`officeUsernames` = active users with `profile.staffType==="office"`, plus
+the owner) and implies **`shared:true`**. **Shared tasks are COLLECTIVE** (self-migrating
+`shared` col on admin_tasks): done is judged across ALL assignees — the first office
+person to press **Done clears it for everyone** (and the bot's `{externalId,action:"done"}`
+does the same), an undo reopens it for all, and `statusFor`/`/mine`/`/attention` all honour
+it; `my-tasks.html` shows a 👥 Office chip + "Done by <name>". A normal task stays
+per-assignee. The email-intake chores (📝 Concerto note, 📍 Link to a site) go out this way
+(`createIntakeTask` posts `assignee:"@office", shared:true`). Test
+`node --no-warnings worker/tools/test-tasks.mjs`. **Dedupe by `externalId`** (an email message-id):
 re-POSTing the same id UPDATES the task, never duplicates (self-migrating `source`
 + `ext_key` cols on admin_tasks). GET /tasks/inbound = a no-secret connection check
 (configured? + token fingerprint). Task is `recurrence:"once"`, no auto-match — the
@@ -5307,7 +5319,8 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it to the
   matching incident's job CARD (`job.events` timeline, prefers the OPEN job, else
   the newest; 404 if we hold none) AND `createIntakeTask` raises a **📝 Concerto
-  note** task on My Tasks (category "Concerto notes", link → job-view) so it's
+  note** task for the WHOLE OFFICE (category "Concerto notes", link → job-view,
+  `@office`+shared so the first person to press Done clears it for everyone) so it's
   actioned + ticked off; no live job → the task alone); any OTHER action →
   `job`+missing → review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
   came back Sep as BARE `00025826` AM01 + `Order 00025826/2` £2,105 seconds

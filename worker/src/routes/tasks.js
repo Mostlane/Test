@@ -62,7 +62,9 @@ async function ensureTables__raw(env) {
   // groups tasks by type (Emails / Compliance / …) for filtering; `ref_date` is the
   // task's "as of" date (e.g. an email's received date) so age + the >7-day warning
   // are accurate and self-updating rather than frozen in the title.
-  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT"]) {
+  // `shared` = a collective/office task: done is judged across ALL assignees (any
+  // one person's completion clears it for everyone), rather than per-assignee.
+  for (const col of ["source TEXT", "ext_key TEXT", "category TEXT", "ref_date TEXT", "link TEXT", "shared INTEGER DEFAULT 0"]) {
     try { await env.DB.prepare(`ALTER TABLE admin_tasks ADD COLUMN ${col}`).run(); } catch {}
   }
 }
@@ -119,6 +121,26 @@ function occurrence(task, now) {
 
 function parseAssignees(t) { try { const a = JSON.parse(t.assignees || "[]"); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } }
 
+// Everyone in the office = active users whose profile.staffType is "office", plus
+// the owner (so they keep visibility). Used by the `@office` inbound assignee so a
+// shared chore (a Concerto note, an unknown site to link) lands on the whole office.
+async function officeUsernames(env, tid) {
+  const out = new Set();
+  const owner = String(env.OWNER_USERNAME || "Jamie Line").trim();
+  if (owner) out.add(owner);
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      const st = (u.status || "").trim().toLowerCase();
+      if (st && st !== "active") continue;           // isActiveStatus: blank or "Active"
+      let staffType = "";
+      try { staffType = String((JSON.parse(u.profile || "{}") || {}).staffType || "").toLowerCase(); } catch {}
+      if (staffType === "office") out.add(u.username);
+    }
+  } catch {}
+  return [...out];
+}
+
 async function autoDone(env, tid, task, user, startAt) {
   if (!task.auto_match) return false;
   try {
@@ -132,13 +154,23 @@ async function autoDone(env, tid, task, user, startAt) {
 // Status of one task for one user in its current occurrence.
 async function statusFor(env, tid, task, user, now, doneMap) {
   const occ = occurrence(task, now);
-  const manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
-    "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
-  ).bind(tid, task.id, user, occ.periodKey).first().then(r => r && r.done_at);
+  let manual = null, doneBy = null;
+  if (task.shared) {
+    // Collective task: done if ANY assignee has completed it this period. One
+    // person pressing Done clears it for the whole office.
+    const r = await env.DB.prepare(
+      "SELECT done_at, done_by FROM admin_task_done WHERE tenant_id=? AND task_id=? AND period_key=? AND done_at IS NOT NULL ORDER BY done_at LIMIT 1"
+    ).bind(tid, task.id, occ.periodKey).first();
+    manual = r && r.done_at; doneBy = r && r.done_by;
+  } else {
+    manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
+      "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
+    ).bind(tid, task.id, user, occ.periodKey).first().then(r => r && r.done_at);
+  }
   let doneAt = manual || null, auto = false;
   if (!doneAt && await autoDone(env, tid, task, user, occ.startAt)) { doneAt = "auto"; auto = true; }
   const done = !!doneAt;
-  return { periodKey: occ.periodKey, dueAt: occ.dueAt, done, auto, doneAt: auto ? null : doneAt, overdue: !done && Date.now() > Date.parse(occ.dueAt) };
+  return { periodKey: occ.periodKey, dueAt: occ.dueAt, done, auto, doneAt: auto ? null : doneAt, doneBy: auto ? null : doneBy, shared: !!task.shared, overdue: !done && Date.now() > Date.parse(occ.dueAt) };
 }
 
 function shapeTask(t) {
@@ -151,6 +183,7 @@ function shapeTask(t) {
     areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || "",
     category: t.category || "", refDate: t.ref_date || "", createdAt: t.created_at || "", link: t.link || "",
+    shared: !!t.shared,
   };
 }
 
@@ -209,17 +242,23 @@ export async function handle(request, env, ctx, url, sess) {
       const title = String(b.title || "").trim().slice(0, 300);
       if (!title) return json({ ok: false, error: "title is required" }, { status: 400 }, env, request);
       const owner = String(env.OWNER_USERNAME || "Jamie Line");
-      // Resolve each assignee to a real portal username (exact → case-insensitive →
-      // first name), so "jamie", "Jamie Line" etc. all land on the right person.
+      // `@office` (or `office:true`) = assign to everyone in the office. `shared` =
+      // collective completion (any one person's Done clears it for all).
       let want = Array.isArray(b.assignees) ? b.assignees : (b.assignee ? [b.assignee] : []);
       want = want.map(s => String(s || "").trim()).filter(Boolean);
-      if (!want.length) want = [owner];
+      const wantsOffice = b.office === true || want.some(w => w.toLowerCase() === "@office");
+      const shared = b.shared === true || wantsOffice;
+      want = want.filter(w => w.toLowerCase() !== "@office");
+      // Resolve each named assignee to a real portal username (exact → case-insensitive →
+      // first name), so "jamie", "Jamie Line" etc. all land on the right person.
       const assignees = [];
       for (const w of want) {
         let u = null;
         try { const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND (lower(username)=lower(?) OR lower(first_name)=lower(?) OR lower(first_name||' '||last_name)=lower(?)) LIMIT 1").bind(tid, w, w, w).first(); u = r && r.username; } catch {}
         assignees.push(u || w);
       }
+      if (wantsOffice) for (const u of await officeUsernames(env, tid)) if (!assignees.includes(u)) assignees.push(u);
+      if (!assignees.length) assignees.push(owner);
       // Keep the detail clean — the email link is stored SEPARATELY (rendered as a
       // tidy "Open email" button), never glued into the summary text. Strip any URL
       // a bot pastes into the detail, and capture it as the link if none was given.
@@ -244,13 +283,13 @@ export async function handle(request, env, ctx, url, sess) {
       }
       if (!id) id = "email-" + crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO admin_tasks
-        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at, source, ext_key, category, ref_date, link, shared)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
           due_date=excluded.due_date, due_time=excluded.due_time, active=1, updated_at=excluded.updated_at,
-          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link`)
+          category=excluded.category, ref_date=COALESCE(excluded.ref_date, admin_tasks.ref_date), link=excluded.link, shared=excluded.shared`)
         .bind(id, tid, title, detail, JSON.stringify(assignees), "once", dueTime, null, null, null, dueDate, "", "", 1,
-          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null).run();
+          "inbound", now, now, String(b.source || "outlook").slice(0, 40), extKey || null, category, refDate, link || null, shared ? 1 : 0).run();
       if (created && ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map(u =>
         sendToUser(env, tid, u, { title: "New task", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {}))));
       return json({ ok: true, id, created, assignees, dueDate }, {}, env, request);
@@ -298,7 +337,10 @@ export async function handle(request, env, ctx, url, sess) {
     if (!parseAssignees(t).includes(me)) return error("This task isn't assigned to you.", 403, env, request);
     const occ = occurrence(t, new Date());
     if (b.undo) {
-      await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?").bind(tid, id, me, occ.periodKey).run();
+      // A shared task is collective — reopening it clears every assignee's row for
+      // the period (not just mine), so it comes back for the whole office.
+      if (t.shared) await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND period_key=?").bind(tid, id, occ.periodKey).run();
+      else await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?").bind(tid, id, me, occ.periodKey).run();
     } else {
       await env.DB.prepare(
         "INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) " +
