@@ -27,6 +27,7 @@
     .pill{display:inline-block;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;}
     .pill.due{background:#fef3c7;color:#92400e;} .pill.overdue{background:#fee2e2;color:#b91c1c;}
     .pill.done{background:#dcfce7;color:#166534;}
+    .pill.office{background:#ede9fe;color:#5b21b6;}
     .pill.age{background:#eef2f6;color:#334155;} .pill.age.warn{background:#fee2e2;color:#b91c1c;}
     .pill.cat{background:#e0edff;color:#1e40af;font-weight:700;}
     .card.warn7{border-left:5px solid var(--bad);}
@@ -155,13 +156,14 @@
       const s=t.status;
       const age=ageDays(t), over7=(age!=null && age>FLAG_AGE && !s.done);
       let pill;
-      if(s.done) pill='<span class="pill done">✓ '+(s.auto?"Done automatically":"Done")+'</span>';
+      if(s.done) pill='<span class="pill done">✓ '+(s.auto?"Done automatically":(s.shared&&s.doneBy?("Done by "+esc(s.doneBy)):"Done"))+'</span>';
       else if(t.refDate){   // email-style task → show AGE (with a warning past 7 days)
         pill='<span class="pill age'+(over7?" warn":"")+'">'+(over7?"⚠ ":"")+(age===0?"today":age+" day"+(age===1?"":"s")+" ago")+'</span>';
       }
       else if(s.overdue) pill='<span class="pill overdue">Overdue — was due '+esc(dueLabel(s.dueAt))+'</span>';
       else pill='<span class="pill due">Due '+esc(dueLabel(s.dueAt))+'</span>';
-      const catPill='<span class="pill cat">'+esc(catOf(t))+'</span> ';
+      const catPill='<span class="pill cat">'+esc(catOf(t))+'</span> '
+        +(s.shared?'<span class="pill office" title="Shared with the office — whoever deals with it first clears it for everyone">👥 Office</span> ':'');
       const canTick=!s.auto;   // auto-completed tasks aren't manually toggled
       const tick=canTick
         ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle('+esc(JSON.stringify(String(t.id)))+','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
