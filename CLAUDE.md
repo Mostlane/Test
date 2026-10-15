@@ -5999,6 +5999,18 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `node --no-warnings worker/tools/test-sitelog-identity.mjs` (16). Duplicates before this: Zane
   , Mariusz Mlynarczyk ×3, Ryan Diggens ×2, Jamie Line ×3 — all merged into the original record 12 Oct
   (visits + devices repointed); SiteLog now has no duplicate names.
+- **Scan log — why a scan didn't sign anyone in (15 Oct 2026).** Table **`scan_log`** (sitelog-db,
+  self-migrating, pruned 180 days): `handle()` now wraps `/scan`, `/confirm-checkin`,
+  `/confirm-checkout` (the old body is `handleInner`) and logs every attempt — kind scan|sign_in|
+  sign_out, outcome (the response `status`), `refused` (anything but confirm_check_in /
+  confirm_sign_out / first_visit / checked_in / checked_out), reason, device→person, site, lat/lng/
+  accuracy, distance, nearest site. The scanner's existing `/log-failed-scan` beacon (location
+  permission denied / unavailable / timeout on the PHONE — never reached the server otherwise) was a
+  silent no-op; it now writes `phone_<type>` rows (+ the phone's message). Admin **GET /scan-log?days=&
+  refused=1**. Portal **sitelog.html → 🚫 Scans that didn't sign anyone in** (Full Access, 1/7/30
+  days) lists refusals in plain English + "offered a sign-in but never confirmed it" (a
+  confirm_check_in/sign_out scan with no sign-in/out from that phone within 20 min). Test
+  `node --no-warnings worker/tools/test-sitelog-scanlog.mjs` (11).
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /

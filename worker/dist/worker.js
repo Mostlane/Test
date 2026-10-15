@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -2089,7 +2084,7 @@ function effectiveCfg(cfg, u) {
     profile = u.profile ? JSON.parse(u.profile) : {};
   } catch {
   }
-  const num3 = (v) => {
+  const num4 = (v) => {
     const n = parseFloat(v);
     return isFinite(n) && n > 0 ? n : null;
   };
@@ -2110,10 +2105,10 @@ function effectiveCfg(cfg, u) {
     lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
-    rate: num3(mine.rate) ?? (mine.rateType === "day" ? num3(profile.dayRate) : num3(profile.hourlyRate)) ?? num3(profile.hourlyRate),
+    rate: num4(mine.rate) ?? (mine.rateType === "day" ? num4(profile.dayRate) : num4(profile.hourlyRate)) ?? num4(profile.hourlyRate),
     // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
     // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
-    overtimeMult: num3(mine.overtimeMult),
+    overtimeMult: num4(mine.overtimeMult),
     overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],
@@ -9152,7 +9147,92 @@ async function getArrivalRulesFor(env, site, type) {
   if (!rules.length) rules = await getArrivalDefaultRules(env, type);
   return rules;
 }
+async function ensureScanLog(env) {
+  if (scanLogReady) return;
+  await env.SITELOG_DB.prepare(`CREATE TABLE IF NOT EXISTS scan_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT, outcome TEXT,
+    refused INTEGER DEFAULT 0, reason TEXT, device_token TEXT, person_id TEXT, site TEXT,
+    lat REAL, lng REAL, accuracy REAL, distance_m INTEGER, nearest_site TEXT, detail TEXT)`).run();
+  try {
+    await env.SITELOG_DB.prepare("CREATE INDEX IF NOT EXISTS idx_scan_log_at ON scan_log(at)").run();
+  } catch (e) {
+  }
+  scanLogReady = true;
+}
+function num(v) {
+  return isFiniteNumber(v) ? Number(v) : null;
+}
+async function logScan(env, row) {
+  try {
+    if (!env.SITELOG_DB) return;
+    await ensureScanLog(env);
+    let personId = row.personId || null;
+    if (!personId && row.deviceToken) {
+      const d = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ? LIMIT 1").bind(String(row.deviceToken).slice(0, 128)).first();
+      personId = d ? d.person_id : null;
+    }
+    await env.SITELOG_DB.prepare(`INSERT INTO scan_log (at, kind, outcome, refused, reason, device_token, person_id, site,
+      lat, lng, accuracy, distance_m, nearest_site, detail) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      (/* @__PURE__ */ new Date()).toISOString(),
+      row.kind || null,
+      String(row.outcome || "unknown").slice(0, 40),
+      row.refused ? 1 : 0,
+      row.reason ? String(row.reason).slice(0, 300) : null,
+      row.deviceToken ? String(row.deviceToken).slice(0, 128) : null,
+      personId,
+      row.site ? String(row.site).slice(0, 160) : null,
+      num(row.lat),
+      num(row.lng),
+      num(row.accuracy),
+      isFiniteNumber(row.distance) ? Math.round(Number(row.distance)) : null,
+      row.nearest ? String(row.nearest).slice(0, 160) : null,
+      row.detail ? String(row.detail).slice(0, 300) : null
+    ).run();
+    if (Math.random() < 0.02) {
+      const cut = new Date(Date.now() - 180 * 864e5).toISOString();
+      await env.SITELOG_DB.prepare("DELETE FROM scan_log WHERE at < ?").bind(cut).run();
+    }
+  } catch (e) {
+    console.error("logScan", e);
+  }
+}
 async function handle7(request, env, ctx) {
+  const u0 = new URL(request.url);
+  const kind = SCAN_KINDS[u0.pathname];
+  if (kind && request.method === "POST" && env.SITELOG_DB) {
+    let body = {};
+    try {
+      body = await request.clone().json();
+    } catch (e) {
+    }
+    const res = await handleInner(request, env, ctx);
+    let out = {};
+    try {
+      out = await res.clone().json();
+    } catch (e) {
+    }
+    const outcome = out.status || (out.ok === false ? "error" : res.ok ? "ok" : "http_" + res.status);
+    const refused = !res.ok || out.ok === false || !SCAN_OK.has(outcome);
+    const p = logScan(env, {
+      kind,
+      outcome,
+      refused,
+      reason: out.error || out.reason || null,
+      deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
+      site: out.site || body.site || null,
+      lat: body.lat,
+      lng: body.lng,
+      accuracy: body.accuracy,
+      distance: out.distance_m,
+      nearest: out.nearestSite || null
+    });
+    if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+    else await p;
+    return res;
+  }
+  return handleInner(request, env, ctx);
+}
+async function handleInner(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsFor(request) });
@@ -10630,6 +10710,20 @@ async function handle7(request, env, ctx) {
       `).bind(device.person_id, limit).all();
     return json4({ visits: rows.results || [] });
   }
+  if (url.pathname === "/scan-log" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureScanLog(env);
+    const days = Math.min(180, Math.max(1, Number(url.searchParams.get("days")) || 7));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const refusedOnly = url.searchParams.get("refused") === "1";
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT l.*, p.first_name, p.last_name, p.company
+        FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+        WHERE l.at >= ? ${refusedOnly ? "AND l.refused = 1" : ""}
+        ORDER BY l.at DESC LIMIT 500`).bind(since).all();
+    return json4({ ok: true, days, rows: rows.results || [] });
+  }
   if (url.pathname === "/device-forget" && request.method === "POST") {
     return json4({ ok: true }, 200, { "Set-Cookie": "ml_did=; Max-Age=0; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" });
   }
@@ -10702,6 +10796,25 @@ async function handle7(request, env, ctx) {
     });
   }
   if (url.pathname === "/log-failed-scan" && request.method === "POST") {
+    const b = await readBody(request);
+    const t = String(b.errorType || b.reason || "client_refused").slice(0, 40);
+    const why = {
+      denied: "Location permission denied on the phone",
+      unavailable: "Phone couldn't get a location fix",
+      timeout: "Location timed out on the phone",
+      no_fix: "No location fix when trying to sign in/out"
+    }[t] || null;
+    await logScan(env, {
+      kind: "scan",
+      outcome: "phone_" + t,
+      refused: true,
+      reason: [why, b.message ? String(b.message).slice(0, 200) : null].filter(Boolean).join(" \u2014 ") || null,
+      deviceToken: b.deviceToken || readDidCookie(request) || null,
+      lat: b.lat,
+      lng: b.lng,
+      accuracy: b.accuracy,
+      detail: (request.headers.get("User-Agent") || "").slice(0, 200)
+    });
     return json4({ ok: true });
   }
   if (url.pathname === "/admin" && request.method === "GET") {
@@ -11425,7 +11538,7 @@ async function sweepAutoClose(env) {
     }
   }
 }
-var ALLOWED_ORIGINS, OFFICE_LAT, OFFICE_LNG, geocodeCache, offlineSchemaReady, arrivalConfigKey;
+var ALLOWED_ORIGINS, OFFICE_LAT, OFFICE_LNG, geocodeCache, offlineSchemaReady, arrivalConfigKey, scanLogReady, SCAN_OK, SCAN_KINDS;
 var init_sitelog_api = __esm({
   "src/routes/sitelog-api.js"() {
     ALLOWED_ORIGINS = [
@@ -11438,6 +11551,9 @@ var init_sitelog_api = __esm({
     geocodeCache = /* @__PURE__ */ new Map();
     offlineSchemaReady = false;
     arrivalConfigKey = (type) => type === "visitor" ? "arrival_default_rules_visitor" : "arrival_default_rules";
+    scanLogReady = false;
+    SCAN_OK = /* @__PURE__ */ new Set(["confirm_check_in", "confirm_sign_out", "first_visit", "checked_in", "checked_out"]);
+    SCAN_KINDS = { "/scan": "scan", "/confirm-checkin": "sign_in", "/confirm-checkout": "sign_out" };
   }
 });
 
@@ -11793,11 +11909,11 @@ async function slCall(env, path, body) {
 }
 async function syncSiteToCompliance(env, tenantId, site) {
   try {
-    const num3 = String(site.siteNumber || "").trim();
-    if (!num3) return;
+    const num4 = String(site.siteNumber || "").trim();
+    if (!num4) return;
     const rows = await env.DB.prepare(
       "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
-    ).bind(tenantId, num3).all();
+    ).bind(tenantId, num4).all();
     const activeVal = site.active === false ? 0 : 1;
     for (const r of rows.results || []) {
       let meta = {};
@@ -16112,15 +16228,15 @@ async function reissueCleanCertForRemedialJob(env, tid, job) {
   }
 }
 async function matchOrderToRemedial(env, tid, o) {
-  const code = padCode2(o.storeCode), num3 = numOf(o.storeCode);
-  if (!code && !num3) return null;
+  const code = padCode2(o.storeCode), num4 = numOf(o.storeCode);
+  if (!code && !num4) return null;
   try {
     const { results } = await env.DB.prepare(
       "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
     const skip = String(o.unlinkedJobId || "");
     const waiting = (r) => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
-    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num3 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num4 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
       const late = !waiting(r) && r.job_id;
@@ -16151,7 +16267,7 @@ async function matchOrderToRemedial(env, tid, o) {
   }
   try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
-    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num3);
+    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num4);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
   } catch {
   }
@@ -17117,10 +17233,10 @@ async function handle12(request, env, ctx, url, sess) {
     const yr = String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
     const created = [], skipped = [];
     for (const it of sites) {
-      const num3 = String(it.siteNumber || "");
-      const s = byNum[num3];
-      if (!num3 || !s) {
-        if (num3) skipped.push(num3);
+      const num4 = String(it.siteNumber || "");
+      const s = byNum[num4];
+      if (!num4 || !s) {
+        if (num4) skipped.push(num4);
         continue;
       }
       let addr = "", siteDur = 0;
@@ -17131,18 +17247,18 @@ async function handle12(request, env, ctx, url, sess) {
       } catch {
       }
       const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : siteDur > 0 ? siteDur : dur;
-      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num3) : "";
+      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num4) : "";
       let desc;
-      if (em && pat) desc = `EM: Import certificate number ${setNum || num3}-${yr}
-PAT: Import certificate number ${num3}-${yr}`;
-      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num3}` : `Import certificate number ${setNum || num3}-${yr}`;
-      else desc = `Import certificate number ${num3}-${yr}`;
+      if (em && pat) desc = `EM: Import certificate number ${setNum || num4}-${yr}
+PAT: Import certificate number ${num4}-${yr}`;
+      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num4}` : `Import certificate number ${setNum || num4}-${yr}`;
+      else desc = `Import certificate number ${num4}-${yr}`;
       const sched = /^\d{4}-\d{2}-\d{2}T/.test(String(it.scheduledAt || "")) ? it.scheduledAt : void 0;
       const job = await createOrUpdateJobFromPayload(env, tid, {
-        reference: s.site_name || num3,
+        reference: s.site_name || num4,
         description: desc,
         siteName: s.site_name || "",
-        siteCode: num3,
+        siteCode: num4,
         address: addr,
         postcode: s.postcode || "",
         emTest: em,
@@ -17154,17 +17270,17 @@ PAT: Import certificate number ${num3}-${yr}`;
         assignedEngineers: engineers,
         originator: "bulk-em"
       });
-      created.push({ id: job.id, site: s.site_name || num3 });
+      created.push({ id: job.id, site: s.site_name || num4 });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
   }
   if (sub === "/site-duration" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const num3 = String(b.siteNumber || "").trim();
+    const num4 = String(b.siteNumber || "").trim();
     const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
-    if (!num3) return error("siteNumber required", 400, env, request);
-    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num3).first();
+    if (!num4) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num4).first();
     if (!row) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -17173,7 +17289,7 @@ PAT: Import certificate number ${num3}-${yr}`;
     }
     if (mins > 0) data.expectedDurationMinutes = mins;
     else delete data.expectedDurationMinutes;
-    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num3, row.client).run();
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num4, row.client).run();
     return json({ ok: true, minutes: mins }, {}, env, request);
   }
   if (sub === "/w3w-key" && method === "GET") {
@@ -21827,7 +21943,7 @@ async function handle13(request, env, ctx, url, sess) {
     const b = await readJson2(request);
     const j = await getJob3(env, tenantId, b.jobId);
     if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
-    const num3 = (v) => {
+    const num4 = (v) => {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : null;
     };
@@ -21835,10 +21951,10 @@ async function handle13(request, env, ctx, url, sess) {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       by: sess.user.username,
       quoteNumber: String(b.quoteNumber || "").trim(),
-      amountExVat: num3(b.amountExVat),
-      amountIncVat: num3(b.amountIncVat),
-      labourCost: num3(b.labourCost),
-      materialsCost: num3(b.materialsCost)
+      amountExVat: num4(b.amountExVat),
+      amountIncVat: num4(b.amountIncVat),
+      labourCost: num4(b.labourCost),
+      materialsCost: num4(b.materialsCost)
     };
     j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     await saveJob(env, tenantId, j);
@@ -29993,10 +30109,10 @@ async function handle16(request, env, ctx, url, sess) {
       b.engineer,
       b.date,
       b.site || null,
-      num(b.standardHours),
-      num(b.overtimeHours),
-      num(b.travelTime),
-      num(b.mileage),
+      num2(b.standardHours),
+      num2(b.overtimeHours),
+      num2(b.travelTime),
+      num2(b.mileage),
       b.notes || null,
       sess2.user.username
     ).run();
@@ -30258,7 +30374,7 @@ async function handle16(request, env, ctx, url, sess) {
   }
   return error("Unknown portal route", 404, env, request);
 }
-function num(v) {
+function num2(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -30789,7 +30905,7 @@ async function ensureTables__raw4(env) {
 }
 var ensureTables5 = onceMigration(ensureTables__raw4);
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
-var num2 = (v) => {
+var num3 = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
@@ -30968,13 +31084,13 @@ async function handle18(request, env, ctx, url, sess) {
       sets.push(col + "=?");
       vals.push(v);
     };
-    if ("cost" in b) put("cost", num2(b.cost));
+    if ("cost" in b) put("cost", num3(b.cost));
     if ("description" in b) put("description", String(b.description || "").slice(0, 4e3));
     if ("raisedAt" in b) put("raised_at", String(b.raisedAt || "").slice(0, 40));
     if ("siteCode" in b) put("site_code", String(b.siteCode || "").slice(0, 20));
     if ("siteName" in b) put("site_name", String(b.siteName || "").slice(0, 200));
     if ("reference" in b) put("reference", String(b.reference || "").slice(0, 200));
-    if ("quoteAmount" in b) put("quote_amount", num2(b.quoteAmount));
+    if ("quoteAmount" in b) put("quote_amount", num3(b.quoteAmount));
     if ("poNumber" in b) put("po_number", String(b.poNumber || "").slice(0, 60));
     if ("invoiceMonth" in b) put("invoice_month", String(b.invoiceMonth || "").slice(0, 7));
     if ("invoiceRef" in b) put("invoice_ref", String(b.invoiceRef || "").slice(0, 60));
@@ -35104,9 +35220,9 @@ async function handle28(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     if (path === "/sites/register/update") {
       const client = String(b.client || "").toLowerCase().trim();
-      const num3 = String(b.siteNumber || "").trim();
-      if (!client || !num3) return error("client and siteNumber required", 400, env, request);
-      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num3).first();
+      const num4 = String(b.siteNumber || "").trim();
+      if (!client || !num4) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num4).first();
       if (!row) return error("Site not found", 404, env, request);
       let data = {};
       try {
@@ -35130,7 +35246,7 @@ async function handle28(request, env, ctx, url, sess) {
         JSON.stringify(data),
         tid,
         client,
-        num3
+        num4
       ).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
@@ -35140,11 +35256,11 @@ async function handle28(request, env, ctx, url, sess) {
       const name = String(b.name || "").trim();
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
-      const num3 = slugNum(name);
+      const num4 = slugNum(name);
       const ll = parseLatLngPair(b.lat, b.lng);
       const data = {
         client,
-        siteNumber: num3,
+        siteNumber: num4,
         siteName: name,
         postcode: String(b.postcode || "").toUpperCase().trim(),
         addedVia: "register"
@@ -35156,10 +35272,10 @@ async function handle28(request, env, ctx, url, sess) {
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
-          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num3, name, data.postcode || null, JSON.stringify(data)).run();
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num4, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
-      return json({ ok: true, client, siteNumber: num3, sitelogPushed: pushed }, {}, env, request);
+      return json({ ok: true, client, siteNumber: num4, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
       const alias = normName(b.alias);
@@ -36642,12 +36758,12 @@ async function ratesMap(env, tid) {
   }
   try {
     const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
-    const num3 = (v) => {
+    const num4 = (v) => {
       const n = parseFloat(v);
       return isFinite(n) && n > 0 ? n : null;
     };
     const defs = cfg.defaults || {};
-    const defPence = num3(defs.pencePerMile);
+    const defPence = num4(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {};
       try {
@@ -36656,8 +36772,8 @@ async function ratesMap(env, tid) {
       }
       const mine = cfg.byUser && cfg.byUser[u.username] || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
-      const rate = num3(mine.rate) ?? (rateType === "day" ? num3(profile.dayRate) : num3(profile.hourlyRate)) ?? num3(profile.hourlyRate);
-      const pence = num3(mine.pencePerMile) ?? defPence;
+      const rate = num4(mine.rate) ?? (rateType === "day" ? num4(profile.dayRate) : num4(profile.hourlyRate)) ?? num4(profile.hourlyRate);
+      const pence = num4(mine.pencePerMile) ?? defPence;
       const fuelPerMile = pence != null ? pence / 100 : null;
       out[u.username] = { rate, rateType, fuelPerMile };
     }
@@ -37790,7 +37906,7 @@ async function handle29(request, env, ctx, url, sess) {
     await ensureVehTable(env);
     const b = await readJson4(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
-    const num3 = (x) => {
+    const num4 = (x) => {
       const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
       return isNaN(n) ? null : n;
     };
@@ -37817,12 +37933,12 @@ async function handle29(request, env, ctx, url, sess) {
         v.taxDue || v.taxDate || "",
         v.nextServiceDate || v.serviceDate || "",
         v.notes || "",
-        num3(v.svcIntervalDays),
-        num3(v.svcIntervalMiles),
+        num4(v.svcIntervalDays),
+        num4(v.svcIntervalMiles),
         v.lastServiceDate || "",
-        num3(v.lastServiceMiles),
-        num3(v.warnDays),
-        num3(v.warnMiles),
+        num4(v.lastServiceMiles),
+        num4(v.warnDays),
+        num4(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
       if (v.specs !== void 0) {
@@ -38243,18 +38359,18 @@ async function handle29(request, env, ctx, url, sess) {
       const reg = String(b.reg || "").trim();
       if (!reg) return jr4({ error: "reg required" }, headers, 400);
       const f = b.finance && typeof b.finance === "object" ? b.finance : {};
-      const num3 = (x) => {
+      const num4 = (x) => {
         const n = Number(x);
         return isFinite(n) && n !== 0 ? n : x === 0 || x === "0" ? 0 : null;
       };
       const clean = {
         ownership: f.ownership === "financed" ? "financed" : "owned",
-        insuranceYear: num3(f.insuranceYear),
-        roadTaxYear: num3(f.roadTaxYear),
-        financeMonthly: num3(f.financeMonthly),
+        insuranceYear: num4(f.insuranceYear),
+        roadTaxYear: num4(f.roadTaxYear),
+        financeMonthly: num4(f.financeMonthly),
         financeEnd: /^\d{4}-\d{2}-\d{2}$/.test(f.financeEnd || "") ? f.financeEnd : "",
-        allowedMiles: num3(f.allowedMiles),
-        excessPence: num3(f.excessPence),
+        allowedMiles: num4(f.allowedMiles),
+        excessPence: num4(f.excessPence),
         note: String(f.note || "").slice(0, 300)
       };
       await env.DB.prepare("UPDATE vehicles SET finance=? WHERE tenant_id=? AND reg=?").bind(JSON.stringify(clean), tid, reg).run();
@@ -39799,12 +39915,12 @@ function financeOf(v) {
 }
 function runningCost(fin, fuelV, odoV, maint12) {
   fin = fin || {};
-  const num3 = (x) => {
+  const num4 = (x) => {
     const n = Number(x);
     return isFinite(n) ? n : 0;
   };
-  const insurance = num3(fin.insuranceYear), roadTax = num3(fin.roadTaxYear);
-  const finance = fin.ownership === "financed" ? num3(fin.financeMonthly) * 12 : 0;
+  const insurance = num4(fin.insuranceYear), roadTax = num4(fin.roadTaxYear);
+  const finance = fin.ownership === "financed" ? num4(fin.financeMonthly) * 12 : 0;
   let fuelYear = 0, fuelProjected = false, milesYear = 0;
   if (fuelV && fuelV.spend > 0 && fuelV.first && fuelV.last) {
     const days = Math.max(1, (Date.parse(fuelV.last) - Date.parse(fuelV.first)) / 864e5);
@@ -39815,9 +39931,9 @@ function runningCost(fin, fuelV, odoV, maint12) {
     const days = Math.max(1, (Date.parse(odoV.last) - Date.parse(odoV.first)) / 864e5);
     milesYear = odoV.milesDriven / days * 365;
   }
-  const maintenance = num3(maint12);
+  const maintenance = num4(maint12);
   let excess = 0, excessProjected = false;
-  const allowed = num3(fin.allowedMiles), excessPence = num3(fin.excessPence);
+  const allowed = num4(fin.allowedMiles), excessPence = num4(fin.excessPence);
   if (fin.ownership === "financed" && allowed > 0 && excessPence > 0 && milesYear > allowed) {
     excess = (milesYear - allowed) * excessPence / 100;
     excessProjected = true;
@@ -41284,28 +41400,28 @@ async function handle33(request, env, ctx, url, sess) {
     } catch {
     }
     const sites = (siteRows || []).map((s) => {
-      const num3 = String(s.site_number);
-      const tens = (tenBySite[num3] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+      const num4 = String(s.site_number);
+      const tens = (tenBySite[num4] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
       const cur = tens.find((t) => t.is_current) || tens[0] || null;
       return {
-        siteNumber: num3,
+        siteNumber: num4,
         siteName: s.site_name || "",
         postcode: s.postcode || "",
         active: s.active == null ? 1 : s.active,
-        jobCount: jobCount[String(Number(num3))] || jobCount[num3] || 0,
+        jobCount: jobCount[String(Number(num4))] || jobCount[num4] || 0,
         tenantCount: tens.length,
         currentTenant: cur ? { ref: cur.ref || "", name: cur.name || "", phone: cur.phone || "", email: cur.email || "" } : null,
-        due: dueByCode[num3] || {}
+        due: dueByCode[num4] || {}
       };
     });
     return json({ ok: true, sites, count: sites.length }, {}, env, request);
   }
   if (path === "/chapplins/site" && method === "GET") {
-    const num3 = String(q.get("number") || "").trim();
-    if (!num3) return error("number required", 400, env, request);
+    const num4 = String(q.get("number") || "").trim();
+    if (!num4) return error("number required", 400, env, request);
     const s = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? AND site_number=?"
-    ).bind(tenantId, CLIENT, num3).first();
+    ).bind(tenantId, CLIENT, num4).first();
     if (!s) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -41314,11 +41430,11 @@ async function handle33(request, env, ctx, url, sess) {
     }
     const { results: tenRows } = await db.prepare(
       "SELECT * FROM site_tenants WHERE tenant_id=? AND client=? AND site_number=? ORDER BY is_current DESC, last_seen DESC"
-    ).bind(tenantId, CLIENT, num3).all();
+    ).bind(tenantId, CLIENT, num4).all();
     const tenants = (tenRows || []).map(tenantOut);
     let jobs = [];
     try {
-      const code = String(Number(num3));
+      const code = String(Number(num4));
       const { results: jr8 } = await db.prepare(
         "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
       ).bind(tenantId, code).all();
@@ -41976,10 +42092,10 @@ function londonISO(date, hhmm) {
 async function resolveSite2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { ok: false };
-  const num3 = q.replace(/\D/g, "");
+  const num4 = q.replace(/\D/g, "");
   try {
-    if (num3) {
-      const cands = [num3, num3.padStart(4, "0"), String(Number(num3))];
+    if (num4) {
+      const cands = [num4, num4.padStart(4, "0"), String(Number(num4))];
       for (const c of [...new Set(cands)]) {
         const r = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND site_number=? AND active=1 LIMIT 1").bind(tid, c).first();
         if (r) return siteOut(r);
@@ -42496,9 +42612,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -42598,12 +42714,12 @@ async function toolFindSite(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { count: 0, sites: [] };
   const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
-  const num3 = q.replace(/\D/g, "");
+  const num4 = q.replace(/\D/g, "");
   const binds = [tid, like, like];
   let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
-  if (num3) {
+  if (num4) {
     sql += " OR site_number IN (?,?,?)";
-    binds.push(num3, num3.padStart(4, "0"), String(Number(num3) || ""));
+    binds.push(num4, num4.padStart(4, "0"), String(Number(num4) || ""));
   }
   sql += ") ORDER BY length(site_name) LIMIT 10";
   const { results } = await env.DB.prepare(sql).bind(...binds).all();
@@ -42630,12 +42746,12 @@ async function toolFindCompliance(env, tid, caps2, query, scheme) {
   const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
   if (bare) {
     const like = "%" + likeKey2(bare.replace(/[%_]/g, "")) + "%";
-    const num3 = bare.replace(/\D/g, "");
+    const num4 = bare.replace(/\D/g, "");
     sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
     binds.push(like, like);
-    if (num3) {
+    if (num4) {
       sql += " OR code IN (?,?,?)";
-      binds.push(num3, num3.padStart(4, "0"), String(Number(num3) || ""));
+      binds.push(num4, num4.padStart(4, "0"), String(Number(num4) || ""));
     }
     sql += ")";
   }
@@ -45933,9 +46049,9 @@ function buildProgrammePdf(data, meta = {}) {
           doc.text(x + 1, gridTop + 8, "BH", { size: 5.4, color: [0.7, 0.45, 0.05] });
         }
         if (dayW >= 8 || isMon || first2) {
-          const num3 = p2(d.getUTCDate());
-          if (x + 1 + textWidth(num3, 5.6) <= rightEdge)
-            doc.text(x + 1, gridTop + 17.5, num3, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
+          const num4 = p2(d.getUTCDate());
+          if (x + 1 + textWidth(num4, 5.6) <= rightEdge)
+            doc.text(x + 1, gridTop + 17.5, num4, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
         }
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
@@ -49762,7 +49878,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50022,7 +50138,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };

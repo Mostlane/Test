@@ -685,7 +685,74 @@ async function getArrivalRulesFor(env, site, type) {
 // API router — active when the request host is api.site-log.co.uk, or called
 // internally by the portal) and sweepAutoClose() (the daily auto-close, folded
 // into mostlane-api's cron). Nothing else in the portal changes.
+// ── Scan log (Oct 2026) ─────────────────────────────────────────────────────
+// Every scan, sign-in and sign-out attempt is recorded with its OUTCOME, so a
+// worker who "couldn't sign in" can be explained from the data: not on site,
+// no location, nearest site + distance, offered a sign-in but never confirmed…
+// The scanner also reports refusals it decides on the phone (location turned
+// off / no fix) via POST /log-failed-scan, which otherwise never reach the server.
+// Table scan_log (self-migrating), pruned to 180 days.
+let scanLogReady = false;
+async function ensureScanLog(env) {
+  if (scanLogReady) return;
+  await env.SITELOG_DB.prepare(`CREATE TABLE IF NOT EXISTS scan_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT, outcome TEXT,
+    refused INTEGER DEFAULT 0, reason TEXT, device_token TEXT, person_id TEXT, site TEXT,
+    lat REAL, lng REAL, accuracy REAL, distance_m INTEGER, nearest_site TEXT, detail TEXT)`).run();
+  try { await env.SITELOG_DB.prepare("CREATE INDEX IF NOT EXISTS idx_scan_log_at ON scan_log(at)").run(); } catch (e) {}
+  scanLogReady = true;
+}
+const SCAN_OK = new Set(["confirm_check_in", "confirm_sign_out", "first_visit", "checked_in", "checked_out"]);
+function num(v) { return isFiniteNumber(v) ? Number(v) : null; }
+export async function logScan(env, row) {
+  try {
+    if (!env.SITELOG_DB) return;
+    await ensureScanLog(env);
+    let personId = row.personId || null;
+    if (!personId && row.deviceToken) {
+      const d = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ? LIMIT 1")
+        .bind(String(row.deviceToken).slice(0, 128)).first();
+      personId = d ? d.person_id : null;
+    }
+    await env.SITELOG_DB.prepare(`INSERT INTO scan_log (at, kind, outcome, refused, reason, device_token, person_id, site,
+      lat, lng, accuracy, distance_m, nearest_site, detail) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      new Date().toISOString(), row.kind || null, String(row.outcome || "unknown").slice(0, 40), row.refused ? 1 : 0,
+      row.reason ? String(row.reason).slice(0, 300) : null, row.deviceToken ? String(row.deviceToken).slice(0, 128) : null,
+      personId, row.site ? String(row.site).slice(0, 160) : null, num(row.lat), num(row.lng), num(row.accuracy),
+      isFiniteNumber(row.distance) ? Math.round(Number(row.distance)) : null,
+      row.nearest ? String(row.nearest).slice(0, 160) : null, row.detail ? String(row.detail).slice(0, 300) : null).run();
+    if (Math.random() < 0.02) {
+      const cut = new Date(Date.now() - 180 * 864e5).toISOString();
+      await env.SITELOG_DB.prepare("DELETE FROM scan_log WHERE at < ?").bind(cut).run();
+    }
+  } catch (e) { console.error("logScan", e); }
+}
+const SCAN_KINDS = { "/scan": "scan", "/confirm-checkin": "sign_in", "/confirm-checkout": "sign_out" };
+
 export async function handle(request, env, ctx) {
+  const u0 = new URL(request.url);
+  const kind = SCAN_KINDS[u0.pathname];
+  if (kind && request.method === "POST" && env.SITELOG_DB) {
+    let body = {};
+    try { body = await request.clone().json(); } catch (e) {}
+    const res = await handleInner(request, env, ctx);
+    let out = {};
+    try { out = await res.clone().json(); } catch (e) {}
+    const outcome = out.status || (out.ok === false ? "error" : (res.ok ? "ok" : "http_" + res.status));
+    const refused = !res.ok || out.ok === false || !SCAN_OK.has(outcome);
+    const p = logScan(env, {
+      kind, outcome, refused, reason: out.error || out.reason || null,
+      deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
+      site: out.site || body.site || null, lat: body.lat, lng: body.lng, accuracy: body.accuracy,
+      distance: out.distance_m, nearest: out.nearestSite || null
+    });
+    if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p;
+    return res;
+  }
+  return handleInner(request, env, ctx);
+}
+
+async function handleInner(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -2664,6 +2731,22 @@ export async function handle(request, env, ctx) {
       return json({ visits: rows.results || [] });
     }
 
+    // GET /scan-log?days=7&refused=1 — admin: who tried to scan and what happened.
+    if (url.pathname === "/scan-log" && request.method === "GET") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      await ensureScanLog(env);
+      const days = Math.min(180, Math.max(1, Number(url.searchParams.get("days")) || 7));
+      const since = new Date(Date.now() - days * 864e5).toISOString();
+      const refusedOnly = url.searchParams.get("refused") === "1";
+      const rows = await env.SITELOG_DB.prepare(`
+        SELECT l.*, p.first_name, p.last_name, p.company
+        FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+        WHERE l.at >= ? ${refusedOnly ? "AND l.refused = 1" : ""}
+        ORDER BY l.at DESC LIMIT 500`).bind(since).all();
+      return json({ ok: true, days, rows: rows.results || [] });
+    }
+
     // POST /device-forget — "Not you?": drop the server's sign-in cookie so the
     // next person on this phone starts clean.
     if (url.pathname === "/device-forget" && request.method === "POST") {
@@ -2763,7 +2846,19 @@ export async function handle(request, env, ctx) {
     }
 
     // POST /log-failed-scan
+    // The scanner reports refusals it decides ON THE PHONE (location permission
+    // denied / unavailable / timed out / no fix), which otherwise never reach the
+    // server. Recorded in scan_log (was a silent no-op until Oct 2026).
     if (url.pathname === "/log-failed-scan" && request.method === "POST") {
+      const b = await readBody(request);
+      const t = String(b.errorType || b.reason || "client_refused").slice(0, 40);
+      const why = { denied: "Location permission denied on the phone", unavailable: "Phone couldn't get a location fix",
+        timeout: "Location timed out on the phone", no_fix: "No location fix when trying to sign in/out" }[t] || null;
+      await logScan(env, {
+        kind: "scan", outcome: "phone_" + t, refused: true, reason: [why, b.message ? String(b.message).slice(0, 200) : null].filter(Boolean).join(" — ") || null,
+        deviceToken: b.deviceToken || readDidCookie(request) || null,
+        lat: b.lat, lng: b.lng, accuracy: b.accuracy, detail: (request.headers.get("User-Agent") || "").slice(0, 200)
+      });
       return json({ ok: true });
     }
 
