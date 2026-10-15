@@ -99,6 +99,7 @@ const rawFbcDigest = mail("noreply@jotform.com", "FBC Weekly Incident Report Upd
 
 const CHAP_SITES = [
   { site_number: "3008", site_name: "Control Tower", postcode: "PO13 9FZ" },
+  { site_number: "3024", site_name: "Fareham and Crofton Cricket Club", postcode: "PO16 0DH" },
   { site_number: "4007", site_name: "159a Fratton Road, Portsmouth, PO1 5ET", postcode: "PO1 5ET" },
   { site_number: "4012", site_name: "32A Archers Road, Southampton, SO15 2LT", postcode: "SO15 2LT" },
   { site_number: "4013", site_name: "32B Archers Road, Southampton, SO15 2LT", postcode: "SO15 2LT" },
@@ -131,9 +132,16 @@ function makeEnv(extraEnv = {}) {
       return { results: [] }; },
   }; return st; } };
   const inbound = [], orders = [];
-  const cancels = [];
+  const cancels = [], tasks = [], notes = [];
   const fetchSelf = async (req) => { const body = await req.json(); const u = new URL(req.url);
-    if (u.pathname === "/certs/remedials/order-inbound") { orders.push({ auth: req.headers.get("authorization"), body }); return new Response(JSON.stringify({ ok: true, id: "ord-1", matched: false }), { status: 200, headers: { "content-type": "application/json" } }); }
+    const J = (o, st) => new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } });
+    if (u.pathname === "/certs/remedials/order-inbound") { orders.push({ auth: req.headers.get("authorization"), body }); return J({ ok: true, id: "ord-1", matched: false }); }
+    if (u.pathname === "/tasks/inbound") { tasks.push({ auth: req.headers.get("authorization"), body }); return J({ ok: true, id: "task-" + (tasks.length) }); }
+    if (body.action === "note") {   // mocked /sla/inbound note: known incident → appended to the card; else 404
+      notes.push({ auth: req.headers.get("authorization"), body });
+      if (body.incident === "00099912") return J({ ok: true, noted: true, id: "JOB-00099912", reference: "00099912", status: "In Progress" });
+      return J({ ok: false, notFound: true }, 404);
+    }
     if (body.action === "cancel") {   // mocked /sla/inbound cancel: /2 open → cancelled; 00099998 finished → noted; 00099997 quote → held; else 404
       cancels.push({ auth: req.headers.get("authorization"), body });
       const J = (o, st) => new Response(JSON.stringify(o), { status: st || 200, headers: { "content-type": "application/json" } });
@@ -144,7 +152,7 @@ function makeEnv(extraEnv = {}) {
     }
     inbound.push({ auth: req.headers.get("authorization"), body });
     return new Response(JSON.stringify({ ok: true, created: inbound.length === 1, id: "JOB-" + body.reference, reference: body.reference }), { status: 200, headers: { "content-type": "application/json" } }); };
-  return { env: { DB: db, JOBS_INBOUND_TOKEN: "tok", ...extraEnv }, rows, inbound, orders, cancels, fetchSelf, calls };
+  return { env: { DB: db, JOBS_INBOUND_TOKEN: "tok", ...extraEnv }, rows, inbound, orders, cancels, tasks, notes, fetchSelf, calls };
 }
 function msgOf(raw, from) { return { from, headers: { get: k => { const m = new RegExp("^" + k + ":\\s*(.+)$", "im").exec(raw.split(/\r?\n\r?\n/)[0]); return m ? m[1] : null; } }, raw: new Blob([raw]).stream() }; }
 let fail = 0; const ok = (name, cond, extra = "") => { console.log((cond ? "PASS" : "FAIL") + "  " + name + (extra ? "  → " + extra : "")); if (!cond) fail++; };
@@ -186,7 +194,10 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
     const fm = await run(E2, rawSendContractor, "noreply@concerto.co.uk");
     ok("helpdesk FM Approved - Send to Contractor → job created", fm.outcome === "created" && E2.inbound[0] && E2.inbound[0].body.reference === "00099911", fm.outcome + " / " + fm.reason);
     const nt = await run(E2, rawNote, "noreply@concerto.co.uk");
-    ok("helpdesk G01. Add a note → dropped, NEVER creates a job", nt.outcome === "dropped" && /note\/update on job 00099912/.test(nt.reason) && E2.inbound.length === 1, nt.outcome + " / " + nt.reason);
+    ok("helpdesk G01. Add a note → added to the job card + a task, never a job",
+      nt.outcome === "note" && E2.inbound.length === 1 && E2.notes.length === 1 && E2.notes[0].body.incident === "00099912"
+      && E2.tasks.length === 1 && /Concerto note/.test(E2.tasks[0].body.title) && /job-view\.html/.test(E2.tasks[0].body.link),
+      nt.outcome + " / " + nt.reason + " / notes=" + E2.notes.length + " tasks=" + E2.tasks.length);
     const uk = await run(E2, rawUnknownAction, "noreply@concerto.co.uk");
     ok("helpdesk unrecognised action → held for a look (review)", uk.outcome === "review" && /unrecognised Concerto action/.test(uk.reason) && E2.inbound.length === 1, uk.outcome + " / " + uk.reason);
   }
@@ -199,6 +210,7 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   // support@ layout, property NOT in the register (Flat 8 vs Flat 15) → job still lands, no site code
   const r2 = await run(E, rawChap2, "support@chapplins.co.uk"); const p2 = E.inbound[1] && E.inbound[1].body;
   ok("chapplins support@ layout: job created, unmatched property carries the address", r2.outcome === "updated" && p2.reference === "CHAP-4999" && p2.priority === "Priority 2" && !p2.siteCode && /Flat 8 Badger Court/.test(p2.siteName) && /second bedroom door/.test(p2.description) && !/Many Thanks|Chapplins Support/.test(p2.description), JSON.stringify(p2));
+  ok("chapplins unmatched property → a 'link to a site' task is raised", E.tasks.some(t => /Link to a site/.test(t.body.title) && /Flat 8 Badger Court/.test(t.body.detail)), "tasks=" + JSON.stringify(E.tasks.map(t => t.body.title)));
   // estimate request: communal site matched exactly, subject type kept in front
   const r3 = await run(E, rawChap3, "ashley@chapplins.co.uk"); const p3 = E.inbound[2] && E.inbound[2].body;
   ok("chapplins estimate: communal site matched + 'Estimate required' prefix", p3 && p3.siteCode === "4026" && /^Urgent Estimate required — /.test(p3.description) && !p3.priority, JSON.stringify(p3));
@@ -297,6 +309,38 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   ok("fbc: 'Quotation Required = No' clears quoteRequired + reads reporter", mNo && mNo.result.fbc.quoteRequired === false && mNo.result.fbc.reportedBy === "Sarah Lydford" && mNo.result.fbc.jobTitle === "Property Development Officer" && /ulterior\.movements\.breezy/.test(mNo.result.fbc.w3w), JSON.stringify(mNo && mNo.result.fbc));
   const dg = await run(E, rawFbcDigest, "noreply@jotform.com");
   ok("fbc: weekly digest → dropped, never a job", dg.outcome === "dropped" && /digest/i.test(dg.reason) && E.inbound.length === 2, dg.outcome + " / " + dg.reason);
+}
+{ // 11b. FBC — a plain-text forward where the reporter picked "Other" (label/value
+  //       on separate lines; real location in the "Other" Site Address line)
+  const FBC_OTHER = `Mostlane New Incident Form
+Site
+Other
+"Other" Site Address\tFareham and Crofton Cricket Club, Bath Lane (lower), Fareham, Hampshire , PO16 0DH
+"Other" Site Access Arrangements\tKeys to be collected / meet Sarah on site
+Priority
+P4 (14 Days)
+Reported By\tSarah Lydford
+Job Title\tProperty Development Officer
+Brief description of the issue\tThere is no power to the toilets and umpires room.
+Quotation Required Before Works?
+No`;
+  const E = makeEnv();
+  const r = await run(E, mail("noreply@jotform.com", "Re: Mostlane New Incident Form", "test-fbc-other@jotform", FBC_OTHER), "noreply@jotform.com");
+  const p = E.inbound[0] && E.inbound[0].body;
+  ok("fbc 'Other': reads the place name + postcode, auto-matches the known site, reads priority",
+    r.outcome === "created" && p && p.siteCode === "3024" && p.postcode === "PO16 0DH" && p.priority === "Priority 4"
+    && /Fareham and Crofton Cricket Club/.test(p.siteName) && /no power to the toilets/.test(p.description),
+    r.outcome + " / " + JSON.stringify(p));
+  ok("fbc 'Other' auto-matched → no 'link to a site' task needed", !E.tasks.some(t => /Link to a site/.test(t.body.title)), "tasks=" + E.tasks.length);
+  // an unknown "Other" place (no matching FBC site) → job still lands + a task
+  const E2 = makeEnv();
+  const FBC_UNKNOWN = FBC_OTHER.replace("Fareham and Crofton Cricket Club, Bath Lane (lower), Fareham, Hampshire , PO16 0DH", "Brand New Village Hall, Nowhere Lane, SO99 9ZZ");
+  const r2 = await run(E2, mail("noreply@jotform.com", "Re: Mostlane New Incident Form", "test-fbc-unknown@jotform", FBC_UNKNOWN), "noreply@jotform.com");
+  const p2 = E2.inbound[0] && E2.inbound[0].body;
+  ok("fbc 'Other' unknown place → job created (not stuck) + a 'link to a site' task",
+    r2.outcome === "created" && p2 && !p2.siteCode && /Brand New Village Hall/.test(p2.siteName)
+    && E2.tasks.some(t => /Link to a site/.test(t.body.title) && t.body.category === "Fareham sites"),
+    r2.outcome + " / site=" + (p2 && p2.siteCode) + " / tasks=" + JSON.stringify(E2.tasks.map(t => t.body.title)));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

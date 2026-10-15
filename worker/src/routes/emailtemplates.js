@@ -263,14 +263,23 @@ function chapplinsJob(subject, t) {
 const djb2 = s => { let h = 5381; const str = String(s || ""); for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; return h.toString(16); };
 function fbcJotform(subject, t) {
   const val = re => { const m = re.exec(t); return m ? String(m[1] || "").replace(/\s+/g, " ").trim() : ""; };
-  const site = val(/^\s*Site[ \t]+(?!Address)(.+)$/im);
+  // The "Site" answer is a dropdown: on some renders it sits on the SAME line as
+  // the label, on others on the NEXT line. A value of "Other" means the reporter
+  // typed a free location into the "Other" Site Address box instead of picking a
+  // named building — so the real place lives in the (Other) Site Address block.
+  let site = val(/^\s*Site[ \t]+(?!Address)(.+)$/im);
+  if (!site) { const nx = (/^\s*Site[ \t]*\r?\n[ \t]*([^\r\n]+)/im.exec(t) || [])[1] || ""; if (nx && !/^(?:["']?Other["']?\s*)?Site Address\b/i.test(nx)) site = nx.replace(/\s+/g, " ").trim(); }
+  const isOther = /^other$/i.test(site);
   // NB `$` under /m is end-of-LINE, so multi-line blocks end on the NEXT known
-  // label, never `$`, or they'd capture only the first line.
-  const addrBlock = (/^\s*Site Address[ \t]+([\s\S]+?)\n\s*(?:Priority|Reported By)\b/im.exec(t) || [])[1] || "";
+  // label, never `$`, or they'd capture only the first line. Accept a plain
+  // "Site Address" OR an "Other" Site Address block, ending on the next label.
+  const addrBlock = (/^\s*(?:["']?Other["']?\s+)?Site Address[ \t]+([\s\S]+?)\n\s*(?:(?:["']?Other["']?\s+)?Site Access|Priority|Reported By)\b/im.exec(t) || [])[1] || "";
   const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
   const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
   const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
-  const prTxt = val(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im);
+  // Priority is a dropdown too: same-line on HTML renders, next-line on a plain
+  // Outlook forward ("Priority\nP4 (14 Days)"). Read both.
+  const prTxt = val(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-4][^\n]*)/im.exec(t) || [])[1] || "");
   const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
   const reportedBy = val(/^\s*Reported By[ \t]+(.+)$/im);
   const jobTitle = val(/^\s*Job Title[ \t]+(.+)$/im);
@@ -279,19 +288,27 @@ function fbcJotform(subject, t) {
   const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
   // The street address for display: the address block minus the hours + what3words.
   const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
-  const reference = "FBC-" + djb2([site, reportedBy, desc.slice(0, 120), prNum].join("|"));
+  // When the reporter picked "Other", the place name is the address's first
+  // segment ("Fareham and Crofton Cricket Club, Bath Lane…" → the cricket club):
+  // that name + the postcode resolve the known FBC site. An UNKNOWN place still
+  // creates the job (with the address as its name) + a "link to a site" task — it
+  // is never stuck in review for the want of a dropdown pick.
+  const otherName = (addrBlock.split(/[,\n]/)[0] || "").replace(/\s+/g, " ").trim();
+  const siteName = (site && !isOther) ? site : otherName;
+  const reference = "FBC-" + djb2([siteName, reportedBy, desc.slice(0, 120), prNum].join("|"));
   const missing = [];
-  if (!site) missing.push("site");
+  // Only a truly unreadable submission (no name AND no postcode) holds for a human.
+  if (!siteName && !postcode) missing.push("site");
   if (!desc) missing.push("description");
   return {
     kind: "job", missing,
     // Match on the SITE NAME (the "Site" pill = the register's site_name); the
     // postcode narrows first, the name disambiguates when a postcode is shared.
-    siteLookup: { client: "fbc", address: site, postcode },
-    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName: site },
+    siteLookup: { client: "fbc", address: siteName, postcode },
+    fbc: { quoteRequired, reportedBy, jobTitle, w3w, hours, siteName },
     fields: {
       isJob: true, reference, priority: prNum ? "Priority " + prNum : "",
-      siteCode: "", siteName: site, address: streetAddr || site, postcode,
+      siteCode: "", siteName, address: streetAddr || siteName, postcode,
       telephone: "", description: desc, raisedAt: "", respondBy: "", completeBy: "", storeType: "fbc"
     }
   };

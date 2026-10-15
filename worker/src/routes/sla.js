@@ -671,6 +671,13 @@ export async function handle(request, env, ctx, url, sess) {
       const r = await cancelIncidentJobs(env, tenantId, ctx, b);
       return jsonResponse(r, headers, r.ok ? 200 : (r.notFound ? 404 : 400));
     }
+    // ── action:"note" — a store's note/photo/document on an EXISTING incident
+    // (Concerto "add a note" / "additional information"). Appends it to the job's
+    // card (events timeline); NEVER creates or re-opens a job. 404 if we hold none.
+    if (b && String(b.action || "").toLowerCase() === "note") {
+      const r = await appendIncidentNote(env, tenantId, b);
+      return jsonResponse(r, headers, r.ok ? 200 : (r.notFound ? 404 : 400));
+    }
     if (!b || (!String(b.reference || "").trim() && !String(b.description || "").trim()))
       return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
 
@@ -4674,6 +4681,29 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
   const key = incidentKey(inc) || incidentKey(ref);
   if (key) add(await jobsForIncidentKey(env, tenantId, key.inc));
   return [...seen.values()];
+}
+/* A store added a note / photo / document to an existing incident (Concerto
+   "G01. Add a note…" / "Additional information has been added"). `b` =
+   {reference?, incident?, text, noteAction?, by?, at?}. Appends it to the job's
+   card (events timeline the office reads). Prefers an OPEN job; falls back to the
+   newest job for the incident so a note on a finished job still lands on its
+   card. Never creates or re-opens a job; no job for the incident → notFound. */
+async function appendIncidentNote(env, tenantId, b) {
+  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
+  const finished = await jobFinishedFor(env, tenantId);
+  const open = jobs.filter(j => !finished(j));
+  const newest = list => list.slice().sort((a, c) => String(c.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+  const j = (open.length ? newest(open) : newest(jobs));
+  const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : new Date().toISOString();
+  const by = String(b.by || "Southern Co-op (Concerto)").slice(0, 80);
+  const label = String(b.noteAction || "").replace(/\s+/g, " ").trim();
+  const text = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 1000);
+  const note = (label ? label + ": " : "") + (text || "(note added — no text)");
+  (j.events ||= []).push({ at, by, type: "note", note });
+  j.updatedAt = new Date().toISOString();
+  await saveJob(env, tenantId, j);
+  return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status };
 }
 /* The client cancelled an incident. `b` = {reference?, incident?, reason?, by?,
    kind:"job"|"quote", at?}. Rules:
