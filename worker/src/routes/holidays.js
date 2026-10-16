@@ -182,20 +182,23 @@ export async function handle(request, env, ctx, url, sess) {
   async function getBankHolidays() { return (await cfgGet(`holiday:bankholidays:${year}`)) || []; }
   async function getShutdownDays() { return (await cfgGet(`holiday:shutdown:${year}`)) || []; }
 
+  // Returns { allowance, exact }. `exact` = the stored figure is the final
+  // entitlement for the year (a manual override) and must NOT be pro-rated;
+  // otherwise `allowance` is the full annual figure (pro-rated on read).
   async function getUserAllowance(username) {
     const row = await db.prepare(
-      "SELECT allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
+      "SELECT allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
     ).bind(db.tenantId, year, username).first();
-    if (row && Number.isFinite(Number(row.allowance))) return Number(row.allowance);
-    return getDefaultAllowance();
+    if (row && Number.isFinite(Number(row.allowance))) return { allowance: Number(row.allowance), exact: !!row.exact };
+    return { allowance: await getDefaultAllowance(), exact: false };
   }
 
   async function listAllowancesMap() {
     const { results } = await db.prepare(
-      "SELECT username, allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
+      "SELECT username, allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
     ).bind(db.tenantId, year).all();
     const out = {};
-    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
+    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = { allowance: Number(r.allowance), exact: !!r.exact };
     return out;
   }
 
@@ -523,9 +526,9 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /holiday/summary
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
-    const baseAllowance = await getUserAllowance(user);
+    const { allowance: baseAllowance, exact } = await getUserAllowance(user);
     const startISO = await getUserStart(user);
-    const allowance = proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year
+    const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year unless an exact override
     const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
     const today = new Date().toISOString().slice(0, 10);
     const u = computeUsage(all, sys, user, allowance, today, startISO);
@@ -612,7 +615,9 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/holiday/config" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const cfg = await getYearConfig();
-    const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    const [bank, shut, allowMap] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    const allowances = {};
+    for (const [u, r] of Object.entries(allowMap)) allowances[u] = r.allowance;   // plain numbers (back-compat)
     return json({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
   }
 
@@ -637,9 +642,12 @@ export async function handle(request, env, ctx, url, sess) {
     const username = body.username;
     const allowance = Number(body.allowance);
     if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
+    // exact=1 → the figure is the FINAL entitlement for the year (a manual
+    // override, never pro-rated). Default 0 → the full annual figure.
+    const exact = body.exact ? 1 : 0;
     await db.prepare(
-      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
-    ).bind(db.tenantId, year, username, allowance).run();
+      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance, exact) VALUES (?,?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance, exact=excluded.exact"
+    ).bind(db.tenantId, year, username, allowance, exact).run();
     return json({ success: true });
   }
 
@@ -706,13 +714,15 @@ export async function handle(request, env, ctx, url, sess) {
     const today = new Date().toISOString().slice(0, 10);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const baseAllowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
+      const row = allowMap[u];
+      const baseAllowance = row && Number.isFinite(row.allowance) ? row.allowance : dflt;
+      const exact = !!(row && row.exact);
       const startISO = startsMap[u] || null;
-      const allowance = proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year
+      const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year unless an exact override
       const c = computeUsage(all, sys, u, allowance, today, startISO);
       list.push({
         username: u, name: u.replace(".", " "), allowance,
-        baseAllowance, proRated: allowance !== baseAllowance, startDate: startISO,
+        baseAllowance, proRated: allowance !== baseAllowance, exact, startDate: startISO,
         used: c.usedToDate,             // used TO DATE
         committed: c.committed,         // full-year commitment
         remaining: c.remaining,
