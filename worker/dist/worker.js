@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -668,6 +663,18 @@ var init_once = __esm({
 });
 
 // src/routes/push.js
+var push_exports = {};
+__export(push_exports, {
+  ensureFeedTable: () => ensureFeedTable,
+  handle: () => handle,
+  markNotificationsReadByTag: () => markNotificationsReadByTag,
+  recordNotification: () => recordNotification,
+  remindPermission: () => remindPermission,
+  remindUser: () => remindUser,
+  resolveNotificationsByTag: () => resolveNotificationsByTag,
+  sendToPermission: () => sendToPermission,
+  sendToUser: () => sendToUser
+});
 function jr(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -771,6 +778,9 @@ async function resolveNotificationsByTag(env, tenantId, tag, outcome) {
     }
   } catch {
   }
+}
+async function markNotificationsReadByTag(env, tenantId, tag) {
+  return resolveNotificationsByTag(env, tenantId, tag, null);
 }
 async function remindUser(env, tenantId, username, payload) {
   try {
@@ -9233,9 +9243,89 @@ async function handle7(request, env, ctx) {
     });
     if (ctx && ctx.waitUntil) ctx.waitUntil(p);
     else await p;
+    if (out.status === "checked_in" || out.status === "checked_out") queueSignPush(env, ctx, body, request, out);
+    return res;
+  }
+  if (u0.pathname === "/sync-event" && request.method === "POST" && env.SITELOG_DB) {
+    let body = {};
+    try {
+      body = await request.clone().json();
+    } catch (e) {
+    }
+    const res = await handleInner(request, env, ctx);
+    let out = {};
+    try {
+      out = await res.clone().json();
+    } catch (e) {
+    }
+    if (out.ok && (out.status === "checked_in" || out.status === "checked_out")) queueSignPush(env, ctx, body, request, out);
     return res;
   }
   return handleInner(request, env, ctx);
+}
+function queueSignPush(env, ctx, body, request, out) {
+  const p = sendSignPush(env, body, request, out).catch(() => {
+  });
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+}
+async function signPushRecipients(env, tid = 1) {
+  const owner = env.OWNER_USERNAME || "Jamie Line";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sitelog:pushnotify:" + tid).first();
+    if (row && row.value) {
+      const cfg = JSON.parse(row.value);
+      if (cfg.enabled === false) return [];
+      if (Array.isArray(cfg.recipients) && cfg.recipients.length) return cfg.recipients.map(String);
+    }
+  } catch (e) {
+  }
+  return [owner];
+}
+function shortName(first, last) {
+  return [first, last].filter(Boolean).join(" ").trim() || "Someone";
+}
+async function buildSignPush(env, { deviceToken, status, site, transferFrom, visitId }) {
+  const db = env.SITELOG_DB;
+  let person = null;
+  if (deviceToken) {
+    person = await db.prepare(
+      "SELECT p.id, p.first_name, p.last_name, p.company FROM devices d JOIN people p ON p.id = d.person_id WHERE d.device_token = ? LIMIT 1"
+    ).bind(deviceToken).first();
+  }
+  let siteName = site || null;
+  if (!siteName && visitId) {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE id = ?").bind(visitId).first();
+    siteName = v ? v.site_code : null;
+  }
+  if (!siteName && person && status === "checked_out") {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE person_id = ? ORDER BY COALESCE(check_out_at, check_in_at) DESC LIMIT 1").bind(person.id).first();
+    siteName = v ? v.site_code : null;
+  }
+  const who = person ? shortName(person.first_name, person.last_name) : "Someone";
+  const co = person && person.company ? " (" + person.company + ")" : "";
+  const { results } = await db.prepare(
+    "SELECT p.first_name, p.last_name FROM visits v JOIN people p ON p.id = v.person_id WHERE v.check_out_at IS NULL ORDER BY v.check_in_at"
+  ).all();
+  const names = [...new Set((results || []).map((r) => shortName(r.first_name, r.last_name)))];
+  const onSite = names.length ? "On site now (" + names.length + "): " + names.slice(0, 8).join(", ") + (names.length > 8 ? " +" + (names.length - 8) + " more" : "") : "Nobody on site now.";
+  const inn = status === "checked_in";
+  const title = inn ? "\u{1F7E2} " + who + " signed in" + (siteName ? " \u2014 " + siteName : "") : "\u{1F534} " + who + " signed out" + (siteName ? " \u2014 " + siteName : "");
+  const lead = inn && transferFrom ? who + co + " moved from " + transferFrom + "." : who + co + (inn ? " is on site." : " has left.");
+  return { title, body: lead + "\n" + onSite, url: "/sitelog.html", tag: "sitelog:" + (visitId || deviceToken || "") + ":" + (inn ? "in" : "out") + ":" + Date.now() };
+}
+async function sendSignPush(env, body, request, out) {
+  if (!env.DB) return;
+  const recipients = await signPushRecipients(env, 1);
+  if (!recipients.length) return;
+  const payload = await buildSignPush(env, {
+    deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
+    status: out.status,
+    site: out.site || body.site || null,
+    transferFrom: out.transferFrom || null,
+    visitId: body.visitId || null
+  });
+  const { sendToUser: sendToUser2 } = await Promise.resolve().then(() => (init_push(), push_exports));
+  for (const u of recipients) await sendToUser2(env, 1, u, payload);
 }
 async function handleInner(request, env, ctx) {
   const url = new URL(request.url);
@@ -42735,9 +42825,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -50012,7 +50102,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50272,7 +50362,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
