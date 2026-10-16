@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -28348,6 +28353,11 @@ function shapeUser(u, perms) {
     StaffType: staffTypeOf(u),
     // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
     ClientOrg: clientOrgOf(u),
+    // What a client login may see: "compliance" = that org's compliance chart
+    // ONLY (no jobs portal), else "jobs" = the full client jobs portal (which
+    // also includes the compliance chart). "" for staff. Default = "jobs" so any
+    // pre-existing client keeps the jobs portal it had.
+    ClientRole: clientRoleOf(u),
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
@@ -28377,6 +28387,15 @@ function clientOrgOf(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
     return p && p.staffType === "client" && p.clientOrg ? String(p.clientOrg).toLowerCase() : "";
+  } catch {
+    return "";
+  }
+}
+function clientRoleOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    if (!p || p.staffType !== "client") return "";
+    return p.clientRole === "compliance" ? "compliance" : "jobs";
   } catch {
     return "";
   }
@@ -28870,6 +28889,9 @@ function shapeUser2(u, perms, level = "full") {
     StaffType: profile.staffType === "office" || profile.staffType === "client" ? profile.staffType : "field",
     // External client login: which client org it's tied to (e.g. "fbc"); "" for staff.
     ClientOrg: profile.staffType === "client" && profile.clientOrg ? String(profile.clientOrg).toLowerCase() : "",
+    // What a client may see: "compliance" = compliance chart only (no jobs),
+    // else "jobs" = the full client jobs portal. "" for staff.
+    ClientRole: profile.staffType === "client" ? profile.clientRole === "compliance" ? "compliance" : "jobs" : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the
@@ -42635,9 +42657,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -48781,6 +48803,14 @@ function clientOrgOf2(sess) {
     return "";
   }
 }
+function clientRoleOf2(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : sess.user.profile || {};
+    return p && p.staffType === "client" && p.clientRole === "compliance" ? "compliance" : "jobs";
+  } catch {
+    return "jobs";
+  }
+}
 async function orgSites(env, tid, org) {
   const db = tenantDB(env, tid);
   let rows = [];
@@ -48813,6 +48843,9 @@ async function handle45(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const org = clientOrgOf2(sess);
   if (!org) return error("Not a client account", 403, env, request);
+  if (clientRoleOf2(sess) === "compliance" && path !== "/client/me") {
+    return error("This client login is compliance-only", 403, env, request);
+  }
   const tid = sess.tenantId;
   const orgLabel = ORG_LABEL[org] || org.toUpperCase();
   const scheme = ORG_SCHEME[org] || "";
@@ -49901,7 +49934,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50161,7 +50194,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

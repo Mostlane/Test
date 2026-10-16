@@ -519,6 +519,9 @@ function shapeUser(u, perms, level = "full") {
     StaffType: (profile.staffType === "office" || profile.staffType === "client") ? profile.staffType : "field",
     // External client login: which client org it's tied to (e.g. "fbc"); "" for staff.
     ClientOrg: profile.staffType === "client" && profile.clientOrg ? String(profile.clientOrg).toLowerCase() : "",
+    // What a client may see: "compliance" = compliance chart only (no jobs),
+    // else "jobs" = the full client jobs portal. "" for staff.
+    ClientRole: profile.staffType === "client" ? (profile.clientRole === "compliance" ? "compliance" : "jobs") : "",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     // Resolved per-scheme compliance access (none|view|download|edit) so the

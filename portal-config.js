@@ -352,11 +352,26 @@
     try {
       var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
       if (st !== "client") return;
+      var role = String(localStorage.getItem("mostlaneClientRole") || sessionStorage.getItem("mostlaneClientRole") || "").toLowerCase();
+      var org = String(localStorage.getItem("mostlaneClientOrg") || sessionStorage.getItem("mostlaneClientOrg") || "").toLowerCase();
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      var OK = ["client-home.html", "login.html", "forgot-password.html", "reset-password.html", "change-password.html", "hash.html"];
-      if (OK.indexOf(page) === -1) location.replace("/client-home.html");
+      var AUTH = ["login.html", "forgot-password.html", "reset-password.html", "change-password.html", "hash.html"];
+      if (role === "compliance") {
+        // Compliance-only client: the ONE page they may see is their org's
+        // compliance chart (plus the auth pages). Anything else bounces there.
+        var CPAGE = ({ fbc: "fareham.html" })[org] || "fareham.html";
+        if (AUTH.indexOf(page) === -1 && page !== CPAGE) { location.replace("/" + CPAGE); return; }
+      } else {
+        // Jobs client: the walled jobs portal (client-home.html is standalone and
+        // doesn't load portal-config, so this only fires on a stray staff URL).
+        if (AUTH.concat(["client-home.html"]).indexOf(page) === -1) { location.replace("/client-home.html"); return; }
+      }
     } catch (e) {}
   })();
+  // Shared helper: is the current session an external client login?
+  function mlIsClientUser() {
+    try { return String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase() === "client"; } catch (e) { return false; }
+  }
 
   // to you.html. Uses the shared mlIsFieldUser when present, else an inline copy
   // (ml-perms.js isn't loaded on every page; portal-config.js is).
@@ -1086,6 +1101,7 @@
       var perms = {};
       try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
       if (yes(perms.StoryMode)) return;   // guided users keep the focused day
+      if (mlIsClientUser()) return;       // external clients get NO staff sidebar/palette
 
       // Restore collapsed state before paint to avoid a flash.
       try { if (localStorage.getItem("pnavCollapsed") === "1") document.documentElement.classList.add("pnav-collapsed"); } catch (e) {}
@@ -1775,9 +1791,16 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD","StaffType","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD","StaffType","ClientOrg","ClientRole","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
+              // Keep the client wall's keys fresh (login set them; refresh here in
+              // case the account's type/role changed since this device logged in).
+              try {
+                localStorage.setItem("mostlaneStaffType", d.user.StaffType || "field");
+                localStorage.setItem("mostlaneClientOrg", d.user.ClientOrg || "");
+                localStorage.setItem("mostlaneClientRole", d.user.ClientRole || "");
+              } catch (e2) {}
             } catch (e) {}
             if (yes(perms.StoryMode)) { var n = document.getElementById("pnav"); if (n) n.remove(); document.body.classList.remove("pnav-on"); return; }
             rebuild();
@@ -1866,6 +1889,7 @@
       // The chat bubble lives ONLY on the home page (same reason as the bell —
       // it floated over full-screen photo/doc close buttons on other pages).
       if (page !== "main.html") return;
+      if (mlIsClientUser()) return;                         // external clients have no staff chat
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
@@ -1890,6 +1914,7 @@
       var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
         "reset-password.html", "change-password.html", "hash.html", "memo-sign.html"];
       if (SKIP.indexOf(page) !== -1) return;
+      if (mlIsClientUser()) return;   // external clients are not staff — no company memos
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
@@ -1930,6 +1955,7 @@
       var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
         "reset-password.html", "change-password.html", "hash.html", "memo-sign.html", "hs-sign.html", "programme-view.html"];
       if (SKIP.indexOf(page) !== -1) return;
+      if (mlIsClientUser()) return;   // external clients never see office gates
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var perms = {};
@@ -2338,6 +2364,7 @@
       // The bell lives ONLY on the home page — it used to float top-right on every
       // page and covered full-screen photo/doc close (✕) buttons.
       if (page !== "main.html") return;
+      if (mlIsClientUser()) return;                                    // external clients have no staff feed
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
