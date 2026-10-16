@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=43"></script>
+  <script src="/portal-config.js?v=44"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SiteLog — Mostlane Portal</title>
@@ -116,7 +116,7 @@ async function loadOnSite(){
   }
 }
 
-if (perms().FullAccess === "Yes") {
+if (perms().FullAccess === "Yes" || perms().SiteLogAdmin === "Yes") {
   $("adminCard").style.display = "block";
   loadOnSite();
   loadRefusals();

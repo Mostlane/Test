@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Contract Builder — Mostlane</title>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="/portal-config.js?v=44"></script>
+  <script src="auth.js"></script>
+  <script src="contract-model.js?v=2"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --warn:#a14d06; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; --field:#e3eff3; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:var(--ink); }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:1280px; margin:14px auto 90px; padding:0 12px; }
+    .status { min-height:18px; color:var(--muted); font-size:13px; margin:0 0 10px; }
+    .status.warn { color:var(--warn); font-weight:600; } .status.ok { color:var(--ok); font-weight:600; } .status.bad { color:var(--bad); font-weight:600; }
+    .grid { display:grid; grid-template-columns:380px minmax(0,1fr); gap:18px; align-items:start; }
+    @media (max-width:920px){ .grid { grid-template-columns:minmax(0,1fr); } }
+    .panel { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:16px; display:flex; flex-direction:column; gap:16px; }
+    @media (min-width:921px){ .panel { position:sticky; top:calc(env(safe-area-inset-top,0px) + 14px); max-height:calc(100vh - 30px); overflow-y:auto; } }
+    fieldset { border:0; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; min-width:0; }
+    legend { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-bottom:6px; padding:0; }
+    .f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .f label { font-weight:600; font-size:13px; }
+    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    input[type=text], input[type=number], input[type=date], textarea, select {
+      font:inherit; width:100%; padding:9px 11px; border:1px solid #ccd5dd; border-radius:9px; background:#fff; color:var(--ink);
+    }
+    textarea { resize:vertical; min-height:58px; }
+    .hint { font-size:12px; color:var(--muted); } .hint.warn { color:var(--warn); font-weight:600; }
+    .opt { border:1px solid var(--line); border-radius:9px; background:#f8fafc; padding:10px 12px; display:flex; flex-direction:column; gap:10px; }
+    .opt > label.tick { display:flex; gap:10px; align-items:flex-start; cursor:pointer; font-weight:600; font-size:13px; }
+    .opt > label.tick input { width:18px; height:18px; margin:1px 0 0; accent-color:var(--brand); flex:none; }
+    .opt > label.tick span small { display:block; font-weight:400; color:var(--muted); margin-top:2px; }
+    .dep { display:flex; flex-direction:column; gap:10px; padding-left:28px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:11px 15px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn:disabled { opacity:.5; cursor:default; } .btn.grey { background:#5b6b7b; } .btn.ghost { background:#eef2f6; color:var(--brand); } .btn.small { padding:8px 12px; font-size:13px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    /* Preview sheet */
+    .sheet-wrap { min-width:0; }
+    .sheet { background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:clamp(18px,4vw,44px); max-width:820px; margin:0 auto; line-height:1.55; font-size:15px; }
+    .sheet h3 { font-size:15.5px; color:var(--brand); margin:22px 0 7px; text-transform:uppercase; letter-spacing:.02em; }
+    .sheet h4 { font-size:14.5px; color:var(--brand); margin:16px 0 6px; }
+    .sheet p { margin:0 0 10px; } .sheet ul { margin:0 0 10px 18px; } .sheet li { margin:0 0 5px; }
+    .sheet hr { border:0; border-top:1px solid var(--line); margin:14px 0; }
+    .sheet .ph { background:#fcefdd; color:var(--warn); border-radius:3px; padding:0 4px; font-size:.86em; font-weight:700; }
+    table.ctbl { border-collapse:collapse; width:100%; margin:8px 0 14px; font-size:13.5px; }
+    table.ctbl th, table.ctbl td { border:1px solid #ccd5dd; padding:7px 9px; text-align:left; vertical-align:top; }
+    table.ctbl th { background:#f4f7fa; font-weight:700; }
+    .optdiv { margin:40px 0 20px; border-top:2px dashed var(--line); padding-top:10px; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); text-align:center; }
+    .sendcard { background:#eef2ff; border:1px solid #c7d2fe; border-radius:12px; padding:14px; }
+    .sendcard h2 { margin:0 0 4px; font-size:16px; color:var(--brand); }
+    .sendcard .sub { color:var(--muted); font-size:13px; margin:0 0 10px; }
+    .miss { background:#fcefdd; border:1px solid #f0d19c; color:var(--warn); border-radius:9px; padding:9px 11px; font-size:13px; margin-bottom:10px; }
+    .noaccess { max-width:520px; margin:60px auto; text-align:center; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/documents-admin.html" title="Back">‹ Back</a>
+    <h1>📝 Employment contract builder</h1>
+  </header>
+
+  <div class="wrap" id="main" style="display:none;">
+    <div class="status" id="status">Fill in the details — the contract updates as you type.</div>
+    <div class="grid">
+      <form class="panel" id="form" autocomplete="off">
+        <fieldset>
+          <legend>Employee</legend>
+          <div class="f">
+            <label for="pickUser">Portal user</label>
+            <select id="pickUser"><option value="">— new starter (type below) —</option></select>
+            <span class="hint">Pick the person so the contract can be <b>sent to them to sign</b>. A brand-new starter must be added in <b>Users Admin</b> first before a contract can be sent to them.</span>
+          </div>
+          <div class="f"><label for="employeeName">Full name</label><input type="text" id="employeeName"></div>
+          <div class="f"><label for="employeeAddress">Home address</label><textarea id="employeeAddress" rows="3"></textarea></div>
+          <div class="f"><label for="startDate">Start date</label><input type="date" id="startDate"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Role and pay</legend>
+          <div class="f"><label for="jobTitle">Job title</label><input type="text" id="jobTitle" placeholder="e.g. Electrician"></div>
+          <div class="f"><label for="duties">Main duties</label><textarea id="duties" rows="3"></textarea></div>
+          <div class="f"><label for="hourlyRate">Hourly rate (£)</label><input type="number" id="hourlyRate" step="0.01" min="0" inputmode="decimal"><span class="hint" id="rateHint"></span></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Hours, notice and holiday</legend>
+          <div class="row2">
+            <div class="f"><label for="workStart">Start time</label><input type="text" id="workStart"></div>
+            <div class="f"><label for="workEnd">Finish time</label><input type="text" id="workEnd"></div>
+          </div>
+          <div class="row2">
+            <div class="f"><label for="workDays">Working days</label><input type="text" id="workDays"></div>
+            <div class="f"><label for="lunchMins">Unpaid lunch (mins)</label><input type="number" id="lunchMins" min="0"></div>
+          </div>
+          <div class="row2">
+            <div class="f"><label for="employeeNotice">Notice they give (weeks)</label><input type="number" id="employeeNotice" min="1"></div>
+            <div class="f"><label for="holidayDays">Holiday incl. bank hols (days)</label><input type="number" id="holidayDays" min="28"></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Options</legend>
+          <div class="opt">
+            <label class="tick"><input type="checkbox" id="travelUnpaid"><span>First and last travel of the day unpaid<small>Unticked: all travel time is paid.</small></span></label>
+            <div class="dep" data-dep="travelUnpaid"><div class="f"><label for="travelMins">Unpaid minutes each way</label><input type="number" id="travelMins" min="0"></div></div>
+          </div>
+          <div class="opt">
+            <label class="tick"><input type="checkbox" id="overtimeEnhanced"><span>Enhanced overtime rate<small>Unticked: overtime paid at basic rate.</small></span></label>
+            <div class="dep row2" data-dep="overtimeEnhanced">
+              <div class="f"><label for="overtimeRate">Multiplier</label><input type="number" id="overtimeRate" step="0.25" min="1"></div>
+              <div class="f"><label for="overtimeAfter">After hours in a day</label><input type="number" id="overtimeAfter" step="0.5" min="0"></div>
+            </div>
+          </div>
+          <div class="opt">
+            <label class="tick"><input type="checkbox" id="probation"><span>Probationary period</span></label>
+            <div class="dep" data-dep="probation"><div class="f"><label for="probationMonths">Length (months)</label><input type="number" id="probationMonths" min="1"></div></div>
+          </div>
+          <div class="opt">
+            <label class="tick"><input type="checkbox" id="apprentice"><span>Apprentice</span></label>
+            <div class="dep" data-dep="apprentice">
+              <div class="f"><label for="apprenticeshipStandard">Apprenticeship</label><input type="text" id="apprenticeshipStandard" placeholder="e.g. Installation Electrician Level 3"></div>
+              <div class="f"><label for="trainingProvider">Training provider</label><input type="text" id="trainingProvider"></div>
+            </div>
+          </div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="van"><span>Company van provided</span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="optOut"><span>48-hour opt-out<small>Sent as a SEPARATE signing request. The employee can decline it without affecting the contract. Not for under-18s.</small></span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="trainingRepay"><span>Repayment of optional training<small>Sliding scale for courses you fund that the role doesn't need.</small></span></label></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Signing for Mostlane</legend>
+          <span class="hint">Everything is signed <b>inside the portal</b> — no file leaves it. When you <b>send for signing</b>, the Company's counter-signature is <b>your own saved signature</b> (set it once in Documents → My signature). The employee then signs on their device, and the signed PDF files into their <b>My Documents › Agreements</b>. Send from the signing director's own login so their signature is the one that appears.</span>
+        </fieldset>
+
+        <div class="actions">
+          <button class="btn grey small" id="btnReset" type="button">Clear details</button>
+        </div>
+      </form>
+
+      <div class="sheet-wrap">
+        <div class="sendcard" style="margin-bottom:14px;">
+          <h2>Send for signing</h2>
+          <p class="sub">Files the signed copy into the employee's <b>My Documents › Agreements</b>. With the opt-out ticked, the contract and the opt-out go as two separate signing requests.</p>
+          <div id="missBox"></div>
+          <div class="actions">
+            <button class="btn" id="btnSend" type="button">📨 Send for signing</button>
+            <a class="btn ghost small" href="/documents-admin.html" id="recordsLink">📄 Sent documents &amp; records</a>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line,#e2e8f0);margin:14px 0;">
+          <p class="sub" style="margin:0 0 8px;">Just need the <b>48-hour opt-out</b> signed by an existing employee (no new contract)? Pick the portal user and fill their <b>name &amp; home address</b> above, then:</p>
+          <div class="actions">
+            <button class="btn ghost small" id="btnOptOnly" type="button">📨 Send opt-out only</button>
+          </div>
+          <div id="optMissBox"></div>
+        </div>
+        <div class="sheet" id="sheet" aria-label="Contract preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="noaccess" id="denied" style="display:none;">This page needs Full access.</div>
+
+  <script>
+    const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    const g = id => document.getElementById(id);
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken"), "Content-Type": "application/json" }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    function toast(m) { try { if (window.MLUI && MLUI.toast) return MLUI.toast(m); } catch {} alert(m); }
+    const MC = window.MLContract;
+    const uname = u => u.Username || u.username || "";
+    const dispName = u => (u.Name || ((u.FirstName || u.first_name || "") + " " + (u.LastName || u.last_name || "")).trim() || uname(u));
+
+    const KEY = "mostlane-contract-builder-v1";
+    let state = Object.assign({}, MC.DEFAULTS);
+    try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) state = Object.assign(state, s); } catch {}
+    let USERS = [], HAS_SIG = false, recipient = "", ME = "";
+
+    function fillForm() {
+      Object.keys(MC.DEFAULTS).forEach(k => {
+        const el = g(k); if (!el) return;
+        if (el.type === "checkbox") el.checked = !!state[k]; else el.value = state[k] == null ? "" : state[k];
+      });
+    }
+    function syncDeps() { document.querySelectorAll("[data-dep]").forEach(d => { d.style.display = state[d.dataset.dep] ? "" : "none"; }); }
+    function rateHint() { const r = MC.rate(state); const el = g("rateHint"); el.className = "hint" + (r.cls ? " warn" : ""); el.textContent = r.text; }
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
+
+    function renderSend() {
+      const miss = MC.missing(state);
+      const box = g("missBox");
+      let html = "";
+      if (miss.length) html += '<div class="miss">⚠ Still blank: <b>' + miss.map(m => m).join(", ") + '</b>. Fill these before sending.</div>';
+      if (!recipient) html += '<div class="miss">Pick the <b>portal user</b> this contract is for (top of the form) so it can be sent to them to sign.</div>';
+      if (!HAS_SIG) html += '<div class="miss">Set your signature first — <a href="/documents-admin.html">Documents → My signature</a> — then come back.</div>';
+      box.innerHTML = html;
+      g("btnSend").disabled = !!(miss.length || !recipient || !HAS_SIG);
+      // Opt-out-only: needs just the recipient, the issuer signature and the
+      // two fields the opt-out document itself carries (name + address).
+      const omiss = MC.optMissing(state);
+      let oh = "";
+      if (omiss.length) oh += '<div class="miss">For the opt-out, fill <b>' + omiss.join(", ") + '</b> above.</div>';
+      g("optMissBox").innerHTML = oh;
+      g("btnOptOnly").disabled = !!(omiss.length || !recipient || !HAS_SIG);
+    }
+    function render() {
+      g("sheet").innerHTML = MC.previewHtml(state);
+      renderSend();
+    }
+
+    g("form").addEventListener("input", e => {
+      const el = e.target; if (!el.id || !(el.id in MC.DEFAULTS)) return;
+      state[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      syncDeps(); rateHint(); render(); save();
+    });
+    g("form").addEventListener("submit", e => e.preventDefault());
+
+    g("pickUser").addEventListener("change", () => {
+      const un = g("pickUser").value; recipient = un;
+      const u = USERS.find(x => uname(x) === un);
+      if (u) {
+        state.employeeName = dispName(u);
+        const p = u.Profile || u.profile || {};
+        const addr = p.homeAddress || p.address || p.home_address || "";
+        if (addr) state.employeeAddress = addr;
+        const jt = p.jobTitle || p.job_title || u.JobTitle || "";
+        if (jt) state.jobTitle = jt;
+        fillForm();
+      }
+      render(); save();
+    });
+
+    g("btnReset").addEventListener("click", () => {
+      state = Object.assign({}, MC.DEFAULTS);
+      g("pickUser").value = ""; recipient = "";
+      fillForm(); syncDeps(); rateHint(); render(); save();
+      g("status").textContent = "Details cleared. Standard Mostlane options restored.";
+    });
+
+    async function createAndSend(title, body, to) {
+      const t = await (await authFetch("/documents/template", { method: "POST", body: JSON.stringify({ title, body }) })).json();
+      if (!t.ok) throw new Error(t.error || "template");
+      const s = await (await authFetch("/documents/send", { method: "POST", body: JSON.stringify({ id: t.id, recipients: [to] }) })).json();
+      if (!s.ok) throw new Error(s.error || "send");
+      return t.id;
+    }
+    g("btnSend").addEventListener("click", async () => {
+      if (g("btnSend").disabled) return;
+      const miss = MC.missing(state);
+      if (miss.length || !recipient || !HAS_SIG) { renderSend(); return; }
+      const who = state.employeeName || recipient;
+      const ok = window.MLUI ? await MLUI.confirm("Send the contract" + (state.optOut ? " and the 48-hour opt-out" : "") + " to " + who + " to sign?", { title: "Send for signing", okLabel: "Send" }) : confirm("Send to " + who + "?");
+      if (!ok) return;
+      g("btnSend").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
+      try {
+        await createAndSend(MC.titleFor(state), MC.markup(state, false), recipient);
+        if (state.optOut) await createAndSend(MC.optTitleFor(state), MC.optMarkup(state, false), recipient);
+        g("status").className = "status ok";
+        g("status").textContent = "Sent to " + who + " to sign" + (state.optOut ? " (contract + opt-out, two requests)" : "") + ". It'll file into their My Documents once signed.";
+        toast("Sent for signing");
+      } catch (e) {
+        g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
+      }
+      renderSend();
+    });
+
+    g("btnOptOnly").addEventListener("click", async () => {
+      if (g("btnOptOnly").disabled) return;
+      if (MC.optMissing(state).length || !recipient || !HAS_SIG) { renderSend(); return; }
+      const who = state.employeeName || recipient;
+      const ok = window.MLUI ? await MLUI.confirm("Send the 48-hour opt-out to " + who + " to sign?", { title: "Send opt-out", okLabel: "Send" }) : confirm("Send the opt-out to " + who + "?");
+      if (!ok) return;
+      g("btnOptOnly").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
+      try {
+        await createAndSend(MC.optTitleFor(state), MC.optMarkup(state, false), recipient);
+        g("status").className = "status ok";
+        g("status").textContent = "48-hour opt-out sent to " + who + " to sign. It'll file into their My Documents once signed.";
+        toast("Opt-out sent for signing");
+      } catch (e) {
+        g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
+      }
+      renderSend();
+    });
+
+    // ── gate + boot ──
+    (async () => {
+      let me;
+      try { me = await (await authFetch("/auth/me")).json(); }
+      catch { location.href = "login.html"; return; }
+      if (!me.ok || me.user.FullAccess !== "Yes") { g("denied").style.display = "block"; return; }
+      g("main").style.display = "block";
+      ME = me.user.Name || ((me.user.FirstName || "") + " " + (me.user.LastName || "")).trim() || "";
+      fillForm(); syncDeps(); rateHint(); render();
+      // Issuer signature present?
+      try { const sg = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!(sg && sg.has); } catch {}
+      // Users for the recipient picker + pre-fill.
+      try {
+        const d = await (await authFetch("/users")).json();
+        USERS = (d.Users || d.users || []).filter(u => uname(u));
+        const sel = g("pickUser");
+        USERS.slice().sort((a, b) => dispName(a).localeCompare(dispName(b))).forEach(u => {
+          const o = document.createElement("option"); o.value = uname(u); o.textContent = dispName(u); sel.appendChild(o);
+        });
+      } catch {}
+      renderSend();
+    })();
+  </script>
+</body>
+</html>

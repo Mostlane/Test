@@ -1,5 +1,5 @@
 // SiteLog timesheet PDFs, emailed to the office automatically.
-// Mounted at /sitelog-ts. Gate: FullAccess.
+// Mounted at /sitelog-ts. Gate: FullAccess | SiteLogAdmin.
 //   Daily  — once everyone who signed in today has signed out (from 16:00
 //            London), or at 20:00 regardless, with anyone still in shown as such.
 //   Weekly — Monday from 07:00 London, covering the previous Monday–Sunday.
@@ -205,7 +205,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (!sess) return error("Not signed in", 401, env, request);
   const tid = sess.tenantId;
   const perms = await permissionsFor(env, tid, sess.user.username);
-  if (perms.FullAccess !== "Yes") return error("Full Access only", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes") return error("Needs the SiteLog admin permission", 403, env, request);
   const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
 
   if (path === "/config" && request.method === "GET") {

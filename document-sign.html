@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Sign a document — Mostlane</title>
-  <script src="/portal-config.js?v=43"></script>
+  <script src="/portal-config.js?v=44"></script>
   <script src="auth.js"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
@@ -58,19 +58,42 @@
     let sigData = "", sctx = null, drawing = false;
     const homeHref = () => "main.html";
 
-    // Render the stored body markup (# / ## / - / --- / blank) as safe HTML.
+    // Escape, then turn **bold** into <strong> (safe: esc runs first).
+    function inl(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>"); }
+    // Render the stored body markup (# / ## / - / --- / | tables | / blank) as safe HTML.
     function renderBody(body) {
       const lines = String(body || "").split(/\r?\n/);
-      let html = "", inUl = false;
+      let html = "", inUl = false, i = 0;
       const closeUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
-      for (const raw of lines) {
-        const line = raw.replace(/\s+$/, "");
+      for (i = 0; i < lines.length; i++) {
+        const line = lines[i].replace(/\s+$/, "");
         if (!line.trim()) { closeUl(); continue; }
+        if (/^\s*\|.*\|\s*$/.test(line)) {
+          closeUl();
+          const rows = [];
+          while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+            const cells = lines[i].trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+            if (!cells.every(c => /^-+$/.test(c) || c === "")) rows.push(cells);
+            i++;
+          }
+          i--;
+          if (rows.length) {
+            html += '<table style="border-collapse:collapse;width:100%;margin:10px 0;font-size:14px;">';
+            rows.forEach((r, ri) => {
+              html += "<tr>" + r.map(c => {
+                const st = "border:1px solid #ccd5dd;padding:7px 9px;text-align:left;vertical-align:top;" + (ri === 0 ? "font-weight:700;background:#f4f7fa;" : "");
+                return "<" + (ri === 0 ? "th" : "td") + ' style="' + st + '">' + inl(c) + "</" + (ri === 0 ? "th" : "td") + ">";
+              }).join("") + "</tr>";
+            });
+            html += "</table>";
+          }
+          continue;
+        }
         if (/^---+$/.test(line.trim())) { closeUl(); html += "<hr>"; continue; }
-        if (/^#\s+/.test(line)) { closeUl(); html += "<h3>" + esc(line.replace(/^#\s+/, "")) + "</h3>"; continue; }
-        if (/^##\s+/.test(line)) { closeUl(); html += "<h4>" + esc(line.replace(/^##\s+/, "")) + "</h4>"; continue; }
-        if (/^[-•]\s+/.test(line)) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + esc(line.replace(/^[-•]\s+/, "")) + "</li>"; continue; }
-        closeUl(); html += "<p>" + esc(line) + "</p>";
+        if (/^#\s+/.test(line)) { closeUl(); html += "<h3>" + inl(line.replace(/^#\s+/, "")) + "</h3>"; continue; }
+        if (/^##\s+/.test(line)) { closeUl(); html += "<h4>" + inl(line.replace(/^##\s+/, "")) + "</h4>"; continue; }
+        if (/^[-•]\s+/.test(line)) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + inl(line.replace(/^[-•]\s+/, "")) + "</li>"; continue; }
+        closeUl(); html += "<p>" + inl(line) + "</p>";
       }
       closeUl();
       return html;

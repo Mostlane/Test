@@ -6062,6 +6062,22 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   days) lists refusals in plain English + "offered a sign-in but never confirmed it" (a
   confirm_check_in/sign_out scan with no sign-in/out from that phone within 20 min). Test
   `node --no-warnings worker/tools/test-sitelog-scanlog.mjs` (11).
+- **Sign-in / sign-out push to the owner (16 Oct 2026).** Every confirmed sign-in or sign-out
+  (`/confirm-checkin`, `/confirm-checkout`, and offline `/sync-event` replays) pushes
+  `sendToUser` → title "🟢 Ryan Diggens signed in — <site>" / "🔴 … signed out", body = company +
+  "On site now (N): name, name…" (moved-from shown on a transfer), url /sitelog.html. Hooked in the
+  `handle()` wrapper (`queueSignPush`, ctx.waitUntil — never delays the scan; refused scans send
+  nothing). Recipients: app_config `sitelog:pushnotify:<tid>` = `{enabled, recipients:[usernames]}` on
+  the MAIN DB; no row = OWNER_USERNAME only; `enabled:false` mutes. Auto sign-outs (16:00 sweep) do
+  NOT push. Test `node --no-warnings worker/tools/test-sitelog-signpush.mjs` (11).
+- **Site Log admin permission `SiteLogAdmin` (16 Oct 2026).** The office view of SiteLog (sitelog.html:
+  🟢 on site now, 🧾 timesheet emails/PDFs, 🚫 refused scans, site push) + the `/sitelog/*` admin proxy +
+  `/sitelog-ts/*` are gated **FullAccess | SiteLogAdmin** (was Full Access only). It is a SEPARATE key
+  from `SiteLog`, which stays the scanner-launch tile that links an engineer's phone — granting an
+  engineer the scanner must never expose everyone's hours. Sidebar entry "Site Log" → sitelog.html,
+  perms `["SiteLogAdmin"]`; main.html tile MAP `SiteLog:["SiteLog","SiteLogAdmin"]`. Toggle in Users
+  Admin → Sites & assets. At launch only the Full Access users (Jamie/Greg/Joe) have it — no one else
+  was granted. Added to login PERM_KEYS + portal-config slim list; portal-config `?v=44`, SW `mostlane-v145`.
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /

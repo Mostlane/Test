@@ -668,6 +668,18 @@ var init_once = __esm({
 });
 
 // src/routes/push.js
+var push_exports = {};
+__export(push_exports, {
+  ensureFeedTable: () => ensureFeedTable,
+  handle: () => handle,
+  markNotificationsReadByTag: () => markNotificationsReadByTag,
+  recordNotification: () => recordNotification,
+  remindPermission: () => remindPermission,
+  remindUser: () => remindUser,
+  resolveNotificationsByTag: () => resolveNotificationsByTag,
+  sendToPermission: () => sendToPermission,
+  sendToUser: () => sendToUser
+});
 function jr(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -771,6 +783,9 @@ async function resolveNotificationsByTag(env, tenantId, tag, outcome) {
     }
   } catch {
   }
+}
+async function markNotificationsReadByTag(env, tenantId, tag) {
+  return resolveNotificationsByTag(env, tenantId, tag, null);
 }
 async function remindUser(env, tenantId, username, payload) {
   try {
@@ -1049,9 +1064,10 @@ function toWinAnsi(s) {
   }
   return out;
 }
-function textWidth(str, size = 10) {
+function textWidth(str, size = 10, bold = false) {
   let u = 0;
-  for (const ch of toWinAnsi(str)) u += W[ch] != null ? W[ch] : 556;
+  const T3 = bold ? WB : W;
+  for (const ch of toWinAnsi(str)) u += T3[ch] != null ? T3[ch] : 556;
   return u / 1e3 * size;
 }
 function pdfStr(s) {
@@ -1089,7 +1105,7 @@ function jpegInfo(bytes) {
   }
   return { w: 1, h: 1, comps: 3 };
 }
-var PAGE_W, PAGE_H, W, WIN1252, ASCIIFY, PdfDoc;
+var PAGE_W, PAGE_H, W, WB, WIN1252, ASCIIFY, PdfDoc;
 var init_pdf = __esm({
   "src/lib/pdf.js"() {
     PAGE_W = 595;
@@ -1181,7 +1197,110 @@ var init_pdf = __esm({
       "\xA3": 556,
       "\xB7": 278,
       "\u2013": 556,
-      "\u2014": 1e3
+      "\u2014": 1e3,
+      "\u2018": 222,
+      "\u2019": 222,
+      "\u201C": 333,
+      "\u201D": 333,
+      "\u2026": 1e3,
+      "\u20AC": 556,
+      "\u2022": 350
+    };
+    WB = {
+      " ": 278,
+      "!": 333,
+      '"': 474,
+      "#": 556,
+      "$": 556,
+      "%": 889,
+      "&": 722,
+      "'": 238,
+      "(": 333,
+      ")": 333,
+      "*": 389,
+      "+": 584,
+      ",": 278,
+      "-": 333,
+      ".": 278,
+      "/": 278,
+      "0": 556,
+      "1": 556,
+      "2": 556,
+      "3": 556,
+      "4": 556,
+      "5": 556,
+      "6": 556,
+      "7": 556,
+      "8": 556,
+      "9": 556,
+      ":": 333,
+      ";": 333,
+      "=": 584,
+      "?": 611,
+      "@": 975,
+      "A": 722,
+      "B": 722,
+      "C": 722,
+      "D": 722,
+      "E": 667,
+      "F": 611,
+      "G": 778,
+      "H": 722,
+      "I": 278,
+      "J": 556,
+      "K": 722,
+      "L": 611,
+      "M": 833,
+      "N": 722,
+      "O": 778,
+      "P": 667,
+      "Q": 778,
+      "R": 722,
+      "S": 667,
+      "T": 611,
+      "U": 722,
+      "V": 667,
+      "W": 944,
+      "X": 667,
+      "Y": 667,
+      "Z": 611,
+      "a": 556,
+      "b": 611,
+      "c": 556,
+      "d": 611,
+      "e": 556,
+      "f": 333,
+      "g": 611,
+      "h": 611,
+      "i": 278,
+      "j": 278,
+      "k": 556,
+      "l": 278,
+      "m": 889,
+      "n": 611,
+      "o": 611,
+      "p": 611,
+      "q": 611,
+      "r": 389,
+      "s": 556,
+      "t": 333,
+      "u": 611,
+      "v": 556,
+      "w": 778,
+      "x": 556,
+      "y": 556,
+      "z": 500,
+      "\xA3": 556,
+      "\xB7": 278,
+      "\u2013": 556,
+      "\u2014": 1e3,
+      "\u2018": 278,
+      "\u2019": 278,
+      "\u201C": 500,
+      "\u201D": 500,
+      "\u2026": 1e3,
+      "\u20AC": 556,
+      "\u2022": 350
     };
     WIN1252 = {
       "\u20AC": 128,
@@ -1289,7 +1408,7 @@ var init_pdf = __esm({
         const font = opt.bold ? "/F2" : "/F1";
         const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
         let tx = x;
-        if (opt.alignRight) tx = x - textWidth(str, size);
+        if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
         const y = this._page.h - yTop;
         this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
         return this;
@@ -1310,8 +1429,8 @@ var init_pdf = __esm({
         const font = opt.bold ? "/F2" : "/F1";
         const col = opt.grey ? "0.45 g " : "";
         let tx = x;
-        if (opt.alignRight) tx = x - textWidth(str, size);
-        else if (opt.center) tx = x - textWidth(str, size) / 2;
+        if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
+        else if (opt.center) tx = x - textWidth(str, size, !!opt.bold) / 2;
         const y = pg.h - yTop;
         pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
         return this;
@@ -9233,9 +9352,89 @@ async function handle7(request, env, ctx) {
     });
     if (ctx && ctx.waitUntil) ctx.waitUntil(p);
     else await p;
+    if (out.status === "checked_in" || out.status === "checked_out") queueSignPush(env, ctx, body, request, out);
+    return res;
+  }
+  if (u0.pathname === "/sync-event" && request.method === "POST" && env.SITELOG_DB) {
+    let body = {};
+    try {
+      body = await request.clone().json();
+    } catch (e) {
+    }
+    const res = await handleInner(request, env, ctx);
+    let out = {};
+    try {
+      out = await res.clone().json();
+    } catch (e) {
+    }
+    if (out.ok && (out.status === "checked_in" || out.status === "checked_out")) queueSignPush(env, ctx, body, request, out);
     return res;
   }
   return handleInner(request, env, ctx);
+}
+function queueSignPush(env, ctx, body, request, out) {
+  const p = sendSignPush(env, body, request, out).catch(() => {
+  });
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+}
+async function signPushRecipients(env, tid = 1) {
+  const owner = env.OWNER_USERNAME || "Jamie Line";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sitelog:pushnotify:" + tid).first();
+    if (row && row.value) {
+      const cfg = JSON.parse(row.value);
+      if (cfg.enabled === false) return [];
+      if (Array.isArray(cfg.recipients) && cfg.recipients.length) return cfg.recipients.map(String);
+    }
+  } catch (e) {
+  }
+  return [owner];
+}
+function shortName(first, last) {
+  return [first, last].filter(Boolean).join(" ").trim() || "Someone";
+}
+async function buildSignPush(env, { deviceToken, status, site, transferFrom, visitId }) {
+  const db = env.SITELOG_DB;
+  let person = null;
+  if (deviceToken) {
+    person = await db.prepare(
+      "SELECT p.id, p.first_name, p.last_name, p.company FROM devices d JOIN people p ON p.id = d.person_id WHERE d.device_token = ? LIMIT 1"
+    ).bind(deviceToken).first();
+  }
+  let siteName = site || null;
+  if (!siteName && visitId) {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE id = ?").bind(visitId).first();
+    siteName = v ? v.site_code : null;
+  }
+  if (!siteName && person && status === "checked_out") {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE person_id = ? ORDER BY COALESCE(check_out_at, check_in_at) DESC LIMIT 1").bind(person.id).first();
+    siteName = v ? v.site_code : null;
+  }
+  const who = person ? shortName(person.first_name, person.last_name) : "Someone";
+  const co = person && person.company ? " (" + person.company + ")" : "";
+  const { results } = await db.prepare(
+    "SELECT p.first_name, p.last_name FROM visits v JOIN people p ON p.id = v.person_id WHERE v.check_out_at IS NULL ORDER BY v.check_in_at"
+  ).all();
+  const names = [...new Set((results || []).map((r) => shortName(r.first_name, r.last_name)))];
+  const onSite = names.length ? "On site now (" + names.length + "): " + names.slice(0, 8).join(", ") + (names.length > 8 ? " +" + (names.length - 8) + " more" : "") : "Nobody on site now.";
+  const inn = status === "checked_in";
+  const title = inn ? "\u{1F7E2} " + who + " signed in" + (siteName ? " \u2014 " + siteName : "") : "\u{1F534} " + who + " signed out" + (siteName ? " \u2014 " + siteName : "");
+  const lead = inn && transferFrom ? who + co + " moved from " + transferFrom + "." : who + co + (inn ? " is on site." : " has left.");
+  return { title, body: lead + "\n" + onSite, url: "/sitelog.html", tag: "sitelog:" + (visitId || deviceToken || "") + ":" + (inn ? "in" : "out") + ":" + Date.now() };
+}
+async function sendSignPush(env, body, request, out) {
+  if (!env.DB) return;
+  const recipients = await signPushRecipients(env, 1);
+  if (!recipients.length) return;
+  const payload = await buildSignPush(env, {
+    deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
+    status: out.status,
+    site: out.site || body.site || null,
+    transferFrom: out.transferFrom || null,
+    visitId: body.visitId || null
+  });
+  const { sendToUser: sendToUser2 } = await Promise.resolve().then(() => (init_push(), push_exports));
+  for (const u of recipients) await sendToUser2(env, 1, u, payload);
 }
 async function handleInner(request, env, ctx) {
   const url = new URL(request.url);
@@ -28826,6 +29025,8 @@ var PERMISSION_KEYS = [
   // access to the H&S planning tool
   "SiteLog",
   // access to SiteLog (site check-in/attendance)
+  "SiteLogAdmin",
+  // SiteLog office view: who's on site, timesheets, sites, scan log
   "OfficeClock",
   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",
@@ -30436,7 +30637,7 @@ async function handle17(request, env, ctx, url, sess) {
     if (!sess) sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
     const perms2 = await permissionsFor(env, sess.tenantId, sess.user.username);
-    if (perms2.SiteLog !== "Yes" && perms2.FullAccess !== "Yes")
+    if (perms2.SiteLog !== "Yes" && perms2.SiteLogAdmin !== "Yes" && perms2.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
     if (!env.PORTAL_BRIDGE_SECRET)
       return json({ ok: true, url: SCAN_URL, linked: false }, {}, env, request);
@@ -30454,8 +30655,8 @@ async function handle17(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes")
-    return error("Forbidden \u2014 SiteLog admin data needs Full Access", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes")
+    return error("Forbidden \u2014 SiteLog admin data needs the SiteLog admin permission", 403, env, request);
   if (!env.SITELOG_ADMIN_SECRET)
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
   const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
@@ -40842,18 +41043,47 @@ function fmtWhen3(iso) {
     return String(iso || "");
   }
 }
-function wrap6(str, size, maxW) {
+function wrap6(str, size, maxW, bold) {
   const words = String(str == null ? "" : str).split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
     const t = cur ? cur + " " + w : w;
-    if (textWidth(t, size) > maxW && cur) {
+    if (textWidth(t, size, !!bold) > maxW && cur) {
       lines.push(cur);
       cur = w;
     } else cur = t;
   }
   if (cur) lines.push(cur);
   return lines.length ? lines : [""];
+}
+function boldWords(str) {
+  const out = [];
+  String(str == null ? "" : str).split("**").forEach((chunk, i) => {
+    const bold = i % 2 === 1;
+    chunk.split(/\s+/).forEach((w) => {
+      if (w !== "") out.push({ w, bold });
+    });
+  });
+  return out;
+}
+function wrapWords(words, size, maxW, force) {
+  const lines = [];
+  let cur = [], curW = 0;
+  const sp = textWidth(" ", size);
+  for (const tok of words) {
+    const ww = textWidth(tok.w, size, !!(force || tok.bold));
+    const add = cur.length ? sp + ww : ww;
+    if (cur.length && curW + add > maxW) {
+      lines.push(cur);
+      cur = [tok];
+      curW = ww;
+    } else {
+      cur.push(tok);
+      curW += add;
+    }
+  }
+  if (cur.length) lines.push(cur);
+  return lines.length ? lines : [[]];
 }
 function buildSignDocPdf(docObj = {}, sig = {}) {
   const doc = new PdfDoc();
@@ -40866,7 +41096,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch {
     y = 96;
   }
-  for (const ln of wrap6(String(docObj.title || "Document"), 20, W6)) {
+  for (const ln of wrap6(String(docObj.title || "Document"), 20, W6, true)) {
     doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
     y += 26;
   }
@@ -40888,11 +41118,72 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y = TOP;
     }
   };
+  function emitWords(x, text, size, opt = {}, lh) {
+    lh = lh || size + 4.5;
+    const lines2 = wrapWords(boldWords(text), size, R - x, opt.bold);
+    for (const ln of lines2) {
+      need(lh);
+      let tx = x;
+      for (let i = 0; i < ln.length; i++) {
+        const tok = ln[i];
+        const b = opt.bold || tok.bold;
+        doc.text(tx, y, tok.w, { size, bold: b, color: opt.color, grey: opt.grey });
+        tx += textWidth(tok.w, size, b) + textWidth(" ", size);
+      }
+      y += lh;
+    }
+  }
+  function emitTable(rows) {
+    if (!rows.length) return;
+    const ncol = Math.max(...rows.map((r) => r.length));
+    const colW = W6 / ncol, pad = 5, csize = 9.5, clh = 13;
+    const drawRow = (cells, header4) => {
+      const wrapped = [];
+      let maxLines = 1;
+      for (let c = 0; c < ncol; c++) {
+        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2, header4);
+        wrapped.push(w);
+        if (w.length > maxLines) maxLines = w.length;
+      }
+      const rh = maxLines * clh + pad * 2;
+      need(rh);
+      for (let c = 0; c < ncol; c++) {
+        const cx = L + c * colW;
+        doc.rect(cx, y, colW, rh, { stroke: [0.6, 0.65, 0.7], lw: 0.5 });
+        let ty = y + pad + csize;
+        for (const ln of wrapped[c]) {
+          let tx = cx + pad;
+          for (const tok of ln) {
+            const b = header4 || tok.bold;
+            doc.text(tx, ty, tok.w, { size: csize, bold: b });
+            tx += textWidth(tok.w, csize, b) + textWidth(" ", csize);
+          }
+          ty += clh;
+        }
+      }
+      y += rh;
+    };
+    drawRow(rows[0], true);
+    for (let i = 1; i < rows.length; i++) drawRow(rows[i], false);
+    y += 8;
+  }
   const lines = String(docObj.body || "").split(/\r?\n/);
-  for (const raw of lines) {
-    const line2 = raw.replace(/\s+$/, "");
+  for (let li = 0; li < lines.length; li++) {
+    const line2 = lines[li].replace(/\s+$/, "");
     if (!line2.trim()) {
       y += 8;
+      continue;
+    }
+    if (/^\|.*\|$/.test(line2.trim())) {
+      const rows = [];
+      while (li < lines.length && /^\s*\|.*\|\s*$/.test(lines[li])) {
+        const cells = lines[li].trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+        if (!cells.every((c) => /^-+$/.test(c) || c === "")) rows.push(cells);
+        li++;
+      }
+      li--;
+      need(24);
+      emitTable(rows);
       continue;
     }
     if (/^---+$/.test(line2.trim())) {
@@ -40902,44 +41193,34 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       continue;
     }
     if (/^#\s+/.test(line2)) {
-      const t = line2.replace(/^#\s+/, "");
-      need(24);
+      need(26);
       y += 6;
-      for (const ln of wrap6(t, 15, W6)) {
-        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY4 });
-        y += 20;
-      }
+      emitWords(L, line2.replace(/^#\s+/, ""), 15, { bold: true, color: NAVY4 }, 20);
       y += 2;
       continue;
     }
     if (/^##\s+/.test(line2)) {
-      const t = line2.replace(/^##\s+/, "");
       need(20);
       y += 4;
-      for (const ln of wrap6(t, 12, W6)) {
-        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY4 });
-        y += 16;
-      }
+      emitWords(L, line2.replace(/^##\s+/, ""), 12, { bold: true, color: NAVY4 }, 16);
       continue;
     }
     if (/^[-•]\s+/.test(line2)) {
-      const t = line2.replace(/^[-•]\s+/, "");
-      const parts2 = wrap6(t, 10.5, W6 - 16);
-      need(parts2.length * 15);
+      const parts = wrapWords(boldWords(line2.replace(/^[-•]\s+/, "")), 10.5, W6 - 16);
+      need(parts.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
-      for (let i = 0; i < parts2.length; i++) {
-        doc.text(L + 16, y, parts2[i], { size: 10.5 });
+      for (const ln of parts) {
+        let tx = L + 16;
+        for (const tok of ln) {
+          doc.text(tx, y, tok.w, { size: 10.5, bold: tok.bold });
+          tx += textWidth(tok.w, 10.5, tok.bold) + textWidth(" ", 10.5);
+        }
         y += 15;
       }
       y += 2;
       continue;
     }
-    const parts = wrap6(line2, 10.5, W6);
-    need(parts.length * 15);
-    for (const ln of parts) {
-      doc.text(L, y, ln, { size: 10.5 });
-      y += 15;
-    }
+    emitWords(L, line2, 10.5, {}, 15);
     y += 5;
   }
   y += 12;
@@ -45317,7 +45598,7 @@ async function handle39(request, env, ctx, url, sess) {
   if (!sess) return error("Not signed in", 401, env, request);
   const tid = sess.tenantId;
   const perms = await permissionsFor(env, tid, sess.user.username);
-  if (perms.FullAccess !== "Yes") return error("Full Access only", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes") return error("Needs the SiteLog admin permission", 403, env, request);
   const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
   if (path === "/config" && request.method === "GET") {
     return json({

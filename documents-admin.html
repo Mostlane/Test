@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Documents — Mostlane</title>
   <link rel="stylesheet" href="/portal.css?v=1">
-  <script src="/portal-config.js?v=43"></script>
+  <script src="/portal-config.js?v=44"></script>
   <script src="auth.js"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
@@ -64,7 +64,10 @@
     <div class="card">
       <div class="row" style="justify-content:space-between;">
         <h2 style="margin:0;">Document library</h2>
-        <button class="btn small" id="newBtn">＋ New document</button>
+        <div class="row" style="gap:8px;">
+          <a class="btn ghost small" href="/contract-builder.html" title="Build a new starter's employment contract">📝 Build a contract</a>
+          <button class="btn small" id="newBtn">＋ New document</button>
+        </div>
       </div>
       <p class="sub">Prepared documents in the Mostlane house style. Select one and send it to the people who need to sign. <b>Preview (blank)</b> shows the unsigned version (your signature only) — to see a completed copy with the recipient's signature, use <b>Signed → View</b>.</p>
       <div id="libBox"><p class="muted">Loading…</p></div>

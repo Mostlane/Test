@@ -1150,7 +1150,7 @@
           { label: "Where's everyone", href: "engineers-live.html", icon: "jobs", perms: ["SLAAdmin", "WhereEveryone"], match: ["engineers-live.html"] },
           { label: "Sites", href: "sites.html", icon: "sites", perms: ["Sites", "AddSite"] },
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
-          { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
+          { label: "Site Log", href: "sitelog.html", icon: "sitelog", perms: ["SiteLogAdmin"] },
           { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
           { label: "Projects", href: "projects-live.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], match: ["projects-live.html", "project-new.html", "project-hub.html", "projects.html", "projects-admin.html"] },
           // PO + finance-capture tools are office-only — field engineers raise POs
@@ -1791,7 +1791,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD","StaffType","ClientOrg","ClientRole","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","SiteLogAdmin","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes","YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD","StaffType","ClientOrg","ClientRole","VehicleAssigned","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               // Keep the client wall's keys fresh (login set them; refresh here in
