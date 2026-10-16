@@ -25,7 +25,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!sess) sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
     const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-    if (perms.SiteLog !== "Yes" && perms.FullAccess !== "Yes")
+    if (perms.SiteLog !== "Yes" && perms.SiteLogAdmin !== "Yes" && perms.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
 
     // Bridge not configured yet → plain scanner link still works (manual register).
@@ -47,8 +47,8 @@ export async function handle(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes")
-    return error("Forbidden — SiteLog admin data needs Full Access", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes")
+    return error("Forbidden — SiteLog admin data needs the SiteLog admin permission", 403, env, request);
   if (!env.SITELOG_ADMIN_SECRET)
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
 
