@@ -1520,9 +1520,22 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   + /site-files. **Fareham sites live under client `fbc`, numbered 3001–3024** (3001
   Civic Offices / 3002 Civic Way Shoppers Car Park pre-existed from the concurrent
   project; 3003–3024 created 12 Aug to give all 24 buildings a portal home — spare
-  `9998` Hook Recreation Ground is the other project's, untouched). NB the Fareham
-  chart page (fareham.html) still keys on (scheme=fareham, code=0001–0024) — the
-  `site_number` link is only the bridge to Site Documents.
+  `9998` Hook Recreation Ground is the other project's). **The Fareham/FBC chart
+  keys on (scheme=fareham, code = the 3xxx site_number)** — code === site_number for
+  every FBC store (the earlier "0001–0024" note was stale; live data is 3001–3024 +
+  3035/3036/3037/9998). **ALL FBC sites auto-add to the compliance chart (16 Oct
+  2026):** `/compliance/stores?scheme=fareham` GET self-heals like the projects
+  scheme — INSERT-OR-IGNORE a `compliance_stores` row (code=site_number, name+postcode
+  from the site, due `{}`) for every active `client='fbc'` site, so a newly-created
+  FBC site appears on the chart on its own (no manual add). **Cert mix-up fix (16 Oct
+  2026):** FBC sites were originally numbered non-alphabetically but re-created on the
+  portal alphabetically, so 5 stores (3007/3015/3017/3021/3024) held another site's
+  EM certs. Re-filed in D1 by moving each `compliance_files` row (by id) + its store
+  `due` dates to the store whose NAME matches the cert's filename; the orphaned
+  "Portchester Castle Toilets" certs went to a NEW chart store **3037** (its FBC site
+  already existed, just wasn't on the chart). The duplicate **"Burridge Village Hall"
+  site 3038** (empty — no jobs/certs; it had corrupted the SiteLog geofence with wrong
+  coords) was DEACTIVATED and the geofence repaired to 3017's coords.
   **Compliance-check WORKLIST (compliance-review.html + `compliance_review` table,
   Aug 2026):** batch-runs the EICR verifier against every stored **5-year (EICR)**
   cert and builds a tick-off worklist. The verification runs IN THE BROWSER using the
