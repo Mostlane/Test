@@ -87,6 +87,11 @@
           <div class="f"><label for="employeeName">Full name</label><input type="text" id="employeeName"></div>
           <div class="f"><label for="employeeAddress">Home address</label><textarea id="employeeAddress" rows="3"></textarea></div>
           <div class="f"><label for="startDate">Start date</label><input type="date" id="startDate"></div>
+          <div class="f" id="issueDateRow" style="display:none;">
+            <label for="issueDate">PPE issue date</label>
+            <input type="date" id="issueDate">
+            <span class="hint">The date shown on the PPE record (its "Dated" line and Issue Date column). Defaults to the start date — set it to the day the equipment is handed over.</span>
+          </div>
         </fieldset>
 
         <fieldset class="contract-only">
@@ -177,7 +182,6 @@
     }
     function toast(m) { try { if (window.MLUI && MLUI.toast) return MLUI.toast(m); } catch {} alert(m); }
     const MC = window.MLContract;
-    const todayStr = () => { try { return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); } catch { return new Date().toISOString().slice(0, 10); } };
     const uname = u => u.Username || u.username || "";
     const dispName = u => (u.Name || ((u.FirstName || u.first_name || "") + " " + (u.LastName || u.last_name || "")).trim() || uname(u));
 
@@ -198,6 +202,7 @@
 
     function syncDocs() {
       document.querySelectorAll(".contract-only").forEach(f => { f.style.display = state.sendContract ? "" : "none"; });
+      const ir = g("issueDateRow"); if (ir) ir.style.display = state.sendPpe ? "" : "none";
     }
     function renderSend() {
       const docs = MC.selectedDocs(state);
@@ -221,7 +226,13 @@
 
     g("form").addEventListener("input", e => {
       const el = e.target; if (!el.id || !(el.id in MC.DEFAULTS)) return;
+      const prev = state[el.id];
       state[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      // PPE issue date follows the start date until the user sets it themselves.
+      if (el.id === "startDate" && (!state.issueDate || state.issueDate === prev)) {
+        state.issueDate = state.startDate;
+        const di = g("issueDate"); if (di) di.value = state.issueDate;
+      }
       syncDeps(); rateHint(); render(); save();
     });
     g("form").addEventListener("submit", e => e.preventDefault());
@@ -243,7 +254,7 @@
 
     g("btnReset").addEventListener("click", () => {
       state = Object.assign({}, MC.DEFAULTS);
-      state.issuerName = ME; state.issueDate = todayStr();
+      state.issuerName = ME;
       g("pickUser").value = ""; recipient = "";
       fillForm(); syncDeps(); rateHint(); render(); save();
       g("status").textContent = "Details cleared. Standard Mostlane options restored.";
@@ -286,7 +297,8 @@
       if (!me.ok || me.user.FullAccess !== "Yes") { g("denied").style.display = "block"; return; }
       g("main").style.display = "block";
       ME = me.user.Name || ((me.user.FirstName || "") + " " + (me.user.LastName || "")).trim() || "";
-      state.issuerName = ME; state.issueDate = todayStr();
+      state.issuerName = ME;
+      if (!state.issueDate && state.startDate) state.issueDate = state.startDate;
       fillForm(); syncDeps(); rateHint(); render();
       // Issuer signature present?
       try { const sg = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!(sg && sg.has); } catch {}

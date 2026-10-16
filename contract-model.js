@@ -39,11 +39,13 @@
     // Which documents to send (the "Employee Documents" picker). Shared details
     // from the contract pre-fill them; each goes out as its own signing request.
     sendContract: true, sendVan: false, sendPpe: false,
-    // Auto-filled by the page (issuer = the logged-in sender, issue date = today).
+    // issuer = the logged-in sender (auto). issueDate = the date on the PPE
+    // record, set by the user and defaulting to the start date.
     issuerName: "", issueDate: ""
   };
   var LABELS = {
     employeeName: "Employee name", employeeAddress: "Employee address", startDate: "Start date",
+    issueDate: "Issue date",
     jobTitle: "Job title", hourlyRate: "Hourly rate", duties: "Duties",
     workStart: "Start time", workEnd: "Finish time", workDays: "Working days", lunchMins: "Lunch minutes",
     employeeNotice: "Weeks", holidayDays: "Holiday days", travelMins: "Minutes",
@@ -56,7 +58,7 @@
   function val(state, k) {
     var v = state[k];
     if (v === "" || v == null) return null;
-    if (k === "startDate") return fmtDate(v);
+    if (k === "startDate" || k === "issueDate") return fmtDate(v);
     if (k === "hourlyRate") { var n = Number(v); return isNaN(n) ? String(v) : n.toFixed(2); }
     if (k === "employeeAddress") return String(v).split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean).join(", ");
     return String(v).trim();
