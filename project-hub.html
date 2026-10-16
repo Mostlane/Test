@@ -34,6 +34,10 @@
     .todo .lbl small { display:block; font-weight:400; color:#8a97a6; font-size:12px; }
     .todo .act { display:flex; gap:6px; flex-wrap:wrap; }
     .pill { display:inline-flex; align-items:center; gap:6px; background:#eef4ff; color:var(--brand); border:1px solid #cdddf5; border-radius:999px; padding:5px 10px; font-size:12.5px; font-weight:600; margin:2px 4px 2px 0; }
+    .pillwrap { display:inline-flex; align-items:center; margin:2px 4px 2px 0; }
+    .pillwrap .pill { margin:0; }
+    .pill-x { margin-left:4px; border:1px solid #f0c9c9; background:#fff; color:#c0392b; cursor:pointer; font-size:12px; line-height:1; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; padding:0; }
+    .pill-x:hover { background:#fde2e2; }
     .money { display:flex; gap:12px; flex-wrap:wrap; }
     .stat { flex:1 1 120px; background:#f8fafc; border:1px solid var(--line); border-radius:11px; padding:10px 12px; }
     .stat .n { font-size:19px; font-weight:800; color:#0f172a; } .stat .l { font-size:11.5px; color:#6b7a90; font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
@@ -747,18 +751,38 @@
       if ((L.ramsIds || []).length) { try { ((await authFetch("/hs/docs?type=rams").then(r => r.json())).docs || []).forEach(x => ramsBy[x.id] = x); } catch {} }
       if (L.programmeId) { try { ((await authFetch("/prog/list").then(r => r.json())).programmes || []).forEach(x => progBy[x.id] = x); } catch {} }
       if (L.cppRef && /^HSD-/.test(String(L.cppRef))) { try { ((await authFetch("/hs/docs?type=cpp").then(r => r.json())).docs || []).forEach(x => cppBy[x.id] = x); } catch {} }
+      // ✕ unlink control (managers only) — removes the LINK, never the document
+      // itself. Reuses the /project/link remove ops the worker already supports.
+      const unlinkBtn = body => CAN ? `<button type="button" class="pill-x" title="Unlink from this project" data-unlink='${esc(JSON.stringify(body))}'>✕</button>` : "";
+      const wrap = (pill, body) => `<span class="pillwrap">${pill}${unlinkBtn(body)}</span>`;
       const filePill = id => { const f = docById[id]; return f ? `<a class="pill" href="#" data-docopen="${esc(f.url)}" data-docname="${esc(f.title || "File")}" style="text-decoration:none;">📎 ${esc(f.title || "File")}</a>` : ""; };
       for (const key of keys) {
         const line = g(key + "RefLine"); const pills = [];
-        if (key === "programme" && L.programmeId) pills.push(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`);
-        if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`));
-        if (key === "cpp" && L.cppRef && /^HSD-/.test(String(L.cppRef))) pills.push(`<a class="pill" href="/cpp-builder.html?doc=${encodeURIComponent(L.cppRef)}" style="text-decoration:none;">📄 ${esc((cppBy[L.cppRef] && (cppBy[L.cppRef].ref || cppBy[L.cppRef].site)) || "CPP")}</a>`);
-        (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(p); });
+        if (key === "programme" && L.programmeId) pills.push(wrap(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`, { kind: "programme", value: "" }));
+        if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(wrap(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`, { kind: "rams-remove", value: id })));
+        if (key === "cpp" && L.cppRef && /^HSD-/.test(String(L.cppRef))) pills.push(wrap(`<a class="pill" href="/cpp-builder.html?doc=${encodeURIComponent(L.cppRef)}" style="text-decoration:none;">📄 ${esc((cppBy[L.cppRef] && (cppBy[L.cppRef].ref || cppBy[L.cppRef].site)) || "CPP")}</a>`, { kind: "cpp", value: "" }));
+        (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(wrap(p, { kind: "doc-file-remove", docKey: key, value: id })); });
         line.innerHTML = pills.length ? " " + pills.join(" ") : "";
       }
       document.querySelectorAll("[data-docopen]").forEach(a => a.onclick = e => { e.preventDefault();
         if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.docopen, fetchUrl: a.dataset.docopen, name: a.dataset.docname, downloadUrl: a.dataset.docopen });
         else window.open(a.dataset.docopen, "_blank");
+      });
+      document.querySelectorAll("[data-unlink]").forEach(btn => btn.onclick = async e => {
+        e.preventDefault(); e.stopPropagation();
+        let body; try { body = JSON.parse(btn.dataset.unlink); } catch { return; }
+        const ok = window.MLUI ? await MLUI.confirm("Unlink this document from the project? The document itself isn't deleted — it stays in its own area / Project Documents.", { title: "Unlink document", okLabel: "Unlink", danger: true }) : confirm("Unlink this document from the project?");
+        if (!ok) return;
+        btn.disabled = true;
+        try {
+          const r = await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ id: PID }, body)) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok || !j.ok) throw new Error((j && j.error) || "Failed");
+          await loadProject();
+        } catch (err) {
+          btn.disabled = false;
+          if (window.MLUI && MLUI.toast) MLUI.toast("Couldn't unlink — try again"); else alert("Couldn't unlink — try again");
+        }
       });
     }
 

@@ -3971,6 +3971,15 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   A required doc's to-do auto-ticks on its portal link OR `docFiles[key].length`;
   /project/doc-delete strips a deleted id from every `docFiles[*]`. Linked
   records + files show as pills per to-do row (`loadDocRefs`, open in docviewer).
+  **Unlink (Oct 2026):** each attached pill (programme/RAMS/CPP record OR an
+  attached file) carries an **✕ Unlink** control for managers (`CAN`) — a wrong
+  attachment is removed from the hub itself, no DB edit needed. It reuses the
+  /project/link remove ops the worker already had — programme/CPP record →
+  `{kind:"programme"|"cpp", value:""}` (clears programmeId/cppRef), RAMS record →
+  `{kind:"rams-remove", value:id}`, file → `{kind:"doc-file-remove", docKey, value:id}`
+  — then `loadProject()` re-renders (pill gone, the required-doc to-do flips back to
+  outstanding). Unlink NEVER deletes the underlying document (the file stays in
+  Project Documents; the programme/RAMS/CPP record stays in its own area).
   **Uploaded files are project_files, so they already surface to engineers in
   Site Documents** (the `/sla/site/docs` "Project Documents" injection) on the
   site-folder AND on portal jobs — portal-built RAMS/programmes are rendered
