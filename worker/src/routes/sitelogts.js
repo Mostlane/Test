@@ -212,6 +212,19 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, config: await getConfig(env, tid), sent: (await readKV(env, tid, SENT_KEY(tid))) || {},
       emailConfigured: !!(env.RESEND_API_KEY || env.RESET_EMAIL_WEBHOOK), sitelogConnected: !!env.SITELOG_DB }, {}, env, request);
   }
+  // The same people/visits the emailed PDF is built from, as JSON for the
+  // portal's timesheet view — so the screen and the email always agree.
+  if (path === "/data" && request.method === "GET") {
+    const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
+    const qd = url.searchParams.get("date") || "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
+    const per = periodFor(k, d);
+    let people;
+    try { people = await loadPeriod(env, per.from, per.to); }
+    catch (e) { return error(e.message || "SiteLog unavailable", 503, env, request); }
+    return json({ ok: true, period: per, today: london().key,
+      people: people.map(p => Object.assign({}, p, { totals: personTotals(p) })) }, {}, env, request);
+  }
   const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
   if (path === "/config" && request.method === "POST") {
     const cur = await getConfig(env, tid);
