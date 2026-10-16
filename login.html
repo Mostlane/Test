@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=42"></script>
+  <script src="/portal-config.js?v=43"></script>
   <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -93,6 +93,15 @@
     function safeLanding(lp) {
       return (lp && typeof lp === "string" && /^[a-z0-9._-]+\.html(\?|#|$)/i.test(lp)) ? lp : null;
     }
+    // Where a CLIENT login lands. A "compliance" client (compliance chart only,
+    // no jobs) goes straight to its org's compliance page; every other client
+    // goes to the walled jobs portal. Extend the org→page map as more clients
+    // get a compliance-only login.
+    function mlClientLanding(role, org) {
+      role = String(role || "").toLowerCase(); org = String(org || "").toLowerCase();
+      if (role === "compliance") return ({ fbc: "fareham.html" })[org] || "compliance.html";
+      return "client-home.html";
+    }
     // Send the user to their chosen landing page (per-user, from /prefs),
     // falling back to the guided My Day (Story) or the main menu. A forced
     // password change always wins.
@@ -102,7 +111,11 @@
       // menu, never a saved landing-page pref (which could point at a staff page).
       try {
         var st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
-        if (st === "client") { window.location.href = "client-home.html"; return; }
+        if (st === "client") {
+          var cr = sessionStorage.getItem("mostlaneClientRole") || localStorage.getItem("mostlaneClientRole") || "";
+          var co = sessionStorage.getItem("mostlaneClientOrg") || localStorage.getItem("mostlaneClientOrg") || "";
+          window.location.href = mlClientLanding(cr, co); return;
+        }
       } catch (e) {}
       // Field users (SLA/jobs, not admin) land in the engineer app; office &
       // admins get the main menu. Reads the permissions just cached at login.
@@ -159,8 +172,9 @@
         var d = await r.json().catch(function () { return {}; });
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
-          // A client login always resumes into the walled client portal.
-          if (d.user && d.user.StaffType === "client") { location.replace("client-home.html"); return; }
+          // A client login always resumes into its walled portal (compliance
+          // chart for a compliance-only client, else the jobs portal).
+          if (d.user && d.user.StaffType === "client") { location.replace(mlClientLanding(d.user.ClientRole, d.user.ClientOrg)); return; }
           var fb = (window.mlIsFieldUser && window.mlIsFieldUser(d.user)) ? "route.html" : "main.html";
           var lp = null;
           try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}
@@ -274,6 +288,9 @@ if (!user || !user.Username) {
         // Per-scheme compliance access (none|view|download|edit) for the four
         // compliance pages — each page reads this to decide view/download/edit.
         set('mostlaneComplianceAccess', JSON.stringify(user.ComplianceAccess || {}));
+        // Client routing + the client wall both read these.
+        set('mostlaneClientOrg', user.ClientOrg || '');
+        set('mostlaneClientRole', user.ClientRole || '');
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
        // Cache the COMPLETE set of permission flags so the sidebar and menu
@@ -284,7 +301,7 @@ if (!user || !user.Username) {
          "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan",
          "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground","Programmes",
          "YardGate","YardGateAnywhere","EicrCheck","Chapplins","CableCalc","WhereEveryone","StaffRecords","CPD",
-         "StaffType","VehicleAssigned","FirstName","LastName"];
+         "StaffType","ClientOrg","ClientRole","VehicleAssigned","FirstName","LastName"];
        const perms = {};
        PERM_KEYS.forEach(function (k) { perms[k] = user[k]; });
 

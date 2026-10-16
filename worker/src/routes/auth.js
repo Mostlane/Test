@@ -292,6 +292,11 @@ function shapeUser(u, perms) {
     StaffType: staffTypeOf(u),
     // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
     ClientOrg: clientOrgOf(u),
+    // What a client login may see: "compliance" = that org's compliance chart
+    // ONLY (no jobs portal), else "jobs" = the full client jobs portal (which
+    // also includes the compliance chart). "" for staff. Default = "jobs" so any
+    // pre-existing client keeps the jobs portal it had.
+    ClientRole: clientRoleOf(u),
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
@@ -320,6 +325,13 @@ function clientOrgOf(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
     return (p && p.staffType === "client" && p.clientOrg) ? String(p.clientOrg).toLowerCase() : "";
+  } catch { return ""; }
+}
+function clientRoleOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
+    if (!p || p.staffType !== "client") return "";
+    return p.clientRole === "compliance" ? "compliance" : "jobs";
   } catch { return ""; }
 }
 

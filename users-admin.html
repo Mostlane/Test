@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=42"></script>
+  <script src="/portal-config.js?v=43"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -320,7 +320,12 @@
           <div id="clientOrgWrap" style="display:none;">
             <label>Client organisation</label>
             <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's own jobs + compliance chart. No staff access, no financial info.</div>
+            <label style="margin-top:8px;">What can they see</label>
+            <select id="f_clientRole">
+              <option value="compliance">Compliance chart only (no jobs)</option>
+              <option value="jobs">Jobs portal + compliance chart</option>
+            </select>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's data only. No staff access, no financial info. "Compliance chart only" hides jobs entirely — they land straight on the compliance chart.</div>
           </div>
         </div>
       </div>
@@ -1111,6 +1116,7 @@
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
       // Client org picker: shown only for a client account.
       if (g("f_clientOrg")) g("f_clientOrg").value = (user?.ClientOrg || user?.Profile?.clientOrg || "fbc");
+      if (g("f_clientRole")) g("f_clientRole").value = (user?.ClientRole || user?.Profile?.clientRole || "compliance");
       syncClientOrg();
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
@@ -1226,8 +1232,10 @@
       // read-only compliance access from the org).
       if (profile.staffType === "client") {
         profile.clientOrg = (g("f_clientOrg") && g("f_clientOrg").value) || "fbc";
+        profile.clientRole = (g("f_clientRole") && g("f_clientRole").value === "jobs") ? "jobs" : "compliance";
       } else {
         delete profile.clientOrg;
+        delete profile.clientRole;
       }
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
@@ -1281,7 +1289,7 @@
     // A Client (external) login isn't a saved STAFF preset, but it must always be
     // offerable from the get-go — so it's appended to the role list regardless of
     // the server presets. staffType "client" + a clientOrg wall the account.
-    const CLIENT_ROLE = { id: "client", label: "Client (external)", sub: "Client login — raise jobs + read-only compliance", staffType: "client", fullAccess: false, perms: [] };
+    const CLIENT_ROLE = { id: "client", label: "Client (external)", sub: "External login — read-only compliance chart (jobs optional)", staffType: "client", fullAccess: false, perms: [] };
     // The wizard uses the OWNER-EDITED server presets (PRESETS) when available,
     // falling back to the built-in defaults so it always works.
     function wizRoles() {
@@ -1368,7 +1376,7 @@
           + wizInput("Start date", "startDate", d.startDate, "date");
       } else if (st.id === "role") {
         const isClient = wizRole(W.role).staffType === "client";
-        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role${isClient ? " — a client gets a walled external login (raise jobs + read-only compliance charts, no financials)." : " — it sets sensible permissions you can fine-tune on the next step."}</div>`
+        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role${isClient ? " — a client gets a walled external login (read-only compliance chart; jobs optional, no financials)." : " — it sets sensible permissions you can fine-tune on the next step."}</div>`
           + wizRoles().map(pr =>
             `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === pr.id ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
                <input type="radio" name="wizRole" value="${esc(pr.id)}" ${W.role === pr.id ? "checked" : ""} style="width:auto;margin-top:3px;">
@@ -1377,13 +1385,17 @@
              ? `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Client organisation</label>
                 <select id="wiz_clientOrg" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
                   <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option></select>
-                <div style="font-size:12px;color:#64748b;margin-top:4px;">They'll see only this client's jobs and compliance charts.</div>`
+                <label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">What can they see</label>
+                <select id="wiz_clientRole" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
+                  <option value="compliance"${(W.clientRole || "compliance") !== "jobs" ? " selected" : ""}>Compliance chart only (no jobs)</option>
+                  <option value="jobs"${W.clientRole === "jobs" ? " selected" : ""}>Jobs portal + compliance chart</option></select>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">"Compliance chart only" walls them to this client's compliance chart — no jobs. They land straight on it.</div>`
              : `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
                 <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
                   <option${W.employment === "Employed" ? " selected" : ""}>Employed</option>
                   <option${/self/i.test(W.employment) ? " selected" : ""}>Self Employed</option></select>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">Self-employed people get their invoice/timesheet area automatically.</div>`);
-        b.querySelectorAll('input[name="wizRole"]').forEach(r => r.onclick = () => { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; applyRole(r.value); wizRender(); });
+        b.querySelectorAll('input[name="wizRole"]').forEach(r => r.onclick = () => { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; const crl = g("wiz_clientRole"); if (crl) W.clientRole = crl.value; applyRole(r.value); wizRender(); });
       } else if (st.id === "access") {
         if (W.full) {
           b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
@@ -1431,7 +1443,7 @@
       const steps = wizSteps(), st = steps[W.step], d = W.d;
       const v = id => { const el = g("wiz_" + id); return el ? el.value.trim() : undefined; };
       if (st.id === "who") { ["first","last","username","email","phone","jobTitle","startDate"].forEach(k => d[k] = v(k)); }
-      else if (st.id === "role") { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; applyRole(W.role); }
+      else if (st.id === "role") { const emp = g("wiz_employment"); if (emp) W.employment = emp.value; const co = g("wiz_clientOrg"); if (co) W.clientOrg = co.value; const crl = g("wiz_clientRole"); if (crl) W.clientRole = crl.value; applyRole(W.role); }
       else if (st.id === "access") {
         if (!W.full) {
           // Update only the perms shown as checkboxes; preserve any preset perm
@@ -1467,7 +1479,7 @@
       const d = W.d, msg = g("wizMsg"); msg.style.color = "#b91c1c"; msg.textContent = "Creating…";
       if (d.password) { const bad = pwProblem(d.password); if (bad) { msg.textContent = bad; return; } }
       const profile = { staffType: W.staffType, areas: [...W.areas] };
-      if (W.staffType === "client") profile.clientOrg = W.clientOrg || "fbc";
+      if (W.staffType === "client") { profile.clientOrg = W.clientOrg || "fbc"; profile.clientRole = W.clientRole === "jobs" ? "jobs" : "compliance"; }
       const pmap = { phone: d.phone, jobTitle: d.jobTitle, startDate: d.startDate, homePostcode: d.homePostcode,
         hourlyRate: d.hourlyRate, overtimeRate: d.overtimeRate, dayRate: d.dayRate, travelRate: d.travelRate,
         fuelCard: d.fuelCard, pencePerMile: d.pencePerMile };

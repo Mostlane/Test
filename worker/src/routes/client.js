@@ -45,6 +45,15 @@ function clientOrgOf(sess) {
     return (p && p.staffType === "client" && p.clientOrg) ? String(p.clientOrg).toLowerCase() : "";
   } catch { return ""; }
 }
+// A client whose role is "compliance" may see ONLY the compliance chart (via the
+// compliance endpoints), never the jobs portal — so the jobs routes below are
+// refused for them even though they hold a valid client session.
+function clientRoleOf(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : (sess.user.profile || {});
+    return (p && p.staffType === "client" && p.clientRole === "compliance") ? "compliance" : "jobs";
+  } catch { return "jobs"; }
+}
 
 // The org's sites: [{code, name, postcode}] + a fast Set of the site codes.
 async function orgSites(env, tid, org) {
@@ -76,6 +85,11 @@ export async function handle(request, env, ctx, url, sess) {
   const org = clientOrgOf(sess);
   // Hard wall: only a client login with a recognised org may use ANY /client route.
   if (!org) return error("Not a client account", 403, env, request);
+  // A compliance-only client may confirm its own identity (/client/me) but NEVER
+  // touch the jobs portal — defence-in-depth behind the front-end routing.
+  if (clientRoleOf(sess) === "compliance" && path !== "/client/me") {
+    return error("This client login is compliance-only", 403, env, request);
+  }
   const tid = sess.tenantId;
   const orgLabel = ORG_LABEL[org] || org.toUpperCase();
   const scheme = ORG_SCHEME[org] || "";

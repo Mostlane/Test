@@ -1376,6 +1376,35 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   **All four compliance pages** now share the compressed **🛠 Tools** toolbar + a
   **🔽 Filters** collapse (Due/Store type/Compliance rows hidden by default, active-
   count badge, remembered in localStorage `mlCompFiltersOpen`).
+- **EXTERNAL CLIENT login — compliance-only vs jobs (Oct 2026)** — a customer (e.g.
+  Fareham Borough Council) can be given a read-only login. An account with
+  **`profile.staffType="client"` + `profile.clientOrg="fbc"`** is walled to that
+  org's data only; `resolveComplianceAccess` HARD-CODES it to its org's scheme at
+  **download** and every other scheme **none** (`ORG_SCHEME={fbc:"fareham"}`), never
+  edit, regardless of any stored levels — so the Users-Admin compliance dropdowns
+  don't apply to a client (the org decides). A client also NEVER sees money/other
+  customers/staff pages/the field app. **Two sub-types via `profile.clientRole`
+  (surfaced as `ClientRole` by auth.js + users.js shapeUser):** **`compliance`** =
+  the compliance chart ONLY (NO jobs) — lands straight on the org's chart
+  (fbc→fareham.html); **`jobs`** (the pre-existing default for any client with no
+  role set) = the walled jobs portal (client-home.html: raise + view jobs) PLUS the
+  compliance chart. Set in **Users Admin** (add-user wizard + the edit panel: Account
+  type = *Client (external)* → *Client organisation* + **"What can they see"**;
+  default *Compliance chart only*). **Enforcement, defence-in-depth:** (1) login.html
+  `mlClientLanding(role,org)` routes a compliance client to fbc→fareham.html (on
+  fresh login AND PWA auto-resume); it stashes `mostlaneClientOrg`/`mostlaneClientRole`
+  (added to login's PERM_KEYS + portal-config's slim-cache writer, which also
+  refreshes the wall's keys from /auth/me). (2) **portal-config.js client wall** is
+  role-aware — a compliance client may ONLY be on their org's compliance page (+ the
+  auth pages), anything else `location.replace`s there; a jobs client → client-home.
+  (3) portal-config SUPPRESSES all staff UI for ANY client — `mlIsClientUser()` early-
+  returns in the sidebar/command-palette (portalNav), chatWidget, notifBell, memoGate
+  and remedialGate. (4) **fareham.html** hides its `.ml-back` (→compliance.html) for a
+  client and shows a **Log out** button instead (their only navigation). (5)
+  **client.js** refuses every `/client/*` jobs route (jobs/job/raise/raise-photo) for
+  a `compliance` client (only `/client/me` passes). **No new PERMISSION_KEY** — it's
+  all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. Test
+  `node --no-warnings worker/tools/test-client-compliance.mjs`.
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`
