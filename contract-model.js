@@ -67,7 +67,7 @@
 
   /* ---------- Contract content (VERBATIM) ---------- */
   var INTRO = [
-    "This contract of employment is made between **Mostlane Construction Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
+    "This contract of employment is made between **Mostlane Construction Limited** of Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
     "This contract supersedes any earlier written or oral arrangement between you and the Company.",
     "The headings in this contract are for convenience only and do not affect its interpretation."
   ];
@@ -75,7 +75,7 @@
   var SECTIONS = [
     { id: "job", title: "Job title and place of work", items: [
       { p: "The Company will employ you in the role of **{jobTitle}**. Your duties and responsibilities include {duties}. The Company may vary your duties and responsibilities from time to time according to the needs of the business, provided they remain reasonable and suited to your skills and experience." },
-      { p: "You do not have a single fixed place of work. You will work at client sites across the UK, generally in the south of England, as current workload requires. Your administrative base is the Company’s office at Segensworth Business Centre, Fareham, PO15 5RQ." },
+      { p: "You do not have a single fixed place of work. You will work at client sites across the UK, generally in the south of England, as current workload requires. Your administrative base is the Company’s office at Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ." },
       { p: "You are employed as an apprentice under an approved apprenticeship. Your apprenticeship is **{apprenticeshipStandard}**, delivered with {trainingProvider}. The Company will give you time during your paid working hours for off-the-job training and assessment. Your apprenticeship agreement and commitment statement form part of this contract.", when: "apprentice" },
       { p: "When you complete your apprenticeship, your employment will continue on the terms of this contract unless the Company confirms otherwise in writing. Your job title and rate of pay will be reviewed at that point.", when: "apprentice" }
     ]},
@@ -241,7 +241,7 @@
   ];
 
   /* ---------- 48-hour opt-out agreement (VERBATIM) ---------- */
-  var OPT_INTRO = "This agreement is between **Mostlane Construction Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
+  var OPT_INTRO = "This agreement is between **Mostlane Construction Limited** of Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
   var OPT_ITEMS = [
     "I agree that the limit of an average of 48 hours’ work in each working week, set by regulation 4(1) of the Working Time Regulations 1998, will not apply to my employment with the Company.",
     "I have made this agreement voluntarily. I understand that I do not have to sign it, and that I will not be dismissed or suffer any other detriment if I choose not to sign it, or if I end it later.",
