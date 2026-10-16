@@ -199,6 +199,44 @@ export async function handle(request, env, ctx, url, sess) {
     return out;
   }
 
+  // Employment start dates (users.profile.startDate, "YYYY-MM-DD"). No date = not
+  // a new starter as far as entitlement goes, so existing staff + the
+  // Timetastic-imported part-year figures are never touched by the pro-rata below.
+  async function getUserStart(username) {
+    const row = await db.prepare(
+      "SELECT json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ? AND username = ?"
+    ).bind(db.tenantId, username).first();
+    return (row && row.sd) || null;
+  }
+  async function listUserStarts() {
+    const { results } = await db.prepare(
+      "SELECT username, json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ?"
+    ).bind(db.tenantId).all();
+    const out = {};
+    for (const r of results || []) if (r.username && r.sd) out[r.username] = r.sd;
+    return out;
+  }
+
+  // First-year PRO-RATA. The stored allowance is the FULL annual entitlement; a
+  // new starter earns only the part of the holiday year (1 Jan–31 Dec) they are
+  // employed for, "to the nearest half day… holiday accrues evenly from day to
+  // day" (the employment contract). ONLY the join year is reduced — later years
+  // get the full allowance, and no start date (or a start on/before 1 Jan) = no
+  // change. Returns the entitlement for `yr`.
+  function proRataAllowance(base, startISO, yr) {
+    if (!Number.isFinite(base) || base <= 0 || base >= 365) return base;   // 0 / the 999 "unlimited" owner sentinel — never pro-rate
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+    if (!m) return base;
+    if (Number(m[1]) !== yr) return base;                 // only the year they joined
+    const DAY = 86400000;
+    const startMs = Date.UTC(yr, Number(m[2]) - 1, Number(m[3]));
+    if (startMs <= Date.UTC(yr, 0, 1)) return base;        // employed the whole year
+    const yearEnd = Date.UTC(yr, 11, 31);
+    const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY) + 1;   // 365 / 366
+    const daysEmployed = Math.round((yearEnd - startMs) / DAY) + 1;            // start … 31 Dec
+    return Math.round((base * daysEmployed / daysInYear) * 2) / 2;             // nearest half day
+  }
+
   async function getActiveUsers() {
     const { results } = await db.prepare(
       "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
@@ -303,7 +341,7 @@ export async function handle(request, env, ctx, url, sess) {
   }
   // One person's usage for the year, with the duplicate-day safeguard + a
   // used-to-date figure + a booked/bank/shutdown breakdown for the wall chart.
-  function computeUsage(all, sys, username, allowance, todayISO) {
+  function computeUsage(all, sys, username, allowance, todayISO, startISO) {
     // Booked paid-holiday days, DEDUPED BY CALENDAR DATE. Summing each booking's
     // `days` used to double-count when two approved bookings covered the same day
     // (e.g. a Timetastic import + a manual re-entry). We instead expand every
@@ -336,6 +374,7 @@ export async function handle(request, env, ctx, url, sess) {
     for (const s of sys) {
       if (s.username !== username) continue;
       if (!isWeekdayISO(s.date)) continue;
+      if (startISO && (s.date || "") < startISO) continue;   // bank/shutdown day before they joined — not charged
       if (s.worked === true || s.status === "Credited") { credited += (s.days || 1); continue; }
       if (covered.has(s.date)) continue;                // SAFEGUARD: holiday already charged this day
       const passed = (s.date || "") <= todayISO;
@@ -484,12 +523,17 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /holiday/summary
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
-    const allowance = await getUserAllowance(user);
+    const baseAllowance = await getUserAllowance(user);
+    const startISO = await getUserStart(user);
+    const allowance = proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year
     const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
     const today = new Date().toISOString().slice(0, 10);
-    const u = computeUsage(all, sys, user, allowance, today);
+    const u = computeUsage(all, sys, user, allowance, today, startISO);
     return json({
-      allowance,
+      allowance,                          // the entitlement (pro-rated in the join year)
+      baseAllowance,                      // the full annual figure
+      proRated: allowance !== baseAllowance,
+      startDate: startISO || null,
       used: u.usedToDate,                 // headline = used TO DATE
       committed: u.committed,             // full-year commitment
       remaining: u.remaining,
@@ -656,16 +700,19 @@ export async function handle(request, env, ctx, url, sess) {
     if (includeInactive) {
       for (const iu of await getInactiveUsers()) { usernames.push(iu.username); inactiveMap[iu.username] = iu.status; }
     }
-    const [all, sys, allowMap, dflt] = await Promise.all([
-      listHolidayRequestsForYear(), listSystemRecordsForYear(), listAllowancesMap(), getDefaultAllowance()
+    const [all, sys, allowMap, dflt, startsMap] = await Promise.all([
+      listHolidayRequestsForYear(), listSystemRecordsForYear(), listAllowancesMap(), getDefaultAllowance(), listUserStarts()
     ]);
     const today = new Date().toISOString().slice(0, 10);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
-      const c = computeUsage(all, sys, u, allowance, today);
+      const baseAllowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
+      const startISO = startsMap[u] || null;
+      const allowance = proRataAllowance(baseAllowance, startISO, year);   // pro-rated in the join year
+      const c = computeUsage(all, sys, u, allowance, today, startISO);
       list.push({
         username: u, name: u.replace(".", " "), allowance,
+        baseAllowance, proRated: allowance !== baseAllowance, startDate: startISO,
         used: c.usedToDate,             // used TO DATE
         committed: c.committed,         // full-year commitment
         remaining: c.remaining,

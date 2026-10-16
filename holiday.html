@@ -279,7 +279,12 @@
       g("statUsed").textContent = sum.used ?? "–";
       const pending = (Array.isArray(mine) ? mine : []).filter(h => h.status === "Pending" && h.start).reduce((t, h) => t + (h.days || 0), 0);
       g("statPending").textContent = pending;
-      g("allowLbl").textContent = `${sum.allowance ?? "–"} day allowance for ${YEAR}`;
+      if (sum.proRated) {
+        const sd = sum.startDate ? new Date(sum.startDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+        g("allowLbl").textContent = `${sum.allowance} day allowance for ${YEAR} — pro-rated from your ${sd} start date (full year ${sum.baseAllowance})`;
+      } else {
+        g("allowLbl").textContent = `${sum.allowance ?? "–"} day allowance for ${YEAR}`;
+      }
       const b = sum.breakdown || {};
       g("sysLbl").textContent = `Incl. bank holidays & shutdown: ${b.sysDeducted || 0} deducted${b.sysCredited ? `, ${b.sysCredited} credited back (worked)` : ""}`;
       // Ring: remaining as a share of allowance.
