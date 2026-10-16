@@ -372,7 +372,8 @@ CREATE TABLE IF NOT EXISTS holiday_allowance (
   tenant_id  INTEGER NOT NULL DEFAULT 1,
   year      INTEGER NOT NULL,
   username  TEXT NOT NULL,
-  allowance INTEGER NOT NULL,
+  allowance INTEGER NOT NULL,                 -- the FULL annual figure (pro-rated on read for a join-year starter)…
+  exact     INTEGER DEFAULT 0,                -- …unless exact=1: then `allowance` IS the final figure for the year (a manual override, never pro-rated)
   PRIMARY KEY (year, username)
 );
 
