@@ -5,18 +5,18 @@
    ported VERBATIM from the reviewed reference builder. Do NOT reword, add or
    remove clauses here — the text is deliberate and legally reviewed.
 
-   ONE source feeds three outputs so they match word for word:
+   ONE source feeds two outputs so they match word for word:
      • MLContract.markup(state)        -> portal signed-document body markup
                                           (# / ## / - / | tables | / **bold**),
                                           with NO signature tables — the portal
-                                          signing block (employee + director)
-                                          handles signing.
+                                          signing block handles signing: the
+                                          Company signatory is the logged-in
+                                          Full-Access issuer, the employee signs
+                                          on the sign page. Signing is entirely
+                                          in-portal — there is no Word/file copy.
      • MLContract.previewHtml(state)   -> the live on-screen preview (same markup
                                           rendered to HTML; missing fields shown
                                           as [Placeholders]).
-     • MLContract.docxBlob(state)      -> the Word (.docx) copy (secondary;
-                                          keeps the reference's full layout incl.
-                                          its own signature tables).
    ============================================================================ */
 (function () {
   "use strict";
@@ -35,8 +35,7 @@
     overtimeEnhanced: true, overtimeRate: "1.5", overtimeAfter: "10",
     probation: true, probationMonths: "6",
     apprentice: false, apprenticeshipStandard: "", trainingProvider: "",
-    van: true, optOut: true, trainingRepay: false,
-    directorName: ""
+    van: true, optOut: true, trainingRepay: false
   };
   var LABELS = {
     employeeName: "Employee name", employeeAddress: "Employee address", startDate: "Start date",
@@ -44,7 +43,7 @@
     workStart: "Start time", workEnd: "Finish time", workDays: "Working days", lunchMins: "Lunch minutes",
     employeeNotice: "Weeks", holidayDays: "Holiday days", travelMins: "Minutes",
     overtimeRate: "Multiplier", overtimeAfter: "Hours", probationMonths: "Months",
-    apprenticeshipStandard: "Apprenticeship", trainingProvider: "Training provider", directorName: "Director name"
+    apprenticeshipStandard: "Apprenticeship", trainingProvider: "Training provider"
   };
 
   var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -244,10 +243,7 @@
     "This agreement does not affect my rights under the Working Time Regulations 1998 to rest breaks, daily and weekly rest periods and paid annual leave.",
     "This agreement does not form part of my contract of employment. It takes effect on the date it is signed by both parties."
   ];
-  var OPT_SIG = [["Signature", "", ""], ["Name", "{employeeName}", "{directorName}"], ["Date", "", ""]];
   var OPT_END = "To Mostlane Limited: I give seven days’ notice that I am ending my agreement to opt out of the 48-hour maximum average working week under the Working Time Regulations 1998.";
-  var OPT_END_SIG = [["Signature", ""], ["Name", "{employeeName}"], ["Date", ""]];
-  var SIG_ROWS = [["Signature", "", ""], ["Name", "{employeeName}", "{directorName}"], ["Position", "{jobTitle}", "Director"], ["Date", "", ""]];
 
   /* ---------- Build a numbered model (VERBATIM) ---------- */
   function build(state) {
@@ -271,22 +267,6 @@
     var carry = blocks.find(function (b) { return b.type === "p" && b.text.indexOf("**Carrying holiday over.**") === 0; });
     if (carry) refs.carry = carry.num;
     return { refs: refs, blocks: blocks };
-  }
-
-  // Styled-run segmentation (bold + field/ref), VERBATIM — used by the Word export.
-  function segs(text, refs, state, placeholders) {
-    var out = [];
-    String(text).split("**").forEach(function (chunk, i) {
-      var bold = i % 2 === 1; var re = /\{(#?)(\w+)\}/g; var last = 0, m;
-      while ((m = re.exec(chunk))) {
-        if (m.index > last) out.push({ t: chunk.slice(last, m.index), bold: bold });
-        if (m[1] === "#") out.push({ t: refs[m[2]] || "?", bold: bold });
-        else { var v = val(state, m[2]); out.push(v == null ? { t: placeholders ? ("[" + (LABELS[m[2]] || m[2]) + "]") : "", bold: bold, missing: true } : { t: v, bold: bold, field: true }); }
-        last = re.lastIndex;
-      }
-      if (last < chunk.length) out.push({ t: chunk.slice(last), bold: bold });
-    });
-    return out;
   }
 
   // Resolve fields/refs but KEEP the literal ** markers (for the portal markup).
@@ -374,13 +354,18 @@
   }
 
   /* ---------- Missing required fields (respects conditional logic) ---------- */
-  function missing(state) {
-    var seen = {}, list = [];
-    var scan = function (mk) { var m, re = /\[([^\]\n]+)\]/g; while ((m = re.exec(mk))) { if (!seen[m[1]]) { seen[m[1]] = 1; list.push(m[1]); } } };
-    scan(markup(state, true));
-    if (state.optOut) scan(optMarkup(state, true));
+  function scanMissing(mk) {
+    var seen = {}, list = [], m, re = /\[([^\]\n]+)\]/g;
+    while ((m = re.exec(mk))) { if (!seen[m[1]]) { seen[m[1]] = 1; list.push(m[1]); } }
     return list;
   }
+  function missing(state) {
+    var list = scanMissing(markup(state, true));
+    if (state.optOut) scanMissing(optMarkup(state, true)).forEach(function (x) { if (list.indexOf(x) < 0) list.push(x); });
+    return list;
+  }
+  // Blank fields the 48-hour opt-out document alone needs (name + address).
+  function optMissing(state) { return scanMissing(optMarkup(state, true)); }
 
   /* ---------- Minimum-wage check ---------- */
   function rate(state) {
@@ -395,81 +380,9 @@
   function titleFor(state) { var n = val(state, "employeeName"); return "Contract of Employment" + (n ? " — " + n : ""); }
   function optTitleFor(state) { var n = val(state, "employeeName"); return "48-hour Opt-out Agreement" + (n ? " — " + n : ""); }
 
-  /* ---------- Word (.docx) export (VERBATIM from the reference) ---------- */
-  function xe(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
-  function runsXml(text, refs, state, extraBold) {
-    return segs(text, refs, state, true).map(function (g) { return "<w:r><w:rPr>" + ((g.bold || extraBold) ? "<w:b/>" : "") + "</w:rPr><w:t xml:space=\"preserve\">" + xe(g.t) + "</w:t></w:r>"; }).join("");
-  }
-  function para(inner, opts) {
-    opts = opts || {};
-    var pPr = '<w:spacing w:after="' + (opts.after == null ? 120 : opts.after) + '" w:line="276" w:lineRule="auto"/>';
-    if (opts.ind) pPr += '<w:ind w:left="' + opts.ind[0] + '" w:hanging="' + (opts.ind[1] || 0) + '"/>';
-    if (opts.jc) pPr += '<w:jc w:val="' + opts.jc + '"/>';
-    if (opts.keepNext) pPr += "<w:keepNext/>";
-    return "<w:p><w:pPr>" + pPr + "</w:pPr>" + inner + "</w:p>";
-  }
-  var tabRun = "<w:r><w:tab/></w:r>";
-  function plainRun(t, bold) { return "<w:r><w:rPr>" + (bold ? "<w:b/>" : "") + "</w:rPr><w:t xml:space=\"preserve\">" + xe(t) + "</w:t></w:r>"; }
-  function tbl(head, rows, refs, state, indent) {
-    var b = '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="999999"/><w:left w:val="single" w:sz="4" w:color="999999"/><w:bottom w:val="single" w:sz="4" w:color="999999"/><w:right w:val="single" w:sz="4" w:color="999999"/><w:insideH w:val="single" w:sz="4" w:color="999999"/><w:insideV w:val="single" w:sz="4" w:color="999999"/></w:tblBorders>';
-    var cell = function (t, bold) { return '<w:tc><w:tcPr><w:tcMar><w:top w:w="60" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/></w:tcMar></w:tcPr>' + para(runsXml(t, refs, state, bold), { after: 0 }) + "</w:tc>"; };
-    var x = '<w:tbl><w:tblPr><w:tblW w:w="' + (indent ? 4500 : 5000) + '" w:type="pct"/>' + (indent ? '<w:tblInd w:w="' + indent + '" w:type="dxa"/>' : "") + b + "</w:tblPr>";
-    x += "<w:tr>" + head.map(function (h) { return cell(h, true); }).join("") + "</w:tr>";
-    rows.forEach(function (r) { x += "<w:tr>" + r.map(function (c) { return cell(c, false); }).join("") + "</w:tr>"; });
-    return x + "</w:tbl>" + para("", { after: 120 });
-  }
-  var PAGE_BREAK = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-  function optBody(state) {
-    var r = {}; var tall = function (x) { return x.replace(/<w:tr>/g, '<w:tr><w:trPr><w:trHeight w:val="520"/></w:trPr>'); };
-    var b = para(plainRun("WORKING TIME REGULATIONS 1998", true), { jc: "center", after: 60 });
-    b += para(plainRun("Agreement to opt out of the 48-hour maximum working week", true), { jc: "center", after: 240 });
-    b += para(runsXml(OPT_INTRO, r, state), { after: 200 });
-    OPT_ITEMS.forEach(function (t, i) { b += para(plainRun(String(i + 1)) + tabRun + runsXml(t, r, state), { ind: [720, 720] }); });
-    b += para("", {}) + tall(tbl(["", "Employee", "For and on behalf of Mostlane Limited"], OPT_SIG, r, state, 0));
-    b += para(plainRun("NOTICE TO END THIS AGREEMENT", true), { keepNext: true }).replace("<w:spacing", '<w:spacing w:before="360"');
-    b += para(runsXml(OPT_END, r, state), { after: 200 });
-    b += tall(tbl(["", ""], OPT_END_SIG, r, state, 0)).replace(/<w:tr><w:trPr><w:trHeight w:val="520"\/><\/w:trPr><w:tc>(?:(?!<\/w:tr>).)*?<\/w:tr>/, "");
-    return b;
-  }
-  function contractBody(state) {
-    var r = build(state), refs = r.refs, blocks = r.blocks, body = "";
-    body += para(plainRun("CONTRACT OF EMPLOYMENT", true), { jc: "center", after: 240 });
-    INTRO.forEach(function (p) { body += para(runsXml(p, refs, state)); });
-    blocks.forEach(function (b) {
-      if (b.type === "h") body += para(plainRun(b.num, true) + tabRun + plainRun(b.text.toUpperCase(), true), { ind: [720, 720], keepNext: true, after: 120 }).replace("<w:spacing", "<w:spacing w:before=\"200\"");
-      else if (b.type === "p") body += para(plainRun(b.num) + tabRun + runsXml(b.text, refs, state), { ind: [720, 720] });
-      else if (b.type === "sub") b.items.forEach(function (x) { body += para(plainRun(x.label) + tabRun + runsXml(x.text, refs, state), { ind: [1440, 720], after: 80 }); });
-      else if (b.type === "table") body += tbl(b.head, b.rows, refs, state, 720);
-      else if (b.type === "cont") body += para(runsXml(b.text, refs, state), { ind: [720, 0] });
-    });
-    body += para("", {}) + para(plainRun("I confirm that I have received, read, understood and accept this contract of employment, the Staff Handbook and the privacy notice, and I undertake to observe the terms and conditions of employment it contains."), { after: 200 });
-    body += tbl(["", "Employee", "For and on behalf of Mostlane Limited"], SIG_ROWS, refs, state, 0).replace(/<w:tr>/g, '<w:tr><w:trPr><w:trHeight w:val="520"/></w:trPr>');
-    return body;
-  }
-  function wrapDoc(body) {
-    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
-      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1300" w:right="1300" w:bottom="1300" w:left="1300" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>';
-  }
-  var STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>';
-  async function makeDocx(documentXml) {
-    if (!window.JSZip) throw new Error("JSZip not loaded");
-    var zip = new window.JSZip();
-    zip.file("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
-    zip.file("_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
-    zip.file("word/_rels/document.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
-    zip.file("word/styles.xml", STYLES);
-    zip.file("word/document.xml", documentXml);
-    return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-  }
-  function docxBlob(state, optOnly) {
-    var body = optOnly ? optBody(state) : (contractBody(state) + (state.optOut ? PAGE_BREAK + optBody(state) : ""));
-    return makeDocx(wrapDoc(body));
-  }
-
   window.MLContract = {
     MIN_WAGE: MIN_WAGE, DEFAULTS: DEFAULTS, LABELS: LABELS,
     markup: markup, optMarkup: optMarkup, previewHtml: previewHtml, renderBodyHtml: renderBodyHtml,
-    missing: missing, rate: rate, titleFor: titleFor, optTitleFor: optTitleFor, docxBlob: docxBlob
+    missing: missing, optMissing: optMissing, rate: rate, titleFor: titleFor, optTitleFor: optTitleFor
   };
 })();

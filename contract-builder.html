@@ -7,8 +7,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="/portal-config.js?v=42"></script>
   <script src="auth.js"></script>
-  <script src="contract-model.js?v=1"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="contract-model.js?v=2"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --warn:#a14d06; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; --field:#e3eff3; }
     * { box-sizing:border-box; }
@@ -74,7 +73,7 @@
           <div class="f">
             <label for="pickUser">Portal user</label>
             <select id="pickUser"><option value="">— new starter (type below) —</option></select>
-            <span class="hint">Pick the person so the contract can be <b>sent to them to sign</b>. A brand-new starter not yet set up can only use <b>Download Word</b> until they're added in Users Admin.</span>
+            <span class="hint">Pick the person so the contract can be <b>sent to them to sign</b>. A brand-new starter must be added in <b>Users Admin</b> first before a contract can be sent to them.</span>
           </div>
           <div class="f"><label for="employeeName">Full name</label><input type="text" id="employeeName"></div>
           <div class="f"><label for="employeeAddress">Home address</label><textarea id="employeeAddress" rows="3"></textarea></div>
@@ -135,12 +134,10 @@
 
         <fieldset>
           <legend>Signing for Mostlane</legend>
-          <div class="f"><label for="directorName">Director named on the Word copy</label><input type="text" id="directorName"></div>
-          <span class="hint">When you <b>send for signing</b>, the counter-signature is YOUR saved signature (set in Documents → My signature). Send the contract from the director's own login for their signature to appear.</span>
+          <span class="hint">Everything is signed <b>inside the portal</b> — no file leaves it. When you <b>send for signing</b>, the Company's counter-signature is <b>your own saved signature</b> (set it once in Documents → My signature). The employee then signs on their device, and the signed PDF files into their <b>My Documents › Agreements</b>. Send from the signing director's own login so their signature is the one that appears.</span>
         </fieldset>
 
         <div class="actions">
-          <button class="btn ghost small" id="btnWord" type="button">⬇ Download Word</button>
           <button class="btn grey small" id="btnReset" type="button">Clear details</button>
         </div>
       </form>
@@ -148,12 +145,18 @@
       <div class="sheet-wrap">
         <div class="sendcard" style="margin-bottom:14px;">
           <h2>Send for signing</h2>
-          <p class="sub">Files the signed copy into the employee's <b>My Documents › Agreements</b>. The contract and the opt-out go as two separate requests.</p>
+          <p class="sub">Files the signed copy into the employee's <b>My Documents › Agreements</b>. With the opt-out ticked, the contract and the opt-out go as two separate signing requests.</p>
           <div id="missBox"></div>
           <div class="actions">
             <button class="btn" id="btnSend" type="button">📨 Send for signing</button>
             <a class="btn ghost small" href="/documents-admin.html" id="recordsLink">📄 Sent documents &amp; records</a>
           </div>
+          <hr style="border:none;border-top:1px solid var(--line,#e2e8f0);margin:14px 0;">
+          <p class="sub" style="margin:0 0 8px;">Just need the <b>48-hour opt-out</b> signed by an existing employee (no new contract)? Pick the portal user and fill their <b>name &amp; home address</b> above, then:</p>
+          <div class="actions">
+            <button class="btn ghost small" id="btnOptOnly" type="button">📨 Send opt-out only</button>
+          </div>
+          <div id="optMissBox"></div>
         </div>
         <div class="sheet" id="sheet" aria-label="Contract preview"></div>
       </div>
@@ -198,6 +201,13 @@
       if (!HAS_SIG) html += '<div class="miss">Set your signature first — <a href="/documents-admin.html">Documents → My signature</a> — then come back.</div>';
       box.innerHTML = html;
       g("btnSend").disabled = !!(miss.length || !recipient || !HAS_SIG);
+      // Opt-out-only: needs just the recipient, the issuer signature and the
+      // two fields the opt-out document itself carries (name + address).
+      const omiss = MC.optMissing(state);
+      let oh = "";
+      if (omiss.length) oh += '<div class="miss">For the opt-out, fill <b>' + omiss.join(", ") + '</b> above.</div>';
+      g("optMissBox").innerHTML = oh;
+      g("btnOptOnly").disabled = !!(omiss.length || !recipient || !HAS_SIG);
     }
     function render() {
       g("sheet").innerHTML = MC.previewHtml(state);
@@ -227,22 +237,10 @@
     });
 
     g("btnReset").addEventListener("click", () => {
-      state = Object.assign({}, MC.DEFAULTS); if (ME) state.directorName = ME;
+      state = Object.assign({}, MC.DEFAULTS);
       g("pickUser").value = ""; recipient = "";
       fillForm(); syncDeps(); rateHint(); render(); save();
       g("status").textContent = "Details cleared. Standard Mostlane options restored.";
-    });
-
-    g("btnWord").addEventListener("click", async () => {
-      try {
-        g("status").className = "status"; g("status").textContent = "Preparing the Word file…";
-        const blob = await MC.docxBlob(state, false);
-        const name = (state.employeeName || "New employee").replace(/[\\/:*?"<>|]/g, "").trim() || "New employee";
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob); a.download = "Contract of Employment - " + name + ".docx";
-        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-        g("status").textContent = "Word file downloaded.";
-      } catch (e) { g("status").className = "status bad"; g("status").textContent = "Couldn't build the Word file."; }
     });
 
     async function createAndSend(title, body, to) {
@@ -272,6 +270,24 @@
       renderSend();
     });
 
+    g("btnOptOnly").addEventListener("click", async () => {
+      if (g("btnOptOnly").disabled) return;
+      if (MC.optMissing(state).length || !recipient || !HAS_SIG) { renderSend(); return; }
+      const who = state.employeeName || recipient;
+      const ok = window.MLUI ? await MLUI.confirm("Send the 48-hour opt-out to " + who + " to sign?", { title: "Send opt-out", okLabel: "Send" }) : confirm("Send the opt-out to " + who + "?");
+      if (!ok) return;
+      g("btnOptOnly").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
+      try {
+        await createAndSend(MC.optTitleFor(state), MC.optMarkup(state, false), recipient);
+        g("status").className = "status ok";
+        g("status").textContent = "48-hour opt-out sent to " + who + " to sign. It'll file into their My Documents once signed.";
+        toast("Opt-out sent for signing");
+      } catch (e) {
+        g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
+      }
+      renderSend();
+    });
+
     // ── gate + boot ──
     (async () => {
       let me;
@@ -280,14 +296,13 @@
       if (!me.ok || me.user.FullAccess !== "Yes") { g("denied").style.display = "block"; return; }
       g("main").style.display = "block";
       ME = me.user.Name || ((me.user.FirstName || "") + " " + (me.user.LastName || "")).trim() || "";
-      if (!state.directorName && ME) state.directorName = ME;
       fillForm(); syncDeps(); rateHint(); render();
       // Issuer signature present?
       try { const sg = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!(sg && sg.has); } catch {}
       // Users for the recipient picker + pre-fill.
       try {
         const d = await (await authFetch("/users")).json();
-        USERS = (d.users || d || []).filter(u => uname(u));
+        USERS = (d.Users || d.users || []).filter(u => uname(u));
         const sel = g("pickUser");
         USERS.slice().sort((a, b) => dispName(a).localeCompare(dispName(b))).forEach(u => {
           const o = document.createElement("option"); o.value = uname(u); o.textContent = dispName(u); sel.appendChild(o);
