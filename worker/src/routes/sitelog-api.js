@@ -747,9 +747,94 @@ export async function handle(request, env, ctx) {
       distance: out.distance_m, nearest: out.nearestSite || null
     });
     if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p;
+    if (out.status === "checked_in" || out.status === "checked_out") queueSignPush(env, ctx, body, request, out);
+    return res;
+  }
+  if (u0.pathname === "/sync-event" && request.method === "POST" && env.SITELOG_DB) {
+    let body = {};
+    try { body = await request.clone().json(); } catch (e) {}
+    const res = await handleInner(request, env, ctx);
+    let out = {};
+    try { out = await res.clone().json(); } catch (e) {}
+    if (out.ok && (out.status === "checked_in" || out.status === "checked_out")) queueSignPush(env, ctx, body, request, out);
     return res;
   }
   return handleInner(request, env, ctx);
+}
+
+// ---- Sign-in / sign-out push (owner only by default) -----------------------
+// Every confirmed sign-in or sign-out pushes the people listed in app_config
+// `sitelog:pushnotify:<tid>` = {enabled, recipients:[usernames]} on the MAIN DB;
+// no config = the owner only. The body ends with who is on site right now.
+// Fire-and-forget: a push failure never touches the scan.
+function queueSignPush(env, ctx, body, request, out) {
+  const p = sendSignPush(env, body, request, out).catch(() => {});
+  if (ctx && ctx.waitUntil) ctx.waitUntil(p);
+}
+
+export async function signPushRecipients(env, tid = 1) {
+  const owner = env.OWNER_USERNAME || "Jamie Line";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?")
+      .bind(tid, "sitelog:pushnotify:" + tid).first();
+    if (row && row.value) {
+      const cfg = JSON.parse(row.value);
+      if (cfg.enabled === false) return [];
+      if (Array.isArray(cfg.recipients) && cfg.recipients.length) return cfg.recipients.map(String);
+    }
+  } catch (e) {}
+  return [owner];
+}
+
+function shortName(first, last) {
+  return [first, last].filter(Boolean).join(" ").trim() || "Someone";
+}
+
+export async function buildSignPush(env, { deviceToken, status, site, transferFrom, visitId }) {
+  const db = env.SITELOG_DB;
+  let person = null;
+  if (deviceToken) {
+    person = await db.prepare(
+      "SELECT p.id, p.first_name, p.last_name, p.company FROM devices d JOIN people p ON p.id = d.person_id WHERE d.device_token = ? LIMIT 1"
+    ).bind(deviceToken).first();
+  }
+  let siteName = site || null;
+  if (!siteName && visitId) {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE id = ?").bind(visitId).first();
+    siteName = v ? v.site_code : null;
+  }
+  if (!siteName && person && status === "checked_out") {
+    const v = await db.prepare("SELECT site_code FROM visits WHERE person_id = ? ORDER BY COALESCE(check_out_at, check_in_at) DESC LIMIT 1").bind(person.id).first();
+    siteName = v ? v.site_code : null;
+  }
+  const who = person ? shortName(person.first_name, person.last_name) : "Someone";
+  const co = person && person.company ? " (" + person.company + ")" : "";
+  const { results } = await db.prepare(
+    "SELECT p.first_name, p.last_name FROM visits v JOIN people p ON p.id = v.person_id WHERE v.check_out_at IS NULL ORDER BY v.check_in_at"
+  ).all();
+  const names = [...new Set((results || []).map(r => shortName(r.first_name, r.last_name)))];
+  const onSite = names.length
+    ? "On site now (" + names.length + "): " + names.slice(0, 8).join(", ") + (names.length > 8 ? " +" + (names.length - 8) + " more" : "")
+    : "Nobody on site now.";
+  const inn = status === "checked_in";
+  const title = inn
+    ? "🟢 " + who + " signed in" + (siteName ? " — " + siteName : "")
+    : "🔴 " + who + " signed out" + (siteName ? " — " + siteName : "");
+  const lead = inn && transferFrom ? who + co + " moved from " + transferFrom + "." : who + co + (inn ? " is on site." : " has left.");
+  return { title, body: lead + "\n" + onSite, url: "/sitelog.html", tag: "sitelog:" + (visitId || deviceToken || "") + ":" + (inn ? "in" : "out") + ":" + Date.now() };
+}
+
+async function sendSignPush(env, body, request, out) {
+  if (!env.DB) return;
+  const recipients = await signPushRecipients(env, 1);
+  if (!recipients.length) return;
+  const payload = await buildSignPush(env, {
+    deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
+    status: out.status, site: out.site || body.site || null,
+    transferFrom: out.transferFrom || null, visitId: body.visitId || null,
+  });
+  const { sendToUser } = await import("./push.js");
+  for (const u of recipients) await sendToUser(env, 1, u, payload);
 }
 
 async function handleInner(request, env, ctx) {
