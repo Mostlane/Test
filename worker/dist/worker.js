@@ -27714,6 +27714,33 @@ async function handle14(request, env, ctx, url, sess) {
     for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
     return out;
   }
+  async function getUserStart(username) {
+    const row = await db.prepare(
+      "SELECT json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ? AND username = ?"
+    ).bind(db.tenantId, username).first();
+    return row && row.sd || null;
+  }
+  async function listUserStarts() {
+    const { results } = await db.prepare(
+      "SELECT username, json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ?"
+    ).bind(db.tenantId).all();
+    const out = {};
+    for (const r of results || []) if (r.username && r.sd) out[r.username] = r.sd;
+    return out;
+  }
+  function proRataAllowance(base, startISO, yr) {
+    if (!Number.isFinite(base) || base <= 0 || base >= 365) return base;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+    if (!m) return base;
+    if (Number(m[1]) !== yr) return base;
+    const DAY2 = 864e5;
+    const startMs = Date.UTC(yr, Number(m[2]) - 1, Number(m[3]));
+    if (startMs <= Date.UTC(yr, 0, 1)) return base;
+    const yearEnd = Date.UTC(yr, 11, 31);
+    const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY2) + 1;
+    const daysEmployed = Math.round((yearEnd - startMs) / DAY2) + 1;
+    return Math.round(base * daysEmployed / daysInYear * 2) / 2;
+  }
   async function getActiveUsers() {
     const { results } = await db.prepare(
       "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
@@ -27799,7 +27826,7 @@ async function handle14(request, env, ctx, url, sess) {
     }
     return set;
   }
-  function computeUsage(all, sys, username, allowance, todayISO2) {
+  function computeUsage(all, sys, username, allowance, todayISO2, startISO) {
     const dayMap = {};
     for (const h of all) {
       if (h.username !== username || h.status !== "Approved") continue;
@@ -27831,6 +27858,7 @@ async function handle14(request, env, ctx, url, sess) {
     for (const s of sys) {
       if (s.username !== username) continue;
       if (!isWeekdayISO(s.date)) continue;
+      if (startISO && (s.date || "") < startISO) continue;
       if (s.worked === true || s.status === "Credited") {
         credited += s.days || 1;
         continue;
@@ -27989,12 +28017,19 @@ async function handle14(request, env, ctx, url, sess) {
   }
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
-    const allowance = await getUserAllowance(user);
+    const baseAllowance = await getUserAllowance(user);
+    const startISO = await getUserStart(user);
+    const allowance = proRataAllowance(baseAllowance, startISO, year);
     const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
     const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const u = computeUsage(all, sys, user, allowance, today);
+    const u = computeUsage(all, sys, user, allowance, today, startISO);
     return json4({
       allowance,
+      // the entitlement (pro-rated in the join year)
+      baseAllowance,
+      // the full annual figure
+      proRated: allowance !== baseAllowance,
+      startDate: startISO || null,
       used: u.usedToDate,
       // headline = used TO DATE
       committed: u.committed,
@@ -28134,21 +28169,27 @@ async function handle14(request, env, ctx, url, sess) {
         inactiveMap[iu.username] = iu.status;
       }
     }
-    const [all, sys, allowMap, dflt] = await Promise.all([
+    const [all, sys, allowMap, dflt, startsMap] = await Promise.all([
       listHolidayRequestsForYear(),
       listSystemRecordsForYear(),
       listAllowancesMap(),
-      getDefaultAllowance()
+      getDefaultAllowance(),
+      listUserStarts()
     ]);
     const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
-      const c = computeUsage(all, sys, u, allowance, today);
+      const baseAllowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
+      const startISO = startsMap[u] || null;
+      const allowance = proRataAllowance(baseAllowance, startISO, year);
+      const c = computeUsage(all, sys, u, allowance, today, startISO);
       list.push({
         username: u,
         name: u.replace(".", " "),
         allowance,
+        baseAllowance,
+        proRated: allowance !== baseAllowance,
+        startDate: startISO,
         used: c.usedToDate,
         // used TO DATE
         committed: c.committed,
