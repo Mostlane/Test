@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="/portal-config.js?v=44"></script>
   <script src="auth.js"></script>
-  <script src="contract-model.js?v=3"></script>
+  <script src="contract-model.js?v=4"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --warn:#a14d06; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
     * { box-sizing:border-box; }
@@ -147,14 +147,14 @@
     function oneLine(s) { return String(s || "").split(/\n+/).map(t => t.trim()).filter(Boolean).join(", "); }
 
     const DEFAULTS = {
-      companyName: "Mostlane Limited",
+      companyName: "Mostlane Construction Limited",
       companyAddress: "Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ",
       employeeName: "", employeeAddress: "",
       courseName: "", courseDates: "", completionDate: "",
       feeExVat: "", vatMode: "reclaim",
       b1: "12", b2: "18", b3: "24"
     };
-    const KEY = "mostlane-training-agreement-v1";
+    const KEY = "mostlane-training-agreement-v2";
     let state = Object.assign({}, DEFAULTS);
     // Company details persist between sessions; course/employee start blank each time.
     try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) { state.companyName = s.companyName || state.companyName; state.companyAddress = s.companyAddress || state.companyAddress; } } catch {}
