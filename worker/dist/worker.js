@@ -12390,6 +12390,29 @@ async function handle9(request, env, ctx, url, sess) {
       } catch {
       }
     }
+    if (scheme === "fareham") {
+      try {
+        const { results: fbcRows } = await env.DB.prepare(
+          "SELECT site_number, site_name, data FROM sites WHERE tenant_id=? AND client='fbc' AND COALESCE(active,1)=1"
+        ).bind(tid).all();
+        const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+        for (const s of fbcRows || []) {
+          const code = String(s.site_number || "").trim();
+          if (!code) continue;
+          let pc = null;
+          try {
+            pc = (JSON.parse(s.data || "{}") || {}).postcode || null;
+          } catch {
+          }
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, postcode, site_number, active, due, meta, updated_at)
+              VALUES (?, 'fareham', ?, ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, s.site_name || null, pc, code, nowIso).run();
+        }
+      } catch {
+      }
+    }
     if (scheme !== "coop") {
       try {
         await env.DB.prepare(

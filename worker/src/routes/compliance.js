@@ -616,6 +616,28 @@ export async function handle(request, env, ctx, url, sess) {
         }
       } catch {}
     }
+    // Fareham (FBC): EVERY active FBC portal site belongs on this chart. Auto-heal
+    // any missing rows so a newly-created FBC site appears on its own (code =
+    // site_number, the FBC convention) — no manual add needed. Name/postcode are
+    // copied from the site; due dates start empty for the office to set.
+    if (scheme === "fareham") {
+      try {
+        const { results: fbcRows } = await env.DB.prepare(
+          "SELECT site_number, site_name, data FROM sites WHERE tenant_id=? AND client='fbc' AND COALESCE(active,1)=1"
+        ).bind(tid).all();
+        const nowIso = new Date().toISOString();
+        for (const s of fbcRows || []) {
+          const code = String(s.site_number || "").trim();
+          if (!code) continue;
+          let pc = null; try { pc = (JSON.parse(s.data || "{}") || {}).postcode || null; } catch {}
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, postcode, site_number, active, due, meta, updated_at)
+              VALUES (?, 'fareham', ?, ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, s.site_name || null, pc, code, nowIso).run();
+        }
+      } catch {}
+    }
     // Non-Co-op stores link to a portal site by NAME. Portal sites for other
     // schemes may be created by a separate workflow AFTER the compliance chart,
     // so self-heal on load: link any still-unlinked store whose name now matches
