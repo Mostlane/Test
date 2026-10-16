@@ -67,7 +67,7 @@
 
   /* ---------- Contract content (VERBATIM) ---------- */
   var INTRO = [
-    "This contract of employment is made between **Mostlane Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
+    "This contract of employment is made between **Mostlane Construction Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
     "This contract supersedes any earlier written or oral arrangement between you and the Company.",
     "The headings in this contract are for convenience only and do not affect its interpretation."
   ];
@@ -241,7 +241,7 @@
   ];
 
   /* ---------- 48-hour opt-out agreement (VERBATIM) ---------- */
-  var OPT_INTRO = "This agreement is between **Mostlane Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
+  var OPT_INTRO = "This agreement is between **Mostlane Construction Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
   var OPT_ITEMS = [
     "I agree that the limit of an average of 48 hours’ work in each working week, set by regulation 4(1) of the Working Time Regulations 1998, will not apply to my employment with the Company.",
     "I have made this agreement voluntarily. I understand that I do not have to sign it, and that I will not be dismissed or suffer any other detriment if I choose not to sign it, or if I end it later.",
@@ -250,7 +250,7 @@
     "This agreement does not affect my rights under the Working Time Regulations 1998 to rest breaks, daily and weekly rest periods and paid annual leave.",
     "This agreement does not form part of my contract of employment. It takes effect on the date it is signed by both parties."
   ];
-  var OPT_END = "To Mostlane Limited: I give seven days’ notice that I am ending my agreement to opt out of the 48-hour maximum average working week under the Working Time Regulations 1998.";
+  var OPT_END = "To Mostlane Construction Limited: I give seven days’ notice that I am ending my agreement to opt out of the 48-hour maximum average working week under the Working Time Regulations 1998.";
 
   /* ---------- Company van policy (VERBATIM — "Mostlane Company Vans") ---------- */
   var VAN_PARAS = [
@@ -376,7 +376,7 @@
     var d = resolve("{issueDate}", r, state, placeholders), who = resolve("{issuerName}", r, state, placeholders);
     out.push("# Personal Protective Equipment (PPE) Issue Record", "");
     out.push(PPE_NOTE, "");
-    out.push("**Name of Employer/Company:** Mostlane Construction");
+    out.push("**Name of Employer/Company:** Mostlane Construction Limited");
     out.push("**Name of Employee:** " + resolve("{employeeName}", r, state, placeholders));
     out.push("**Address of Employee:** " + resolve("{employeeAddress}", r, state, placeholders));
     out.push("**Employees working location:** Various Sites", "");
