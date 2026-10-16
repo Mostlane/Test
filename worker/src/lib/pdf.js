@@ -26,6 +26,25 @@ const W = {
   "g": 556, "h": 556, "i": 222, "j": 222, "k": 500, "l": 222, "m": 833, "n": 556,
   "o": 556, "p": 556, "q": 556, "r": 333, "s": 500, "t": 278, "u": 556, "v": 500,
   "w": 722, "x": 500, "y": 500, "z": 500, "£": 556, "·": 278, "–": 556, "—": 1000,
+  "‘": 222, "’": 222, "“": 333, "”": 333, "…": 1000, "€": 556, "•": 350,
+};
+
+// Helvetica-BOLD advance widths (per 1000 units) — bold glyphs are wider than
+// regular, so measuring bold text with the table above underestimates it and
+// consecutive bold words overlap (the visible space between them collapses).
+const WB = {
+  " ": 278, "!": 333, '"': 474, "#": 556, "$": 556, "%": 889, "&": 722, "'": 238,
+  "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333, ".": 278, "/": 278,
+  "0": 556, "1": 556, "2": 556, "3": 556, "4": 556, "5": 556, "6": 556, "7": 556,
+  "8": 556, "9": 556, ":": 333, ";": 333, "=": 584, "?": 611, "@": 975,
+  "A": 722, "B": 722, "C": 722, "D": 722, "E": 667, "F": 611, "G": 778, "H": 722,
+  "I": 278, "J": 556, "K": 722, "L": 611, "M": 833, "N": 722, "O": 778, "P": 667,
+  "Q": 778, "R": 722, "S": 667, "T": 611, "U": 722, "V": 667, "W": 944, "X": 667,
+  "Y": 667, "Z": 611, "a": 556, "b": 611, "c": 556, "d": 611, "e": 556, "f": 333,
+  "g": 611, "h": 611, "i": 278, "j": 278, "k": 556, "l": 278, "m": 889, "n": 611,
+  "o": 611, "p": 611, "q": 611, "r": 389, "s": 556, "t": 333, "u": 611, "v": 556,
+  "w": 778, "x": 556, "y": 556, "z": 500, "£": 556, "·": 278, "–": 556, "—": 1000,
+  "‘": 278, "’": 278, "“": 500, "”": 500, "…": 1000, "€": 556, "•": 350,
 };
 
 // Characters WinAnsi DOES have, but above the Latin-1 range (Windows-1252's
@@ -63,11 +82,12 @@ export function toWinAnsi(s) {
   return out;
 }
 
-export function textWidth(str, size = 10) {
+export function textWidth(str, size = 10, bold = false) {
   let u = 0;
+  const T = bold ? WB : W;
   // Measure what will actually be DRAWN — toWinAnsi can change the length
   // (an arrow becomes "->"), so measuring the raw string would misjudge fits.
-  for (const ch of toWinAnsi(str)) u += W[ch] != null ? W[ch] : 556;
+  for (const ch of toWinAnsi(str)) u += T[ch] != null ? T[ch] : 556;
   return (u / 1000) * size;
 }
 
@@ -144,7 +164,7 @@ export class PdfDoc {
     const font = opt.bold ? "/F2" : "/F1";
     const col = opt.color ? `${opt.color.map(n => n.toFixed(3)).join(" ")} rg ` : (opt.grey ? "0.45 g " : "");
     let tx = x;
-    if (opt.alignRight) tx = x - textWidth(str, size);
+    if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
     const y = this._page.h - yTop;
     this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${(opt.grey || opt.color) ? " 0 g" : ""}`);
     return this;
@@ -167,8 +187,8 @@ export class PdfDoc {
     const font = opt.bold ? "/F2" : "/F1";
     const col = opt.grey ? "0.45 g " : "";
     let tx = x;
-    if (opt.alignRight) tx = x - textWidth(str, size);
-    else if (opt.center) tx = x - textWidth(str, size) / 2;
+    if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
+    else if (opt.center) tx = x - textWidth(str, size, !!opt.bold) / 2;
     const y = pg.h - yTop;
     pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
     return this;

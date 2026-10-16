@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -1059,9 +1064,10 @@ function toWinAnsi(s) {
   }
   return out;
 }
-function textWidth(str, size = 10) {
+function textWidth(str, size = 10, bold = false) {
   let u = 0;
-  for (const ch of toWinAnsi(str)) u += W[ch] != null ? W[ch] : 556;
+  const T3 = bold ? WB : W;
+  for (const ch of toWinAnsi(str)) u += T3[ch] != null ? T3[ch] : 556;
   return u / 1e3 * size;
 }
 function pdfStr(s) {
@@ -1099,7 +1105,7 @@ function jpegInfo(bytes) {
   }
   return { w: 1, h: 1, comps: 3 };
 }
-var PAGE_W, PAGE_H, W, WIN1252, ASCIIFY, PdfDoc;
+var PAGE_W, PAGE_H, W, WB, WIN1252, ASCIIFY, PdfDoc;
 var init_pdf = __esm({
   "src/lib/pdf.js"() {
     PAGE_W = 595;
@@ -1191,7 +1197,110 @@ var init_pdf = __esm({
       "\xA3": 556,
       "\xB7": 278,
       "\u2013": 556,
-      "\u2014": 1e3
+      "\u2014": 1e3,
+      "\u2018": 222,
+      "\u2019": 222,
+      "\u201C": 333,
+      "\u201D": 333,
+      "\u2026": 1e3,
+      "\u20AC": 556,
+      "\u2022": 350
+    };
+    WB = {
+      " ": 278,
+      "!": 333,
+      '"': 474,
+      "#": 556,
+      "$": 556,
+      "%": 889,
+      "&": 722,
+      "'": 238,
+      "(": 333,
+      ")": 333,
+      "*": 389,
+      "+": 584,
+      ",": 278,
+      "-": 333,
+      ".": 278,
+      "/": 278,
+      "0": 556,
+      "1": 556,
+      "2": 556,
+      "3": 556,
+      "4": 556,
+      "5": 556,
+      "6": 556,
+      "7": 556,
+      "8": 556,
+      "9": 556,
+      ":": 333,
+      ";": 333,
+      "=": 584,
+      "?": 611,
+      "@": 975,
+      "A": 722,
+      "B": 722,
+      "C": 722,
+      "D": 722,
+      "E": 667,
+      "F": 611,
+      "G": 778,
+      "H": 722,
+      "I": 278,
+      "J": 556,
+      "K": 722,
+      "L": 611,
+      "M": 833,
+      "N": 722,
+      "O": 778,
+      "P": 667,
+      "Q": 778,
+      "R": 722,
+      "S": 667,
+      "T": 611,
+      "U": 722,
+      "V": 667,
+      "W": 944,
+      "X": 667,
+      "Y": 667,
+      "Z": 611,
+      "a": 556,
+      "b": 611,
+      "c": 556,
+      "d": 611,
+      "e": 556,
+      "f": 333,
+      "g": 611,
+      "h": 611,
+      "i": 278,
+      "j": 278,
+      "k": 556,
+      "l": 278,
+      "m": 889,
+      "n": 611,
+      "o": 611,
+      "p": 611,
+      "q": 611,
+      "r": 389,
+      "s": 556,
+      "t": 333,
+      "u": 611,
+      "v": 556,
+      "w": 778,
+      "x": 556,
+      "y": 556,
+      "z": 500,
+      "\xA3": 556,
+      "\xB7": 278,
+      "\u2013": 556,
+      "\u2014": 1e3,
+      "\u2018": 278,
+      "\u2019": 278,
+      "\u201C": 500,
+      "\u201D": 500,
+      "\u2026": 1e3,
+      "\u20AC": 556,
+      "\u2022": 350
     };
     WIN1252 = {
       "\u20AC": 128,
@@ -1299,7 +1408,7 @@ var init_pdf = __esm({
         const font = opt.bold ? "/F2" : "/F1";
         const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
         let tx = x;
-        if (opt.alignRight) tx = x - textWidth(str, size);
+        if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
         const y = this._page.h - yTop;
         this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
         return this;
@@ -1320,8 +1429,8 @@ var init_pdf = __esm({
         const font = opt.bold ? "/F2" : "/F1";
         const col = opt.grey ? "0.45 g " : "";
         let tx = x;
-        if (opt.alignRight) tx = x - textWidth(str, size);
-        else if (opt.center) tx = x - textWidth(str, size) / 2;
+        if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
+        else if (opt.center) tx = x - textWidth(str, size, !!opt.bold) / 2;
         const y = pg.h - yTop;
         pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
         return this;
@@ -40934,12 +41043,12 @@ function fmtWhen3(iso) {
     return String(iso || "");
   }
 }
-function wrap6(str, size, maxW) {
+function wrap6(str, size, maxW, bold) {
   const words = String(str == null ? "" : str).split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
     const t = cur ? cur + " " + w : w;
-    if (textWidth(t, size) > maxW && cur) {
+    if (textWidth(t, size, !!bold) > maxW && cur) {
       lines.push(cur);
       cur = w;
     } else cur = t;
@@ -40957,12 +41066,12 @@ function boldWords(str) {
   });
   return out;
 }
-function wrapWords(words, size, maxW) {
+function wrapWords(words, size, maxW, force) {
   const lines = [];
   let cur = [], curW = 0;
   const sp = textWidth(" ", size);
   for (const tok of words) {
-    const ww = textWidth(tok.w, size);
+    const ww = textWidth(tok.w, size, !!(force || tok.bold));
     const add = cur.length ? sp + ww : ww;
     if (cur.length && curW + add > maxW) {
       lines.push(cur);
@@ -40987,7 +41096,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch {
     y = 96;
   }
-  for (const ln of wrap6(String(docObj.title || "Document"), 20, W6)) {
+  for (const ln of wrap6(String(docObj.title || "Document"), 20, W6, true)) {
     doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
     y += 26;
   }
@@ -41011,14 +41120,15 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   };
   function emitWords(x, text, size, opt = {}, lh) {
     lh = lh || size + 4.5;
-    const lines2 = wrapWords(boldWords(text), size, R - x);
+    const lines2 = wrapWords(boldWords(text), size, R - x, opt.bold);
     for (const ln of lines2) {
       need(lh);
       let tx = x;
       for (let i = 0; i < ln.length; i++) {
         const tok = ln[i];
-        doc.text(tx, y, tok.w, { size, bold: opt.bold || tok.bold, color: opt.color, grey: opt.grey });
-        tx += textWidth(tok.w, size) + textWidth(" ", size);
+        const b = opt.bold || tok.bold;
+        doc.text(tx, y, tok.w, { size, bold: b, color: opt.color, grey: opt.grey });
+        tx += textWidth(tok.w, size, b) + textWidth(" ", size);
       }
       y += lh;
     }
@@ -41031,7 +41141,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       const wrapped = [];
       let maxLines = 1;
       for (let c = 0; c < ncol; c++) {
-        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2);
+        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2, header4);
         wrapped.push(w);
         if (w.length > maxLines) maxLines = w.length;
       }
@@ -41044,8 +41154,9 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
         for (const ln of wrapped[c]) {
           let tx = cx + pad;
           for (const tok of ln) {
-            doc.text(tx, ty, tok.w, { size: csize, bold: header4 || tok.bold });
-            tx += textWidth(tok.w, csize) + textWidth(" ", csize);
+            const b = header4 || tok.bold;
+            doc.text(tx, ty, tok.w, { size: csize, bold: b });
+            tx += textWidth(tok.w, csize, b) + textWidth(" ", csize);
           }
           ty += clh;
         }
@@ -41102,7 +41213,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
         let tx = L + 16;
         for (const tok of ln) {
           doc.text(tx, y, tok.w, { size: 10.5, bold: tok.bold });
-          tx += textWidth(tok.w, 10.5) + textWidth(" ", 10.5);
+          tx += textWidth(tok.w, 10.5, tok.bold) + textWidth(" ", 10.5);
         }
         y += 15;
       }
@@ -42827,9 +42938,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -50104,7 +50215,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50364,7 +50475,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };
