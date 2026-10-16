@@ -41,11 +41,11 @@ function fmtWhen(iso) {
   } catch { return String(iso || ""); }
 }
 
-function wrap(str, size, maxW) {
+function wrap(str, size, maxW, bold) {
   const words = String(str == null ? "" : str).split(/\s+/), lines = []; let cur = "";
   for (const w of words) {
     const t = cur ? cur + " " + w : w;
-    if (textWidth(t, size) > maxW && cur) { lines.push(cur); cur = w; }
+    if (textWidth(t, size, !!bold) > maxW && cur) { lines.push(cur); cur = w; }
     else cur = t;
   }
   if (cur) lines.push(cur);
@@ -64,10 +64,12 @@ function boldWords(str) {
   return out;
 }
 // Greedy word-wrap over styled words. Returns lines, each an array of {w,bold}.
-function wrapWords(words, size, maxW) {
+// `force` = a style applied to every word (e.g. a bold heading) so widths are
+// measured in the SAME font the word is drawn in — bold glyphs are wider.
+function wrapWords(words, size, maxW, force) {
   const lines = []; let cur = [], curW = 0; const sp = textWidth(" ", size);
   for (const tok of words) {
-    const ww = textWidth(tok.w, size);
+    const ww = textWidth(tok.w, size, !!(force || tok.bold));
     const add = cur.length ? sp + ww : ww;
     if (cur.length && curW + add > maxW) { lines.push(cur); cur = [tok]; curW = ww; }
     else { cur.push(tok); curW += add; }
@@ -89,7 +91,7 @@ export function buildSignDocPdf(docObj = {}, sig = {}) {
   } catch { y = 96; }
 
   // Title.
-  for (const ln of wrap(String(docObj.title || "Document"), 20, W)) {
+  for (const ln of wrap(String(docObj.title || "Document"), 20, W, true)) {
     doc.text(L, y, ln, { size: 20, bold: true, color: NAVY }); y += 26;
   }
   y += 2;
@@ -106,14 +108,15 @@ export function buildSignDocPdf(docObj = {}, sig = {}) {
   // forced style (heading colour) applied to every run.
   function emitWords(x, text, size, opt = {}, lh) {
     lh = lh || size + 4.5;
-    const lines = wrapWords(boldWords(text), size, R - x);
+    const lines = wrapWords(boldWords(text), size, R - x, opt.bold);
     for (const ln of lines) {
       need(lh);
       let tx = x;
       for (let i = 0; i < ln.length; i++) {
         const tok = ln[i];
-        doc.text(tx, y, tok.w, { size, bold: opt.bold || tok.bold, color: opt.color, grey: opt.grey });
-        tx += textWidth(tok.w, size) + textWidth(" ", size);
+        const b = opt.bold || tok.bold;
+        doc.text(tx, y, tok.w, { size, bold: b, color: opt.color, grey: opt.grey });
+        tx += textWidth(tok.w, size, b) + textWidth(" ", size);
       }
       y += lh;
     }
@@ -129,7 +132,7 @@ export function buildSignDocPdf(docObj = {}, sig = {}) {
       const wrapped = [];
       let maxLines = 1;
       for (let c = 0; c < ncol; c++) {
-        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2);
+        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2, header);
         wrapped.push(w); if (w.length > maxLines) maxLines = w.length;
       }
       const rh = maxLines * clh + pad * 2;
@@ -141,8 +144,9 @@ export function buildSignDocPdf(docObj = {}, sig = {}) {
         for (const ln of wrapped[c]) {
           let tx = cx + pad;
           for (const tok of ln) {
-            doc.text(tx, ty, tok.w, { size: csize, bold: header || tok.bold });
-            tx += textWidth(tok.w, csize) + textWidth(" ", csize);
+            const b = header || tok.bold;
+            doc.text(tx, ty, tok.w, { size: csize, bold: b });
+            tx += textWidth(tok.w, csize, b) + textWidth(" ", csize);
           }
           ty += clh;
         }
@@ -179,7 +183,7 @@ export function buildSignDocPdf(docObj = {}, sig = {}) {
       doc.text(L + 4, y, "•", { size: 10.5 });
       for (const ln of parts) {
         let tx = L + 16;
-        for (const tok of ln) { doc.text(tx, y, tok.w, { size: 10.5, bold: tok.bold }); tx += textWidth(tok.w, 10.5) + textWidth(" ", 10.5); }
+        for (const tok of ln) { doc.text(tx, y, tok.w, { size: 10.5, bold: tok.bold }); tx += textWidth(tok.w, 10.5, tok.bold) + textWidth(" ", 10.5); }
         y += 15;
       }
       y += 2; continue;
