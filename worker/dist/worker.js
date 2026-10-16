@@ -28916,6 +28916,8 @@ var PERMISSION_KEYS = [
   // access to the H&S planning tool
   "SiteLog",
   // access to SiteLog (site check-in/attendance)
+  "SiteLogAdmin",
+  // SiteLog office view: who's on site, timesheets, sites, scan log
   "OfficeClock",
   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",
@@ -30526,7 +30528,7 @@ async function handle17(request, env, ctx, url, sess) {
     if (!sess) sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
     const perms2 = await permissionsFor(env, sess.tenantId, sess.user.username);
-    if (perms2.SiteLog !== "Yes" && perms2.FullAccess !== "Yes")
+    if (perms2.SiteLog !== "Yes" && perms2.SiteLogAdmin !== "Yes" && perms2.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
     if (!env.PORTAL_BRIDGE_SECRET)
       return json({ ok: true, url: SCAN_URL, linked: false }, {}, env, request);
@@ -30544,8 +30546,8 @@ async function handle17(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes")
-    return error("Forbidden \u2014 SiteLog admin data needs Full Access", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes")
+    return error("Forbidden \u2014 SiteLog admin data needs the SiteLog admin permission", 403, env, request);
   if (!env.SITELOG_ADMIN_SECRET)
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
   const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
@@ -45485,7 +45487,7 @@ async function handle39(request, env, ctx, url, sess) {
   if (!sess) return error("Not signed in", 401, env, request);
   const tid = sess.tenantId;
   const perms = await permissionsFor(env, tid, sess.user.username);
-  if (perms.FullAccess !== "Yes") return error("Full Access only", 403, env, request);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes") return error("Needs the SiteLog admin permission", 403, env, request);
   const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
   if (path === "/config" && request.method === "GET") {
     return json({

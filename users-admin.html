@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=43"></script>
+  <script src="/portal-config.js?v=44"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -472,7 +472,7 @@
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
-      "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
+      "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","SiteLogAdmin","OfficeTimesheet",
       "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere","EicrCheck","Chapplins","WhereEveryone","StaffRecords","CPD"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
@@ -488,7 +488,8 @@
       AssetAdmin:"P&E admin — all transfer documents", MyDocuments:"My documents",
       Weekly:"Weekly", Forms:"Forms", Compliance:"Compliance", Projects:"Projects",
       ProjectsAdmin:"Projects admin", TimesheetAdmin:"Timesheet admin",
-      LabourPlanning:"Labour planning", SLA:"SLA — My Jobs (engineer)", SLAAdmin:"SLA Admin — dashboard, scheduler, edit jobs", HSPlan:"H&S planner", SiteLog:"SiteLog",
+      LabourPlanning:"Labour planning", SLA:"SLA — My Jobs (engineer)", SLAAdmin:"SLA Admin — dashboard, scheduler, edit jobs", HSPlan:"H&S planner", SiteLog:"SiteLog — scanner tile (links their phone)",
+      SiteLogAdmin:"Site Log admin — who's on site, timesheets, sites, scan log",
       OfficeClock:"Office clock in/out", OfficeTimesheet:"Office timesheet (view all)",
       EngTimesheet:"Engineer timesheet (times, jobs, invoices)",
       ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background",
@@ -505,7 +506,7 @@
     // appears here exactly once.
     const PERM_GROUPS = [
       { title:"Administration",       perms:["Users","DeviceAdmin","StaffRecords"] },
-      { title:"Sites & assets",       perms:["Sites","AddSite","Assets","AssetAdmin","SiteLog"] },
+      { title:"Sites & assets",       perms:["Sites","AddSite","Assets","AssetAdmin","SiteLog","SiteLogAdmin"] },
       { title:"Jobs & SLA",           perms:["SLA","SLAAdmin","WhereEveryone","Forms"] },
       { title:"Time & hours",         perms:["CheckInOut","EngTimesheet","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","OfficeTimesheet","Weekly"] },
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },

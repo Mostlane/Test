@@ -468,6 +468,7 @@ const PERMISSION_KEYS = [
   "StoryMode",   // opt-in: guided day protocol for this engineer
   "HSPlan",      // access to the H&S planning tool
   "SiteLog",       // access to SiteLog (site check-in/attendance)
+  "SiteLogAdmin",  // SiteLog office view: who's on site, timesheets, sites, scan log
   "OfficeClock",   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",// view the weekly master office timesheet (all staff)
   "EngTimesheet",  // engineer weekly timesheet (times + jobs; invoices if self-employed)
