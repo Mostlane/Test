@@ -233,3 +233,5 @@
   Cache-Control: no-cache
 /document-sign.html
   Cache-Control: no-cache
+/training-agreement.html
+  Cache-Control: no-cache
