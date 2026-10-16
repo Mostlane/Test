@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -40833,6 +40838,35 @@ function wrap6(str, size, maxW) {
   if (cur) lines.push(cur);
   return lines.length ? lines : [""];
 }
+function boldWords(str) {
+  const out = [];
+  String(str == null ? "" : str).split("**").forEach((chunk, i) => {
+    const bold = i % 2 === 1;
+    chunk.split(/\s+/).forEach((w) => {
+      if (w !== "") out.push({ w, bold });
+    });
+  });
+  return out;
+}
+function wrapWords(words, size, maxW) {
+  const lines = [];
+  let cur = [], curW = 0;
+  const sp = textWidth(" ", size);
+  for (const tok of words) {
+    const ww = textWidth(tok.w, size);
+    const add = cur.length ? sp + ww : ww;
+    if (cur.length && curW + add > maxW) {
+      lines.push(cur);
+      cur = [tok];
+      curW = ww;
+    } else {
+      cur.push(tok);
+      curW += add;
+    }
+  }
+  if (cur.length) lines.push(cur);
+  return lines.length ? lines : [[]];
+}
 function buildSignDocPdf(docObj = {}, sig = {}) {
   const doc = new PdfDoc();
   const ref = String(docObj.ref || "");
@@ -40866,11 +40900,70 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       y = TOP;
     }
   };
+  function emitWords(x, text, size, opt = {}, lh) {
+    lh = lh || size + 4.5;
+    const lines2 = wrapWords(boldWords(text), size, R - x);
+    for (const ln of lines2) {
+      need(lh);
+      let tx = x;
+      for (let i = 0; i < ln.length; i++) {
+        const tok = ln[i];
+        doc.text(tx, y, tok.w, { size, bold: opt.bold || tok.bold, color: opt.color, grey: opt.grey });
+        tx += textWidth(tok.w, size) + textWidth(" ", size);
+      }
+      y += lh;
+    }
+  }
+  function emitTable(rows) {
+    if (!rows.length) return;
+    const ncol = Math.max(...rows.map((r) => r.length));
+    const colW = W6 / ncol, pad = 5, csize = 9.5, clh = 13;
+    const drawRow = (cells, header4) => {
+      const wrapped = [];
+      let maxLines = 1;
+      for (let c = 0; c < ncol; c++) {
+        const w = wrapWords(boldWords(cells[c] || ""), csize, colW - pad * 2);
+        wrapped.push(w);
+        if (w.length > maxLines) maxLines = w.length;
+      }
+      const rh = maxLines * clh + pad * 2;
+      need(rh);
+      for (let c = 0; c < ncol; c++) {
+        const cx = L + c * colW;
+        doc.rect(cx, y, colW, rh, { stroke: [0.6, 0.65, 0.7], lw: 0.5 });
+        let ty = y + pad + csize;
+        for (const ln of wrapped[c]) {
+          let tx = cx + pad;
+          for (const tok of ln) {
+            doc.text(tx, ty, tok.w, { size: csize, bold: header4 || tok.bold });
+            tx += textWidth(tok.w, csize) + textWidth(" ", csize);
+          }
+          ty += clh;
+        }
+      }
+      y += rh;
+    };
+    drawRow(rows[0], true);
+    for (let i = 1; i < rows.length; i++) drawRow(rows[i], false);
+    y += 8;
+  }
   const lines = String(docObj.body || "").split(/\r?\n/);
-  for (const raw of lines) {
-    const line2 = raw.replace(/\s+$/, "");
+  for (let li = 0; li < lines.length; li++) {
+    const line2 = lines[li].replace(/\s+$/, "");
     if (!line2.trim()) {
       y += 8;
+      continue;
+    }
+    if (/^\|.*\|$/.test(line2.trim())) {
+      const rows = [];
+      while (li < lines.length && /^\s*\|.*\|\s*$/.test(lines[li])) {
+        const cells = lines[li].trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+        if (!cells.every((c) => /^-+$/.test(c) || c === "")) rows.push(cells);
+        li++;
+      }
+      li--;
+      need(24);
+      emitTable(rows);
       continue;
     }
     if (/^---+$/.test(line2.trim())) {
@@ -40880,44 +40973,34 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
       continue;
     }
     if (/^#\s+/.test(line2)) {
-      const t = line2.replace(/^#\s+/, "");
-      need(24);
+      need(26);
       y += 6;
-      for (const ln of wrap6(t, 15, W6)) {
-        doc.text(L, y, ln, { size: 15, bold: true, color: NAVY4 });
-        y += 20;
-      }
+      emitWords(L, line2.replace(/^#\s+/, ""), 15, { bold: true, color: NAVY4 }, 20);
       y += 2;
       continue;
     }
     if (/^##\s+/.test(line2)) {
-      const t = line2.replace(/^##\s+/, "");
       need(20);
       y += 4;
-      for (const ln of wrap6(t, 12, W6)) {
-        doc.text(L, y, ln, { size: 12, bold: true, color: NAVY4 });
-        y += 16;
-      }
+      emitWords(L, line2.replace(/^##\s+/, ""), 12, { bold: true, color: NAVY4 }, 16);
       continue;
     }
     if (/^[-•]\s+/.test(line2)) {
-      const t = line2.replace(/^[-•]\s+/, "");
-      const parts2 = wrap6(t, 10.5, W6 - 16);
-      need(parts2.length * 15);
+      const parts = wrapWords(boldWords(line2.replace(/^[-•]\s+/, "")), 10.5, W6 - 16);
+      need(parts.length * 15);
       doc.text(L + 4, y, "\u2022", { size: 10.5 });
-      for (let i = 0; i < parts2.length; i++) {
-        doc.text(L + 16, y, parts2[i], { size: 10.5 });
+      for (const ln of parts) {
+        let tx = L + 16;
+        for (const tok of ln) {
+          doc.text(tx, y, tok.w, { size: 10.5, bold: tok.bold });
+          tx += textWidth(tok.w, 10.5) + textWidth(" ", 10.5);
+        }
         y += 15;
       }
       y += 2;
       continue;
     }
-    const parts = wrap6(line2, 10.5, W6);
-    need(parts.length * 15);
-    for (const ln of parts) {
-      doc.text(L, y, ln, { size: 10.5 });
-      y += 15;
-    }
+    emitWords(L, line2, 10.5, {}, 15);
     y += 5;
   }
   y += 12;
@@ -42635,9 +42718,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -49901,7 +49984,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50161,7 +50244,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };
