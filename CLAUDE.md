@@ -2158,6 +2158,15 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     Active, ✅ Invoiced (grouped by month w/ totals). Each job expands to
     inline-editable cost/PO/quote status+amount/invoice status+month/ref (autosave
     "Saved ✓") + a conversation log with an add-note box + "Open job card →".
+  - **📋 Jobs is a compliance-style TABLE (17 Oct 2026, Jamie: "easier to read… see jobs
+    which came in as new incidents and are not yet complete")** — sticky navy header,
+    sticky Site column, zebra rows, sortable headings (Site · Received · Days · Job · Priority
+    · Job status · Engineer · Quote · Cost · Invoice). **Default filter "🆕 Live — not
+    complete"** (= `invoiceState:"open"`: on the board, not finished; red summary tile);
+    chips Quote required / To invoice / Invoiced / All + a search box. Live rows carry a blue
+    left stripe (quote-needed amber); a Pending job with no engineer reads "🆕 Pending"; the
+    Days cell goes green ≤7 / amber ≤14 / red after. Tap a row → the same editor (cost/PO/
+    quote/invoice + conversation) opens beneath it, pinned to the visible width. HTML only.
   - **🧾 Invoicing (Sep 2026 — Jamie's monthly-invoice ask)** — a month-by-month
     worksheet. **Every FBC job defaults into the month it was RECEIVED** —
     `effMonth(r)` = `r.invoiceMonth` if set, else the month of `raisedAt`
