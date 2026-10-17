@@ -68,20 +68,16 @@
     <button id="logoutBtn">Log out</button>
   </header>
   <div class="tabs">
-    <button data-tab="jobs" class="on">My jobs</button>
-    <button data-tab="raise">Raise a job</button>
+    <button data-tab="jobs" class="on">Current jobs</button>
+    <button data-tab="raise" id="raiseTabBtn" hidden>Raise a job</button>
     <button data-tab="compliance">Compliance</button>
   </div>
 
   <div class="wrap">
     <!-- JOBS -->
     <section id="tab-jobs">
-      <div class="filters">
-        <button data-f="all" class="on">All</button>
-        <button data-f="pending">Pending</button>
-        <button data-f="complete">Complete</button>
-      </div>
-      <div class="card" id="jobsCard"><div class="empty">Loading your jobs…</div></div>
+      <p class="muted" id="jobsIntro" style="font-size:13px;margin:0 0 8px">Jobs we're working on at your sites. A job drops off this list once it's complete.</p>
+      <div class="card" id="jobsCard"><div class="empty">Loading current jobs…</div></div>
     </section>
 
     <!-- RAISE -->
@@ -199,6 +195,7 @@
     catch(e){ toLogin(); return; }
     if(!d || !d.ok){ toLogin(); return; }
     ME = d;
+    if (d.canRaise) $("raiseTabBtn").hidden = false;
     $("orgTitle").childNodes[0].nodeValue = d.orgLabel || "Client Portal";
     $("orgSub").textContent = d.name || "";
     // Site picker
@@ -209,12 +206,6 @@
   })();
 
   // ── Jobs list ────────────────────────────────────────────────────────────────
-  Array.prototype.forEach.call(document.querySelectorAll(".filters button"), function(b){
-    b.onclick = function(){
-      Array.prototype.forEach.call(document.querySelectorAll(".filters button"), function(x){ x.classList.remove("on"); });
-      b.classList.add("on"); JOBFILTER = b.getAttribute("data-f"); renderJobs();
-    };
-  });
   async function loadJobs(){
     try{
       var d = await authFetch("/client/jobs").then(function(r){ return r.json(); });
@@ -225,14 +216,15 @@
   function fmtDate(iso){ if(!iso) return ""; var dt=new Date(iso); if(isNaN(dt)) return ""; return dt.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
   function renderJobs(){
     var card = $("jobsCard");
-    var list = JOBS.filter(function(j){ return JOBFILTER==="all" || (JOBFILTER==="pending"&&j.status==="Pending") || (JOBFILTER==="complete"&&j.status==="Complete"); });
-    if(!list.length){ card.innerHTML = '<div class="empty">'+(JOBS.length?"No jobs in this filter.":"No jobs yet. Use ‘Raise a job’ to log one.")+'</div>'; return; }
+    var list = JOBS;
+    $("jobsIntro").textContent = list.length ? (list.length + " job" + (list.length===1?"":"s") + " in progress at your sites. A job drops off this list once it's complete.") : "Jobs we're working on at your sites. A job drops off this list once it's complete.";
+    if(!list.length){ card.innerHTML = '<div class="empty">No jobs in progress at your sites right now. ✓</div>'; return; }
     card.innerHTML = list.map(function(j){
-      var cls = j.status==="Complete" ? "complete" : "pending";
+      var cls = /^(In progress|Engineer on the way)$/.test(j.status) ? "complete" : "pending";
       return '<div class="jobrow" data-id="'+esc(j.id)+'">'+
         '<div class="body"><div class="t">'+esc(j.site||"Site")+'</div>'+
-        '<div class="s">'+esc(j.ref||"")+' · '+esc((j.description||"").slice(0,70))+'</div>'+
-        '<div class="s">'+(j.byClient?"You raised · ":"")+fmtDate(j.raisedAt)+'</div></div>'+
+        '<div class="s">'+((j.ref && j.ref!==j.site && !/^[0-9a-f]{8}-/.test(j.ref)) ? esc(j.ref)+' · ' : '')+esc((j.description||"").slice(0,70))+'</div>'+
+        '<div class="s">'+(j.byClient?"You raised · ":"")+"Logged "+fmtDate(j.raisedAt)+'</div></div>'+
         '<span class="pill '+cls+'">'+esc(j.status)+'</span></div>';
     }).join("");
     Array.prototype.forEach.call(card.querySelectorAll(".jobrow"), function(row){
@@ -246,13 +238,13 @@
     catch(e){ return; }
     if(!d || !d.ok){ return; }
     var j = d.job;
-    var cls = j.status==="Complete" ? "complete" : "pending";
+    var cls = /^(In progress|Engineer on the way)$/.test(j.status) ? "complete" : "pending";
     var photos = (j.photos||[]).map(function(p){ return '<img class="ph" src="'+esc(p.url)+'" loading="lazy" onclick="window.open(this.src,\'_blank\')">'; }).join("");
     var html = '<div class="modal"><div class="sheet">'+
       '<button class="x" onclick="closeModal()">Close ✕</button>'+
       '<h2>'+esc(j.site||"Job")+'</h2>'+
       '<div style="margin:2px 0 10px"><span class="pill '+cls+'">'+esc(j.status)+'</span>'+(j.urgency?' <span class="muted" style="font-size:12.5px">· '+esc(j.urgency)+'</span>':'')+'</div>'+
-      '<div class="muted" style="font-size:12.5px">Reference '+esc(j.ref||"")+' · Raised '+fmtDate(j.raisedAt)+(j.completedAt?(' · Completed '+fmtDate(j.completedAt)):"")+'</div>'+
+      '<div class="muted" style="font-size:12.5px">Reference '+esc(j.ref||"")+' · Logged '+fmtDate(j.raisedAt)+'</div>'+
       '<p style="white-space:pre-wrap;margin:12px 0 4px">'+esc(j.description||"")+'</p>'+
       (j.completionNote?('<div class="card" style="background:#f6f9f4;border-color:#d7ecdc;margin-top:10px"><b style="color:var(--ok)">Completion note</b><div style="white-space:pre-wrap;margin-top:4px">'+esc(j.completionNote)+'</div></div>'):'')+
       (photos?('<label>Photos</label><div>'+photos+'</div>'):'')+
