@@ -21,6 +21,39 @@
     .tabs button{ flex:1; border:none; background:none; padding:13px 6px; font:600 13.5px inherit; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; }
     .tabs button.on{ color:var(--brand); border-bottom-color:var(--brand); }
     .wrap{ max-width:760px; margin:0 auto; padding:14px 12px 60px; }
+    @media(min-width:900px){ .wrap{ max-width:1180px; } }
+    /* Current jobs — compliance-style table with a clear "Latest update" column */
+    .jtwrap{ overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    table.jt{ width:100%; border-collapse:separate; border-spacing:0; font-size:13.5px; }
+    table.jt th{ background:var(--brand); color:#fff; text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; padding:10px 10px; white-space:nowrap; position:sticky; top:0; }
+    table.jt td{ padding:10px 10px; border-bottom:1px solid #eef1f5; vertical-align:top; }
+    table.jt tr.zeb td{ background:#f8fafc; }
+    table.jt tbody tr{ cursor:pointer; }
+    table.jt tbody tr:hover td{ background:#eef4fb; }
+    table.jt td.site{ font-weight:700; min-width:140px; position:sticky; left:0; background:#fff; border-right:1px solid #eef1f5; }
+    table.jt tr.zeb td.site{ background:#f8fafc; }
+    table.jt td.job{ min-width:200px; max-width:320px; color:#344054; }
+    table.jt td.job .ref{ font-size:11.5px; color:var(--muted); }
+    table.jt td.nowrap{ white-space:nowrap; }
+    table.jt td.upd{ min-width:240px; max-width:420px; }
+    .updcell{ background:#fff8ec; border:1px solid #f5d9a6; border-radius:8px; padding:6px 9px; color:#5c3a05; white-space:pre-wrap; }
+    .updcell .d{ display:block; font-size:11.5px; font-weight:700; color:#8a5a12; margin-bottom:2px; }
+    .updcell .more{ display:block; font-size:11.5px; color:#8a5a12; margin-top:3px; }
+    .noupd{ color:#98a2b3; font-size:12.5px; }
+    /* Phone: each job becomes a stacked card so the update is never off-screen */
+    @media(max-width:700px){
+      .jtwrap{ border:none; background:none; overflow:visible; }
+      table.jt, table.jt tbody{ display:block; }
+      table.jt thead{ display:none; }
+      table.jt tr{ display:grid; grid-template-columns:1fr auto; gap:4px 10px; background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+      table.jt td{ display:block; padding:0; border:none; background:none !important; position:static; min-width:0; max-width:none; }
+      table.jt td.site{ grid-column:1; grid-row:1; border:none; font-size:15px; }
+      table.jt td.st{ grid-column:2; grid-row:1; text-align:right; }
+      table.jt td.job{ grid-column:1 / -1; }
+      table.jt td.logged{ grid-column:1 / -1; font-size:12px; color:var(--muted); }
+      table.jt td.logged:before{ content:"Logged "; }
+      table.jt td.upd{ grid-column:1 / -1; margin-top:6px; }
+    }
     .card{ background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.05); padding:14px; margin-bottom:12px; }
     label{ display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
     input,select,textarea{ width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; background:#fff; color:var(--ink); }
@@ -222,17 +255,25 @@
     var card = $("jobsCard");
     var list = JOBS;
     $("jobsIntro").textContent = list.length ? (list.length + " job" + (list.length===1?"":"s") + " in progress at your sites. A job drops off this list once it's complete.") : "Jobs we're working on at your sites. A job drops off this list once it's complete.";
+    card.style.padding = card.style.border = card.style.background = card.style.boxShadow = "";
     if(!list.length){ card.innerHTML = '<div class="empty">No jobs in progress at your sites right now. ✓</div>'; return; }
-    card.innerHTML = list.map(function(j){
-      var cls = /^(In progress|Engineer on the way)$/.test(j.status) ? "complete" : "pending";
-      return '<div class="jobrow" data-id="'+esc(j.id)+'">'+
-        '<div class="body"><div class="t">'+esc(j.site||"Site")+'</div>'+
-        '<div class="s">'+((j.ref && j.ref!==j.site && !/^[0-9a-f]{8}-/.test(j.ref)) ? esc(j.ref)+' · ' : '')+esc((j.description||"").slice(0,70))+'</div>'+
-        '<div class="s">'+(j.byClient?"You raised · ":"")+"Logged "+fmtDate(j.raisedAt)+'</div>'+
-        (j.latestUpdate?('<div class="upd">📣 <b>'+fmtDate(j.latestUpdate.at)+':</b> '+esc(j.latestUpdate.body)+'</div>'):'')+'</div>'+
-        '<span class="pill '+cls+'">'+esc(j.status)+'</span></div>';
-    }).join("");
-    Array.prototype.forEach.call(card.querySelectorAll(".jobrow"), function(row){
+    card.innerHTML = '<div class="jtwrap"><table class="jt"><thead><tr><th>Site</th><th>Job</th><th>Logged</th><th>Status</th><th>Latest update from Mostlane</th></tr></thead><tbody>'+
+      list.map(function(j, i){
+        var cls = /^(In progress|Engineer on the way)$/.test(j.status) ? "complete" : "pending";
+        var refOk = j.ref && j.ref!==j.site && !/^[0-9a-f]{8}-/.test(j.ref);
+        var u = j.latestUpdate;
+        var upd = u ? ('<div class="updcell"><span class="d">📣 '+esc(fmtDateTime(u.at))+(u.by?' · '+esc(u.by):'')+'</span>'+esc(u.body)+
+                       (j.updateCount>1?'<span class="more">+ '+(j.updateCount-1)+' earlier update'+(j.updateCount>2?'s':'')+' — tap to see all</span>':'')+'</div>')
+                    : '<span class="noupd">No update yet</span>';
+        return '<tr data-id="'+esc(j.id)+'"'+(i%2?' class="zeb"':'')+'>'+
+          '<td class="site">'+esc(j.site||"Site")+'</td>'+
+          '<td class="job">'+esc((j.description||"").slice(0,140))+(refOk?'<div class="ref">Ref '+esc(j.ref)+'</div>':'')+(j.byClient?'<div class="ref">Raised by you</div>':'')+'</td>'+
+          '<td class="nowrap logged">'+esc(fmtDate(j.raisedAt))+'</td>'+
+          '<td class="nowrap st"><span class="pill '+cls+'">'+esc(j.status)+'</span></td>'+
+          '<td class="upd">'+upd+'</td></tr>';
+      }).join("")+'</tbody></table></div>';
+    card.style.padding = "0"; card.style.border = "none"; card.style.background = "none"; card.style.boxShadow = "none";
+    Array.prototype.forEach.call(card.querySelectorAll("tr[data-id]"), function(row){
       row.onclick = function(){ openJob(row.getAttribute("data-id")); };
     });
   }

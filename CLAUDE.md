@@ -2262,6 +2262,12 @@ in the modal). Only client_visible rows ever reach the client — the incident e
 internal notes never do; `by` is the poster's first name. **POST /fbc/message-delete
 {id}** removes a note/update posted by mistake (never an inbound email) — the ✕ on each.
 No push/email to the client yet (they see it on next login).
+**client-home.html Current jobs is a TABLE (17 Oct 2026, Jamie: "updates clear to them in the
+table"):** navy header, zebra rows, columns Site · Job (+ref) · Logged · Status · **Latest
+update from Mostlane** (amber box: date/time · first name · text, "+ N earlier updates — tap
+to see all"; "No update yet" otherwise); row tap opens the job modal. ≤700px each row
+re-flows into a stacked card (CSS grid) so the update is never off-screen; `.wrap` widens to
+1180px on desktop.
 
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
