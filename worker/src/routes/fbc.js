@@ -116,6 +116,23 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Shape a merged row from an fbc_meta row (m) and its live sla_jobs row (j).
   const DONE = new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+  // The office's own "finished" categories ("FBC Works Completed", "Compliance
+  // Complete" …) count as done too — otherwise those jobs sat in "live".
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of (row ? JSON.parse(row.value) : [])) if (c && c.done && c.name) DONE.add(String(c.name).trim().toLowerCase());
+  } catch {}
+  // What KIND of job is it? Only incidents are "received": a Jotform email (source
+  // jotform/backfill) or an office-raised request. Planned compliance work (flick
+  // tests, 3-hour drain-downs, EM/PAT/EICR) is booked by us, not received.
+  const PLANNED_RE = /\b(flick\s*tests?|drain[\s-]*downs?|3\s*-?\s*h(?:ou)?rs?\s+(?:drain|test)|emergency\s+light(?:ing)?\s+tests?|em\s+tests?|pat\s+test(?:ing|s)?|eicr|fixed\s+wire|5\s*-?\s*year)\b/i;
+  const kindOf = (m, j) => {
+    const src = (m && m.source) || "";
+    if (src === "jotform" || src === "backfill") return "email";
+    let d = {}; try { d = j && j.data ? JSON.parse(j.data) : {}; } catch {}
+    if (d.emTest || d.pat || d.elecTest || d.pumpMaintenance || PLANNED_RE.test(String((j && j.description) || (m && m.description) || ""))) return "planned";
+    return "office";
+  };
   const shape = (m, j, msg) => {
     const status = (j && j.status) || "";
     const finished = DONE.has(String(status).toLowerCase());
@@ -156,6 +173,10 @@ export async function handle(request, env, ctx, url, sess) {
       messageCount: (msg && msg.n) || 0,
       lastMessageAt: (msg && msg.last) || "",
       onBoard: !!j,
+      finished,
+      kind: kindOf(m, j),
+      // An emailed incident's received time is when the email came in (the meta row).
+      receivedAt: (m && (m.source === "jotform" || m.source === "backfill")) ? ((m.raised_at) || (m.created_at) || (j && j.created_at) || "") : ((j && j.created_at) || (m && m.created_at) || ""),
     };
   };
 

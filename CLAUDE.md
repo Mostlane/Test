@@ -2167,6 +2167,18 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     left stripe (quote-needed amber); a Pending job with no engineer reads "🆕 Pending"; the
     Days cell goes green ≤7 / amber ≤14 / red after. Tap a row → the same editor (cost/PO/
     quote/invoice + conversation) opens beneath it, pinned to the visible width. HTML only.
+  - **Incidents vs planned tests + finished categories (17 Oct 2026, Jamie: "a lot of
+    these are flick tests or 3hr tests… if they didn't come in via email they haven't been
+    received").** `/fbc/list` rows now carry **`kind`** = `email` (fbc_meta source jotform/
+    backfill — the incident email), `planned` (job flags emTest/pat/elecTest/pump OR a
+    description matching flick test / drain down / EM / PAT / EICR / fixed wire / 5-year —
+    work WE booked) or `office` (raised by the office); **`receivedAt`** (the email time for
+    `email`); and **`finished`** — which now honours the office's custom `done:true`
+    categories ("FBC Works Completed", "Compliance Complete"), previously read as LIVE.
+    The page's Type column shows 📨 Email / ✍️ Office / 🔦 Planned; the Date column says
+    what the date IS (received / raised / booked / not booked); Days only counts incidents.
+    Default filter "🆕 Incidents — not complete" excludes planned work; a separate "🔦 Planned
+    tests" chip lists unfinished planned tests.
   - **🧾 Invoicing (Sep 2026 — Jamie's monthly-invoice ask)** — a month-by-month
     worksheet. **Every FBC job defaults into the month it was RECEIVED** —
     `effMonth(r)` = `r.invoiceMonth` if set, else the month of `raisedAt`

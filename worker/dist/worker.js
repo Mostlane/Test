@@ -31341,6 +31341,23 @@ async function handle18(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/fbc(?=\/|$)/, "") || "/";
   const DONE = /* @__PURE__ */ new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of row ? JSON.parse(row.value) : []) if (c && c.done && c.name) DONE.add(String(c.name).trim().toLowerCase());
+  } catch {
+  }
+  const PLANNED_RE = /\b(flick\s*tests?|drain[\s-]*downs?|3\s*-?\s*h(?:ou)?rs?\s+(?:drain|test)|emergency\s+light(?:ing)?\s+tests?|em\s+tests?|pat\s+test(?:ing|s)?|eicr|fixed\s+wire|5\s*-?\s*year)\b/i;
+  const kindOf = (m, j) => {
+    const src = m && m.source || "";
+    if (src === "jotform" || src === "backfill") return "email";
+    let d = {};
+    try {
+      d = j && j.data ? JSON.parse(j.data) : {};
+    } catch {
+    }
+    if (d.emTest || d.pat || d.elecTest || d.pumpMaintenance || PLANNED_RE.test(String(j && j.description || m && m.description || ""))) return "planned";
+    return "office";
+  };
   const shape2 = (m, j, msg) => {
     const status = j && j.status || "";
     const finished = DONE.has(String(status).toLowerCase());
@@ -31380,7 +31397,11 @@ async function handle18(request, env, ctx, url, sess) {
       source: m && m.source || (j ? "manual" : ""),
       messageCount: msg && msg.n || 0,
       lastMessageAt: msg && msg.last || "",
-      onBoard: !!j
+      onBoard: !!j,
+      finished,
+      kind: kindOf(m, j),
+      // An emailed incident's received time is when the email came in (the meta row).
+      receivedAt: m && (m.source === "jotform" || m.source === "backfill") ? m.raised_at || m.created_at || j && j.created_at || "" : j && j.created_at || m && m.created_at || ""
     };
   };
   if (sub === "/list" && method === "GET") {
