@@ -2250,7 +2250,18 @@ or add one): `/client/me` returns `canRaise`, client-home hides the "Raise a job
 `/client/raise`(+`-photo`) 403. The raise form itself is BUILT (site picker, urgency →
 priority, photos, office push, confirmation email) — Jamie plans his own incident form to
 replace Jotform; this is the natural home for it. Test `node --no-warnings
-worker/tools/test-client-portal.mjs` (10). No FBC client accounts exist yet (17 Oct).
+worker/tools/test-client-portal.mjs` (15). No FBC client accounts exist yet (17 Oct).
+**Office updates the client can read (17 Oct 2026):** on fbc.html each job's
+Conversation box has **Add note** (internal, as before) and **📣 Update for FBC** (confirm
+first) → POST /fbc/message `{jobId, body, toClient:true}` stores an `fbc_messages` row with
+`direction:"client"` + new column **`client_visible=1`** (self-migrating). fbc.js
+`clientUpdatesFor(env,tid,jobIds)` (exported) feeds client.js: `/client/jobs` adds
+`latestUpdate {at,body,by}` + `updateCount` per job (card shows it; a fresh update sorts
+the job to the top) and `/client/job` adds the full `updates[]` ("Updates from Mostlane"
+in the modal). Only client_visible rows ever reach the client — the incident email and
+internal notes never do; `by` is the poster's first name. **POST /fbc/message-delete
+{id}** removes a note/update posted by mistake (never an inbound email) — the ✕ on each.
+No push/email to the client yet (they see it on next login).
 
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job

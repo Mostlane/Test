@@ -21,6 +21,7 @@ import { ORG_SCHEME } from "../lib/complianceaccess.js";
 import { listJobs, createOrUpdateJobFromPayload, reconcileRelease } from "./sla.js";
 import { sendToPermission } from "./push.js";
 import { sendEmail, appBase } from "../lib/email.js";
+import { clientUpdatesFor } from "./fbc.js";
 
 const ORG_LABEL = { fbc: "Fareham Borough Council" };
 
@@ -161,6 +162,14 @@ export async function handle(request, env, ctx, url, sess) {
       scheduledAt: j.scheduledAt || "",
       updatedAt: j.updatedAt || "",
     }));
+    // The office's "update for the client" notes — the latest one rides on the card.
+    const ups = await clientUpdatesFor(env, tid, jobs.map(j => j.id));
+    for (const j of jobs) {
+      const u = (ups[j.id] || [])[0];
+      j.latestUpdate = u ? { at: u.at, body: u.body.slice(0, 200), by: u.by } : null;
+      j.updateCount = (ups[j.id] || []).length;
+      if (u && (!j.updatedAt || u.at > j.updatedAt)) j.updatedAt = u.at;
+    }
     // Newest activity first.
     jobs.sort((a, b) => (Date.parse(b.updatedAt || b.raisedAt || 0) || 0) - (Date.parse(a.updatedAt || a.raisedAt || 0) || 0));
     return json({ ok: true, jobs }, {}, env, request);
@@ -211,6 +220,7 @@ export async function handle(request, env, ctx, url, sess) {
         completedAt: "",
         completionNote: "",
         photos,
+        updates: (await clientUpdatesFor(env, tid, [j.id]))[j.id] || [],
       },
     }, {}, env, request);
   }
