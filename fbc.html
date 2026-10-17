@@ -101,6 +101,30 @@
       table.inv td{border:none;padding:5px 10px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
       table.inv td::before{content:attr(data-l);font-size:11px;font-weight:700;color:#6b7a90;text-transform:uppercase;}
       table.inv input.cost,table.inv input.mth{width:auto;} }
+    /* Compliance-style jobs table */
+    .tblwrap{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);overflow:auto;max-height:calc(100vh - 230px);}
+    table.jt{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
+    table.jt th{position:sticky;top:0;z-index:3;background:var(--brand);color:#fff;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:8px 9px;white-space:nowrap;cursor:pointer;user-select:none;}
+    table.jt th .ar{opacity:.7;margin-left:3px;}
+    table.jt td{padding:6px 9px;border-bottom:1px solid #eef2f6;white-space:nowrap;vertical-align:middle;background:#fff;}
+    table.jt tbody tr.r:nth-child(4n+1) td{background:#f8fafc;}
+    table.jt tbody tr.r{cursor:pointer;}
+    table.jt tbody tr.r:hover td{background:#eef4fb;}
+    table.jt th.stk,table.jt td.stk{position:sticky;left:0;z-index:2;}
+    table.jt th.stk{z-index:4;}
+    table.jt td.stk{font-weight:700;max-width:230px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #e2e8f0;}
+    table.jt td.dsc{max-width:340px;overflow:hidden;text-overflow:ellipsis;color:#374151;}
+    table.jt tr.r.live td.stk{box-shadow:inset 4px 0 0 #2563eb;}
+    table.jt tr.r.q td.stk{box-shadow:inset 4px 0 0 #d97706;}
+    table.jt tr.r.open td{background:#eef4fb !important;}
+    table.jt tr.det td{white-space:normal;background:#fafbfc;padding:0;}
+    table.jt tr.det .job{border:none;border-radius:0;margin:0;position:sticky;left:0;box-sizing:border-box;}
+    .sp{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;}
+    .sp.new{background:#dbeafe;color:#1d4ed8;} .sp.live{background:#e0ecff;color:#1e40af;} .sp.hold{background:#fde7d3;color:#9a4b00;}
+    .sp.done{background:#d8f0e0;color:#0e7a3b;} .sp.none{background:#eef1f4;color:#5a6b80;}
+    .days{display:inline-block;min-width:34px;text-align:center;border-radius:7px;padding:2px 6px;font-weight:800;font-size:12px;}
+    .days.g{background:#e3f6e9;color:#0e7a3b;} .days.a{background:#fff3cd;color:#7a5b00;} .days.r{background:#fde2e2;color:#b00020;}
+    .wrap.wide{max-width:1250px;}
   </style>
 </head>
 <body>
@@ -117,7 +141,7 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap wide">
     <div id="jobsView">
       <div class="card">
         <p class="muted" id="greet" style="margin:0 0 10px;">Fareham Borough Council jobs — quotes, costs, and what to invoice each month.</p>
@@ -125,11 +149,12 @@
       </div>
 
       <div class="filters" id="filters">
-        <button class="chip on" data-f="all">All</button>
+        <button class="chip on" data-f="active">🆕 Live — not complete</button>
         <button class="chip" data-f="quote">⭐ Quote required</button>
-        <button class="chip" data-f="active">Active</button>
-        <button class="chip" data-f="toinvoice">To invoice</button>
-        <button class="chip" data-f="invoiced">Invoiced</button>
+        <button class="chip" data-f="toinvoice">🧾 To invoice</button>
+        <button class="chip" data-f="invoiced">✅ Invoiced</button>
+        <button class="chip" data-f="all">All</button>
+        <input id="q" type="search" placeholder="Search site, job, reporter…" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:999px;font-size:14px;font-family:inherit;">
       </div>
 
       <div id="list"><div class="card"><p class="muted" style="padding:6px 4px;">Loading…</p></div></div>
@@ -161,7 +186,7 @@
     const fmtDay = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}); } catch { return ""; } };
     const fmtDT = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return ""; } };
     const monthLbl = m => { if(!/^\d{4}-\d{2}$/.test(m||"")) return m||""; const d=new Date(m+"-01T00:00:00"); return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
-    let FILTER = "all", ROWS = [], VIEW = "jobs", curMonth = null;
+    let FILTER = "active", SORT = { k:"received", dir:-1 }, QTXT = "", OPEN = new Set(), ROWS = [], VIEW = "jobs", curMonth = null;
     const ym = d => { const x = new Date(d); return isNaN(x) ? "" : (x.getFullYear() + "-" + String(x.getMonth()+1).padStart(2,"0")); };
     const effMonth = r => (/^\d{4}-\d{2}$/.test(r.invoiceMonth||"") ? r.invoiceMonth : ym(r.raisedAt));
 
@@ -188,6 +213,7 @@
         render();
       });
       [].forEach.call(document.querySelectorAll(".tab"), b => b.onclick = () => switchView(b.dataset.v));
+      g("q").addEventListener("input", e => { QTXT = e.target.value.trim().toLowerCase(); render(); });
       g("mPrev").onclick = () => stepMonth(-1);
       g("mNext").onclick = () => stepMonth(1);
       g("expMonth").onclick = () => exportXlsx(false);
@@ -225,7 +251,7 @@
       g("summary").innerHTML =
         tile(ROWS.length, "jobs", "") +
         tile(q, "need a quote", q?"warn":"") +
-        tile(active, "active", "") +
+        tile(active, "live — not complete", active?"bad":"") +
         tile(toInv, "to invoice", toInv?"warn":"") +
         tile(inv, "invoiced", inv?"ok":"");
       g("greet").textContent = toInv
@@ -336,61 +362,85 @@
     }
 
     function pass(r) {
+      if (QTXT && ![r.siteName, r.siteCode, r.reference, r.description, r.reportedBy, r.assignedTo, r.status].join(" ").toLowerCase().includes(QTXT)) return false;
       if (FILTER === "quote") return isQuote(r);
       if (FILTER === "active") return r.invoiceState === "open";
       if (FILTER === "toinvoice") return r.invoiceState === "to_invoice";
       if (FILTER === "invoiced") return r.invoiceState === "invoiced";
       return true;
     }
-
+    const DAY = 864e5;
+    const ageDays = r => { const t = Date.parse(r.raisedAt); return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / DAY)); };
+    function statusPill(r) {
+      const st = String(r.status || "").trim(), l = st.toLowerCase();
+      if (!r.onBoard) return '<span class="sp none">Record only</span>';
+      if (/complete|closed|invoiced|cancel/.test(l)) return '<span class="sp done">'+esc(st)+'</span>';
+      if (/hold|quote|order/.test(l)) return '<span class="sp hold">'+esc(st)+'</span>';
+      const isNew = /pending|^$/.test(l) && !r.assignedTo;
+      return '<span class="sp '+(isNew?"new":"live")+'">'+(isNew?"🆕 ":"")+esc(st || "New")+'</span>';
+    }
+    function daysCell(r) {
+      const d = ageDays(r); if (d == null) return "";
+      if (r.invoiceState !== "open") return '<span class="muted">'+d+'d</span>';
+      return '<span class="days '+(d > 14 ? "r" : d > 7 ? "a" : "g")+'">'+d+'d</span>';
+    }
+    const quoteCell = r => r.quoteRequired ? ('<span class="badge qpill">⭐ '+esc(r.quoteStatus ? (r.quoteStatus[0].toUpperCase()+r.quoteStatus.slice(1)) : "Needed")+(r.quoteAmount!=null&&r.quoteAmount!==""?" · "+money(r.quoteAmount):"")+'</span>') : '<span class="muted">—</span>';
+    const COLS = [
+      { k:"site", h:"Site", v:r => (r.siteName||r.siteCode||"").toLowerCase() },
+      { k:"received", h:"Received", v:r => String(r.raisedAt||"") },
+      { k:"days", h:"Days", v:r => ageDays(r) ?? -1 },
+      { k:"job", h:"Job", v:r => (r.description||r.reference||"").toLowerCase() },
+      { k:"priority", h:"Priority", v:r => String(r.priority||"zz") },
+      { k:"status", h:"Job status", v:r => String(r.status||"").toLowerCase() },
+      { k:"eng", h:"Engineer", v:r => String(r.assignedTo||"").toLowerCase() },
+      { k:"quote", h:"Quote", v:r => r.quoteRequired ? 0 : 1 },
+      { k:"cost", h:"Cost", v:r => Number(r.cost)||0 },
+      { k:"inv", h:"Invoice", v:r => r.invoiceState },
+    ];
     function render() {
-      let rows = ROWS.filter(pass);
-      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">Nothing here.</p></div>'; return; }
-      let h = "";
-      // Quote-required always breaks out into its own section (unless already filtered to one thing)
-      if (FILTER === "all") {
-        const quote = rows.filter(isQuote);
-        const rest = rows.filter(r => !isQuote(r));
-        if (quote.length) { h += '<div class="sechd q">⭐ Quote required ('+quote.length+')</div>'; quote.forEach(r => h += jobCard(r)); }
-        // group the rest: to-invoice by month, then active, then invoiced
-        const toInv = rest.filter(r => r.invoiceState === "to_invoice");
-        const active = rest.filter(r => r.invoiceState === "open");
-        const invoiced = rest.filter(r => r.invoiceState === "invoiced");
-        const nr = rest.filter(r => r.invoiceState === "not_required");
-        if (toInv.length) { h += '<div class="sechd">🧾 To invoice ('+toInv.length+')</div>'; toInv.forEach(r => h += jobCard(r)); }
-        if (active.length) { h += '<div class="sechd">🔧 Active ('+active.length+')</div>'; active.forEach(r => h += jobCard(r)); }
-        if (invoiced.length) {
-          h += '<div class="sechd">✅ Invoiced ('+invoiced.length+')</div>';
-          // group invoiced by month
-          const byM = {}; invoiced.forEach(r => { const m=r.invoiceMonth||"—"; (byM[m]=byM[m]||[]).push(r); });
-          Object.keys(byM).sort().reverse().forEach(m => {
-            h += '<div class="muted" style="margin:6px 4px 4px;font-weight:700;">'+esc(m==="—"?"Month not set":monthLbl(m))+' — '+money(byM[m].reduce((s,r)=>s+(Number(r.cost)||0),0))+'</div>';
-            byM[m].forEach(r => h += jobCard(r));
-          });
-        }
-        if (nr.length) { h += '<div class="sechd">🚫 No invoice needed ('+nr.length+')</div>'; nr.forEach(r => h += jobCard(r)); }
-      } else {
-        rows.forEach(r => h += jobCard(r));
-      }
-      g("list").innerHTML = h;
-      [].forEach.call(g("list").querySelectorAll(".jhd"), el => el.onclick = () => {
-        const j = el.closest(".job"); const was = j.classList.contains("open");
-        j.classList.toggle("open");
-        if (!was && !j.dataset.loaded) loadConv(j.dataset.job, j);
+      const rows = ROWS.filter(pass);
+      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">'+(FILTER==="active"?"No live FBC jobs — everything that came in is complete. 🎉":"Nothing here.")+'</p></div>'; return; }
+      const col = COLS.find(c => c.k === SORT.k) || COLS[1];
+      rows.sort((a,b) => { const x = col.v(a), y = col.v(b); return (x < y ? -1 : x > y ? 1 : 0) * SORT.dir; });
+      let h = '<div class="tblwrap"><table class="jt"><thead><tr>' + COLS.map((c,i) => '<th data-k="'+c.k+'"'+(i===0?' class="stk"':'')+'>'+esc(c.h)+(SORT.k===c.k?'<span class="ar">'+(SORT.dir>0?"▲":"▼")+'</span>':'')+'</th>').join("") + '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const live = r.invoiceState === "open", q = isQuote(r), open = OPEN.has(r.jobId);
+        const desc = (r.description || r.reference || "").replace(/\s+/g, " ");
+        h += '<tr class="r'+(live?" live":"")+(q?" q":"")+(open?" open":"")+'" data-job="'+esc(r.jobId)+'">'
+          + '<td class="stk" title="'+esc(r.siteName||r.siteCode)+'">'+esc(r.siteName||r.siteCode||"—")+'</td>'
+          + '<td>'+esc(fmtDay(r.raisedAt))+'</td>'
+          + '<td>'+daysCell(r)+'</td>'
+          + '<td class="dsc" title="'+esc(desc)+'">'+esc(desc||"—")+(r.messageCount?' <span class="muted">💬'+r.messageCount+'</span>':'')+'</td>'
+          + '<td>'+esc((r.priority||"").replace(/^Priority\s*/i,"P"))+'</td>'
+          + '<td>'+statusPill(r)+'</td>'
+          + '<td>'+esc(r.assignedTo||"—")+'</td>'
+          + '<td>'+quoteCell(r)+'</td>'
+          + '<td>'+(r.cost!=null&&r.cost!==""?money(r.cost):'<span class="muted">—</span>')+'</td>'
+          + '<td>'+invBadge(r)+'</td>'
+          + '</tr>';
+        if (open) h += '<tr class="det"><td colspan="'+COLS.length+'">'+jobCard(r)+'</td></tr>';
       });
+      h += '</tbody></table></div>';
+      g("list").innerHTML = h;
+      [].forEach.call(g("list").querySelectorAll("th[data-k]"), th => th.onclick = () => {
+        const k = th.dataset.k; SORT = { k, dir: SORT.k === k ? -SORT.dir : (k === "received" || k === "days" || k === "cost" ? -1 : 1) }; render();
+      });
+      [].forEach.call(g("list").querySelectorAll("tr.r"), tr => tr.onclick = () => {
+        const id = tr.dataset.job; OPEN.has(id) ? OPEN.delete(id) : OPEN.add(id); render();
+      });
+      // The detail panel stays the width of the VISIBLE table area (pinned left), so
+      // its fields never run off-screen when the table itself scrolls sideways.
+      const fitDet = () => { const w = (g("list").querySelector(".tblwrap") || {}).clientWidth; if (w) [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => j.style.width = w + "px"); };
+      fitDet(); if (!window.__fbcFit) { window.__fbcFit = 1; addEventListener("resize", () => { const w = (g("list").querySelector(".tblwrap") || {}).clientWidth; if (w) [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => j.style.width = w + "px"); }); }
+      [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => { if (!j.dataset.loaded) loadConv(j.dataset.job, j); });
       wireEdits();
     }
 
     function jobCard(r) {
-      const q = isQuote(r);
-      const em = q ? "⭐" : "🏛️";
       const sub = [r.siteCode, r.priority, r.reportedBy && ("by "+r.reportedBy), r.cost!=null?money(r.cost):"", r.messageCount?("💬 "+r.messageCount):""].filter(Boolean).join(" · ");
-      return '<div class="job'+(q?" q":"")+'" data-job="'+esc(r.jobId)+'">'
-        + '<div class="jhd"><div class="em">'+em+'</div>'
-        + '<div class="m"><div class="t">'+esc(r.siteName||r.siteCode||r.reference||"FBC job")+'</div>'
-        + '<div class="s">'+esc(sub || fmtDay(r.raisedAt))+'</div></div>'
-        + invBadge(r) + '</div>'
+      return '<div class="job open" data-job="'+esc(r.jobId)+'">'
         + '<div class="body">'
+        + (sub ? '<p class="muted" style="margin:0 0 8px;">'+esc(sub)+'</p>' : '')
         + (r.description ? '<p class="desc">'+esc(r.description)+'</p>' : '')
         + (r.w3w ? '<p class="muted" style="margin:0 0 10px;">📍 '+esc(r.w3w)+'</p>' : '')
         + '<div class="grid">'
