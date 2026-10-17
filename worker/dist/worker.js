@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -23637,7 +23642,8 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
   return [...seen.values()];
 }
 async function appendIncidentNote(env, tenantId, b) {
-  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  let jobs = b.reference || b.incident ? await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident }) : [];
+  if (!jobs.length && b.property && String(b.client || "") === "chapplins") jobs = await jobsByProperty(env, tenantId, b.property);
   if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
   const finished = await jobFinishedFor(env, tenantId);
   const open = jobs.filter((j2) => !finished(j2));
@@ -23645,13 +23651,34 @@ async function appendIncidentNote(env, tenantId, b) {
   const j = open.length ? newest(open) : newest(jobs);
   const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
   const by = String(b.by || "Southern Co-op (Concerto)").slice(0, 80);
-  const label2 = String(b.noteAction || "").replace(/\s+/g, " ").trim();
+  const label2 = String(b.client || "") === "chapplins" ? "" : String(b.noteAction || "").replace(/\s+/g, " ").trim();
   const text = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 1e3);
   const note = (label2 ? label2 + ": " : "") + (text || "(note added \u2014 no text)");
   (j.events ||= []).push({ at, by, type: "note", note });
   j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   await saveJob(env, tenantId, j);
   return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status };
+}
+async function jobsByProperty(env, tenantId, property) {
+  const norm2 = (x) => String(x || "").toLowerCase().replace(/\b[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}\b/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const head = norm2(property).split(" ").slice(0, 3).join(" ");
+  if (head.split(" ").length < 2) return [];
+  let rows = [];
+  try {
+    rows = (await tenantDB(env, tenantId).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND (id LIKE 'CHAP-%' OR helpdesk_ref LIKE 'CHAP-%' OR json_extract(data,'$.storeType')='chapplins')").bind(tenantId).all()).results || [];
+  } catch {
+    return [];
+  }
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate && [j.siteName, j.address].some((v) => {
+    const n = norm2(v);
+    return n === head || n.startsWith(head + " ");
+  }));
 }
 async function cancelIncidentJobs(env, tenantId, ctx, b) {
   const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
@@ -30962,6 +30989,23 @@ function chapplinsJob(subject, t) {
     }
   };
 }
+function chapplinsNote(subject, t) {
+  const subj = String(subject || "").replace(/^(?:\s*(?:re|fw|fwd|aw)\s*:\s*)+/i, "").trim();
+  if (/remittance|payment advice|statement|invoice/i.test(subj)) return { kind: "notice", reason: "Chapplins accounts email \u2014 not a job" };
+  let body = String(t || "");
+  const hdr = /^[\s_]*From:[^\n]*\n(?:[^\n]*\n){0,6}?\s*Subject:[^\n]*\n/i.exec(body);
+  if (hdr && hdr.index < 200) body = body.slice(hdr.index + hdr[0].length);
+  const q = /\n\s*(?:From:\s|-{3,}\s*Original Message|_{10,})/i.exec(body);
+  let text = q ? body.slice(0, q.index) : body;
+  const cut = CHAP_SIG.exec(text);
+  if (cut) text = text.slice(0, cut.index);
+  text = text.replace(/^\s*(?:Good (?:morning|afternoon|evening)[^\n]*|Hi[^\n]*|Hello[^\n]*|Dear[^\n]*)\n/i, "").replace(/\s+/g, " ").trim();
+  const jobNo = line(/Job Number[:\s]*(\d{6,12})\b/i, subj) || line(/Job Number[:\s]*(\d{6,12})\b/i, t);
+  const quotedProp = line(/^[ \t]*Property:[ \t]*([^\n]*)$/im, t);
+  const property = quotedProp || subj.replace(/\bP\s*[1-4]\b/ig, " ").replace(/\b(?:urgent|chase|chaser|update)\b/ig, " ").replace(/\s*-\s*$/, "").replace(/\s+/g, " ").trim();
+  const reference = jobNo ? "CHAP-" + jobNo : "";
+  return { kind: "note", incident: reference, note: { reference, incident: reference, property, client: "chapplins", text: text.slice(0, 1e3), action: "Chapplins", by: "Chapplins Lettings" } };
+}
 var djb2 = (s) => {
   let h = 5381;
   const str = String(s || "");
@@ -30982,15 +31026,17 @@ function fbcJotform(subject, t) {
   const addrBlock = (/^\s*(?:["']?Other["']?\s+)?Site Address[ \t]+([\s\S]+?)\n\s*(?:(?:["']?Other["']?\s+)?Site Access|Priority|Reported By)\b/im.exec(t) || [])[1] || "";
   const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
   const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
-  const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
-  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-4][^\n]*)/im.exec(t) || [])[1] || "");
-  const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
+  const HOURS_LINE = /^[ \t]*(?:out of hours|in hours|office hours|24\s*\/\s*7|24 hours|any ?time)[^\n]*$/im;
+  const hours = ((/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || ((HOURS_LINE.exec(addrBlock) || [])[0] || "")).trim();
+  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-5][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-5][^\n]*)/im.exec(t) || [])[1] || "");
+  const prRaw = (/([1-5])/.exec(prTxt) || [])[1] || "";
+  const prNum = prRaw === "5" ? "4" : prRaw;
   const reportedBy = val2(/^\s*Reported By[ \t]+(.+)$/im);
   const jobTitle = val2(/^\s*Job Title[ \t]+(.+)$/im);
   let desc = (/^\s*Brief description of the issue[ \t]+([\s\S]+?)\n\s*Quotation Required/im.exec(t) || [])[1] || "";
   desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
-  const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
+  const streetAddr = addrBlock.replace(new RegExp(HOURS_LINE.source, "img"), " ").replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
   const otherName = (addrBlock.split(/[,\n]/)[0] || "").replace(/\s+/g, " ").trim();
   const siteName = site && !isOther ? site : otherName;
   const reference = "FBC-" + djb2([siteName, reportedBy, desc.slice(0, 120), prNum].join("|"));
@@ -31013,7 +31059,7 @@ function fbcJotform(subject, t) {
       address: streetAddr || siteName,
       postcode,
       telephone: "",
-      description: desc,
+      description: desc + (prRaw === "5" ? "\n\nClient priority: " + prTxt.replace(/\s+/g, " ").trim() : ""),
       raisedAt: "",
       respondBy: "",
       completeBy: "",
@@ -31093,8 +31139,17 @@ var TEMPLATES = [
     id: "chapplins-job",
     label: "Chapplins Lettings \u2014 new job raised",
     domains: ["chapplins.co.uk"],
-    test: (s, t) => /A new job has been raised/i.test(t),
+    test: (s, t) => /A new job has been raised/i.test(t) && !/^\s*(?:re|aw)\s*:/i.test(s),
     read: chapplinsJob
+  },
+  // Anything else from Chapplins (a chase, a reply on a job thread) → a note on the job.
+  {
+    id: "chapplins-note",
+    label: "Chapplins Lettings \u2014 chase / update on a job",
+    domains: ["chapplins.co.uk"],
+    replyOk: true,
+    test: () => true,
+    read: chapplinsNote
   },
   {
     id: "metrorod-report",
@@ -31147,8 +31202,19 @@ async function lookupSite(env, tid, { client, address, postcode }) {
   } catch {
     return null;
   }
-  if (!rows.length) return null;
   const want = normAddr(address);
+  if (pc) {
+    const byPc = rows.length ? rows.filter((r) => normAddr(r.site_name) === want) : [];
+    if (!byPc.length) {
+      try {
+        const all = (await env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client).all()).results || [];
+        const ex = all.filter((r) => normAddr(r.site_name) === want);
+        if (ex.length === 1) return { siteCode: ex[0].site_number, siteName: ex[0].site_name };
+      } catch {
+      }
+    }
+  }
+  if (!rows.length) return null;
   const exact = rows.filter((r) => normAddr(r.site_name) === want);
   if (exact.length === 1) return { siteCode: exact[0].site_number, siteName: exact[0].site_name };
   const head = want.split(" ").slice(0, 3).join(" ");
@@ -31654,11 +31720,11 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
-async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at }) {
+async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at, by, property, client }) {
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
-    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: "Southern Co-op (Concerto)", at })
+    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: by || "Southern Co-op (Concerto)", at, property: property || "", client: client || "" })
   });
   const resp = await fetchSelf(req, env, ctx);
   let out = {};
@@ -31777,28 +31843,30 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
     if (r.kind === "note") {
       const n = r.note || {}, inc = r.incident || n.incident || "";
-      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this Concerto note to job " + (inc || "?") + "\u2019s card + raise a task to action it" };
+      const who = n.client === "chapplins" ? "Chapplins" : "Concerto";
+      const what = inc || n.property || "";
+      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "\u2019s card + raise a task to action it" };
       let noted = null;
       try {
-        noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt });
+        noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt, by: n.by, property: n.property, client: n.client });
       } catch {
       }
       try {
         await createIntakeTask(env, ctx, fetchSelf, {
           externalId: "note:" + (msg.messageId || inc || subject + ":" + Date.now()),
-          title: "\u{1F4DD} Concerto note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : "a job"),
-          detail: ((n.action ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
+          title: "\u{1F4DD} " + who + " note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : n.property || "a job"),
+          detail: ((n.action && who === "Concerto" ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
           link: noted && noted.jobId ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
-          category: "Concerto notes"
+          category: who + " notes"
         });
       } catch {
       }
       return {
         ...out2,
         outcome: "note",
-        reference: inc,
+        reference: noted && noted.reference || inc,
         jobId: noted && noted.jobId || "",
-        reason: noted && noted.jobId ? "Note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : "Concerto note on " + (inc || "?") + " \u2014 no live job on the board, so a task was raised to action it"
+        reason: noted && noted.jobId ? who + " note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : who + " note on " + (what || "?") + " \u2014 no matching live job on the board, so a task was raised to action it"
       };
     }
     if (r.kind === "cancel") {
@@ -42980,9 +43048,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -50275,7 +50343,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50535,7 +50603,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

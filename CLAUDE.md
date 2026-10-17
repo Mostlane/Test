@@ -5404,6 +5404,19 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `/status` carries `reviewOpen` + `templates`, the test box takes a From address
   (the template depends on the sender) and names which template read it. Outcomes
   now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
+  **Chapplins chase / reply → a NOTE on the job (17 Oct 2026):** template
+  **`chapplins-note`** (replyOk) catches ANY Chapplins mail that isn't a "new job
+  raised" (and a RE: on one): e.g. "32c Archers Road - Southampton … the smell is
+  getting worse". Matched to the job by a Job Number anywhere in the mail (→ id
+  `CHAP-<n>`), else by the PROPERTY (`sla.js jobsByProperty`: first three address
+  words must lead the job's site name/address, so 32A ≠ 32C; jobs found by id/ref
+  `CHAP-` OR `storeType:"chapplins"` — the office renames refs to the address).
+  Appended to the job card + a shared "📝 Chapplins note" task; no job → task only.
+  Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
+  visit") → Priority 4 + "Client priority: P5 …" in the description; "Out of
+  hours"-style lines no longer land in the address; `lookupSite` falls back to a
+  unique EXACT site-name match when the form's postcode disagrees with the register
+  (Broadcut Depot is PO16 8SP on the register, typed as PO13 9FW).
   **Adding a client = add one template + fixtures** in emailtemplates.js /
   test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
 - **The SAME INCIDENT arriving again → a linked VISIT, never a duplicate or an

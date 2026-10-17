@@ -260,11 +260,11 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
 /* Append a store's note/photo/document to the matching job's card (events
    timeline) via POST /sla/inbound {action:"note"} in-process. Returns the job it
    landed on, or null when the incident has no job on the board. */
-async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at }) {
+async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at, by, property, client }) {
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
-    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: "Southern Co-op (Concerto)", at })
+    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: by || "Southern Co-op (Concerto)", at, property: property || "", client: client || "" })
   });
   const resp = await fetchSelf(req, env, ctx);
   let out = {}; try { out = await resp.json(); } catch {}
@@ -379,22 +379,24 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       // job's CARD (the notes/timeline the office reads) AND raised as a task so
       // someone actions it and ticks it off (My Tasks). No live job → task only.
       const n = r.note || {}, inc = r.incident || n.incident || "";
-      if (opts.dryRun) return { ...out, outcome: "dryrun", reference: inc, reason: "Would add this Concerto note to job " + (inc || "?") + "’s card + raise a task to action it" };
+      const who = n.client === "chapplins" ? "Chapplins" : "Concerto";
+      const what = inc || n.property || "";
+      if (opts.dryRun) return { ...out, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "’s card + raise a task to action it" };
       let noted = null;
-      try { noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt }); } catch {}
+      try { noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt, by: n.by, property: n.property, client: n.client }); } catch {}
       try {
         await createIntakeTask(env, ctx, fetchSelf, {
           externalId: "note:" + (msg.messageId || inc || (subject + ":" + Date.now())),
-          title: "📝 Concerto note — " + (noted && noted.reference ? "job " + noted.reference : (inc ? "incident " + inc : "a job")),
-          detail: ((n.action ? n.action + " — " : "") + (n.text || "")).slice(0, 400),
+          title: "📝 " + who + " note — " + (noted && noted.reference ? "job " + noted.reference : (inc ? "incident " + inc : (n.property || "a job"))),
+          detail: ((n.action && who === "Concerto" ? n.action + " — " : "") + (n.text || "")).slice(0, 400),
           link: (noted && noted.jobId) ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
-          category: "Concerto notes",
+          category: who + " notes",
         });
       } catch {}
-      return { ...out, outcome: "note", reference: inc, jobId: (noted && noted.jobId) || "",
+      return { ...out, outcome: "note", reference: (noted && noted.reference) || inc, jobId: (noted && noted.jobId) || "",
         reason: (noted && noted.jobId)
-          ? "Note added to job " + (noted.reference || inc) + "’s card + a task raised to action it"
-          : "Concerto note on " + (inc || "?") + " — no live job on the board, so a task was raised to action it" };
+          ? who + " note added to job " + (noted.reference || inc) + "’s card + a task raised to action it"
+          : who + " note on " + (what || "?") + " — no matching live job on the board, so a task was raised to action it" };
     }
     if (r.kind === "cancel") {
       const c = { ...(r.cancel || {}), action: "cancel", isJob: false };

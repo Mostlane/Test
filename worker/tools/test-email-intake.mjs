@@ -226,7 +226,8 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
   const z = await run(E, rawZap, "office@mostlane.com");
   ok("our own 'Send N to MetroRod' → dropped", z.outcome === "dropped" && /own outbound/.test(z.reason), z.reason);
   const re = await run(E, rawChap.replace("Subject: P1 - ", "Subject: RE: P1 - ").replace("test-chap1@fpp.local", "test-re@fpp.local"), "ashley@chapplins.co.uk");
-  ok("a reply ('RE:') quoting a job email → dropped", re.outcome === "dropped" && /Reply/.test(re.reason), re.reason);
+  // A Chapplins reply on a job thread is a chase on THAT job → a note + task, never a new job.
+  ok("a Chapplins reply ('RE:') quoting a job email → note on the job, never a new job", re.outcome === "note" && !E.inbound.some(x => x.body && x.body.action !== "note"), re.outcome + " / " + re.reason);
   const sp = await run(E, mail("noreply@concerto.co.uk", "Orders have been added to the Supplier Portal - from Southern Coop", "test-sp@concerto", "<div>39 PPM orders have been created and added to the Supplier Portal</div>"), "noreply@concerto.co.uk");
   ok("Concerto supplier-portal batch notice → dropped, never a job/order", sp.outcome === "dropped" && /supplier-portal/i.test(sp.reason), sp.outcome + " / " + sp.reason);
   ok("nothing created from any of them", E.inbound.length === 0 && E.orders.length === 0);
@@ -342,6 +343,22 @@ No`;
     r2.outcome === "created" && p2 && !p2.siteCode && /Brand New Village Hall/.test(p2.siteName)
     && E2.tasks.some(t => /Link to a site/.test(t.body.title) && t.body.category === "Fareham sites"),
     r2.outcome + " / site=" + (p2 && p2.siteCode) + " / tasks=" + JSON.stringify(E2.tasks.map(t => t.body.title)));
+}
+{
+  // Chapplins chase (no "new job raised" marker) → a NOTE, never a job / never "no template"
+  const CHASE = "Good Afternoon Tanya,\n\nHad a call from the tenant this morning here at the above. She is saying that the smell is getting a lot worse.\n\nMany Thanks\n\nKeith\n\nChapplins Support";
+  const mc = matchTemplate("support@chapplins.co.uk", "32c Archers Road - Southampton", CHASE);
+  ok("chapplins chase → chapplins-note", mc && mc.tpl.id === "chapplins-note" && mc.result.kind === "note"
+    && mc.result.note.property === "32c Archers Road - Southampton" && /smell is getting a lot worse/.test(mc.result.note.text) && !/Keith/.test(mc.result.note.text), JSON.stringify(mc && mc.result));
+  const mr = matchTemplate("ashley@chapplins.co.uk", "RE: New job raised: Job Number 260730169 P1", "Any update?\n\nFrom: Tanya\nSent: x\nA new job has been raised with the following details:\nJob Number: 260730169");
+  ok("chapplins reply on a job thread → note keyed to CHAP-<jobNo>", mr && mr.tpl.id === "chapplins-note" && mr.result.incident === "CHAP-260730169" && mr.result.note.text === "Any update?", JSON.stringify(mr && mr.result));
+  ok("chapplins new-job email still a job", matchTemplate("support@chapplins.co.uk", "New job raised: Job Number 1234567 P2", "A new job has been raised with the following details:\nProperty: 1 Test Road, AB1 2CD\nJob Number: 1234567\nJob Description:\nfix it").tpl.id === "chapplins-job");
+  ok("chapplins remittance → dropped notice", matchTemplate("support@chapplins.co.uk", "Remittance advice", "paid").result.kind === "notice");
+  // FBC P5 → Priority 4 + client wording kept; "Out of hours" not in the address
+  const P5 = "Mostlane New Incident Form\nSite\nBroadcut Depot\nSite Address    1 Vulcan Wy\nFareham\nPO13 9FW\n\nOut of hours\n\n///tasty.jumpy.gone\nPriority\nP5 (On next planned visit to site)\nReported By     A Person\nJob Title       Officer\nBrief description of the issue  Replace light fitting\nQuotation Required Before Works?\nNo\n";
+  const f5 = matchTemplate("noreply@jotform.com", "Re: Mostlane New Incident Form", P5).result.fields;
+  ok("fbc P5 → Priority 4 + wording in description", f5.priority === "Priority 4" && /Client priority: P5 \(On next planned visit/.test(f5.description), JSON.stringify(f5));
+  ok("fbc 'Out of hours' kept out of the address", !/Out of hours/i.test(f5.address) && /PO13 9FW/.test(f5.address), f5.address);
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
