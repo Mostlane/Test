@@ -4,6 +4,7 @@
 // Run:  node --no-warnings worker/tools/test-client-portal.mjs
 import { DatabaseSync } from "node:sqlite";
 import * as client from "../src/routes/client.js";
+import * as fbc from "../src/routes/fbc.js";
 
 function d1(db) {
   const wrap = (sql) => { let binds = []; const st = {
@@ -56,5 +57,19 @@ const me = await call(jobsUser, "GET", "/client/me");
 ok("/client/me says raising is off by default", me.body && me.body.canRaise === false && me.body.role === "jobs");
 ok("raising refused unless switched on", (await call(jobsUser, "POST", "/client/raise", { siteCode: "3006", description: "test fault" })).status === 403);
 ok("compliance-only login can't read jobs", (await call(sess({ clientRole: "compliance" }), "GET", "/client/jobs")).status === 403);
+// Office updates for the client: only client-visible ones reach the portal.
+await fbc.appendFbcMessage(env, 1, "D", { direction: "in", from: "noreply@jotform.com", subject: "Incident", body: "internal incident email", at: "2026-10-15T09:00:00Z" });
+await fbc.appendFbcMessage(env, 1, "D", { direction: "note", from: "Jamie Line", body: "internal: chase supplier", at: "2026-10-16T09:00:00Z" });
+await fbc.appendFbcMessage(env, 1, "D", { direction: "client", from: "Tanya Smith", body: "Parts ordered, fitting Tuesday", at: "2026-10-17T10:00:00Z", clientVisible: true });
+await fbc.appendFbcMessage(env, 1, "E", { direction: "client", from: "Tanya Smith", body: "Co-op update", at: "2026-10-17T11:00:00Z", clientVisible: true });
+const r2 = await call(jobsUser, "GET", "/client/jobs");
+const d2 = r2.body.jobs.find(j => j.id === "D");
+ok("latest client update rides on the job card", d2.latestUpdate && d2.latestUpdate.body === "Parts ordered, fitting Tuesday" && d2.updateCount === 1, JSON.stringify(d2.latestUpdate));
+ok("poster shown by first name only", d2.latestUpdate.by === "Tanya");
+ok("job with a fresh update sorts first", r2.body.jobs[0].id === "D");
+ok("a job with no updates carries none", r2.body.jobs.find(j => j.id === "A").latestUpdate === null);
+const one = await call(jobsUser, "GET", "/client/job?id=D");
+const bodies = (one.body.job.updates || []).map(u => u.body);
+ok("job detail lists ONLY client-visible updates (no internal note / email)", JSON.stringify(bodies) === '["Parts ordered, fitting Tuesday"]', JSON.stringify(bodies));
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

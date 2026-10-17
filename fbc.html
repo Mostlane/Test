@@ -61,8 +61,13 @@
     .msg .b{font-size:13px;white-space:pre-wrap;color:#243040;}
     .msg.note{background:#f4f8ff;border-color:#d8e6ff;}
     .msg.out{background:#f0faf3;border-color:#cdeed8;}
-    .addnote{display:flex;gap:8px;margin-top:8px;}
-    .addnote textarea{flex:1;min-height:38px;padding:8px;border:1px solid #ccd5dd;border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;}
+    .msg.client{background:#fff8ec;border-color:#f5d9a6;}
+    .msg .del{float:right;border:0;background:none;color:#9aa6b6;cursor:pointer;font-size:12px;padding:0 2px;}
+    .msg .del:hover{color:#b00020;}
+    .addnote .btn.fbc{background:#b45309;border-color:#b45309;color:#fff;}
+    .addnote .hint{font-size:11.5px;color:#6b7a90;width:100%;margin-top:2px;}
+    .addnote{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:flex-start;}
+    .addnote textarea{flex:1 1 260px;min-height:38px;padding:8px;border:1px solid #ccd5dd;border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;}
     .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
     .btn.ghost{background:#eef2f7;color:var(--brand);border:1px solid #d7dee6;}
     .empty{padding:14px 4px;color:#8a97a8;font-size:13px;}
@@ -467,7 +472,8 @@
         +   (r.onBoard ? '<a class="lnk" href="job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Open job card →</a>' : '')
         + '</div>'
         + '<div class="conv" data-conv><h4>Conversation</h4><p class="muted" data-msgs>Loading…</p>'
-        +   '<div class="addnote"><textarea data-note placeholder="Add a note…"></textarea><button class="btn" data-addnote>Add</button></div>'
+        +   '<div class="addnote"><textarea data-note placeholder="Write a note or an update…"></textarea><button class="btn" data-addnote title="Internal — FBC never sees it">Add note</button><button class="btn fbc" data-addclient title="FBC see this on their portal">📣 Update for FBC</button>'
+        +   '<div class="hint">"Add note" stays internal. "Update for FBC" shows on this job in the FBC client portal.</div></div>'
         + '</div>'
         + '</div></div>';
     }
@@ -501,13 +507,25 @@
           el.addEventListener("change", flush);
           if (el.tagName === "INPUT" && el.type !== "month") el.addEventListener("input", go);
         });
-        const addBtn = j.querySelector("[data-addnote]"), ta = j.querySelector("[data-note]");
-        if (addBtn) addBtn.onclick = async () => {
+        const ta = j.querySelector("[data-note]");
+        const post = async (btn, toClient) => {
           const body = (ta.value||"").trim(); if (!body) return;
-          addBtn.disabled = true;
-          try { await authFetch("/fbc/message", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ jobId, body }) }); ta.value=""; j.dataset.loaded=""; await loadConv(jobId, j); } catch {}
-          addBtn.disabled = false;
+          if (toClient) {
+            const msg = "FBC will see this update on their portal:\n\n" + body;
+            const ok = window.MLUI ? await MLUI.confirm(msg, { title:"Send update to FBC?", okLabel:"Send to FBC" }) : confirm(msg);
+            if (!ok) return;
+          }
+          btn.disabled = true;
+          try {
+            const r = await authFetch("/fbc/message", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ jobId, body, toClient }) });
+            if (!r.ok) throw new Error();
+            ta.value=""; j.dataset.loaded=""; await loadConv(jobId, j);
+          } catch { alert("Couldn't save — try again."); }
+          btn.disabled = false;
         };
+        const addBtn = j.querySelector("[data-addnote]"), cliBtn = j.querySelector("[data-addclient]");
+        if (addBtn) addBtn.onclick = () => post(addBtn, false);
+        if (cliBtn) cliBtn.onclick = () => post(cliBtn, true);
       });
     }
 
@@ -518,11 +536,21 @@
         j.dataset.loaded = "1";
         const msgs = (d && d.messages) || [];
         if (!msgs.length) { box.innerHTML = '<span class="muted">No emails or notes logged yet.</span>'; return; }
-        box.outerHTML = '<div data-msgs>' + msgs.map(m => {
-          const cls = m.direction === "note" ? "note" : (m.direction === "out" ? "out" : "");
-          const who = m.direction === "note" ? ("Note — " + esc(m.from_addr||"")) : (m.direction === "out" ? ("Sent — " + esc(m.from_addr||"")) : esc(m.from_addr||""));
-          return '<div class="msg '+cls+'"><div class="h">'+who+' · '+fmtDT(m.at)+(m.subject?" · "+esc(m.subject):"")+'</div><div class="b">'+esc(m.body||"")+'</div></div>';
+        const html = '<div data-msgs>' + msgs.map(m => {
+          const isCli = m.direction === "client" || m.client_visible == 1;
+          const cls = isCli ? "client" : (m.direction === "note" ? "note" : (m.direction === "out" ? "out" : ""));
+          const who = isCli ? ("📣 Update for FBC — " + esc(m.from_addr||"")) : m.direction === "note" ? ("Note (internal) — " + esc(m.from_addr||"")) : (m.direction === "out" ? ("Sent — " + esc(m.from_addr||"")) : esc(m.from_addr||""));
+          const del = (isCli || m.direction === "note") ? '<button class="del" data-del="'+esc(m.id)+'" title="Remove">✕</button>' : '';
+          return '<div class="msg '+cls+'">'+del+'<div class="h">'+who+' · '+fmtDT(m.at)+(m.subject?" · "+esc(m.subject):"")+'</div><div class="b">'+esc(m.body||"")+'</div></div>';
         }).join("") + '</div>';
+        box.outerHTML = html;
+        [].forEach.call(j.querySelectorAll("[data-msgs] [data-del]"), b => b.onclick = async (e) => {
+          e.stopPropagation();
+          const ok = window.MLUI ? await MLUI.confirm("Remove this note/update? If it was an update for FBC, it disappears from their portal too.", { title:"Remove?", okLabel:"Remove", danger:true }) : confirm("Remove this?");
+          if (!ok) return;
+          try { await authFetch("/fbc/message-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: b.dataset.del }) }); } catch {}
+          await loadConv(jobId, j);
+        });
       } catch { box.innerHTML = '<span class="muted" style="color:#b00020">Couldn\'t load the conversation.</span>'; }
     }
 
