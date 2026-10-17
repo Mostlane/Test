@@ -6124,7 +6124,17 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   — nothing sends until recipients are saved on **sitelog.html → 🧾 Timesheet emails** (Full Access;
   also Today's / Last week's PDF preview + Send now). Endpoints GET/POST `/config`, POST `/pdf`
   `{kind,date}`, POST `/send`. Needs `RESEND_API_KEY`. Test
-  `node --no-warnings worker/tools/test-sitelog-timesheets.mjs` (16).
+  `node --no-warnings worker/tools/test-sitelog-timesheets.mjs` (25).
+  **"Scanned but not confirmed" fallback (17 Oct 2026):** `loadPeriod` also reads `scan_log`
+  (`kind='scan'`, outcome confirm_check_in/confirm_sign_out = the phone was OFFERED a sign-in/out
+  that was never pressed). Used ONLY where no real event exists: (a) a missed sign-out (auto, or
+  open on a past day) takes the LAST unconfirmed sign-out scan after sign-in that day as its out
+  time; (b) a sign-in scan with no visit around it (not inside a real visit, not within 20 min
+  before one starts) becomes a visit, ending at a later sign-in scan at the SAME site ≥30 min on
+  that day, else no hours. Only scans 05:00–21:00 London count. State `scanned` (+`scannedIn`/
+  `scannedOut`), purple in the portal Day/Week view, the PDF (row + legend + chip) and the email
+  line; `personTotals().scanned`. Real-data cases it was built against: a sign-in scan at another
+  site while still signed in (ignored), a re-scan before a later confirmed sign-out (ignored).
 
 ## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
 The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
