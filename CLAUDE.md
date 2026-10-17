@@ -2229,6 +2229,29 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
   no duplicates). **Phase 3:** quote-sent workflow + monthly invoice reminder + fold
   FBC cost into job costing.
 
+## FBC client portal (routes/client.js + client-home.html — external client logins)
+An EXTERNAL customer login = a user with `profile.staffType:"client"` + `clientOrg`
+(only `fbc` today → compliance scheme `fareham`, `lib/complianceaccess.js ORG_SCHEME`).
+Walled server-side: every `/client/*` route is org-scoped, never money, never staff pages;
+a client's compliance access is hard-capped at view+download on its own scheme. Created in
+**Users Admin** (Staff type "Client (external)" or the add-user wizard) with a role:
+- **`clientRole:"compliance"`** — "Compliance chart only": login lands on fareham.html.
+- **`clientRole:"jobs"`** — "Compliance + current jobs": lands on **client-home.html**
+  (tabs **Current jobs** + **Compliance**).
+**Current jobs only (17 Oct 2026, Jamie's spec):** `GET /client/jobs` returns live jobs
+at the org's sites (or tagged `clientOrg`) and DROPS anything finished — built-in done
+states, Cancelled AND the office's custom `done:true` categories (`finishedTest`);
+`/client/job?id=` 404s a finished job. Status shown in plain words (`clientStatus`):
+Logged · Booked <date> · Engineer on the way · In progress · On hold · Being quoted.
+Descriptions pass `clientDescription` (strips the auto EM/PAT day plan + "🚨 change
+status…"/office-only lines). **Previous jobs = later** (would be a separate opt-in list).
+**Raising jobs is OFF** unless `profile.clientCanRaise` (no admin toggle yet — set in D1
+or add one): `/client/me` returns `canRaise`, client-home hides the "Raise a job" tab, and
+`/client/raise`(+`-photo`) 403. The raise form itself is BUILT (site picker, urgency →
+priority, photos, office push, confirmation email) — Jamie plans his own incident form to
+replace Jotform; this is the natural home for it. Test `node --no-warnings
+worker/tools/test-client-portal.mjs` (10). No FBC client accounts exist yet (17 Oct).
+
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
 P&L** that unifies labour (SiteLog scans + SLA job-status taps), materials (PO

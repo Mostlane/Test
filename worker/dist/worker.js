@@ -49217,13 +49217,33 @@ init_email();
 var ORG_LABEL = { fbc: "Fareham Borough Council" };
 var URGENCY_PRIORITY = { emergency: "Priority 1", urgent: "Priority 2", routine: "Priority 3" };
 var URGENCY_LABEL = { emergency: "Emergency", urgent: "Urgent", routine: "Routine" };
-function clientStatus(status) {
+function clientStatus(status, scheduledAt) {
   const s = String(status || "").toLowerCase();
-  if (s === "complete" || s === "closed jobs" || s === "invoiced" || s === "closed") return "Complete";
-  return "Pending";
+  if (/^(complete|closed jobs|closed|invoiced)$/.test(s)) return "Complete";
+  if (s === "travelling") return "Engineer on the way";
+  if (s === "in progress") return "In progress";
+  if (s === "on hold") return "On hold";
+  if (s === "quote" || s === "order") return "Being quoted";
+  if (scheduledAt && Number.isFinite(Date.parse(scheduledAt))) {
+    return "Booked " + new Date(scheduledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+  }
+  return "Logged";
 }
-function isFinishedInternal(status) {
-  return /^(complete|closed jobs|closed|invoiced)$/i.test(String(status || ""));
+async function finishedTest(env, tid) {
+  const done = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of row ? JSON.parse(row.value) : []) if (c && c.done && c.name) done.add(String(c.name).trim().toLowerCase());
+  } catch {
+  }
+  return (status) => done.has(String(status || "").trim().toLowerCase());
+}
+function clientDescription(d) {
+  let t = String(d || "");
+  t = t.replace(/[^\n]*EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\s*/g, "");
+  t = t.split("\n").filter((l) => !/🚨|please change status|internal only|office only/i.test(l)).join("\n");
+  t = t.replace(/\*\*/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return t;
 }
 function clientOrgOf2(sess) {
   try {
@@ -49231,6 +49251,14 @@ function clientOrgOf2(sess) {
     return p && p.staffType === "client" && p.clientOrg ? String(p.clientOrg).toLowerCase() : "";
   } catch {
     return "";
+  }
+}
+function clientCanRaise(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : sess.user.profile || {};
+    return !!(p && p.clientCanRaise);
+  } catch {
+    return false;
   }
 }
 function clientRoleOf2(sess) {
@@ -49286,6 +49314,8 @@ async function handle45(request, env, ctx, url, sess) {
       org,
       orgLabel,
       scheme,
+      role: clientRoleOf2(sess),
+      canRaise: clientCanRaise(sess),
       name: [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ") || sess.user.username,
       sites
     }, {}, env, request);
@@ -49298,14 +49328,15 @@ async function handle45(request, env, ctx, url, sess) {
       nameByCode[s.code] = s.name;
     });
     const all = await listJobs(env, tid);
-    const mine = all.filter((j) => j && !j.hiddenFromClient && !j.fallbackTemplate && (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
+    const finished = await finishedTest(env, tid);
+    const mine = all.filter((j) => j && !j.hiddenFromClient && !j.fallbackTemplate && !finished(j.status) && (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
     const jobs = mine.map((j) => ({
       id: j.id,
       ref: j.helpdeskRef || j.id,
       site: j.siteName || nameByCode[String(j.siteCode || "").trim()] || j.siteCode || "",
       siteCode: j.siteCode || "",
-      description: String(j.description || "").slice(0, 400),
-      status: clientStatus(j.status),
+      description: clientDescription(j.description).slice(0, 400),
+      status: clientStatus(j.status, j.scheduledAt),
       urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
       byClient: !!j.raisedByClient,
       raisedAt: j.raisedAt || j.createdAt || "",
@@ -49323,6 +49354,7 @@ async function handle45(request, env, ctx, url, sess) {
     const all = await listJobs(env, tid);
     const j = all.find((x) => x && x.id === id);
     if (!j || j.hiddenFromClient) return error("Not found", 404, env, request);
+    if ((await finishedTest(env, tid))(j.status)) return error("Not found", 404, env, request);
     const ownsIt = String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim());
     if (!ownsIt) return error("Not found", 404, env, request);
     let photos = [];
@@ -49335,9 +49367,6 @@ async function handle45(request, env, ctx, url, sess) {
     } catch {
       photos = [];
     }
-    let completionNote = "";
-    const notes = (j.events || []).filter((e) => e && (e.type === "note" || e.note && String(e.note).trim()));
-    if (notes.length) completionNote = String(notes[notes.length - 1].note || "").trim();
     return json({
       ok: true,
       job: {
@@ -49346,17 +49375,20 @@ async function handle45(request, env, ctx, url, sess) {
         site: j.siteName || j.siteCode || "",
         siteCode: j.siteCode || "",
         postcode: j.postcode || "",
-        description: String(j.description || ""),
-        status: clientStatus(j.status),
+        description: clientDescription(j.description),
+        status: clientStatus(j.status, j.scheduledAt),
         urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
         byClient: !!j.raisedByClient,
         raisedAt: j.raisedAt || j.createdAt || "",
         scheduledAt: j.scheduledAt || "",
-        completedAt: isFinishedInternal(j.status) ? j.closedAt || j.updatedAt || "" : "",
-        completionNote: isFinishedInternal(j.status) ? completionNote : "",
+        completedAt: "",
+        completionNote: "",
         photos
       }
     }, {}, env, request);
+  }
+  if ((path === "/client/raise" || path === "/client/raise-photo") && !clientCanRaise(sess)) {
+    return error("Raising jobs from the portal isn't switched on for this account.", 403, env, request);
   }
   if (path === "/client/raise" && method === "POST") {
     const b = await request.json().catch(() => ({}));

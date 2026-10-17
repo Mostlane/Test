@@ -29,14 +29,39 @@ const ORG_LABEL = { fbc: "Fareham Borough Council" };
 const URGENCY_PRIORITY = { emergency: "Priority 1", urgent: "Priority 2", routine: "Priority 3" };
 const URGENCY_LABEL = { emergency: "Emergency", urgent: "Urgent", routine: "Routine" };
 
-// A client only ever sees two states: Pending (anything not finished) or Complete.
-function clientStatus(status) {
+// What the client sees for a LIVE job — plain progress, never our internal
+// statuses or categories. Finished jobs never reach the client (current jobs only).
+function clientStatus(status, scheduledAt) {
   const s = String(status || "").toLowerCase();
-  if (s === "complete" || s === "closed jobs" || s === "invoiced" || s === "closed") return "Complete";
-  return "Pending";   // Scheduled / Travelling / In Progress / On Hold / Quote / Pending / …
+  if (/^(complete|closed jobs|closed|invoiced)$/.test(s)) return "Complete";
+  if (s === "travelling") return "Engineer on the way";
+  if (s === "in progress") return "In progress";
+  if (s === "on hold") return "On hold";
+  if (s === "quote" || s === "order") return "Being quoted";
+  if (scheduledAt && Number.isFinite(Date.parse(scheduledAt))) {
+    return "Booked " + new Date(scheduledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+  }
+  return "Logged";
 }
-function isFinishedInternal(status) {
-  return /^(complete|closed jobs|closed|invoiced)$/i.test(String(status || ""));
+// Finished = the built-in done states, Cancelled, AND the office's own "done"
+// categories (e.g. "FBC Works Completed", "Compliance Complete").
+async function finishedTest(env, tid) {
+  const done = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of (row ? JSON.parse(row.value) : [])) if (c && c.done && c.name) done.add(String(c.name).trim().toLowerCase());
+  } catch {}
+  return status => done.has(String(status || "").trim().toLowerCase());
+}
+// The client-facing description: our engineers' text can carry office-only
+// instructions (a "🚨 change status to…" line, the auto EM/PAT day plan) — strip
+// those so the client reads only the work itself.
+function clientDescription(d) {
+  let t = String(d || "");
+  t = t.replace(/[^\n]*EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\s*/g, "");
+  t = t.split("\n").filter(l => !/🚨|please change status|internal only|office only/i.test(l)).join("\n");
+  t = t.replace(/\*\*/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return t;
 }
 
 function clientOrgOf(sess) {
@@ -48,6 +73,14 @@ function clientOrgOf(sess) {
 // A client whose role is "compliance" may see ONLY the compliance chart (via the
 // compliance endpoints), never the jobs portal — so the jobs routes below are
 // refused for them even though they hold a valid client session.
+// Raising jobs from the portal is OFF unless the account is switched on
+// (profile.clientCanRaise) — the incident form is coming later.
+function clientCanRaise(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : (sess.user.profile || {});
+    return !!(p && p.clientCanRaise);
+  } catch { return false; }
+}
 function clientRoleOf(sess) {
   try {
     const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : (sess.user.profile || {});
@@ -98,7 +131,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/client/me" && method === "GET") {
     const sites = await orgSites(env, tid, org);
     return json({
-      ok: true, org, orgLabel, scheme,
+      ok: true, org, orgLabel, scheme, role: clientRoleOf(sess), canRaise: clientCanRaise(sess),
       name: [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ") || sess.user.username,
       sites,
     }, {}, env, request);
@@ -110,15 +143,18 @@ export async function handle(request, env, ctx, url, sess) {
     const codes = new Set(sites.map(s => s.code));
     const nameByCode = {}; sites.forEach(s => { nameByCode[s.code] = s.name; });
     const all = await listJobs(env, tid);
-    const mine = all.filter(j => j && !j.hiddenFromClient && !j.fallbackTemplate &&
+    const finished = await finishedTest(env, tid);
+    // CURRENT jobs only: a finished job drops off the client's list. (A "previous
+    // jobs" view will come later — it would be a separate, opt-in list.)
+    const mine = all.filter(j => j && !j.hiddenFromClient && !j.fallbackTemplate && !finished(j.status) &&
       (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
     const jobs = mine.map(j => ({
       id: j.id,
       ref: j.helpdeskRef || j.id,
       site: j.siteName || nameByCode[String(j.siteCode || "").trim()] || j.siteCode || "",
       siteCode: j.siteCode || "",
-      description: String(j.description || "").slice(0, 400),
-      status: clientStatus(j.status),
+      description: clientDescription(j.description).slice(0, 400),
+      status: clientStatus(j.status, j.scheduledAt),
       urgency: j.clientUrgency ? (URGENCY_LABEL[j.clientUrgency] || j.clientUrgency) : "",
       byClient: !!j.raisedByClient,
       raisedAt: j.raisedAt || j.createdAt || "",
@@ -139,6 +175,8 @@ export async function handle(request, env, ctx, url, sess) {
     const all = await listJobs(env, tid);
     const j = all.find(x => x && x.id === id);
     if (!j || j.hiddenFromClient) return error("Not found", 404, env, request);
+    // Current jobs only — a finished job is no longer the client's to open.
+    if ((await finishedTest(env, tid))(j.status)) return error("Not found", 404, env, request);
     // Must belong to this org (by tag or by site) — never let a client read another
     // client's job by guessing an id.
     const ownsIt = String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim());
@@ -155,9 +193,6 @@ export async function handle(request, env, ctx, url, sess) {
     } catch { photos = []; }
 
     // Completion note = the most recent note event; completion date = closedAt/complete.
-    let completionNote = "";
-    const notes = (j.events || []).filter(e => e && (e.type === "note" || (e.note && String(e.note).trim())));
-    if (notes.length) completionNote = String(notes[notes.length - 1].note || "").trim();
 
     return json({
       ok: true,
@@ -167,20 +202,23 @@ export async function handle(request, env, ctx, url, sess) {
         site: j.siteName || j.siteCode || "",
         siteCode: j.siteCode || "",
         postcode: j.postcode || "",
-        description: String(j.description || ""),
-        status: clientStatus(j.status),
+        description: clientDescription(j.description),
+        status: clientStatus(j.status, j.scheduledAt),
         urgency: j.clientUrgency ? (URGENCY_LABEL[j.clientUrgency] || j.clientUrgency) : "",
         byClient: !!j.raisedByClient,
         raisedAt: j.raisedAt || j.createdAt || "",
         scheduledAt: j.scheduledAt || "",
-        completedAt: isFinishedInternal(j.status) ? (j.closedAt || j.updatedAt || "") : "",
-        completionNote: isFinishedInternal(j.status) ? completionNote : "",
+        completedAt: "",
+        completionNote: "",
         photos,
       },
     }, {}, env, request);
   }
 
   // ── POST /client/raise ─── the client raises a job ──────────────────────────
+  if ((path === "/client/raise" || path === "/client/raise-photo") && !clientCanRaise(sess)) {
+    return error("Raising jobs from the portal isn't switched on for this account.", 403, env, request);
+  }
   if (path === "/client/raise" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const siteCode = String(b.siteCode || "").trim();
