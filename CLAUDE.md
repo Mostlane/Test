@@ -1403,7 +1403,7 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   client and shows a **Log out** button instead (their only navigation). (5)
   **client.js** refuses every `/client/*` jobs route (jobs/job/raise/raise-photo) for
   a `compliance` client (only `/client/me` passes). **No new PERMISSION_KEY** — it's
-  all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. Test
+  all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. **View As lands a client by role (17 Oct 2026):** the owner picker sends a `jobs` client to client-home.html and a compliance-only FBC client to fareham.html (was client-home for every client); portal-config `?v=45`, SW `mostlane-v146`. Test
   `node --no-warnings worker/tools/test-client-compliance.mjs`.
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
