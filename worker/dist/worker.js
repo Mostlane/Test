@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -43069,9 +43064,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -45313,6 +45308,8 @@ var AMBER = [0.851, 0.467, 0.024];
 var ROW_RED = [0.996, 0.937, 0.937];
 var ROW_AMBER = [1, 0.969, 0.898];
 var ZEBRA3 = [0.973, 0.976, 0.984];
+var PURPLE = [0.486, 0.228, 0.929];
+var ROW_PURPLE = [0.953, 0.937, 1];
 var GRID = [0.85, 0.87, 0.9];
 function fit4(str, size, max) {
   str = String(str == null ? "" : str);
@@ -45359,10 +45356,13 @@ function legend(doc, y) {
   doc.text(M6 + 432, y, "Missed sign-out", { size: 8.5, grey: true });
   doc.rect(M6 + 512, y - 8, 10, 8, { fill: ROW_AMBER, stroke: [0.95, 0.82, 0.6], lw: 0.5 });
   doc.text(M6 + 526, y, "Still signed in", { size: 8.5, grey: true });
+  doc.rect(M6 + 606, y - 8, 10, 8, { fill: ROW_PURPLE, stroke: [0.8, 0.72, 0.98], lw: 0.5 });
+  doc.text(M6 + 620, y, "Scanned but not confirmed", { size: 8.5, grey: true });
 }
 function personTotals(p) {
-  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0;
+  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0, scanned = 0;
   for (const v of p.visits) {
+    if (v.state === "scanned") scanned++;
     if (v.state !== "open") mins += v.mins || 0;
     if (v.state === "auto") {
       missed++;
@@ -45372,7 +45372,7 @@ function personTotals(p) {
     if (!v.inOk) unver++;
     if (v.state !== "open" && !v.outOk) unver++;
   }
-  return { mins, autoMins, missed, open, unver, visits: p.visits.length };
+  return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
 }
 function summaryPage(doc, meta, people) {
   let y = header3(doc, meta, "Summary \u2014 everyone");
@@ -45404,8 +45404,8 @@ function summaryPage(doc, meta, people) {
     tot.open += t.open;
     tot.unver += t.unver;
     tot.visits += t.visits;
-    const bad = t.missed || t.unver;
-    doc.rect(M6, y, PW - 2 * M6, 18, { fill: bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
+    const bad = t.missed || t.unver || t.scanned;
+    doc.rect(M6, y, PW - 2 * M6, 18, { fill: t.missed ? ROW_RED : t.scanned ? ROW_PURPLE : bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
     doc.text(M6 + 4, y + 12.5, fit4(p.name, 9.5, 195), { size: 9.5, bold: true });
     doc.text(M6 + 209, y + 12.5, fit4(p.company || "", 9, 190), { size: 9, grey: true });
     doc.text(M6 + 410, y + 12.5, String(t.visits), { size: 9.5, alignRight: true });
@@ -45428,6 +45428,8 @@ function summaryPage(doc, meta, people) {
   doc.text(PW - M6 - 6, y + 16, String(tot.unver), { size: 10, bold: true, alignRight: true, color: tot.unver ? RED3 : null });
   y += 34;
   doc.text(M6, y, "Hours on site include visits the system closed automatically (missed sign-outs) \u2014 those times are an assumption, not a scan.", { size: 8.5, grey: true });
+  y += 12;
+  doc.text(M6, y, "Purple rows: scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used because nothing else was recorded.", { size: 8.5, grey: true });
   legend(doc, y + 18);
 }
 var VC = { date: M6, site: M6 + 72, inT: M6 + 330, inM: M6 + 372, outT: M6 + 392, outM: M6 + 434, hrs: M6 + 505, note: M6 + 520 };
@@ -45441,6 +45443,7 @@ function personPages(doc, meta, p) {
     ["Missed sign-outs", String(t.missed), t.missed ? RED3 : null],
     ["Not verified", String(t.unver), t.unver ? RED3 : null]
   ];
+  if (t.scanned) chips.push(["Scanned, not confirmed", String(t.scanned), PURPLE]);
   if (t.open) chips.push(["Still signed in", String(t.open), AMBER]);
   let cx = M6;
   for (const [lab, val2, col] of chips) {
@@ -45470,7 +45473,7 @@ function personPages(doc, meta, p) {
       head();
       lastDate = "";
     }
-    const bg = v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
+    const bg = v.state === "scanned" ? ROW_PURPLE : v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
     doc.rect(M6, y, PW - 2 * M6, 20, { fill: bg });
     if (v.date !== lastDate) {
       doc.text(VC.date + 4, y + 13.5, v.date, { size: 9, bold: true });
@@ -45478,20 +45481,20 @@ function personPages(doc, meta, p) {
       lastDate = v.date;
     }
     doc.text(VC.site, y + 13.5, fit4(v.site, 9.5, 250), { size: 9.5 });
-    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true });
+    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true, color: v.scannedIn ? PURPLE : null });
     mark(doc, VC.inM, y + 10, !!v.inOk);
-    if (v.state === "open") {
-      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: AMBER });
+    if (v.state === "open" || v.state === "scanned" && !v.outTime) {
+      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: v.state === "open" ? AMBER : PURPLE });
     } else {
-      doc.text(VC.outT, y + 13.5, v.outTime || "", { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : null });
+      doc.text(VC.outT, y + 13.5, v.outTime || (v.state === "scanned" ? "\u2014" : ""), { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : v.state === "scanned" && v.scannedOut ? PURPLE : null });
       mark(doc, VC.outM, y + 10, !!v.outOk);
     }
-    doc.text(VC.hrs, y + 13.5, v.state === "open" ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
+    doc.text(VC.hrs, y + 13.5, v.state === "open" || v.state === "scanned" && !v.scannedOut ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
     const note = v.note || "";
     if (note) doc.text(VC.note, y + 13.5, fit4(note, 8.5, PW - M6 - VC.note - 4), {
       size: 8.5,
-      bold: v.state === "auto" || v.state === "open",
-      color: v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
+      bold: v.state === "auto" || v.state === "open" || v.state === "scanned",
+      color: v.state === "scanned" ? PURPLE : v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
     });
     y += 20;
   });
@@ -45585,6 +45588,31 @@ function periodFor(kind, dateKey) {
     file: `SiteLog-${dateKey}.pdf`
   };
 }
+var SCAN_EARLY = 5 * 60;
+var SCAN_LATE = 21 * 60;
+var PRE_CONFIRM_MS = 20 * 6e4;
+var MIN_SPAN_MS = 30 * 6e4;
+var minsOfDay = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+function plausible(d) {
+  const m = minsOfDay(london(d).hhmm);
+  return m >= SCAN_EARLY && m <= SCAN_LATE;
+}
+async function loadUnconfirmedScans(db, from, to) {
+  try {
+    const r = await db.prepare(`
+      SELECT l.at, l.outcome, l.person_id, l.site, p.first_name, p.last_name, p.company
+      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+      WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
+        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?
+      ORDER BY l.at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
+    return r.results || [];
+  } catch (e) {
+    return [];
+  }
+}
 async function loadPeriod(env, from, to) {
   const db = env.SITELOG_DB;
   if (!db) throw new Error("SiteLog database is not connected to this worker");
@@ -45599,20 +45627,60 @@ async function loadPeriod(env, from, to) {
     FROM visits v LEFT JOIN people p ON p.id = v.person_id
     WHERE v.check_in_at >= ? AND v.check_in_at < ?
     ORDER BY v.check_in_at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
+  const scans = await loadUnconfirmedScans(db, from, to);
+  const today = london().key;
+  const spans = /* @__PURE__ */ new Map();
+  for (const r of res.results || []) {
+    const a = parseUtc(r.check_in_at);
+    if (!a || !r.person_id) continue;
+    const b = parseUtc(r.check_out_at);
+    if (!spans.has(r.person_id)) spans.set(r.person_id, []);
+    spans.get(r.person_id).push([a.getTime(), b ? b.getTime() : Infinity]);
+  }
+  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b);
+  const scansBy = /* @__PURE__ */ new Map();
+  for (const s of scans) {
+    const d = parseUtc(s.at);
+    if (!d) continue;
+    s._d = d;
+    if (!scansBy.has(s.person_id)) scansBy.set(s.person_id, []);
+    scansBy.get(s.person_id).push(s);
+  }
   const byPerson = /* @__PURE__ */ new Map();
+  const ensure7 = (key, first, last, company) => {
+    const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
+    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
+    return byPerson.get(key);
+  };
+  const dayLabel = (day) => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
+  const m = (d) => Math.round(Number(d));
   for (const r of res.results || []) {
     const inD = parseUtc(r.check_in_at);
     if (!inD) continue;
     const day = london(inD).key;
     if (day < from || day > to) continue;
-    const outD = parseUtc(r.check_out_at);
+    let outD = parseUtc(r.check_out_at);
     const auto = Number(r.auto_checkout) === 1;
-    const state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
+    let state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
     const inOk = Number(r.sign_in_verified) === 1;
-    const outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
-    const m = (d) => Math.round(Number(d));
+    let outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
     let note = "";
-    if (state === "auto") note = "Did not sign out \u2014 closed automatically";
+    let scannedOut = null;
+    if ((state === "auto" || state === "open" && day < today) && r.person_id) {
+      const limit = outD ? outD.getTime() : Infinity;
+      for (const s of scansBy.get(r.person_id) || []) {
+        const t = s._d.getTime();
+        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
+        if (london(s._d).key !== day || !plausible(s._d)) continue;
+        scannedOut = s._d;
+      }
+    }
+    if (scannedOut) {
+      state = "scanned";
+      outD = scannedOut;
+      outOk = false;
+      note = "Scanned, not confirmed \u2014 sign-out time from a scan";
+    } else if (state === "auto") note = "Did not sign out \u2014 closed automatically";
     else if (state === "open") note = "Still signed in";
     else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
     else if (state === "manual") note = "Added by the office";
@@ -45624,11 +45692,10 @@ async function loadPeriod(env, from, to) {
       if (!outOk) bits.push("sign-out location not checked");
       note = bits.join(" \xB7 ");
     }
-    const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || "Unknown person";
-    const key = r.person_id || name;
-    if (!byPerson.has(key)) byPerson.set(key, { name, company: r.company || "", visits: [] });
-    byPerson.get(key).visits.push({
-      date: niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", ""),
+    const p = ensure7(r.person_id || [r.first_name, r.last_name].join(" "), r.first_name, r.last_name, r.company);
+    p.visits.push({
+      _t: inD.getTime(),
+      date: dayLabel(day),
       site: r.site_code || r.provided_site_name || "",
       inTime: london(inD).hhmm,
       outTime: outD ? london(outD).hhmm : "",
@@ -45637,9 +45704,58 @@ async function loadPeriod(env, from, to) {
       outOk,
       state,
       note,
+      scannedIn: false,
+      scannedOut: !!scannedOut,
       inDist: r.sign_in_distance_m,
       outDist: r.sign_out_distance_m
     });
+  }
+  for (const [pid, list] of scansBy) {
+    const ins = list.filter((s) => s.outcome === "confirm_check_in");
+    const used = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ins.length; i++) {
+      const s = ins[i];
+      if (used.has(s)) continue;
+      const t = s._d.getTime(), day = london(s._d).key;
+      if (day < from || day > to || !plausible(s._d) || insideVisit(pid, t)) {
+        used.add(s);
+        continue;
+      }
+      used.add(s);
+      const nextVisit = Math.min(...(spans.get(pid) || []).map(([a]) => a).filter((a) => a > t), Infinity);
+      let end = null;
+      for (let j = i + 1; j < ins.length; j++) {
+        const e = ins[j], et = e._d.getTime();
+        if (london(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
+        used.add(e);
+        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) end = e._d;
+        else if ((e.site || "") !== (s.site || "")) {
+          used.delete(e);
+          break;
+        }
+      }
+      const p = ensure7(pid, s.first_name, s.last_name, s.company);
+      p.visits.push({
+        _t: t,
+        date: dayLabel(day),
+        site: s.site || "",
+        inTime: london(s._d).hhmm,
+        outTime: end ? london(end).hhmm : "",
+        mins: end ? Math.max(0, (end - s._d) / 6e4) : 0,
+        inOk: false,
+        outOk: false,
+        state: "scanned",
+        scannedIn: true,
+        scannedOut: !!end,
+        note: end ? "Scanned, not confirmed \u2014 in & out times from scans" : "Scanned, not confirmed \u2014 no sign-out, hours not counted",
+        inDist: null,
+        outDist: null
+      });
+    }
+  }
+  for (const p of byPerson.values()) {
+    p.visits.sort((a, b) => a._t - b._t);
+    for (const v of p.visits) delete v._t;
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -45673,6 +45789,7 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
     const t = personTotals(p);
     const flag = [
       t.missed ? `${t.missed} missed sign-out${t.missed > 1 ? "s" : ""}` : "",
+      t.scanned ? `${t.scanned} scanned but not confirmed` : "",
       t.unver ? `${t.unver} not verified` : "",
       t.open ? `${t.open} still in` : ""
     ].filter(Boolean).join(" \xB7 ");
@@ -45681,7 +45798,7 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
     <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc3(per.label)}</b></p>
     ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
-    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began).</p></div>`;
+    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded.</p></div>`;
   const r = await sendEmail(env, {
     to: recipients,
     subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
@@ -50364,7 +50481,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -50624,7 +50741,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
