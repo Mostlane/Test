@@ -41,9 +41,9 @@
     .tvp summary .hrs{ margin-left:auto; font-weight:800; color:var(--ml-blue); font-size:16px; white-space:nowrap; }
     .tvp.bad{ border-color:#fecaca; background:#fff7f7; }
     .pill{ font-size:12px; border-radius:999px; padding:2px 8px; white-space:nowrap; }
-    .pill.ok{ background:#e7f6ec; color:#0e7a3b; } .pill.bad{ background:#fdecec; color:#b91c1c; } .pill.amb{ background:#fff4d6; color:#92400e; }
+    .pill.ok{ background:#e7f6ec; color:#0e7a3b; } .pill.bad{ background:#fdecec; color:#b91c1c; } .pill.amb{ background:#fff4d6; color:#92400e; } .pill.scn{ background:#f1ebff; color:#6d28d9; }
     .tvv{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; padding:8px 12px; border-top:1px solid #eef1f5; font-size:13.5px; align-items:baseline; }
-    .tvv.auto{ background:#fdecec; } .tvv.open{ background:#fff8e6; }
+    .tvv.auto{ background:#fdecec; } .tvv.open{ background:#fff8e6; } .tvv.scanned{ background:#f4efff; } .tvv.scanned .note{ color:#6d28d9; font-weight:600; } .tvv .sc{ color:#6d28d9; font-weight:700; }
     .tvv .t{ font-variant-numeric:tabular-nums; white-space:nowrap; }
     .tvv .note{ grid-column:1/-1; color:var(--muted); font-size:12px; }
     .g{ color:#0e7a3b; font-weight:700; } .x{ color:#b91c1c; font-weight:700; }
@@ -198,30 +198,34 @@ async function loadTimesheetView(){
     $("tvLabel").textContent = d.period.label;
     const people = d.people || [];
     if (!people.length) { $("tvList").textContent = "Nobody signed in on SiteLog in this period."; return; }
-    let tot = 0, missed = 0, open = 0, unver = 0;
-    people.forEach(p => { tot += p.totals.mins; missed += p.totals.missed; open += p.totals.open; unver += p.totals.unver; });
+    let tot = 0, missed = 0, open = 0, unver = 0, scanned = 0;
+    people.forEach(p => { tot += p.totals.mins; missed += p.totals.missed; open += p.totals.open; unver += p.totals.unver; scanned += p.totals.scanned || 0; });
     $("tvTot").innerHTML = `<span class="pill ok">${people.length} ${people.length>1?"people":"person"} · ${hm(tot)}</span>` +
       (missed ? `<span class="pill bad">${missed} missed sign-out${missed>1?"s":""}</span>` : "") +
+      (scanned ? `<span class="pill scn">${scanned} scanned but not confirmed</span>` : "") +
       (open ? `<span class="pill amb">${open} still signed in</span>` : "") +
       (unver ? `<span class="pill bad">${unver} not GPS-checked</span>` : "");
     const weekly = TV.kind === "weekly";
     $("tvList").innerHTML = people.map(p => {
       const t = p.totals;
       const status = t.missed ? `<span class="pill bad">${t.missed} missed sign-out</span>`
+        : t.scanned ? `<span class="pill scn">Scanned but not confirmed</span>`
         : t.open ? `<span class="pill amb">Still signed in</span>`
         : t.unver ? `<span class="pill bad">${t.unver} not verified</span>`
         : `<span class="pill ok">All verified</span>`;
       const rows = p.visits.map(v => {
         const mark = ok => ok ? `<span class="g">✔</span>` : `<span class="x">✘</span>`;
-        const out = v.state === "open" ? "still in" : esc(v.outTime);
-        return `<div class="tvv ${v.state==="auto"?"auto":v.state==="open"?"open":""}">
-          <span class="t">${weekly ? esc(v.date) + " · " : ""}${esc(v.inTime)} ${mark(v.inOk)} → ${out} ${v.state==="open" ? "" : mark(v.outOk)}</span>
+        const noEnd = v.state === "open" || (v.state === "scanned" && !v.outTime);
+        const out = v.state === "open" ? "still in" : noEnd ? "?" : v.scannedOut ? `<span class="sc">${esc(v.outTime)}</span>` : esc(v.outTime);
+        const inT = v.scannedIn ? `<span class="sc">${esc(v.inTime)}</span>` : esc(v.inTime);
+        return `<div class="tvv ${v.state==="auto"?"auto":v.state==="open"?"open":v.state==="scanned"?"scanned":""}">
+          <span class="t">${weekly ? esc(v.date) + " · " : ""}${inT} ${mark(v.inOk)} → ${out} ${noEnd ? "" : mark(v.outOk)}</span>
           <span>${esc(v.site)}</span>
-          <span class="t"><b>${v.state==="open" ? "–" : hm(v.mins)}</b></span>
+          <span class="t"><b>${noEnd ? "–" : hm(v.mins)}</b></span>
           ${v.note ? `<span class="note">${esc(v.note)}</span>` : ""}
         </div>`;
       }).join("");
-      return `<details class="tvp${t.missed||t.unver?" bad":""}"><summary><b>${esc(p.name)}</b><span class="muted">${esc(p.company||"")} · ${t.visits} visit${t.visits>1?"s":""}</span>${status}<span class="hrs">${hm(t.mins)}</span></summary>${rows}</details>`;
+      return `<details class="tvp${t.missed||t.unver||t.scanned?" bad":""}"><summary><b>${esc(p.name)}</b><span class="muted">${esc(p.company||"")} · ${t.visits} visit${t.visits>1?"s":""}</span>${status}<span class="hrs">${hm(t.mins)}</span></summary>${rows}</details>`;
     }).join("");
   }catch(e){ if (seq === tvSeq) $("tvList").textContent = e.message; }
 }
