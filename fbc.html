@@ -149,7 +149,8 @@
       </div>
 
       <div class="filters" id="filters">
-        <button class="chip on" data-f="active">🆕 Live — not complete</button>
+        <button class="chip on" data-f="active">🆕 Incidents — not complete</button>
+        <button class="chip" data-f="planned">🔦 Planned tests</button>
         <button class="chip" data-f="quote">⭐ Quote required</button>
         <button class="chip" data-f="toinvoice">🧾 To invoice</button>
         <button class="chip" data-f="invoiced">✅ Invoiced</button>
@@ -247,18 +248,20 @@
       const q = ROWS.filter(isQuote).length;
       const toInv = ROWS.filter(r => r.invoiceState === "to_invoice").length;
       const inv = ROWS.filter(r => r.invoiceState === "invoiced").length;
-      const active = ROWS.filter(r => r.invoiceState === "open").length;
+      const active = ROWS.filter(r => r.invoiceState === "open" && r.kind !== "planned").length;
+      const planned = ROWS.filter(r => r.kind === "planned" && !r.finished).length;
       g("summary").innerHTML =
         tile(ROWS.length, "jobs", "") +
         tile(q, "need a quote", q?"warn":"") +
-        tile(active, "live — not complete", active?"bad":"") +
+        tile(active, "incidents not complete", active?"bad":"") +
+        tile(planned, "planned tests to do", "") +
         tile(toInv, "to invoice", toInv?"warn":"") +
         tile(inv, "invoiced", inv?"ok":"");
       g("greet").textContent = toInv
         ? (toInv + " job" + (toInv===1?"":"s") + " done and waiting to be invoiced" + (q?(", "+q+" still need a quote"):"") + ".")
         : (q ? (q + " job" + (q===1?"":"s") + " need a quote.") : "FBC jobs — quotes, costs, and what to invoice each month.");
       // refresh filter counts
-      const cnt = { all:ROWS.length, quote:q, active, toinvoice:toInv, invoiced:inv };
+      const cnt = { all:ROWS.length, quote:q, active, planned, toinvoice:toInv, invoiced:inv };
       [].forEach.call(g("filters").querySelectorAll(".chip"), b => {
         const n = cnt[b.dataset.f]; b.innerHTML = b.textContent.replace(/\s*\d+$/,"").trim() + (n!=null?' <span class="c">'+n+'</span>':"");
       });
@@ -364,30 +367,37 @@
     function pass(r) {
       if (QTXT && ![r.siteName, r.siteCode, r.reference, r.description, r.reportedBy, r.assignedTo, r.status].join(" ").toLowerCase().includes(QTXT)) return false;
       if (FILTER === "quote") return isQuote(r);
-      if (FILTER === "active") return r.invoiceState === "open";
+      if (FILTER === "active") return r.invoiceState === "open" && r.kind !== "planned";
+      if (FILTER === "planned") return r.kind === "planned" && !r.finished;
       if (FILTER === "toinvoice") return r.invoiceState === "to_invoice";
       if (FILTER === "invoiced") return r.invoiceState === "invoiced";
       return true;
     }
     const DAY = 864e5;
-    const ageDays = r => { const t = Date.parse(r.raisedAt); return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / DAY)); };
+    // The date that MEANS something for this job: an emailed incident was RECEIVED,
+    // an office-raised one was RAISED, a planned test is BOOKED for a day (not received).
+    const dateOf = r => r.kind === "planned" ? (r.scheduledAt || (r.finished ? r.raisedAt : "") || "") : (r.receivedAt || r.raisedAt || "");
+    const dateWord = r => r.kind === "planned" ? (r.scheduledAt ? "booked" : (r.finished ? "logged" : "not booked")) : (r.kind === "email" ? "received" : "raised");
+    const TYPE = { email:'<span class="sp new" title="Came in on the Jotform incident email">📨 Email</span>', office:'<span class="sp none" title="Raised by the office">✍️ Office</span>', planned:'<span class="sp hold" style="background:#f1ecff;color:#5b21b6" title="Planned compliance work we booked — not an incident">🔦 Planned</span>' };
+    const ageDays = r => { if (r.kind === "planned") return null; const t = Date.parse(dateOf(r)); return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / DAY)); };
     function statusPill(r) {
       const st = String(r.status || "").trim(), l = st.toLowerCase();
       if (!r.onBoard) return '<span class="sp none">Record only</span>';
-      if (/complete|closed|invoiced|cancel/.test(l)) return '<span class="sp done">'+esc(st)+'</span>';
+      if (r.finished || /complete|closed|invoiced|cancel/.test(l)) return '<span class="sp done">'+esc(st)+'</span>';
       if (/hold|quote|order/.test(l)) return '<span class="sp hold">'+esc(st)+'</span>';
       const isNew = /pending|^$/.test(l) && !r.assignedTo;
       return '<span class="sp '+(isNew?"new":"live")+'">'+(isNew?"🆕 ":"")+esc(st || "New")+'</span>';
     }
     function daysCell(r) {
       const d = ageDays(r); if (d == null) return "";
-      if (r.invoiceState !== "open") return '<span class="muted">'+d+'d</span>';
+      if (r.invoiceState !== "open" || r.finished) return '<span class="muted">'+d+'d</span>';
       return '<span class="days '+(d > 14 ? "r" : d > 7 ? "a" : "g")+'">'+d+'d</span>';
     }
     const quoteCell = r => r.quoteRequired ? ('<span class="badge qpill">⭐ '+esc(r.quoteStatus ? (r.quoteStatus[0].toUpperCase()+r.quoteStatus.slice(1)) : "Needed")+(r.quoteAmount!=null&&r.quoteAmount!==""?" · "+money(r.quoteAmount):"")+'</span>') : '<span class="muted">—</span>';
     const COLS = [
       { k:"site", h:"Site", v:r => (r.siteName||r.siteCode||"").toLowerCase() },
-      { k:"received", h:"Received", v:r => String(r.raisedAt||"") },
+      { k:"type", h:"Type", v:r => r.kind },
+      { k:"received", h:"Date", v:r => String(dateOf(r)) },
       { k:"days", h:"Days", v:r => ageDays(r) ?? -1 },
       { k:"job", h:"Job", v:r => (r.description||r.reference||"").toLowerCase() },
       { k:"priority", h:"Priority", v:r => String(r.priority||"zz") },
@@ -399,7 +409,7 @@
     ];
     function render() {
       const rows = ROWS.filter(pass);
-      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">'+(FILTER==="active"?"No live FBC jobs — everything that came in is complete. 🎉":"Nothing here.")+'</p></div>'; return; }
+      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">'+(FILTER==="active"?"No open FBC incidents — everything that came in is complete. 🎉":"Nothing here.")+'</p></div>'; return; }
       const col = COLS.find(c => c.k === SORT.k) || COLS[1];
       rows.sort((a,b) => { const x = col.v(a), y = col.v(b); return (x < y ? -1 : x > y ? 1 : 0) * SORT.dir; });
       let h = '<div class="tblwrap"><table class="jt"><thead><tr>' + COLS.map((c,i) => '<th data-k="'+c.k+'"'+(i===0?' class="stk"':'')+'>'+esc(c.h)+(SORT.k===c.k?'<span class="ar">'+(SORT.dir>0?"▲":"▼")+'</span>':'')+'</th>').join("") + '</tr></thead><tbody>';
@@ -408,7 +418,8 @@
         const desc = (r.description || r.reference || "").replace(/\s+/g, " ");
         h += '<tr class="r'+(live?" live":"")+(q?" q":"")+(open?" open":"")+'" data-job="'+esc(r.jobId)+'">'
           + '<td class="stk" title="'+esc(r.siteName||r.siteCode)+'">'+esc(r.siteName||r.siteCode||"—")+'</td>'
-          + '<td>'+esc(fmtDay(r.raisedAt))+'</td>'
+          + '<td>'+(TYPE[r.kind]||"")+'</td>'
+          + '<td>'+(dateOf(r) ? esc(fmtDay(dateOf(r))) : "—")+' <span class="muted" style="font-size:11px">'+esc(dateWord(r))+'</span></td>'
           + '<td>'+daysCell(r)+'</td>'
           + '<td class="dsc" title="'+esc(desc)+'">'+esc(desc||"—")+(r.messageCount?' <span class="muted">💬'+r.messageCount+'</span>':'')+'</td>'
           + '<td>'+esc((r.priority||"").replace(/^Priority\s*/i,"P"))+'</td>'
