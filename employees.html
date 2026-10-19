@@ -262,7 +262,7 @@
   ];
   const kindDef = k => KINDS.find(x=>x.kind===k);
 
-  let ME=null, CAN=false, CUR_USER="", CUR_NAME="", CUR_NI="", editing=null, editKind="";
+  let ME=null, CAN=false, CUR_USER="", CUR_NAME="", CUR_NI="", CUR_PC="", editing=null, editKind="";
   let CUR_IS_SUB=false, CUR_SUB_LOCAL=true, RETURN_TAB="staff";
   let CUR_RECS=[], CUR_ST="", REQ_CAT=[], REQ_OVER={on:[],off:[]}, CUR_REQ=[];
 
@@ -356,6 +356,7 @@
       CUR_RECS = recs;
       recs.forEach(x=>{ if(x.title) TITLE_SUGGEST.add(x.title); });
       CUR_NI = (manage && !isSub && r.ni!=null) ? r.ni : "";
+      CUR_PC = (manage && !isSub && r.postcode!=null) ? r.postcode : "";
       renderNiRow(manage && !isSub);
       if(manage && !isSub){
         CUR_ST = r.reqStaffType||""; REQ_CAT = r.reqCatalogue||[]; REQ_OVER = r.reqOver||{on:[],off:[]}; CUR_REQ = r.requirements||[];
@@ -379,30 +380,51 @@
         if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
     }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
   }
-  // ── NI number (office only — never shown to the employee) ────────────────────
+  // ── DVLA-check details (office only — never shown to the employee) ───────────
+  // NI number + postcode are editable here; the driving-licence number is read
+  // from the person's licence record. All three get a copy button on the Licence
+  // checks tab too.
   function renderNiRow(show){
     const el=g("niRow"); if(!el) return;
     if(!show){ el.classList.add("hide"); el.innerHTML=""; return; }
     el.classList.remove("hide");
-    el.innerHTML = `<label class="lbl" style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:3px">National Insurance number <span style="font-weight:400">· office only, not shown to the employee</span></label>
-      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
-        <input id="niInput" value="${esc(CUR_NI)}" placeholder="e.g. AB123456C" maxlength="13" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:.5px;width:160px">
-        <button class="btn small" id="niSave">Save</button>
-        <button class="btn ghost small" id="niCopy" data-copyni="${esc(CUR_NI)}" ${CUR_NI?"":'style="display:none"'}>⧉ Copy</button>
-        <span id="niMsg" class="muted" style="font-size:12px"></span>
+    const field = (f, lbl, val, ph, extra) => `
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label class="lbl" style="font-size:12px;color:var(--muted);font-weight:600">${lbl}</label>
+        <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="${f}Input" value="${esc(val)}" placeholder="${esc(ph)}" autocomplete="off" spellcheck="false" style="${extra}width:160px">
+          <button class="btn small" data-save="${f}">Save</button>
+          <button class="btn ghost small" data-copyfield="${f}" data-copyni="${esc(val)}" ${val?"":'style="display:none"'}>⧉ Copy</button>
+          <span id="${f}Msg" class="muted" style="font-size:12px"></span>
+        </div>
       </div>`;
-    g("niSave").onclick=saveNi;
+    el.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#f8fafc">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px">🪪 DVLA check details <span class="muted" style="font-weight:400">· office only, not shown to the employee</span></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        ${field("ni","National Insurance number",CUR_NI,"e.g. AB123456C","text-transform:uppercase;letter-spacing:.5px;")}
+        ${field("pc","Postcode",CUR_PC,"e.g. PO15 5RQ","text-transform:uppercase;")}
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">The driving licence number is read from the person’s licence record (Driving licences below); all three have a copy button on the 🚗 Licence checks tab.</div>
+    </div>`;
+    el.querySelectorAll("[data-save]").forEach(b=>b.onclick=()=>saveDvla(b.dataset.save));
     wireCopy(el);
   }
-  async function saveNi(){
-    const val=(g("niInput").value||"").toUpperCase().replace(/\s+/g,"");
-    g("niMsg").textContent="Saving…";
+  async function saveDvla(f){
+    const raw=(g(f+"Input").value||"").toUpperCase();
+    const val = f==="ni" ? raw.replace(/\s+/g,"") : raw.replace(/\s+/g," ").trim();
+    const msg=g(f+"Msg"); if(msg) msg.textContent="Saving…";
+    const body={username:CUR_USER}; body[f==="ni"?"ni":"postcode"]=val;
     try{
-      const r=await authFetch("/hr/ni",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:CUR_USER,ni:val})}).then(x=>x.json());
-      if(r&&r.ok){ CUR_NI=r.ni||""; g("niMsg").textContent="Saved ✓"; const c=g("niCopy"); if(c){ if(CUR_NI){ c.style.display=""; c.dataset.copyni=CUR_NI; c.onclick=()=>copyText(CUR_NI,c); } else c.style.display="none"; } setTimeout(()=>{ if(g("niMsg")) g("niMsg").textContent=""; },1500); }
-      else g("niMsg").textContent=(r&&r.error)||"Couldn’t save.";
-    }catch(e){ g("niMsg").textContent="Couldn’t save."; }
+      const r=await authFetch("/hr/ni",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(x=>x.json());
+      if(r&&r.ok){
+        const got = (f==="ni"?r.ni:r.postcode)||"";
+        if(f==="ni") CUR_NI=got; else CUR_PC=got;
+        if(msg){ msg.textContent="Saved ✓"; setTimeout(()=>{ if(g(f+"Msg")) g(f+"Msg").textContent=""; },1500); }
+        const c=el_copy(f); if(c){ if(got){ c.style.display=""; c.dataset.copyni=got; c.onclick=()=>copyText(got,c); } else c.style.display="none"; }
+      } else if(msg) msg.textContent=(r&&r.error)||"Couldn’t save.";
+    }catch(e){ if(msg) msg.textContent="Couldn’t save."; }
   }
+  function el_copy(f){ return document.querySelector('#niRow [data-copyfield="'+f+'"]'); }
 
   // ── Required documents (per-person editor) ───────────────────────────────────
   function defApplies(it, st){ st=String(st||"").toLowerCase(); const s=it.scope||"all"; return s==="all"||(s==="field"&&st!=="office")||(s==="office"&&st==="office"); }
@@ -623,14 +645,20 @@
       const cls = d.licenceStatus==="expired" ? "red" : (d.licenceStatus==="expiring" ? "amber" : "green");
       return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${esc(fmtDate(d.licenceExpiry))}</span>`;
     };
-    const niPill = d => d.ni
-      ? `<span class="chip" title="National Insurance number (office only)">🆔 ${esc(d.ni)}</span><button class="btn ghost small" data-copyni="${esc(d.ni)}" title="Copy NI number">⧉ Copy</button>`
-      : `<span class="chip grey" title="No NI number saved — open History to add it">🆔 No NI</span>`;
+    // The three details needed for a DVLA check — each with its own copy button.
+    const copyPill = (val, emoji, label, title) => val
+      ? `<span class="chip" title="${esc(title)}">${emoji} ${esc(val)}</span><button class="btn ghost small" data-copyni="${esc(val)}" title="Copy ${esc(label)}">⧉</button>`
+      : `<span class="chip grey" title="Not saved — open History to add it">${emoji} No ${esc(label)}</span>`;
+    const niPill = d => copyPill(d.ni, "🆔", "NI", "National Insurance number (office only)");
+    const licNoPill = d => copyPill(d.licenceNumber, "🪪", "licence no.", "Driving licence number (field 5)");
+    const pcPill = d => copyPill(d.postcode, "📮", "postcode", "Postcode for the DVLA check");
     g("driverList").innerHTML = DRIVERS.map(d=>`
       <div class="emp">
         <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
         <span class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-end">
           ${niPill(d)}
+          ${licNoPill(d)}
+          ${pcPill(d)}
           ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${esc(fmtDate(d.lastChecked))}</span>`}
           ${licPill(d)}
           <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
