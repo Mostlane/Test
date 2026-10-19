@@ -1315,6 +1315,20 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     ⧉ Copy button on every Licence-checks row (or "🆔 No NI" when unset) so the
     office copies it straight into the DVLA check. Shared `copyText` helper with a
     hidden-textarea fallback.
+  - **DVLA-check trio — NI + licence number + postcode, each copyable (Oct 2026):**
+    the three details a DVLA check needs are surfaced together, each with its own
+    ⧉ copy button, on the Licence-checks row AND the person view (office only).
+    **Driving licence number** = the latest `licence` record's `number` (field 5;
+    `computeDriverChecks` returns `licenceNumber`, read-only — comes from the
+    record). **Postcode** = app_config **`staff:postcode:<tid>`** (`getPostcodeMap`/
+    `setPostcode`), editable; **defaults to the person's `profile.homePostcode`**
+    when not explicitly set (`homePostcodeOf`). **POST /hr/ni** now takes `postcode`
+    too (`"ni" in b`/`"postcode" in b` so one field never wipes the other);
+    `/hr/records` admin branch + `/hr/driver-checks` return `postcode`
+    (+`licenceNumber`). employees.html person view shows a **"🪪 DVLA check details"**
+    card (NI + Postcode, each Save + ⧉ Copy); the Licence-checks row shows 🆔 NI ·
+    🪪 licence no. · 📮 postcode pills, each with a ⧉ copy button. All still
+    office-only — never on the employee self-view.
   - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
     records of one kind (default `qualification`) into a grid — competencies
     (distinct record TITLES **that carry an expiry date** — permanent/no-expiry
