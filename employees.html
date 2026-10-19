@@ -157,6 +157,7 @@
         <button class="btn ghost small hide" id="backToList">‹ All staff</button>
       </div>
       <p id="personSub" class="muted" style="margin:4px 0 0"></p>
+      <div id="niRow" class="hide" style="margin-top:10px"></div>
     </div>
     <div id="reqCard"></div>
     <div id="sections"></div>
@@ -229,6 +230,14 @@
   const g = id => document.getElementById(id);
   const fmtDate = s => { if(!s) return ""; const d=new Date(String(s).slice(0,10)+"T00:00:00"); return isNaN(d)?s:d.toLocaleDateString("en-GB"); };
 
+  // Copy-to-clipboard (falls back to a hidden textarea where the API is blocked).
+  function copyText(txt, btn){
+    const t=String(txt||""); const done=()=>{ if(!btn) return; const o=btn.dataset.lbl||btn.textContent; btn.dataset.lbl=o; btn.textContent="✓ Copied"; setTimeout(()=>{ btn.textContent=o; }, 1200); };
+    const fb=()=>{ try{ const ta=document.createElement("textarea"); ta.value=t; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); done(); }catch(e){} };
+    try{ if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done,fb); else fb(); }catch(e){ fb(); }
+  }
+  function wireCopy(root){ (root||document).querySelectorAll("[data-copyni]").forEach(b=>{ b.onclick=()=>copyText(b.dataset.copyni,b); }); }
+
   // The four record types + their fields. `col` maps to a fixed column; anything
   // prefixed "data." rides in the record's data JSON.
   const KINDS = [
@@ -253,7 +262,7 @@
   ];
   const kindDef = k => KINDS.find(x=>x.kind===k);
 
-  let ME=null, CAN=false, CUR_USER="", CUR_NAME="", editing=null, editKind="";
+  let ME=null, CAN=false, CUR_USER="", CUR_NAME="", CUR_NI="", editing=null, editKind="";
   let CUR_IS_SUB=false, CUR_SUB_LOCAL=true, RETURN_TAB="staff";
   let CUR_RECS=[], CUR_ST="", REQ_CAT=[], REQ_OVER={on:[],off:[]}, CUR_REQ=[];
 
@@ -346,6 +355,8 @@
       const manage = CAN && r.canManage;
       CUR_RECS = recs;
       recs.forEach(x=>{ if(x.title) TITLE_SUGGEST.add(x.title); });
+      CUR_NI = (manage && !isSub && r.ni!=null) ? r.ni : "";
+      renderNiRow(manage && !isSub);
       if(manage && !isSub){
         CUR_ST = r.reqStaffType||""; REQ_CAT = r.reqCatalogue||[]; REQ_OVER = r.reqOver||{on:[],off:[]}; CUR_REQ = r.requirements||[];
         (REQ_CAT||[]).forEach(it=>{ if(it.title) TITLE_SUGGEST.add(it.title); });
@@ -368,6 +379,31 @@
         if(window.MLDocViewer) MLDocViewer.open({url:u,fetchUrl:u,name:n,downloadUrl:u}); else window.open(u,"_blank"); });
     }catch(e){ g("personSub").innerHTML='<span class="msg err">Couldn’t load records.</span>'; }
   }
+  // ── NI number (office only — never shown to the employee) ────────────────────
+  function renderNiRow(show){
+    const el=g("niRow"); if(!el) return;
+    if(!show){ el.classList.add("hide"); el.innerHTML=""; return; }
+    el.classList.remove("hide");
+    el.innerHTML = `<label class="lbl" style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:3px">National Insurance number <span style="font-weight:400">· office only, not shown to the employee</span></label>
+      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+        <input id="niInput" value="${esc(CUR_NI)}" placeholder="e.g. AB123456C" maxlength="13" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:.5px;width:160px">
+        <button class="btn small" id="niSave">Save</button>
+        <button class="btn ghost small" id="niCopy" data-copyni="${esc(CUR_NI)}" ${CUR_NI?"":'style="display:none"'}>⧉ Copy</button>
+        <span id="niMsg" class="muted" style="font-size:12px"></span>
+      </div>`;
+    g("niSave").onclick=saveNi;
+    wireCopy(el);
+  }
+  async function saveNi(){
+    const val=(g("niInput").value||"").toUpperCase().replace(/\s+/g,"");
+    g("niMsg").textContent="Saving…";
+    try{
+      const r=await authFetch("/hr/ni",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:CUR_USER,ni:val})}).then(x=>x.json());
+      if(r&&r.ok){ CUR_NI=r.ni||""; g("niMsg").textContent="Saved ✓"; const c=g("niCopy"); if(c){ if(CUR_NI){ c.style.display=""; c.dataset.copyni=CUR_NI; c.onclick=()=>copyText(CUR_NI,c); } else c.style.display="none"; } setTimeout(()=>{ if(g("niMsg")) g("niMsg").textContent=""; },1500); }
+      else g("niMsg").textContent=(r&&r.error)||"Couldn’t save.";
+    }catch(e){ g("niMsg").textContent="Couldn’t save."; }
+  }
+
   // ── Required documents (per-person editor) ───────────────────────────────────
   function defApplies(it, st){ st=String(st||"").toLowerCase(); const s=it.scope||"all"; return s==="all"||(s==="field"&&st!=="office")||(s==="office"&&st==="office"); }
   function renderReqCard(){
@@ -587,16 +623,21 @@
       const cls = d.licenceStatus==="expired" ? "red" : (d.licenceStatus==="expiring" ? "amber" : "green");
       return `<span class="chip ${cls}" title="Photocard licence expiry (field 4b)">🚗 Licence exp ${esc(fmtDate(d.licenceExpiry))}</span>`;
     };
+    const niPill = d => d.ni
+      ? `<span class="chip" title="National Insurance number (office only)">🆔 ${esc(d.ni)}</span><button class="btn ghost small" data-copyni="${esc(d.ni)}" title="Copy NI number">⧉ Copy</button>`
+      : `<span class="chip grey" title="No NI number saved — open History to add it">🆔 No NI</span>`;
     g("driverList").innerHTML = DRIVERS.map(d=>`
       <div class="emp">
         <span class="nm">${esc(d.name)} <span class="muted" style="font-weight:400">· ${esc(d.reg||"")}</span></span>
-        <span class="row" style="gap:6px">
+        <span class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${niPill(d)}
           ${d.status==="due" ? `<span class="chip amber" title="Monthly DVLA check">🔁 Check due this month</span>` : `<span class="chip green" title="Monthly DVLA check">🔁 Checked ${esc(fmtDate(d.lastChecked))}</span>`}
           ${licPill(d)}
           <button class="btn small" data-log="${esc(d.username)}" data-n="${esc(d.name)}">Log check</button>
           <button class="btn ghost small" data-open="${esc(d.username)}" data-n="${esc(d.name)}">History</button>
         </span>
       </div>`).join("");
+    wireCopy(g("driverList"));
     document.querySelectorAll("#driverList [data-log]").forEach(b=>b.onclick=()=>{ CUR_USER=b.dataset.log; CUR_NAME=b.dataset.n; CUR_IS_SUB=false; RETURN_TAB="drivers"; openRec("licence_check", null); });
     document.querySelectorAll("#driverList [data-open]").forEach(b=>b.onclick=()=>openPerson(b.dataset.open, b.dataset.n, false));
   }

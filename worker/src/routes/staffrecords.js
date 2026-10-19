@@ -124,6 +124,28 @@ async function saveReqCfg(db, cfg) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(db.tenantId, "staff:reqs:" + db.tenantId, JSON.stringify({ items: cfg.items || [], byUser: cfg.byUser || {} })).run();
 }
+
+// ── NI numbers (app_config `staff:ni:<tid>` = {username: "AB123456C"}) ─────────
+// Kept here, OFFICE-side, NOT on users.profile — so it never rides in shapeUser /
+// /auth/me / /users and can only ever be read back through the admin-gated HR
+// routes below. An employee never sees their own NI through the portal.
+async function getNiMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:ni:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return (v && typeof v === "object") ? v : {};
+  } catch { return {}; }
+}
+async function setNi(db, username, ni) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getNiMap(db);
+  const val = String(ni || "").toUpperCase().replace(/\s+/g, "").slice(0, 13);
+  if (val) map[u] = val; else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, "staff:ni:" + db.tenantId, JSON.stringify(map)).run();
+  return val;
+}
 // The catalogue items that apply to one person (scope by staff type, minus their
 // opt-outs, plus their explicit extras).
 export function requiredForUser(cfg, username, staffType) {
@@ -226,6 +248,7 @@ async function computeDriverChecks(db) {
       if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
     }
   } catch {}
+  const niMap = await getNiMap(db);                  // office-only — surfaced beside each driver for the DVLA check
   const month = todayISO().slice(0, 7);
   return drivers.map(u => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
@@ -234,7 +257,7 @@ async function computeDriverChecks(db) {
     const nextDue = l ? (l.expires || "") : "";
     const licenceExpiry = lic[u.username] || "";
     return { username: u.username, name, reg: u.vehicle_assigned || "", lastChecked: l ? l.issued : "", nextDue, status: doneThisMonth ? "done" : "due",
-             licenceExpiry, licenceStatus: statusOf(licenceExpiry) };
+             ni: niMap[u.username] || "", licenceExpiry, licenceStatus: statusOf(licenceExpiry) };
   }).sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : (a.status === "due" ? -1 : 1)));
 }
 
@@ -276,7 +299,7 @@ export async function handle(request, env, ctx, url, sess) {
     for (const r of (results || [])) records.push(await shape(env, url.origin, r));
     // For admins, also return this person's required-documents state so the
     // person view can show the ✓/✗ pills and the "what must they hold" editor.
-    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "";
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = undefined;
     if (isAdmin) {
       const cfg = await getReqCfg(db);
       try { const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first(); reqStaffType = String((JSON.parse((urow && urow.profile) || "{}").staffType) || "").toLowerCase(); } catch {}
@@ -286,8 +309,9 @@ export async function handle(request, env, ctx, url, sess) {
       });
       reqCatalogue = cfg.items;
       reqOver = (cfg.byUser && cfg.byUser[user]) || { on: [], off: [] };
+      ni = (await getNiMap(db))[user] || "";          // office-only; never on the self-view
     }
-    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType }, {}, env, request);
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni }, {}, env, request);
   }
 
   // ── Required-documents config: which documents each person must hold ──────────
@@ -333,6 +357,16 @@ export async function handle(request, env, ctx, url, sess) {
     }
     await saveReqCfg(db, cfg);
     return json({ ok: true, items: cfg.items, byUser: cfg.byUser }, {}, env, request);
+  }
+
+  // ── Set a person's NI number (office only) ────────────────────────────────────
+  if (path === "/hr/ni" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const username = String(b.username || "").trim();
+    if (!username) return error("Employee is required", 400, env, request);
+    const ni = await setNi(db, username, b.ni);
+    return json({ ok: true, username, ni }, {}, env, request);
   }
 
   // ── Everything below is admin (FullAccess | StaffRecords) ────────────────────

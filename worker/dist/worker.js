@@ -34658,6 +34658,25 @@ async function getReqCfg(db) {
 async function saveReqCfg(db, cfg) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:reqs:" + db.tenantId, JSON.stringify({ items: cfg.items || [], byUser: cfg.byUser || {} })).run();
 }
+async function getNiMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:ni:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+async function setNi(db, username, ni) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getNiMap(db);
+  const val2 = String(ni || "").toUpperCase().replace(/\s+/g, "").slice(0, 13);
+  if (val2) map[u] = val2;
+  else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:ni:" + db.tenantId, JSON.stringify(map)).run();
+  return val2;
+}
 function requiredForUser(cfg, username, staffType) {
   const st = String(staffType || "").toLowerCase();
   const over = cfg.byUser && cfg.byUser[username] || {};
@@ -34770,6 +34789,7 @@ async function computeDriverChecks(db) {
     }
   } catch {
   }
+  const niMap = await getNiMap(db);
   const month = todayISO().slice(0, 7);
   return drivers.map((u) => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
@@ -34784,6 +34804,7 @@ async function computeDriverChecks(db) {
       lastChecked: l ? l.issued : "",
       nextDue,
       status: doneThisMonth ? "done" : "due",
+      ni: niMap[u.username] || "",
       licenceExpiry,
       licenceStatus: statusOf3(licenceExpiry)
     };
@@ -34821,7 +34842,7 @@ async function handle26(request, env, ctx, url, sess) {
     ).bind(db.tenantId, user).all();
     const records = [];
     for (const r of results || []) records.push(await shape(env, url.origin, r));
-    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "";
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = void 0;
     if (isAdmin) {
       const cfg = await getReqCfg(db);
       try {
@@ -34835,8 +34856,9 @@ async function handle26(request, env, ctx, url, sess) {
       });
       reqCatalogue = cfg.items;
       reqOver = cfg.byUser && cfg.byUser[user] || { on: [], off: [] };
+      ni = (await getNiMap(db))[user] || "";
     }
-    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType }, {}, env, request);
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni }, {}, env, request);
   }
   if (path === "/hr/requirements" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
@@ -34885,6 +34907,14 @@ async function handle26(request, env, ctx, url, sess) {
     }
     await saveReqCfg(db, cfg);
     return json({ ok: true, items: cfg.items, byUser: cfg.byUser }, {}, env, request);
+  }
+  if (path === "/hr/ni" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const username = String(b.username || "").trim();
+    if (!username) return error("Employee is required", 400, env, request);
+    const ni = await setNi(db, username, b.ni);
+    return json({ ok: true, username, ni }, {}, env, request);
   }
   if (path === "/hr/overview" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
