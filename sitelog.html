@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=44"></script>
+  <script src="/portal-config.js?v=45"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SiteLog — Mostlane Portal</title>
@@ -29,6 +29,25 @@
     .tsbtns{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     .tsbtn{ border:1px solid var(--border); background:#fff; color:var(--ml-blue); border-radius:10px; padding:10px 14px; font-size:14px; font-weight:600; cursor:pointer; }
     .tsbtn.primary{ background:var(--ml-blue); color:#fff; border-color:var(--ml-blue); }
+    .tvbar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+    .tvbar input[type=date]{ font:inherit; border:1px solid var(--border); border-radius:10px; padding:8px 10px; }
+    .seg{ display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .seg button{ border:none; background:#fff; color:var(--ml-blue); padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+    .seg button.on{ background:var(--ml-blue); color:#fff; }
+    .tvp{ border:1px solid #eef1f5; border-radius:12px; margin-bottom:8px; overflow:hidden; }
+    .tvp summary{ list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; padding:11px 12px; }
+    .tvp summary::-webkit-details-marker{ display:none; }
+    .tvp summary b{ color:#0f172a; font-size:15px; }
+    .tvp summary .hrs{ margin-left:auto; font-weight:800; color:var(--ml-blue); font-size:16px; white-space:nowrap; }
+    .tvp.bad{ border-color:#fecaca; background:#fff7f7; }
+    .pill{ font-size:12px; border-radius:999px; padding:2px 8px; white-space:nowrap; }
+    .pill.ok{ background:#e7f6ec; color:#0e7a3b; } .pill.bad{ background:#fdecec; color:#b91c1c; } .pill.amb{ background:#fff4d6; color:#92400e; } .pill.scn{ background:#f1ebff; color:#6d28d9; }
+    .tvv{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; padding:8px 12px; border-top:1px solid #eef1f5; font-size:13.5px; align-items:baseline; }
+    .tvv.auto{ background:#fdecec; } .tvv.open{ background:#fff8e6; } .tvv.scanned{ background:#f4efff; } .tvv.scanned .note{ color:#6d28d9; font-weight:600; } .tvv .sc{ color:#6d28d9; font-weight:700; }
+    .tvv .t{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .tvv .note{ grid-column:1/-1; color:var(--muted); font-size:12px; }
+    .g{ color:#0e7a3b; font-weight:700; } .x{ color:#b91c1c; font-weight:700; }
+    .tvtot{ display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 10px; }
   </style>
 </head>
 <body>
@@ -50,6 +69,22 @@
     <div class="msg" id="pushMsg"></div>
     <a class="bigbtn" href="site-arrival.html" style="background:linear-gradient(90deg,#0e7a3b,#12a150);">📋 Set what visitors see on arrival</a>
     <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
+  </div>
+
+  <div class="card" id="tvCard" style="display:none;">
+    <h2>📋 Timesheet — who signed in and out</h2>
+    <p class="muted" style="margin:0 0 10px;">The same record the timesheet email is built from. ✔ = the phone was at the site when it signed in/out; ✘ = not checked (automatic sign-out, office edit, or before location checks began).</p>
+    <div class="tvbar">
+      <div class="seg"><button id="tvDay" class="on">Day</button><button id="tvWeek">Week</button></div>
+      <button class="tsbtn" id="tvPrev" title="Previous">‹</button>
+      <input type="date" id="tvDate">
+      <button class="tsbtn" id="tvNext" title="Next">›</button>
+      <button class="tsbtn" id="tvToday">Today</button>
+      <button class="tsbtn" id="tvPdf">📄 PDF</button>
+    </div>
+    <div class="muted" id="tvLabel" style="font-weight:600;color:#0f172a;margin-bottom:6px;"></div>
+    <div class="tvtot" id="tvTot"></div>
+    <div id="tvList" class="muted">Loading…</div>
   </div>
 
   <div class="card" id="refCard" style="display:none;">
@@ -122,6 +157,77 @@ if (perms().FullAccess === "Yes" || perms().SiteLogAdmin === "Yes") {
   loadRefusals();
   $("refDays").addEventListener("change", loadRefusals);
   loadTimesheetCfg();
+  setTimeout(initTimesheetView, 0);   // after the script below has defined it
+}
+
+// ── Timesheet view (same data as the emailed PDF: GET /sitelog-ts/data) ──
+const TV = { kind:"daily", date:"" };
+function londonToday(){ return new Date().toLocaleDateString("en-CA",{ timeZone:"Europe/London" }); }
+function shiftDate(key, n){ const d = new Date(key + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); }
+function hm(mins){ mins = Math.round(mins||0); return Math.floor(mins/60) + "h " + String(mins%60).padStart(2,"0") + "m"; }
+function initTimesheetView(){
+  $("tvCard").style.display = "block";
+  TV.date = londonToday(); $("tvDate").value = TV.date;
+  const setKind = k => { TV.kind = k; $("tvDay").classList.toggle("on", k==="daily"); $("tvWeek").classList.toggle("on", k==="weekly"); loadTimesheetView(); };
+  $("tvDay").onclick = () => setKind("daily");
+  $("tvWeek").onclick = () => setKind("weekly");
+  $("tvPrev").onclick = () => { TV.date = shiftDate(TV.date, TV.kind==="weekly" ? -7 : -1); $("tvDate").value = TV.date; loadTimesheetView(); };
+  $("tvNext").onclick = () => { TV.date = shiftDate(TV.date, TV.kind==="weekly" ? 7 : 1); $("tvDate").value = TV.date; loadTimesheetView(); };
+  $("tvToday").onclick = () => { TV.date = londonToday(); $("tvDate").value = TV.date; loadTimesheetView(); };
+  $("tvDate").onchange = () => { if ($("tvDate").value) { TV.date = $("tvDate").value; loadTimesheetView(); } };
+  $("tvPdf").onclick = async () => {
+    const w = window.open("", "_blank");
+    try{
+      const r = await authFetch(`${API}/sitelog-ts/pdf`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kind: TV.kind, date: TV.date }) });
+      if(!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't build the PDF");
+      const url = URL.createObjectURL(await r.blob());
+      if(w) w.location = url; else location.href = url;
+    }catch(e){ if(w) w.close(); $("tvList").textContent = e.message; }
+  };
+  loadTimesheetView();
+}
+let tvSeq = 0;
+async function loadTimesheetView(){
+  const seq = ++tvSeq;
+  $("tvList").textContent = "Loading timesheet…"; $("tvTot").innerHTML = "";
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/data?kind=${TV.kind}&date=${TV.date}`, { cache:"no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (seq !== tvSeq) return;
+    if (!r.ok) throw new Error(d.error || "Couldn't load the timesheet");
+    $("tvLabel").textContent = d.period.label;
+    const people = d.people || [];
+    if (!people.length) { $("tvList").textContent = "Nobody signed in on SiteLog in this period."; return; }
+    let tot = 0, missed = 0, open = 0, unver = 0, scanned = 0;
+    people.forEach(p => { tot += p.totals.mins; missed += p.totals.missed; open += p.totals.open; unver += p.totals.unver; scanned += p.totals.scanned || 0; });
+    $("tvTot").innerHTML = `<span class="pill ok">${people.length} ${people.length>1?"people":"person"} · ${hm(tot)}</span>` +
+      (missed ? `<span class="pill bad">${missed} missed sign-out${missed>1?"s":""}</span>` : "") +
+      (scanned ? `<span class="pill scn">${scanned} scanned but not confirmed</span>` : "") +
+      (open ? `<span class="pill amb">${open} still signed in</span>` : "") +
+      (unver ? `<span class="pill bad">${unver} not GPS-checked</span>` : "");
+    const weekly = TV.kind === "weekly";
+    $("tvList").innerHTML = people.map(p => {
+      const t = p.totals;
+      const status = t.missed ? `<span class="pill bad">${t.missed} missed sign-out</span>`
+        : t.scanned ? `<span class="pill scn">Scanned but not confirmed</span>`
+        : t.open ? `<span class="pill amb">Still signed in</span>`
+        : t.unver ? `<span class="pill bad">${t.unver} not verified</span>`
+        : `<span class="pill ok">All verified</span>`;
+      const rows = p.visits.map(v => {
+        const mark = ok => ok ? `<span class="g">✔</span>` : `<span class="x">✘</span>`;
+        const noEnd = v.state === "open" || (v.state === "scanned" && !v.outTime);
+        const out = v.state === "open" ? "still in" : noEnd ? "?" : v.scannedOut ? `<span class="sc">${esc(v.outTime)}</span>` : esc(v.outTime);
+        const inT = v.scannedIn ? `<span class="sc">${esc(v.inTime)}</span>` : esc(v.inTime);
+        return `<div class="tvv ${v.state==="auto"?"auto":v.state==="open"?"open":v.state==="scanned"?"scanned":""}">
+          <span class="t">${weekly ? esc(v.date) + " · " : ""}${inT} ${mark(v.inOk)} → ${out} ${noEnd ? "" : mark(v.outOk)}</span>
+          <span>${esc(v.site)}</span>
+          <span class="t"><b>${noEnd ? "–" : hm(v.mins)}</b></span>
+          ${v.note ? `<span class="note">${esc(v.note)}</span>` : ""}
+        </div>`;
+      }).join("");
+      return `<details class="tvp${t.missed||t.unver||t.scanned?" bad":""}"><summary><b>${esc(p.name)}</b><span class="muted">${esc(p.company||"")} · ${t.visits} visit${t.visits>1?"s":""}</span>${status}<span class="hrs">${hm(t.mins)}</span></summary>${rows}</details>`;
+    }).join("");
+  }catch(e){ if (seq === tvSeq) $("tvList").textContent = e.message; }
 }
 
 // ── Refused / abandoned scans (scan_log) ──

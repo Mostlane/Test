@@ -4689,7 +4689,11 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
    newest job for the incident so a note on a finished job still lands on its
    card. Never creates or re-opens a job; no job for the incident → notFound. */
 async function appendIncidentNote(env, tenantId, b) {
-  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  let jobs = (b.reference || b.incident) ? await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident }) : [];
+  // No job number (a Chapplins chase: "32c Archers Road - Southampton") → match the
+  // PROPERTY against that client's jobs: the first three words of the address
+  // ("32c archers road") must lead the job's site name/address, so 32A ≠ 32C.
+  if (!jobs.length && b.property && String(b.client || "") === "chapplins") jobs = await jobsByProperty(env, tenantId, b.property);
   if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
   const finished = await jobFinishedFor(env, tenantId);
   const open = jobs.filter(j => !finished(j));
@@ -4697,13 +4701,22 @@ async function appendIncidentNote(env, tenantId, b) {
   const j = (open.length ? newest(open) : newest(jobs));
   const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : new Date().toISOString();
   const by = String(b.by || "Southern Co-op (Concerto)").slice(0, 80);
-  const label = String(b.noteAction || "").replace(/\s+/g, " ").trim();
+  const label = String(b.client || "") === "chapplins" ? "" : String(b.noteAction || "").replace(/\s+/g, " ").trim();
   const text = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 1000);
   const note = (label ? label + ": " : "") + (text || "(note added — no text)");
   (j.events ||= []).push({ at, by, type: "note", note });
   j.updatedAt = new Date().toISOString();
   await saveJob(env, tenantId, j);
   return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status };
+}
+async function jobsByProperty(env, tenantId, property) {
+  const norm = x => String(x || "").toLowerCase().replace(/\b[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}\b/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const head = norm(property).split(" ").slice(0, 3).join(" ");
+  if (head.split(" ").length < 2) return [];
+  let rows = [];
+  try { rows = ((await tenantDB(env, tenantId).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND (id LIKE 'CHAP-%' OR helpdesk_ref LIKE 'CHAP-%' OR json_extract(data,'$.storeType')='chapplins')").bind(tenantId).all()).results) || []; } catch { return []; }
+  return rows.map(r => { try { return JSON.parse(r.data); } catch { return null; } })
+    .filter(j => j && !j.fallbackTemplate && [j.siteName, j.address].some(v => { const n = norm(v); return n === head || n.startsWith(head + " "); }));
 }
 /* The client cancelled an incident. `b` = {reference?, incident?, reason?, by?,
    kind:"job"|"quote", at?}. Rules:

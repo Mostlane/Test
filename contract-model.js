@@ -35,10 +35,17 @@
     overtimeEnhanced: true, overtimeRate: "1.5", overtimeAfter: "10",
     probation: true, probationMonths: "6",
     apprentice: false, apprenticeshipStandard: "", trainingProvider: "",
-    van: true, optOut: true, trainingRepay: false
+    van: true, optOut: true, trainingRepay: false,
+    // Which documents to send (the "Employee Documents" picker). Shared details
+    // from the contract pre-fill them; each goes out as its own signing request.
+    sendContract: true, sendVan: false, sendPpe: false,
+    // issuer = the logged-in sender (auto). issueDate = the date on the PPE
+    // record, set by the user and defaulting to the start date.
+    issuerName: "", issueDate: ""
   };
   var LABELS = {
     employeeName: "Employee name", employeeAddress: "Employee address", startDate: "Start date",
+    issueDate: "Issue date",
     jobTitle: "Job title", hourlyRate: "Hourly rate", duties: "Duties",
     workStart: "Start time", workEnd: "Finish time", workDays: "Working days", lunchMins: "Lunch minutes",
     employeeNotice: "Weeks", holidayDays: "Holiday days", travelMins: "Minutes",
@@ -51,7 +58,7 @@
   function val(state, k) {
     var v = state[k];
     if (v === "" || v == null) return null;
-    if (k === "startDate") return fmtDate(v);
+    if (k === "startDate" || k === "issueDate") return fmtDate(v);
     if (k === "hourlyRate") { var n = Number(v); return isNaN(n) ? String(v) : n.toFixed(2); }
     if (k === "employeeAddress") return String(v).split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean).join(", ");
     return String(v).trim();
@@ -60,7 +67,7 @@
 
   /* ---------- Contract content (VERBATIM) ---------- */
   var INTRO = [
-    "This contract of employment is made between **Mostlane Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
+    "This contract of employment is made between **Mostlane Construction Limited** of Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘you’). It meets the requirements of section 1 of the Employment Rights Act 1996 (as amended).",
     "This contract supersedes any earlier written or oral arrangement between you and the Company.",
     "The headings in this contract are for convenience only and do not affect its interpretation."
   ];
@@ -68,7 +75,7 @@
   var SECTIONS = [
     { id: "job", title: "Job title and place of work", items: [
       { p: "The Company will employ you in the role of **{jobTitle}**. Your duties and responsibilities include {duties}. The Company may vary your duties and responsibilities from time to time according to the needs of the business, provided they remain reasonable and suited to your skills and experience." },
-      { p: "You do not have a single fixed place of work. You will work at client sites across the UK, generally in the south of England, as current workload requires. Your administrative base is the Company’s office at Segensworth Business Centre, Fareham, PO15 5RQ." },
+      { p: "You do not have a single fixed place of work. You will work at client sites across the UK, generally in the south of England, as current workload requires. Your administrative base is the Company’s office at Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ." },
       { p: "You are employed as an apprentice under an approved apprenticeship. Your apprenticeship is **{apprenticeshipStandard}**, delivered with {trainingProvider}. The Company will give you time during your paid working hours for off-the-job training and assessment. Your apprenticeship agreement and commitment statement form part of this contract.", when: "apprentice" },
       { p: "When you complete your apprenticeship, your employment will continue on the terms of this contract unless the Company confirms otherwise in writing. Your job title and rate of pay will be reviewed at that point.", when: "apprentice" }
     ]},
@@ -234,7 +241,7 @@
   ];
 
   /* ---------- 48-hour opt-out agreement (VERBATIM) ---------- */
-  var OPT_INTRO = "This agreement is between **Mostlane Limited** of Segensworth Business Centre, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
+  var OPT_INTRO = "This agreement is between **Mostlane Construction Limited** of Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ (‘the Company’) and **{employeeName}** of {employeeAddress} (‘I’ or ‘me’).";
   var OPT_ITEMS = [
     "I agree that the limit of an average of 48 hours’ work in each working week, set by regulation 4(1) of the Working Time Regulations 1998, will not apply to my employment with the Company.",
     "I have made this agreement voluntarily. I understand that I do not have to sign it, and that I will not be dismissed or suffer any other detriment if I choose not to sign it, or if I end it later.",
@@ -243,7 +250,53 @@
     "This agreement does not affect my rights under the Working Time Regulations 1998 to rest breaks, daily and weekly rest periods and paid annual leave.",
     "This agreement does not form part of my contract of employment. It takes effect on the date it is signed by both parties."
   ];
-  var OPT_END = "To Mostlane Limited: I give seven days’ notice that I am ending my agreement to opt out of the 48-hour maximum average working week under the Working Time Regulations 1998.";
+  var OPT_END = "To Mostlane Construction Limited: I give seven days’ notice that I am ending my agreement to opt out of the 48-hour maximum average working week under the Working Time Regulations 1998.";
+
+  /* ---------- Company van policy (VERBATIM — "Mostlane Company Vans") ---------- */
+  var VAN_PARAS = [
+    "You will have use of the company vans as instructed and for **company business use only.**",
+    "You will be liable for any HMRC charges and we therefore recommend you keep mileage records to prove it is used for company business and for travel from home to place of work only."
+  ];
+  var VAN_RULES = [
+    "No Private Use",
+    "Van is kept in clean condition inside and out at all times",
+    "No alterations or additions to radios or other such items",
+    "No fixing of any items to dashboard/doors or any other part of the cab",
+    "No racking or any other shelving in rear of van unless previously agreed in writing by employer",
+    "No Smoking",
+    "Vans are fitted with GPS trackers",
+    "Weekly check of oil, water and tyres required"
+  ];
+  var VAN_AFTER = [
+    "You will be responsible for any speeding, parking or overloading fines. Any damage to the paintwork or interior of the cab you will be responsible for the cost of repair following estimate from main dealer.",
+    "Any disregard to any of these items will result in the use of the company vehicle being removed.",
+    "Bluetooth is standard and mobile phone should only be answered hands free and when safe to do so.",
+    "A fuel card will be provided for these vehicles only.",
+    "An updated copy of your driving licence is required on an annual basis and any points collected through a year must be disclosed.",
+    "I confirm I understand the rules and conditions set above and that I will abide and follow these."
+  ];
+
+  /* ---------- PPE Issue Record (VERBATIM) ---------- */
+  var PPE_NOTE = "Note: This form is intended to assist Mostlane in maintaining a basic record of the PPE issued following their PPE assessment. The assessment should have taken into account all risks arising from their activities / work / premises, also any other realistic control measure that could be taken to make the use of PPE unnecessary. Please note that the form is not intended to be fully comprehensive and may well require other inclusions due to the nature of your specific trade / activities / premises, etc. It is your duty to ensure compliance with the relevant legislation. Should you have any uncertainties in this regard we recommend that you consult the regulations or seek expert help before using this tool.";
+  var PPE_CONFIRM = [
+    ["A", "Reasons why the PPE is necessary"],
+    ["B", "Correct method of using/wearing the PPE"],
+    ["C", "Procedures to follow in the event of loss or damage to the PPE"],
+    ["D", "Arrangements for cleaning, storage, and repair / replacement of the equipment."],
+    ["E", "Recommended times/periods for cleaning, and replacement of the PPE or any components forming part of the PPE"],
+    ["F", "Limitations of the PPE (if any)"],
+    ["G", "Specific circumstances when the PPE is to be worn, e.g., as detailed in the company safe working procedures or method statements. I also confirm that I have been made aware of my duties under current legislation in relation to the need for me to appropriately use and not abuse the PPE issued to me by my employer in relation to them complying with their legislative duties (see below)."]
+  ];
+  var PPE_ITEMS = [
+    ["Head/Hair", "Hard Hat"],
+    ["Eyes/Face", "Safety Glasses"],
+    ["Respiratory system", "FP3 Face Masks"],
+    ["Hearing", "Ear Defenders"],
+    ["Hand/wrist/arms", "Protective Gloves"],
+    ["Feet/Legs", "Safety Boots"],
+    ["Other misc. e.g. entry to confined spaces, excessive heat or cold, etc", "Hi-vis jacket"]
+  ];
+  var PPE_EXTRACT = "Extract from The Health & Safety at Work, etc. Act 1974: Part I  7  It shall be the duty of every employee while at work  a  to take reasonable care for the health and safety of himself and other persons who may be affected by his acts or omissions at work; and  b  as regards any duty or requirement imposed on his employer or any other person by or under any of the relevant statutory provisions, to co-operate with him so far as is necessary to enable that duty or requirement to be performed or complied with.  8  No person shall intentionally or recklessly interfere with or misuse anything provided in the interests of health, safety or welfare in pursuance of any of the relevant statutory provisions. Brief Explanatory Note - relevant statutory provisions refers to Acts or Regulations, e.g. a Noise assessment may determine that suitable hearing protection must be worn, as other means of control are not viable. The PPE assessment determines the appropriate type of PPE. Once the PPE has been issued then the employee must co-operate and wear the PPE to assist the employer in complying with the duty. Note: for further advice we would recommend that you consult the HSE guidance provided on Personal Protective Equipment at work and the following free leaflet INDG 174 A short guide to Personal Protective Equipment at Work Regulations 1992. This is available from HSE Books.";
 
   /* ---------- Build a numbered model (VERBATIM) ---------- */
   function build(state) {
@@ -306,6 +359,38 @@
     OPT_ITEMS.forEach(function (t, i) { out.push((i + 1) + "  " + resolve(t, r, state, placeholders), ""); });
     out.push("## Notice to end this agreement");
     out.push(resolve(OPT_END, r, state, placeholders));
+    return out.join("\n");
+  }
+  function vanMarkup(state, placeholders) {
+    var r = {}, out = [];
+    out.push("# Mostlane Company Vans", "");
+    VAN_PARAS.forEach(function (p) { out.push(resolve(p, r, state, placeholders), ""); });
+    out.push("Use of the company van is on the understanding you abide with these rules:", "");
+    VAN_RULES.forEach(function (b) { out.push("- " + b); });
+    out.push("");
+    VAN_AFTER.forEach(function (p) { out.push(resolve(p, r, state, placeholders), ""); });
+    return out.join("\n").replace(/\n+$/, "");
+  }
+  function ppeMarkup(state, placeholders) {
+    var r = {}, out = [];
+    var d = resolve("{issueDate}", r, state, placeholders), who = resolve("{issuerName}", r, state, placeholders);
+    out.push("# Personal Protective Equipment (PPE) Issue Record", "");
+    out.push(PPE_NOTE, "");
+    out.push("**Name of Employer/Company:** Mostlane Construction Limited");
+    out.push("**Name of Employee:** " + resolve("{employeeName}", r, state, placeholders));
+    out.push("**Address of Employee:** " + resolve("{employeeAddress}", r, state, placeholders));
+    out.push("**Employees working location:** Various Sites", "");
+    out.push("I confirm that I have received the under noted personal protective equipment (PPE). I also confirm that I have received instruction and training in the:", "");
+    PPE_CONFIRM.forEach(function (c) { out.push("- **" + c[0] + "**  " + c[1]); });
+    out.push("");
+    out.push("## PPE issued", "");
+    out.push("Person providing instruction and training: " + who + "   ·   Dated: " + d, "");
+    out.push("| PPE Issued to Protect to or From | Details of PPE Issued (& If Disposable) | Issue Date | Details of Issuer |");
+    out.push("| --- | --- | --- | --- |");
+    PPE_ITEMS.forEach(function (it) { out.push("| " + it[0] + " | " + it[1] + " | " + d + " | " + who + " |"); });
+    out.push("");
+    out.push("## Health & Safety at Work etc. Act 1974 — extract", "");
+    out.push(PPE_EXTRACT);
     return out.join("\n");
   }
 
@@ -379,10 +464,49 @@
 
   function titleFor(state) { var n = val(state, "employeeName"); return "Contract of Employment" + (n ? " — " + n : ""); }
   function optTitleFor(state) { var n = val(state, "employeeName"); return "48-hour Opt-out Agreement" + (n ? " — " + n : ""); }
+  function vanTitleFor(state) { var n = val(state, "employeeName"); return "Company Van Policy" + (n ? " — " + n : ""); }
+  function ppeTitleFor(state) { var n = val(state, "employeeName"); return "PPE Issue Record" + (n ? " — " + n : ""); }
+
+  /* ---------- Employee Documents: one picker, each sent separately ---------- */
+  // id matches the state flag the page toggles (optOut already exists; the
+  // others are sendContract / sendVan / sendPpe added to DEFAULTS).
+  var DOCS = [
+    { id: "contract", flag: "sendContract", label: "Contract of employment", title: titleFor, body: markup },
+    { id: "optOut", flag: "optOut", label: "48-hour opt-out", title: optTitleFor, body: optMarkup },
+    { id: "van", flag: "sendVan", label: "Company van policy", title: vanTitleFor, body: vanMarkup },
+    { id: "ppe", flag: "sendPpe", label: "PPE issue record", title: ppeTitleFor, body: ppeMarkup }
+  ];
+  function pickedDocs(state) { return DOCS.filter(function (d) { return !!state[d.flag]; }); }
+  // The documents to actually send (resolved title + body, placeholders OFF).
+  function selectedDocs(state) {
+    return pickedDocs(state).map(function (d) {
+      return { id: d.id, label: d.label, title: d.title(state), body: d.body(state, false) };
+    });
+  }
+  // Union of blank required fields across the selected documents.
+  function missingForDocs(state) {
+    var list = [];
+    pickedDocs(state).forEach(function (d) {
+      scanMissing(d.body(state, true)).forEach(function (x) { if (list.indexOf(x) < 0) list.push(x); });
+    });
+    return list;
+  }
+  // Live preview of whichever documents are ticked (each with a divider).
+  function previewForDocs(state) {
+    var picked = pickedDocs(state);
+    if (!picked.length) return '<p style="color:#64748b;padding:24px;text-align:center;">Tick at least one document to send — see <b>Documents to send</b> at the top of the form.</p>';
+    return picked.map(function (d, i) {
+      var sep = i ? '<div class="optdiv">' + esc(d.label) + ' — separate signing request</div>' : "";
+      return sep + renderBodyHtml(d.body(state, true));
+    }).join("");
+  }
 
   window.MLContract = {
-    MIN_WAGE: MIN_WAGE, DEFAULTS: DEFAULTS, LABELS: LABELS,
-    markup: markup, optMarkup: optMarkup, previewHtml: previewHtml, renderBodyHtml: renderBodyHtml,
-    missing: missing, optMissing: optMissing, rate: rate, titleFor: titleFor, optTitleFor: optTitleFor
+    MIN_WAGE: MIN_WAGE, DEFAULTS: DEFAULTS, LABELS: LABELS, DOCS: DOCS,
+    markup: markup, optMarkup: optMarkup, vanMarkup: vanMarkup, ppeMarkup: ppeMarkup,
+    previewHtml: previewHtml, previewForDocs: previewForDocs, renderBodyHtml: renderBodyHtml,
+    missing: missing, optMissing: optMissing, missingForDocs: missingForDocs,
+    selectedDocs: selectedDocs, pickedDocs: pickedDocs, rate: rate,
+    titleFor: titleFor, optTitleFor: optTitleFor, vanTitleFor: vanTitleFor, ppeTitleFor: ppeTitleFor
   };
 })();

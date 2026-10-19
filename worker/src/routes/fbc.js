@@ -47,6 +47,9 @@ async function ensureTables__raw(env) {
     from_addr TEXT, subject TEXT, body TEXT, message_id TEXT, created_at TEXT
   )`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fbc_msg_job ON fbc_messages(tenant_id, job_id)").run(); } catch {}
+  // client_visible=1 = an office "update for FBC" — shown to the client's portal
+  // login on that job. Everything else (incident email, office notes) stays internal.
+  try { await env.DB.prepare("ALTER TABLE fbc_messages ADD COLUMN client_visible INTEGER DEFAULT 0").run(); } catch {}
 }
 export const ensureTables = onceMigration(ensureTables__raw);
 
@@ -95,11 +98,37 @@ export async function appendFbcMessage(env, tid, jobId, msg = {}) {
   const id = jobId + "|" + (mid || ("n-" + Math.random().toString(36).slice(2, 10)));
   try {
     await env.DB.prepare(`INSERT OR IGNORE INTO fbc_messages
-      (id, tenant_id, job_id, at, direction, from_addr, subject, body, message_id, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      (id, tenant_id, job_id, at, direction, from_addr, subject, body, message_id, created_at, client_visible)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(id, t, jobId, msg.at || now(), msg.direction || "in", String(msg.from || "").slice(0, 200),
-        String(msg.subject || "").slice(0, 300), String(msg.body || "").slice(0, 8000), mid, now()).run();
+        String(msg.subject || "").slice(0, 300), String(msg.body || "").slice(0, 8000), mid, now(),
+        msg.clientVisible ? 1 : 0).run();
   } catch (e) { console.log("appendFbcMessage", String(e && e.message || e)); }
+  return id;
+}
+
+// ── The office's client-visible updates, for the client portal ───────────────
+// Returns { jobId: [{at, by, body}] } newest first. `by` is the poster's first
+// name only — the client never sees usernames or internal notes.
+export async function clientUpdatesFor(env, tid, jobIds) {
+  const out = {};
+  const ids = [...new Set((jobIds || []).filter(Boolean).map(String))];
+  if (!env || !env.DB || !ids.length) return out;
+  await ensureTables(env);
+  const t = Number(tid) || 1;
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    try {
+      const { results } = await env.DB.prepare(
+        `SELECT job_id, at, from_addr, body FROM fbc_messages
+         WHERE tenant_id=? AND client_visible=1 AND job_id IN (${chunk.map(() => "?").join(",")})
+         ORDER BY at DESC`).bind(t, ...chunk).all();
+      for (const r of (results || [])) {
+        (out[r.job_id] = out[r.job_id] || []).push({ at: r.at, by: String(r.from_addr || "").split(/[\s.]/)[0], body: r.body || "" });
+      }
+    } catch (e) { console.log("clientUpdatesFor", String(e && e.message || e)); }
+  }
+  return out;
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -116,6 +145,23 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Shape a merged row from an fbc_meta row (m) and its live sla_jobs row (j).
   const DONE = new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+  // The office's own "finished" categories ("FBC Works Completed", "Compliance
+  // Complete" …) count as done too — otherwise those jobs sat in "live".
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of (row ? JSON.parse(row.value) : [])) if (c && c.done && c.name) DONE.add(String(c.name).trim().toLowerCase());
+  } catch {}
+  // What KIND of job is it? Only incidents are "received": a Jotform email (source
+  // jotform/backfill) or an office-raised request. Planned compliance work (flick
+  // tests, 3-hour drain-downs, EM/PAT/EICR) is booked by us, not received.
+  const PLANNED_RE = /\b(flick\s*tests?|drain[\s-]*downs?|3\s*-?\s*h(?:ou)?rs?\s+(?:drain|test)|emergency\s+light(?:ing)?\s+tests?|em\s+tests?|pat\s+test(?:ing|s)?|eicr|fixed\s+wire|5\s*-?\s*year)\b/i;
+  const kindOf = (m, j) => {
+    const src = (m && m.source) || "";
+    if (src === "jotform" || src === "backfill") return "email";
+    let d = {}; try { d = j && j.data ? JSON.parse(j.data) : {}; } catch {}
+    if (d.emTest || d.pat || d.elecTest || d.pumpMaintenance || PLANNED_RE.test(String((j && j.description) || (m && m.description) || ""))) return "planned";
+    return "office";
+  };
   const shape = (m, j, msg) => {
     const status = (j && j.status) || "";
     const finished = DONE.has(String(status).toLowerCase());
@@ -156,6 +202,10 @@ export async function handle(request, env, ctx, url, sess) {
       messageCount: (msg && msg.n) || 0,
       lastMessageAt: (msg && msg.last) || "",
       onBoard: !!j,
+      finished,
+      kind: kindOf(m, j),
+      // An emailed incident's received time is when the email came in (the meta row).
+      receivedAt: (m && (m.source === "jotform" || m.source === "backfill")) ? ((m.raised_at) || (m.created_at) || (j && j.created_at) || "") : ((j && j.created_at) || (m && m.created_at) || ""),
     };
   };
 
@@ -199,7 +249,7 @@ export async function handle(request, env, ctx, url, sess) {
     const j = await env.DB.prepare("SELECT id, helpdesk_ref, status, priority, site_code, assigned_to, scheduled_at, created_at, description, data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
     if (!m && !j) return error("Not found", 404, env, request);
     const { results: msgs } = await env.DB.prepare(
-      "SELECT at, direction, from_addr, subject, body FROM fbc_messages WHERE tenant_id=? AND job_id=? ORDER BY at DESC").bind(tid, jobId).all();
+      "SELECT id, at, direction, from_addr, subject, body, client_visible FROM fbc_messages WHERE tenant_id=? AND job_id=? ORDER BY at DESC").bind(tid, jobId).all();
     const mcount = { n: (msgs || []).length, last: (msgs && msgs[0] && msgs[0].at) || "" };
     return json({ ok: true, job: shape(m, j, mcount), messages: msgs || [] }, {}, env, request);
   }
@@ -240,8 +290,18 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const jobId = String(b.jobId || "");
     if (!jobId || !String(b.body || "").trim()) return error("jobId and body required", 400, env, request);
-    await appendFbcMessage(env, tid, jobId, { direction: "note", from: sess.user.username, subject: "", body: b.body, at: now() });
+    const toClient = !!b.toClient;
+    await appendFbcMessage(env, tid, jobId, { direction: toClient ? "client" : "note", from: sess.user.username, subject: "", body: b.body, at: now(), clientVisible: toClient });
     return json({ ok: true }, {}, env, request);
+  }
+
+  // Remove an office note / client update posted by mistake (never an inbound email).
+  if (sub === "/message-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("id required", 400, env, request);
+    const r = await env.DB.prepare("DELETE FROM fbc_messages WHERE tenant_id=? AND id=? AND direction IN ('note','client')").bind(tid, id).run();
+    return json({ ok: true, deleted: (r && r.meta && r.meta.changes) || 0 }, {}, env, request);
   }
 
   return error("Unknown FBC route", 404, env, request);

@@ -1403,7 +1403,7 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   client and shows a **Log out** button instead (their only navigation). (5)
   **client.js** refuses every `/client/*` jobs route (jobs/job/raise/raise-photo) for
   a `compliance` client (only `/client/me` passes). **No new PERMISSION_KEY** — it's
-  all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. Test
+  all profile-based. portal-config bumped `?v=43`, SW `mostlane-v144`. **View As lands a client by role (17 Oct 2026):** the owner picker sends a `jobs` client to client-home.html and a compliance-only FBC client to fareham.html (was client-home for every client); portal-config `?v=45`, SW `mostlane-v146`. Test
   `node --no-warnings worker/tools/test-client-compliance.mjs`.
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
@@ -2158,6 +2158,27 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
     Active, ✅ Invoiced (grouped by month w/ totals). Each job expands to
     inline-editable cost/PO/quote status+amount/invoice status+month/ref (autosave
     "Saved ✓") + a conversation log with an add-note box + "Open job card →".
+  - **📋 Jobs is a compliance-style TABLE (17 Oct 2026, Jamie: "easier to read… see jobs
+    which came in as new incidents and are not yet complete")** — sticky navy header,
+    sticky Site column, zebra rows, sortable headings (Site · Received · Days · Job · Priority
+    · Job status · Engineer · Quote · Cost · Invoice). **Default filter "🆕 Live — not
+    complete"** (= `invoiceState:"open"`: on the board, not finished; red summary tile);
+    chips Quote required / To invoice / Invoiced / All + a search box. Live rows carry a blue
+    left stripe (quote-needed amber); a Pending job with no engineer reads "🆕 Pending"; the
+    Days cell goes green ≤7 / amber ≤14 / red after. Tap a row → the same editor (cost/PO/
+    quote/invoice + conversation) opens beneath it, pinned to the visible width. HTML only.
+  - **Incidents vs planned tests + finished categories (17 Oct 2026, Jamie: "a lot of
+    these are flick tests or 3hr tests… if they didn't come in via email they haven't been
+    received").** `/fbc/list` rows now carry **`kind`** = `email` (fbc_meta source jotform/
+    backfill — the incident email), `planned` (job flags emTest/pat/elecTest/pump OR a
+    description matching flick test / drain down / EM / PAT / EICR / fixed wire / 5-year —
+    work WE booked) or `office` (raised by the office); **`receivedAt`** (the email time for
+    `email`); and **`finished`** — which now honours the office's custom `done:true`
+    categories ("FBC Works Completed", "Compliance Complete"), previously read as LIVE.
+    The page's Type column shows 📨 Email / ✍️ Office / 🔦 Planned; the Date column says
+    what the date IS (received / raised / booked / not booked); Days only counts incidents.
+    Default filter "🆕 Incidents — not complete" excludes planned work; a separate "🔦 Planned
+    tests" chip lists unfinished planned tests.
   - **🧾 Invoicing (Sep 2026 — Jamie's monthly-invoice ask)** — a month-by-month
     worksheet. **Every FBC job defaults into the month it was RECEIVED** —
     `effMonth(r)` = `r.invoiceMonth` if set, else the month of `raisedAt`
@@ -2207,6 +2228,46 @@ per-job conversation log) so nothing is forgotten to invoice. Phase 1 (DONE).
   review queue (exclude bcpartnership@ / auto-replies / insurance-cert-tender admin,
   no duplicates). **Phase 3:** quote-sent workflow + monthly invoice reminder + fold
   FBC cost into job costing.
+
+## FBC client portal (routes/client.js + client-home.html — external client logins)
+An EXTERNAL customer login = a user with `profile.staffType:"client"` + `clientOrg`
+(only `fbc` today → compliance scheme `fareham`, `lib/complianceaccess.js ORG_SCHEME`).
+Walled server-side: every `/client/*` route is org-scoped, never money, never staff pages;
+a client's compliance access is hard-capped at view+download on its own scheme. Created in
+**Users Admin** (Staff type "Client (external)" or the add-user wizard) with a role:
+- **`clientRole:"compliance"`** — "Compliance chart only": login lands on fareham.html.
+- **`clientRole:"jobs"`** — "Compliance + current jobs": lands on **client-home.html**
+  (tabs **Current jobs** + **Compliance**).
+**Current jobs only (17 Oct 2026, Jamie's spec):** `GET /client/jobs` returns live jobs
+at the org's sites (or tagged `clientOrg`) and DROPS anything finished — built-in done
+states, Cancelled AND the office's custom `done:true` categories (`finishedTest`);
+`/client/job?id=` 404s a finished job. Status shown in plain words (`clientStatus`):
+Logged · Booked <date> · Engineer on the way · In progress · On hold · Being quoted.
+Descriptions pass `clientDescription` (strips the auto EM/PAT day plan + "🚨 change
+status…"/office-only lines). **Previous jobs = later** (would be a separate opt-in list).
+**Raising jobs is OFF** unless `profile.clientCanRaise` (no admin toggle yet — set in D1
+or add one): `/client/me` returns `canRaise`, client-home hides the "Raise a job" tab, and
+`/client/raise`(+`-photo`) 403. The raise form itself is BUILT (site picker, urgency →
+priority, photos, office push, confirmation email) — Jamie plans his own incident form to
+replace Jotform; this is the natural home for it. Test `node --no-warnings
+worker/tools/test-client-portal.mjs` (15). No FBC client accounts exist yet (17 Oct).
+**Office updates the client can read (17 Oct 2026):** on fbc.html each job's
+Conversation box has **Add note** (internal, as before) and **📣 Update for FBC** (confirm
+first) → POST /fbc/message `{jobId, body, toClient:true}` stores an `fbc_messages` row with
+`direction:"client"` + new column **`client_visible=1`** (self-migrating). fbc.js
+`clientUpdatesFor(env,tid,jobIds)` (exported) feeds client.js: `/client/jobs` adds
+`latestUpdate {at,body,by}` + `updateCount` per job (card shows it; a fresh update sorts
+the job to the top) and `/client/job` adds the full `updates[]` ("Updates from Mostlane"
+in the modal). Only client_visible rows ever reach the client — the incident email and
+internal notes never do; `by` is the poster's first name. **POST /fbc/message-delete
+{id}** removes a note/update posted by mistake (never an inbound email) — the ✕ on each.
+No push/email to the client yet (they see it on next login).
+**client-home.html Current jobs is a TABLE (17 Oct 2026, Jamie: "updates clear to them in the
+table"):** navy header, zebra rows, columns Site · Job (+ref) · Logged · Status · **Latest
+update from Mostlane** (amber box: date/time · first name · text, "+ N earlier updates — tap
+to see all"; "No update yet" otherwise); row tap opens the job modal. ≤700px each row
+re-flows into a stacked card (CSS grid) so the update is never off-screen; `.wrap` widens to
+1180px on desktop.
 
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
@@ -5404,6 +5465,19 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `/status` carries `reviewOpen` + `templates`, the test box takes a From address
   (the template depends on the sender) and names which template read it. Outcomes
   now: created|updated|order|review|dismissed|dropped|ignored|duplicate|failed|dryrun.
+  **Chapplins chase / reply → a NOTE on the job (17 Oct 2026):** template
+  **`chapplins-note`** (replyOk) catches ANY Chapplins mail that isn't a "new job
+  raised" (and a RE: on one): e.g. "32c Archers Road - Southampton … the smell is
+  getting worse". Matched to the job by a Job Number anywhere in the mail (→ id
+  `CHAP-<n>`), else by the PROPERTY (`sla.js jobsByProperty`: first three address
+  words must lead the job's site name/address, so 32A ≠ 32C; jobs found by id/ref
+  `CHAP-` OR `storeType:"chapplins"` — the office renames refs to the address).
+  Appended to the job card + a shared "📝 Chapplins note" task; no job → task only.
+  Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
+  visit") → Priority 4 + "Client priority: P5 …" in the description; "Out of
+  hours"-style lines no longer land in the address; `lookupSite` falls back to a
+  unique EXACT site-name match when the form's postcode disagrees with the register
+  (Broadcut Depot is PO16 8SP on the register, typed as PO13 9FW).
   **Adding a client = add one template + fixtures** in emailtemplates.js /
   test-email-intake.mjs (36 cases, ALL PASS) — never widen the AI path instead.
 - **The SAME INCIDENT arriving again → a linked VISIT, never a duplicate or an
@@ -6090,7 +6164,17 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   — nothing sends until recipients are saved on **sitelog.html → 🧾 Timesheet emails** (Full Access;
   also Today's / Last week's PDF preview + Send now). Endpoints GET/POST `/config`, POST `/pdf`
   `{kind,date}`, POST `/send`. Needs `RESEND_API_KEY`. Test
-  `node --no-warnings worker/tools/test-sitelog-timesheets.mjs` (16).
+  `node --no-warnings worker/tools/test-sitelog-timesheets.mjs` (25).
+  **"Scanned but not confirmed" fallback (17 Oct 2026):** `loadPeriod` also reads `scan_log`
+  (`kind='scan'`, outcome confirm_check_in/confirm_sign_out = the phone was OFFERED a sign-in/out
+  that was never pressed). Used ONLY where no real event exists: (a) a missed sign-out (auto, or
+  open on a past day) takes the LAST unconfirmed sign-out scan after sign-in that day as its out
+  time; (b) a sign-in scan with no visit around it (not inside a real visit, not within 20 min
+  before one starts) becomes a visit, ending at a later sign-in scan at the SAME site ≥30 min on
+  that day, else no hours. Only scans 05:00–21:00 London count. State `scanned` (+`scannedIn`/
+  `scannedOut`), purple in the portal Day/Week view, the PDF (row + legend + chip) and the email
+  line; `personTotals().scanned`. Real-data cases it was built against: a sign-in scan at another
+  site while still signed in (ignored), a re-scan before a later confirmed sign-out (ignored).
 
 ## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
 The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device

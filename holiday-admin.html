@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=44"></script>
+  <script src="/portal-config.js?v=45"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -987,22 +987,22 @@
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
       BALMAP = {};
       list.forEach(e => {
-        BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown };
+        BALMAP[e.username] = { allowance: e.allowance, baseAllowance: e.baseAllowance ?? e.allowance, proRated: !!e.proRated, startDate: e.startDate || null, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown };
         ACTIVEMAP[e.username] = e.active !== false;
       });
       g("balBody").innerHTML = list.map(e => `
         <tr class="${e.active === false ? "archived" : ""}">
           <td class="name-link" data-user="${esc(e.username)}" title="View ${esc(NAMES[e.username] || e.name || e.username)}'s year">${esc(NAMES[e.username] || e.name || e.username)}${e.active === false ? `<span class="arch-badge">${esc(e.status || "Archived")}</span>` : ""}</td>
-          <td>${e.allowance}</td>
+          <td>${e.proRated ? `${e.allowance} <span class="muted" style="font-weight:400" title="Pro-rated from ${esc(e.startDate || "start date")} — full-year allowance ${e.baseAllowance}">(of ${e.baseAllowance})</span>` : e.allowance}</td>
           <td>${e.used}</td>
           <td class="${e.remaining < 0 ? "neg" : e.remaining <= 2 ? "low" : ""}">${e.remaining}</td>
-          <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">✎<span class="elbl"> Edit allowance</span></button></td>
+          <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.baseAllowance ?? e.allowance}">✎<span class="elbl"> Edit allowance</span></button></td>
         </tr>`).join("") || "<tr><td colspan='5' class='muted'>No users.</td></tr>";
     }
     document.addEventListener("click", async e => {
       const t = e.target.closest("[data-allow]") || e.target;
       if (!t.dataset || !t.dataset.allow) return;
-      const v = prompt(`Allowance for ${NAMES[t.dataset.allow] || t.dataset.allow} in ${YEAR}:`, t.dataset.cur);
+      const v = prompt(`Full-year allowance for ${NAMES[t.dataset.allow] || t.dataset.allow} in ${YEAR} (days).\nA mid-year starter is pro-rated from their start date automatically.`, t.dataset.cur);
       if (v === null) return;
       const n = Number(v);
       if (!Number.isFinite(n) || n < 0) { alert("Enter a number of days."); return; }

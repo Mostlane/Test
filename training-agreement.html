@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Training Agreement — Mostlane</title>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="/portal-config.js?v=45"></script>
+  <script src="auth.js"></script>
+  <script src="contract-model.js?v=5"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --warn:#a14d06; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:var(--ink); }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:1280px; margin:14px auto 90px; padding:0 12px; }
+    .status { min-height:18px; color:var(--muted); font-size:13px; margin:0 0 10px; }
+    .status.warn { color:var(--warn); font-weight:600; } .status.ok { color:var(--ok); font-weight:600; } .status.bad { color:var(--bad); font-weight:600; }
+    .grid { display:grid; grid-template-columns:380px minmax(0,1fr); gap:18px; align-items:start; }
+    @media (max-width:920px){ .grid { grid-template-columns:minmax(0,1fr); } }
+    .panel { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:16px; display:flex; flex-direction:column; gap:16px; }
+    @media (min-width:921px){ .panel { position:sticky; top:calc(env(safe-area-inset-top,0px) + 14px); max-height:calc(100vh - 30px); overflow-y:auto; } }
+    fieldset { border:0; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; min-width:0; }
+    legend { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-bottom:6px; padding:0; }
+    .f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .f label { font-weight:600; font-size:13px; }
+    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    input[type=text], input[type=number], input[type=date], textarea, select {
+      font:inherit; width:100%; padding:9px 11px; border:1px solid #ccd5dd; border-radius:9px; background:#fff; color:var(--ink);
+    }
+    textarea { resize:vertical; min-height:58px; }
+    .hint { font-size:12px; color:var(--muted); } .hint.warn { color:var(--warn); font-weight:600; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:11px 15px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn:disabled { opacity:.5; cursor:default; } .btn.grey { background:#5b6b7b; } .btn.ghost { background:#eef2f6; color:var(--brand); } .btn.small { padding:8px 12px; font-size:13px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .sheet-wrap { min-width:0; }
+    .sheet { background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:clamp(18px,4vw,44px); max-width:820px; margin:0 auto; line-height:1.55; font-size:15px; }
+    .sheet h3 { font-size:15.5px; color:var(--brand); margin:22px 0 7px; text-transform:uppercase; letter-spacing:.02em; }
+    .sheet h4 { font-size:14.5px; color:var(--brand); margin:16px 0 6px; }
+    .sheet p { margin:0 0 10px; } .sheet ul { margin:0 0 10px 18px; } .sheet li { margin:0 0 5px; }
+    .sheet hr { border:0; border-top:1px solid var(--line); margin:14px 0; }
+    .sheet .ph { background:#fcefdd; color:var(--warn); border-radius:3px; padding:0 4px; font-size:.86em; font-weight:700; }
+    table.ctbl { border-collapse:collapse; width:100%; margin:8px 0 14px; font-size:13.5px; }
+    table.ctbl th, table.ctbl td { border:1px solid #ccd5dd; padding:7px 9px; text-align:left; vertical-align:top; }
+    table.ctbl th { background:#f4f7fa; font-weight:700; }
+    .sendcard { background:#eef2ff; border:1px solid #c7d2fe; border-radius:12px; padding:14px; margin-bottom:14px; }
+    .sendcard h2 { margin:0 0 4px; font-size:16px; color:var(--brand); }
+    .sendcard .sub { color:var(--muted); font-size:13px; margin:0 0 10px; }
+    .miss { background:#fcefdd; border:1px solid #f0d19c; color:var(--warn); border-radius:9px; padding:9px 11px; font-size:13px; margin-bottom:10px; }
+    .noaccess { max-width:520px; margin:60px auto; text-align:center; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/documents-admin.html" title="Back">‹ Back</a>
+    <h1>🎓 Training agreement</h1>
+  </header>
+
+  <div class="wrap" id="main" style="display:none;">
+    <div class="status" id="status">Fill in the blanks and send it to the employee to sign. The Company counter-signature is your own saved signature; the employee signs on their device and the signed PDF files into their My Documents › Agreements.</div>
+    <div class="grid">
+      <form class="panel" id="form" autocomplete="off">
+        <fieldset>
+          <legend>Employee</legend>
+          <div class="f">
+            <label for="pickUser">Portal user</label>
+            <select id="pickUser"><option value="">— pick the employee —</option></select>
+            <span class="hint">Pick the person so it can be <b>sent to them to sign</b>. Their name &amp; home address pre-fill where the portal holds them.</span>
+          </div>
+          <div class="f"><label for="employeeName">Full name</label><input type="text" id="employeeName"></div>
+          <div class="f"><label for="employeeAddress">Home address</label><textarea id="employeeAddress" rows="2"></textarea></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>The course</legend>
+          <div class="f"><label for="courseName">Course name</label><input type="text" id="courseName" placeholder="e.g. SSSTS — Site Supervisors' Safety Training Scheme"></div>
+          <div class="f"><label for="courseDates">Course date(s)</label><input type="text" id="courseDates" placeholder="e.g. 21–22 October 2026"><span class="hint">Free text — type it as it should read.</span></div>
+          <div class="f"><label for="completionDate">Course completion date</label><input type="date" id="completionDate"><span class="hint">The repayment period is measured from this date.</span></div>
+          <div class="row2">
+            <div class="f"><label for="feeExVat">Course fee ex&nbsp;VAT (£)</label><input type="number" id="feeExVat" step="0.01" min="0" inputmode="decimal" placeholder="199.00"></div>
+            <div class="f"><label for="vatMode">VAT</label>
+              <select id="vatMode">
+                <option value="reclaim">Reclaimed — claw back net (ex VAT)</option>
+                <option value="gross">Not reclaimed — claw back gross (inc VAT)</option>
+              </select>
+            </div>
+          </div>
+          <span class="hint" id="costHint"></span>
+        </fieldset>
+
+        <fieldset>
+          <legend>Repayment scale (from completion)</legend>
+          <span class="hint">If they resign or are dismissed for gross misconduct, they repay this reducing share of the cost. Standard Mostlane bands are set; change them if a course needs a different scale.</span>
+          <div class="row3">
+            <div class="f"><label for="b1">100% before</label><input type="number" id="b1" min="1" step="1"><span class="hint">months</span></div>
+            <div class="f"><label for="b2">50% before</label><input type="number" id="b2" min="1" step="1"><span class="hint">months</span></div>
+            <div class="f"><label for="b3">25% before</label><input type="number" id="b3" min="1" step="1"><span class="hint">months</span></div>
+          </div>
+          <span class="hint" id="bandHint"></span>
+        </fieldset>
+
+        <fieldset>
+          <legend>Issued by (the Company)</legend>
+          <div class="f"><label for="companyName">Company name</label><input type="text" id="companyName"></div>
+          <div class="f"><label for="companyAddress">Company address</label><textarea id="companyAddress" rows="2"></textarea></div>
+          <span class="hint">Signed <b>inside the portal</b> — your saved signature is applied as the Company signatory. Set it once in <a href="/documents-admin.html">Documents → My signature</a>, and send from the signing director's own login so their signature is the one that appears.</span>
+        </fieldset>
+
+        <div class="actions">
+          <button class="btn grey small" id="btnReset" type="button">Clear</button>
+        </div>
+      </form>
+
+      <div class="sheet-wrap">
+        <div class="sendcard">
+          <h2>Send for signing</h2>
+          <p class="sub">Goes to the employee as a signing request and files into their <b>My Documents › Agreements</b> once signed. Nothing leaves the portal.</p>
+          <div id="missBox"></div>
+          <div class="actions">
+            <button class="btn" id="btnSend" type="button">📨 Send for signing</button>
+            <a class="btn ghost small" href="/documents-admin.html">📄 Sent documents &amp; records</a>
+          </div>
+        </div>
+        <div class="sheet" id="sheet" aria-label="Document preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="noaccess" id="denied" style="display:none;">This page needs Full access.</div>
+
+  <script>
+    const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    const g = id => document.getElementById(id);
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken"), "Content-Type": "application/json" }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    function toast(m) { try { if (window.MLUI && MLUI.toast) return MLUI.toast(m); } catch {} alert(m); }
+    const uname = u => u.Username || u.username || "";
+    const dispName = u => (u.Name || ((u.FirstName || u.first_name || "") + " " + (u.LastName || u.last_name || "")).trim() || uname(u));
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    function fmtDate(v) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || "")); return m ? ((+m[3]) + " " + MONTHS[+m[2]-1] + " " + m[1]) : (v || ""); }
+    function money(n) { const x = Number(n); return isFinite(x) ? x.toFixed(2) : ""; }
+    function oneLine(s) { return String(s || "").split(/\n+/).map(t => t.trim()).filter(Boolean).join(", "); }
+
+    const DEFAULTS = {
+      companyName: "Mostlane Construction Limited",
+      companyAddress: "Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ",
+      employeeName: "", employeeAddress: "",
+      courseName: "", courseDates: "", completionDate: "",
+      feeExVat: "", vatMode: "reclaim",
+      b1: "12", b2: "18", b3: "24"
+    };
+    const KEY = "mostlane-training-agreement-v2";
+    let state = Object.assign({}, DEFAULTS);
+    // Company details persist between sessions; course/employee start blank each time.
+    try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) { state.companyName = s.companyName || state.companyName; state.companyAddress = s.companyAddress || state.companyAddress; } } catch {}
+    let USERS = [], HAS_SIG = false, recipient = "", ME = "";
+
+    function repayable() {
+      const fee = Number(state.feeExVat);
+      if (!isFinite(fee) || fee <= 0) return null;
+      return state.vatMode === "gross" ? fee * 1.2 : fee;
+    }
+
+    // Build the signing-document body markup (# / ## / - / | tables | / **bold**).
+    function buildBody(ph) {
+      const PH = k => ph ? ("[" + k + "]") : "";
+      const coName = state.companyName.trim() || (ph ? PH("Company") : "");
+      const coAddr = oneLine(state.companyAddress) || (ph ? PH("Company address") : "");
+      const empName = state.employeeName.trim() || (ph ? PH("Employee name") : "");
+      const empAddr = oneLine(state.employeeAddress) || (ph ? PH("Employee address") : "");
+      const course = state.courseName.trim() || (ph ? PH("Course name") : "");
+      const dates = state.courseDates.trim() || (ph ? PH("Course dates") : "");
+      const comp = state.completionDate ? fmtDate(state.completionDate) : (ph ? PH("Completion date") : "");
+      const rep = repayable();
+      const feeStr = state.feeExVat ? ("£" + money(state.feeExVat) + " plus VAT") : (ph ? PH("Course fee") : "");
+      const costStr = rep != null
+        ? ("£" + money(rep) + (state.vatMode === "gross" ? " (including VAT)" : " (net; VAT recovered by the Company)"))
+        : (ph ? PH("Course fee") : "");
+      const b1 = Number(state.b1) || 0, b2 = Number(state.b2) || 0, b3 = Number(state.b3) || 0;
+      const a100 = rep != null ? "£" + money(rep) : "", a50 = rep != null ? "£" + money(rep * 0.5) : "", a25 = rep != null ? "£" + money(rep * 0.25) : "";
+
+      const L = [];
+      L.push("# Training Cost Agreement", "");
+      L.push("**Between:** " + coName + " of " + coAddr + " (‘the Company’)");
+      L.push("**And:** " + empName + " of " + empAddr + " (‘the Employee’)", "");
+      L.push("## The training");
+      L.push("The Company has agreed to fund the Employee’s attendance on the following course:", "");
+      L.push("- **Course:** " + course);
+      L.push("- **Date(s):** " + dates);
+      L.push("- **Course fee:** " + feeStr);
+      L.push("- **Cost to the Company:** " + costStr, "");
+      L.push("## Repayment");
+      L.push("The Company meets the cost of the course in full up front. The Employee agrees that, if they resign or are dismissed for gross misconduct, they will repay a proportion of the cost on the following scale, measured from the course completion date (" + comp + "):", "");
+      L.push("| Time between course completion and leaving | Proportion repayable | Amount |");
+      L.push("| --- | --- | --- |");
+      L.push("| Less than " + b1 + " months | 100% | " + a100 + " |");
+      L.push("| " + b1 + " months to less than " + b2 + " months | 50% | " + a50 + " |");
+      L.push("| " + b2 + " months to less than " + b3 + " months | 25% | " + a25 + " |");
+      L.push("| " + b3 + " months or more | None | £0.00 |", "");
+      L.push("Repayment does not apply where the Company ends the Employee’s employment for any reason other than gross misconduct (for example redundancy), or where employment ends through no fault of the Employee.", "");
+      L.push("## How repayment is made");
+      L.push("The Employee authorises the Company to deduct any sum due under this agreement from their final salary and any other payments owed to them on leaving. Where those payments do not cover the amount due, the balance remains repayable by the Employee within 30 days of their last working day.", "");
+      L.push("## Agreement");
+      L.push("This agreement relates only to the course named above and is in addition to, and does not replace, any existing training agreement or the Employee’s contract of employment.");
+      return L.join("\n");
+    }
+
+    function title() { return "Training Cost Agreement" + (state.courseName.trim() ? " — " + state.courseName.trim() : ""); }
+
+    function missing() {
+      const need = [];
+      if (!state.employeeName.trim()) need.push("Employee name");
+      if (!oneLine(state.employeeAddress)) need.push("Employee address");
+      if (!state.courseName.trim()) need.push("Course name");
+      if (!state.courseDates.trim()) need.push("Course date(s)");
+      if (!state.completionDate) need.push("Completion date");
+      if (repayable() == null) need.push("Course fee");
+      return need;
+    }
+
+    function renderPreview() {
+      const body = buildBody(true);
+      g("sheet").innerHTML = window.MLContract ? MLContract.renderBodyHtml(body) : ("<pre>" + esc(body) + "</pre>");
+    }
+    function renderCostHint() {
+      const rep = repayable();
+      if (rep == null) { g("costHint").textContent = ""; return; }
+      const fee = Number(state.feeExVat);
+      g("costHint").textContent = state.vatMode === "gross"
+        ? ("Repayable: £" + money(rep) + " (fee £" + money(fee) + " + VAT £" + money(fee * 0.2) + ").")
+        : ("Repayable: £" + money(rep) + " (net; the £" + money(fee * 0.2) + " VAT is recovered by the Company).");
+    }
+    function renderBandHint() {
+      const b1 = Number(state.b1) || 0, b2 = Number(state.b2) || 0, b3 = Number(state.b3) || 0;
+      g("bandHint").className = "hint" + ((b1 && b2 && b3 && b1 < b2 && b2 < b3) ? "" : " warn");
+      g("bandHint").textContent = (b1 && b2 && b3 && b1 < b2 && b2 < b3)
+        ? ("100% < " + b1 + "m · 50% " + b1 + "–" + b2 + "m · 25% " + b2 + "–" + b3 + "m · none after " + b3 + "m.")
+        : "Months must increase: 100% band < 50% band < 25% band.";
+    }
+    function renderSend() {
+      const miss = missing();
+      let html = "";
+      if (miss.length) html += '<div class="miss">⚠ Still blank: <b>' + miss.map(esc).join(", ") + '</b>.</div>';
+      if (!recipient) html += '<div class="miss">Pick the <b>portal user</b> (top of the form) so it can be sent to them to sign.</div>';
+      if (!HAS_SIG) html += '<div class="miss">Set your signature first — <a href="/documents-admin.html">Documents → My signature</a> — then come back.</div>';
+      g("missBox").innerHTML = html;
+      g("btnSend").disabled = !!(miss.length || !recipient || !HAS_SIG);
+    }
+    function render() { renderPreview(); renderCostHint(); renderBandHint(); renderSend(); }
+    function save() { try { localStorage.setItem(KEY, JSON.stringify({ companyName: state.companyName, companyAddress: state.companyAddress })); } catch {} }
+
+    function fillForm() {
+      Object.keys(DEFAULTS).forEach(k => { const el = g(k); if (el) el.value = state[k] == null ? "" : state[k]; });
+    }
+
+    g("form").addEventListener("input", e => {
+      const el = e.target; if (!el.id || !(el.id in DEFAULTS)) return;
+      state[el.id] = el.value;
+      render(); save();
+    });
+    g("form").addEventListener("submit", e => e.preventDefault());
+
+    g("pickUser").addEventListener("change", () => {
+      const un = g("pickUser").value; recipient = un;
+      const u = USERS.find(x => uname(x) === un);
+      if (u) {
+        state.employeeName = dispName(u);
+        const p = u.Profile || u.profile || {};
+        const addr = p.homeAddress || p.address || p.home_address || "";
+        if (addr) state.employeeAddress = addr;
+        fillForm();
+      }
+      render();
+    });
+
+    g("btnReset").addEventListener("click", () => {
+      const co = state.companyName, ca = state.companyAddress;
+      state = Object.assign({}, DEFAULTS, { companyName: co, companyAddress: ca });
+      g("pickUser").value = ""; recipient = "";
+      fillForm(); render();
+      g("status").textContent = "Cleared.";
+    });
+
+    async function createAndSend(t, body, to) {
+      const tpl = await (await authFetch("/documents/template", { method: "POST", body: JSON.stringify({ title: t, body }) })).json();
+      if (!tpl.ok) throw new Error(tpl.error || "template");
+      const s = await (await authFetch("/documents/send", { method: "POST", body: JSON.stringify({ id: tpl.id, recipients: [to] }) })).json();
+      if (!s.ok) throw new Error(s.error || "send");
+      return tpl.id;
+    }
+    g("btnSend").addEventListener("click", async () => {
+      if (g("btnSend").disabled) return;
+      if (missing().length || !recipient || !HAS_SIG) return renderSend();
+      const who = state.employeeName || recipient;
+      const ok = window.MLUI ? await MLUI.confirm("Send this training agreement to " + who + " to sign?", { title: "Send for signing", okLabel: "Send" }) : confirm("Send to " + who + "?");
+      if (!ok) return;
+      g("btnSend").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
+      try {
+        await createAndSend(title(), buildBody(false), recipient);
+        g("status").className = "status ok";
+        g("status").textContent = "Sent to " + who + " to sign. It'll file into their My Documents › Agreements once signed, with your signature as the Company.";
+        toast("Sent for signing");
+      } catch (e) {
+        g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
+      }
+      renderSend();
+    });
+
+    // Optional URL prefill so a ready-made agreement can be opened in one click.
+    function applyUrlPrefill() {
+      const q = new URLSearchParams(location.search);
+      const map = { user:"__user", name:"employeeName", addr:"employeeAddress", course:"courseName", dates:"courseDates", fee:"feeExVat", completion:"completionDate", vat:"vatMode", b1:"b1", b2:"b2", b3:"b3" };
+      let pendingUser = "";
+      Object.keys(map).forEach(k => {
+        if (!q.has(k)) return;
+        const v = q.get(k);
+        if (map[k] === "__user") pendingUser = v;
+        else state[map[k]] = v;
+      });
+      fillForm();
+      return pendingUser;
+    }
+
+    // ── gate + boot ──
+    (async () => {
+      let me;
+      try { me = await (await authFetch("/auth/me")).json(); }
+      catch { location.href = "login.html"; return; }
+      if (!me.ok || me.user.FullAccess !== "Yes") { g("denied").style.display = "block"; return; }
+      g("main").style.display = "block";
+      ME = me.user.Name || ((me.user.FirstName || "") + " " + (me.user.LastName || "")).trim() || "";
+      fillForm();
+      const pendingUser = applyUrlPrefill();
+      render();
+      try { const sg = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!(sg && sg.has); } catch {}
+      try {
+        const d = await (await authFetch("/users")).json();
+        USERS = (d.Users || d.users || []).filter(u => uname(u));
+        const sel = g("pickUser");
+        USERS.slice().sort((a, b) => dispName(a).localeCompare(dispName(b))).forEach(u => {
+          const o = document.createElement("option"); o.value = uname(u); o.textContent = dispName(u); sel.appendChild(o);
+        });
+        // Honour a ?user= prefill once the list is loaded.
+        if (pendingUser) {
+          const match = USERS.find(u => uname(u).toLowerCase() === pendingUser.toLowerCase() || dispName(u).toLowerCase() === pendingUser.toLowerCase());
+          if (match) { sel.value = uname(match); recipient = uname(match); const p = match.Profile || match.profile || {}; const a = p.homeAddress || p.address || p.home_address || ""; if (a && !state.employeeAddress) state.employeeAddress = a; if (!state.employeeName) state.employeeName = dispName(match); fillForm(); }
+        }
+      } catch {}
+      render();
+    })();
+  </script>
+</body>
+</html>

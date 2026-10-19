@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=44"></script>
+  <script src="/portal-config.js?v=45"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -322,10 +322,10 @@
             <select id="f_clientOrg"><option value="fbc">Fareham Borough Council (FBC)</option></select>
             <label style="margin-top:8px;">What can they see</label>
             <select id="f_clientRole">
-              <option value="compliance">Compliance chart only (no jobs)</option>
-              <option value="jobs">Jobs portal + compliance chart</option>
+              <option value="compliance">Compliance chart only</option>
+              <option value="jobs">Compliance + current jobs</option>
             </select>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's data only. No staff access, no financial info. "Compliance chart only" hides jobs entirely — they land straight on the compliance chart.</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">An external client login: walled to this org's data only. No staff access, no financial info. "Compliance chart only" hides jobs entirely. "Compliance + current jobs" also shows the jobs we're working on at their sites — each drops off once it's complete (no costs, no history).</div>
           </div>
         </div>
       </div>
@@ -1316,6 +1316,23 @@
       if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
       if (pr.staffType === "client" && !W.clientOrg) W.clientOrg = "fbc";
     }
+    // Holiday pro-rata (mirrors the worker's proRataAllowance): a new starter's
+    // entitlement for the year they JOIN, to the nearest half day.
+    const DEFAULT_HOL_ALLOWANCE = 28;
+    function holYear(startISO) { const m = /^(\d{4})-\d{2}-\d{2}$/.exec(startISO || ""); return m ? Number(m[1]) : new Date().getFullYear(); }
+    function holProRata(base, startISO, yr) {
+      const full = { value: base, proRated: false, daysEmployed: null, daysInYear: null };
+      if (!Number.isFinite(base) || base <= 0 || base >= 365) return full;
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startISO || "");
+      if (!m || Number(m[1]) !== yr) return full;
+      const DAY = 86400000, startMs = Date.UTC(yr, +m[2] - 1, +m[3]);
+      if (startMs <= Date.UTC(yr, 0, 1)) return full;
+      const yearEnd = Date.UTC(yr, 11, 31);
+      const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY) + 1;
+      const daysEmployed = Math.round((yearEnd - startMs) / DAY) + 1;
+      return { value: Math.round((base * daysEmployed / daysInYear) * 2) / 2, proRated: true, daysEmployed, daysInYear };
+    }
+
     function wizSteps() {
       // A client login needs no permissions/vehicle/pay — just who, role+org, finish.
       if (W.staffType === "client") return [{ id: "who", t: "Who are they?" }, { id: "role", t: "Role & client" }, { id: "finish", t: "Password & finish" }];
@@ -1388,8 +1405,8 @@
                   <option value="fbc"${(W.clientOrg || "fbc") === "fbc" ? " selected" : ""}>Fareham Borough Council (FBC)</option></select>
                 <label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">What can they see</label>
                 <select id="wiz_clientRole" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
-                  <option value="compliance"${(W.clientRole || "compliance") !== "jobs" ? " selected" : ""}>Compliance chart only (no jobs)</option>
-                  <option value="jobs"${W.clientRole === "jobs" ? " selected" : ""}>Jobs portal + compliance chart</option></select>
+                  <option value="compliance"${(W.clientRole || "compliance") !== "jobs" ? " selected" : ""}>Compliance chart only</option>
+                  <option value="jobs"${W.clientRole === "jobs" ? " selected" : ""}>Compliance + current jobs</option></select>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">"Compliance chart only" walls them to this client's compliance chart — no jobs. They land straight on it.</div>`
              : `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
                 <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
@@ -1424,9 +1441,33 @@
         const need = W.staffType === "field" || /self/i.test(W.employment);
         b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:6px;">${need ? "A pay rate is used for timesheets <b>and</b> job costing — without it their on-site time can't be costed." : "Optional for office staff."} You can skip and add it later.</div>`
           + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Hourly rate (£)", "hourlyRate", d.hourlyRate, "number", "e.g. 18")}</div><div style="flex:1;">${wizInput("Day rate (£)", "dayRate", d.dayRate, "number")}</div></div>`
-          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Overtime rate (£)", "overtimeRate", d.overtimeRate, "number")}</div><div style="flex:1;">${wizInput("Travel / mileage rate (£)", "travelRate", d.travelRate, "number")}</div></div>`;
+          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Overtime rate (£)", "overtimeRate", d.overtimeRate, "number")}</div><div style="flex:1;">${wizInput("Travel / mileage rate (£)", "travelRate", d.travelRate, "number")}</div></div>`
+          + wizInput("Holiday allowance (days per year)", "holidayAllowance",
+              (d.holidayAllowance != null && d.holidayAllowance !== "") ? d.holidayAllowance : (/self/i.test(W.employment) ? "0" : String(DEFAULT_HOL_ALLOWANCE)),
+              "number", "e.g. 28")
+          + `<div style="font-size:12px;color:#64748b;margin-top:4px;">The <b>full-year</b> entitlement. A mid-year starter is pro-rated from their start date — you'll see the figure on the final step.</div>`;
       } else if (st.id === "finish") {
         const gaps = wizGaps();
+        // Holiday entitlement for their join year (pro-rated preview, editable).
+        let holBox = "";
+        const hbase = Number(d.holidayAllowance);
+        if (W.staffType !== "client" && Number.isFinite(hbase) && hbase > 0 && hbase < 365) {
+          const hyr = holYear(d.startDate), hp = holProRata(hbase, d.startDate, hyr);
+          if (hp.proRated) {
+            const sd = d.startDate ? new Date(d.startDate + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+            const shown = (d.holidayEntitlement != null && d.holidayEntitlement !== "") ? d.holidayEntitlement : hp.value;
+            holBox = `<div style="margin-top:12px;background:#eef5ff;border:1px solid #bcd4f6;border-radius:12px;padding:12px 14px;">
+                <div style="font-weight:700;color:#003366;margin-bottom:4px;">🏖️ Holiday for ${hyr}</div>
+                <div style="font-size:13px;color:#334155;">Full-year allowance <b>${hbase}</b> days · starts <b>${esc(sd)}</b> · employed <b>${hp.daysEmployed}</b> of ${hp.daysInYear} days this year.</div>
+                <label style="display:block;margin:10px 0 3px;font-weight:600;font-size:13px;">Entitlement for ${hyr} (days)</label>
+                <input id="wiz_holEnt" type="number" step="0.5" min="0" value="${esc(String(shown))}" style="width:140px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">Pro-rated to <b>${hp.value}</b> days (nearest ½). Accept, or type a different figure to set theirs manually.</div>
+              </div>`;
+          } else {
+            holBox = `<div style="margin-top:12px;background:#eef5ff;border:1px solid #bcd4f6;border-radius:12px;padding:11px 14px;font-size:13px;color:#334155;">
+                🏖️ Holiday for ${hyr}: <b>${hbase}</b> days (full year — no pro-rata).</div>`;
+          }
+        }
         b.innerHTML = wizInput("Set a password now (optional)", "password", d.password, "password", "Leave blank to email a set-up link")
           + `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;"><input type="checkbox" id="wiz_welcome" ${W.sendWelcome ? "checked" : ""} style="width:auto;"> Send a welcome email with a “set your password” link</label>`
           + `<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
@@ -1434,6 +1475,7 @@
                <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(wizRole(W.role).label)}</b> · ${esc(W.employment)}</div>
                <div style="font-size:13px;color:#475569;margin-top:2px;">${W.full ? "Full access" : (W.perms.size + " permission" + (W.perms.size === 1 ? "" : "s"))}</div>
              </div>`
+          + holBox
           + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:12px 14px;">
                <div style="font-weight:700;color:#b45309;margin-bottom:4px;">⚠ Still to set up (you can do these later)</div>
                <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : `<div style="margin-top:10px;color:#0a7d33;font-size:13.5px;">✓ Everything's filled in.</div>`)
@@ -1455,8 +1497,8 @@
           W.areas = new Set([...document.querySelectorAll(".wizArea:checked")].map(c => c.value));
         }
       } else if (st.id === "field") { ["vehicle","homePostcode","fuelCard","pencePerMile"].forEach(k => d[k] = v(k)); }
-      else if (st.id === "pay") { ["hourlyRate","dayRate","overtimeRate","travelRate"].forEach(k => d[k] = v(k)); }
-      else if (st.id === "finish") { d.password = (g("wiz_password") || {}).value || ""; W.sendWelcome = g("wiz_welcome").checked; }
+      else if (st.id === "pay") { ["hourlyRate","dayRate","overtimeRate","travelRate","holidayAllowance"].forEach(k => d[k] = v(k)); }
+      else if (st.id === "finish") { d.password = (g("wiz_password") || {}).value || ""; W.sendWelcome = g("wiz_welcome").checked; const he = g("wiz_holEnt"); if (he) d.holidayEntitlement = he.value; }
       return true;
     }
     function wizGaps() {
@@ -1500,6 +1542,21 @@
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
         if (!res.ok || !r.ok) { msg.textContent = r.error || "Create failed."; return; }
+        // Holiday entitlement for their JOIN year. Accept the pro-rata → store the
+        // full-year allowance (the worker derives the figure on read). Override →
+        // store the typed figure as `exact` so it's never pro-rated again.
+        try {
+          const hbase = Number(d.holidayAllowance);
+          if (W.staffType !== "client" && Number.isFinite(hbase) && hbase >= 0) {
+            const hyr = holYear(d.startDate), hp = holProRata(hbase, d.startDate, hyr);
+            let val = hbase, exact = false;
+            if (hp.proRated) {
+              const entered = Number(d.holidayEntitlement);
+              if (Number.isFinite(entered) && Math.abs(entered - hp.value) > 0.001) { val = entered; exact = true; }
+            }
+            await api(`/holiday/set-allowance?year=${hyr}`, { method: "POST", body: JSON.stringify({ username: d.username, allowance: val, exact }) });
+          }
+        } catch (e) {}
         // Wire the engineer into the fleet registry too (driver history + van
         // checks) — VehicleAssigned alone covers van-check, this adds the proper
         // assignment row. Best-effort; needs Vehicles/FullAccess.

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Contract Builder — Mostlane</title>
+  <title>Employee Documents — Mostlane</title>
   <link rel="stylesheet" href="/portal.css?v=1">
-  <script src="/portal-config.js?v=44"></script>
+  <script src="/portal-config.js?v=45"></script>
   <script src="auth.js"></script>
-  <script src="contract-model.js?v=2"></script>
+  <script src="contract-model.js?v=5"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --warn:#a14d06; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; --field:#e3eff3; }
     * { box-sizing:border-box; }
@@ -61,33 +61,47 @@
 <body>
   <header class="page">
     <a class="ml-back" href="/documents-admin.html" title="Back">‹ Back</a>
-    <h1>📝 Employment contract builder</h1>
+    <h1>📝 Employee documents</h1>
   </header>
 
   <div class="wrap" id="main" style="display:none;">
-    <div class="status" id="status">Fill in the details — the contract updates as you type.</div>
+    <div class="status" id="status">Fill in the details once — pick which documents to send below. Each goes to the employee as its own signing request.</div>
     <div class="grid">
       <form class="panel" id="form" autocomplete="off">
+        <fieldset>
+          <legend>Documents to send</legend>
+          <div class="opt"><label class="tick"><input type="checkbox" id="sendContract"><span>Contract of employment<small>The full contract built from the details below.</small></span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="optOut"><span>48-hour opt-out<small>Working Time Regulations. The employee can decline it without affecting the contract. Not for under-18s.</small></span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="sendVan"><span>Company van policy<small>The "Mostlane Company Vans" rules + driving-licence disclosure.</small></span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="sendPpe"><span>PPE issue record<small>Personal protective equipment issued, with the H&amp;S Act declaration.</small></span></label></div>
+          <span class="hint">Tick any combination. The employee's <b>name &amp; home address</b> below are shared across them all. To send just one (e.g. the opt-out or PPE to an existing employee), tick only that one.</span>
+        </fieldset>
+
         <fieldset>
           <legend>Employee</legend>
           <div class="f">
             <label for="pickUser">Portal user</label>
             <select id="pickUser"><option value="">— new starter (type below) —</option></select>
-            <span class="hint">Pick the person so the contract can be <b>sent to them to sign</b>. A brand-new starter must be added in <b>Users Admin</b> first before a contract can be sent to them.</span>
+            <span class="hint">Pick the person so the documents can be <b>sent to them to sign</b>. A brand-new starter must be added in <b>Users Admin</b> first before anything can be sent to them.</span>
           </div>
           <div class="f"><label for="employeeName">Full name</label><input type="text" id="employeeName"></div>
           <div class="f"><label for="employeeAddress">Home address</label><textarea id="employeeAddress" rows="3"></textarea></div>
           <div class="f"><label for="startDate">Start date</label><input type="date" id="startDate"></div>
+          <div class="f" id="issueDateRow" style="display:none;">
+            <label for="issueDate">PPE issue date</label>
+            <input type="date" id="issueDate">
+            <span class="hint">The date shown on the PPE record (its "Dated" line and Issue Date column). Defaults to the start date — set it to the day the equipment is handed over.</span>
+          </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset class="contract-only">
           <legend>Role and pay</legend>
           <div class="f"><label for="jobTitle">Job title</label><input type="text" id="jobTitle" placeholder="e.g. Electrician"></div>
           <div class="f"><label for="duties">Main duties</label><textarea id="duties" rows="3"></textarea></div>
           <div class="f"><label for="hourlyRate">Hourly rate (£)</label><input type="number" id="hourlyRate" step="0.01" min="0" inputmode="decimal"><span class="hint" id="rateHint"></span></div>
         </fieldset>
 
-        <fieldset>
+        <fieldset class="contract-only">
           <legend>Hours, notice and holiday</legend>
           <div class="row2">
             <div class="f"><label for="workStart">Start time</label><input type="text" id="workStart"></div>
@@ -103,8 +117,8 @@
           </div>
         </fieldset>
 
-        <fieldset>
-          <legend>Options</legend>
+        <fieldset class="contract-only">
+          <legend>Contract options</legend>
           <div class="opt">
             <label class="tick"><input type="checkbox" id="travelUnpaid"><span>First and last travel of the day unpaid<small>Unticked: all travel time is paid.</small></span></label>
             <div class="dep" data-dep="travelUnpaid"><div class="f"><label for="travelMins">Unpaid minutes each way</label><input type="number" id="travelMins" min="0"></div></div>
@@ -127,14 +141,13 @@
               <div class="f"><label for="trainingProvider">Training provider</label><input type="text" id="trainingProvider"></div>
             </div>
           </div>
-          <div class="opt"><label class="tick"><input type="checkbox" id="van"><span>Company van provided</span></label></div>
-          <div class="opt"><label class="tick"><input type="checkbox" id="optOut"><span>48-hour opt-out<small>Sent as a SEPARATE signing request. The employee can decline it without affecting the contract. Not for under-18s.</small></span></label></div>
+          <div class="opt"><label class="tick"><input type="checkbox" id="van"><span>Company van provided<small>Adds the company-vehicle pay, deductions and telematics clauses to the contract. (Send the separate van policy from "Documents to send" above.)</small></span></label></div>
           <div class="opt"><label class="tick"><input type="checkbox" id="trainingRepay"><span>Repayment of optional training<small>Sliding scale for courses you fund that the role doesn't need.</small></span></label></div>
         </fieldset>
 
         <fieldset>
           <legend>Signing for Mostlane</legend>
-          <span class="hint">Everything is signed <b>inside the portal</b> — no file leaves it. When you <b>send for signing</b>, the Company's counter-signature is <b>your own saved signature</b> (set it once in Documents → My signature). The employee then signs on their device, and the signed PDF files into their <b>My Documents › Agreements</b>. Send from the signing director's own login so their signature is the one that appears.</span>
+          <span class="hint">Everything is signed <b>inside the portal</b> — no file leaves it. When you <b>send for signing</b>, the Company's counter-signature is <b>your own saved signature</b> (set it once in Documents → My signature). The employee then signs each document on their device, and the signed PDFs file into their <b>My Documents › Agreements</b>. Send from the signing director's own login so their signature is the one that appears.</span>
         </fieldset>
 
         <div class="actions">
@@ -145,20 +158,15 @@
       <div class="sheet-wrap">
         <div class="sendcard" style="margin-bottom:14px;">
           <h2>Send for signing</h2>
-          <p class="sub">Files the signed copy into the employee's <b>My Documents › Agreements</b>. With the opt-out ticked, the contract and the opt-out go as two separate signing requests.</p>
+          <p class="sub">Each ticked document goes to the employee as its <b>own signing request</b> and files into their <b>My Documents › Agreements</b> once signed.</p>
+          <div id="docList" class="sub" style="margin:0 0 10px;font-weight:600;color:var(--brand);"></div>
           <div id="missBox"></div>
           <div class="actions">
             <button class="btn" id="btnSend" type="button">📨 Send for signing</button>
             <a class="btn ghost small" href="/documents-admin.html" id="recordsLink">📄 Sent documents &amp; records</a>
           </div>
-          <hr style="border:none;border-top:1px solid var(--line,#e2e8f0);margin:14px 0;">
-          <p class="sub" style="margin:0 0 8px;">Just need the <b>48-hour opt-out</b> signed by an existing employee (no new contract)? Pick the portal user and fill their <b>name &amp; home address</b> above, then:</p>
-          <div class="actions">
-            <button class="btn ghost small" id="btnOptOnly" type="button">📨 Send opt-out only</button>
-          </div>
-          <div id="optMissBox"></div>
         </div>
-        <div class="sheet" id="sheet" aria-label="Contract preview"></div>
+        <div class="sheet" id="sheet" aria-label="Document preview"></div>
       </div>
     </div>
   </div>
@@ -192,31 +200,39 @@
     function rateHint() { const r = MC.rate(state); const el = g("rateHint"); el.className = "hint" + (r.cls ? " warn" : ""); el.textContent = r.text; }
     function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
 
+    function syncDocs() {
+      document.querySelectorAll(".contract-only").forEach(f => { f.style.display = state.sendContract ? "" : "none"; });
+      const ir = g("issueDateRow"); if (ir) ir.style.display = state.sendPpe ? "" : "none";
+    }
     function renderSend() {
-      const miss = MC.missing(state);
+      const docs = MC.selectedDocs(state);
+      const miss = MC.missingForDocs(state);
+      g("docList").textContent = docs.length ? ("Will send: " + docs.map(d => d.label).join(" · ")) : "";
       const box = g("missBox");
       let html = "";
-      if (miss.length) html += '<div class="miss">⚠ Still blank: <b>' + miss.map(m => m).join(", ") + '</b>. Fill these before sending.</div>';
-      if (!recipient) html += '<div class="miss">Pick the <b>portal user</b> this contract is for (top of the form) so it can be sent to them to sign.</div>';
+      if (!docs.length) html += '<div class="miss">Tick at least one <b>document to send</b> (top of the form).</div>';
+      if (miss.length) html += '<div class="miss">⚠ Still blank: <b>' + miss.join(", ") + '</b>. Fill these before sending.</div>';
+      if (!recipient) html += '<div class="miss">Pick the <b>portal user</b> these documents are for (top of the form) so they can be sent to them to sign.</div>';
       if (!HAS_SIG) html += '<div class="miss">Set your signature first — <a href="/documents-admin.html">Documents → My signature</a> — then come back.</div>';
       box.innerHTML = html;
-      g("btnSend").disabled = !!(miss.length || !recipient || !HAS_SIG);
-      // Opt-out-only: needs just the recipient, the issuer signature and the
-      // two fields the opt-out document itself carries (name + address).
-      const omiss = MC.optMissing(state);
-      let oh = "";
-      if (omiss.length) oh += '<div class="miss">For the opt-out, fill <b>' + omiss.join(", ") + '</b> above.</div>';
-      g("optMissBox").innerHTML = oh;
-      g("btnOptOnly").disabled = !!(omiss.length || !recipient || !HAS_SIG);
+      g("btnSend").disabled = !!(!docs.length || miss.length || !recipient || !HAS_SIG);
+      g("btnSend").textContent = "📨 Send " + (docs.length > 1 ? docs.length + " documents for signing" : "for signing");
     }
     function render() {
-      g("sheet").innerHTML = MC.previewHtml(state);
+      syncDocs();
+      g("sheet").innerHTML = MC.previewForDocs(state);
       renderSend();
     }
 
     g("form").addEventListener("input", e => {
       const el = e.target; if (!el.id || !(el.id in MC.DEFAULTS)) return;
+      const prev = state[el.id];
       state[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      // PPE issue date follows the start date until the user sets it themselves.
+      if (el.id === "startDate" && (!state.issueDate || state.issueDate === prev)) {
+        state.issueDate = state.startDate;
+        const di = g("issueDate"); if (di) di.value = state.issueDate;
+      }
       syncDeps(); rateHint(); render(); save();
     });
     g("form").addEventListener("submit", e => e.preventDefault());
@@ -238,6 +254,7 @@
 
     g("btnReset").addEventListener("click", () => {
       state = Object.assign({}, MC.DEFAULTS);
+      state.issuerName = ME;
       g("pickUser").value = ""; recipient = "";
       fillForm(); syncDeps(); rateHint(); render(); save();
       g("status").textContent = "Details cleared. Standard Mostlane options restored.";
@@ -252,36 +269,20 @@
     }
     g("btnSend").addEventListener("click", async () => {
       if (g("btnSend").disabled) return;
-      const miss = MC.missing(state);
-      if (miss.length || !recipient || !HAS_SIG) { renderSend(); return; }
+      const docs = MC.selectedDocs(state);
+      if (!docs.length || MC.missingForDocs(state).length || !recipient || !HAS_SIG) { renderSend(); return; }
       const who = state.employeeName || recipient;
-      const ok = window.MLUI ? await MLUI.confirm("Send the contract" + (state.optOut ? " and the 48-hour opt-out" : "") + " to " + who + " to sign?", { title: "Send for signing", okLabel: "Send" }) : confirm("Send to " + who + "?");
+      const names = docs.map(d => d.label).join(", ");
+      const ok = window.MLUI
+        ? await MLUI.confirm("Send " + (docs.length > 1 ? "these " + docs.length + " documents" : "this document") + " (" + names + ") to " + who + " to sign?", { title: "Send for signing", okLabel: "Send" })
+        : confirm("Send " + names + " to " + who + "?");
       if (!ok) return;
       g("btnSend").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
       try {
-        await createAndSend(MC.titleFor(state), MC.markup(state, false), recipient);
-        if (state.optOut) await createAndSend(MC.optTitleFor(state), MC.optMarkup(state, false), recipient);
+        for (const d of docs) await createAndSend(d.title, d.body, recipient);
         g("status").className = "status ok";
-        g("status").textContent = "Sent to " + who + " to sign" + (state.optOut ? " (contract + opt-out, two requests)" : "") + ". It'll file into their My Documents once signed.";
+        g("status").textContent = "Sent " + docs.length + " document" + (docs.length > 1 ? "s" : "") + " to " + who + " to sign" + (docs.length > 1 ? " (separate requests)" : "") + ". It'll file into their My Documents once signed.";
         toast("Sent for signing");
-      } catch (e) {
-        g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
-      }
-      renderSend();
-    });
-
-    g("btnOptOnly").addEventListener("click", async () => {
-      if (g("btnOptOnly").disabled) return;
-      if (MC.optMissing(state).length || !recipient || !HAS_SIG) { renderSend(); return; }
-      const who = state.employeeName || recipient;
-      const ok = window.MLUI ? await MLUI.confirm("Send the 48-hour opt-out to " + who + " to sign?", { title: "Send opt-out", okLabel: "Send" }) : confirm("Send the opt-out to " + who + "?");
-      if (!ok) return;
-      g("btnOptOnly").disabled = true; g("status").className = "status"; g("status").textContent = "Sending…";
-      try {
-        await createAndSend(MC.optTitleFor(state), MC.optMarkup(state, false), recipient);
-        g("status").className = "status ok";
-        g("status").textContent = "48-hour opt-out sent to " + who + " to sign. It'll file into their My Documents once signed.";
-        toast("Opt-out sent for signing");
       } catch (e) {
         g("status").className = "status bad"; g("status").textContent = "Couldn't send: " + (e.message || e);
       }
@@ -296,6 +297,8 @@
       if (!me.ok || me.user.FullAccess !== "Yes") { g("denied").style.display = "block"; return; }
       g("main").style.display = "block";
       ME = me.user.Name || ((me.user.FirstName || "") + " " + (me.user.LastName || "")).trim() || "";
+      state.issuerName = ME;
+      if (!state.issueDate && state.startDate) state.issueDate = state.startDate;
       fillForm(); syncDeps(); rateHint(); render();
       // Issuer signature present?
       try { const sg = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!(sg && sg.has); } catch {}

@@ -1009,7 +1009,13 @@
             }));
             applySession(d);
             // A client account lands in its own walled portal; everyone else on main.
-            location.href = ((d.user && d.user.StaffType) === "client") ? "/client-home.html" : "/main.html";
+            // (role-aware, same rule as login.html: compliance-only → the org's chart).
+            var du = d.user || {};
+            if (du.StaffType === "client") {
+              var cOrg = String(du.ClientOrg || "").toLowerCase();
+              location.href = (du.ClientRole === "jobs") ? "/client-home.html"
+                : (cOrg === "fbc" ? "/fareham.html" : "/client-home.html");
+            } else location.href = "/main.html";
           }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
         };
       };

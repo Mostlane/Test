@@ -63,4 +63,43 @@ at("2026-10-13T15:10:00Z"); await ts.sweepSitelogTimesheets(env, 1); ok(sent.len
 at("2026-10-19T06:10:00Z"); await ts.sweepSitelogTimesheets(env, 1); ok(sent.length === 3 && /Week 12 Oct – 18 Oct/.test(sent[2].subject), "weekly on Monday 07:00 for previous week");
 at("2026-10-19T07:10:00Z"); await ts.sweepSitelogTimesheets(env, 1); ok(sent.length === 3, "weekly sent only once");
 globalThis.Date = realDate;
+
+// ── Scanned but not confirmed (scan_log fallback) — 14 Oct (BST) ──
+sl.exec(`CREATE TABLE scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, kind TEXT, outcome TEXT, refused INTEGER DEFAULT 0, reason TEXT, device_token TEXT, person_id TEXT, site TEXT, lat REAL, lng REAL, accuracy REAL, distance_m INTEGER, nearest_site TEXT, detail TEXT);
+INSERT INTO people VALUES ('p4','Scan','Four',''),('p5','Scan','Five',''),('p6','Scan','Six',''),('p7','Scan','Seven',''),('p8','Scan','Eight',''),('p9','Scan','Nine','');
+INSERT INTO visits (id,person_id,site_code,check_in_at,check_out_at,auto_checkout,sign_in_verified,sign_out_verified) VALUES
+ ('s4','p4','Jubilee','2026-10-14 06:25:00','2026-10-14 13:53:00',0,1,1),
+ ('s5','p5','Jubilee','2026-10-14 05:29:00','2026-10-14 08:58:00',0,1,1),
+ ('s6','p6','Jubilee','2026-10-14 06:00:00','2026-10-14 15:00:00',1,1,0),
+ ('s9','p9','Jubilee','2026-10-14 06:10:00','2026-10-14 14:00:00',0,1,1);
+INSERT INTO scan_log (at,kind,outcome,person_id,site) VALUES
+ ('2026-10-14T08:00:00.000Z','scan','confirm_sign_out','p4','Jubilee'),
+ ('2026-10-14T13:56:00.000Z','scan','confirm_check_in','p4','North Road'),
+ ('2026-10-14T06:44:00.000Z','scan','confirm_check_in','p5','St James'),
+ ('2026-10-14T12:00:00.000Z','scan','confirm_sign_out','p6','Jubilee'),
+ ('2026-10-14T13:30:00.000Z','scan','confirm_sign_out','p6','Jubilee'),
+ ('2026-10-14T06:30:00.000Z','scan','confirm_check_in','p7','Site A'),
+ ('2026-10-14T06:31:00.000Z','scan','confirm_check_in','p7','Site A'),
+ ('2026-10-14T15:00:00.000Z','scan','confirm_check_in','p7','Site A'),
+ ('2026-10-14T23:30:00.000Z','scan','confirm_check_in','p8','Site A'),
+ ('2026-10-14T06:00:00.000Z','scan','confirm_check_in','p9','Jubilee');`);
+const sc = await ts.loadPeriod(env, "2026-10-14", "2026-10-14");
+const by = n => sc.find(p => p.name === n);
+const s4 = by("Scan Four");
+ok(s4.visits.length === 2 && s4.visits[0].state === "ok", "confirmed sign-out wins over an earlier unconfirmed scan");
+ok(s4.visits[1].state === "scanned" && s4.visits[1].scannedIn && s4.visits[1].inTime === "14:56" && s4.visits[1].mins === 0 && s4.visits[1].site === "North Road",
+  "unconfirmed sign-in after leaving → flagged visit, no hours without an end");
+ok(by("Scan Five").visits.length === 1, "sign-in scan while signed in elsewhere is ignored (no double count)");
+const s6 = by("Scan Six").visits[0];
+ok(s6.state === "scanned" && s6.scannedOut && s6.outTime === "14:30" && s6.mins === 450, "missed sign-out uses the last unconfirmed sign-out scan");
+const s7 = by("Scan Seven");
+ok(s7 && s7.visits.length === 1 && s7.visits[0].inTime === "07:30" && s7.visits[0].outTime === "16:00" && s7.visits[0].mins === 510,
+  "scanned in + scanned again later at the same site → hours between the scans");
+ok(!by("Scan Eight"), "a scan at 00:30 is not a plausible sign-in");
+ok(by("Scan Nine").visits.length === 1, "the normal scan just before confirming is ignored");
+const { personTotals } = await import("../src/lib/sitelogtspdf.js");
+ok(personTotals(by("Scan Six")).scanned === 1 && personTotals(by("Scan Six")).missed === 0, "totals count it as scanned, not missed");
+const scPdf = await ts.buildPdf(env, "daily", "2026-10-14");
+ok(scPdf.bytes.length > 2000, "PDF with scanned rows builds");
+writeFileSync(process.argv[4] || "/tmp/sl-scan.pdf", scPdf.bytes);
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

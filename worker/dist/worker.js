@@ -23642,7 +23642,8 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
   return [...seen.values()];
 }
 async function appendIncidentNote(env, tenantId, b) {
-  const jobs = await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident });
+  let jobs = b.reference || b.incident ? await findIncidentJobs(env, tenantId, { reference: b.reference, incident: b.incident }) : [];
+  if (!jobs.length && b.property && String(b.client || "") === "chapplins") jobs = await jobsByProperty(env, tenantId, b.property);
   if (!jobs.length) return { ok: false, notFound: true, error: "No job on the board for " + (String(b.reference || b.incident || "").trim() || "that incident") };
   const finished = await jobFinishedFor(env, tenantId);
   const open = jobs.filter((j2) => !finished(j2));
@@ -23650,13 +23651,34 @@ async function appendIncidentNote(env, tenantId, b) {
   const j = open.length ? newest(open) : newest(jobs);
   const at = b.at && Number.isFinite(Date.parse(b.at)) ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString();
   const by = String(b.by || "Southern Co-op (Concerto)").slice(0, 80);
-  const label2 = String(b.noteAction || "").replace(/\s+/g, " ").trim();
+  const label2 = String(b.client || "") === "chapplins" ? "" : String(b.noteAction || "").replace(/\s+/g, " ").trim();
   const text = String(b.text || "").replace(/\s+/g, " ").trim().slice(0, 1e3);
   const note = (label2 ? label2 + ": " : "") + (text || "(note added \u2014 no text)");
   (j.events ||= []).push({ at, by, type: "note", note });
   j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   await saveJob(env, tenantId, j);
   return { ok: true, noted: true, id: j.id, reference: j.helpdeskRef || j.id, status: j.status };
+}
+async function jobsByProperty(env, tenantId, property) {
+  const norm2 = (x) => String(x || "").toLowerCase().replace(/\b[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}\b/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const head = norm2(property).split(" ").slice(0, 3).join(" ");
+  if (head.split(" ").length < 2) return [];
+  let rows = [];
+  try {
+    rows = (await tenantDB(env, tenantId).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND (id LIKE 'CHAP-%' OR helpdesk_ref LIKE 'CHAP-%' OR json_extract(data,'$.storeType')='chapplins')").bind(tenantId).all()).results || [];
+  } catch {
+    return [];
+  }
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && !j.fallbackTemplate && [j.siteName, j.address].some((v) => {
+    const n = norm2(v);
+    return n === head || n.startsWith(head + " ");
+  }));
 }
 async function cancelIncidentJobs(env, tenantId, ctx, b) {
   const kind = String(b.kind || "job").toLowerCase() === "quote" ? "quote" : "job";
@@ -27701,18 +27723,45 @@ async function handle14(request, env, ctx, url, sess) {
   }
   async function getUserAllowance(username) {
     const row = await db.prepare(
-      "SELECT allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
+      "SELECT allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
     ).bind(db.tenantId, year, username).first();
-    if (row && Number.isFinite(Number(row.allowance))) return Number(row.allowance);
-    return getDefaultAllowance();
+    if (row && Number.isFinite(Number(row.allowance))) return { allowance: Number(row.allowance), exact: !!row.exact };
+    return { allowance: await getDefaultAllowance(), exact: false };
   }
   async function listAllowancesMap() {
     const { results } = await db.prepare(
-      "SELECT username, allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
+      "SELECT username, allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
     ).bind(db.tenantId, year).all();
     const out = {};
-    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
+    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = { allowance: Number(r.allowance), exact: !!r.exact };
     return out;
+  }
+  async function getUserStart(username) {
+    const row = await db.prepare(
+      "SELECT json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ? AND username = ?"
+    ).bind(db.tenantId, username).first();
+    return row && row.sd || null;
+  }
+  async function listUserStarts() {
+    const { results } = await db.prepare(
+      "SELECT username, json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ?"
+    ).bind(db.tenantId).all();
+    const out = {};
+    for (const r of results || []) if (r.username && r.sd) out[r.username] = r.sd;
+    return out;
+  }
+  function proRataAllowance(base, startISO, yr) {
+    if (!Number.isFinite(base) || base <= 0 || base >= 365) return base;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+    if (!m) return base;
+    if (Number(m[1]) !== yr) return base;
+    const DAY2 = 864e5;
+    const startMs = Date.UTC(yr, Number(m[2]) - 1, Number(m[3]));
+    if (startMs <= Date.UTC(yr, 0, 1)) return base;
+    const yearEnd = Date.UTC(yr, 11, 31);
+    const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY2) + 1;
+    const daysEmployed = Math.round((yearEnd - startMs) / DAY2) + 1;
+    return Math.round(base * daysEmployed / daysInYear * 2) / 2;
   }
   async function getActiveUsers() {
     const { results } = await db.prepare(
@@ -27799,7 +27848,7 @@ async function handle14(request, env, ctx, url, sess) {
     }
     return set;
   }
-  function computeUsage(all, sys, username, allowance, todayISO2) {
+  function computeUsage(all, sys, username, allowance, todayISO2, startISO) {
     const dayMap = {};
     for (const h of all) {
       if (h.username !== username || h.status !== "Approved") continue;
@@ -27831,6 +27880,7 @@ async function handle14(request, env, ctx, url, sess) {
     for (const s of sys) {
       if (s.username !== username) continue;
       if (!isWeekdayISO(s.date)) continue;
+      if (startISO && (s.date || "") < startISO) continue;
       if (s.worked === true || s.status === "Credited") {
         credited += s.days || 1;
         continue;
@@ -27989,12 +28039,19 @@ async function handle14(request, env, ctx, url, sess) {
   }
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
-    const allowance = await getUserAllowance(user);
+    const { allowance: baseAllowance, exact } = await getUserAllowance(user);
+    const startISO = await getUserStart(user);
+    const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
     const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
     const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const u = computeUsage(all, sys, user, allowance, today);
+    const u = computeUsage(all, sys, user, allowance, today, startISO);
     return json4({
       allowance,
+      // the entitlement (pro-rated in the join year)
+      baseAllowance,
+      // the full annual figure
+      proRated: allowance !== baseAllowance,
+      startDate: startISO || null,
       used: u.usedToDate,
       // headline = used TO DATE
       committed: u.committed,
@@ -28055,7 +28112,9 @@ async function handle14(request, env, ctx, url, sess) {
   if (path === "/holiday/config" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const cfg = await getYearConfig();
-    const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    const [bank, shut, allowMap] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    const allowances = {};
+    for (const [u, r] of Object.entries(allowMap)) allowances[u] = r.allowance;
     return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
   }
   if (path === "/holiday/set-year-config" && method === "POST") {
@@ -28076,9 +28135,10 @@ async function handle14(request, env, ctx, url, sess) {
     const username = body.username;
     const allowance = Number(body.allowance);
     if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
+    const exact = body.exact ? 1 : 0;
     await db.prepare(
-      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
-    ).bind(db.tenantId, year, username, allowance).run();
+      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance, exact) VALUES (?,?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance, exact=excluded.exact"
+    ).bind(db.tenantId, year, username, allowance, exact).run();
     return json4({ success: true });
   }
   if (path === "/holiday/set-bankholidays" && method === "POST") {
@@ -28134,21 +28194,30 @@ async function handle14(request, env, ctx, url, sess) {
         inactiveMap[iu.username] = iu.status;
       }
     }
-    const [all, sys, allowMap, dflt] = await Promise.all([
+    const [all, sys, allowMap, dflt, startsMap] = await Promise.all([
       listHolidayRequestsForYear(),
       listSystemRecordsForYear(),
       listAllowancesMap(),
-      getDefaultAllowance()
+      getDefaultAllowance(),
+      listUserStarts()
     ]);
     const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
-      const c = computeUsage(all, sys, u, allowance, today);
+      const row = allowMap[u];
+      const baseAllowance = row && Number.isFinite(row.allowance) ? row.allowance : dflt;
+      const exact = !!(row && row.exact);
+      const startISO = startsMap[u] || null;
+      const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
+      const c = computeUsage(all, sys, u, allowance, today, startISO);
       list.push({
         username: u,
         name: u.replace(".", " "),
         allowance,
+        baseAllowance,
+        proRated: allowance !== baseAllowance,
+        exact,
+        startDate: startISO,
         used: c.usedToDate,
         // used TO DATE
         committed: c.committed,
@@ -30920,6 +30989,23 @@ function chapplinsJob(subject, t) {
     }
   };
 }
+function chapplinsNote(subject, t) {
+  const subj = String(subject || "").replace(/^(?:\s*(?:re|fw|fwd|aw)\s*:\s*)+/i, "").trim();
+  if (/remittance|payment advice|statement|invoice/i.test(subj)) return { kind: "notice", reason: "Chapplins accounts email \u2014 not a job" };
+  let body = String(t || "");
+  const hdr = /^[\s_]*From:[^\n]*\n(?:[^\n]*\n){0,6}?\s*Subject:[^\n]*\n/i.exec(body);
+  if (hdr && hdr.index < 200) body = body.slice(hdr.index + hdr[0].length);
+  const q = /\n\s*(?:From:\s|-{3,}\s*Original Message|_{10,})/i.exec(body);
+  let text = q ? body.slice(0, q.index) : body;
+  const cut = CHAP_SIG.exec(text);
+  if (cut) text = text.slice(0, cut.index);
+  text = text.replace(/^\s*(?:Good (?:morning|afternoon|evening)[^\n]*|Hi[^\n]*|Hello[^\n]*|Dear[^\n]*)\n/i, "").replace(/\s+/g, " ").trim();
+  const jobNo = line(/Job Number[:\s]*(\d{6,12})\b/i, subj) || line(/Job Number[:\s]*(\d{6,12})\b/i, t);
+  const quotedProp = line(/^[ \t]*Property:[ \t]*([^\n]*)$/im, t);
+  const property = quotedProp || subj.replace(/\bP\s*[1-4]\b/ig, " ").replace(/\b(?:urgent|chase|chaser|update)\b/ig, " ").replace(/\s*-\s*$/, "").replace(/\s+/g, " ").trim();
+  const reference = jobNo ? "CHAP-" + jobNo : "";
+  return { kind: "note", incident: reference, note: { reference, incident: reference, property, client: "chapplins", text: text.slice(0, 1e3), action: "Chapplins", by: "Chapplins Lettings" } };
+}
 var djb2 = (s) => {
   let h = 5381;
   const str = String(s || "");
@@ -30940,15 +31026,17 @@ function fbcJotform(subject, t) {
   const addrBlock = (/^\s*(?:["']?Other["']?\s+)?Site Address[ \t]+([\s\S]+?)\n\s*(?:(?:["']?Other["']?\s+)?Site Access|Priority|Reported By)\b/im.exec(t) || [])[1] || "";
   const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
   const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
-  const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
-  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-4][^\n]*)/im.exec(t) || [])[1] || "");
-  const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
+  const HOURS_LINE = /^[ \t]*(?:out of hours|in hours|office hours|24\s*\/\s*7|24 hours|any ?time)[^\n]*$/im;
+  const hours = ((/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || ((HOURS_LINE.exec(addrBlock) || [])[0] || "")).trim();
+  const prTxt = val2(/^\s*Priority[ \t]+(P?\s*[1-5][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-5][^\n]*)/im.exec(t) || [])[1] || "");
+  const prRaw = (/([1-5])/.exec(prTxt) || [])[1] || "";
+  const prNum = prRaw === "5" ? "4" : prRaw;
   const reportedBy = val2(/^\s*Reported By[ \t]+(.+)$/im);
   const jobTitle = val2(/^\s*Job Title[ \t]+(.+)$/im);
   let desc = (/^\s*Brief description of the issue[ \t]+([\s\S]+?)\n\s*Quotation Required/im.exec(t) || [])[1] || "";
   desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
-  const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
+  const streetAddr = addrBlock.replace(new RegExp(HOURS_LINE.source, "img"), " ").replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
   const otherName = (addrBlock.split(/[,\n]/)[0] || "").replace(/\s+/g, " ").trim();
   const siteName = site && !isOther ? site : otherName;
   const reference = "FBC-" + djb2([siteName, reportedBy, desc.slice(0, 120), prNum].join("|"));
@@ -30971,7 +31059,7 @@ function fbcJotform(subject, t) {
       address: streetAddr || siteName,
       postcode,
       telephone: "",
-      description: desc,
+      description: desc + (prRaw === "5" ? "\n\nClient priority: " + prTxt.replace(/\s+/g, " ").trim() : ""),
       raisedAt: "",
       respondBy: "",
       completeBy: "",
@@ -31051,8 +31139,17 @@ var TEMPLATES = [
     id: "chapplins-job",
     label: "Chapplins Lettings \u2014 new job raised",
     domains: ["chapplins.co.uk"],
-    test: (s, t) => /A new job has been raised/i.test(t),
+    test: (s, t) => /A new job has been raised/i.test(t) && !/^\s*(?:re|aw)\s*:/i.test(s),
     read: chapplinsJob
+  },
+  // Anything else from Chapplins (a chase, a reply on a job thread) → a note on the job.
+  {
+    id: "chapplins-note",
+    label: "Chapplins Lettings \u2014 chase / update on a job",
+    domains: ["chapplins.co.uk"],
+    replyOk: true,
+    test: () => true,
+    read: chapplinsNote
   },
   {
     id: "metrorod-report",
@@ -31105,8 +31202,19 @@ async function lookupSite(env, tid, { client, address, postcode }) {
   } catch {
     return null;
   }
-  if (!rows.length) return null;
   const want = normAddr(address);
+  if (pc) {
+    const byPc = rows.length ? rows.filter((r) => normAddr(r.site_name) === want) : [];
+    if (!byPc.length) {
+      try {
+        const all = (await env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client).all()).results || [];
+        const ex = all.filter((r) => normAddr(r.site_name) === want);
+        if (ex.length === 1) return { siteCode: ex[0].site_number, siteName: ex[0].site_name };
+      } catch {
+      }
+    }
+  }
+  if (!rows.length) return null;
   const exact = rows.filter((r) => normAddr(r.site_name) === want);
   if (exact.length === 1) return { siteCode: exact[0].site_number, siteName: exact[0].site_name };
   const head = want.split(" ").slice(0, 3).join(" ");
@@ -31146,6 +31254,10 @@ async function ensureTables__raw4(env) {
   )`).run();
   try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fbc_msg_job ON fbc_messages(tenant_id, job_id)").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE fbc_messages ADD COLUMN client_visible INTEGER DEFAULT 0").run();
   } catch {
   }
 }
@@ -31205,8 +31317,8 @@ async function appendFbcMessage(env, tid, jobId, msg = {}) {
   const id = jobId + "|" + (mid || "n-" + Math.random().toString(36).slice(2, 10));
   try {
     await env.DB.prepare(`INSERT OR IGNORE INTO fbc_messages
-      (id, tenant_id, job_id, at, direction, from_addr, subject, body, message_id, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(
+      (id, tenant_id, job_id, at, direction, from_addr, subject, body, message_id, created_at, client_visible)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(
       id,
       t,
       jobId,
@@ -31216,11 +31328,36 @@ async function appendFbcMessage(env, tid, jobId, msg = {}) {
       String(msg.subject || "").slice(0, 300),
       String(msg.body || "").slice(0, 8e3),
       mid,
-      now()
+      now(),
+      msg.clientVisible ? 1 : 0
     ).run();
   } catch (e) {
     console.log("appendFbcMessage", String(e && e.message || e));
   }
+  return id;
+}
+async function clientUpdatesFor(env, tid, jobIds) {
+  const out = {};
+  const ids = [...new Set((jobIds || []).filter(Boolean).map(String))];
+  if (!env || !env.DB || !ids.length) return out;
+  await ensureTables5(env);
+  const t = Number(tid) || 1;
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    try {
+      const { results } = await env.DB.prepare(
+        `SELECT job_id, at, from_addr, body FROM fbc_messages
+         WHERE tenant_id=? AND client_visible=1 AND job_id IN (${chunk.map(() => "?").join(",")})
+         ORDER BY at DESC`
+      ).bind(t, ...chunk).all();
+      for (const r of results || []) {
+        (out[r.job_id] = out[r.job_id] || []).push({ at: r.at, by: String(r.from_addr || "").split(/[\s.]/)[0], body: r.body || "" });
+      }
+    } catch (e) {
+      console.log("clientUpdatesFor", String(e && e.message || e));
+    }
+  }
+  return out;
 }
 async function handle18(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
@@ -31233,6 +31370,23 @@ async function handle18(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/fbc(?=\/|$)/, "") || "/";
   const DONE = /* @__PURE__ */ new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of row ? JSON.parse(row.value) : []) if (c && c.done && c.name) DONE.add(String(c.name).trim().toLowerCase());
+  } catch {
+  }
+  const PLANNED_RE = /\b(flick\s*tests?|drain[\s-]*downs?|3\s*-?\s*h(?:ou)?rs?\s+(?:drain|test)|emergency\s+light(?:ing)?\s+tests?|em\s+tests?|pat\s+test(?:ing|s)?|eicr|fixed\s+wire|5\s*-?\s*year)\b/i;
+  const kindOf = (m, j) => {
+    const src = m && m.source || "";
+    if (src === "jotform" || src === "backfill") return "email";
+    let d = {};
+    try {
+      d = j && j.data ? JSON.parse(j.data) : {};
+    } catch {
+    }
+    if (d.emTest || d.pat || d.elecTest || d.pumpMaintenance || PLANNED_RE.test(String(j && j.description || m && m.description || ""))) return "planned";
+    return "office";
+  };
   const shape2 = (m, j, msg) => {
     const status = j && j.status || "";
     const finished = DONE.has(String(status).toLowerCase());
@@ -31272,7 +31426,11 @@ async function handle18(request, env, ctx, url, sess) {
       source: m && m.source || (j ? "manual" : ""),
       messageCount: msg && msg.n || 0,
       lastMessageAt: msg && msg.last || "",
-      onBoard: !!j
+      onBoard: !!j,
+      finished,
+      kind: kindOf(m, j),
+      // An emailed incident's received time is when the email came in (the meta row).
+      receivedAt: m && (m.source === "jotform" || m.source === "backfill") ? m.raised_at || m.created_at || j && j.created_at || "" : j && j.created_at || m && m.created_at || ""
     };
   };
   if (sub === "/list" && method === "GET") {
@@ -31315,7 +31473,7 @@ async function handle18(request, env, ctx, url, sess) {
     const j = await env.DB.prepare("SELECT id, helpdesk_ref, status, priority, site_code, assigned_to, scheduled_at, created_at, description, data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
     if (!m && !j) return error("Not found", 404, env, request);
     const { results: msgs } = await env.DB.prepare(
-      "SELECT at, direction, from_addr, subject, body FROM fbc_messages WHERE tenant_id=? AND job_id=? ORDER BY at DESC"
+      "SELECT id, at, direction, from_addr, subject, body, client_visible FROM fbc_messages WHERE tenant_id=? AND job_id=? ORDER BY at DESC"
     ).bind(tid, jobId).all();
     const mcount = { n: (msgs || []).length, last: msgs && msgs[0] && msgs[0].at || "" };
     return json({ ok: true, job: shape2(m, j, mcount), messages: msgs || [] }, {}, env, request);
@@ -31359,8 +31517,16 @@ async function handle18(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const jobId = String(b.jobId || "");
     if (!jobId || !String(b.body || "").trim()) return error("jobId and body required", 400, env, request);
-    await appendFbcMessage(env, tid, jobId, { direction: "note", from: sess.user.username, subject: "", body: b.body, at: now() });
+    const toClient = !!b.toClient;
+    await appendFbcMessage(env, tid, jobId, { direction: toClient ? "client" : "note", from: sess.user.username, subject: "", body: b.body, at: now(), clientVisible: toClient });
     return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/message-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return error("id required", 400, env, request);
+    const r = await env.DB.prepare("DELETE FROM fbc_messages WHERE tenant_id=? AND id=? AND direction IN ('note','client')").bind(tid, id).run();
+    return json({ ok: true, deleted: r && r.meta && r.meta.changes || 0 }, {}, env, request);
   }
   return error("Unknown FBC route", 404, env, request);
 }
@@ -31612,11 +31778,11 @@ async function createJob(env, ctx, fetchSelf, fields, sender) {
     return { outcome: "failed", reason: "Couldn't reach /sla/inbound: " + String(e && e.message || e).slice(0, 120), reference: fields.reference || "", payload };
   }
 }
-async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at }) {
+async function appendJobNote(env, ctx, fetchSelf, { incident, reference, text, noteAction, at, by, property, client }) {
   const req = new Request("https://mostlane-api.internal/sla/inbound", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": "Bearer " + (env.JOBS_INBOUND_TOKEN || "") },
-    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: "Southern Co-op (Concerto)", at })
+    body: JSON.stringify({ action: "note", incident, reference, text, noteAction, by: by || "Southern Co-op (Concerto)", at, property: property || "", client: client || "" })
   });
   const resp = await fetchSelf(req, env, ctx);
   let out = {};
@@ -31735,28 +31901,30 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     if (r.kind === "notice") return { ...out2, outcome: "dropped", reason: r.reason || "Not a job" };
     if (r.kind === "note") {
       const n = r.note || {}, inc = r.incident || n.incident || "";
-      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this Concerto note to job " + (inc || "?") + "\u2019s card + raise a task to action it" };
+      const who = n.client === "chapplins" ? "Chapplins" : "Concerto";
+      const what = inc || n.property || "";
+      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "\u2019s card + raise a task to action it" };
       let noted = null;
       try {
-        noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt });
+        noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt, by: n.by, property: n.property, client: n.client });
       } catch {
       }
       try {
         await createIntakeTask(env, ctx, fetchSelf, {
           externalId: "note:" + (msg.messageId || inc || subject + ":" + Date.now()),
-          title: "\u{1F4DD} Concerto note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : "a job"),
-          detail: ((n.action ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
+          title: "\u{1F4DD} " + who + " note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : n.property || "a job"),
+          detail: ((n.action && who === "Concerto" ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
           link: noted && noted.jobId ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
-          category: "Concerto notes"
+          category: who + " notes"
         });
       } catch {
       }
       return {
         ...out2,
         outcome: "note",
-        reference: inc,
+        reference: noted && noted.reference || inc,
         jobId: noted && noted.jobId || "",
-        reason: noted && noted.jobId ? "Note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : "Concerto note on " + (inc || "?") + " \u2014 no live job on the board, so a task was raised to action it"
+        reason: noted && noted.jobId ? who + " note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : who + " note on " + (what || "?") + " \u2014 no matching live job on the board, so a task was raised to action it"
       };
     }
     if (r.kind === "cancel") {
@@ -45212,6 +45380,8 @@ var AMBER = [0.851, 0.467, 0.024];
 var ROW_RED = [0.996, 0.937, 0.937];
 var ROW_AMBER = [1, 0.969, 0.898];
 var ZEBRA3 = [0.973, 0.976, 0.984];
+var PURPLE = [0.486, 0.228, 0.929];
+var ROW_PURPLE = [0.953, 0.937, 1];
 var GRID = [0.85, 0.87, 0.9];
 function fit4(str, size, max) {
   str = String(str == null ? "" : str);
@@ -45258,10 +45428,13 @@ function legend(doc, y) {
   doc.text(M6 + 432, y, "Missed sign-out", { size: 8.5, grey: true });
   doc.rect(M6 + 512, y - 8, 10, 8, { fill: ROW_AMBER, stroke: [0.95, 0.82, 0.6], lw: 0.5 });
   doc.text(M6 + 526, y, "Still signed in", { size: 8.5, grey: true });
+  doc.rect(M6 + 606, y - 8, 10, 8, { fill: ROW_PURPLE, stroke: [0.8, 0.72, 0.98], lw: 0.5 });
+  doc.text(M6 + 620, y, "Scanned but not confirmed", { size: 8.5, grey: true });
 }
 function personTotals(p) {
-  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0;
+  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0, scanned = 0;
   for (const v of p.visits) {
+    if (v.state === "scanned") scanned++;
     if (v.state !== "open") mins += v.mins || 0;
     if (v.state === "auto") {
       missed++;
@@ -45271,7 +45444,7 @@ function personTotals(p) {
     if (!v.inOk) unver++;
     if (v.state !== "open" && !v.outOk) unver++;
   }
-  return { mins, autoMins, missed, open, unver, visits: p.visits.length };
+  return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
 }
 function summaryPage(doc, meta, people) {
   let y = header3(doc, meta, "Summary \u2014 everyone");
@@ -45303,8 +45476,8 @@ function summaryPage(doc, meta, people) {
     tot.open += t.open;
     tot.unver += t.unver;
     tot.visits += t.visits;
-    const bad = t.missed || t.unver;
-    doc.rect(M6, y, PW - 2 * M6, 18, { fill: bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
+    const bad = t.missed || t.unver || t.scanned;
+    doc.rect(M6, y, PW - 2 * M6, 18, { fill: t.missed ? ROW_RED : t.scanned ? ROW_PURPLE : bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
     doc.text(M6 + 4, y + 12.5, fit4(p.name, 9.5, 195), { size: 9.5, bold: true });
     doc.text(M6 + 209, y + 12.5, fit4(p.company || "", 9, 190), { size: 9, grey: true });
     doc.text(M6 + 410, y + 12.5, String(t.visits), { size: 9.5, alignRight: true });
@@ -45327,6 +45500,8 @@ function summaryPage(doc, meta, people) {
   doc.text(PW - M6 - 6, y + 16, String(tot.unver), { size: 10, bold: true, alignRight: true, color: tot.unver ? RED3 : null });
   y += 34;
   doc.text(M6, y, "Hours on site include visits the system closed automatically (missed sign-outs) \u2014 those times are an assumption, not a scan.", { size: 8.5, grey: true });
+  y += 12;
+  doc.text(M6, y, "Purple rows: scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used because nothing else was recorded.", { size: 8.5, grey: true });
   legend(doc, y + 18);
 }
 var VC = { date: M6, site: M6 + 72, inT: M6 + 330, inM: M6 + 372, outT: M6 + 392, outM: M6 + 434, hrs: M6 + 505, note: M6 + 520 };
@@ -45340,6 +45515,7 @@ function personPages(doc, meta, p) {
     ["Missed sign-outs", String(t.missed), t.missed ? RED3 : null],
     ["Not verified", String(t.unver), t.unver ? RED3 : null]
   ];
+  if (t.scanned) chips.push(["Scanned, not confirmed", String(t.scanned), PURPLE]);
   if (t.open) chips.push(["Still signed in", String(t.open), AMBER]);
   let cx = M6;
   for (const [lab, val2, col] of chips) {
@@ -45369,7 +45545,7 @@ function personPages(doc, meta, p) {
       head();
       lastDate = "";
     }
-    const bg = v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
+    const bg = v.state === "scanned" ? ROW_PURPLE : v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
     doc.rect(M6, y, PW - 2 * M6, 20, { fill: bg });
     if (v.date !== lastDate) {
       doc.text(VC.date + 4, y + 13.5, v.date, { size: 9, bold: true });
@@ -45377,20 +45553,20 @@ function personPages(doc, meta, p) {
       lastDate = v.date;
     }
     doc.text(VC.site, y + 13.5, fit4(v.site, 9.5, 250), { size: 9.5 });
-    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true });
+    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true, color: v.scannedIn ? PURPLE : null });
     mark(doc, VC.inM, y + 10, !!v.inOk);
-    if (v.state === "open") {
-      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: AMBER });
+    if (v.state === "open" || v.state === "scanned" && !v.outTime) {
+      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: v.state === "open" ? AMBER : PURPLE });
     } else {
-      doc.text(VC.outT, y + 13.5, v.outTime || "", { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : null });
+      doc.text(VC.outT, y + 13.5, v.outTime || (v.state === "scanned" ? "\u2014" : ""), { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : v.state === "scanned" && v.scannedOut ? PURPLE : null });
       mark(doc, VC.outM, y + 10, !!v.outOk);
     }
-    doc.text(VC.hrs, y + 13.5, v.state === "open" ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
+    doc.text(VC.hrs, y + 13.5, v.state === "open" || v.state === "scanned" && !v.scannedOut ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
     const note = v.note || "";
     if (note) doc.text(VC.note, y + 13.5, fit4(note, 8.5, PW - M6 - VC.note - 4), {
       size: 8.5,
-      bold: v.state === "auto" || v.state === "open",
-      color: v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
+      bold: v.state === "auto" || v.state === "open" || v.state === "scanned",
+      color: v.state === "scanned" ? PURPLE : v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
     });
     y += 20;
   });
@@ -45484,6 +45660,31 @@ function periodFor(kind, dateKey) {
     file: `SiteLog-${dateKey}.pdf`
   };
 }
+var SCAN_EARLY = 5 * 60;
+var SCAN_LATE = 21 * 60;
+var PRE_CONFIRM_MS = 20 * 6e4;
+var MIN_SPAN_MS = 30 * 6e4;
+var minsOfDay = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+function plausible(d) {
+  const m = minsOfDay(london(d).hhmm);
+  return m >= SCAN_EARLY && m <= SCAN_LATE;
+}
+async function loadUnconfirmedScans(db, from, to) {
+  try {
+    const r = await db.prepare(`
+      SELECT l.at, l.outcome, l.person_id, l.site, p.first_name, p.last_name, p.company
+      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+      WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
+        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?
+      ORDER BY l.at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
+    return r.results || [];
+  } catch (e) {
+    return [];
+  }
+}
 async function loadPeriod(env, from, to) {
   const db = env.SITELOG_DB;
   if (!db) throw new Error("SiteLog database is not connected to this worker");
@@ -45498,20 +45699,60 @@ async function loadPeriod(env, from, to) {
     FROM visits v LEFT JOIN people p ON p.id = v.person_id
     WHERE v.check_in_at >= ? AND v.check_in_at < ?
     ORDER BY v.check_in_at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
+  const scans = await loadUnconfirmedScans(db, from, to);
+  const today = london().key;
+  const spans = /* @__PURE__ */ new Map();
+  for (const r of res.results || []) {
+    const a = parseUtc(r.check_in_at);
+    if (!a || !r.person_id) continue;
+    const b = parseUtc(r.check_out_at);
+    if (!spans.has(r.person_id)) spans.set(r.person_id, []);
+    spans.get(r.person_id).push([a.getTime(), b ? b.getTime() : Infinity]);
+  }
+  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b);
+  const scansBy = /* @__PURE__ */ new Map();
+  for (const s of scans) {
+    const d = parseUtc(s.at);
+    if (!d) continue;
+    s._d = d;
+    if (!scansBy.has(s.person_id)) scansBy.set(s.person_id, []);
+    scansBy.get(s.person_id).push(s);
+  }
   const byPerson = /* @__PURE__ */ new Map();
+  const ensure7 = (key, first, last, company) => {
+    const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
+    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
+    return byPerson.get(key);
+  };
+  const dayLabel = (day) => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
+  const m = (d) => Math.round(Number(d));
   for (const r of res.results || []) {
     const inD = parseUtc(r.check_in_at);
     if (!inD) continue;
     const day = london(inD).key;
     if (day < from || day > to) continue;
-    const outD = parseUtc(r.check_out_at);
+    let outD = parseUtc(r.check_out_at);
     const auto = Number(r.auto_checkout) === 1;
-    const state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
+    let state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
     const inOk = Number(r.sign_in_verified) === 1;
-    const outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
-    const m = (d) => Math.round(Number(d));
+    let outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
     let note = "";
-    if (state === "auto") note = "Did not sign out \u2014 closed automatically";
+    let scannedOut = null;
+    if ((state === "auto" || state === "open" && day < today) && r.person_id) {
+      const limit = outD ? outD.getTime() : Infinity;
+      for (const s of scansBy.get(r.person_id) || []) {
+        const t = s._d.getTime();
+        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
+        if (london(s._d).key !== day || !plausible(s._d)) continue;
+        scannedOut = s._d;
+      }
+    }
+    if (scannedOut) {
+      state = "scanned";
+      outD = scannedOut;
+      outOk = false;
+      note = "Scanned, not confirmed \u2014 sign-out time from a scan";
+    } else if (state === "auto") note = "Did not sign out \u2014 closed automatically";
     else if (state === "open") note = "Still signed in";
     else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
     else if (state === "manual") note = "Added by the office";
@@ -45523,11 +45764,10 @@ async function loadPeriod(env, from, to) {
       if (!outOk) bits.push("sign-out location not checked");
       note = bits.join(" \xB7 ");
     }
-    const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || "Unknown person";
-    const key = r.person_id || name;
-    if (!byPerson.has(key)) byPerson.set(key, { name, company: r.company || "", visits: [] });
-    byPerson.get(key).visits.push({
-      date: niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", ""),
+    const p = ensure7(r.person_id || [r.first_name, r.last_name].join(" "), r.first_name, r.last_name, r.company);
+    p.visits.push({
+      _t: inD.getTime(),
+      date: dayLabel(day),
       site: r.site_code || r.provided_site_name || "",
       inTime: london(inD).hhmm,
       outTime: outD ? london(outD).hhmm : "",
@@ -45536,9 +45776,58 @@ async function loadPeriod(env, from, to) {
       outOk,
       state,
       note,
+      scannedIn: false,
+      scannedOut: !!scannedOut,
       inDist: r.sign_in_distance_m,
       outDist: r.sign_out_distance_m
     });
+  }
+  for (const [pid, list] of scansBy) {
+    const ins = list.filter((s) => s.outcome === "confirm_check_in");
+    const used = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ins.length; i++) {
+      const s = ins[i];
+      if (used.has(s)) continue;
+      const t = s._d.getTime(), day = london(s._d).key;
+      if (day < from || day > to || !plausible(s._d) || insideVisit(pid, t)) {
+        used.add(s);
+        continue;
+      }
+      used.add(s);
+      const nextVisit = Math.min(...(spans.get(pid) || []).map(([a]) => a).filter((a) => a > t), Infinity);
+      let end = null;
+      for (let j = i + 1; j < ins.length; j++) {
+        const e = ins[j], et = e._d.getTime();
+        if (london(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
+        used.add(e);
+        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) end = e._d;
+        else if ((e.site || "") !== (s.site || "")) {
+          used.delete(e);
+          break;
+        }
+      }
+      const p = ensure7(pid, s.first_name, s.last_name, s.company);
+      p.visits.push({
+        _t: t,
+        date: dayLabel(day),
+        site: s.site || "",
+        inTime: london(s._d).hhmm,
+        outTime: end ? london(end).hhmm : "",
+        mins: end ? Math.max(0, (end - s._d) / 6e4) : 0,
+        inOk: false,
+        outOk: false,
+        state: "scanned",
+        scannedIn: true,
+        scannedOut: !!end,
+        note: end ? "Scanned, not confirmed \u2014 in & out times from scans" : "Scanned, not confirmed \u2014 no sign-out, hours not counted",
+        inDist: null,
+        outDist: null
+      });
+    }
+  }
+  for (const p of byPerson.values()) {
+    p.visits.sort((a, b) => a._t - b._t);
+    for (const v of p.visits) delete v._t;
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -45572,6 +45861,7 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
     const t = personTotals(p);
     const flag = [
       t.missed ? `${t.missed} missed sign-out${t.missed > 1 ? "s" : ""}` : "",
+      t.scanned ? `${t.scanned} scanned but not confirmed` : "",
       t.unver ? `${t.unver} not verified` : "",
       t.open ? `${t.open} still in` : ""
     ].filter(Boolean).join(" \xB7 ");
@@ -45580,7 +45870,7 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
     <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc3(per.label)}</b></p>
     ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
-    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began).</p></div>`;
+    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded.</p></div>`;
   const r = await sendEmail(env, {
     to: recipients,
     subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
@@ -45637,6 +45927,24 @@ async function handle39(request, env, ctx, url, sess) {
       sent: await readKV(env, tid, SENT_KEY(tid)) || {},
       emailConfigured: !!(env.RESEND_API_KEY || env.RESET_EMAIL_WEBHOOK),
       sitelogConnected: !!env.SITELOG_DB
+    }, {}, env, request);
+  }
+  if (path === "/data" && request.method === "GET") {
+    const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
+    const qd = url.searchParams.get("date") || "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
+    const per = periodFor(k, d);
+    let people;
+    try {
+      people = await loadPeriod(env, per.from, per.to);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+    return json({
+      ok: true,
+      period: per,
+      today: london().key,
+      people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
     }, {}, env, request);
   }
   const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
@@ -49098,13 +49406,33 @@ init_email();
 var ORG_LABEL = { fbc: "Fareham Borough Council" };
 var URGENCY_PRIORITY = { emergency: "Priority 1", urgent: "Priority 2", routine: "Priority 3" };
 var URGENCY_LABEL = { emergency: "Emergency", urgent: "Urgent", routine: "Routine" };
-function clientStatus(status) {
+function clientStatus(status, scheduledAt) {
   const s = String(status || "").toLowerCase();
-  if (s === "complete" || s === "closed jobs" || s === "invoiced" || s === "closed") return "Complete";
-  return "Pending";
+  if (/^(complete|closed jobs|closed|invoiced)$/.test(s)) return "Complete";
+  if (s === "travelling") return "Engineer on the way";
+  if (s === "in progress") return "In progress";
+  if (s === "on hold") return "On hold";
+  if (s === "quote" || s === "order") return "Being quoted";
+  if (scheduledAt && Number.isFinite(Date.parse(scheduledAt))) {
+    return "Booked " + new Date(scheduledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+  }
+  return "Logged";
 }
-function isFinishedInternal(status) {
-  return /^(complete|closed jobs|closed|invoiced)$/i.test(String(status || ""));
+async function finishedTest(env, tid) {
+  const done = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+    for (const c of row ? JSON.parse(row.value) : []) if (c && c.done && c.name) done.add(String(c.name).trim().toLowerCase());
+  } catch {
+  }
+  return (status) => done.has(String(status || "").trim().toLowerCase());
+}
+function clientDescription(d) {
+  let t = String(d || "");
+  t = t.replace(/[^\n]*EM\/PAT DAY PLAN \(auto\)[\s\S]*?— end of plan —\s*/g, "");
+  t = t.split("\n").filter((l) => !/🚨|please change status|internal only|office only/i.test(l)).join("\n");
+  t = t.replace(/\*\*/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return t;
 }
 function clientOrgOf2(sess) {
   try {
@@ -49112,6 +49440,14 @@ function clientOrgOf2(sess) {
     return p && p.staffType === "client" && p.clientOrg ? String(p.clientOrg).toLowerCase() : "";
   } catch {
     return "";
+  }
+}
+function clientCanRaise(sess) {
+  try {
+    const p = typeof sess.user.profile === "string" ? JSON.parse(sess.user.profile) : sess.user.profile || {};
+    return !!(p && p.clientCanRaise);
+  } catch {
+    return false;
   }
 }
 function clientRoleOf2(sess) {
@@ -49167,6 +49503,8 @@ async function handle45(request, env, ctx, url, sess) {
       org,
       orgLabel,
       scheme,
+      role: clientRoleOf2(sess),
+      canRaise: clientCanRaise(sess),
       name: [sess.user.first_name, sess.user.last_name].filter(Boolean).join(" ") || sess.user.username,
       sites
     }, {}, env, request);
@@ -49179,20 +49517,28 @@ async function handle45(request, env, ctx, url, sess) {
       nameByCode[s.code] = s.name;
     });
     const all = await listJobs(env, tid);
-    const mine = all.filter((j) => j && !j.hiddenFromClient && !j.fallbackTemplate && (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
+    const finished = await finishedTest(env, tid);
+    const mine = all.filter((j) => j && !j.hiddenFromClient && !j.fallbackTemplate && !finished(j.status) && (String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim())));
     const jobs = mine.map((j) => ({
       id: j.id,
       ref: j.helpdeskRef || j.id,
       site: j.siteName || nameByCode[String(j.siteCode || "").trim()] || j.siteCode || "",
       siteCode: j.siteCode || "",
-      description: String(j.description || "").slice(0, 400),
-      status: clientStatus(j.status),
+      description: clientDescription(j.description).slice(0, 400),
+      status: clientStatus(j.status, j.scheduledAt),
       urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
       byClient: !!j.raisedByClient,
       raisedAt: j.raisedAt || j.createdAt || "",
       scheduledAt: j.scheduledAt || "",
       updatedAt: j.updatedAt || ""
     }));
+    const ups = await clientUpdatesFor(env, tid, jobs.map((j) => j.id));
+    for (const j of jobs) {
+      const u = (ups[j.id] || [])[0];
+      j.latestUpdate = u ? { at: u.at, body: u.body.slice(0, 200), by: u.by } : null;
+      j.updateCount = (ups[j.id] || []).length;
+      if (u && (!j.updatedAt || u.at > j.updatedAt)) j.updatedAt = u.at;
+    }
     jobs.sort((a, b) => (Date.parse(b.updatedAt || b.raisedAt || 0) || 0) - (Date.parse(a.updatedAt || a.raisedAt || 0) || 0));
     return json({ ok: true, jobs }, {}, env, request);
   }
@@ -49204,6 +49550,7 @@ async function handle45(request, env, ctx, url, sess) {
     const all = await listJobs(env, tid);
     const j = all.find((x) => x && x.id === id);
     if (!j || j.hiddenFromClient) return error("Not found", 404, env, request);
+    if ((await finishedTest(env, tid))(j.status)) return error("Not found", 404, env, request);
     const ownsIt = String(j.clientOrg || "").toLowerCase() === org || codes.has(String(j.siteCode || "").trim());
     if (!ownsIt) return error("Not found", 404, env, request);
     let photos = [];
@@ -49216,9 +49563,6 @@ async function handle45(request, env, ctx, url, sess) {
     } catch {
       photos = [];
     }
-    let completionNote = "";
-    const notes = (j.events || []).filter((e) => e && (e.type === "note" || e.note && String(e.note).trim()));
-    if (notes.length) completionNote = String(notes[notes.length - 1].note || "").trim();
     return json({
       ok: true,
       job: {
@@ -49227,17 +49571,21 @@ async function handle45(request, env, ctx, url, sess) {
         site: j.siteName || j.siteCode || "",
         siteCode: j.siteCode || "",
         postcode: j.postcode || "",
-        description: String(j.description || ""),
-        status: clientStatus(j.status),
+        description: clientDescription(j.description),
+        status: clientStatus(j.status, j.scheduledAt),
         urgency: j.clientUrgency ? URGENCY_LABEL[j.clientUrgency] || j.clientUrgency : "",
         byClient: !!j.raisedByClient,
         raisedAt: j.raisedAt || j.createdAt || "",
         scheduledAt: j.scheduledAt || "",
-        completedAt: isFinishedInternal(j.status) ? j.closedAt || j.updatedAt || "" : "",
-        completionNote: isFinishedInternal(j.status) ? completionNote : "",
-        photos
+        completedAt: "",
+        completionNote: "",
+        photos,
+        updates: (await clientUpdatesFor(env, tid, [j.id]))[j.id] || []
       }
     }, {}, env, request);
+  }
+  if ((path === "/client/raise" || path === "/client/raise-photo") && !clientCanRaise(sess)) {
+    return error("Raising jobs from the portal isn't switched on for this account.", 403, env, request);
   }
   if (path === "/client/raise" && method === "POST") {
     const b = await request.json().catch(() => ({}));

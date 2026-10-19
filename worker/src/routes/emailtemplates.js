@@ -248,6 +248,30 @@ function chapplinsJob(subject, t) {
   };
 }
 
+/* Chapplins CHASE / follow-up on an existing job (no "A new job has been raised"
+   marker): e.g. "32c Archers Road - Southampton … the smell is getting a lot worse,
+   could you contact the tenant". Never a new job — it is appended to the matching
+   job's card + raised as a task (kind "note"). Matched to the job by a Job Number
+   anywhere in the mail (incl. a quoted original), else by the property in the
+   subject / a quoted "Property:" line. Remittances/invoices are not chases. */
+function chapplinsNote(subject, t) {
+  const subj = String(subject || "").replace(/^(?:\s*(?:re|fw|fwd|aw)\s*:\s*)+/i, "").trim();
+  if (/remittance|payment advice|statement|invoice/i.test(subj)) return { kind: "notice", reason: "Chapplins accounts email — not a job" };
+  let body = String(t || "");
+  // Drop the outer forward header (From:/Sent:/To:/Subject:) then cut at a quoted original.
+  const hdr = /^[\s_]*From:[^\n]*\n(?:[^\n]*\n){0,6}?\s*Subject:[^\n]*\n/i.exec(body);
+  if (hdr && hdr.index < 200) body = body.slice(hdr.index + hdr[0].length);
+  const q = /\n\s*(?:From:\s|-{3,}\s*Original Message|_{10,})/i.exec(body);
+  let text = q ? body.slice(0, q.index) : body;
+  const cut = CHAP_SIG.exec(text); if (cut) text = text.slice(0, cut.index);
+  text = text.replace(/^\s*(?:Good (?:morning|afternoon|evening)[^\n]*|Hi[^\n]*|Hello[^\n]*|Dear[^\n]*)\n/i, "").replace(/\s+/g, " ").trim();
+  const jobNo = line(/Job Number[:\s]*(\d{6,12})\b/i, subj) || line(/Job Number[:\s]*(\d{6,12})\b/i, t);
+  const quotedProp = line(/^[ \t]*Property:[ \t]*([^\n]*)$/im, t);
+  const property = (quotedProp || subj.replace(/\bP\s*[1-4]\b/ig, " ").replace(/\b(?:urgent|chase|chaser|update)\b/ig, " ").replace(/\s*-\s*$/,"").replace(/\s+/g, " ").trim());
+  const reference = jobNo ? "CHAP-" + jobNo : "";
+  return { kind: "note", incident: reference, note: { reference, incident: reference, property, client: "chapplins", text: text.slice(0, 1000), action: "Chapplins", by: "Chapplins Lettings" } };
+}
+
 /* ── Fareham Borough Council (FBC) — Jotform "Mostlane New Incident Form" ─────
    FBC officers log incidents on our Jotform; Jotform emails a fixed table from
    noreply@jotform.com, subject "Re: Mostlane New Incident Form". stripHtml lays
@@ -276,18 +300,22 @@ function fbcJotform(subject, t) {
   const addrBlock = (/^\s*(?:["']?Other["']?\s+)?Site Address[ \t]+([\s\S]+?)\n\s*(?:(?:["']?Other["']?\s+)?Site Access|Priority|Reported By)\b/im.exec(t) || [])[1] || "";
   const postcode = (PC_RE.exec(addrBlock) || PC_RE.exec(t) || [])[1] || "";
   const w3w = (/(\/\/\/[a-z]+\.[a-z]+\.[a-z]+)/i.exec(addrBlock) || [])[1] || "";
-  const hours = (/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || "";
+  const HOURS_LINE = /^[ \t]*(?:out of hours|in hours|office hours|24\s*\/\s*7|24 hours|any ?time)[^\n]*$/im;
+  const hours = ((/([A-Za-z][^\n]*?\d\s*(?:am|pm)[^\n]*)/i.exec(addrBlock) || [])[1] || ((HOURS_LINE.exec(addrBlock) || [])[0] || "")).trim();
   // Priority is a dropdown too: same-line on HTML renders, next-line on a plain
   // Outlook forward ("Priority\nP4 (14 Days)"). Read both.
-  const prTxt = val(/^\s*Priority[ \t]+(P?\s*[1-4][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-4][^\n]*)/im.exec(t) || [])[1] || "");
-  const prNum = (/([1-4])/.exec(prTxt) || [])[1] || "";
+  const prTxt = val(/^\s*Priority[ \t]+(P?\s*[1-5][^\n]*)$/im) || ((/^\s*Priority[ \t]*\r?\n[ \t]*(P?\s*[1-5][^\n]*)/im.exec(t) || [])[1] || "");
+  // FBC's form has a P5 ("On next planned visit to site") — the portal's lowest SLA
+  // is Priority 4, so P5 maps there and the client's own wording rides in the description.
+  const prRaw = (/([1-5])/.exec(prTxt) || [])[1] || "";
+  const prNum = prRaw === "5" ? "4" : prRaw;
   const reportedBy = val(/^\s*Reported By[ \t]+(.+)$/im);
   const jobTitle = val(/^\s*Job Title[ \t]+(.+)$/im);
   let desc = (/^\s*Brief description of the issue[ \t]+([\s\S]+?)\n\s*Quotation Required/im.exec(t) || [])[1] || "";
   desc = desc.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   const quoteRequired = /Quotation Required Before Works\?\s+Yes\b/i.test(t);
   // The street address for display: the address block minus the hours + what3words.
-  const streetAddr = addrBlock.replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
+  const streetAddr = addrBlock.replace(new RegExp(HOURS_LINE.source, "img"), " ").replace(/\/\/\/[a-z.]+/ig, " ").replace(/[A-Za-z][^\n]*\d\s*(?:am|pm)[^\n]*/ig, " ").replace(/\s*\n\s*/g, ", ").replace(/,\s*,+/g, ", ").replace(/[\s,]+$/g, "").replace(/\s+/g, " ").trim();
   // When the reporter picked "Other", the place name is the address's first
   // segment ("Fareham and Crofton Cricket Club, Bath Lane…" → the cricket club):
   // that name + the postcode resolve the known FBC site. An UNKNOWN place still
@@ -309,7 +337,7 @@ function fbcJotform(subject, t) {
     fields: {
       isJob: true, reference, priority: prNum ? "Priority " + prNum : "",
       siteCode: "", siteName, address: streetAddr || siteName, postcode,
-      telephone: "", description: desc, raisedAt: "", respondBy: "", completeBy: "", storeType: "fbc"
+      telephone: "", description: desc + (prRaw === "5" ? "\n\nClient priority: " + prTxt.replace(/\s+/g, " ").trim() : ""), raisedAt: "", respondBy: "", completeBy: "", storeType: "fbc"
     }
   };
 }
@@ -337,7 +365,10 @@ export const TEMPLATES = [
   { id: "concerto-notice", label: "Concerto — quote notice", domains: ["concerto.co.uk"],
     test: (s) => /^Quote\s*:/i.test(s), read: () => ({ kind: "notice", reason: "Concerto quote notice, not a job" }) },
   { id: "chapplins-job", label: "Chapplins Lettings — new job raised", domains: ["chapplins.co.uk"],
-    test: (s, t) => /A new job has been raised/i.test(t), read: chapplinsJob },
+    test: (s, t) => /A new job has been raised/i.test(t) && !/^\s*(?:re|aw)\s*:/i.test(s), read: chapplinsJob },
+  // Anything else from Chapplins (a chase, a reply on a job thread) → a note on the job.
+  { id: "chapplins-note", label: "Chapplins Lettings — chase / update on a job", domains: ["chapplins.co.uk"], replyOk: true,
+    test: () => true, read: chapplinsNote },
   { id: "metrorod-report", label: "Metro Rod — job card / quote (supplier paperwork)", domains: ["metrorod.co.uk"],
     test: () => true, read: (s) => ({ kind: "notice", reason: /quote/i.test(s) ? "Metro Rod quotation — supplier paperwork, not a job" : "Metro Rod job card / report — supplier paperwork, not a job" }) },
   { id: "mostlane-outbound", label: "Mostlane — our own drainage/zap emails", domains: ["mostlane.com"],
@@ -380,8 +411,21 @@ export async function lookupSite(env, tid, { client, address, postcode }) {
       : env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client);
     rows = ((await q.all()).results) || [];
   } catch { return null; }
-  if (!rows.length) return null;
   const want = normAddr(address);
+  if (pc) {
+    // The form's postcode can disagree with the register (Broadcut Depot is on the
+    // register at PO16 8SP, the officer typed PO13 9FW): fall back to an EXACT,
+    // unique site-name match across the client's sites.
+    const byPc = rows.length ? rows.filter(r => normAddr(r.site_name) === want) : [];
+    if (!byPc.length) {
+      try {
+        const all = ((await env.DB.prepare("SELECT site_number, site_name, postcode FROM sites WHERE tenant_id=? AND client=? AND active=1").bind(tid, client).all()).results) || [];
+        const ex = all.filter(r => normAddr(r.site_name) === want);
+        if (ex.length === 1) return { siteCode: ex[0].site_number, siteName: ex[0].site_name };
+      } catch {}
+    }
+  }
+  if (!rows.length) return null;
   const exact = rows.filter(r => normAddr(r.site_name) === want);
   if (exact.length === 1) return { siteCode: exact[0].site_number, siteName: exact[0].site_name };
   const head = want.split(" ").slice(0, 3).join(" ");

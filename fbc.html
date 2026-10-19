@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>FBC Jobs</title>
-  <script src="/portal-config.js?v=44"></script>
+  <script src="/portal-config.js?v=45"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="ml-xlsx.js?v=1"></script>
@@ -61,8 +61,13 @@
     .msg .b{font-size:13px;white-space:pre-wrap;color:#243040;}
     .msg.note{background:#f4f8ff;border-color:#d8e6ff;}
     .msg.out{background:#f0faf3;border-color:#cdeed8;}
-    .addnote{display:flex;gap:8px;margin-top:8px;}
-    .addnote textarea{flex:1;min-height:38px;padding:8px;border:1px solid #ccd5dd;border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;}
+    .msg.client{background:#fff8ec;border-color:#f5d9a6;}
+    .msg .del{float:right;border:0;background:none;color:#9aa6b6;cursor:pointer;font-size:12px;padding:0 2px;}
+    .msg .del:hover{color:#b00020;}
+    .addnote .btn.fbc{background:#b45309;border-color:#b45309;color:#fff;}
+    .addnote .hint{font-size:11.5px;color:#6b7a90;width:100%;margin-top:2px;}
+    .addnote{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:flex-start;}
+    .addnote textarea{flex:1 1 260px;min-height:38px;padding:8px;border:1px solid #ccd5dd;border-radius:9px;font-family:inherit;font-size:13px;resize:vertical;}
     .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
     .btn.ghost{background:#eef2f7;color:var(--brand);border:1px solid #d7dee6;}
     .empty{padding:14px 4px;color:#8a97a8;font-size:13px;}
@@ -101,6 +106,30 @@
       table.inv td{border:none;padding:5px 10px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
       table.inv td::before{content:attr(data-l);font-size:11px;font-weight:700;color:#6b7a90;text-transform:uppercase;}
       table.inv input.cost,table.inv input.mth{width:auto;} }
+    /* Compliance-style jobs table */
+    .tblwrap{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 10px rgba(6,24,54,.06);overflow:auto;max-height:calc(100vh - 230px);}
+    table.jt{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
+    table.jt th{position:sticky;top:0;z-index:3;background:var(--brand);color:#fff;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:8px 9px;white-space:nowrap;cursor:pointer;user-select:none;}
+    table.jt th .ar{opacity:.7;margin-left:3px;}
+    table.jt td{padding:6px 9px;border-bottom:1px solid #eef2f6;white-space:nowrap;vertical-align:middle;background:#fff;}
+    table.jt tbody tr.r:nth-child(4n+1) td{background:#f8fafc;}
+    table.jt tbody tr.r{cursor:pointer;}
+    table.jt tbody tr.r:hover td{background:#eef4fb;}
+    table.jt th.stk,table.jt td.stk{position:sticky;left:0;z-index:2;}
+    table.jt th.stk{z-index:4;}
+    table.jt td.stk{font-weight:700;max-width:230px;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #e2e8f0;}
+    table.jt td.dsc{max-width:340px;overflow:hidden;text-overflow:ellipsis;color:#374151;}
+    table.jt tr.r.live td.stk{box-shadow:inset 4px 0 0 #2563eb;}
+    table.jt tr.r.q td.stk{box-shadow:inset 4px 0 0 #d97706;}
+    table.jt tr.r.open td{background:#eef4fb !important;}
+    table.jt tr.det td{white-space:normal;background:#fafbfc;padding:0;}
+    table.jt tr.det .job{border:none;border-radius:0;margin:0;position:sticky;left:0;box-sizing:border-box;}
+    .sp{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;}
+    .sp.new{background:#dbeafe;color:#1d4ed8;} .sp.live{background:#e0ecff;color:#1e40af;} .sp.hold{background:#fde7d3;color:#9a4b00;}
+    .sp.done{background:#d8f0e0;color:#0e7a3b;} .sp.none{background:#eef1f4;color:#5a6b80;}
+    .days{display:inline-block;min-width:34px;text-align:center;border-radius:7px;padding:2px 6px;font-weight:800;font-size:12px;}
+    .days.g{background:#e3f6e9;color:#0e7a3b;} .days.a{background:#fff3cd;color:#7a5b00;} .days.r{background:#fde2e2;color:#b00020;}
+    .wrap.wide{max-width:1250px;}
   </style>
 </head>
 <body>
@@ -117,7 +146,7 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap wide">
     <div id="jobsView">
       <div class="card">
         <p class="muted" id="greet" style="margin:0 0 10px;">Fareham Borough Council jobs — quotes, costs, and what to invoice each month.</p>
@@ -125,11 +154,13 @@
       </div>
 
       <div class="filters" id="filters">
-        <button class="chip on" data-f="all">All</button>
+        <button class="chip on" data-f="active">🆕 Incidents — not complete</button>
+        <button class="chip" data-f="planned">🔦 Planned tests</button>
         <button class="chip" data-f="quote">⭐ Quote required</button>
-        <button class="chip" data-f="active">Active</button>
-        <button class="chip" data-f="toinvoice">To invoice</button>
-        <button class="chip" data-f="invoiced">Invoiced</button>
+        <button class="chip" data-f="toinvoice">🧾 To invoice</button>
+        <button class="chip" data-f="invoiced">✅ Invoiced</button>
+        <button class="chip" data-f="all">All</button>
+        <input id="q" type="search" placeholder="Search site, job, reporter…" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:999px;font-size:14px;font-family:inherit;">
       </div>
 
       <div id="list"><div class="card"><p class="muted" style="padding:6px 4px;">Loading…</p></div></div>
@@ -161,7 +192,7 @@
     const fmtDay = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}); } catch { return ""; } };
     const fmtDT = t => { try { const d=new Date(t); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return ""; } };
     const monthLbl = m => { if(!/^\d{4}-\d{2}$/.test(m||"")) return m||""; const d=new Date(m+"-01T00:00:00"); return d.toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
-    let FILTER = "all", ROWS = [], VIEW = "jobs", curMonth = null;
+    let FILTER = "active", SORT = { k:"received", dir:-1 }, QTXT = "", OPEN = new Set(), ROWS = [], VIEW = "jobs", curMonth = null;
     const ym = d => { const x = new Date(d); return isNaN(x) ? "" : (x.getFullYear() + "-" + String(x.getMonth()+1).padStart(2,"0")); };
     const effMonth = r => (/^\d{4}-\d{2}$/.test(r.invoiceMonth||"") ? r.invoiceMonth : ym(r.raisedAt));
 
@@ -188,6 +219,7 @@
         render();
       });
       [].forEach.call(document.querySelectorAll(".tab"), b => b.onclick = () => switchView(b.dataset.v));
+      g("q").addEventListener("input", e => { QTXT = e.target.value.trim().toLowerCase(); render(); });
       g("mPrev").onclick = () => stepMonth(-1);
       g("mNext").onclick = () => stepMonth(1);
       g("expMonth").onclick = () => exportXlsx(false);
@@ -221,18 +253,20 @@
       const q = ROWS.filter(isQuote).length;
       const toInv = ROWS.filter(r => r.invoiceState === "to_invoice").length;
       const inv = ROWS.filter(r => r.invoiceState === "invoiced").length;
-      const active = ROWS.filter(r => r.invoiceState === "open").length;
+      const active = ROWS.filter(r => r.invoiceState === "open" && r.kind !== "planned").length;
+      const planned = ROWS.filter(r => r.kind === "planned" && !r.finished).length;
       g("summary").innerHTML =
         tile(ROWS.length, "jobs", "") +
         tile(q, "need a quote", q?"warn":"") +
-        tile(active, "active", "") +
+        tile(active, "incidents not complete", active?"bad":"") +
+        tile(planned, "planned tests to do", "") +
         tile(toInv, "to invoice", toInv?"warn":"") +
         tile(inv, "invoiced", inv?"ok":"");
       g("greet").textContent = toInv
         ? (toInv + " job" + (toInv===1?"":"s") + " done and waiting to be invoiced" + (q?(", "+q+" still need a quote"):"") + ".")
         : (q ? (q + " job" + (q===1?"":"s") + " need a quote.") : "FBC jobs — quotes, costs, and what to invoice each month.");
       // refresh filter counts
-      const cnt = { all:ROWS.length, quote:q, active, toinvoice:toInv, invoiced:inv };
+      const cnt = { all:ROWS.length, quote:q, active, planned, toinvoice:toInv, invoiced:inv };
       [].forEach.call(g("filters").querySelectorAll(".chip"), b => {
         const n = cnt[b.dataset.f]; b.innerHTML = b.textContent.replace(/\s*\d+$/,"").trim() + (n!=null?' <span class="c">'+n+'</span>':"");
       });
@@ -336,61 +370,93 @@
     }
 
     function pass(r) {
+      if (QTXT && ![r.siteName, r.siteCode, r.reference, r.description, r.reportedBy, r.assignedTo, r.status].join(" ").toLowerCase().includes(QTXT)) return false;
       if (FILTER === "quote") return isQuote(r);
-      if (FILTER === "active") return r.invoiceState === "open";
+      if (FILTER === "active") return r.invoiceState === "open" && r.kind !== "planned";
+      if (FILTER === "planned") return r.kind === "planned" && !r.finished;
       if (FILTER === "toinvoice") return r.invoiceState === "to_invoice";
       if (FILTER === "invoiced") return r.invoiceState === "invoiced";
       return true;
     }
-
+    const DAY = 864e5;
+    // The date that MEANS something for this job: an emailed incident was RECEIVED,
+    // an office-raised one was RAISED, a planned test is BOOKED for a day (not received).
+    const dateOf = r => r.kind === "planned" ? (r.scheduledAt || (r.finished ? r.raisedAt : "") || "") : (r.receivedAt || r.raisedAt || "");
+    const dateWord = r => r.kind === "planned" ? (r.scheduledAt ? "booked" : (r.finished ? "logged" : "not booked")) : (r.kind === "email" ? "received" : "raised");
+    const TYPE = { email:'<span class="sp new" title="Came in on the Jotform incident email">📨 Email</span>', office:'<span class="sp none" title="Raised by the office">✍️ Office</span>', planned:'<span class="sp hold" style="background:#f1ecff;color:#5b21b6" title="Planned compliance work we booked — not an incident">🔦 Planned</span>' };
+    const ageDays = r => { if (r.kind === "planned") return null; const t = Date.parse(dateOf(r)); return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / DAY)); };
+    function statusPill(r) {
+      const st = String(r.status || "").trim(), l = st.toLowerCase();
+      if (!r.onBoard) return '<span class="sp none">Record only</span>';
+      if (r.finished || /complete|closed|invoiced|cancel/.test(l)) return '<span class="sp done">'+esc(st)+'</span>';
+      if (/hold|quote|order/.test(l)) return '<span class="sp hold">'+esc(st)+'</span>';
+      const isNew = /pending|^$/.test(l) && !r.assignedTo;
+      return '<span class="sp '+(isNew?"new":"live")+'">'+(isNew?"🆕 ":"")+esc(st || "New")+'</span>';
+    }
+    function daysCell(r) {
+      const d = ageDays(r); if (d == null) return "";
+      if (r.invoiceState !== "open" || r.finished) return '<span class="muted">'+d+'d</span>';
+      return '<span class="days '+(d > 14 ? "r" : d > 7 ? "a" : "g")+'">'+d+'d</span>';
+    }
+    const quoteCell = r => r.quoteRequired ? ('<span class="badge qpill">⭐ '+esc(r.quoteStatus ? (r.quoteStatus[0].toUpperCase()+r.quoteStatus.slice(1)) : "Needed")+(r.quoteAmount!=null&&r.quoteAmount!==""?" · "+money(r.quoteAmount):"")+'</span>') : '<span class="muted">—</span>';
+    const COLS = [
+      { k:"site", h:"Site", v:r => (r.siteName||r.siteCode||"").toLowerCase() },
+      { k:"type", h:"Type", v:r => r.kind },
+      { k:"received", h:"Date", v:r => String(dateOf(r)) },
+      { k:"days", h:"Days", v:r => ageDays(r) ?? -1 },
+      { k:"job", h:"Job", v:r => (r.description||r.reference||"").toLowerCase() },
+      { k:"priority", h:"Priority", v:r => String(r.priority||"zz") },
+      { k:"status", h:"Job status", v:r => String(r.status||"").toLowerCase() },
+      { k:"eng", h:"Engineer", v:r => String(r.assignedTo||"").toLowerCase() },
+      { k:"quote", h:"Quote", v:r => r.quoteRequired ? 0 : 1 },
+      { k:"cost", h:"Cost", v:r => Number(r.cost)||0 },
+      { k:"inv", h:"Invoice", v:r => r.invoiceState },
+    ];
     function render() {
-      let rows = ROWS.filter(pass);
-      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">Nothing here.</p></div>'; return; }
-      let h = "";
-      // Quote-required always breaks out into its own section (unless already filtered to one thing)
-      if (FILTER === "all") {
-        const quote = rows.filter(isQuote);
-        const rest = rows.filter(r => !isQuote(r));
-        if (quote.length) { h += '<div class="sechd q">⭐ Quote required ('+quote.length+')</div>'; quote.forEach(r => h += jobCard(r)); }
-        // group the rest: to-invoice by month, then active, then invoiced
-        const toInv = rest.filter(r => r.invoiceState === "to_invoice");
-        const active = rest.filter(r => r.invoiceState === "open");
-        const invoiced = rest.filter(r => r.invoiceState === "invoiced");
-        const nr = rest.filter(r => r.invoiceState === "not_required");
-        if (toInv.length) { h += '<div class="sechd">🧾 To invoice ('+toInv.length+')</div>'; toInv.forEach(r => h += jobCard(r)); }
-        if (active.length) { h += '<div class="sechd">🔧 Active ('+active.length+')</div>'; active.forEach(r => h += jobCard(r)); }
-        if (invoiced.length) {
-          h += '<div class="sechd">✅ Invoiced ('+invoiced.length+')</div>';
-          // group invoiced by month
-          const byM = {}; invoiced.forEach(r => { const m=r.invoiceMonth||"—"; (byM[m]=byM[m]||[]).push(r); });
-          Object.keys(byM).sort().reverse().forEach(m => {
-            h += '<div class="muted" style="margin:6px 4px 4px;font-weight:700;">'+esc(m==="—"?"Month not set":monthLbl(m))+' — '+money(byM[m].reduce((s,r)=>s+(Number(r.cost)||0),0))+'</div>';
-            byM[m].forEach(r => h += jobCard(r));
-          });
-        }
-        if (nr.length) { h += '<div class="sechd">🚫 No invoice needed ('+nr.length+')</div>'; nr.forEach(r => h += jobCard(r)); }
-      } else {
-        rows.forEach(r => h += jobCard(r));
-      }
-      g("list").innerHTML = h;
-      [].forEach.call(g("list").querySelectorAll(".jhd"), el => el.onclick = () => {
-        const j = el.closest(".job"); const was = j.classList.contains("open");
-        j.classList.toggle("open");
-        if (!was && !j.dataset.loaded) loadConv(j.dataset.job, j);
+      const rows = ROWS.filter(pass);
+      if (!rows.length) { g("list").innerHTML = '<div class="card"><p class="empty">'+(FILTER==="active"?"No open FBC incidents — everything that came in is complete. 🎉":"Nothing here.")+'</p></div>'; return; }
+      const col = COLS.find(c => c.k === SORT.k) || COLS[1];
+      rows.sort((a,b) => { const x = col.v(a), y = col.v(b); return (x < y ? -1 : x > y ? 1 : 0) * SORT.dir; });
+      let h = '<div class="tblwrap"><table class="jt"><thead><tr>' + COLS.map((c,i) => '<th data-k="'+c.k+'"'+(i===0?' class="stk"':'')+'>'+esc(c.h)+(SORT.k===c.k?'<span class="ar">'+(SORT.dir>0?"▲":"▼")+'</span>':'')+'</th>').join("") + '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const live = r.invoiceState === "open", q = isQuote(r), open = OPEN.has(r.jobId);
+        const desc = (r.description || r.reference || "").replace(/\s+/g, " ");
+        h += '<tr class="r'+(live?" live":"")+(q?" q":"")+(open?" open":"")+'" data-job="'+esc(r.jobId)+'">'
+          + '<td class="stk" title="'+esc(r.siteName||r.siteCode)+'">'+esc(r.siteName||r.siteCode||"—")+'</td>'
+          + '<td>'+(TYPE[r.kind]||"")+'</td>'
+          + '<td>'+(dateOf(r) ? esc(fmtDay(dateOf(r))) : "—")+' <span class="muted" style="font-size:11px">'+esc(dateWord(r))+'</span></td>'
+          + '<td>'+daysCell(r)+'</td>'
+          + '<td class="dsc" title="'+esc(desc)+'">'+esc(desc||"—")+(r.messageCount?' <span class="muted">💬'+r.messageCount+'</span>':'')+'</td>'
+          + '<td>'+esc((r.priority||"").replace(/^Priority\s*/i,"P"))+'</td>'
+          + '<td>'+statusPill(r)+'</td>'
+          + '<td>'+esc(r.assignedTo||"—")+'</td>'
+          + '<td>'+quoteCell(r)+'</td>'
+          + '<td>'+(r.cost!=null&&r.cost!==""?money(r.cost):'<span class="muted">—</span>')+'</td>'
+          + '<td>'+invBadge(r)+'</td>'
+          + '</tr>';
+        if (open) h += '<tr class="det"><td colspan="'+COLS.length+'">'+jobCard(r)+'</td></tr>';
       });
+      h += '</tbody></table></div>';
+      g("list").innerHTML = h;
+      [].forEach.call(g("list").querySelectorAll("th[data-k]"), th => th.onclick = () => {
+        const k = th.dataset.k; SORT = { k, dir: SORT.k === k ? -SORT.dir : (k === "received" || k === "days" || k === "cost" ? -1 : 1) }; render();
+      });
+      [].forEach.call(g("list").querySelectorAll("tr.r"), tr => tr.onclick = () => {
+        const id = tr.dataset.job; OPEN.has(id) ? OPEN.delete(id) : OPEN.add(id); render();
+      });
+      // The detail panel stays the width of the VISIBLE table area (pinned left), so
+      // its fields never run off-screen when the table itself scrolls sideways.
+      const fitDet = () => { const w = (g("list").querySelector(".tblwrap") || {}).clientWidth; if (w) [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => j.style.width = w + "px"); };
+      fitDet(); if (!window.__fbcFit) { window.__fbcFit = 1; addEventListener("resize", () => { const w = (g("list").querySelector(".tblwrap") || {}).clientWidth; if (w) [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => j.style.width = w + "px"); }); }
+      [].forEach.call(g("list").querySelectorAll("tr.det .job"), j => { if (!j.dataset.loaded) loadConv(j.dataset.job, j); });
       wireEdits();
     }
 
     function jobCard(r) {
-      const q = isQuote(r);
-      const em = q ? "⭐" : "🏛️";
       const sub = [r.siteCode, r.priority, r.reportedBy && ("by "+r.reportedBy), r.cost!=null?money(r.cost):"", r.messageCount?("💬 "+r.messageCount):""].filter(Boolean).join(" · ");
-      return '<div class="job'+(q?" q":"")+'" data-job="'+esc(r.jobId)+'">'
-        + '<div class="jhd"><div class="em">'+em+'</div>'
-        + '<div class="m"><div class="t">'+esc(r.siteName||r.siteCode||r.reference||"FBC job")+'</div>'
-        + '<div class="s">'+esc(sub || fmtDay(r.raisedAt))+'</div></div>'
-        + invBadge(r) + '</div>'
+      return '<div class="job open" data-job="'+esc(r.jobId)+'">'
         + '<div class="body">'
+        + (sub ? '<p class="muted" style="margin:0 0 8px;">'+esc(sub)+'</p>' : '')
         + (r.description ? '<p class="desc">'+esc(r.description)+'</p>' : '')
         + (r.w3w ? '<p class="muted" style="margin:0 0 10px;">📍 '+esc(r.w3w)+'</p>' : '')
         + '<div class="grid">'
@@ -406,7 +472,8 @@
         +   (r.onBoard ? '<a class="lnk" href="job-view.html?jobId='+encodeURIComponent(r.jobId)+'">Open job card →</a>' : '')
         + '</div>'
         + '<div class="conv" data-conv><h4>Conversation</h4><p class="muted" data-msgs>Loading…</p>'
-        +   '<div class="addnote"><textarea data-note placeholder="Add a note…"></textarea><button class="btn" data-addnote>Add</button></div>'
+        +   '<div class="addnote"><textarea data-note placeholder="Write a note or an update…"></textarea><button class="btn" data-addnote title="Internal — FBC never sees it">Add note</button><button class="btn fbc" data-addclient title="FBC see this on their portal">📣 Update for FBC</button>'
+        +   '<div class="hint">"Add note" stays internal. "Update for FBC" shows on this job in the FBC client portal.</div></div>'
         + '</div>'
         + '</div></div>';
     }
@@ -440,13 +507,25 @@
           el.addEventListener("change", flush);
           if (el.tagName === "INPUT" && el.type !== "month") el.addEventListener("input", go);
         });
-        const addBtn = j.querySelector("[data-addnote]"), ta = j.querySelector("[data-note]");
-        if (addBtn) addBtn.onclick = async () => {
+        const ta = j.querySelector("[data-note]");
+        const post = async (btn, toClient) => {
           const body = (ta.value||"").trim(); if (!body) return;
-          addBtn.disabled = true;
-          try { await authFetch("/fbc/message", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ jobId, body }) }); ta.value=""; j.dataset.loaded=""; await loadConv(jobId, j); } catch {}
-          addBtn.disabled = false;
+          if (toClient) {
+            const msg = "FBC will see this update on their portal:\n\n" + body;
+            const ok = window.MLUI ? await MLUI.confirm(msg, { title:"Send update to FBC?", okLabel:"Send to FBC" }) : confirm(msg);
+            if (!ok) return;
+          }
+          btn.disabled = true;
+          try {
+            const r = await authFetch("/fbc/message", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ jobId, body, toClient }) });
+            if (!r.ok) throw new Error();
+            ta.value=""; j.dataset.loaded=""; await loadConv(jobId, j);
+          } catch { alert("Couldn't save — try again."); }
+          btn.disabled = false;
         };
+        const addBtn = j.querySelector("[data-addnote]"), cliBtn = j.querySelector("[data-addclient]");
+        if (addBtn) addBtn.onclick = () => post(addBtn, false);
+        if (cliBtn) cliBtn.onclick = () => post(cliBtn, true);
       });
     }
 
@@ -457,11 +536,21 @@
         j.dataset.loaded = "1";
         const msgs = (d && d.messages) || [];
         if (!msgs.length) { box.innerHTML = '<span class="muted">No emails or notes logged yet.</span>'; return; }
-        box.outerHTML = '<div data-msgs>' + msgs.map(m => {
-          const cls = m.direction === "note" ? "note" : (m.direction === "out" ? "out" : "");
-          const who = m.direction === "note" ? ("Note — " + esc(m.from_addr||"")) : (m.direction === "out" ? ("Sent — " + esc(m.from_addr||"")) : esc(m.from_addr||""));
-          return '<div class="msg '+cls+'"><div class="h">'+who+' · '+fmtDT(m.at)+(m.subject?" · "+esc(m.subject):"")+'</div><div class="b">'+esc(m.body||"")+'</div></div>';
+        const html = '<div data-msgs>' + msgs.map(m => {
+          const isCli = m.direction === "client" || m.client_visible == 1;
+          const cls = isCli ? "client" : (m.direction === "note" ? "note" : (m.direction === "out" ? "out" : ""));
+          const who = isCli ? ("📣 Update for FBC — " + esc(m.from_addr||"")) : m.direction === "note" ? ("Note (internal) — " + esc(m.from_addr||"")) : (m.direction === "out" ? ("Sent — " + esc(m.from_addr||"")) : esc(m.from_addr||""));
+          const del = (isCli || m.direction === "note") ? '<button class="del" data-del="'+esc(m.id)+'" title="Remove">✕</button>' : '';
+          return '<div class="msg '+cls+'">'+del+'<div class="h">'+who+' · '+fmtDT(m.at)+(m.subject?" · "+esc(m.subject):"")+'</div><div class="b">'+esc(m.body||"")+'</div></div>';
         }).join("") + '</div>';
+        box.outerHTML = html;
+        [].forEach.call(j.querySelectorAll("[data-msgs] [data-del]"), b => b.onclick = async (e) => {
+          e.stopPropagation();
+          const ok = window.MLUI ? await MLUI.confirm("Remove this note/update? If it was an update for FBC, it disappears from their portal too.", { title:"Remove?", okLabel:"Remove", danger:true }) : confirm("Remove this?");
+          if (!ok) return;
+          try { await authFetch("/fbc/message-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: b.dataset.del }) }); } catch {}
+          await loadConv(jobId, j);
+        });
       } catch { box.innerHTML = '<span class="muted" style="color:#b00020">Couldn\'t load the conversation.</span>'; }
     }
 
