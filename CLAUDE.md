@@ -1302,6 +1302,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
     the home-hub card, and the daily cron summary. The employees.html "Licence
     checks" tab lists each driver with a one-tap **Log check** (attach the DVLA
     result as proof). _headers + SW `mostlane-v115`+.
+  - **NI numbers (office only, Oct 2026):** each employee's National Insurance
+    number is stored in app_config **`staff:ni:<tid>`** = `{username: "AB123456C"}`
+    — DELIBERATELY NOT on `users.profile`, so it never rides in `shapeUser` /
+    `/auth/me` / `/users` and an employee can NEVER see their own NI through the
+    portal (the `/hr/records` SELF-view omits it). Only the admin-gated HR routes
+    expose it: `getNiMap`/`setNi` (staffrecords.js), **POST /hr/ni**
+    `{username, ni}` (FullAccess|StaffRecords — uppercases, strips spaces, 13
+    chars), `/hr/records` admin branch returns `ni`, and `computeDriverChecks`
+    attaches `ni` per driver so **/hr/driver-checks** carries it. employees.html:
+    an NI field + Save + ⧉ Copy on the person view (office only), and a 🆔 NI +
+    ⧉ Copy button on every Licence-checks row (or "🆔 No NI" when unset) so the
+    office copies it straight into the DVLA check. Shared `copyText` helper with a
+    hidden-textarea fallback.
   - **Training matrix (Sep 2026):** **GET /hr/matrix?kind=&field=** pivots the
     records of one kind (default `qualification`) into a grid — competencies
     (distinct record TITLES **that carry an expiry date** — permanent/no-expiry
