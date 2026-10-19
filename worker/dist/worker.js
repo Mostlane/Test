@@ -34845,6 +34845,32 @@ async function setNi(db, username, ni) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:ni:" + db.tenantId, JSON.stringify(map)).run();
   return val2;
 }
+async function getPostcodeMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:postcode:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+async function setPostcode(db, username, pc) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getPostcodeMap(db);
+  const val2 = String(pc || "").toUpperCase().replace(/\s+/g, " ").trim().slice(0, 12);
+  if (val2) map[u] = val2;
+  else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:postcode:" + db.tenantId, JSON.stringify(map)).run();
+  return val2;
+}
+var homePostcodeOf = (profileJson) => {
+  try {
+    return String(JSON.parse(profileJson || "{}").homePostcode || "").trim();
+  } catch {
+    return "";
+  }
+};
 function requiredForUser(cfg, username, staffType) {
   const st = String(staffType || "").toLowerCase();
   const over = cfg.byUser && cfg.byUser[username] || {};
@@ -34926,7 +34952,7 @@ async function computeDriverChecks(db) {
   let drivers = [];
   try {
     const { results } = await db.prepare(
-      "SELECT username, first_name, last_name, status, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
+      "SELECT username, first_name, last_name, status, vehicle_assigned, profile FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
     ).bind(db.tenantId).all();
     drivers = (results || []).filter((u) => {
       const s = String(u.status || "").trim().toLowerCase();
@@ -34949,22 +34975,24 @@ async function computeDriverChecks(db) {
   const lic = {};
   try {
     const { results } = await db.prepare(
-      "SELECT username, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
+      "SELECT username, number, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
     ).bind(db.tenantId).all();
     for (const r of results || []) {
       const cur = lic[r.username];
-      if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) lic[r.username] = { number: r.number || "", expires: r.expires || "" };
     }
   } catch {
   }
   const niMap = await getNiMap(db);
+  const pcMap = await getPostcodeMap(db);
   const month = todayISO().slice(0, 7);
   return drivers.map((u) => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
     const l = latest[u.username] || null;
     const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
     const nextDue = l ? l.expires || "" : "";
-    const licenceExpiry = lic[u.username] || "";
+    const licRec = lic[u.username] || null;
+    const licenceExpiry = licRec ? licRec.expires : "";
     return {
       username: u.username,
       name,
@@ -34973,6 +35001,8 @@ async function computeDriverChecks(db) {
       nextDue,
       status: doneThisMonth ? "done" : "due",
       ni: niMap[u.username] || "",
+      postcode: pcMap[u.username] || homePostcodeOf(u.profile) || "",
+      licenceNumber: licRec ? licRec.number : "",
       licenceExpiry,
       licenceStatus: statusOf3(licenceExpiry)
     };
@@ -35010,12 +35040,14 @@ async function handle26(request, env, ctx, url, sess) {
     ).bind(db.tenantId, user).all();
     const records = [];
     for (const r of results || []) records.push(await shape(env, url.origin, r));
-    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = void 0;
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = void 0, postcode = void 0;
     if (isAdmin) {
       const cfg = await getReqCfg(db);
+      let homePc = "";
       try {
         const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first();
         reqStaffType = String(JSON.parse(urow && urow.profile || "{}").staffType || "").toLowerCase();
+        homePc = homePostcodeOf(urow && urow.profile);
       } catch {
       }
       requirements = requiredForUser(cfg, user, reqStaffType).map((it) => {
@@ -35025,8 +35057,9 @@ async function handle26(request, env, ctx, url, sess) {
       reqCatalogue = cfg.items;
       reqOver = cfg.byUser && cfg.byUser[user] || { on: [], off: [] };
       ni = (await getNiMap(db))[user] || "";
+      postcode = (await getPostcodeMap(db))[user] || homePc || "";
     }
-    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni }, {}, env, request);
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni, postcode }, {}, env, request);
   }
   if (path === "/hr/requirements" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
@@ -35081,8 +35114,10 @@ async function handle26(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const username = String(b.username || "").trim();
     if (!username) return error("Employee is required", 400, env, request);
-    const ni = await setNi(db, username, b.ni);
-    return json({ ok: true, username, ni }, {}, env, request);
+    const out = { ok: true, username };
+    if ("ni" in b) out.ni = await setNi(db, username, b.ni);
+    if ("postcode" in b) out.postcode = await setPostcode(db, username, b.postcode);
+    return json(out, {}, env, request);
   }
   if (path === "/hr/overview" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
