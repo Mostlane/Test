@@ -88,7 +88,7 @@
   <div class="wrap">
     <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
     <div id="board">
-      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> marks the subcontractor’s part finished <b>and sets the job to Complete</b> (↩ and Reopen don’t change the job’s status).</div>
+      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> marks the subcontractor’s part finished <b>and sets the job to Complete</b> (↩ and Reopen don’t change the job’s status). The <b>Incident</b> column is the client's incident number (also added to the order email). Open a row's detail to add a <b>closing note</b> — it saves onto the job and shows in its notes, so add it before you press ✓ Done.</div>
       <div class="bar" id="tabBar"></div>
       <div class="bar" id="subBar"></div>
       <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
@@ -139,12 +139,12 @@
     const q = g("q").value.trim().toLowerCase();
     const list = rows.filter(inTab)
       .filter(r => !sub || (r.subs.length ? r.subs.map(subKey) : ["unknown"]).includes(sub))
-      .filter(r => !q || [r.ref, r.project ? r.project.number + " " + r.project.name : "", r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
+      .filter(r => !q || [r.ref, r.incident, r.project ? r.project.number + " " + r.project.name : "", r.siteCode, r.siteName, r.description, r.subs.join(" "), r.pos.map(p => p.number + " " + p.description).join(" ")].join(" ").toLowerCase().includes(q));
     let tot = list.length + " job" + (list.length === 1 ? "" : "s");
     if (DATA.money) { const t = list.reduce((a, r) => a + (r.cost || 0), 0); if (t) tot += " · cost " + money(t); }
     g("tot").textContent = tot;
     if (!list.length) { g("list").innerHTML = '<p class="muted" style="padding:18px 4px;">Nothing here.</p>'; return; }
-    const cols = [["sub","Subcontractor",0,130],["ref","Job",0,110],["site","Site",0,150],["work","Work",1,null],["since","Since",0,80],["days","Days",0,82],["status","Job status",0,132],["pos","PO",0,78]]
+    const cols = [["sub","Subcontractor",0,130],["ref","Job",0,110],["incident","Incident",0,96],["site","Site",0,150],["work","Work",1,null],["since","Since",0,80],["days","Days",0,82],["status","Job status",0,132],["pos","PO",0,78]]
       .concat(DATA.money ? [["cost","PO £",0,110]] : []).concat([["act","",1,150]]);
     list.sort(cmp);
     const colg = "<colgroup>" + cols.map(c => c[3] == null ? "<col>" : `<col style="width:${c[3]}px">`).join("") + "</colgroup>";
@@ -155,7 +155,7 @@
   let sortKey = "days", sortDir = -1;
   const SORTV = {
     sub: r => (r.subs[0] || "~").toLowerCase(), ref: r => String(r.project ? r.project.number + " " + r.project.name : r.ref || "").toLowerCase(),
-    site: r => [r.siteCode, r.siteName].join(" ").toLowerCase(), since: r => r.since || "",
+    incident: r => r.incident || "", site: r => [r.siteCode, r.siteName].join(" ").toLowerCase(), since: r => r.since || "",
     days: r => r.days == null ? -1 : r.days, status: r => r.state + (r.jobStatus || ""),
     pos: r => r.pos.length ? Number(r.pos[0].number) || 0 : -1, cost: r => r.cost || 0
   };
@@ -188,7 +188,7 @@
     const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", r.jobId ? "Finished by the subcontractor — also sets the job to Complete" : "Finished by the subcontractor") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
     const work = r.description || "";
     const open = OPENDET.has(r.key);
-    let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="wrap">${refHtml}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
+    let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="wrap">${refHtml}</td><td class="nw" style="font-weight:700;color:#0f2438">${r.incident ? esc(r.incident) : "<span class='muted2' style='font-weight:400'>—</span>"}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
       <td class="work"><span class="one" data-det="${esc(r.key)}" title="${esc(work)}">${open ? "▾ " : "▸ "}${esc(work || "(no description)")}</span></td>
       <td class="nw">${esc(fmtD(r.since))}</td><td class="wrap c ${dCls}">${dTxt}</td><td class="wrap">${status}</td><td class="nw">${pos}</td>${cost}<td class="wrap">${acts}</td></tr>`;
     // detail row (always rendered to keep the zebra striping stable; hidden when closed)
@@ -196,7 +196,12 @@
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
     const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${rec && rec.declined ? " · <b>they can't take it</b>" + (rec.declined.reason ? ": “" + esc(rec.declined.reason) + "”" : "") : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
     const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" data-from="${esc(r.jobId)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
-    html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 10 : 9}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}</td></tr>`;
+    const cnote = r.jobId ? `<div style="margin-top:12px;border-top:1px solid #e6ebf1;padding-top:10px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:5px">📝 Closing note <span class="muted2" style="font-weight:400">— saved to the job${r.closingNote ? ", editable" : ", add before you close"}</span></div>
+        <textarea data-cnote="${esc(r.jobId)}" rows="2" placeholder="Add a closing note before closing the job…" style="width:100%;box-sizing:border-box;border:1px solid #cfd8e3;border-radius:8px;padding:8px;font:inherit;resize:vertical">${esc(r.closingNote || "")}</textarea>
+        <div style="margin-top:6px"><button class="ib ok" data-cnotesave="${esc(r.jobId)}">Save note</button> <span class="cnmsg" data-cnmsg="${esc(r.jobId)}" style="font-size:12px;margin-left:6px"></span></div>
+      </div>` : "";
+    html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 11 : 10}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}${cnote}</td></tr>`;
     return html;
   }
 
@@ -276,8 +281,24 @@
     load();
   }
 
+  async function saveCNote(jobId, btn) {
+    const ta = document.querySelector('textarea[data-cnote="' + jobId.replace(/"/g, '\\"') + '"]');
+    const msg = document.querySelector('[data-cnmsg="' + jobId.replace(/"/g, '\\"') + '"]');
+    if (!ta) return;
+    btn.disabled = true; if (msg) { msg.textContent = "Saving…"; msg.style.color = "#7a8794"; }
+    try {
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(jobId) + "/close-note", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: ta.value }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
+      for (const r of (DATA.rows || [])) if (r.jobId === jobId) r.closingNote = (d.closingNote && d.closingNote.text) || "";
+      if (msg) { msg.textContent = "Saved ✓"; msg.style.color = "#15803d"; }
+    } catch (e) { if (msg) { msg.textContent = "Couldn't save: " + (e.message || e); msg.style.color = "#c0392b"; } }
+    btn.disabled = false;
+  }
+
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick],[data-sugpo]"); if (!t) return;
+    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick],[data-sugpo],[data-cnotesave]"); if (!t) return;
+    if (t.dataset.cnotesave) { saveCNote(t.dataset.cnotesave, t); return; }
     if (t.dataset.link) { openLink(t.dataset.link); return; }
     if (t.dataset.sugpo) { (async () => { const r = (DATA.rows || []).find(x => x.pos.some(p => String(p.number) === t.dataset.sugpo)); const sg = r && r.suggest && r.suggest[0]; const ok = window.MLUI ? await MLUI.confirm(`Link PO ${t.dataset.sugpo} to job ${sg ? sg.ref : ""}? Why it looks like a match: ${sg ? sg.why : ""}`, { title: "Link PO to this job?", okLabel: "Link" }) : confirm("Link PO " + t.dataset.sugpo + "?"); if (ok) doLink(t.dataset.sugpo, t.dataset.sugjob); })(); return; }
     if (t.dataset.pick) { doLink(LINK_PO, t.dataset.pick); return; }

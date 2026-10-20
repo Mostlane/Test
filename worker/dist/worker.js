@@ -21758,6 +21758,34 @@ async function handle13(request, env, ctx, url, sess) {
       }
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
+    if (parts[2] === "close-note" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson2(request);
+      const job = await getJob3(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const txt = String(b.note == null ? "" : b.note).trim().slice(0, 1e3);
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
+      const by = sess.user.username;
+      const TAG = "Closing note";
+      job.events ||= [];
+      const existing = job.events.find((e) => e && e.type === "note" && typeof e.note === "string" && e.note.startsWith(TAG + ": "));
+      if (!txt) {
+        if (existing) job.events = job.events.filter((e) => e !== existing);
+        job.closingNote = null;
+      } else if (existing) {
+        existing.note = TAG + ": " + txt;
+        existing.at = now2;
+        existing.by = by;
+        job.closingNote = { text: txt, at: now2, by };
+      } else {
+        job.events.push({ at: now2, by, type: "note", note: TAG + ": " + txt });
+        job.closingNote = { text: txt, at: now2, by };
+      }
+      job.updatedAt = now2;
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, closingNote: job.closingNote }, headers);
+    }
     if (parts[2] === "em-timer" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
@@ -26033,7 +26061,7 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const autoTarget = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
   const target = opts.target != null ? String(opts.target).trim().slice(0, 60) : autoTarget;
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : job.priority || "Job";
-  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
+  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
   const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
   let addr = String(job.address || job.siteName || "").trim();
@@ -26123,7 +26151,8 @@ async function subcontractedRows(env, tid, money2) {
         drainage: isDrainageJob(j),
         record: j.subcontract || null,
         pos: [],
-        subs: []
+        subs: [],
+        closingNote: j.closingNote && j.closingNote.text || ""
       };
       rows.set(j.id, r);
     }
@@ -26176,6 +26205,7 @@ async function subcontractedRows(env, tid, money2) {
       record: null,
       pos: [po],
       subs: [],
+      closingNote: "",
       project: projectFor(p.site)
     });
     const pr = rows.get("po:" + p.po_number);
@@ -26219,6 +26249,8 @@ async function subcontractedRows(env, tid, money2) {
     r.state = rs === "done" || rs === "returned" ? rs : r.jobFinished ? "done" : "open";
     r.closedAt = r.record && r.record.closedAt || null;
     r.days = r.since ? Math.max(0, Math.floor((now2 - Date.parse(r.since)) / 864e5)) : null;
+    const ik = incidentKey(r.ref);
+    r.incident = ik ? ik.inc + (ik.suf ? "/" + ik.suf : "") : "";
     if (money2) {
       const priced = r.pos.filter((p) => p.cost != null);
       r.poTotal = priced.reduce((a, p) => a + p.cost, 0);
