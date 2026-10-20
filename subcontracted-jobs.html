@@ -76,6 +76,12 @@
     .lr{border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin:6px 0;cursor:pointer;font-size:13px;}
     .lr:hover{background:#eef4ff;border-color:#93c5fd;}
     .help{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px;color:#475569;margin-bottom:10px;}
+    #noteBack{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:9000;padding:60px 12px;}
+    #noteBack.show{display:flex;}
+    #noteBox{background:#fff;border-radius:14px;width:100%;max-width:520px;padding:16px 18px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+    #noteBox h3{margin:0 0 4px;font-size:16px;color:var(--brand);}
+    #noteTa{width:100%;box-sizing:border-box;border:1px solid #cfd8e3;border-radius:8px;padding:9px;font:inherit;resize:vertical;margin-top:8px;min-height:74px;}
+    .ib.hasnote{border-color:var(--ok);color:var(--ok);}
   </style>
 </head>
 <body>
@@ -88,7 +94,7 @@
   <div class="wrap">
     <div id="forbidden">🚫 This page is for Full Access users and office staff (SLA admins).</div>
     <div id="board">
-      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> marks the subcontractor’s part finished <b>and sets the job to Complete</b> (↩ and Reopen don’t change the job’s status). The <b>Incident</b> column is the client's incident number (also added to the order email). Open a row's detail to add a <b>closing note</b> — it saves onto the job and shows in its notes, so add it before you press ✓ Done.</div>
+      <div class="help">Jobs sent to a subcontractor or marked “already with a subcontractor”, plus subcontractor POs from the last 6 months. Tap a job's work text to see the full detail and POs. Tap a column heading to sort. <b>🔗 Link</b> ties a PO-only row to its incident/job; type a cost (ex VAT) in the £ box to save it onto the PO. <b>✓ Done</b> marks the subcontractor’s part finished <b>and sets the job to Complete</b> (↩ and Reopen don’t change the job’s status). The <b>Incident</b> column is the client's incident number (also added to the order email). <b>📝 Note</b> adds a <b>closing note</b> onto the job (shows in its notes, reports and job card); pressing <b>✓ Done</b> without one will prompt you for a note first — you can still close without it.</div>
       <div class="bar" id="tabBar"></div>
       <div class="bar" id="subBar"></div>
       <div class="bar"><input type="search" id="q" placeholder="Search ref / site / words…" style="flex:1;min-width:180px;"><span class="tot" id="tot"></span></div>
@@ -101,6 +107,18 @@
     <input type="search" id="linkQ" placeholder="Incident / ref number, site or words…" style="width:100%;margin-top:8px;" autocomplete="off">
     <div id="linkRes"></div>
     <div style="text-align:right;margin-top:8px;"><button class="btn ghost" id="linkCancel">Cancel</button></div>
+  </div></div>
+  <div id="noteBack"><div id="noteBox">
+    <h3 id="noteTitle">Closing note</h3>
+    <div class="muted" id="noteSub"></div>
+    <textarea id="noteTa" rows="3" placeholder="Add a closing note before closing the job…"></textarea>
+    <div class="muted2" id="noteHint" style="margin-top:6px;font-size:12px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn ghost" id="noteCancel">Cancel</button>
+      <button class="btn ghost" id="noteSkip">Close without a note</button>
+      <button class="btn green" id="noteSaveClose">Save note &amp; close</button>
+      <button class="btn" id="noteSave">Save note</button>
+    </div>
   </div></div>
 <script>
   const API = window.MOSTLANE_API;
@@ -185,7 +203,9 @@
     const cost = DATA.money ? `<td class="nw" style="text-align:right">${costIn}</td>` : "";
     const b = (st, label, c, tip) => `<button class="ib ${c || ""}" data-act="${st}" data-key="${esc(r.key)}"${tip ? ` title="${tip}"` : ""}>${label}</button>`;
     const link = !r.jobId && r.pos.length ? `<button class="ib" data-link="${esc(r.pos[0].number)}" title="Link this PO to an incident / job">🔗 Link</button> ` : "";
-    const acts = link + (r.state === "open" ? b("done", "✓ Done", "ok", r.jobId ? "Finished by the subcontractor — also sets the job to Complete" : "Finished by the subcontractor") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
+    const hasNote = r.jobId && r.closingNote && String(r.closingNote).trim();
+    const noteBtn = r.jobId ? `<button class="ib${hasNote ? " hasnote" : ""}" data-note="${esc(r.key)}" title="Add or edit the closing note (saved to the job)">📝 Note${hasNote ? " ✓" : ""}</button> ` : "";
+    const acts = link + noteBtn + (r.state === "open" ? b("done", "✓ Done", "ok", r.jobId ? "Finished by the subcontractor — also sets the job to Complete" : "Finished by the subcontractor") + " " + b("returned", "↩", "", "Back with us") : b("open", "Reopen"));
     const work = r.description || "";
     const open = OPENDET.has(r.key);
     let html = `<tr class="r"><td>${esc((r.subs.length ? r.subs : ["Unknown"]).join(", "))}</td><td class="wrap">${refHtml}</td><td class="nw" style="font-weight:700;color:#0f2438">${r.incident ? esc(r.incident) : "<span class='muted2' style='font-weight:400'>—</span>"}</td><td class="nw site" title="${esc(site)}">${esc(site || "—")}</td>
@@ -196,11 +216,9 @@
     const how = rec ? (rec.to ? "Emailed to " + rec.to : rec.fromPo ? "From a purchase order" : "Handed over (no email)") : "From a purchase order";
     const meta = `${esc(how)}${r.since ? " · " + esc(fmtD(r.since)) : ""}${r.sentBy ? " by " + esc(r.sentBy) : ""}${rec && rec.note ? " · " + esc(rec.note) : ""}${rec && rec.declined ? " · <b>they can't take it</b>" + (rec.declined.reason ? ": “" + esc(rec.declined.reason) + "”" : "") : ""}${r.closedAt ? " · closed " + esc(fmtD(r.closedAt)) : ""}`;
     const poList = r.pos.map(p => `<div class="po"><b>PO ${esc(p.number)}</b> · ${esc(p.supplier)}${p.trade ? " · " + esc(p.trade) : ""} · ${esc(fmtD(p.issuedAt))}${DATA.money ? " · " + costInput("po", p.number, p.cost) : ""}${p.description ? ' <span class="muted2">— ' + esc(p.description) + "</span>" : ""}${r.jobId ? ` <button class="ib" data-unlink="${esc(p.number)}" data-from="${esc(r.jobId)}" title="${p.match === "incident" ? "Matched by incident number" : "Linked to this job"} — unlink">✕ Unlink</button>` : ""}</div>`).join("");
-    const cnote = r.jobId ? `<div style="margin-top:12px;border-top:1px solid #e6ebf1;padding-top:10px">
-        <div style="font-weight:700;font-size:13px;margin-bottom:5px">📝 Closing note <span class="muted2" style="font-weight:400">— saved to the job${r.closingNote ? ", editable" : ", add before you close"}</span></div>
-        <textarea data-cnote="${esc(r.jobId)}" rows="2" placeholder="Add a closing note before closing the job…" style="width:100%;box-sizing:border-box;border:1px solid #cfd8e3;border-radius:8px;padding:8px;font:inherit;resize:vertical">${esc(r.closingNote || "")}</textarea>
-        <div style="margin-top:6px"><button class="ib ok" data-cnotesave="${esc(r.jobId)}">Save note</button> <span class="cnmsg" data-cnmsg="${esc(r.jobId)}" style="font-size:12px;margin-left:6px"></span></div>
-      </div>` : "";
+    const cnote = hasNote
+      ? `<div style="margin-top:10px;border-top:1px solid #e6ebf1;padding-top:8px"><span style="font-weight:700">📝 Closing note:</span> ${esc(r.closingNote)} <button class="ib" data-note="${esc(r.key)}" title="Edit the closing note" style="margin-left:6px">Edit</button></div>`
+      : (r.jobId ? `<div style="margin-top:10px;border-top:1px solid #e6ebf1;padding-top:8px"><button class="ib" data-note="${esc(r.key)}">📝 Add closing note</button></div>` : "");
     html += `<tr class="det"${open ? "" : " hidden"}><td colspan="${DATA.money ? 11 : 10}"><div class="dl">${esc(work || "(no description)")}</div><div class="muted2">${meta}</div>${poList ? '<div style="margin-top:6px">' + poList + "</div>" : ""}${cnote}</td></tr>`;
     return html;
   }
@@ -268,37 +286,62 @@
   g("linkBack").addEventListener("click", e => { if (e.target.id === "linkBack") g("linkBack").classList.remove("show"); });
   document.addEventListener("change", e => { if (e.target.matches("input.cost")) saveCost(e.target); });
 
-  async function setState(key, st, btn) {
-    const r = (DATA.rows || []).find(x => x.key === key); if (!r) return;
-    btn.disabled = true;
+  // Perform the actual state change (done / returned / open). Closing note is handled
+  // separately by the modal below so pressing Done can prompt for one first.
+  async function performState(r, st) {
     try {
       let res;
       if (r.jobId) res = await authFetch("/sla/jobs/" + encodeURIComponent(r.jobId) + "/subcontract-status", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ status: st, name: r.subs[0] || "", since: r.since }) });
-      else res = await authFetch("/sla/subcontracted/po-status", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ key, status: st }) });
+      else res = await authFetch("/sla/subcontracted/po-status", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ key: r.key, status: st }) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
-    } catch (e) { alert("Couldn't do that: " + (e.message || e)); btn.disabled = false; return; }
-    load();
+      return true;
+    } catch (e) { alert("Couldn't do that: " + (e.message || e)); return false; }
+  }
+  function setState(key, st, btn) {
+    const r = (DATA.rows || []).find(x => x.key === key); if (!r) return;
+    // Closing a subcontracted job with no closing note yet → gently prompt for one
+    // (dismissable — the job still closes). Reminds staff 9 times out of 10.
+    if (st === "done" && r.jobId && !(r.closingNote && String(r.closingNote).trim())) { openNote(r, true); return; }
+    if (btn) btn.disabled = true;
+    performState(r, st).then(ok => { if (ok) load(); else if (btn) btn.disabled = false; });
   }
 
-  async function saveCNote(jobId, btn) {
-    const ta = document.querySelector('textarea[data-cnote="' + jobId.replace(/"/g, '\\"') + '"]');
-    const msg = document.querySelector('[data-cnmsg="' + jobId.replace(/"/g, '\\"') + '"]');
-    if (!ta) return;
-    btn.disabled = true; if (msg) { msg.textContent = "Saving…"; msg.style.color = "#7a8794"; }
+  // Closing-note modal — one editable note saved onto the job (shows in its notes /
+  // reports / job card). Opened by the 📝 Note button, or automatically when Done is
+  // pressed with no note yet.
+  let NOTE_ROW = null;
+  async function saveCNoteValue(jobId, text) {
     try {
-      const res = await authFetch("/sla/jobs/" + encodeURIComponent(jobId) + "/close-note", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: ta.value }) });
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(jobId) + "/close-note", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: text }) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || ("HTTP " + res.status));
       for (const r of (DATA.rows || [])) if (r.jobId === jobId) r.closingNote = (d.closingNote && d.closingNote.text) || "";
-      if (msg) { msg.textContent = "Saved ✓"; msg.style.color = "#15803d"; }
-    } catch (e) { if (msg) { msg.textContent = "Couldn't save: " + (e.message || e); msg.style.color = "#c0392b"; } }
-    btn.disabled = false;
+      return true;
+    } catch (e) { alert("Couldn't save the note: " + (e.message || e)); return false; }
   }
+  function openNote(r, afterDone) {
+    NOTE_ROW = r;
+    g("noteTitle").textContent = (afterDone ? "Add a closing note" : "Closing note") + (r.incident ? " — " + r.incident : (r.ref ? " — " + r.ref : ""));
+    g("noteSub").textContent = [r.subs.join(", "), r.siteName, r.description].filter(Boolean).join(" · ").slice(0, 160);
+    g("noteTa").value = r.closingNote || "";
+    g("noteHint").textContent = afterDone ? "This saves onto the job, then marks it Done. Nothing to add? Just close it." : "Saves onto the job and shows in its notes, reports and job card.";
+    g("noteSaveClose").style.display = afterDone ? "" : "none";
+    g("noteSkip").style.display = afterDone ? "" : "none";
+    g("noteSave").style.display = afterDone ? "none" : "";
+    g("noteBack").classList.add("show");
+    setTimeout(() => g("noteTa").focus(), 50);
+  }
+  function closeNoteModal() { g("noteBack").classList.remove("show"); NOTE_ROW = null; }
+  g("noteCancel").onclick = closeNoteModal;
+  g("noteBack").addEventListener("click", e => { if (e.target.id === "noteBack") closeNoteModal(); });
+  g("noteSave").onclick = async () => { const r = NOTE_ROW; if (!r) return; if (await saveCNoteValue(r.jobId, g("noteTa").value)) { closeNoteModal(); render(); } };
+  g("noteSaveClose").onclick = async () => { const r = NOTE_ROW; if (!r) return; if (!await saveCNoteValue(r.jobId, g("noteTa").value)) return; closeNoteModal(); if (await performState(r, "done")) load(); };
+  g("noteSkip").onclick = async () => { const r = NOTE_ROW; if (!r) return; closeNoteModal(); if (await performState(r, "done")) load(); };
 
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick],[data-sugpo],[data-cnotesave]"); if (!t) return;
-    if (t.dataset.cnotesave) { saveCNote(t.dataset.cnotesave, t); return; }
+    const t = e.target.closest("[data-tab],[data-sub],[data-act],[data-sort],[data-det],[data-link],[data-unlink],[data-pick],[data-sugpo],[data-note]"); if (!t) return;
+    if (t.dataset.note) { const r = (DATA.rows || []).find(x => x.key === t.dataset.note); if (r) openNote(r, false); return; }
     if (t.dataset.link) { openLink(t.dataset.link); return; }
     if (t.dataset.sugpo) { (async () => { const r = (DATA.rows || []).find(x => x.pos.some(p => String(p.number) === t.dataset.sugpo)); const sg = r && r.suggest && r.suggest[0]; const ok = window.MLUI ? await MLUI.confirm(`Link PO ${t.dataset.sugpo} to job ${sg ? sg.ref : ""}? Why it looks like a match: ${sg ? sg.why : ""}`, { title: "Link PO to this job?", okLabel: "Link" }) : confirm("Link PO " + t.dataset.sugpo + "?"); if (ok) doLink(t.dataset.sugpo, t.dataset.sugjob); })(); return; }
     if (t.dataset.pick) { doLink(LINK_PO, t.dataset.pick); return; }
