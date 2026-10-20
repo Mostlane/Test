@@ -26026,6 +26026,8 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const f = sc && sc.fields ? sc.fields : {};
   const on = (k) => f[k] !== false;
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
+  const ik = incidentKey(job.helpdeskRef);
+  const incident = ik ? ik.inc + (ik.suf ? "/" + ik.suf : "") : "";
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
   const autoTarget = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
@@ -26052,7 +26054,7 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
 <tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "") : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
 <tr><td style="padding:18px 28px 4px 28px">${boxes}${invoiceBox}</td></tr>
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
-<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
+<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.${incident ? "<br>Our job reference: " + escH(incident) : ""}</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref, details, target };
 }
