@@ -124,6 +124,49 @@ async function saveReqCfg(db, cfg) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(db.tenantId, "staff:reqs:" + db.tenantId, JSON.stringify({ items: cfg.items || [], byUser: cfg.byUser || {} })).run();
 }
+
+// ── NI numbers (app_config `staff:ni:<tid>` = {username: "AB123456C"}) ─────────
+// Kept here, OFFICE-side, NOT on users.profile — so it never rides in shapeUser /
+// /auth/me / /users and can only ever be read back through the admin-gated HR
+// routes below. An employee never sees their own NI through the portal.
+async function getNiMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:ni:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return (v && typeof v === "object") ? v : {};
+  } catch { return {}; }
+}
+async function setNi(db, username, ni) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getNiMap(db);
+  const val = String(ni || "").toUpperCase().replace(/\s+/g, "").slice(0, 13);
+  if (val) map[u] = val; else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, "staff:ni:" + db.tenantId, JSON.stringify(map)).run();
+  return val;
+}
+// ── Postcode for DVLA checks (app_config `staff:postcode:<tid>`) ───────────────
+// Same office-side store as NI. `postcodeFor` prefers the explicitly-set value,
+// else falls back to the person's home postcode (profile.homePostcode).
+async function getPostcodeMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:postcode:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return (v && typeof v === "object") ? v : {};
+  } catch { return {}; }
+}
+async function setPostcode(db, username, pc) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getPostcodeMap(db);
+  const val = String(pc || "").toUpperCase().replace(/\s+/g, " ").trim().slice(0, 12);
+  if (val) map[u] = val; else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, "staff:postcode:" + db.tenantId, JSON.stringify(map)).run();
+  return val;
+}
+const homePostcodeOf = profileJson => { try { return String(JSON.parse(profileJson || "{}").homePostcode || "").trim(); } catch { return ""; } };
 // The catalogue items that apply to one person (scope by staff type, minus their
 // opt-outs, plus their explicit extras).
 export function requiredForUser(cfg, username, staffType) {
@@ -199,7 +242,7 @@ async function computeDriverChecks(db) {
   let drivers = [];
   try {
     const { results } = await db.prepare(
-      "SELECT username, first_name, last_name, status, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
+      "SELECT username, first_name, last_name, status, vehicle_assigned, profile FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
     ).bind(db.tenantId).all();
     drivers = (results || []).filter(u => { const s = String(u.status || "").trim().toLowerCase(); return s === "" || s === "active"; });
   } catch { return []; }
@@ -214,27 +257,32 @@ async function computeDriverChecks(db) {
       if (!cur || String(r.issued || "") > String(cur.issued || "")) latest[r.username] = { issued: r.issued || "", expires: r.expires || "" };
     }
   } catch {}
-  // Photocard licence expiry (field 4b) per driver — the actual DRIVING LICENCE
-  // expiry, distinct from the monthly check. Latest licence record's expires.
+  // Photocard licence per driver — the actual DRIVING LICENCE record: the driver
+  // NUMBER (field 5) + expiry (field 4b), distinct from the monthly check. Keeps
+  // the record with the furthest-out expiry.
   const lic = {};
   try {
     const { results } = await db.prepare(
-      "SELECT username, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
+      "SELECT username, number, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
     ).bind(db.tenantId).all();
     for (const r of (results || [])) {
       const cur = lic[r.username];
-      if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) lic[r.username] = { number: r.number || "", expires: r.expires || "" };
     }
   } catch {}
+  const niMap = await getNiMap(db);                  // office-only — surfaced beside each driver for the DVLA check
+  const pcMap = await getPostcodeMap(db);            // set postcode (else their home postcode, below)
   const month = todayISO().slice(0, 7);
   return drivers.map(u => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
     const l = latest[u.username] || null;
     const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
     const nextDue = l ? (l.expires || "") : "";
-    const licenceExpiry = lic[u.username] || "";
+    const licRec = lic[u.username] || null;
+    const licenceExpiry = licRec ? licRec.expires : "";
     return { username: u.username, name, reg: u.vehicle_assigned || "", lastChecked: l ? l.issued : "", nextDue, status: doneThisMonth ? "done" : "due",
-             licenceExpiry, licenceStatus: statusOf(licenceExpiry) };
+             ni: niMap[u.username] || "", postcode: pcMap[u.username] || homePostcodeOf(u.profile) || "",
+             licenceNumber: licRec ? licRec.number : "", licenceExpiry, licenceStatus: statusOf(licenceExpiry) };
   }).sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : (a.status === "due" ? -1 : 1)));
 }
 
@@ -276,18 +324,21 @@ export async function handle(request, env, ctx, url, sess) {
     for (const r of (results || [])) records.push(await shape(env, url.origin, r));
     // For admins, also return this person's required-documents state so the
     // person view can show the ✓/✗ pills and the "what must they hold" editor.
-    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "";
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = undefined, postcode = undefined;
     if (isAdmin) {
       const cfg = await getReqCfg(db);
-      try { const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first(); reqStaffType = String((JSON.parse((urow && urow.profile) || "{}").staffType) || "").toLowerCase(); } catch {}
+      let homePc = "";
+      try { const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first(); reqStaffType = String((JSON.parse((urow && urow.profile) || "{}").staffType) || "").toLowerCase(); homePc = homePostcodeOf(urow && urow.profile); } catch {}
       requirements = requiredForUser(cfg, user, reqStaffType).map(it => {
         const s = reqStatus(it, results || []);
         return { id: it.id, kind: it.kind, title: it.title, scope: it.scope, status: s.status, expires: s.expires || "" };
       });
       reqCatalogue = cfg.items;
       reqOver = (cfg.byUser && cfg.byUser[user]) || { on: [], off: [] };
+      ni = (await getNiMap(db))[user] || "";                        // office-only; never on the self-view
+      postcode = (await getPostcodeMap(db))[user] || homePc || "";  // set value, else their home postcode
     }
-    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType }, {}, env, request);
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni, postcode }, {}, env, request);
   }
 
   // ── Required-documents config: which documents each person must hold ──────────
@@ -333,6 +384,18 @@ export async function handle(request, env, ctx, url, sess) {
     }
     await saveReqCfg(db, cfg);
     return json({ ok: true, items: cfg.items, byUser: cfg.byUser }, {}, env, request);
+  }
+
+  // ── Set a person's NI number / postcode for DVLA checks (office only) ─────────
+  if (path === "/hr/ni" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const username = String(b.username || "").trim();
+    if (!username) return error("Employee is required", 400, env, request);
+    const out = { ok: true, username };
+    if ("ni" in b) out.ni = await setNi(db, username, b.ni);
+    if ("postcode" in b) out.postcode = await setPostcode(db, username, b.postcode);
+    return json(out, {}, env, request);
   }
 
   // ── Everything below is admin (FullAccess | StaffRecords) ────────────────────

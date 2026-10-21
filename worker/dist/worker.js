@@ -21783,6 +21783,34 @@ async function handle13(request, env, ctx, url, sess) {
       }
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
+    if (parts[2] === "close-note" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson2(request);
+      const job = await getJob3(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const txt = String(b.note == null ? "" : b.note).trim().slice(0, 1e3);
+      const now2 = (/* @__PURE__ */ new Date()).toISOString();
+      const by = sess.user.username;
+      const TAG = "Closing note";
+      job.events ||= [];
+      const existing = job.events.find((e) => e && e.type === "note" && typeof e.note === "string" && e.note.startsWith(TAG + ": "));
+      if (!txt) {
+        if (existing) job.events = job.events.filter((e) => e !== existing);
+        job.closingNote = null;
+      } else if (existing) {
+        existing.note = TAG + ": " + txt;
+        existing.at = now2;
+        existing.by = by;
+        job.closingNote = { text: txt, at: now2, by };
+      } else {
+        job.events.push({ at: now2, by, type: "note", note: TAG + ": " + txt });
+        job.closingNote = { text: txt, at: now2, by };
+      }
+      job.updatedAt = now2;
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, closingNote: job.closingNote }, headers);
+    }
     if (parts[2] === "em-timer" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
@@ -26051,12 +26079,14 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const f = sc && sc.fields ? sc.fields : {};
   const on = (k) => f[k] !== false;
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
+  const ik = incidentKey(job.helpdeskRef);
+  const incident = ik ? ik.inc + (ik.suf ? "/" + ik.suf : "") : "";
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
   const autoTarget = hrs ? hrs % 24 === 0 && hrs >= 48 ? hrs / 24 + " Days" : hrs + " Hours" : "";
   const target = opts.target != null ? String(opts.target).trim().slice(0, 60) : autoTarget;
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : job.priority || "Job";
-  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
+  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
   const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
   let addr = String(job.address || job.siteName || "").trim();
@@ -26077,7 +26107,7 @@ function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
 <tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "") : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
 <tr><td style="padding:18px 28px 4px 28px">${boxes}${invoiceBox}</td></tr>
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
-<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
+<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd \xB7 Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.${incident ? "<br>Our job reference: " + escH(incident) : ""}</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref, details, target };
 }
@@ -26146,7 +26176,8 @@ async function subcontractedRows(env, tid, money2) {
         drainage: isDrainageJob(j),
         record: j.subcontract || null,
         pos: [],
-        subs: []
+        subs: [],
+        closingNote: j.closingNote && j.closingNote.text || ""
       };
       rows.set(j.id, r);
     }
@@ -26199,6 +26230,7 @@ async function subcontractedRows(env, tid, money2) {
       record: null,
       pos: [po],
       subs: [],
+      closingNote: "",
       project: projectFor(p.site)
     });
     const pr = rows.get("po:" + p.po_number);
@@ -26242,6 +26274,8 @@ async function subcontractedRows(env, tid, money2) {
     r.state = rs === "done" || rs === "returned" ? rs : r.jobFinished ? "done" : "open";
     r.closedAt = r.record && r.record.closedAt || null;
     r.days = r.since ? Math.max(0, Math.floor((now2 - Date.parse(r.since)) / 864e5)) : null;
+    const ik = incidentKey(r.ref);
+    r.incident = ik ? ik.inc + (ik.suf ? "/" + ik.suf : "") : "";
     if (money2) {
       const priced = r.pos.filter((p) => p.cost != null);
       r.poTotal = priced.reduce((a, p) => a + p.cost, 0);
@@ -35048,6 +35082,51 @@ async function getReqCfg(db) {
 async function saveReqCfg(db, cfg) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:reqs:" + db.tenantId, JSON.stringify({ items: cfg.items || [], byUser: cfg.byUser || {} })).run();
 }
+async function getNiMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:ni:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+async function setNi(db, username, ni) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getNiMap(db);
+  const val2 = String(ni || "").toUpperCase().replace(/\s+/g, "").slice(0, 13);
+  if (val2) map[u] = val2;
+  else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:ni:" + db.tenantId, JSON.stringify(map)).run();
+  return val2;
+}
+async function getPostcodeMap(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "staff:postcode:" + db.tenantId).first();
+    const v = row && row.value ? JSON.parse(row.value) : {};
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+async function setPostcode(db, username, pc) {
+  const u = String(username || "").trim();
+  if (!u) return "";
+  const map = await getPostcodeMap(db);
+  const val2 = String(pc || "").toUpperCase().replace(/\s+/g, " ").trim().slice(0, 12);
+  if (val2) map[u] = val2;
+  else delete map[u];
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "staff:postcode:" + db.tenantId, JSON.stringify(map)).run();
+  return val2;
+}
+var homePostcodeOf = (profileJson) => {
+  try {
+    return String(JSON.parse(profileJson || "{}").homePostcode || "").trim();
+  } catch {
+    return "";
+  }
+};
 function requiredForUser(cfg, username, staffType) {
   const st = String(staffType || "").toLowerCase();
   const over = cfg.byUser && cfg.byUser[username] || {};
@@ -35129,7 +35208,7 @@ async function computeDriverChecks(db) {
   let drivers = [];
   try {
     const { results } = await db.prepare(
-      "SELECT username, first_name, last_name, status, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
+      "SELECT username, first_name, last_name, status, vehicle_assigned, profile FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND TRIM(vehicle_assigned)<>''"
     ).bind(db.tenantId).all();
     drivers = (results || []).filter((u) => {
       const s = String(u.status || "").trim().toLowerCase();
@@ -35152,21 +35231,24 @@ async function computeDriverChecks(db) {
   const lic = {};
   try {
     const { results } = await db.prepare(
-      "SELECT username, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
+      "SELECT username, number, expires FROM staff_records WHERE tenant_id=? AND kind='licence'"
     ).bind(db.tenantId).all();
     for (const r of results || []) {
       const cur = lic[r.username];
-      if (!cur || String(r.expires || "") > String(cur || "")) lic[r.username] = r.expires || "";
+      if (!cur || String(r.expires || "") > String(cur.expires || "")) lic[r.username] = { number: r.number || "", expires: r.expires || "" };
     }
   } catch {
   }
+  const niMap = await getNiMap(db);
+  const pcMap = await getPostcodeMap(db);
   const month = todayISO().slice(0, 7);
   return drivers.map((u) => {
     const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
     const l = latest[u.username] || null;
     const doneThisMonth = !!(l && String(l.issued || "").slice(0, 7) === month);
     const nextDue = l ? l.expires || "" : "";
-    const licenceExpiry = lic[u.username] || "";
+    const licRec = lic[u.username] || null;
+    const licenceExpiry = licRec ? licRec.expires : "";
     return {
       username: u.username,
       name,
@@ -35174,6 +35256,9 @@ async function computeDriverChecks(db) {
       lastChecked: l ? l.issued : "",
       nextDue,
       status: doneThisMonth ? "done" : "due",
+      ni: niMap[u.username] || "",
+      postcode: pcMap[u.username] || homePostcodeOf(u.profile) || "",
+      licenceNumber: licRec ? licRec.number : "",
       licenceExpiry,
       licenceStatus: statusOf3(licenceExpiry)
     };
@@ -35211,12 +35296,14 @@ async function handle26(request, env, ctx, url, sess) {
     ).bind(db.tenantId, user).all();
     const records = [];
     for (const r of results || []) records.push(await shape(env, url.origin, r));
-    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "";
+    let requirements = null, reqCatalogue = null, reqOver = null, reqStaffType = "", ni = void 0, postcode = void 0;
     if (isAdmin) {
       const cfg = await getReqCfg(db);
+      let homePc = "";
       try {
         const urow = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, user).first();
         reqStaffType = String(JSON.parse(urow && urow.profile || "{}").staffType || "").toLowerCase();
+        homePc = homePostcodeOf(urow && urow.profile);
       } catch {
       }
       requirements = requiredForUser(cfg, user, reqStaffType).map((it) => {
@@ -35225,8 +35312,10 @@ async function handle26(request, env, ctx, url, sess) {
       });
       reqCatalogue = cfg.items;
       reqOver = cfg.byUser && cfg.byUser[user] || { on: [], off: [] };
+      ni = (await getNiMap(db))[user] || "";
+      postcode = (await getPostcodeMap(db))[user] || homePc || "";
     }
-    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType }, {}, env, request);
+    return json({ ok: true, user, canManage: isAdmin, records, requirements, reqCatalogue, reqOver, reqStaffType, ni, postcode }, {}, env, request);
   }
   if (path === "/hr/requirements" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);
@@ -35275,6 +35364,16 @@ async function handle26(request, env, ctx, url, sess) {
     }
     await saveReqCfg(db, cfg);
     return json({ ok: true, items: cfg.items, byUser: cfg.byUser }, {}, env, request);
+  }
+  if (path === "/hr/ni" && method === "POST") {
+    if (!isAdmin) return error("This needs HR access.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const username = String(b.username || "").trim();
+    if (!username) return error("Employee is required", 400, env, request);
+    const out = { ok: true, username };
+    if ("ni" in b) out.ni = await setNi(db, username, b.ni);
+    if ("postcode" in b) out.postcode = await setPostcode(db, username, b.postcode);
+    return json(out, {}, env, request);
   }
   if (path === "/hr/overview" && method === "GET") {
     if (!isAdmin) return error("This needs HR access.", 403, env, request);

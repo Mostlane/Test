@@ -2692,6 +2692,36 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
+    // POST /sla/jobs/{id}/close-note {note} — save/overwrite ONE editable closing note
+    // on the job (kept in the notes timeline so it shows on the job card) before the
+    // office closes a subcontracted job. Blank clears it. SLA admin.
+    if (parts[2] === "close-note" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const txt = String(b.note == null ? "" : b.note).trim().slice(0, 1000);
+      const now = new Date().toISOString();
+      const by = sess.user.username;
+      const TAG = "Closing note";
+      job.events ||= [];
+      const existing = job.events.find(e => e && e.type === "note" && typeof e.note === "string" && e.note.startsWith(TAG + ": "));
+      if (!txt) {
+        if (existing) job.events = job.events.filter(e => e !== existing);
+        job.closingNote = null;
+      } else if (existing) {
+        existing.note = TAG + ": " + txt; existing.at = now; existing.by = by;
+        job.closingNote = { text: txt, at: now, by };
+      } else {
+        job.events.push({ at: now, by, type: "note", note: TAG + ": " + txt });
+        job.closingNote = { text: txt, at: now, by };
+      }
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, closingNote: job.closingNote }, headers);
+    }
+
     // POST /sla/jobs/{id}/em-timer — start / reset / clear the 3-hour EM
     // drain-down countdown. Persisted on the job so the engineer (job card +
     // list) AND the office (board) all see the same live timer. {action, durationMinutes?}
@@ -7085,13 +7115,18 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
   const f = (sc && sc.fields) ? sc.fields : {};
   const on = k => f[k] !== false;   // default every field ON when not configured
   const ref = String(poRef || job.helpdeskRef || job.id || "").trim();
+  // The Concerto incident number — shown quietly in the footer so the office can
+  // search their mail trail by it. Deliberately NOT near the PO/Order No, and never
+  // labelled as an order, so a subcontractor doesn't confuse it with the PO number.
+  const ik = incidentKey(job.helpdeskRef);
+  const incident = ik ? (ik.inc + (ik.suf ? "/" + ik.suf : "")) : "";
   const pc = String(job.postcode || "").trim().toUpperCase();
   const hrs = Number(hours) || 0;
   const autoTarget = hrs ? (hrs % 24 === 0 && hrs >= 48 ? (hrs / 24) + " Days" : hrs + " Hours") : "";
   // The office can override the response time per email (opts.target); "" hides it.
   const target = (opts.target != null) ? String(opts.target).trim().slice(0, 60) : autoTarget;
   const urgency = /priority\s*1/i.test(job.priority || "") ? "Emergency" : (job.priority || "Job");
-  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}`;
+  const subject = `Mostlane - ${urgency} - Order ${ref}${pc ? " at " + pc : ""}${incident ? ` [${incident}]` : ""}`;
   const code = String(job.siteCode || "").trim();
   const site = [/^\d{1,3}$/.test(code) ? code.padStart(4, "0") : code, String(job.siteName || "").trim()].filter(Boolean).join(" ");
   // The address box always carries the postcode (it used to be in the subject only).
@@ -7113,7 +7148,7 @@ export function buildMetroRodEmail(job, hours, poRef, sc, opts = {}) {
 <tr><td style="padding:24px 28px 0 28px"><table style="width:100%;background:#15599d;border-radius:12px;color:#ffffff;font-weight:600"><tr><td style="padding:16px 20px">${headPriority ? (target ? "SLA Response Time Within " + escH(target) : escH(job.priority || "")) : "Mostlane"}</td><td style="padding:16px 20px;text-align:right">Order No ${escH(ref)}</td></tr></table></td></tr>
 <tr><td style="padding:18px 28px 4px 28px">${boxes}${invoiceBox}</td></tr>
 <tr><td style="padding:14px 28px 0 28px"><div style="font-size:14px;color:#52606d;line-height:1.5">${opts.declineUrl ? "Please attend the above." : "Please attend the above and confirm receipt."} Contact the site on the number above to arrange access.</div></td></tr>${declineBox}
-<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.</div></td></tr>
+<tr><td style="padding:22px 28px 28px 28px"><div style="border-top:1px solid #e2e6ec;padding-top:16px;font-size:12px;color:#9aa5b1;line-height:1.6">Mostlane Ltd · Segensworth Business Centre, Fareham, PO15 5RQ<br>Sent from the Mostlane portal.${incident ? "<br>Our job reference: " + escH(incident) : ""}</div></td></tr>
 </table></td></tr></table>`;
   return { subject, html, ref, details, target };
 }
@@ -7174,7 +7209,8 @@ export async function subcontractedRows(env, tid, money) {
     if (!r) {
       r = { key: j.id, jobId: j.id, ref: j.helpdeskRef || j.id, siteCode: j.siteCode || "", siteName: j.siteName || "", postcode: j.postcode || "",
         description: String(j.description || "").slice(0, 300), jobStatus: j.status || "", priority: j.priority || "", jobFinished: finished(j),
-        drainage: isDrainageJob(j), record: j.subcontract || null, pos: [], subs: [] };
+        drainage: isDrainageJob(j), record: j.subcontract || null, pos: [], subs: [],
+        closingNote: (j.closingNote && j.closingNote.text) || "" };
       rows.set(j.id, r);
     }
     return r;
@@ -7205,7 +7241,7 @@ export async function subcontractedRows(env, tid, money) {
     }
     else rows.set("po:" + p.po_number, { key: "po:" + p.po_number, jobId: null, ref: p.incident_no || p.job_ref || "", siteCode: "", siteName: p.site || "", postcode: "",
       description: String(p.description || "").slice(0, 300), jobStatus: "", priority: "", jobFinished: false, drainage: false, record: null, pos: [po], subs: [],
-      project: projectFor(p.site) });
+      closingNote: "", project: projectFor(p.site) });
     const pr = rows.get("po:" + p.po_number);
     if (pr && !j && !pr.project) pr.suggest = suggestJobsForPo(p, jobs, df || (df = siteWordFreq(jobs)));
   }
@@ -7238,6 +7274,8 @@ export async function subcontractedRows(env, tid, money) {
     r.state = rs === "done" || rs === "returned" ? rs : r.jobFinished ? "done" : "open";
     r.closedAt = (r.record && r.record.closedAt) || null;
     r.days = r.since ? Math.max(0, Math.floor((now - Date.parse(r.since)) / 864e5)) : null;
+    const ik = incidentKey(r.ref);
+    r.incident = ik ? (ik.inc + (ik.suf ? "/" + ik.suf : "")) : "";
     if (money) {
       const priced = r.pos.filter(p => p.cost != null); r.poTotal = priced.reduce((a, p) => a + p.cost, 0); r.poUnpriced = r.pos.length - priced.length;
       r.recordCost = r.record && r.record.cost != null ? Number(r.record.cost) : null;
