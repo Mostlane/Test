@@ -7101,11 +7101,11 @@ async function updateConfig(db, body) {
 async function getSystemStatus(db) {
   const config = await getConfigMap(db);
   const now2 = /* @__PURE__ */ new Date();
-  const ukTime = new Date(now2.toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const ukTime2 = new Date(now2.toLocaleString("en-US", { timeZone: "Europe/London" }));
   const dayMap = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-  const today = dayMap[ukTime.getDay()];
-  const todayDate = ukTime.toISOString().split("T")[0];
-  const currentTime = ukTime.toTimeString().slice(0, 5);
+  const today = dayMap[ukTime2.getDay()];
+  const todayDate = ukTime2.toISOString().split("T")[0];
+  const currentTime = ukTime2.toTimeString().slice(0, 5);
   const closure = await db.prepare(`SELECT * FROM closures WHERE date = ?`).bind(todayDate).first();
   if (config.system_status === "disabled") return { mode: "disabled", message: "System is currently offline. Call office on " + config.office_phone };
   if (config.force_open_ooh === "1") return { mode: "ooh", message: null, forced: true };
@@ -8237,8 +8237,8 @@ async function updatePO(db, poNumber, body) {
   return { success: true };
 }
 async function getDashboard(db) {
-  const ukTime = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "Europe/London" }));
-  const todayDate = ukTime.toISOString().split("T")[0];
+  const ukTime2 = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "Europe/London" }));
+  const todayDate = ukTime2.toISOString().split("T")[0];
   const [uncosted, review, flagged, creditDue, unmatched, today] = await db.batch([
     db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND cost_ex_vat IS NULL AND COALESCE(status, 'open') != 'complete'`),
     db.prepare(`SELECT COUNT(*) c FROM po_log WHERE deleted = 0 AND needs_review = 1`),
@@ -32019,6 +32019,191 @@ async function writeRow(env, tid, cfg, info, dryRun) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300) };
   }
 }
+async function sheetOrderRows(env, tid) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up" };
+  const cfg = await getSheetConfig2(env, tid);
+  if (!cfg.enabled) return { ok: false, off: true, error: "spreadsheet feed is switched off" };
+  try {
+    const ur = await graphJson(env, "GET", sheetBase(cfg) + "/usedRange(valuesOnly=true)?$select=rowIndex,values");
+    const vals = ur && ur.values || [], top = Number(ur && ur.rowIndex) || 0;
+    const h = vals.findIndex((r) => String(r[1] || "").trim().toLowerCase() === "order number");
+    if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
+    const byOrder = {};
+    for (let i = h + 1; i < vals.length; i++) {
+      const r = vals[i], o = sheetOrderNo(r[1]);
+      if (!o) continue;
+      const k = o.toLowerCase();
+      (byOrder[k] = byOrder[k] || []).push({
+        row: top + i + 1,
+        type: String(r[3] || "").trim(),
+        name: String(r[4] || "").trim(),
+        desc: String(r[5] || "").trim(),
+        trade: String(r[9] || "").trim(),
+        miles: String(r[12] == null ? "" : r[12]).trim()
+      });
+    }
+    return { ok: true, byOrder, sheet: cfg.sheet };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 300) };
+  }
+}
+
+// src/lib/intakecheck.js
+var CFG = (tid) => "intakecheck:" + (Math.trunc(Number(tid)) || 1);
+var SENT = (tid) => "intakecheck:sent:" + (Math.trunc(Number(tid)) || 1);
+var RUN_HOUR = 7;
+var RUN_MIN = 30;
+var CONCERTO_JOB = /Helpdesk action - (?:FM Approved|AM01|Re-open)|New Job Alert/i;
+var CLIENT_DOMAINS = /concerto\.co\.uk|jotform\.com|chapplins\.co\.uk/i;
+function london(d = /* @__PURE__ */ new Date()) {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d).reduce((a, x) => {
+    a[x.type] = x.value;
+    return a;
+  }, {});
+  return { dow: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
+}
+var esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var ukTime = (iso) => {
+  try {
+    return new Date(iso).toLocaleString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return iso;
+  }
+};
+async function getIntakeCheckConfig(env, tid) {
+  let c = {};
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG(tid)).first();
+    if (r) c = JSON.parse(r.value) || {};
+  } catch {
+  }
+  return { enabled: c.enabled !== false, recipients: Array.isArray(c.recipients) ? c.recipients : [] };
+}
+async function setIntakeCheckConfig(env, tid, { enabled, recipients }) {
+  const cur = await getIntakeCheckConfig(env, tid);
+  const next = {
+    enabled: enabled === void 0 ? cur.enabled : !!enabled,
+    recipients: Array.isArray(recipients) ? recipients.map((x) => String(x || "").trim().toLowerCase()).filter((x) => /@/.test(x)).slice(0, 10) : cur.recipients
+  };
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(CFG(tid), JSON.stringify(next), Math.trunc(Number(tid)) || 1).run();
+  return next;
+}
+async function defaultRecipients(env) {
+  const owner = env.OWNER_USERNAME || "Jamie Line";
+  try {
+    const r = await env.DB.prepare("SELECT email FROM users WHERE username=?").bind(owner).first();
+    if (r && r.email) return [r.email];
+  } catch {
+  }
+  return [];
+}
+async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
+  const now2 = /* @__PURE__ */ new Date(), since = new Date(now2.getTime() - hours * 36e5).toISOString();
+  const issues = [];
+  let emails = [];
+  try {
+    const { results } = await env.DB.prepare("SELECT id, received_at, from_addr, orig_from, subject, outcome, reason, reference, job_id FROM inbound_emails WHERE received_at >= ? ORDER BY received_at").bind(since).all();
+    emails = results || [];
+  } catch (e) {
+    issues.push({ section: "intake", text: "Couldn't read the email log: " + String(e.message || e).slice(0, 120) });
+  }
+  for (const e of emails) {
+    const who = e.orig_from || e.from_addr || "";
+    if (e.outcome === "failed") issues.push({ section: "intake", ref: e.reference || "", text: `Email failed: \u201C${e.subject}\u201D \u2014 ${String(e.reason || "").slice(0, 160)}`, fix: "Open Email intake and press \u21BB Re-run on it." });
+    else if (e.outcome === "review") issues.push({ section: "intake", ref: e.reference || "", text: `Waiting in \u201CNeeds a look\u201D: \u201C${e.subject}\u201D`, fix: "Open Email intake \u2192 Needs a look, check the fields and create the job (or dismiss)." });
+    else if (e.outcome === "ignored" && CLIENT_DOMAINS.test(who)) issues.push({ section: "intake", ref: "", text: `A client email was ignored: \u201C${e.subject}\u201D from ${who}`, fix: "Check the sender is on the Email intake allow-list, then Re-run." });
+  }
+  const jobs = emails.filter((e) => (e.outcome === "created" || e.outcome === "updated") && CONCERTO_JOB.test(e.subject || ""));
+  if (jobs.length) {
+    const ids = [...new Set(jobs.map((j) => j.job_id).filter(Boolean))];
+    const onBoard = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      try {
+        const { results } = await env.DB.prepare(`SELECT id FROM sla_jobs WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+        (results || []).forEach((r) => onBoard.add(r.id));
+      } catch {
+      }
+    }
+    const sheet = await sheetOrderRows(env, tid);
+    if (!sheet.ok && !sheet.off) issues.push({ section: "sheet", text: "Couldn't open the Co-op spreadsheet to check it: " + sheet.error, fix: "Check the file hasn't been moved/renamed and the Concerto tab still exists." });
+    const seen = /* @__PURE__ */ new Set();
+    for (const j of jobs) {
+      const order = sheetOrderNo(j.reference || "");
+      if (!order || seen.has(order)) continue;
+      seen.add(order);
+      if (j.job_id && !onBoard.has(j.job_id)) issues.push({ section: "board", ref: order, text: `Job ${order} came in at ${ukTime(j.received_at)} but is no longer on the board.`, fix: "Check it wasn't deleted by mistake (Email intake \u2192 Re-run puts it back)." });
+      if (!sheet.ok || j.outcome !== "created") continue;
+      const rows = sheet.byOrder[order.toLowerCase()];
+      if (!rows) {
+        issues.push({ section: "sheet", ref: order, text: `${order} (${ukTime(j.received_at)}) is not on the spreadsheet.`, fix: "Email intake \u2192 \u{1F4CA} Co-op spreadsheet \u2192 type the order \u2192 Add." });
+        continue;
+      }
+      if (rows.length > 1) issues.push({ section: "sheet", ref: order, text: `${order} is on the spreadsheet ${rows.length} times (rows ${rows.map((r2) => r2.row).join(", ")}).`, fix: "Delete the extra row(s)." });
+      const r = rows[0], miss = [];
+      if (!r.trade) miss.push("trade");
+      if (!r.miles || r.miles === "0") miss.push("mileage");
+      if (!r.type) miss.push("type");
+      if (!r.name) miss.push("store name");
+      if (miss.length) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) is missing: ${miss.join(", ")}.`, fix: "Fill in by hand, or Email intake \u2192 Add again (fills blanks only)." });
+      else if (/…$/.test(r.desc) || r.desc.length > 75) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) has the long, cut-off description rather than a short summary.`, fix: "Retype column F if you want it tidy (cosmetic)." });
+    }
+  }
+  for (const p of await coopSheetPending(env, tid)) {
+    if (Date.now() - new Date(p.at).getTime() < 30 * 6e4) continue;
+    issues.push({ section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake \u2192 Add it by hand." });
+  }
+  const start = london(new Date(now2.getTime() - hours * 36e5));
+  if (!emails.length && start.dow >= 1 && start.dow <= 5) issues.push({ section: "intake", text: `No job emails at all reached the portal in the last ${hours} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
+  return { since, until: now2.toISOString(), emails: emails.length, concertoJobs: jobs.length, issues };
+}
+function renderEmail(res) {
+  const sec = { intake: "\u{1F4E8} Emails", board: "\u{1F4CB} Job board", sheet: "\u{1F4CA} Co-op spreadsheet" };
+  const groups = ["intake", "board", "sheet"].map((k) => {
+    const list = res.issues.filter((i) => i.section === k);
+    if (!list.length) return "";
+    return `<h3 style="margin:18px 0 6px;color:#003366;font-size:15px">${sec[k]} (${list.length})</h3><ul style="margin:0;padding-left:18px">` + list.map((i) => `<li style="margin:0 0 8px">${esc3(i.text)}${i.fix ? `<br><span style="color:#5b6b7b;font-size:13px">\u2192 ${esc3(i.fix)}</span>` : ""}</li>`).join("") + "</ul>";
+  }).join("");
+  return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f2438;max-width:640px">
+<p>Morning \u2014 the daily intake check found <b>${res.issues.length} thing${res.issues.length === 1 ? "" : "s"}</b> to sort out
+(${ukTime(res.since)} \u2192 ${ukTime(res.until)}: ${res.emails} email${res.emails === 1 ? "" : "s"} received, ${res.concertoJobs} Concerto job${res.concertoJobs === 1 ? "" : "s"}).</p>
+${groups}
+<p style="margin-top:20px"><a href="https://mostlane-portal.com/email-intake.html" style="background:#003366;color:#fff;padding:9px 14px;border-radius:8px;text-decoration:none">Open Email intake</a></p>
+<p style="color:#8a97a5;font-size:12px">Sent automatically by the portal. You only get this email when something needs fixing.</p></div>`;
+}
+async function sendIntakeCheck(env, tid, res, { force = false } = {}) {
+  if (!res.issues.length && !force) return { ok: true, sent: false, reason: "nothing to report" };
+  const cfg = await getIntakeCheckConfig(env, tid);
+  const to = cfg.recipients.length ? cfg.recipients : await defaultRecipients(env);
+  if (!to.length) return { ok: false, error: "no recipient \u2014 set one on the Email intake page" };
+  const subject = res.issues.length ? `\u26A0 Portal intake check: ${res.issues.length} to fix` : "\u2705 Portal intake check: nothing to fix";
+  const html = res.issues.length ? renderEmail(res) : `<p>The daily intake check found nothing to fix (${res.emails} emails, ${res.concertoJobs} Concerto jobs in the last 24 h).</p>`;
+  const { sendSubconMail: sendSubconMail2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+  const r = await sendSubconMail2(env, Math.trunc(Number(tid)) || 1, { to, subject, html });
+  return { ok: !!r.ok, sent: !!r.ok, to, via: r.via, error: r.error };
+}
+async function sweepIntakeCheck(env, tid = 1) {
+  const L2 = london();
+  if (L2.hour < RUN_HOUR || L2.hour === RUN_HOUR && L2.minute < RUN_MIN) return;
+  const cfg = await getIntakeCheckConfig(env, tid);
+  if (!cfg.enabled) return;
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(SENT(tid)).first();
+    if (r && r.value === L2.date) return;
+  } catch {
+  }
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(SENT(tid), L2.date, Math.trunc(Number(tid)) || 1).run();
+  const res = await runIntakeCheck(env, tid, { hours: 24 });
+  const s = await sendIntakeCheck(env, tid, res);
+  if (res.issues.length) {
+    try {
+      const { sendToUser: sendToUser2 } = await Promise.resolve().then(() => (init_push(), push_exports));
+      await sendToUser2(env, tid, env.OWNER_USERNAME || "Jamie Line", { title: `\u26A0 Intake check: ${res.issues.length} to fix`, body: res.issues.slice(0, 3).map((i) => i.text).join(" \xB7 ").slice(0, 180), url: "/email-intake.html", tag: "intakecheck:" + L2.date });
+    } catch {
+    }
+  }
+  return s;
+}
 
 // src/routes/emailjob.js
 init_push();
@@ -32591,6 +32776,18 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email \u2192 job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " \u2014 created by " + me }).catch(() => {
     }));
     return json({ ok: true, ...res, fields }, {}, env, request);
+  }
+  if (sub === "/daily-check" && method === "GET") {
+    const hours = Math.min(168, Math.max(1, Number(url.searchParams.get("hours")) || 24));
+    const res = await runIntakeCheck(env, tid, { hours });
+    return json({ ok: true, ...res, config: await getIntakeCheckConfig(env, tid) }, {}, env, request);
+  }
+  if (sub === "/daily-check" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (b.config) return json({ ok: true, config: await setIntakeCheckConfig(env, tid, b.config) }, {}, env, request);
+    const res = await runIntakeCheck(env, tid, { hours: Math.min(168, Math.max(1, Number(b.hours) || 24)) });
+    const s = await sendIntakeCheck(env, tid, res, { force: b.force === true });
+    return json({ ok: s.ok, ...res, send: s }, { status: s.ok ? 200 : 502 }, env, request);
   }
   if (sub === "/sheet-check" && method === "GET") {
     const r = await inspectSheet(env, tid, "");
@@ -45414,12 +45611,12 @@ function jsonArrayAfter(text, key) {
   if (i < 0) return null;
   const start = text.indexOf("[", i);
   if (start < 0) return null;
-  let depth = 0, inStr = false, esc4 = false;
+  let depth = 0, inStr = false, esc5 = false;
   for (let j = start; j < text.length; j++) {
     const c = text[j];
     if (inStr) {
-      if (esc4) esc4 = false;
-      else if (c === "\\") esc4 = true;
+      if (esc5) esc5 = false;
+      else if (c === "\\") esc5 = true;
       else if (c === '"') inStr = false;
     } else if (c === '"') inStr = true;
     else if (c === "[") depth++;
@@ -46159,7 +46356,7 @@ async function getConfig5(env, tid) {
     recipients: Array.isArray(c.recipients) ? c.recipients.filter(Boolean) : []
   };
 }
-function london(d = /* @__PURE__ */ new Date()) {
+function london2(d = /* @__PURE__ */ new Date()) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/London",
     year: "numeric",
@@ -46211,7 +46408,7 @@ var minsOfDay = (hhmm) => {
   return h * 60 + m;
 };
 function plausible(d) {
-  const m = minsOfDay(london(d).hhmm);
+  const m = minsOfDay(london2(d).hhmm);
   return m >= SCAN_EARLY && m <= SCAN_LATE;
 }
 async function loadUnconfirmedScans(db, from, to) {
@@ -46242,7 +46439,7 @@ async function loadPeriod(env, from, to) {
     WHERE v.check_in_at >= ? AND v.check_in_at < ?
     ORDER BY v.check_in_at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
   const scans = await loadUnconfirmedScans(db, from, to);
-  const today = london().key;
+  const today = london2().key;
   const spans = /* @__PURE__ */ new Map();
   for (const r of res.results || []) {
     const a = parseUtc(r.check_in_at);
@@ -46271,7 +46468,7 @@ async function loadPeriod(env, from, to) {
   for (const r of res.results || []) {
     const inD = parseUtc(r.check_in_at);
     if (!inD) continue;
-    const day = london(inD).key;
+    const day = london2(inD).key;
     if (day < from || day > to) continue;
     let outD = parseUtc(r.check_out_at);
     const auto = Number(r.auto_checkout) === 1;
@@ -46285,7 +46482,7 @@ async function loadPeriod(env, from, to) {
       for (const s of scansBy.get(r.person_id) || []) {
         const t = s._d.getTime();
         if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
-        if (london(s._d).key !== day || !plausible(s._d)) continue;
+        if (london2(s._d).key !== day || !plausible(s._d)) continue;
         scannedOut = s._d;
       }
     }
@@ -46311,8 +46508,8 @@ async function loadPeriod(env, from, to) {
       _t: inD.getTime(),
       date: dayLabel(day),
       site: r.site_code || r.provided_site_name || "",
-      inTime: london(inD).hhmm,
-      outTime: outD ? london(outD).hhmm : "",
+      inTime: london2(inD).hhmm,
+      outTime: outD ? london2(outD).hhmm : "",
       mins: outD ? Math.max(0, (outD - inD) / 6e4) : 0,
       inOk,
       outOk,
@@ -46330,7 +46527,7 @@ async function loadPeriod(env, from, to) {
     for (let i = 0; i < ins.length; i++) {
       const s = ins[i];
       if (used.has(s)) continue;
-      const t = s._d.getTime(), day = london(s._d).key;
+      const t = s._d.getTime(), day = london2(s._d).key;
       if (day < from || day > to || !plausible(s._d) || insideVisit(pid, t)) {
         used.add(s);
         continue;
@@ -46340,7 +46537,7 @@ async function loadPeriod(env, from, to) {
       let end = null;
       for (let j = i + 1; j < ins.length; j++) {
         const e = ins[j], et = e._d.getTime();
-        if (london(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
+        if (london2(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
         used.add(e);
         if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) end = e._d;
         else if ((e.site || "") !== (s.site || "")) {
@@ -46353,8 +46550,8 @@ async function loadPeriod(env, from, to) {
         _t: t,
         date: dayLabel(day),
         site: s.site || "",
-        inTime: london(s._d).hhmm,
-        outTime: end ? london(end).hhmm : "",
+        inTime: london2(s._d).hhmm,
+        outTime: end ? london2(end).hhmm : "",
         mins: end ? Math.max(0, (end - s._d) / 6e4) : 0,
         inOk: false,
         outOk: false,
@@ -46381,7 +46578,7 @@ async function buildPdf(env, kind, dateKey) {
     logo = logoBytes();
   } catch (e) {
   }
-  const now2 = london();
+  const now2 = london2();
   const bytes = buildSiteLogTimesheetPdf({
     title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
     periodLabel: per.label,
@@ -46396,7 +46593,7 @@ function b64(bytes) {
   for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
   return btoa(s);
 }
-var esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var esc4 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 async function emailTimesheet(env, tid, kind, dateKey, recipients) {
   const { per, people, bytes } = await buildPdf(env, kind, dateKey);
   const rows = people.map((p) => {
@@ -46407,10 +46604,10 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
       t.unver ? `${t.unver} not verified` : "",
       t.open ? `${t.open} still in` : ""
     ].filter(Boolean).join(" \xB7 ");
-    return `<tr><td style="padding:4px 10px 4px 0">${esc3(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc3(flag) : "All verified"}</td></tr>`;
+    return `<tr><td style="padding:4px 10px 4px 0">${esc4(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc4(flag) : "All verified"}</td></tr>`;
   }).join("");
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
-    <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc3(per.label)}</b></p>
+    <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc4(per.label)}</b></p>
     ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
     <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded.</p></div>`;
   const r = await sendEmail(env, {
@@ -46425,7 +46622,7 @@ async function sweepSitelogTimesheets(env, tid = 1) {
   if (!env.SITELOG_DB) return;
   const cfg = await getConfig5(env, tid);
   if (!cfg.enabled || !cfg.recipients.length) return;
-  const now2 = london();
+  const now2 = london2();
   const sent = await readKV(env, tid, SENT_KEY(tid)) || {};
   if (cfg.weekly && dow(now2.key) === 1 && now2.hhmm >= WEEKLY_FROM) {
     const lastMon = addDays3(now2.key, -7);
@@ -46474,7 +46671,7 @@ async function handle39(request, env, ctx, url, sess) {
   if (path === "/data" && request.method === "GET") {
     const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
     const qd = url.searchParams.get("date") || "";
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london2().key;
     const per = periodFor(k, d);
     let people;
     try {
@@ -46485,7 +46682,7 @@ async function handle39(request, env, ctx, url, sess) {
     return json({
       ok: true,
       period: per,
-      today: london().key,
+      today: london2().key,
       people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
     }, {}, env, request);
   }
@@ -46504,7 +46701,7 @@ async function handle39(request, env, ctx, url, sess) {
     return json({ ok: true, config: next }, {}, env, request);
   }
   const kind = body.kind === "weekly" ? "weekly" : "daily";
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays3(london().key, -7) : london().key;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays3(london2().key, -7) : london2().key;
   if (path === "/pdf" && request.method === "POST") {
     const { per, bytes } = await buildPdf(env, kind, date);
     return new Response(bytes, { headers: Object.assign({
@@ -51104,6 +51301,7 @@ var worker = {
     ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(sweepCoopSheetPending(env, 1).catch((e) => console.error("scheduled co-op sheet retry:", e)));
+    ctx.waitUntil(sweepIntakeCheck(env, 1).catch((e) => console.error("scheduled intake check:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }

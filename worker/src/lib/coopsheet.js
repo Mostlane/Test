@@ -348,3 +348,25 @@ async function writeRow(env, tid, cfg, info, dryRun) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300) };
   }
 }
+
+// Every data row on the tab, keyed by order number — for the daily check.
+export async function sheetOrderRows(env, tid) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up" };
+  const cfg = await getSheetConfig(env, tid);
+  if (!cfg.enabled) return { ok: false, off: true, error: "spreadsheet feed is switched off" };
+  try {
+    const ur = await graphJson(env, "GET", sheetBase(cfg) + "/usedRange(valuesOnly=true)?$select=rowIndex,values");
+    const vals = (ur && ur.values) || [], top = Number(ur && ur.rowIndex) || 0;
+    const h = vals.findIndex(r => String(r[1] || "").trim().toLowerCase() === "order number");
+    if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
+    const byOrder = {};
+    for (let i = h + 1; i < vals.length; i++) {
+      const r = vals[i], o = sheetOrderNo(r[1]);
+      if (!o) continue;
+      const k = o.toLowerCase();
+      (byOrder[k] = byOrder[k] || []).push({ row: top + i + 1, type: String(r[3] || "").trim(), name: String(r[4] || "").trim(),
+        desc: String(r[5] || "").trim(), trade: String(r[9] || "").trim(), miles: String(r[12] == null ? "" : r[12]).trim() });
+    }
+    return { ok: true, byOrder, sheet: cfg.sheet };
+  } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 300) }; }
+}

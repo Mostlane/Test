@@ -64,7 +64,8 @@ import * as programmes from "./routes/programmes.js"; // DONE (job programmes: b
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
-import * as coopsheet from "./lib/coopsheet.js";   // Co-op spreadsheet feed: retry queued rows
+import * as coopsheet from "./lib/coopsheet.js";
+import * as intakecheck from "./lib/intakecheck.js"; // daily "anything to fix?" email   // Co-op spreadsheet feed: retry queued rows
 import * as client from "./routes/client.js";      // DONE  (external client portal: walled per-org jobs + raise + compliance)
 import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
 import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
@@ -295,6 +296,7 @@ const worker = {
     ctx.waitUntil(sitelogts.sweepSitelogTimesheets(env, 1).catch(e => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(coopsheet.sweepCoopSheetPending(env, 1).catch(e => console.error("scheduled co-op sheet retry:", e)));
+    ctx.waitUntil(intakecheck.sweepIntakeCheck(env, 1).catch(e => console.error("scheduled intake check:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {

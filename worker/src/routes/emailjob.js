@@ -26,6 +26,7 @@ import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { recordFbcJob, appendFbcMessage } from "./fbc.js";
 import { appendCoopSheetRow, inspectSheet, coopSheetPending, jobForOrder } from "../lib/coopsheet.js";
+import { runIntakeCheck, sendIntakeCheck, getIntakeCheckConfig, setIntakeCheckConfig } from "../lib/intakecheck.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 import { onceMigration } from "../lib/once.js";
 
@@ -562,6 +563,19 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
   }
   // Co-op spreadsheet feed: check the link (read-only), or add one job's row by
   // its reference (backfill / retry after a failure — skips one already there).
+  // Daily intake check: preview (GET), run + email now (POST {send:true}), config.
+  if (sub === "/daily-check" && method === "GET") {
+    const hours = Math.min(168, Math.max(1, Number(url.searchParams.get("hours")) || 24));
+    const res = await runIntakeCheck(env, tid, { hours });
+    return json({ ok: true, ...res, config: await getIntakeCheckConfig(env, tid) }, {}, env, request);
+  }
+  if (sub === "/daily-check" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (b.config) return json({ ok: true, config: await setIntakeCheckConfig(env, tid, b.config) }, {}, env, request);
+    const res = await runIntakeCheck(env, tid, { hours: Math.min(168, Math.max(1, Number(b.hours) || 24)) });
+    const s = await sendIntakeCheck(env, tid, res, { force: b.force === true });
+    return json({ ok: s.ok, ...res, send: s }, { status: s.ok ? 200 : 502 }, env, request);
+  }
   if (sub === "/sheet-check" && method === "GET") {
     const r = await inspectSheet(env, tid, "");
     const pending = await coopSheetPending(env, tid);
