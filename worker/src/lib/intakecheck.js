@@ -44,7 +44,7 @@ async function defaultRecipients(env) {
 }
 
 // Build the list of issues for the window [since, now). Read-only.
-export async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
+export async function runIntakeCheck(env, tid, { hours = 24, silenceHours = null, cosmetic = true } = {}) {
   const now = new Date(), since = new Date(now.getTime() - hours * 3600e3).toISOString();
   const issues = []; // {section, ref, text, fix}
   let emails = [];
@@ -56,9 +56,9 @@ export async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
   // 1) Emails that didn't do their job.
   for (const e of emails) {
     const who = e.orig_from || e.from_addr || "";
-    if (e.outcome === "failed") issues.push({ section: "intake", ref: e.reference || "", text: `Email failed: “${e.subject}” — ${String(e.reason || "").slice(0, 160)}`, fix: "Open Email intake and press ↻ Re-run on it." });
-    else if (e.outcome === "review") issues.push({ section: "intake", ref: e.reference || "", text: `Waiting in “Needs a look”: “${e.subject}”`, fix: "Open Email intake → Needs a look, check the fields and create the job (or dismiss)." });
-    else if (e.outcome === "ignored" && CLIENT_DOMAINS.test(who)) issues.push({ section: "intake", ref: "", text: `A client email was ignored: “${e.subject}” from ${who}`, fix: "Check the sender is on the Email intake allow-list, then Re-run." });
+    if (e.outcome === "failed") issues.push({ kind: "email_failed", emailId: e.id, section: "intake", ref: e.reference || "", text: `Email failed: “${e.subject}” — ${String(e.reason || "").slice(0, 160)}`, fix: "Open Email intake and press ↻ Re-run on it." });
+    else if (e.outcome === "review") issues.push({ kind: "review", emailId: e.id, section: "intake", ref: e.reference || "", text: `Waiting in “Needs a look”: “${e.subject}”`, fix: "Open Email intake → Needs a look, check the fields and create the job (or dismiss)." });
+    else if (e.outcome === "ignored" && CLIENT_DOMAINS.test(who)) issues.push({ kind: "ignored", emailId: e.id, section: "intake", ref: "", text: `A client email was ignored: “${e.subject}” from ${who}`, fix: "Check the sender is on the Email intake allow-list, then Re-run." });
   }
 
   // 2) Concerto jobs → on the board + on the spreadsheet, filled in.
@@ -71,35 +71,36 @@ export async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
       try { const { results } = await env.DB.prepare(`SELECT id FROM sla_jobs WHERE id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all(); (results || []).forEach(r => onBoard.add(r.id)); } catch {}
     }
     const sheet = await sheetOrderRows(env, tid);
-    if (!sheet.ok && !sheet.off) issues.push({ section: "sheet", text: "Couldn't open the Co-op spreadsheet to check it: " + sheet.error, fix: "Check the file hasn't been moved/renamed and the Concerto tab still exists." });
+    if (!sheet.ok && !sheet.off) issues.push({ kind: "sheet_unreachable", section: "sheet", text: "Couldn't open the Co-op spreadsheet to check it: " + sheet.error, fix: "Check the file hasn't been moved/renamed and the Concerto tab still exists." });
     const seen = new Set();
     for (const j of jobs) {
       const order = sheetOrderNo(j.reference || "");
       if (!order || seen.has(order)) continue; seen.add(order);
-      if (j.job_id && !onBoard.has(j.job_id)) issues.push({ section: "board", ref: order, text: `Job ${order} came in at ${ukTime(j.received_at)} but is no longer on the board.`, fix: "Check it wasn't deleted by mistake (Email intake → Re-run puts it back)." });
+      if (j.job_id && !onBoard.has(j.job_id)) issues.push({ kind: "board_missing", emailId: j.id, section: "board", ref: order, text: `Job ${order} came in at ${ukTime(j.received_at)} but is no longer on the board.`, fix: "Check it wasn't deleted by mistake (Email intake → Re-run puts it back)." });
       if (!sheet.ok || j.outcome !== "created") continue;
       const rows = sheet.byOrder[order.toLowerCase()];
-      if (!rows) { issues.push({ section: "sheet", ref: order, text: `${order} (${ukTime(j.received_at)}) is not on the spreadsheet.`, fix: "Email intake → 📊 Co-op spreadsheet → type the order → Add." }); continue; }
-      if (rows.length > 1) issues.push({ section: "sheet", ref: order, text: `${order} is on the spreadsheet ${rows.length} times (rows ${rows.map(r => r.row).join(", ")}).`, fix: "Delete the extra row(s)." });
+      if (!rows) { issues.push({ kind: "sheet_missing", section: "sheet", ref: order, text: `${order} (${ukTime(j.received_at)}) is not on the spreadsheet.`, fix: "Email intake → 📊 Co-op spreadsheet → type the order → Add." }); continue; }
+      if (rows.length > 1) issues.push({ kind: "sheet_dup", section: "sheet", ref: order, text: `${order} is on the spreadsheet ${rows.length} times (rows ${rows.map(r => r.row).join(", ")}).`, fix: "Delete the extra row(s)." });
       const r = rows[0], miss = [];
       if (!r.trade) miss.push("trade");
       if (!r.miles || r.miles === "0") miss.push("mileage");
       if (!r.type) miss.push("type");
       if (!r.name) miss.push("store name");
-      if (miss.length) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) is missing: ${miss.join(", ")}.`, fix: "Fill in by hand, or Email intake → Add again (fills blanks only)." });
-      else if (/…$/.test(r.desc) || r.desc.length > 75) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) has the long, cut-off description rather than a short summary.`, fix: "Retype column F if you want it tidy (cosmetic)." });
+      if (miss.length) issues.push({ kind: "sheet_blank", section: "sheet", ref: order, text: `${order} (row ${r.row}) is missing: ${miss.join(", ")}.`, fix: "Fill in by hand, or Email intake → Add again (fills blanks only)." });
+      else if (cosmetic && (/…$/.test(r.desc) || r.desc.length > 75)) issues.push({ kind: "sheet_desc", section: "sheet", ref: order, text: `${order} (row ${r.row}) has the long, cut-off description rather than a short summary.`, fix: "Retype column F if you want it tidy (cosmetic)." });
     }
   }
 
   // 3) Still queued for the spreadsheet (older than 30 min — the cron hasn't cleared them).
   for (const p of await coopSheetPending(env, tid)) {
     if (Date.now() - new Date(p.at).getTime() < 30 * 60e3) continue;
-    issues.push({ section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake → Add it by hand." });
+    issues.push({ kind: "sheet_pending", section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake → Add it by hand." });
   }
 
   // 4) Silence on a working day = the forward has probably stopped.
-  const start = london(new Date(now.getTime() - hours * 3600e3));
-  if (!emails.length && start.dow >= 1 && start.dow <= 5) issues.push({ section: "intake", text: `No job emails at all reached the portal in the last ${hours} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
+  const sh = silenceHours || hours;
+  const start = london(new Date(now.getTime() - sh * 3600e3)), recent = emails.filter(e => e.received_at >= new Date(now.getTime() - sh * 3600e3).toISOString());
+  if (!recent.length && start.dow >= 1 && start.dow <= 5) issues.push({ kind: "silence", section: "intake", text: `No job emails at all reached the portal in the last ${sh} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
 
   return { since, until: now.toISOString(), emails: emails.length, concertoJobs: jobs.length, issues };
 }
@@ -147,4 +148,29 @@ export async function sweepIntakeCheck(env, tid = 1) {
       await sendToUser(env, tid, env.OWNER_USERNAME || "Jamie Line", { title: `⚠ Intake check: ${res.issues.length} to fix`, body: res.issues.slice(0, 3).map(i => i.text).join(" · ").slice(0, 180), url: "/email-intake.html", tag: "intakecheck:" + L.date }); } catch {}
   }
   return s;
+}
+
+// ── Live issues for the ⚠ on the SLA board + sidebar ─────────────────────────
+// A 7-day look-back so a problem stays flagged until it's actually fixed (not
+// just until it ages out of 24 h); cosmetic description warnings are left to the
+// morning email. Saved to app_config so every page load reads it for free.
+const LIVE = tid => "intakecheck:live:" + (Math.trunc(Number(tid)) || 1);
+const FIXABLE = { sheet_missing: 1, sheet_blank: 1, sheet_pending: 1 };
+export async function refreshLiveIssues(env, tid) {
+  const res = await runIntakeCheck(env, tid, { hours: 168, silenceHours: 24, cosmetic: false });
+  const issues = res.issues.map(i => ({ ...i, id: (i.kind || "x") + ":" + (i.ref || i.emailId || ""), fixable: !!FIXABLE[i.kind] }));
+  const live = { at: new Date().toISOString(), issues };
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(LIVE(tid), JSON.stringify(live), Math.trunc(Number(tid)) || 1).run();
+  return live;
+}
+export async function getLiveIssues(env, tid) {
+  try { const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(LIVE(tid)).first(); if (r) return JSON.parse(r.value); } catch {}
+  return null;
+}
+// Cron: every 15 minutes.
+export async function sweepLiveIssues(env, tid = 1) {
+  const cur = await getLiveIssues(env, tid);
+  if (cur && Date.now() - new Date(cur.at).getTime() < 14 * 60e3) return cur;
+  return refreshLiveIssues(env, tid);
 }

@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -32092,7 +32097,7 @@ async function defaultRecipients(env) {
   }
   return [];
 }
-async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
+async function runIntakeCheck(env, tid, { hours = 24, silenceHours = null, cosmetic = true } = {}) {
   const now2 = /* @__PURE__ */ new Date(), since = new Date(now2.getTime() - hours * 36e5).toISOString();
   const issues = [];
   let emails = [];
@@ -32104,9 +32109,9 @@ async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
   }
   for (const e of emails) {
     const who = e.orig_from || e.from_addr || "";
-    if (e.outcome === "failed") issues.push({ section: "intake", ref: e.reference || "", text: `Email failed: \u201C${e.subject}\u201D \u2014 ${String(e.reason || "").slice(0, 160)}`, fix: "Open Email intake and press \u21BB Re-run on it." });
-    else if (e.outcome === "review") issues.push({ section: "intake", ref: e.reference || "", text: `Waiting in \u201CNeeds a look\u201D: \u201C${e.subject}\u201D`, fix: "Open Email intake \u2192 Needs a look, check the fields and create the job (or dismiss)." });
-    else if (e.outcome === "ignored" && CLIENT_DOMAINS.test(who)) issues.push({ section: "intake", ref: "", text: `A client email was ignored: \u201C${e.subject}\u201D from ${who}`, fix: "Check the sender is on the Email intake allow-list, then Re-run." });
+    if (e.outcome === "failed") issues.push({ kind: "email_failed", emailId: e.id, section: "intake", ref: e.reference || "", text: `Email failed: \u201C${e.subject}\u201D \u2014 ${String(e.reason || "").slice(0, 160)}`, fix: "Open Email intake and press \u21BB Re-run on it." });
+    else if (e.outcome === "review") issues.push({ kind: "review", emailId: e.id, section: "intake", ref: e.reference || "", text: `Waiting in \u201CNeeds a look\u201D: \u201C${e.subject}\u201D`, fix: "Open Email intake \u2192 Needs a look, check the fields and create the job (or dismiss)." });
+    else if (e.outcome === "ignored" && CLIENT_DOMAINS.test(who)) issues.push({ kind: "ignored", emailId: e.id, section: "intake", ref: "", text: `A client email was ignored: \u201C${e.subject}\u201D from ${who}`, fix: "Check the sender is on the Email intake allow-list, then Re-run." });
   }
   const jobs = emails.filter((e) => (e.outcome === "created" || e.outcome === "updated") && CONCERTO_JOB.test(e.subject || ""));
   if (jobs.length) {
@@ -32121,35 +32126,36 @@ async function runIntakeCheck(env, tid, { hours = 24 } = {}) {
       }
     }
     const sheet = await sheetOrderRows(env, tid);
-    if (!sheet.ok && !sheet.off) issues.push({ section: "sheet", text: "Couldn't open the Co-op spreadsheet to check it: " + sheet.error, fix: "Check the file hasn't been moved/renamed and the Concerto tab still exists." });
+    if (!sheet.ok && !sheet.off) issues.push({ kind: "sheet_unreachable", section: "sheet", text: "Couldn't open the Co-op spreadsheet to check it: " + sheet.error, fix: "Check the file hasn't been moved/renamed and the Concerto tab still exists." });
     const seen = /* @__PURE__ */ new Set();
     for (const j of jobs) {
       const order = sheetOrderNo(j.reference || "");
       if (!order || seen.has(order)) continue;
       seen.add(order);
-      if (j.job_id && !onBoard.has(j.job_id)) issues.push({ section: "board", ref: order, text: `Job ${order} came in at ${ukTime(j.received_at)} but is no longer on the board.`, fix: "Check it wasn't deleted by mistake (Email intake \u2192 Re-run puts it back)." });
+      if (j.job_id && !onBoard.has(j.job_id)) issues.push({ kind: "board_missing", emailId: j.id, section: "board", ref: order, text: `Job ${order} came in at ${ukTime(j.received_at)} but is no longer on the board.`, fix: "Check it wasn't deleted by mistake (Email intake \u2192 Re-run puts it back)." });
       if (!sheet.ok || j.outcome !== "created") continue;
       const rows = sheet.byOrder[order.toLowerCase()];
       if (!rows) {
-        issues.push({ section: "sheet", ref: order, text: `${order} (${ukTime(j.received_at)}) is not on the spreadsheet.`, fix: "Email intake \u2192 \u{1F4CA} Co-op spreadsheet \u2192 type the order \u2192 Add." });
+        issues.push({ kind: "sheet_missing", section: "sheet", ref: order, text: `${order} (${ukTime(j.received_at)}) is not on the spreadsheet.`, fix: "Email intake \u2192 \u{1F4CA} Co-op spreadsheet \u2192 type the order \u2192 Add." });
         continue;
       }
-      if (rows.length > 1) issues.push({ section: "sheet", ref: order, text: `${order} is on the spreadsheet ${rows.length} times (rows ${rows.map((r2) => r2.row).join(", ")}).`, fix: "Delete the extra row(s)." });
+      if (rows.length > 1) issues.push({ kind: "sheet_dup", section: "sheet", ref: order, text: `${order} is on the spreadsheet ${rows.length} times (rows ${rows.map((r2) => r2.row).join(", ")}).`, fix: "Delete the extra row(s)." });
       const r = rows[0], miss = [];
       if (!r.trade) miss.push("trade");
       if (!r.miles || r.miles === "0") miss.push("mileage");
       if (!r.type) miss.push("type");
       if (!r.name) miss.push("store name");
-      if (miss.length) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) is missing: ${miss.join(", ")}.`, fix: "Fill in by hand, or Email intake \u2192 Add again (fills blanks only)." });
-      else if (/…$/.test(r.desc) || r.desc.length > 75) issues.push({ section: "sheet", ref: order, text: `${order} (row ${r.row}) has the long, cut-off description rather than a short summary.`, fix: "Retype column F if you want it tidy (cosmetic)." });
+      if (miss.length) issues.push({ kind: "sheet_blank", section: "sheet", ref: order, text: `${order} (row ${r.row}) is missing: ${miss.join(", ")}.`, fix: "Fill in by hand, or Email intake \u2192 Add again (fills blanks only)." });
+      else if (cosmetic && (/…$/.test(r.desc) || r.desc.length > 75)) issues.push({ kind: "sheet_desc", section: "sheet", ref: order, text: `${order} (row ${r.row}) has the long, cut-off description rather than a short summary.`, fix: "Retype column F if you want it tidy (cosmetic)." });
     }
   }
   for (const p of await coopSheetPending(env, tid)) {
     if (Date.now() - new Date(p.at).getTime() < 30 * 6e4) continue;
-    issues.push({ section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake \u2192 Add it by hand." });
+    issues.push({ kind: "sheet_pending", section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake \u2192 Add it by hand." });
   }
-  const start = london(new Date(now2.getTime() - hours * 36e5));
-  if (!emails.length && start.dow >= 1 && start.dow <= 5) issues.push({ section: "intake", text: `No job emails at all reached the portal in the last ${hours} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
+  const sh = silenceHours || hours;
+  const start = london(new Date(now2.getTime() - sh * 36e5)), recent = emails.filter((e) => e.received_at >= new Date(now2.getTime() - sh * 36e5).toISOString());
+  if (!recent.length && start.dow >= 1 && start.dow <= 5) issues.push({ kind: "silence", section: "intake", text: `No job emails at all reached the portal in the last ${sh} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
   return { since, until: now2.toISOString(), emails: emails.length, concertoJobs: jobs.length, issues };
 }
 function renderEmail(res) {
@@ -32199,8 +32205,31 @@ async function sweepIntakeCheck(env, tid = 1) {
   }
   return s;
 }
+var LIVE = (tid) => "intakecheck:live:" + (Math.trunc(Number(tid)) || 1);
+var FIXABLE = { sheet_missing: 1, sheet_blank: 1, sheet_pending: 1 };
+async function refreshLiveIssues(env, tid) {
+  const res = await runIntakeCheck(env, tid, { hours: 168, silenceHours: 24, cosmetic: false });
+  const issues = res.issues.map((i) => ({ ...i, id: (i.kind || "x") + ":" + (i.ref || i.emailId || ""), fixable: !!FIXABLE[i.kind] }));
+  const live = { at: (/* @__PURE__ */ new Date()).toISOString(), issues };
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(LIVE(tid), JSON.stringify(live), Math.trunc(Number(tid)) || 1).run();
+  return live;
+}
+async function getLiveIssues(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(LIVE(tid)).first();
+    if (r) return JSON.parse(r.value);
+  } catch {
+  }
+  return null;
+}
+async function sweepLiveIssues(env, tid = 1) {
+  const cur = await getLiveIssues(env, tid);
+  if (cur && Date.now() - new Date(cur.at).getTime() < 14 * 6e4) return cur;
+  return refreshLiveIssues(env, tid);
+}
 
 // src/routes/emailjob.js
+init_auth();
 init_push();
 init_once();
 var T2 = "inbound_emails";
@@ -32681,12 +32710,37 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
   console.log("email intake:", res.outcome, "\u2014", subject, "\u2014", res.reason);
 }
 async function handleApi(request, env, ctx, url, sess, fetchSelf) {
+  const res = await handleApiInner(request, env, ctx, url, sess, fetchSelf);
+  if (request.method.toUpperCase() === "POST" && /\/(rerun|approve|dismiss|sheet-add)$/.test(url.pathname) && res && res.status < 300 && ctx && ctx.waitUntil) {
+    ctx.waitUntil(refreshLiveIssues(env, await resolveTenantId(env, request)).catch(() => {
+    }));
+  }
+  return res;
+}
+async function handleApiInner(request, env, ctx, url, sess, fetchSelf) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/email-intake(?=\/|$)/, "") || "/";
   if (!sess || !sess.user) return error("Login required", 401, env, request);
   const tid = await resolveTenantId(env, request);
   const me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
+  if (sub === "/issues" || sub === "/issues/fix") {
+    if (!await canSeeMoney(env, tid, me)) return error("Office users only", 403, env, request);
+    if (sub === "/issues" && method === "GET") {
+      let live = url.searchParams.get("fresh") === "1" ? null : await getLiveIssues(env, tid);
+      if (!live) live = await refreshLiveIssues(env, tid);
+      return json({ ok: true, ...live, canAdmin: perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" }, {}, env, request);
+    }
+    if (sub === "/issues/fix" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const job = await jobForOrder(env, b.ref);
+      if (!job) return error("Can't find job " + (b.ref || "") + " on the board", 404, env, request);
+      const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || b.ref, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { noQueue: true });
+      const live = await refreshLiveIssues(env, tid);
+      return json({ ok: !!r.ok, result: r, error: r.error || "", ...live }, { status: r.ok ? 200 : 502 }, env, request);
+    }
+    return error("Not found", 404, env, request);
+  }
   if (!(perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes")) return error("SLA admin access required", 403, env, request);
   const ltid = String(Math.trunc(Number(tid)) || 1);
   await ensureTable2(env);
@@ -43870,9 +43924,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -51529,6 +51583,7 @@ var worker = {
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(sweepCoopSheetPending(env, 1).catch((e) => console.error("scheduled co-op sheet retry:", e)));
     ctx.waitUntil(sweepIntakeCheck(env, 1).catch((e) => console.error("scheduled intake check:", e)));
+    ctx.waitUntil(sweepLiveIssues(env, 1).catch((e) => console.error("scheduled live intake issues:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
@@ -51561,7 +51616,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -51823,7 +51878,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

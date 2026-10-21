@@ -298,6 +298,7 @@ const worker = {
     ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(coopsheet.sweepCoopSheetPending(env, 1).catch(e => console.error("scheduled co-op sheet retry:", e)));
     ctx.waitUntil(intakecheck.sweepIntakeCheck(env, 1).catch(e => console.error("scheduled intake check:", e)));
+    ctx.waitUntil(intakecheck.sweepLiveIssues(env, 1).catch(e => console.error("scheduled live intake issues:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {

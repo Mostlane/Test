@@ -2364,6 +2364,162 @@
   // (the signed document, the job, the request). The feed is written server-side
   // for every push event, so it's complete even if the phone never turned push
   // on. Chat messages are deliberately NOT here — they have the 💬 chat bell.
+  // ── ⚠ Intake issues — SLA board header + sidebar (21 Oct 2026) ─────────────
+  // Office users only (server: FullAccess or staffType office). Reads the saved
+  // check (/email-intake/issues — refreshed every 15 min + straight after a fix),
+  // shows a ⚠ beside "SLA / Jobs" in the sidebar and on the SLA board header,
+  // opens a panel with one-tap fixes, and disappears by itself once nothing's left.
+  (function intakeWarn() {
+    try {
+      if (window.self !== window.top) return;
+      if (mlIsClientUser()) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var p = {};
+      try { p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+      var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+      if (yes(p.StoryMode)) return;
+      var st = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      if (!yes(p.FullAccess) && st !== "office") return;
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var onBoard = page === "sla-main.html";
+      var state = { issues: [], canAdmin: false, at: null };
+
+      function bf(path, init) {
+        init = init || {};
+        init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});
+        if (init.body) init.headers["Content-Type"] = "application/json";
+        return nativeFetch(API + path, init).then(function (r) { return r.json().then(function (j) { j.__status = r.status; return j; }); });
+      }
+      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+
+      var css = document.createElement("style");
+      css.textContent =
+        "#pnav .pn-warn{margin-left:auto;font-size:15px;line-height:1;cursor:pointer;animation:mlWarnPulse 1.6s ease-in-out infinite;flex:none}"
+        + "html.pnav-collapsed #pnav .pn-warn{position:absolute;top:2px;right:4px;margin:0}"
+        + "#pnav a.pn-item .pn-warn + .pn-badge{margin-left:6px}"
+        + "#mlIntakeWarn{display:inline-flex;align-items:center;gap:6px;background:#fff7e6;border:1.5px solid #f59e0b;color:#92400e;border-radius:999px;padding:5px 12px;font:700 14px/1 'Segoe UI',system-ui,sans-serif;cursor:pointer;animation:mlWarnPulse 1.6s ease-in-out infinite}"
+        + "#mlIntakeWarn:hover{background:#fdecc8}"
+        + "@keyframes mlWarnPulse{0%,100%{opacity:1}50%{opacity:.55}}"
+        + "@media (prefers-reduced-motion:reduce){#pnav .pn-warn,#mlIntakeWarn{animation:none}}"
+        + "#mlIwBack{position:fixed;inset:0;background:rgba(10,25,45,.45);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:calc(env(safe-area-inset-top,0px) + 40px) 12px 20px;overflow:auto}"
+        + "#mlIwCard{background:#fff;border-radius:14px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font:14px/1.45 'Segoe UI',system-ui,sans-serif;color:#0f2438}"
+        + "#mlIwCard .hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e6ebf0}"
+        + "#mlIwCard .hd b{font-size:16px;flex:1}"
+        + "#mlIwCard .bd{padding:6px 16px 16px;max-height:65vh;overflow:auto}"
+        + "#mlIwCard h4{margin:14px 0 6px;color:#003366;font-size:13px;text-transform:uppercase;letter-spacing:.03em}"
+        + "#mlIwCard .it{border:1px solid #f3d9a4;background:#fffaf0;border-radius:10px;padding:10px 12px;margin:0 0 8px}"
+        + "#mlIwCard .fx{color:#5b6b7b;font-size:13px;margin-top:3px}"
+        + "#mlIwCard .ac{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}"
+        + "#mlIwCard button,#mlIwCard a.b{border:1px solid #003366;background:#003366;color:#fff;border-radius:8px;padding:6px 12px;font:600 13px 'Segoe UI',system-ui,sans-serif;cursor:pointer;text-decoration:none}"
+        + "#mlIwCard .ghost{background:#fff;color:#003366}"
+        + "#mlIwCard .msg{font-size:13px;margin-top:6px}";
+      document.head.appendChild(css);
+
+      function applySidebar() {
+        var item = document.querySelector('#pnav a.pn-item[href^="/sla-main.html"]');
+        if (!item) return;
+        var w = item.querySelector(".pn-warn");
+        if (!state.issues.length) { if (w) w.remove(); return; }
+        if (!w) {
+          w = document.createElement("span");
+          w.className = "pn-warn"; w.textContent = "⚠️";
+          w.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); openPanel(); });
+          var badge = item.querySelector(".pn-badge");
+          item.insertBefore(w, badge || null);
+        }
+        w.title = state.issues.length + " intake issue" + (state.issues.length === 1 ? "" : "s") + " — click to fix";
+      }
+      function applyBoard() {
+        if (!onBoard) return;
+        var b = document.getElementById("mlIntakeWarn");
+        if (!state.issues.length) { if (b) b.remove(); return; }
+        if (!b) {
+          b = document.createElement("button");
+          b.id = "mlIntakeWarn"; b.type = "button";
+          b.addEventListener("click", openPanel);
+          var host = document.querySelector("header .header-left") || document.querySelector("header");
+          if (host) host.appendChild(b);
+          else { b.style.cssText = "position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:70px;z-index:9999"; document.body.appendChild(b); }
+        }
+        b.innerHTML = "⚠️ " + state.issues.length;
+        b.title = state.issues.length + " job intake / spreadsheet issue" + (state.issues.length === 1 ? "" : "s") + " — click to fix";
+      }
+      function apply() { applySidebar(); applyBoard(); if (document.getElementById("mlIwBack")) renderPanel(); }
+
+      function load(fresh) {
+        return bf("/email-intake/issues" + (fresh ? "?fresh=1" : "")).then(function (j) {
+          if (!j || !j.ok) { if (j && j.__status === 403) { state.issues = []; stop(); } return; }
+          state.issues = j.issues || []; state.canAdmin = !!j.canAdmin; state.at = j.at;
+          apply();
+        }).catch(function () {});
+      }
+
+      var SEC = { intake: "📨 Emails", board: "📋 Job board", sheet: "📊 Co-op spreadsheet" };
+      function actionFor(i) {
+        if (i.fixable && i.ref) return '<button data-fix="' + esc(i.ref) + '">' + (i.kind === "sheet_blank" ? "Fill in the blanks" : "Add to the spreadsheet") + "</button>";
+        if (!state.canAdmin) return '<span class="fx">Ask an SLA admin to sort this on the Email intake page.</span>';
+        if (i.kind === "review" && i.emailId) return '<a class="b" href="/email-intake.html?review=' + encodeURIComponent(i.emailId) + '">Open it</a>';
+        if (i.kind === "email_failed" || i.kind === "ignored" || i.kind === "board_missing" || i.kind === "sheet_unreachable" || i.kind === "silence") return '<a class="b" href="/email-intake.html">Open Email intake</a>';
+        return "";
+      }
+      function renderPanel() {
+        var card = document.getElementById("mlIwCard"); if (!card) return;
+        var body = card.querySelector(".bd");
+        if (!state.issues.length) {
+          body.innerHTML = '<p style="margin:14px 0;font-size:15px">✅ All sorted — nothing left to fix.</p>';
+          return;
+        }
+        var html = "";
+        ["intake", "board", "sheet"].forEach(function (k) {
+          var list = state.issues.filter(function (i) { return i.section === k; });
+          if (!list.length) return;
+          html += "<h4>" + SEC[k] + " (" + list.length + ")</h4>";
+          list.forEach(function (i) {
+            html += '<div class="it" data-id="' + esc(i.id) + '">' + esc(i.text)
+              + (i.fix ? '<div class="fx">→ ' + esc(i.fix) + "</div>" : "")
+              + '<div class="ac">' + actionFor(i) + '</div><div class="msg"></div></div>';
+          });
+        });
+        body.innerHTML = html;
+        body.querySelectorAll("button[data-fix]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var box = btn.closest(".it"), msg = box.querySelector(".msg");
+            btn.disabled = true; msg.textContent = "Fixing…";
+            bf("/email-intake/issues/fix", { method: "POST", body: JSON.stringify({ ref: btn.getAttribute("data-fix") }) }).then(function (j) {
+              if (j && j.issues) { state.issues = j.issues; state.at = j.at; }
+              if (j && j.ok) { msg.textContent = "Done ✓"; setTimeout(apply, 700); }
+              else { btn.disabled = false; msg.textContent = (j && j.error) || "Couldn't fix it — try again shortly."; }
+            }).catch(function (e) { btn.disabled = false; msg.textContent = e.message; });
+          });
+        });
+      }
+      function openPanel() {
+        if (document.getElementById("mlIwBack")) return;
+        var back = document.createElement("div");
+        back.id = "mlIwBack";
+        back.innerHTML = '<div id="mlIwCard"><div class="hd"><span style="font-size:20px">⚠️</span><b>Job intake — things to fix</b>'
+          + '<button class="ghost" id="mlIwRe">↻ Re-check</button><button class="ghost" id="mlIwX">✕</button></div><div class="bd"></div></div>';
+        document.body.appendChild(back);
+        back.addEventListener("click", function (e) { if (e.target === back) back.remove(); });
+        back.querySelector("#mlIwX").addEventListener("click", function () { back.remove(); });
+        back.querySelector("#mlIwRe").addEventListener("click", function () {
+          back.querySelector(".bd").innerHTML = '<p style="margin:14px 0">Checking…</p>';
+          load(true);
+        });
+        renderPanel();
+      }
+
+      var timers = [];
+      function stop() { timers.forEach(clearInterval); timers = []; }
+      load(false);
+      timers.push(setInterval(function () { if (document.visibilityState === "visible") load(false); }, 120000));
+      timers.push(setInterval(applySidebar, 3000));   // the sidebar is (re)built async
+      document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") load(false); });
+      window.mlIntakeIssues = { open: openPanel, refresh: function () { return load(true); } };
+    } catch (e) {}
+  })();
+
   (function notifBell() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
