@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -2208,7 +2203,7 @@ function effectiveCfg(cfg, u) {
     profile = u.profile ? JSON.parse(u.profile) : {};
   } catch {
   }
-  const num4 = (v) => {
+  const num5 = (v) => {
     const n = parseFloat(v);
     return isFinite(n) && n > 0 ? n : null;
   };
@@ -2229,10 +2224,10 @@ function effectiveCfg(cfg, u) {
     lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
-    rate: num4(mine.rate) ?? (mine.rateType === "day" ? num4(profile.dayRate) : num4(profile.hourlyRate)) ?? num4(profile.hourlyRate),
+    rate: num5(mine.rate) ?? (mine.rateType === "day" ? num5(profile.dayRate) : num5(profile.hourlyRate)) ?? num5(profile.hourlyRate),
     // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
     // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
-    overtimeMult: num4(mine.overtimeMult),
+    overtimeMult: num5(mine.overtimeMult),
     overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],
@@ -12196,11 +12191,11 @@ async function slCall(env, path, body) {
 }
 async function syncSiteToCompliance(env, tenantId, site) {
   try {
-    const num4 = String(site.siteNumber || "").trim();
-    if (!num4) return;
+    const num5 = String(site.siteNumber || "").trim();
+    if (!num5) return;
     const rows = await env.DB.prepare(
       "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
-    ).bind(tenantId, num4).all();
+    ).bind(tenantId, num5).all();
     const activeVal = site.active === false ? 0 : 1;
     for (const r of rows.results || []) {
       let meta = {};
@@ -16538,15 +16533,15 @@ async function reissueCleanCertForRemedialJob(env, tid, job) {
   }
 }
 async function matchOrderToRemedial(env, tid, o) {
-  const code = padCode2(o.storeCode), num4 = numOf(o.storeCode);
-  if (!code && !num4) return null;
+  const code = padCode2(o.storeCode), num5 = numOf(o.storeCode);
+  if (!code && !num5) return null;
   try {
     const { results } = await env.DB.prepare(
       "SELECT cert_id, site_code, site_name, cert_number, stage, job_id FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote') IN ('to_quote','quoted','approved','in_works') ORDER BY created_at DESC LIMIT 200"
     ).bind(tid).all();
     const skip = String(o.unlinkedJobId || "");
     const waiting = (r) => ["to_quote", "quoted", ""].includes(String(r.stage || ""));
-    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num4 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
+    const cands = (results || []).filter((r) => numOf(r.site_code) && numOf(r.site_code) === num5 && !(r.job_id && r.job_id === skip)).sort((a, b) => (waiting(b) ? 1 : 0) - (waiting(a) ? 1 : 0));
     if (cands.length) {
       const r = cands[0];
       const late = !waiting(r) && r.job_id;
@@ -16577,7 +16572,7 @@ async function matchOrderToRemedial(env, tid, o) {
   }
   try {
     const jobs = (await listJobs(env, tid)).filter((j) => j && j.elecTest && Array.isArray(j.remedials) && j.remedials.length && !j.remedialsWorksJobId);
-    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num4);
+    const cand = jobs.find((j) => numOf(j.siteCode) && numOf(j.siteCode) === num5);
     if (cand) return { kind: "elec", jobId: cand.id, note: `Electrical-test remedials on job ${cand.helpdeskRef || cand.reference || cand.id} at ${cand.siteName || code}` };
   } catch {
   }
@@ -17543,10 +17538,10 @@ async function handle12(request, env, ctx, url, sess) {
     const yr = String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
     const created = [], skipped = [];
     for (const it of sites) {
-      const num4 = String(it.siteNumber || "");
-      const s = byNum[num4];
-      if (!num4 || !s) {
-        if (num4) skipped.push(num4);
+      const num5 = String(it.siteNumber || "");
+      const s = byNum[num5];
+      if (!num5 || !s) {
+        if (num5) skipped.push(num5);
         continue;
       }
       let addr = "", siteDur = 0;
@@ -17557,18 +17552,18 @@ async function handle12(request, env, ctx, url, sess) {
       } catch {
       }
       const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : siteDur > 0 ? siteDur : dur;
-      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num4) : "";
+      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num5) : "";
       let desc;
-      if (em && pat) desc = `EM: Import certificate number ${setNum || num4}-${yr}
-PAT: Import certificate number ${num4}-${yr}`;
-      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num4}` : `Import certificate number ${setNum || num4}-${yr}`;
-      else desc = `Import certificate number ${num4}-${yr}`;
+      if (em && pat) desc = `EM: Import certificate number ${setNum || num5}-${yr}
+PAT: Import certificate number ${num5}-${yr}`;
+      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num5}` : `Import certificate number ${setNum || num5}-${yr}`;
+      else desc = `Import certificate number ${num5}-${yr}`;
       const sched = /^\d{4}-\d{2}-\d{2}T/.test(String(it.scheduledAt || "")) ? it.scheduledAt : void 0;
       const job = await createOrUpdateJobFromPayload(env, tid, {
-        reference: s.site_name || num4,
+        reference: s.site_name || num5,
         description: desc,
         siteName: s.site_name || "",
-        siteCode: num4,
+        siteCode: num5,
         address: addr,
         postcode: s.postcode || "",
         emTest: em,
@@ -17580,17 +17575,17 @@ PAT: Import certificate number ${num4}-${yr}`;
         assignedEngineers: engineers,
         originator: "bulk-em"
       });
-      created.push({ id: job.id, site: s.site_name || num4 });
+      created.push({ id: job.id, site: s.site_name || num5 });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
   }
   if (sub === "/site-duration" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const num4 = String(b.siteNumber || "").trim();
+    const num5 = String(b.siteNumber || "").trim();
     const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
-    if (!num4) return error("siteNumber required", 400, env, request);
-    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num4).first();
+    if (!num5) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num5).first();
     if (!row) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -17599,7 +17594,7 @@ PAT: Import certificate number ${num4}-${yr}`;
     }
     if (mins > 0) data.expectedDurationMinutes = mins;
     else delete data.expectedDurationMinutes;
-    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num4, row.client).run();
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num5, row.client).run();
     return json({ ok: true, minutes: mins }, {}, env, request);
   }
   if (sub === "/w3w-key" && method === "GET") {
@@ -22281,7 +22276,7 @@ async function handle13(request, env, ctx, url, sess) {
     const b = await readJson2(request);
     const j = await getJob3(env, tenantId, b.jobId);
     if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
-    const num4 = (v) => {
+    const num5 = (v) => {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : null;
     };
@@ -22289,10 +22284,10 @@ async function handle13(request, env, ctx, url, sess) {
       at: (/* @__PURE__ */ new Date()).toISOString(),
       by: sess.user.username,
       quoteNumber: String(b.quoteNumber || "").trim(),
-      amountExVat: num4(b.amountExVat),
-      amountIncVat: num4(b.amountIncVat),
-      labourCost: num4(b.labourCost),
-      materialsCost: num4(b.materialsCost)
+      amountExVat: num5(b.amountExVat),
+      amountIncVat: num5(b.amountIncVat),
+      labourCost: num5(b.labourCost),
+      materialsCost: num5(b.materialsCost)
     };
     j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     await saveJob(env, tenantId, j);
@@ -36403,9 +36398,9 @@ async function handle28(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     if (path === "/sites/register/update") {
       const client = String(b.client || "").toLowerCase().trim();
-      const num4 = String(b.siteNumber || "").trim();
-      if (!client || !num4) return error("client and siteNumber required", 400, env, request);
-      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num4).first();
+      const num5 = String(b.siteNumber || "").trim();
+      if (!client || !num5) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num5).first();
       if (!row) return error("Site not found", 404, env, request);
       let data = {};
       try {
@@ -36429,7 +36424,7 @@ async function handle28(request, env, ctx, url, sess) {
         JSON.stringify(data),
         tid,
         client,
-        num4
+        num5
       ).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
@@ -36439,11 +36434,11 @@ async function handle28(request, env, ctx, url, sess) {
       const name = String(b.name || "").trim();
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
-      const num4 = slugNum(name);
+      const num5 = slugNum(name);
       const ll = parseLatLngPair(b.lat, b.lng);
       const data = {
         client,
-        siteNumber: num4,
+        siteNumber: num5,
         siteName: name,
         postcode: String(b.postcode || "").toUpperCase().trim(),
         addedVia: "register"
@@ -36455,10 +36450,10 @@ async function handle28(request, env, ctx, url, sess) {
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
-          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num4, name, data.postcode || null, JSON.stringify(data)).run();
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num5, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
       if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
-      return json({ ok: true, client, siteNumber: num4, sitelogPushed: pushed }, {}, env, request);
+      return json({ ok: true, client, siteNumber: num5, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
       const alias = normName(b.alias);
@@ -37941,12 +37936,12 @@ async function ratesMap(env, tid) {
   }
   try {
     const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
-    const num4 = (v) => {
+    const num5 = (v) => {
       const n = parseFloat(v);
       return isFinite(n) && n > 0 ? n : null;
     };
     const defs = cfg.defaults || {};
-    const defPence = num4(defs.pencePerMile);
+    const defPence = num5(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {};
       try {
@@ -37955,8 +37950,8 @@ async function ratesMap(env, tid) {
       }
       const mine = cfg.byUser && cfg.byUser[u.username] || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
-      const rate = num4(mine.rate) ?? (rateType === "day" ? num4(profile.dayRate) : num4(profile.hourlyRate)) ?? num4(profile.hourlyRate);
-      const pence = num4(mine.pencePerMile) ?? defPence;
+      const rate = num5(mine.rate) ?? (rateType === "day" ? num5(profile.dayRate) : num5(profile.hourlyRate)) ?? num5(profile.hourlyRate);
+      const pence = num5(mine.pencePerMile) ?? defPence;
       const fuelPerMile = pence != null ? pence / 100 : null;
       out[u.username] = { rate, rateType, fuelPerMile };
     }
@@ -39089,7 +39084,7 @@ async function handle29(request, env, ctx, url, sess) {
     await ensureVehTable(env);
     const b = await readJson4(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
-    const num4 = (x) => {
+    const num5 = (x) => {
       const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
       return isNaN(n) ? null : n;
     };
@@ -39116,12 +39111,12 @@ async function handle29(request, env, ctx, url, sess) {
         v.taxDue || v.taxDate || "",
         v.nextServiceDate || v.serviceDate || "",
         v.notes || "",
-        num4(v.svcIntervalDays),
-        num4(v.svcIntervalMiles),
+        num5(v.svcIntervalDays),
+        num5(v.svcIntervalMiles),
         v.lastServiceDate || "",
-        num4(v.lastServiceMiles),
-        num4(v.warnDays),
-        num4(v.warnMiles),
+        num5(v.lastServiceMiles),
+        num5(v.warnDays),
+        num5(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
       if (v.specs !== void 0) {
@@ -39542,18 +39537,18 @@ async function handle29(request, env, ctx, url, sess) {
       const reg = String(b.reg || "").trim();
       if (!reg) return jr4({ error: "reg required" }, headers, 400);
       const f = b.finance && typeof b.finance === "object" ? b.finance : {};
-      const num4 = (x) => {
+      const num5 = (x) => {
         const n = Number(x);
         return isFinite(n) && n !== 0 ? n : x === 0 || x === "0" ? 0 : null;
       };
       const clean = {
         ownership: f.ownership === "financed" ? "financed" : "owned",
-        insuranceYear: num4(f.insuranceYear),
-        roadTaxYear: num4(f.roadTaxYear),
-        financeMonthly: num4(f.financeMonthly),
+        insuranceYear: num5(f.insuranceYear),
+        roadTaxYear: num5(f.roadTaxYear),
+        financeMonthly: num5(f.financeMonthly),
         financeEnd: /^\d{4}-\d{2}-\d{2}$/.test(f.financeEnd || "") ? f.financeEnd : "",
-        allowedMiles: num4(f.allowedMiles),
-        excessPence: num4(f.excessPence),
+        allowedMiles: num5(f.allowedMiles),
+        excessPence: num5(f.excessPence),
         note: String(f.note || "").slice(0, 300)
       };
       await env.DB.prepare("UPDATE vehicles SET finance=? WHERE tenant_id=? AND reg=?").bind(JSON.stringify(clean), tid, reg).run();
@@ -41098,12 +41093,12 @@ function financeOf(v) {
 }
 function runningCost(fin, fuelV, odoV, maint12) {
   fin = fin || {};
-  const num4 = (x) => {
+  const num5 = (x) => {
     const n = Number(x);
     return isFinite(n) ? n : 0;
   };
-  const insurance = num4(fin.insuranceYear), roadTax = num4(fin.roadTaxYear);
-  const finance = fin.ownership === "financed" ? num4(fin.financeMonthly) * 12 : 0;
+  const insurance = num5(fin.insuranceYear), roadTax = num5(fin.roadTaxYear);
+  const finance = fin.ownership === "financed" ? num5(fin.financeMonthly) * 12 : 0;
   let fuelYear = 0, fuelProjected = false, milesYear = 0;
   if (fuelV && fuelV.spend > 0 && fuelV.first && fuelV.last) {
     const days = Math.max(1, (Date.parse(fuelV.last) - Date.parse(fuelV.first)) / 864e5);
@@ -41114,9 +41109,9 @@ function runningCost(fin, fuelV, odoV, maint12) {
     const days = Math.max(1, (Date.parse(odoV.last) - Date.parse(odoV.first)) / 864e5);
     milesYear = odoV.milesDriven / days * 365;
   }
-  const maintenance = num4(maint12);
+  const maintenance = num5(maint12);
   let excess = 0, excessProjected = false;
-  const allowed = num4(fin.allowedMiles), excessPence = num4(fin.excessPence);
+  const allowed = num5(fin.allowedMiles), excessPence = num5(fin.excessPence);
   if (fin.ownership === "financed" && allowed > 0 && excessPence > 0 && milesYear > allowed) {
     excess = (milesYear - allowed) * excessPence / 100;
     excessProjected = true;
@@ -42663,28 +42658,28 @@ async function handle33(request, env, ctx, url, sess) {
     } catch {
     }
     const sites = (siteRows || []).map((s) => {
-      const num4 = String(s.site_number);
-      const tens = (tenBySite[num4] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+      const num5 = String(s.site_number);
+      const tens = (tenBySite[num5] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
       const cur = tens.find((t) => t.is_current) || tens[0] || null;
       return {
-        siteNumber: num4,
+        siteNumber: num5,
         siteName: s.site_name || "",
         postcode: s.postcode || "",
         active: s.active == null ? 1 : s.active,
-        jobCount: jobCount[String(Number(num4))] || jobCount[num4] || 0,
+        jobCount: jobCount[String(Number(num5))] || jobCount[num5] || 0,
         tenantCount: tens.length,
         currentTenant: cur ? { ref: cur.ref || "", name: cur.name || "", phone: cur.phone || "", email: cur.email || "" } : null,
-        due: dueByCode[num4] || {}
+        due: dueByCode[num5] || {}
       };
     });
     return json({ ok: true, sites, count: sites.length }, {}, env, request);
   }
   if (path === "/chapplins/site" && method === "GET") {
-    const num4 = String(q.get("number") || "").trim();
-    if (!num4) return error("number required", 400, env, request);
+    const num5 = String(q.get("number") || "").trim();
+    if (!num5) return error("number required", 400, env, request);
     const s = await db.prepare(
       "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? AND site_number=?"
-    ).bind(tenantId, CLIENT, num4).first();
+    ).bind(tenantId, CLIENT, num5).first();
     if (!s) return error("Site not found", 404, env, request);
     let data = {};
     try {
@@ -42693,11 +42688,11 @@ async function handle33(request, env, ctx, url, sess) {
     }
     const { results: tenRows } = await db.prepare(
       "SELECT * FROM site_tenants WHERE tenant_id=? AND client=? AND site_number=? ORDER BY is_current DESC, last_seen DESC"
-    ).bind(tenantId, CLIENT, num4).all();
+    ).bind(tenantId, CLIENT, num5).all();
     const tenants = (tenRows || []).map(tenantOut);
     let jobs = [];
     try {
-      const code = String(Number(num4));
+      const code = String(Number(num5));
       const { results: jr8 } = await db.prepare(
         "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
       ).bind(tenantId, code).all();
@@ -43355,10 +43350,10 @@ function londonISO(date, hhmm) {
 async function resolveSite2(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { ok: false };
-  const num4 = q.replace(/\D/g, "");
+  const num5 = q.replace(/\D/g, "");
   try {
-    if (num4) {
-      const cands = [num4, num4.padStart(4, "0"), String(Number(num4))];
+    if (num5) {
+      const cands = [num5, num5.padStart(4, "0"), String(Number(num5))];
       for (const c of [...new Set(cands)]) {
         const r = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND site_number=? AND active=1 LIMIT 1").bind(tid, c).first();
         if (r) return siteOut(r);
@@ -43875,9 +43870,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -43977,12 +43972,12 @@ async function toolFindSite(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return { count: 0, sites: [] };
   const like = "%" + likeKey2(q.replace(/[%_]/g, "")) + "%";
-  const num4 = q.replace(/\D/g, "");
+  const num5 = q.replace(/\D/g, "");
   const binds = [tid, like, like];
   let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
-  if (num4) {
+  if (num5) {
     sql += " OR site_number IN (?,?,?)";
-    binds.push(num4, num4.padStart(4, "0"), String(Number(num4) || ""));
+    binds.push(num5, num5.padStart(4, "0"), String(Number(num5) || ""));
   }
   sql += ") ORDER BY length(site_name) LIMIT 10";
   const { results } = await env.DB.prepare(sql).bind(...binds).all();
@@ -44009,12 +44004,12 @@ async function toolFindCompliance(env, tid, caps2, query, scheme) {
   const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
   if (bare) {
     const like = "%" + likeKey2(bare.replace(/[%_]/g, "")) + "%";
-    const num4 = bare.replace(/\D/g, "");
+    const num5 = bare.replace(/\D/g, "");
     sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
     binds.push(like, like);
-    if (num4) {
+    if (num5) {
       sql += " OR code IN (?,?,?)";
-      binds.push(num4, num4.padStart(4, "0"), String(Number(num4) || ""));
+      binds.push(num5, num5.padStart(4, "0"), String(Number(num5) || ""));
     }
     sql += ")";
   }
@@ -46331,6 +46326,7 @@ function buildSiteLogTimesheetPdf(meta) {
 }
 
 // src/routes/sitelogts.js
+init_filesign();
 var CFG_KEY4 = (tid) => `sitelog:tsmail:${tid}`;
 var SENT_KEY = (tid) => `sitelog:tsmail:sent:${tid}`;
 var DAILY_FROM = "16:00";
@@ -46399,9 +46395,11 @@ function periodFor(kind, dateKey) {
     file: `SiteLog-${dateKey}.pdf`
   };
 }
+var num4 = (v) => v === null || v === void 0 || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 var SCAN_EARLY = 5 * 60;
 var SCAN_LATE = 21 * 60;
 var PRE_CONFIRM_MS = 20 * 6e4;
+var POST_SIGNOUT_MS = 30 * 6e4;
 var MIN_SPAN_MS = 30 * 6e4;
 var minsOfDay = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
@@ -46414,7 +46412,7 @@ function plausible(d) {
 async function loadUnconfirmedScans(db, from, to) {
   try {
     const r = await db.prepare(`
-      SELECT l.at, l.outcome, l.person_id, l.site, p.first_name, p.last_name, p.company
+      SELECT l.at, l.outcome, l.person_id, l.site, l.lat, l.lng, p.first_name, p.last_name, p.company
       FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
       WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
         AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?
@@ -46434,6 +46432,7 @@ async function loadPeriod(env, from, to) {
            COALESCE(v.sign_in_verified,0) AS sign_in_verified,
            COALESCE(v.sign_out_verified,0) AS sign_out_verified,
            v.sign_in_distance_m, v.sign_out_distance_m,
+           v.lat AS in_lat, v.lng AS in_lng, v.out_lat, v.out_lng,
            p.first_name, p.last_name, p.company
     FROM visits v LEFT JOIN people p ON p.id = v.person_id
     WHERE v.check_in_at >= ? AND v.check_in_at < ?
@@ -46448,7 +46447,7 @@ async function loadPeriod(env, from, to) {
     if (!spans.has(r.person_id)) spans.set(r.person_id, []);
     spans.get(r.person_id).push([a.getTime(), b ? b.getTime() : Infinity]);
   }
-  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b);
+  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b + POST_SIGNOUT_MS);
   const scansBy = /* @__PURE__ */ new Map();
   for (const s of scans) {
     const d = parseUtc(s.at);
@@ -46476,7 +46475,7 @@ async function loadPeriod(env, from, to) {
     const inOk = Number(r.sign_in_verified) === 1;
     let outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
     let note = "";
-    let scannedOut = null;
+    let scannedOut = null, scannedOutAt = null;
     if ((state === "auto" || state === "open" && day < today) && r.person_id) {
       const limit = outD ? outD.getTime() : Infinity;
       for (const s of scansBy.get(r.person_id) || []) {
@@ -46484,6 +46483,7 @@ async function loadPeriod(env, from, to) {
         if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
         if (london2(s._d).key !== day || !plausible(s._d)) continue;
         scannedOut = s._d;
+        scannedOutAt = s;
       }
     }
     if (scannedOut) {
@@ -46517,6 +46517,13 @@ async function loadPeriod(env, from, to) {
       note,
       scannedIn: false,
       scannedOut: !!scannedOut,
+      pid: r.person_id || "",
+      vid: r.id,
+      day,
+      inLat: num4(r.in_lat),
+      inLng: num4(r.in_lng),
+      outLat: scannedOutAt ? num4(scannedOutAt.lat) : auto ? null : num4(r.out_lat),
+      outLng: scannedOutAt ? num4(scannedOutAt.lng) : auto ? null : num4(r.out_lng),
       inDist: r.sign_in_distance_m,
       outDist: r.sign_out_distance_m
     });
@@ -46534,13 +46541,15 @@ async function loadPeriod(env, from, to) {
       }
       used.add(s);
       const nextVisit = Math.min(...(spans.get(pid) || []).map(([a]) => a).filter((a) => a > t), Infinity);
-      let end = null;
+      let end = null, endScan = null;
       for (let j = i + 1; j < ins.length; j++) {
         const e = ins[j], et = e._d.getTime();
         if (london2(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
         used.add(e);
-        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) end = e._d;
-        else if ((e.site || "") !== (s.site || "")) {
+        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) {
+          end = e._d;
+          endScan = e;
+        } else if ((e.site || "") !== (s.site || "")) {
           used.delete(e);
           break;
         }
@@ -46560,7 +46569,14 @@ async function loadPeriod(env, from, to) {
         scannedOut: !!end,
         note: end ? "Scanned, not confirmed \u2014 in & out times from scans" : "Scanned, not confirmed \u2014 no sign-out, hours not counted",
         inDist: null,
-        outDist: null
+        outDist: null,
+        pid,
+        vid: "scan:" + s.at,
+        day,
+        inLat: num4(s.lat),
+        inLng: num4(s.lng),
+        outLat: endScan ? num4(endScan.lat) : null,
+        outLng: endScan ? num4(endScan.lng) : null
       });
     }
   }
@@ -46596,6 +46612,13 @@ function b64(bytes) {
 var esc4 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 async function emailTimesheet(env, tid, kind, dateKey, recipients) {
   const { per, people, bytes } = await buildPdf(env, kind, dateKey);
+  await addMapLinks(env, apiOrigin(env), people, MAP_TTL_EMAIL);
+  const pin = (u) => u ? ` <a href="${esc4(u)}" style="text-decoration:none" title="Show on a map">\u{1F4CD}</a>` : "";
+  const evRows = (p) => p.visits.map((v) => {
+    const out = v.state === "open" ? "still in" : v.outTime || "\u2014";
+    const bad = v.state === "auto" || v.state === "scanned";
+    return `<tr><td></td><td colspan="2" style="padding:1px 0 1px 10px;font-size:12.5px;color:${bad ? "#b45309" : "#475569"}">${kind === "weekly" ? esc4(v.date) + " \xB7 " : ""}${esc4(v.site)} \xB7 in ${esc4(v.inTime)}${v.inOk ? " \u2714" : " \u2718"}${pin(v.mapIn)} \u2192 out ${esc4(out)}${v.state === "open" ? "" : v.outOk ? " \u2714" : " \u2718"}${pin(v.mapOut)}` + (bad ? ` \xB7 ${esc4(v.note)}` : "") + `</td></tr>`;
+  }).join("");
   const rows = people.map((p) => {
     const t = personTotals(p);
     const flag = [
@@ -46604,12 +46627,12 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
       t.unver ? `${t.unver} not verified` : "",
       t.open ? `${t.open} still in` : ""
     ].filter(Boolean).join(" \xB7 ");
-    return `<tr><td style="padding:4px 10px 4px 0">${esc4(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc4(flag) : "All verified"}</td></tr>`;
+    return `<tr><td style="padding:4px 10px 4px 0">${esc4(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc4(flag) : "All verified"}</td></tr>` + evRows(p);
   }).join("");
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
     <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc4(per.label)}</b></p>
     ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
-    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded.</p></div>`;
+    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded. Tap \u{1F4CD} to see on a map where the phone was for that sign-in or sign-out (links work for 90 days).</p></div>`;
   const r = await sendEmail(env, {
     to: recipients,
     subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
@@ -46617,6 +46640,207 @@ async function emailTimesheet(env, tid, kind, dateKey, recipients) {
     attachments: [{ filename: per.file, content: b64(bytes) }]
   });
   return { ...r, people: people.length, period: per.label };
+}
+var MAP_PATH = "/sitelog-map";
+var MAP_TTL_EMAIL = 90 * 86400;
+var MAP_TTL_VIEW = 7 * 86400;
+function apiOrigin(env, url) {
+  return url ? url.origin : String(env.API_BASE_URL || "https://mostlane-api.jamie-def.workers.dev").replace(/\/$/, "");
+}
+async function addMapLinks(env, origin, people, ttl) {
+  if (!fileSigningEnabled(env)) return people;
+  for (const p of people) for (const v of p.visits) {
+    if (!v.pid) continue;
+    const key = (side) => [v.pid, v.day, v.vid, side].join("|");
+    if (v.inLat != null && v.inLng != null) v.mapIn = await signedFileUrl(env, origin, MAP_PATH, key("in"), ttl);
+    if (v.outLat != null && v.outLng != null) v.mapOut = await signedFileUrl(env, origin, MAP_PATH, key("out"), ttl);
+  }
+  return people;
+}
+function hav(a, b, c, d) {
+  const R2 = 6371e3, r = (x) => x * Math.PI / 180;
+  const s = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2;
+  return 2 * R2 * Math.asin(Math.sqrt(s));
+}
+var SCAN_LABEL = {
+  confirm_check_in: "Scanned \u2014 offered sign-in",
+  confirm_sign_out: "Scanned \u2014 offered sign-out",
+  checked_in: "Signed in",
+  checked_out: "Signed out",
+  first_visit: "Scanned \u2014 new phone",
+  unknown_site: "Refused \u2014 not at a site",
+  outside_site: "Refused \u2014 outside the site boundary",
+  outside_site_signed_in: "Refused \u2014 tried to sign out away from the site",
+  no_location: "Refused \u2014 no location"
+};
+async function personDayEvents(env, personId, dateKey) {
+  const db = env.SITELOG_DB;
+  const person = await db.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(personId).first();
+  const vis = (await db.prepare(`SELECT * FROM visits WHERE person_id = ? AND check_in_at >= ? AND check_in_at < ? ORDER BY check_in_at`).bind(personId, addDays3(dateKey, -1), addDays3(dateKey, 2)).all()).results || [];
+  let scans = [];
+  try {
+    scans = (await db.prepare(`SELECT at, kind, outcome, refused, site, nearest_site, lat, lng, accuracy, distance_m FROM scan_log
+      WHERE person_id = ? AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays3(dateKey, -1), addDays3(dateKey, 2)).all()).results || [];
+  } catch (e) {
+  }
+  const sites = (await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites WHERE COALESCE(archived,0) = 0").all()).results || [];
+  const siteBy = new Map(sites.map((x) => [x.site_name, x]));
+  const distTo = (name2, lat, lng) => {
+    const st = siteBy.get(name2);
+    return st && lat != null ? Math.round(hav(lat, lng, +st.lat, +st.lng)) : null;
+  };
+  const events = [];
+  for (const v of vis) {
+    const inD = parseUtc(v.check_in_at);
+    if (!inD || london2(inD).key !== dateKey) continue;
+    const auto = Number(v.auto_checkout) === 1;
+    if (num4(v.lat) != null) events.push({
+      id: v.id + ":in",
+      t: inD.toISOString(),
+      time: london2(inD).hhmm,
+      kind: "in",
+      label: "Signed in",
+      site: v.site_code,
+      lat: num4(v.lat),
+      lng: num4(v.lng),
+      acc: num4(v.accuracy),
+      ok: Number(v.sign_in_verified) === 1,
+      dist: distTo(v.site_code, num4(v.lat), num4(v.lng))
+    });
+    const outD = parseUtc(v.check_out_at);
+    if (outD && !auto && num4(v.out_lat) != null) events.push({
+      id: v.id + ":out",
+      t: outD.toISOString(),
+      time: london2(outD).hhmm,
+      kind: "out",
+      label: "Signed out",
+      site: v.site_code,
+      lat: num4(v.out_lat),
+      lng: num4(v.out_lng),
+      acc: num4(v.out_accuracy),
+      ok: Number(v.sign_out_verified) === 1,
+      dist: distTo(v.site_code, num4(v.out_lat), num4(v.out_lng))
+    });
+  }
+  for (const sc of scans) {
+    const d = parseUtc(sc.at);
+    if (!d || london2(d).key !== dateKey || num4(sc.lat) == null) continue;
+    if (sc.kind !== "scan" && !Number(sc.refused)) continue;
+    const site = sc.site || sc.nearest_site || "";
+    events.push({
+      id: "scan:" + sc.at,
+      t: d.toISOString(),
+      time: london2(d).hhmm,
+      kind: Number(sc.refused) ? "refused" : "scan",
+      label: SCAN_LABEL[sc.outcome] || "Scan \u2014 " + sc.outcome,
+      site,
+      lat: num4(sc.lat),
+      lng: num4(sc.lng),
+      acc: num4(sc.accuracy),
+      ok: null,
+      dist: sc.site ? distTo(sc.site, num4(sc.lat), num4(sc.lng)) : sc.distance_m != null ? Number(sc.distance_m) : null
+    });
+  }
+  events.sort((a, b) => a.t < b.t ? -1 : 1);
+  const want = new Set(events.map((e) => e.site).filter(Boolean));
+  for (const st of sites) {
+    if (want.size > 40) break;
+    if (events.some((e) => hav(e.lat, e.lng, +st.lat, +st.lng) <= 1e3)) want.add(st.site_name);
+  }
+  const drawSites = [...want].map((n) => siteBy.get(n)).filter(Boolean).map((x) => ({ name: x.site_name, lat: +x.lat, lng: +x.lng, radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }));
+  const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "Unknown person";
+  return { name, company: person && person.company || "", date: dateKey, events, sites: drawSites };
+}
+function mapPage(title, body, status = 200) {
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>${esc4(title)}</title>${body}`, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" }
+  });
+}
+async function handleMap(request, env, ctx, url) {
+  if (request.method !== "GET") return mapPage("Not allowed", "</head><body>Not allowed</body></html>", 405);
+  const key = url.searchParams.get("key") || "";
+  if (!fileSigningEnabled(env) || !await verifyFileSig(env, key, url.searchParams))
+    return mapPage("Link expired", `</head><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#0f172a"><h2>This map link has expired or isn't valid</h2><p>Open the timesheet in the portal (Site Log) for a fresh link.</p></body></html>`, 403);
+  if (!env.SITELOG_DB) return mapPage("Unavailable", "</head><body>SiteLog is not connected.</body></html>", 503);
+  const [pid, day, vid, side] = key.split("|");
+  if (!pid || !/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return mapPage("Bad link", "</head><body>Bad link</body></html>", 400);
+  const data = await personDayEvents(env, pid, day);
+  data.focus = vid && vid.startsWith("scan:") ? vid : vid ? vid + ":" + (side === "out" ? "out" : "in") : "";
+  data.dayLabel = niceDate(day, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", "");
+  const json4 = JSON.stringify(data).replace(/</g, "\\u003c");
+  return mapPage(`${data.name} \u2014 ${data.dayLabel}`, `
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<style>
+  body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;background:#f4f6f9}
+  header{background:#003468;color:#fff;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
+  header h1{font-size:17px;margin:0} header div{font-size:13px;opacity:.85;margin-top:2px}
+  #map{height:58vh;min-height:300px}
+  ul{list-style:none;margin:0;padding:8px 12px 24px;max-width:760px}
+  li{background:#fff;border:1px solid #e2e6ec;border-radius:10px;padding:9px 12px;margin:6px 0;cursor:pointer;display:flex;gap:10px;align-items:baseline}
+  li.on{border-color:#003468;box-shadow:0 0 0 2px #00346833}
+  .t{font-weight:700;font-variant-numeric:tabular-nums;min-width:44px}
+  .d{font-size:12.5px;color:#64748b} .ok{color:#16a34a} .bad{color:#dc2626}
+  .dot{width:10px;height:10px;border-radius:50%;flex:none;align-self:center}
+  .note{font-size:12px;color:#64748b;padding:6px 14px 0;max-width:760px}
+</style></head><body>
+<header><h1 id="h"></h1><div id="sub"></div></header>
+<div id="map"></div>
+<p class="note">Pins show where the phone said it was. The blue circles are each site's sign-in boundary. GPS on a phone is usually accurate to 10\u201325 m (the faint ring round the selected pin).</p>
+<ul id="list"></ul>
+<script type="application/json" id="data">${json4}<\/script>
+<script>
+(function(){
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var esc = function(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); };
+  document.getElementById("h").textContent = D.name + (D.company ? " \u2014 " + D.company : "");
+  document.getElementById("sub").textContent = D.dayLabel + " \xB7 " + D.events.length + " event" + (D.events.length==1?"":"s");
+  var COL = { in:"#16a34a", out:"#1d4ed8", scan:"#94a3b8", refused:"#dc2626" };
+  var map = L.map("map", { zoomControl:true });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    { maxZoom:20, subdomains:"abcd", attribution:"&copy; OpenStreetMap &copy; CARTO" }).addTo(map);
+  D.sites.forEach(function(s){
+    L.circle([s.lat,s.lng], { radius:s.radius, color:"#2563eb", weight:1, fillOpacity:.05 }).addTo(map);
+    L.circleMarker([s.lat,s.lng], { radius:4, color:"#1e3a8a", fillColor:"#1e3a8a", fillOpacity:1, weight:1 })
+      .addTo(map).bindTooltip(esc(s.name), { permanent:true, direction:"right", offset:[6,0], className:"" });
+  });
+  var marks = {}, acc = null, bounds = [];
+  function text(e){
+    var where = e.site ? esc(e.site) : "no site";
+    var dist = e.dist != null ? (e.dist + " m from " + (e.kind==="refused" && !e.ok ? "the nearest site" : "the site")) : "";
+    var gps = e.ok === true ? '<span class="ok">\u2714 GPS verified</span>' : e.ok === false ? '<span class="bad">\u2718 not verified</span>' : "";
+    return "<b>" + esc(e.time) + " \xB7 " + esc(e.label) + "</b><br>" + where + (dist ? " \xB7 " + dist : "") + (gps ? "<br>" + gps : "")
+      + (e.acc ? '<br><span style="color:#64748b">phone accuracy \xB1' + Math.round(e.acc) + ' m</span>' : "");
+  }
+  D.events.forEach(function(e){
+    var m = L.circleMarker([e.lat,e.lng], { radius:8, color:"#fff", weight:2, fillColor:COL[e.kind]||"#64748b", fillOpacity:1 })
+      .addTo(map).bindPopup(text(e));
+    marks[e.id] = { m:m, e:e }; bounds.push([e.lat,e.lng]);
+  });
+  function focus(id, pan){
+    var x = marks[id]; if (!x) return;
+    if (acc) map.removeLayer(acc);
+    if (x.e.acc) acc = L.circle([x.e.lat,x.e.lng], { radius:x.e.acc, color:COL[x.e.kind], weight:1, fillOpacity:.12 }).addTo(map);
+    Object.keys(marks).forEach(function(k){ marks[k].m.setRadius(k===id?12:8); });
+    if (pan) map.setView([x.e.lat,x.e.lng], 18);
+    x.m.openPopup();
+    [].forEach.call(document.querySelectorAll("#list li"), function(li){ li.classList.toggle("on", li.dataset.id===id); });
+  }
+  var list = document.getElementById("list");
+  list.innerHTML = D.events.map(function(e){
+    return '<li data-id="' + esc(e.id) + '"><span class="dot" style="background:' + (COL[e.kind]||"#64748b") + '"></span><span class="t">' + esc(e.time)
+      + '</span><span>' + esc(e.label) + '<div class="d">' + (e.kind === "refused" && e.site ? "nearest site: " : "") + (e.site ? esc(e.site) : "no site") + (e.dist != null ? " \xB7 " + e.dist + " m away" : "")
+      + (e.ok === true ? ' \xB7 <span class="ok">\u2714</span>' : e.ok === false ? ' \xB7 <span class="bad">\u2718</span>' : "") + '</div></span></li>';
+  }).join("") || '<li>No events with a location on this day.</li>';
+  list.addEventListener("click", function(ev){ var li = ev.target.closest("li[data-id]"); if (li) focus(li.dataset.id, true); });
+  if (D.focus && marks[D.focus]) { map.setView([marks[D.focus].e.lat, marks[D.focus].e.lng], 17); focus(D.focus, false); }
+  else if (bounds.length) map.fitBounds(bounds, { padding:[40,40], maxZoom:17 });
+  else if (D.sites.length) map.setView([D.sites[0].lat, D.sites[0].lng], 16);
+  else map.setView([50.86,-1.2], 9);
+})();
+<\/script></body></html>`);
 }
 async function sweepSitelogTimesheets(env, tid = 1) {
   if (!env.SITELOG_DB) return;
@@ -46679,6 +46903,7 @@ async function handle39(request, env, ctx, url, sess) {
     } catch (e) {
       return error(e.message || "SiteLog unavailable", 503, env, request);
     }
+    await addMapLinks(env, apiOrigin(env, url), people, MAP_TTL_VIEW);
     return json({
       ok: true,
       period: per,
@@ -47452,9 +47677,9 @@ function buildProgrammePdf(data, meta = {}) {
           doc.text(x + 1, gridTop + 8, "BH", { size: 5.4, color: [0.7, 0.45, 0.05] });
         }
         if (dayW >= 8 || isMon || first2) {
-          const num4 = p2(d.getUTCDate());
-          if (x + 1 + textWidth(num4, 5.6) <= rightEdge)
-            doc.text(x + 1, gridTop + 17.5, num4, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
+          const num5 = p2(d.getUTCDate());
+          if (x + 1 + textWidth(num5, 5.6) <= rightEdge)
+            doc.text(x + 1, gridTop + 17.5, num5, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
         }
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
@@ -51188,6 +51413,8 @@ var ROUTES = [
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/sitelog-ts", handle39],
   // SiteLog timesheet PDFs (FullAccess)
+  ["*", "/sitelog-map", handleMap],
+  // where a phone was for a sign-in/out (signed link, public)
   ["*", "/cablecalc", handle40],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/cpd", handle38],
@@ -51334,7 +51561,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -51531,6 +51758,8 @@ var PUBLIC_ROUTES = [
   ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
+  ["GET", "/sitelog-map"],
+  // SiteLog event location map (signed link from the timesheet email / Site Log page)
   ["GET", "/sla/subcon-reply"],
   // subcontractor "can't take this job" link (signed, verified in-handler)
   ["POST", "/sla/subcon-reply"],
@@ -51594,7 +51823,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
