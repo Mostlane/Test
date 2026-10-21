@@ -227,7 +227,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   ACTIVE job blocks (a job merely booked today never did), and since 21 Oct only one put on the go
   TODAY (`activeSetOn` — the engineer's engStatus slice `at`, else the newest matching statusHistory
   entry, London day):** 31191/1 Rowledge had sat office-set "Travelling" for Steve/Chris since 6 Oct
-  and silently barred them from ending any day. Both
+  and silently barred them from ending any day. Both **Blocked = a pop-up that stays (21 Oct):** the 409 now carries per job
+  `{id, ref, status, site, since, by, byOffice, why, todo}` + `blocked:true`, and
+  `day-timesheet.js MLDaySheet.blocked(d,{back})` (`?v=2`) shows a red "⛔ You can't end your day yet"
+  modal — which job, site, status, since when, who set it (office vs them), what to do, an "Open this
+  job →" button, and "call the office — they can close your day". engineer-jobs / route / my-day all
+  use it (also for no-signal); my-day's own client-side activeJob pre-check was removed (server
+  decides). Previously the reason was an auto-fading toast (portal-wide alert), easily missed.
   clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=46"></script>
-  <script src="day-timesheet.js?v=1"></script>
+  <script src="day-timesheet.js?v=2"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>My Day — Mostlane</title>
@@ -316,7 +316,8 @@ async function startTravel(jobId, btn){
 
 async function endDay(){
   const msg = $("endMsg"); msg.className = "msg";
-  if(activeJob()){ msg.className="msg err"; msg.textContent = "You still have an active job — finish, quote, order or hold it first."; return; }
+  // The server decides (and explains in a pop-up) — a local status check here
+  // could be stale or a co-worker's status on a shared job.
   $("endBtn").disabled = true; msg.textContent = "Ending your day…";
   try{
     const m = $("endMiles").value;
@@ -325,6 +326,7 @@ async function endDay(){
       body: JSON.stringify({ engineer:getEngineer(), gps, endMileage: m && !isNaN(+m) ? Math.round(+m) : null, fuel: $("fuel").value.trim(), date: todayLocal() }) });
     if(res && res.ok===false){
       const d = await res.json().catch(()=>({}));
+      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"my-day.html" }); }
       const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
       msg.className="msg err"; msg.textContent = (d.error||"You can't end your day yet.")+(list?"\n\n"+list:""); $("endBtn").disabled=false; return;
     }

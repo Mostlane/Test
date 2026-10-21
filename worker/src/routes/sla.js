@@ -1713,11 +1713,25 @@ export async function handle(request, env, ctx, url, sess) {
           // stale, not a visit he's walking away from; the not-attended warning
           // and the board already flag it for the office.
           if (active && activeSetOn(j, engNorm, st) !== londonDateOfIso(new Date().toISOString())) continue;
-          if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+          if (active) {
+            const who = activeSetBy(j, engNorm, st);
+            const byOffice = !!who.by && normId(who.by) !== engNorm;
+            outstanding.push({
+              id: j.id, ref: j.helpdeskRef || j.id, status: st,
+              site: j.siteName || j.siteCode || "", since: who.at || "", by: who.by || "", byOffice,
+              why: /travelling/i.test(st)
+                ? (byOffice ? `The office (${who.by}) marked you as travelling to this job.` : "You're marked as travelling to this job.")
+                : (byOffice ? `The office (${who.by}) marked this job as in progress for you.` : "You started this job and it hasn't been finished."),
+              todo: /travelling/i.test(st)
+                ? "Open it and either start it (In Progress) or, if you're not going today, put it On Hold with a reason."
+                : "Open it and Complete it — or, if you can't finish today, put it On Hold with a reason so the office knows."
+            });
+          }
         }
         if (outstanding.length) {
           return jsonResponse({
-            error: "You still have " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " in progress — finish or park " + (outstanding.length === 1 ? "it" : "them") + " before ending your day.",
+            error: "You can't end your day yet — " + outstanding.length + " job" + (outstanding.length === 1 ? " is" : "s are") + " still on the go today.",
+            blocked: true,
             outstanding
           }, headers, 409);
         }
@@ -4827,6 +4841,19 @@ function londonDateOfIso(iso) {
 // The London day this engineer's CURRENT status was set: their per-engineer slice
 // on a shared job, else the newest matching statusHistory entry. When it can't be
 // traced it counts as today, so an untraceable active job still blocks (cautious).
+// Who set this engineer's current status, and when ({by, at}; blanks if unknown).
+function activeSetBy(job, engNorm, status) {
+  const want = String(status || "").toLowerCase();
+  const slice = job && job.engStatus && job.engStatus[engNorm];
+  if (slice && String(slice.status || "").toLowerCase() === want) return { by: slice.by || "", at: slice.at || "" };
+  const hist = Array.isArray(job && job.statusHistory) ? job.statusHistory : [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i] || {};
+    if (h.eng && h.eng !== engNorm) continue;
+    if (String(h.status || "").toLowerCase() === want) return { by: h.by || "", at: h.at || "" };
+  }
+  return { by: "", at: "" };
+}
 export function activeSetOn(job, engNorm, status) {
   const today = londonDateOfIso(new Date().toISOString());
   const slice = job && job.engStatus && job.engStatus[engNorm];

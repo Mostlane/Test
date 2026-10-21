@@ -307,7 +307,58 @@
       .catch(function () { return false; });
   }
 
-  window.MLDaySheet = { open: open, reopen: reopen, isConfirmed: isConfirmed, flushPending: flushPending, hasPending: function () { return pendingDates().length > 0; } };
+  // "You can't end your day yet" — a pop-up that STAYS until closed and says
+  // exactly which job is holding the day open, why, and what to do (21 Oct 2026:
+  // the old brief toast was easily missed, so engineers just thought the app
+  // wouldn't let them finish). d = the 409 body from /sla/shift/clock-off.
+  function blocked(d, opts) {
+    opts = opts || {};
+    var back = opts.back || (location.pathname.split("/").pop() || "engineer-jobs.html");
+    var list = (d && Array.isArray(d.outstanding)) ? d.outstanding : [];
+    var old = document.getElementById("mldbBack"); if (old) old.remove();
+    if (!document.getElementById("mldb-style")) {
+      var st = document.createElement("style"); st.id = "mldb-style";
+      st.textContent =
+        "#mldbBack{position:fixed;inset:0;background:rgba(10,25,45,.55);z-index:2147483500;display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top,0px) + 16px) 14px calc(env(safe-area-inset-bottom,0px) + 16px)}"
+        + "#mldbCard{background:#fff;border-radius:16px;max-width:460px;width:100%;max-height:100%;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);font:15px/1.45 'Segoe UI',system-ui,sans-serif;color:#0f2438}"
+        + "#mldbCard .hd{background:#b91c1c;color:#fff;padding:16px 18px;border-radius:16px 16px 0 0}"
+        + "#mldbCard .hd b{display:block;font-size:18px}"
+        + "#mldbCard .bd{padding:14px 18px}"
+        + "#mldbCard .job{border:1.5px solid #fecaca;background:#fff5f5;border-radius:12px;padding:12px;margin:0 0 10px}"
+        + "#mldbCard .ref{font-weight:700;font-size:16px;background:none;padding:0;border:0;font-family:inherit;color:#0f2438}"
+        + "#mldbCard .meta{color:#5b6b7b;font-size:13px;margin:2px 0 6px}"
+        + "#mldbCard .why{margin:4px 0}"
+        + "#mldbCard .todo{background:#fff;border-radius:8px;padding:8px 10px;font-size:14px;margin:8px 0}"
+        + "#mldbCard a.go{display:block;text-align:center;background:#003366;color:#fff;border-radius:10px;padding:11px;font-weight:700;text-decoration:none}"
+        + "#mldbCard .ft{padding:0 18px 16px}"
+        + "#mldbCard .note{color:#5b6b7b;font-size:13px;margin:4px 0 12px}"
+        + "#mldbCard button{width:100%;border:1px solid #c9d3dd;background:#fff;color:#0f2438;border-radius:10px;padding:11px;font:600 15px 'Segoe UI',system-ui,sans-serif}";
+      document.head.appendChild(st);
+    }
+    function when(iso) {
+      if (!iso) return "";
+      try { return new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; }
+    }
+    var jobs = list.map(function (o) {
+      return '<div class="job"><div class="ref">' + esc(o.ref || o.id) + '</div>'
+        + '<div class="meta">' + esc([o.site, o.status, o.since ? "since " + when(o.since) : ""].filter(Boolean).join(" · ")) + '</div>'
+        + '<div class="why">' + esc(o.why || ("This job is still " + (o.status || "on the go") + ".")) + '</div>'
+        + '<div class="todo">👉 ' + esc(o.todo || "Open it and finish it, or put it On Hold with a reason.") + '</div>'
+        + (o.id ? '<a class="go" href="engineer-job.html?jobId=' + encodeURIComponent(o.id) + '&back=' + encodeURIComponent(back) + '">Open this job →</a>' : '')
+        + '</div>';
+    }).join("");
+    var back2 = document.createElement("div");
+    back2.id = "mldbBack";
+    back2.innerHTML = '<div id="mldbCard" role="alertdialog" aria-modal="true">'
+      + '<div class="hd"><b>⛔ You can\'t end your day yet</b>' + esc(list.length === 1 ? "This job is still on the go:" : (list.length ? list.length + " jobs are still on the go:" : "")) + '</div>'
+      + '<div class="bd">' + (jobs || '<div class="why">' + esc((d && d.error) || "The server wouldn't end your day.") + '</div>') + '</div>'
+      + '<div class="ft"><div class="note">Sort the job' + (list.length === 1 ? "" : "s") + ' above, then press End my day again. Stuck? Call the office — they can close your day for you.</div>'
+      + '<button type="button" id="mldbClose">Close</button></div></div>';
+    document.body.appendChild(back2);
+    back2.querySelector("#mldbClose").onclick = function () { back2.remove(); };
+  }
+
+  window.MLDaySheet = { open: open, reopen: reopen, isConfirmed: isConfirmed, flushPending: flushPending, blocked: blocked, hasPending: function () { return pendingDates().length > 0; } };
 
   // Sync any queued confirmations when the app regains connectivity / reopens.
   try {
