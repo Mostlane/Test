@@ -6187,6 +6187,16 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   days) lists refusals in plain English + "offered a sign-in but never confirmed it" (a
   confirm_check_in/sign_out scan with no sign-in/out from that phone within 20 min). Test
   `node --no-warnings worker/tools/test-sitelog-scanlog.mjs` (11).
+- **Which site a scan belongs to — `chooseSite` (21 Oct 2026).** Starbucks Jubilee Street and
+  Brighton North Road are **45 m apart**, both 500 m radius; picking the nearest pin let 10–25 m of
+  GPS wobble flip Zane between them (20 Oct: transferred to North Road at 10:03, back at 13:08). A
+  smaller radius cannot separate pins 45 m apart (and 250 m would have refused Ryan's genuine 16 Oct
+  sign-out at 260 m). `sitelog-api.js chooseSite` (used by /scan and /sync-event): (1) an OPEN visit
+  whose site still contains the fix wins; (2) among sites within 60 m of the closest, the person's
+  most recent site (30 days) wins; (3) else nearest. /scan replies carry `alternatives` (the near-tie
+  site names) for a future "which site?" picker in the scanner (Mostlane/SiteLog, not built). Trade-off:
+  moving between two overlapping sites now needs a sign-out first. Test
+  `node --no-warnings worker/tools/test-sitelog-sitepick.mjs` (6).
 - **Sign-in / sign-out push to the owner (16 Oct 2026).** Every confirmed sign-in or sign-out
   (`/confirm-checkin`, `/confirm-checkout`, and offline `/sync-event` replays) pushes
   `sendToUser` → title "🟢 Ryan Diggens signed in — <site>" / "🔴 … signed out", body = company +

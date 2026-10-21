@@ -406,6 +406,50 @@ function forcedCheckoutSql(checkInAt, visitDateKey, nowMs) {
   return toSqlUtc(forcedMs);
 }
 
+// Which site does a GPS fix belong to? Sites can sit metres apart (Starbucks
+// Jubilee Street and Brighton North Road are 45 m apart, both 500 m radius), and
+// phone GPS wobbles 10-25 m, so "nearest pin" alone flips people between them.
+//   1. Sticky: someone signed in at a site they are still inside stays there.
+//   2. Near-tie (another site within TIE_M of the closest): prefer the site this
+//      person used most recently in the last 30 days.
+//   3. Otherwise the closest site, as before.
+// Returns { site, alternatives:[names inside the near-tie] }.
+const SITE_TIE_M = 60;
+export async function chooseSite(env, siteRows, lat, lng, personId) {
+  const inside = [];
+  for (const s of siteRows || []) {
+    const d = haversineMeters(lat, lng, Number(s.lat), Number(s.lng));
+    const r = Number(s.radius_m) > 0 ? Number(s.radius_m) : 500;
+    if (d <= r) inside.push({ s, d });
+  }
+  if (!inside.length) return { site: null, alternatives: [] };
+  inside.sort((a, b) => a.d - b.d);
+  const close = inside.filter(x => x.d <= inside[0].d + SITE_TIE_M);
+  const alternatives = close.length > 1 ? close.map(x => x.s.site_name) : [];
+  if (personId && inside.length > 1) {
+    try {
+      const open = await env.SITELOG_DB.prepare(
+        "SELECT site_code FROM visits WHERE person_id = ? AND check_out_at IS NULL ORDER BY check_in_at DESC"
+      ).bind(personId).all();
+      for (const v of open.results || []) {
+        const hit = inside.find(x => x.s.site_name === v.site_code);
+        if (hit) return { site: hit.s, alternatives, reason: "open_visit" };
+      }
+      if (close.length > 1) {
+        const since = new Date(Date.now() - 30 * 864e5).toISOString().replace("T", " ").slice(0, 19);
+        const recent = await env.SITELOG_DB.prepare(
+          "SELECT site_code FROM visits WHERE person_id = ? AND check_in_at >= ? ORDER BY check_in_at DESC LIMIT 20"
+        ).bind(personId, since).all();
+        for (const v of recent.results || []) {
+          const hit = close.find(x => x.s.site_name === v.site_code);
+          if (hit) return { site: hit.s, alternatives, reason: "recent_visit" };
+        }
+      }
+    } catch (e) { /* fall back to nearest */ }
+  }
+  return { site: inside[0].s, alternatives, reason: "nearest" };
+}
+
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => d * Math.PI / 180;
@@ -2371,11 +2415,10 @@ async function handleInner(request, env, ctx) {
       let matchedSite = null;
       if (latVal !== null && lngVal !== null && latVal >= -90 && latVal <= 90 && lngVal >= -180 && lngVal <= 180) {
         const siteRows = await env.SITELOG_DB.prepare("SELECT * FROM sites WHERE COALESCE(archived,0) = 0").all();
-        let bestDist = null;
-        for (const s of siteRows.results || []) {
-          const d = haversineMeters(latVal, lngVal, Number(s.lat), Number(s.lng));
-          if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) { bestDist = d; matchedSite = s; }
-        }
+        const devPick = await env.SITELOG_DB.prepare(
+          "SELECT person_id FROM devices WHERE device_token = ?"
+        ).bind(deviceToken).first();
+        matchedSite = (await chooseSite(env, siteRows.results || [], latVal, lngVal, devPick ? devPick.person_id : null)).site;
       }
 
       const device = await env.SITELOG_DB.prepare(
@@ -2501,17 +2544,12 @@ async function handleInner(request, env, ctx) {
         "SELECT * FROM sites WHERE COALESCE(archived,0) = 0"
       ).all();
 
-      let matchedSite = null;
-      let bestDist = null;
-
-      for (const s of siteRows.results || []) {
-        const d = haversineMeters(latNum, lngNum, Number(s.lat), Number(s.lng));
-
-        if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) {
-          bestDist = d;
-          matchedSite = s;
-        }
-      }
+      const devPick = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ?"
+      ).bind(deviceToken).first();
+      const pick = await chooseSite(env, siteRows.results || [], latNum, lngNum, devPick ? devPick.person_id : null);
+      const matchedSite = pick.site;
+      const siteAlternatives = pick.alternatives;
 
       if (!matchedSite) {
         // Even with no GPS-matched site, a device that is currently signed in
@@ -2646,6 +2684,7 @@ async function handleInner(request, env, ctx) {
           status: "confirm_sign_out",
           visitId: openVisit.id,
           site: siteCode,
+          alternatives: siteAlternatives,
           firstName: person?.first_name || null,
           company: person?.company || null
         });
@@ -2657,6 +2696,7 @@ async function handleInner(request, env, ctx) {
       return json({
         status: "confirm_check_in",
         site: siteCode,
+        alternatives: siteAlternatives,
         firstName: person?.first_name || null,
         company: person?.company || null,
         arrivalType,
