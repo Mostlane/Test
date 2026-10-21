@@ -141,6 +141,7 @@ const ROUTES = [
   ["*", "/certs",      certs.handle],    // portal-native EM/PAT certificates (draft → office review → file to compliance)
   ["*", "/pump",       pump.handle],     // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/sitelog-ts", sitelogts.handle], // SiteLog timesheet PDFs (FullAccess)
+  ["*", "/sitelog-map", sitelogts.handleMap], // where a phone was for a sign-in/out (signed link, public)
   ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/cpd",        cpd.handle],       // CPD training (electricians): read material + test → logged per user for the NICEIC audit
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
@@ -502,6 +503,7 @@ const PUBLIC_ROUTES = [
   ["GET", "/sla/firestop/spec-file"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
+  ["GET", "/sitelog-map"],   // SiteLog event location map (signed link from the timesheet email / Site Log page)
   ["GET", "/sla/subcon-reply"],    // subcontractor "can't take this job" link (signed, verified in-handler)
   ["POST", "/sla/subcon-reply"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)

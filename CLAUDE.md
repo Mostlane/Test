@@ -6236,6 +6236,19 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `scannedOut`), purple in the portal Day/Week view, the PDF (row + legend + chip) and the email
   line; `personTotals().scanned`. Real-data cases it was built against: a sign-in scan at another
   site while still signed in (ignored), a re-scan before a later confirmed sign-out (ignored).
+  A sign-in scan within 30 min AFTER a real sign-out is also ignored (someone walking off — Zane's
+  daily 16:08 'North Road' scan as he leaves Jubilee Street).
+  **📍 Location map per event (21 Oct 2026).** Every sign-in / sign-out with a stored fix (visits
+  lat/lng, out_lat/out_lng; scanned-but-not-confirmed use the scan's) gets a signed link
+  **GET /sitelog-map?key=<personId>|<date>|<visitId>|<in|out>&exp&sig** (PUBLIC_ROUTES, HMAC via
+  filesign; NO links at all without a signing secret, so it never falls open). The worker renders a
+  standalone Leaflet page: that person's whole day — sign-ins (green), sign-outs (blue), unconfirmed
+  scans (grey), refused scans (red) from `scan_log` — with every named site + any site within 1 km
+  drawn as its geofence circle, the clicked event focused with its GPS-accuracy ring, and a tappable
+  list (time · what · site · metres from it · ✔/✘). `personDayEvents()` builds it. Links: /data mints
+  them for SiteLog admins (7 days, 📍 next to each time in sitelog.html's Day/Week view); the email
+  mints them for the recipients (90 days) — the email now lists every event per person with 📍s.
+  Auto-closed sign-outs have no pin (no location). Origin = `env.API_BASE_URL` else the workers.dev host.
 
 ## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
 The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
