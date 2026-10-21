@@ -65,6 +65,25 @@ export async function graphJson(env, method, path, body) {
   return j;
 }
 
+// JSON $batch: up to 20 sub-requests per call. sequential (default) chains
+// each on the one before — workbook writes clash when run in parallel. Returns one
+// {status, body} per request, in the order given. Throws only if the batch
+// call itself is refused; a failed sub-request comes back with its status.
+export async function graphBatch(env, reqs, { sequential = true } = {}) {
+  const out = [];
+  for (let i = 0; i < reqs.length; i += 20) {
+    const chunk = reqs.slice(i, i + 20).map((q, k) => ({
+      id: String(k + 1), method: q.method, url: q.url,
+      ...(k && sequential ? { dependsOn: [String(k)] } : {}),
+      ...(q.body !== undefined ? { body: q.body, headers: { "content-type": "application/json" } } : {}),
+    }));
+    const j = await graphJson(env, "POST", "/$batch", { requests: chunk });
+    const byId = {}; for (const r of (j && j.responses) || []) byId[r.id] = r;
+    chunk.forEach(c => { const r = byId[c.id] || {}; out.push({ status: Number(r.status) || 0, body: r.body }); });
+  }
+  return out;
+}
+
 // A quick reachability check for the sweep setup UI: can we sign in AND see the
 // mailbox? Returns {ok, error?}.
 export async function graphMailboxCheck(env, mailbox) {

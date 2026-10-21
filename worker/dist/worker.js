@@ -6376,6 +6376,7 @@ var init_invoiceparse = __esm({
 var graphmail_exports = {};
 __export(graphmail_exports, {
   downloadAttachment: () => downloadAttachment,
+  graphBatch: () => graphBatch,
   graphConfigured: () => graphConfigured,
   graphJson: () => graphJson,
   graphMailboxCheck: () => graphMailboxCheck,
@@ -6443,6 +6444,26 @@ async function graphJson(env, method, path, body) {
     throw e;
   }
   return j;
+}
+async function graphBatch(env, reqs, { sequential = true } = {}) {
+  const out = [];
+  for (let i = 0; i < reqs.length; i += 20) {
+    const chunk = reqs.slice(i, i + 20).map((q, k) => ({
+      id: String(k + 1),
+      method: q.method,
+      url: q.url,
+      ...k && sequential ? { dependsOn: [String(k)] } : {},
+      ...q.body !== void 0 ? { body: q.body, headers: { "content-type": "application/json" } } : {}
+    }));
+    const j = await graphJson(env, "POST", "/$batch", { requests: chunk });
+    const byId = {};
+    for (const r of j && j.responses || []) byId[r.id] = r;
+    chunk.forEach((c) => {
+      const r = byId[c.id] || {};
+      out.push({ status: Number(r.status) || 0, body: r.body });
+    });
+  }
+  return out;
 }
 async function graphMailboxCheck(env, mailbox) {
   if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
@@ -31627,6 +31648,31 @@ function shortDescription(desc) {
   t = t.charAt(0).toUpperCase() + t.slice(1);
   return t && !/[.!?…]$/.test(t) ? t + "." : t;
 }
+async function aiShortDescription(env, desc) {
+  const text = String(desc || "").replace(/\s+/g, " ").trim().slice(0, 1500);
+  if (!text || !env.ANTHROPIC_API_KEY) return shortDescription(desc);
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-5",
+        max_tokens: 60,
+        messages: [{ role: "user", content: "Summarise this building-maintenance fault in 4 to 8 plain words for a spreadsheet, ending with a full stop. Say what is wrong, not where or when. No quotes, no store names, no access times.\n\n" + text }]
+      })
+    });
+    if (r.ok) {
+      const j = await r.json();
+      let t = String((j.content || []).map((c) => c.text || "").join(" ")).replace(/\s+/g, " ").replace(/^["'“]+|["'”]+$/g, "").trim();
+      if (t && t.length <= 90) {
+        t = t.charAt(0).toUpperCase() + t.slice(1);
+        return /[.!?]$/.test(t) ? t : t + ".";
+      }
+    }
+  } catch {
+  }
+  return shortDescription(desc);
+}
 function sheetTrade(desc) {
   let w = null;
   try {
@@ -31671,16 +31717,20 @@ async function rowInfo(env, tid, { reference, siteCode, siteName, postcode, desc
     } catch {
     }
   }
-  const name = site && site.site_name || String(siteName || "").replace(/^\s*\d{3,4}\s*[-–]\s*/, "").trim();
+  const emailName = String(siteName || "").replace(/^\s*\d{3,4}\s*[-–]\s*/, "").trim();
+  const portalName = String(site && site.site_name || "").replace(/^\s*\d{3,4}\s*[-–]\s*/, "").trim();
+  const name = emailName || portalName;
   const pc = site && site.postcode || postcode || "";
+  let miles = await roundTripMiles(env, tid, portalName || name, pc);
+  if (miles === "" && emailName && emailName !== portalName) miles = await roundTripMiles(env, tid, emailName, "");
   return {
     order: sheetOrderNo(reference),
     storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
     type: site && TYPE_LABEL2[String(site.client || "").toLowerCase()] || "Retail",
     name,
-    desc: shortDescription(description),
+    desc: await aiShortDescription(env, description),
     trade: sheetTrade(description),
-    miles: await roundTripMiles(env, tid, name, pc)
+    miles
   };
 }
 var colLetter = (i) => String.fromCharCode(65 + i);
@@ -31695,7 +31745,7 @@ async function inspectSheet(env, tid, order) {
     const vals = ur && ur.values || [], top = Number(ur && ur.rowIndex) || 0;
     const h = vals.findIndex((r) => String(r[1] || "").trim().toLowerCase() === "order number");
     if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
-    let target = -1, maxWe = 0, lastOrder = "", existsRow = 0;
+    let target = -1, maxWe = 0, lastOrder = "", existsRow = 0, existsVals = null;
     for (let i = h + 1; i < vals.length; i++) {
       const r = vals[i];
       const blank = !String(r[1] || "").trim() && !String(r[4] || "").trim() && !String(r[5] || "").trim();
@@ -31708,12 +31758,57 @@ async function inspectSheet(env, tid, order) {
         if (Number.isFinite(we) && we > maxWe) maxWe = we;
         lastOrder = String(r[1] || "");
       }
-      if (order && !existsRow && sameOrder(r[1], order)) existsRow = top + i + 1;
+      if (order && !existsRow && sameOrder(r[1], order)) {
+        existsRow = top + i + 1;
+        existsVals = r;
+      }
     }
     if (target < 0) target = vals.length;
-    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow };
+    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow, existsVals, headerRow: top + h + 1 };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300), status: e && e.status };
+  }
+}
+var COLS2 = 21;
+var formulasFor = (r) => ({ 13: `=SUM(M${r}*0.5)`, 16: `=SUM(P${r}*0.18)`, 17: `=SUM(N${r},O${r},P${r},Q${r})`, 18: `=SUM(G${r}-R${r})` });
+async function copyRowFormat(env, cfg, src, dst) {
+  try {
+    const base = sheetBase(cfg);
+    const cell = (c, r) => `${base}/range(address='${colLetter(c)}${r}')`;
+    const gets = [{ method: "GET", url: `${base}/range(address='A${src}:${colLetter(COLS2 - 1)}${src}')?$select=numberFormat` }];
+    for (let c = 0; c < COLS2; c++) {
+      gets.push({ method: "GET", url: cell(c, src) + "/format?$select=horizontalAlignment,verticalAlignment,wrapText" });
+      gets.push({ method: "GET", url: cell(c, src) + "/format/fill" });
+      gets.push({ method: "GET", url: cell(c, src) + "/format/font" });
+      gets.push({ method: "GET", url: cell(c, src) + "/format/borders" });
+    }
+    const res = await graphBatch(env, gets, { sequential: false });
+    const writes = [];
+    const nf = res[0] && res[0].status < 300 && res[0].body && res[0].body.numberFormat;
+    if (Array.isArray(nf) && nf[0]) writes.push({ method: "PATCH", url: `${base}/range(address='A${dst}:${colLetter(COLS2 - 1)}${dst}')`, body: { numberFormat: [nf[0]] } });
+    for (let c = 0; c < COLS2; c++) {
+      const [fm, fill2, font, bord] = res.slice(1 + c * 4, 5 + c * 4).map((x) => x && x.status < 300 ? x.body : null);
+      if (fm) writes.push({ method: "PATCH", url: cell(c, dst) + "/format", body: { horizontalAlignment: fm.horizontalAlignment, verticalAlignment: fm.verticalAlignment, wrapText: !!fm.wrapText } });
+      if (fill2 && fill2.color && !/^#?FFFFFF$/i.test(fill2.color)) writes.push({ method: "PATCH", url: cell(c, dst) + "/format/fill", body: { color: fill2.color } });
+      if (font) {
+        const f = {};
+        for (const k of ["name", "size", "color", "bold", "italic", "underline"]) if (font[k] != null) f[k] = font[k];
+        writes.push({ method: "PATCH", url: cell(c, dst) + "/format/font", body: f });
+      }
+      for (const b of bord && bord.value || []) {
+        if (!/^Edge(Top|Bottom|Left|Right)$/.test(b.sideIndex || "") || !b.style || b.style === "None") continue;
+        const body = { style: b.style };
+        if (b.color) body.color = b.color;
+        if (b.weight) body.weight = b.weight;
+        writes.push({ method: "PATCH", url: cell(c, dst) + `/format/borders/${b.sideIndex}`, body });
+      }
+    }
+    if (!writes.length) return { ok: false, error: "nothing read from row " + src };
+    const out = await graphBatch(env, writes, { sequential: true });
+    const bad = out.filter((o) => !(o.status >= 200 && o.status < 300)).length;
+    return { ok: bad === 0, applied: writes.length - bad, failed: bad };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 200) };
   }
 }
 async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
@@ -31724,8 +31819,22 @@ async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
     if (!info.order) return { ok: false, error: "no order number" };
     const at = await inspectSheet(env, tid, info.order);
     if (!at.ok) return at;
-    if (at.existsRow) return { ok: true, skipped: true, row: at.existsRow, info, reason: "already on the sheet (row " + at.existsRow + ")" };
-    const r = at.nextRow;
+    if (at.existsRow) {
+      const r2 = at.existsRow, ev = at.existsVals || [];
+      const blank = (c) => ev[c] == null || String(ev[c]).trim() === "";
+      const fills = {};
+      if (blank(9) && info.trade) fills[9] = info.trade;
+      if (blank(12) && info.miles !== "") fills[12] = info.miles;
+      const fx2 = formulasFor(r2);
+      for (const c of Object.keys(fx2)) if (blank(+c)) fills[c] = fx2[c];
+      const cols = Object.keys(fills).map(Number);
+      if (!cols.length) return { ok: true, skipped: true, row: r2, info, reason: "already on the sheet (row " + r2 + ")" };
+      if (dryRun) return { ok: true, dryRun: true, row: r2, info, filled: fills };
+      await graphBatch(env, cols.map((c) => ({ method: "PATCH", url: sheetBase(cfg) + `/range(address='${colLetter(c)}${r2}')`, body: { formulas: [[fills[c]]] } })));
+      const fmt2 = r2 > at.headerRow + 1 ? await copyRowFormat(env, cfg, r2 - 1, r2) : null;
+      return { ok: true, filled: true, row: r2, info, cols: cols.map(colLetter), format: fmt2 };
+    }
+    const r = at.nextRow, fx = formulasFor(r);
     const row = [
       at.nextWe,
       info.order,
@@ -31740,18 +31849,19 @@ async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
       "",
       "",
       info.miles === "" ? "" : info.miles,
-      `=SUM(M${r}*0.5)`,
+      fx[13],
       "",
       "",
-      `=SUM(P${r}*0.18)`,
-      `=SUM(N${r},O${r},P${r},Q${r})`,
-      `=SUM(G${r}-R${r})`,
+      fx[16],
+      fx[17],
+      fx[18],
       "",
       ""
     ];
     if (dryRun) return { ok: true, dryRun: true, row: r, info, values: row };
     await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
-    return { ok: true, row: r, info };
+    const fmt = r > at.headerRow + 1 ? await copyRowFormat(env, cfg, r - 1, r) : null;
+    return { ok: true, row: r, info, format: fmt };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300) };
   }
@@ -32200,7 +32310,7 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     }
     if (made.outcome === "created" && /^concerto-(job|helpdesk)$/.test(tm.tpl.id)) {
       const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields2.reference, siteCode: fields2.siteCode, siteName: fields2.siteName, postcode: fields2.postcode, description: fields2.description });
-      made.reason = (made.reason || "") + (sr.ok ? sr.skipped ? " \xB7 already on the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 added to the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 \u26A0 Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
+      made.reason = (made.reason || "") + (sr.ok ? sr.skipped ? " \xB7 already on the Co-op spreadsheet (row " + sr.row + ")" : sr.filled ? " \xB7 already on the Co-op spreadsheet \u2014 filled in its blanks (row " + sr.row + ")" : " \xB7 added to the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 \u26A0 Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
     }
     return { ...out2, fields: fields2, ...made };
   }
@@ -46747,7 +46857,7 @@ var LINE_H = 10;
 var ROW_PAD = 4.5;
 var MAX_NAME_LINES = 5;
 var HDR_H = 22;
-var COLS2 = [
+var COLS3 = [
   // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
@@ -46755,15 +46865,15 @@ var COLS2 = [
   { key: "end", label: "End", w: 36 },
   { key: "days", label: "Days", w: 26 }
 ];
-var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
+var LEFT_W = COLS3.reduce((a, c) => a + c.w, 0);
 var GRID_X = M8 + LEFT_W;
 var GRID_W = PW2 - M8 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
-  COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
-  LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
+  COLS3[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS3.reduce((a, c) => a + c.w, 0);
   GRID_X = M8 + LEFT_W;
   GRID_W = PW2 - M8 - GRID_X;
 }
@@ -46854,7 +46964,7 @@ function buildProgrammePdf(data, meta = {}) {
     _c: byC[t.contractor] || null
   }));
   for (const t of tasks) {
-    t._lines = wrapLines2(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._lines = wrapLines2(t.name || "", COLS3[0].w - 6, 8.5, MAX_NAME_LINES);
     t._h = Math.max(ROW_H3, t._lines.length * LINE_H + ROW_PAD);
   }
   const hasExtra = tasks.some((t) => t.extra);
@@ -46980,7 +47090,7 @@ function buildProgrammePdf(data, meta = {}) {
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
       doc.rect(M8, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
       let cx = M8;
-      for (const col of COLS2) {
+      for (const col of COLS3) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
@@ -47019,11 +47129,11 @@ function buildProgrammePdf(data, meta = {}) {
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
         (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M8 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M8 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M8 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
+          doc.rect(M8 + COLS3[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M8 + COLS3[0].w + 12, ry + 10.5, fitText(t._c.name, COLS3[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M8 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M8 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        if (t._start) doc.text(M8 + COLS3[0].w + COLS3[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M8 + COLS3[0].w + COLS3[1].w + COLS3[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
         doc.text(M8 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
         doc.line(M8, ry + rh, M8 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {

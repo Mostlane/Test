@@ -446,7 +446,7 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     if (made.outcome === "created" && /^concerto-(job|helpdesk)$/.test(tm.tpl.id)) {
       const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields.reference, siteCode: fields.siteCode, siteName: fields.siteName, postcode: fields.postcode, description: fields.description });
       made.reason = (made.reason || "") + (sr.ok
-        ? (sr.skipped ? " · already on the Co-op spreadsheet (row " + sr.row + ")" : " · added to the Co-op spreadsheet (row " + sr.row + ")")
+        ? (sr.skipped ? " · already on the Co-op spreadsheet (row " + sr.row + ")" : sr.filled ? " · already on the Co-op spreadsheet — filled in its blanks (row " + sr.row + ")" : " · added to the Co-op spreadsheet (row " + sr.row + ")")
         : " · ⚠ Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
     }
     return { ...out, fields, ...made };

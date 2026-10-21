@@ -259,7 +259,7 @@
     m.textContent = "Adding…"; m.className = "msg";
     try{
       var r = await authFetch("/email-intake/sheet-add", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ reference: ref }) }).then(function(x){ return x.json(); });
-      if(r && r.ok){ m.textContent = r.skipped ? "Already on the sheet (row "+r.row+") ✓" : "Added on row "+r.row+" ✓"; m.className = "msg ok"; loadSheet(); }
+      if(r && r.ok){ m.textContent = r.skipped ? "Already on the sheet (row "+r.row+") — nothing blank to fill ✓" : r.filled ? "Row "+r.row+" was already there — filled in "+(r.cols||[]).join(", ")+" ✓" : "Added on row "+r.row+" ✓"; m.className = "msg ok"; loadSheet(); }
       else { m.textContent = (r && r.error) || "Failed"; m.className = "msg err"; }
     }catch(e){ m.textContent = e.message; m.className = "msg err"; }
   };
