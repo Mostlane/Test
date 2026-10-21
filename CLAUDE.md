@@ -236,6 +236,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   decides). Previously the reason was an auto-fading toast (portal-wide alert), easily missed.
   NB a PENDING On Hold does NOT block clock-off (parked() counts any On Hold) — the approval only
   holds up starting the NEXT job (findBlockingJob holdPending); the pop-up text says so.
+  **Warning, not a wall (21 Oct, Jamie: engineers tap Travelling, do the job, drive home, then can't
+  end the day):** the 409 now carries `canOverride:true` and the pop-up (amber "⚠️ Before you end your
+  day") offers **■ End my day anyway** → re-POST `{acknowledge:true}`: the day ends at the real time,
+  the engineer's open `job_time_segments` close at that moment, each open job gets an event note +
+  `job.dayEndedOpen {at,by,status}`, and FullAccess|SLAAdmin (office only) get a "Day ended with a job
+  still open" push. The job stays unfinished — the cross-job guard (`findBlockingJob`) makes them
+  complete it before they can start their next job. `day-timesheet.js?v=4`.
   clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
