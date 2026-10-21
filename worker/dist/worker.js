@@ -31828,8 +31828,11 @@ async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
       const fx2 = formulasFor(r2);
       for (const c of Object.keys(fx2)) if (blank(+c)) fills[c] = fx2[c];
       const cols = Object.keys(fills).map(Number);
-      if (!cols.length) return { ok: true, skipped: true, row: r2, info, reason: "already on the sheet (row " + r2 + ")" };
       if (dryRun) return { ok: true, dryRun: true, row: r2, info, filled: fills };
+      if (!cols.length) {
+        const fmt3 = r2 > at.headerRow + 1 ? await copyRowFormat(env, cfg, r2 - 1, r2) : null;
+        return { ok: true, skipped: true, row: r2, info, format: fmt3, reason: "already on the sheet (row " + r2 + ")" };
+      }
       await graphBatch(env, cols.map((c) => ({ method: "PATCH", url: sheetBase(cfg) + `/range(address='${colLetter(c)}${r2}')`, body: { formulas: [[fills[c]]] } })));
       const fmt2 = r2 > at.headerRow + 1 ? await copyRowFormat(env, cfg, r2 - 1, r2) : null;
       return { ok: true, filled: true, row: r2, info, cols: cols.map(colLetter), format: fmt2 };
