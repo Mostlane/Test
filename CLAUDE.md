@@ -6129,6 +6129,12 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   GET `/email-intake/sheet-check`, POST `/email-intake/sheet-add {reference}` (backfill/retry);
   email-intake.html "📊 Co-op spreadsheet" card. Approve-from-review does NOT add a row (use
   the card). If the file is moved/renamed in SharePoint the item id still holds; a renamed TAB breaks it.
+  **Zap parity (21 Oct):** short description is a 4–8 word AI summary like the Zap's (`aiShortDescription`,
+  falls back to the trimmed text); store name = the EMAIL's site name ("Cowes, Mill Hill Road"), mileage
+  looked up by the portal site name in `site_miles` (round trip). An order ALREADY on the sheet (typed by
+  hand) only gets its BLANK trade / mileage / formula cells filled — nothing typed is overwritten. Every
+  written row copies the row above's formatting cell by cell (`copyRowFormat`: number formats, font, fill,
+  alignment, cell borders) via Graph `$batch` (`graphmail.js graphBatch`).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
