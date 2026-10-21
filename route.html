@@ -4,7 +4,7 @@
   <script src="/portal-config.js?v=46"></script>
   <script src="/van-check-gate.js?v=4"></script>
   <script src="ml-offline.js"></script>
-  <script src="day-timesheet.js?v=3"></script>
+  <script src="day-timesheet.js?v=4"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Route — Mostlane</title>
@@ -386,8 +386,8 @@
     try{ await jfetch("/shift/clock-on",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,startMileage:startMileage,date:todayLocal(),opId:opId()})}); }catch(e){}
     await loadAll(); render();
   }
-  async function endDay(){
-    var sure = window.MLUI
+  async function endDay(ack){
+    var sure = ack === true ? true : window.MLUI
       ? await MLUI.confirm("End your day now? If another job comes in later you can restart the clock.", { title:"End my day", okLabel:"■ End my day", danger:true })
       : confirm("End your day now?");
     if(!sure) return;
@@ -396,10 +396,10 @@
     // The server refuses clock-off while jobs are outstanding (409) — show
     // WHICH jobs instead of pretending the day ended.
     try{
-      var r=await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal(),opId:opId()})});
+      var r=await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal(),opId:opId(),acknowledge:ack===true})});
       var d=await r.json().catch(function(){return {};});
       if(!r.ok){
-        if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"route.html?stay=1" }); return; }
+        if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"route.html?stay=1", onOverride:function(){ endDay(true); } }); return; }
         var list=(d.outstanding||[]).map(function(o){return "• "+o.ref+" — "+o.status;}).join("\n");
         alert((d.error||"You can't end your day yet.")+(list?"\n\n"+list:""));
         return;

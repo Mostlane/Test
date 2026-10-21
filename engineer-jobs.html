@@ -3,7 +3,7 @@
 <head>
   <script src="/portal-config.js?v=46"></script>
   <script src="/van-check-gate.js?v=4"></script>
-  <script src="day-timesheet.js?v=3"></script>
+  <script src="day-timesheet.js?v=4"></script>
   <meta charset="UTF-8">
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -832,11 +832,11 @@ async function doClockOn(){
     body: JSON.stringify({ engineer, gps, startMileage: null, date: todayLocal() }) });
   await loadShift(); renderDayBar(); applyDayGate();
 }
-async function clockOff(){
+async function clockOff(ack){
   const engineer = getEngineer();
   // Are-you-sure before the clock stops — and the day can be resumed from the
   // "Day ended" bar if an emergency job comes in later.
-  const sure = window.MLUI
+  const sure = ack === true ? true : window.MLUI
     ? await MLUI.confirm("End your day now? If another job comes in later you can restart the clock from this page.", { title:"End my day", okLabel:"■ End my day", danger:true })
     : confirm("End your day now?");
   if(!sure) return;
@@ -845,10 +845,10 @@ async function clockOff(){
   // The server refuses (409) while jobs are outstanding — show WHICH ones.
   try{
     const res = await fetch(`${SLA_API}/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal() }) });
+      body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal(), acknowledge: ack === true }) });
     const d = await res.json().catch(()=>({}));
     if(!res.ok){
-      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"engineer-jobs.html" }); return; }
+      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"engineer-jobs.html", onOverride:()=>clockOff(true) }); return; }
       const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
       alert((d.error||"You can't end your day yet.")+(list?"\n\n"+list:""));
       return;

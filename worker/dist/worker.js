@@ -20822,6 +20822,7 @@ async function handle13(request, env, ctx, url, sess) {
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
     const engNorm = normId(b.engineer);
+    let leftOpen = [];
     let force = false;
     if (b.force === true) {
       const p = await permissionsFor(env, tenantId, sess.user.username);
@@ -20859,24 +20860,53 @@ async function handle13(request, env, ctx, url, sess) {
               by: who.by || "",
               byOffice,
               why: /travelling/i.test(st) ? byOffice ? `The office (${who.by}) marked you as travelling to this job.` : "You're marked as travelling to this job." : byOffice ? `The office (${who.by}) marked this job as in progress for you.` : "You started this job and it hasn't been finished.",
-              todo: /travelling/i.test(st) ? "Open it and either start it (In Progress), or if you're not getting there today put it On Hold with a reason. On Hold goes to the office for approval \u2014 you can end your day straight away while it waits." : "Open it and Complete it \u2014 or if you can't finish today, put it On Hold with a reason. On Hold goes to the office for approval \u2014 you can end your day straight away while it waits (it's only your NEXT job that waits for the approval)."
+              todo: /travelling/i.test(st) ? "Did you do it? Open it and complete it now (photos, note, signature). Didn't get there? Put it On Hold with a reason." : "Finished it? Open it and complete it now. Couldn't finish? Put it On Hold with a reason."
             });
           }
         }
-        if (outstanding.length) {
+        if (outstanding.length && b.acknowledge !== true) {
           return jsonResponse({
-            error: "You can't end your day yet \u2014 " + outstanding.length + " job" + (outstanding.length === 1 ? " is" : "s are") + " still on the go today.",
+            error: "You've still got " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " on the go today.",
             blocked: true,
+            canOverride: true,
             outstanding
           }, headers, 409);
         }
+        if (outstanding.length) leftOpen = outstanding;
       } catch (e) {
       }
     }
     await db.prepare(
       "UPDATE shifts SET clock_off_at=?, clock_off_gps=COALESCE(?, clock_off_gps), end_mileage=COALESCE(?, end_mileage), fuel=COALESCE(?, fuel) WHERE tenant_id=? AND username=? AND date=?"
     ).bind((/* @__PURE__ */ new Date()).toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
-    return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
+    if (leftOpen.length) {
+      const now2 = (/* @__PURE__ */ new Date()).toISOString(), who = sess?.user?.username || b.engineer;
+      try {
+        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL").bind(now2, tenantId, b.engineer).run();
+      } catch {
+      }
+      for (const o of leftOpen) {
+        try {
+          const j = await getJob3(env, tenantId, o.id);
+          if (!j) continue;
+          j.events ||= [];
+          j.events.push({ at: now2, by: who, type: "note", note: `${b.engineer} ended their day with this job still ${o.status} \u2014 needs completing (photos / note / signature).` });
+          j.dayEndedOpen = { at: now2, by: b.engineer, status: o.status };
+          j.updatedAt = now2;
+          await saveJob(env, tenantId, j);
+        } catch {
+        }
+      }
+      const refs = leftOpen.map((o) => o.ref).join(", ");
+      ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+        title: "Day ended with a job still open",
+        body: `${b.engineer} ended their day with ${refs} still ${leftOpen.length === 1 ? leftOpen[0].status : "on the go"} \u2014 it needs completing.`,
+        url: leftOpen.length === 1 ? "/job-view.html?jobId=" + encodeURIComponent(leftOpen[0].id) : "/sla-main.html",
+        tag: "dayend-open:" + engNorm + ":" + date
+      }, b.engineer, { officeOnly: true }).catch(() => {
+      }));
+    }
+    return jsonResponse({ ok: true, leftOpen, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
   }
   if (subpath === "/shift/resume" && method === "POST") {
     const b = await readJson2(request);

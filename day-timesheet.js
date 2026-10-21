@@ -350,12 +350,18 @@
     var back2 = document.createElement("div");
     back2.id = "mldbBack";
     back2.innerHTML = '<div id="mldbCard" role="alertdialog" aria-modal="true">'
-      + '<div class="hd"><b>⛔ You can\'t end your day yet</b>' + esc(list.length === 1 ? "This job is still on the go:" : (list.length ? list.length + " jobs are still on the go:" : "")) + '</div>'
+      + '<div class="hd"' + (d && d.canOverride ? ' style="background:#b45309"' : '') + '><b>' + (d && d.canOverride ? '⚠️ Before you end your day' : '⛔ You can\'t end your day yet') + '</b>' + esc(list.length === 1 ? "This job is still on the go:" : (list.length ? list.length + " jobs are still on the go:" : "")) + '</div>'
       + '<div class="bd">' + (jobs || '<div class="why">' + esc((d && d.error) || "The server wouldn't end your day.") + '</div>') + '</div>'
-      + '<div class="ft"><div class="note">Sort the job' + (list.length === 1 ? "" : "s") + ' above, then press End my day again — an On Hold waiting for approval does NOT stop you finishing. Stuck? Call the office — they can close your day for you.</div>'
+      + '<div class="ft">'
+      + (d && d.canOverride && opts.onOverride
+          ? '<div class="note">Best to sort it now while it\'s fresh. Already left site and can\'t finish it here? You can still end your day — the office will be told and you\'ll need to complete it before you can start your next job.</div>'
+            + '<button type="button" id="mldbAnyway" style="background:#b91c1c;color:#fff;border-color:#b91c1c;margin-bottom:8px">■ End my day anyway</button>'
+          : '<div class="note">Sort the job' + (list.length === 1 ? "" : "s") + ' above, then press End my day again. Stuck? Call the office — they can close your day for you.</div>')
       + '<button type="button" id="mldbClose">Close</button></div></div>';
     document.body.appendChild(back2);
     back2.querySelector("#mldbClose").onclick = function () { back2.remove(); };
+    var any = back2.querySelector("#mldbAnyway");
+    if (any) any.onclick = function () { any.disabled = true; any.textContent = "Ending your day…"; back2.remove(); opts.onOverride(); };
   }
 
   window.MLDaySheet = { open: open, reopen: reopen, isConfirmed: isConfirmed, flushPending: flushPending, blocked: blocked, hasPending: function () { return pendingDates().length > 0; } };

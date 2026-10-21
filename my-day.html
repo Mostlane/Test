@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=46"></script>
-  <script src="day-timesheet.js?v=3"></script>
+  <script src="day-timesheet.js?v=4"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>My Day — Mostlane</title>
@@ -314,7 +314,7 @@ async function startTravel(jobId, btn){
   }catch(e){ btn.disabled = false; btn.textContent = "🚐 Travel to this job"; }
 }
 
-async function endDay(){
+async function endDay(ack){
   const msg = $("endMsg"); msg.className = "msg";
   // The server decides (and explains in a pop-up) — a local status check here
   // could be stale or a co-worker's status on a shared job.
@@ -323,10 +323,10 @@ async function endDay(){
     const m = $("endMiles").value;
     const gps = await getGps();
     const res = await authFetch(`${API}/sla/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ engineer:getEngineer(), gps, endMileage: m && !isNaN(+m) ? Math.round(+m) : null, fuel: $("fuel").value.trim(), date: todayLocal() }) });
+      body: JSON.stringify({ engineer:getEngineer(), gps, endMileage: m && !isNaN(+m) ? Math.round(+m) : null, fuel: $("fuel").value.trim(), date: todayLocal(), acknowledge: ack === true }) });
     if(res && res.ok===false){
       const d = await res.json().catch(()=>({}));
-      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"my-day.html" }); }
+      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"my-day.html", onOverride:()=>endDay(true) }); }
       const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
       msg.className="msg err"; msg.textContent = (d.error||"You can't end your day yet.")+(list?"\n\n"+list:""); $("endBtn").disabled=false; return;
     }
