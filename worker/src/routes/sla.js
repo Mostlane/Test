@@ -1723,8 +1723,8 @@ export async function handle(request, env, ctx, url, sess) {
                 ? (byOffice ? `The office (${who.by}) marked you as travelling to this job.` : "You're marked as travelling to this job.")
                 : (byOffice ? `The office (${who.by}) marked this job as in progress for you.` : "You started this job and it hasn't been finished."),
               todo: /travelling/i.test(st)
-                ? "Open it and either start it (In Progress) or, if you're not going today, put it On Hold with a reason."
-                : "Open it and Complete it — or, if you can't finish today, put it On Hold with a reason so the office knows."
+                ? "Open it and either start it (In Progress), or if you're not getting there today put it On Hold with a reason. On Hold goes to the office for approval — you can end your day straight away while it waits."
+                : "Open it and Complete it — or if you can't finish today, put it On Hold with a reason. On Hold goes to the office for approval — you can end your day straight away while it waits (it's only your NEXT job that waits for the approval)."
             });
           }
         }

@@ -352,7 +352,7 @@
     back2.innerHTML = '<div id="mldbCard" role="alertdialog" aria-modal="true">'
       + '<div class="hd"><b>⛔ You can\'t end your day yet</b>' + esc(list.length === 1 ? "This job is still on the go:" : (list.length ? list.length + " jobs are still on the go:" : "")) + '</div>'
       + '<div class="bd">' + (jobs || '<div class="why">' + esc((d && d.error) || "The server wouldn't end your day.") + '</div>') + '</div>'
-      + '<div class="ft"><div class="note">Sort the job' + (list.length === 1 ? "" : "s") + ' above, then press End my day again. Stuck? Call the office — they can close your day for you.</div>'
+      + '<div class="ft"><div class="note">Sort the job' + (list.length === 1 ? "" : "s") + ' above, then press End my day again — an On Hold waiting for approval does NOT stop you finishing. Stuck? Call the office — they can close your day for you.</div>'
       + '<button type="button" id="mldbClose">Close</button></div></div>';
     document.body.appendChild(back2);
     back2.querySelector("#mldbClose").onclick = function () { back2.remove(); };
