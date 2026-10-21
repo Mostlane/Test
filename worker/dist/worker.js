@@ -19287,6 +19287,7 @@ __export(sla_exports, {
   suggestJobsForPo: () => suggestJobsForPo,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
+  sweepStatusNudges: () => sweepStatusNudges,
   unlinkOrderFromJob: () => unlinkOrderFromJob
 });
 function badScheduleDate(iso, label2 = "Scheduled date") {
@@ -23913,6 +23914,92 @@ function activeSetBy(job, engNorm, status) {
     if (String(h.status || "").toLowerCase() === want) return { by: h.by || "", at: h.at || "" };
   }
   return { by: "", at: "" };
+}
+async function sweepStatusNudges(env, tenantId = 1) {
+  const now2 = /* @__PURE__ */ new Date();
+  const hr = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).format(now2)) % 24;
+  if (hr < 6 || hr >= 21) return { skipped: "outside hours" };
+  const today = londonDateOfIso(now2.toISOString());
+  const all = await listJobs(env, tenantId);
+  const NK = "sla:nudges:" + tenantId;
+  let state = {};
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(NK).first();
+    if (r) state = JSON.parse(r.value) || {};
+  } catch {
+  }
+  let users = null, miles = null, sent = 0, dirty = false;
+  const userFor = async (eng) => {
+    if (!users) {
+      users = {};
+      try {
+        const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users").all();
+        for (const u of results || []) {
+          users[normId(u.username)] = u.username;
+          const full = [u.first_name, u.last_name].filter(Boolean).join(" ");
+          if (full) users[normId(full)] = u.username;
+        }
+      } catch {
+      }
+    }
+    return users[normId(eng)] || eng;
+  };
+  const oneWayMiles = async (site) => {
+    if (!miles) {
+      miles = {};
+      try {
+        const { results } = await env.DB.prepare("SELECT key, miles FROM site_miles").all();
+        for (const r of results || []) miles[r.key] = Number(r.miles) || 0;
+      } catch {
+      }
+    }
+    const m = miles[String(site || "").toLowerCase().replace(/\s+/g, " ").trim()];
+    return m > 0 ? m / 2 : null;
+  };
+  const certJob = (j) => !!(j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping);
+  for (const j of all) {
+    const engs = assignedList(j);
+    if (!engs.length) continue;
+    for (const eng of engs) {
+      const n = normId(eng);
+      const st = String(effStatus(j, n) || "");
+      const travelling = /^travelling$/i.test(st), working = /^in progress$/i.test(st);
+      if (!travelling && !working) continue;
+      const set = activeSetBy(j, n, st);
+      if (!set.at || londonDateOfIso(set.at) !== today) continue;
+      if (j.dayEndedOpen && j.dayEndedOpen.at && londonDateOfIso(j.dayEndedOpen.at) === today) continue;
+      if (working && (certJob(j) || jobIsProject(j))) continue;
+      const key = st + "@" + set.at;
+      const sk = j.id + "|" + n;
+      const rec = state[sk] && state[sk].key === key ? state[sk] : { key, n: 0, last: null };
+      const since = (now2 - new Date(set.at)) / 6e4;
+      let due;
+      if (travelling) {
+        const m = await oneWayMiles(j.siteName);
+        const first = m ? Math.min(100, Math.max(25, m * 1.6 + 10)) : 40;
+        due = rec.n === 0 ? since >= first : rec.n < 2 && (now2 - new Date(rec.last)) / 6e4 >= 30;
+      } else {
+        const first = Math.max(30, Number(j.durationMinutes) || 60) + 10;
+        due = rec.n === 0 ? since >= first : rec.n < 3 && (now2 - new Date(rec.last)) / 6e4 >= 45;
+      }
+      if (!due) continue;
+      const site = j.siteName || j.helpdeskRef || j.id;
+      const url = "/engineer-job.html?jobId=" + encodeURIComponent(j.id) + "&back=engineer-jobs.html";
+      try {
+        await sendToUser(env, tenantId, await userFor(eng), travelling ? { title: "\u{1F4CD} Arrived at " + site + "?", body: "Tap to start the job (risk assessment first) so your time on site is recorded.", url, tag: "nudge:" + j.id } : { title: "\u2705 Finishing up at " + site + "?", body: "Complete it BEFORE you leave \u2014 you'll need the customer's signature and your After photos.", url, tag: "nudge:" + j.id });
+        sent++;
+      } catch {
+      }
+      state[sk] = { key, n: rec.n + 1, last: now2.toISOString() };
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    const cutoff = Date.now() - 2 * 864e5;
+    for (const k of Object.keys(state)) if (!state[k].last || new Date(state[k].last).getTime() < cutoff) delete state[k];
+    await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(NK, JSON.stringify(state), tenantId).run();
+  }
+  return { sent };
 }
 function activeSetOn(job, engNorm, status) {
   const today = londonDateOfIso((/* @__PURE__ */ new Date()).toISOString());
@@ -51655,6 +51742,7 @@ var worker = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
+    ctx.waitUntil(sweepStatusNudges(env, 1).catch((e) => console.error("scheduled status nudges:", e)));
     ctx.waitUntil(sweepFallbacks(env, 1).catch((e) => console.error("scheduled fallback sweep:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
     ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));

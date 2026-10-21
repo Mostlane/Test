@@ -280,6 +280,7 @@ const worker = {
     // job releases + the 5pm-day-before nudge push within ~5 min; the heavier
     // hourly work is gated to the top of the hour to keep its old cadence.
     ctx.waitUntil(sla.sweepJobReleases(env, 1).catch(e => console.error("scheduled job-release sweep:", e)));
+    ctx.waitUntil(sla.sweepStatusNudges(env, 1).catch(e => console.error("scheduled status nudges:", e)));
     // Fallback jobs — self-gates on London time to warn the office (15:30 & 18:00)
     // about field engineers with no job for the next working day, then auto-assign
     // each still-empty engineer their configured fallback at 19:00 (Fri covers Mon).
