@@ -243,6 +243,16 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `job.dayEndedOpen {at,by,status}`, and FullAccess|SLAAdmin (office only) get a "Day ended with a job
   still open" push. The job stays unfinished — the cross-job guard (`findBlockingJob`) makes them
   complete it before they can start their next job. `day-timesheet.js?v=4`.
+  **Status nudges — the prevention (21 Oct, `sla.sweepStatusNudges`, every 5-min tick, 06–21 London):**
+  a web app can't see an engineer arrive (no background GPS in a PWA; SiteLog isn't scanned at reactive
+  jobs — only Ryan, 3 scans since 7 Oct), so it nudges on TIME by push: still **Travelling** past the
+  estimated drive (one-way `site_miles` × 1.6 + 10 min, clamped 25–100, else 40) → "📍 Arrived at X? Tap
+  to start the job" (+1 repeat after 30 min); still **In Progress** past `durationMinutes` (default 60,
+  min 30) + 10 → "✅ Finishing up at X? Complete it BEFORE you leave — you'll need the customer's
+  signature" (every 45 min, max 3). Only statuses set today; cert jobs (EM/PAT/pump/elec/firestop) +
+  projects skip the finish nudge; a job closed via "End my day anyway" stops nudging. State in
+  app_config `sla:nudges:<tid>` (never on the job — no race with the engineer's own PATCH), pruned 2 days.
+  Needs push ON: Daniel Walker + Chris Freeman had none (21 Oct).
   clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
