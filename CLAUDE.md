@@ -6142,6 +6142,16 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   (`sweepCoopSheetPending`, 4/tick, gives up after ~24 h) retries it — the intake reason says "will retry
   automatically" and the email-intake card lists what's waiting. A store that isn't a portal site (e.g.
   4150 Hinton Park) takes its Type + mileage from the sheet's OWN earlier rows for that store number.
+  **Daily intake check (21 Oct, `lib/intakecheck.js`):** the 5-min cron runs `sweepIntakeCheck` once a day
+  from **07:30 London** (dedupe app_config `intakecheck:sent:<tid>` = the date) over the last 24 h and
+  emails ONLY when there's something to fix: email failed / still in Needs a look / a client-domain email
+  ignored; a Concerto job no longer on the board; a Concerto job not on the sheet, on it twice, or
+  missing trade/mileage/type/name (or a cut-off description); a row queued >30 min; a working day with
+  ZERO emails (the Outlook forward stopped). Sent from the orders@ mailbox via `sendSubconMail` (365,
+  Resend fallback) + a push to the owner. Recipients in app_config `intakecheck:<tid>`
+  `{enabled, recipients[]}` (blank = the owner's users.email); email-intake.html "🩺 Daily intake check"
+  card: on/off, recipients, 🔍 Check now (GET `/email-intake/daily-check`), 📧 Check & email now
+  (POST `{force:true}`; POST `{config}` saves).
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

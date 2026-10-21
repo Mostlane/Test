@@ -91,6 +91,19 @@
     </div>
   </div>
 
+  <div class="card" id="dcCard">
+    <h2>🩺 Daily intake check</h2>
+    <p class="muted">Every morning at about 7:30 the portal checks the last 24 hours: every Concerto job is on the board <b>and</b> on the Co-op spreadsheet with trade, mileage and type filled in; nothing failed or is waiting in “Needs a look”; nothing is stuck waiting for the spreadsheet; and emails actually arrived on a working day. It emails you <b>only if something needs fixing</b>.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="dcOn"> On</label>
+      <input id="dcTo" placeholder="Send to (emails, comma-separated — blank = you)" style="flex:1;min-width:240px">
+      <button class="btn ghost sm" id="dcSave">Save</button>
+      <button class="btn ghost sm" id="dcRun">🔍 Check now</button>
+      <button class="btn sm" id="dcSend">📧 Check &amp; email now</button>
+    </div>
+    <div id="dcOut" class="muted" style="margin-top:10px"></div>
+  </div>
+
   <div class="card">
     <h2>Recent emails</h2>
     <p class="muted">Every email the intake address receives, newest first, with what happened to it. <span class="pill p-created">created</span> / <span class="pill p-updated">updated</span> = a job on the board · <span class="pill p-order">order</span> = a Concerto order sheet filed under Client orders (cert-review) · <span class="pill p-cancelled">cancelled</span> = a Concerto cancellation applied to the job (❌ pill + timestamp on the board) · <span class="pill p-review">review</span> = held for a human (above) · <span class="pill p-dropped">dropped</span> = a reply, notice, quote or supplier paperwork · <span class="pill p-duplicate">duplicate</span> = the same email arrived twice.</p>
@@ -263,7 +276,32 @@
       else { m.textContent = (r && r.error) || "Failed"; m.className = "msg err"; }
     }catch(e){ m.textContent = e.message; m.className = "msg err"; }
   };
-  loadStatus(); loadLog(); loadSheet();
+  function dcRender(r){
+    var o=$("dcOut");
+    if(!r||!r.ok&&!r.issues){ o.innerHTML='<span class="msg err">'+esc((r&&r.error)||"Check failed")+'</span>'; return; }
+    var head = r.emails+' email(s), '+r.concertoJobs+' Concerto job(s) in the last 24 h. ';
+    if(!r.issues.length){ o.innerHTML='✅ '+esc(head)+'Nothing to fix.'; }
+    else o.innerHTML='⚠ '+esc(head)+'<b>'+r.issues.length+' to fix:</b><ul style="margin:6px 0 0;padding-left:18px">'+r.issues.map(function(i){return '<li>'+esc(i.text)+(i.fix?'<br><span class="muted">→ '+esc(i.fix)+'</span>':'')+'</li>';}).join("")+'</ul>';
+    if(r.send){ o.innerHTML += r.send.sent ? '<p class="msg ok">Emailed to '+esc((r.send.to||[]).join(", "))+' ✓</p>' : '<p class="msg">'+esc(r.send.reason||r.send.error||"Not sent")+'</p>'; }
+  }
+  async function dcLoad(){
+    try{ var r = await authFetch("/email-intake/daily-check").then(function(x){return x.json();});
+      if(r&&r.config){ $("dcOn").checked = r.config.enabled; $("dcTo").value = (r.config.recipients||[]).join(", "); }
+      dcRender(r);
+    }catch(e){ $("dcOut").textContent = "Couldn’t run the check ("+e.message+")"; }
+  }
+  $("dcRun").onclick = function(){ $("dcOut").textContent = "Checking…"; dcLoad(); };
+  $("dcSave").onclick = async function(){
+    var rec = $("dcTo").value.split(/[,;\s]+/).filter(Boolean);
+    await authFetch("/email-intake/daily-check",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({config:{enabled:$("dcOn").checked,recipients:rec}})});
+    $("dcOut").innerHTML = '<span class="msg ok">Saved ✓</span>';
+  };
+  $("dcSend").onclick = async function(){
+    $("dcOut").textContent = "Checking and emailing…";
+    try{ var r = await authFetch("/email-intake/daily-check",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({force:true})}).then(function(x){return x.json();}); dcRender(r); }
+    catch(e){ $("dcOut").textContent = e.message; }
+  };
+  loadStatus(); loadLog(); loadSheet(); dcLoad();
 })();
 </script>
 </body>
