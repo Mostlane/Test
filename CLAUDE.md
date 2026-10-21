@@ -234,6 +234,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   job →" button, and "call the office — they can close your day". engineer-jobs / route / my-day all
   use it (also for no-signal); my-day's own client-side activeJob pre-check was removed (server
   decides). Previously the reason was an auto-fading toast (portal-wide alert), easily missed.
+  NB a PENDING On Hold does NOT block clock-off (parked() counts any On Hold) — the approval only
+  holds up starting the NEXT job (findBlockingJob holdPending); the pop-up text says so.
   clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
