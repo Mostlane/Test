@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -9075,6 +9070,41 @@ function forcedCheckoutSql(checkInAt, visitDateKey, nowMs) {
   if (Number.isFinite(nowMs)) forcedMs = Math.min(forcedMs, nowMs);
   return toSqlUtc(forcedMs);
 }
+async function chooseSite(env, siteRows, lat, lng, personId) {
+  const inside = [];
+  for (const s of siteRows || []) {
+    const d = haversineMeters(lat, lng, Number(s.lat), Number(s.lng));
+    const r = Number(s.radius_m) > 0 ? Number(s.radius_m) : 500;
+    if (d <= r) inside.push({ s, d });
+  }
+  if (!inside.length) return { site: null, alternatives: [] };
+  inside.sort((a, b) => a.d - b.d);
+  const close = inside.filter((x) => x.d <= inside[0].d + SITE_TIE_M);
+  const alternatives = close.length > 1 ? close.map((x) => x.s.site_name) : [];
+  if (personId && inside.length > 1) {
+    try {
+      const open = await env.SITELOG_DB.prepare(
+        "SELECT site_code FROM visits WHERE person_id = ? AND check_out_at IS NULL ORDER BY check_in_at DESC"
+      ).bind(personId).all();
+      for (const v of open.results || []) {
+        const hit = inside.find((x) => x.s.site_name === v.site_code);
+        if (hit) return { site: hit.s, alternatives, reason: "open_visit" };
+      }
+      if (close.length > 1) {
+        const since = new Date(Date.now() - 30 * 864e5).toISOString().replace("T", " ").slice(0, 19);
+        const recent = await env.SITELOG_DB.prepare(
+          "SELECT site_code FROM visits WHERE person_id = ? AND check_in_at >= ? ORDER BY check_in_at DESC LIMIT 20"
+        ).bind(personId, since).all();
+        for (const v of recent.results || []) {
+          const hit = close.find((x) => x.s.site_name === v.site_code);
+          if (hit) return { site: hit.s, alternatives, reason: "recent_visit" };
+        }
+      }
+    } catch (e) {
+    }
+  }
+  return { site: inside[0].s, alternatives, reason: "nearest" };
+}
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R2 = 6371e3;
   const toRad = (d) => d * Math.PI / 180;
@@ -10631,14 +10661,10 @@ async function handleInner(request, env, ctx) {
     let matchedSite = null;
     if (latVal !== null && lngVal !== null && latVal >= -90 && latVal <= 90 && lngVal >= -180 && lngVal <= 180) {
       const siteRows = await env.SITELOG_DB.prepare("SELECT * FROM sites WHERE COALESCE(archived,0) = 0").all();
-      let bestDist = null;
-      for (const s of siteRows.results || []) {
-        const d = haversineMeters(latVal, lngVal, Number(s.lat), Number(s.lng));
-        if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) {
-          bestDist = d;
-          matchedSite = s;
-        }
-      }
+      const devPick = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ?"
+      ).bind(deviceToken).first();
+      matchedSite = (await chooseSite(env, siteRows.results || [], latVal, lngVal, devPick ? devPick.person_id : null)).site;
     }
     const device = await env.SITELOG_DB.prepare(
       "SELECT * FROM devices WHERE device_token = ?"
@@ -10730,15 +10756,12 @@ async function handleInner(request, env, ctx) {
     const siteRows = await env.SITELOG_DB.prepare(
       "SELECT * FROM sites WHERE COALESCE(archived,0) = 0"
     ).all();
-    let matchedSite = null;
-    let bestDist = null;
-    for (const s of siteRows.results || []) {
-      const d = haversineMeters(latNum, lngNum, Number(s.lat), Number(s.lng));
-      if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) {
-        bestDist = d;
-        matchedSite = s;
-      }
-    }
+    const devPick = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    const pick = await chooseSite(env, siteRows.results || [], latNum, lngNum, devPick ? devPick.person_id : null);
+    const matchedSite = pick.site;
+    const siteAlternatives = pick.alternatives;
     if (!matchedSite) {
       const devNoSite = await env.SITELOG_DB.prepare(
         "SELECT * FROM devices WHERE device_token = ?"
@@ -10838,6 +10861,7 @@ async function handleInner(request, env, ctx) {
         status: "confirm_sign_out",
         visitId: openVisit.id,
         site: siteCode,
+        alternatives: siteAlternatives,
         firstName: person?.first_name || null,
         company: person?.company || null
       });
@@ -10846,6 +10870,7 @@ async function handleInner(request, env, ctx) {
     return json4({
       status: "confirm_check_in",
       site: siteCode,
+      alternatives: siteAlternatives,
       firstName: person?.first_name || null,
       company: person?.company || null,
       arrivalType,
@@ -11788,7 +11813,7 @@ async function sweepAutoClose(env) {
     }
   }
 }
-var ALLOWED_ORIGINS, OFFICE_LAT, OFFICE_LNG, geocodeCache, offlineSchemaReady, arrivalConfigKey, scanLogReady, SCAN_OK, SCAN_KINDS;
+var ALLOWED_ORIGINS, OFFICE_LAT, OFFICE_LNG, geocodeCache, offlineSchemaReady, SITE_TIE_M, arrivalConfigKey, scanLogReady, SCAN_OK, SCAN_KINDS;
 var init_sitelog_api = __esm({
   "src/routes/sitelog-api.js"() {
     ALLOWED_ORIGINS = [
@@ -11800,6 +11825,7 @@ var init_sitelog_api = __esm({
     OFFICE_LNG = -1.2343;
     geocodeCache = /* @__PURE__ */ new Map();
     offlineSchemaReady = false;
+    SITE_TIE_M = 60;
     arrivalConfigKey = (type) => type === "visitor" ? "arrival_default_rules_visitor" : "arrival_default_rules";
     scanLogReady = false;
     SCAN_OK = /* @__PURE__ */ new Set(["confirm_check_in", "confirm_sign_out", "first_visit", "checked_in", "checked_out"]);
@@ -43540,9 +43566,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -50997,7 +51023,7 @@ var worker = {
     }
   }
 };
-var index_default = worker;
+var src_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -51257,7 +51283,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  index_default as default,
+  src_default as default,
   isPublic,
   isSignedJobExport
 };
