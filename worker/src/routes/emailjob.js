@@ -25,6 +25,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { recordFbcJob, appendFbcMessage } from "./fbc.js";
+import { appendCoopSheetRow, inspectSheet } from "../lib/coopsheet.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 import { onceMigration } from "../lib/once.js";
 
@@ -439,6 +440,15 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
         });
       } catch {}
     }
+    // Co-op spreadsheet: a NEW Concerto job also gets its row on the
+    // "Concerto Reactive Maintenance" workbook (what the old Zap did). Fail-soft —
+    // the job is already on the board; the outcome is noted on the intake log.
+    if (made.outcome === "created" && /^concerto-(job|helpdesk)$/.test(tm.tpl.id)) {
+      const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields.reference, siteCode: fields.siteCode, siteName: fields.siteName, postcode: fields.postcode, description: fields.description });
+      made.reason = (made.reason || "") + (sr.ok
+        ? (sr.skipped ? " · already on the Co-op spreadsheet (row " + sr.row + ")" : " · added to the Co-op spreadsheet (row " + sr.row + ")")
+        : " · ⚠ Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
+    }
     return { ...out, fields, ...made };
   }
 
@@ -549,6 +559,26 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
       .bind(res.outcome, ("Approved by " + me + " — " + res.reason).slice(0, 300), res.reference || "", res.jobId || "", res.status || null, JSON.stringify(fields), ltid, row.id).run();
     ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "📨 Email → job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " — created by " + me }).catch(() => {}));
     return json({ ok: true, ...res, fields }, {}, env, request);
+  }
+  // Co-op spreadsheet feed: check the link (read-only), or add one job's row by
+  // its reference (backfill / retry after a failure — skips one already there).
+  if (sub === "/sheet-check" && method === "GET") {
+    const r = await inspectSheet(env, tid, "");
+    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto" }, {}, env, request);
+  }
+  if (sub === "/sheet-add" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const want = String(b.reference || "").trim();
+    if (!want) return error("Type the job's order number (e.g. 32141/1)", 400, env, request);
+    const digits = want.replace(/^0+/, "");
+    let job = null;
+    try {
+      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(want, "%" + digits).all();
+      for (const row of (results || [])) { const d = JSON.parse(row.data || "{}"); const ref = String(d.helpdeskRef || d.reference || ""); if (ref.replace(/^0+/, "").split("-")[0] === digits) { job = d; break; } }
+    } catch {}
+    if (!job) return error("No job with order number " + want + " on the board", 404, env, request);
+    const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || want, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { dryRun: b.dryRun === true });
+    return json(r, { status: r.ok ? 200 : 502 }, env, request);
   }
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);

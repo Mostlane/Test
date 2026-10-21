@@ -6084,6 +6084,24 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   subcontractor, `activeSub`) + "📋 Full history →" = subcontracted-jobs.html?tab=all&sub=<key>
   (that page now reads ?tab/?sub).
   Tests in test-drainage.mjs. Not in the sidebar (needs a portal-config ?v= sweep).
+- **Co-op spreadsheet feed (21 Oct 2026 — replaces the Zap's "add a row" step).** Every NEW
+  Concerto job made by the email intake (templates `concerto-job` / `concerto-helpdesk`,
+  outcome `created`) also gets a row on the **Concerto** tab of SharePoint
+  `Mostlane Construction/Admin/Co-op/Concerto Reactive Maintenance.xlsx` — `lib/coopsheet.js
+  appendCoopSheetRow` via Graph (`graphmail.js graphJson`; app needs **Files.ReadWrite.All**
+  application permission). Row = we (max+1) · order no. (zeros stripped, "32141/1") · store
+  no. (text, 4-digit) · type (sites.client → Retail/ELS/COBRA) · store name · short
+  description (`shortDescription`: Concerto tag / Observation / ACCESS TIMES stripped, ≤70
+  chars) · trade (`sheetTrade` from classifyWork: Drainage/Electrician/Plumbing/Glazing/MT
+  (Multi-trade)) · M round-trip miles (site_miles, else Google HQ PO15 5RQ ×2) + the sheet's
+  N/Q/R/S formulas. Target row = first blank row (B/E/F empty) under the "Order Number"
+  header; an order already anywhere on the tab is SKIPPED (never doubles a hand-typed row).
+  Fail-soft: the job lands regardless; the intake log reason says "added to the Co-op
+  spreadsheet (row N)" or "⚠ Co-op spreadsheet not updated: …". Config app_config
+  `coopsheet:<tid>` `{enabled, driveId, itemId, sheet}` (defaults = that workbook). Office API
+  GET `/email-intake/sheet-check`, POST `/email-intake/sheet-add {reference}` (backfill/retry);
+  email-intake.html "📊 Co-op spreadsheet" card. Approve-from-review does NOT add a row (use
+  the card). If the file is moved/renamed in SharePoint the item id still holds; a renamed TAB breaks it.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

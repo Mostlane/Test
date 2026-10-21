@@ -44,6 +44,27 @@ async function graphGet(env, path, { raw } = {}) {
   return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
 }
 
+// Generic JSON call (GET/POST/PATCH) — used by the Co-op spreadsheet feed
+// (lib/coopsheet.js), which writes rows into an Excel workbook. Needs the app
+// permission Files.ReadWrite.All. Retries once with a fresh token on 401/403
+// (a token minted before the permission was granted carries no write role).
+export async function graphJson(env, method, path, body) {
+  const call = async () => fetch(GRAPH + path, {
+    method,
+    headers: { authorization: "Bearer " + (await getToken(env)), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let r = await call();
+  if (r.status === 401 || r.status === 403) { _tok = { value: "", exp: 0 }; r = await call(); }
+  let j = null; try { j = await r.json(); } catch {}
+  if (!r.ok) {
+    const d = j && j.error ? ((j.error.code ? j.error.code + ": " : "") + (j.error.message || "")) : "";
+    const e = new Error("Microsoft 365 refused (" + r.status + ")" + (d ? " — " + d.slice(0, 220) : ""));
+    e.status = r.status; throw e;
+  }
+  return j;
+}
+
 // A quick reachability check for the sweep setup UI: can we sign in AND see the
 // mailbox? Returns {ok, error?}.
 export async function graphMailboxCheck(env, mailbox) {
