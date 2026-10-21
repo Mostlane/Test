@@ -19245,6 +19245,7 @@ var init_certs = __esm({
 var sla_exports = {};
 __export(sla_exports, {
   SUBCON_STATUS: () => SUBCON_STATUS,
+  activeSetOn: () => activeSetOn,
   applyOrderToJob: () => applyOrderToJob,
   badScheduleDate: () => badScheduleDate,
   badScheduleIn: () => badScheduleIn,
@@ -20845,6 +20846,7 @@ async function handle13(request, env, ctx, url, sess) {
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
+          if (active && activeSetOn(j, engNorm, st) !== londonDateOfIso((/* @__PURE__ */ new Date()).toISOString())) continue;
           if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
         }
         if (outstanding.length) {
@@ -23847,6 +23849,25 @@ async function purgeUnverifiedCertsForJob(env, tenantId, jobId) {
 }
 function todayStr() {
   return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+function londonDateOfIso(iso) {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  } catch {
+    return "";
+  }
+}
+function activeSetOn(job, engNorm, status) {
+  const today = londonDateOfIso((/* @__PURE__ */ new Date()).toISOString());
+  const slice = job && job.engStatus && job.engStatus[engNorm];
+  if (slice && slice.at && String(slice.status || "").toLowerCase() === String(status || "").toLowerCase()) return londonDateOfIso(slice.at) || today;
+  const hist = Array.isArray(job && job.statusHistory) ? job.statusHistory : [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i] || {};
+    if (h.eng && h.eng !== engNorm) continue;
+    if (String(h.status || "").toLowerCase() === String(status || "").toLowerCase() && h.at) return londonDateOfIso(h.at) || today;
+  }
+  return today;
 }
 async function getShift(env, tenantId, username, date) {
   if (!username) return null;
