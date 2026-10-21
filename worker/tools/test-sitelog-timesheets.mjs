@@ -15,6 +15,8 @@ function d1(db) {
 const sl = new DatabaseSync(":memory:"), main = new DatabaseSync(":memory:");
 sl.exec(`CREATE TABLE people (id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, company TEXT);
 CREATE TABLE visits (id TEXT PRIMARY KEY, person_id TEXT, site_code TEXT, check_in_at TEXT, check_out_at TEXT, auto_checkout INTEGER DEFAULT 0, transferred_to TEXT, manual_entry INTEGER DEFAULT 0, provided_site_name TEXT, sign_in_verified INTEGER DEFAULT 0, sign_out_verified INTEGER DEFAULT 0, sign_in_distance_m REAL, sign_out_distance_m REAL);
+CREATE TABLE sites (site_name TEXT, lat REAL, lng REAL, radius_m INTEGER, archived INTEGER DEFAULT 0);
+INSERT INTO sites VALUES ('Starbucks Jubilee Street',50.825362,-0.138606,500,0),('Brighton North Road',50.824983,-0.138814,500,0),('Far Away',51.5,-2.5,500,0);
 INSERT INTO people VALUES ('p1','User','One','Mostlane'),('p2','User','Two','DCI'),('p3','User','Three','Storm Agency');
 INSERT INTO visits VALUES
  ('v1','p1','Starbucks Jubilee Street','2026-10-12 06:55:00','2026-10-12 11:30:00',0,NULL,0,NULL,1,1,22,14),
@@ -23,6 +25,7 @@ INSERT INTO visits VALUES
  ('v4','p3','Starbucks Jubilee Street','2026-10-12 08:00:00',NULL,0,NULL,0,NULL,1,0,40,NULL),
  ('v5','p2','Lake Road Surgery','2026-10-11 07:00:00','2026-10-11 14:00:00',0,NULL,1,NULL,0,0,NULL,NULL),
  ('v6','p1','Old visit','2026-10-05 07:00:00','2026-10-05 15:00:00',0,NULL,0,NULL,1,1,10,10);`);
+for (const c of ['lat','lng','accuracy','out_lat','out_lng','out_accuracy']) sl.exec(`ALTER TABLE visits ADD COLUMN ${c} REAL`);
 main.exec(`CREATE TABLE app_config (tenant_id INTEGER, key TEXT PRIMARY KEY, value TEXT);`);
 const sent = [];
 globalThis.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return new Response("{}", { status: 200 }); };
@@ -83,12 +86,14 @@ INSERT INTO scan_log (at,kind,outcome,person_id,site) VALUES
  ('2026-10-14T15:00:00.000Z','scan','confirm_check_in','p7','Site A'),
  ('2026-10-14T23:30:00.000Z','scan','confirm_check_in','p8','Site A'),
  ('2026-10-14T06:00:00.000Z','scan','confirm_check_in','p9','Jubilee');`);
+sl.exec(`INSERT INTO people VALUES ('p10','Scan','Ten','');
+INSERT INTO visits (id,person_id,site_code,check_in_at,check_out_at,auto_checkout,sign_in_verified,sign_out_verified) VALUES ('s10','p10','Jubilee','2026-10-14 06:00:00','2026-10-14 13:54:00',0,1,1);
+INSERT INTO scan_log (at,kind,outcome,person_id,site) VALUES ('2026-10-14T14:08:00.000Z','scan','confirm_check_in','p10','North Road');`);
 const sc = await ts.loadPeriod(env, "2026-10-14", "2026-10-14");
 const by = n => sc.find(p => p.name === n);
 const s4 = by("Scan Four");
-ok(s4.visits.length === 2 && s4.visits[0].state === "ok", "confirmed sign-out wins over an earlier unconfirmed scan");
-ok(s4.visits[1].state === "scanned" && s4.visits[1].scannedIn && s4.visits[1].inTime === "14:56" && s4.visits[1].mins === 0 && s4.visits[1].site === "North Road",
-  "unconfirmed sign-in after leaving → flagged visit, no hours without an end");
+ok(s4.visits[0].state === "ok", "confirmed sign-out wins over an earlier unconfirmed scan");
+ok(s4.visits.length === 1, "a sign-in scan 3 min after signing out elsewhere is someone leaving — not a visit");
 ok(by("Scan Five").visits.length === 1, "sign-in scan while signed in elsewhere is ignored (no double count)");
 const s6 = by("Scan Six").visits[0];
 ok(s6.state === "scanned" && s6.scannedOut && s6.outTime === "14:30" && s6.mins === 450, "missed sign-out uses the last unconfirmed sign-out scan");
@@ -97,9 +102,34 @@ ok(s7 && s7.visits.length === 1 && s7.visits[0].inTime === "07:30" && s7.visits[
   "scanned in + scanned again later at the same site → hours between the scans");
 ok(!by("Scan Eight"), "a scan at 00:30 is not a plausible sign-in");
 ok(by("Scan Nine").visits.length === 1, "the normal scan just before confirming is ignored");
+ok(by("Scan Ten").visits.length === 1, "a sign-in scan within 30 min after signing out (leaving) is ignored");
 const { personTotals } = await import("../src/lib/sitelogtspdf.js");
 ok(personTotals(by("Scan Six")).scanned === 1 && personTotals(by("Scan Six")).missed === 0, "totals count it as scanned, not missed");
 const scPdf = await ts.buildPdf(env, "daily", "2026-10-14");
 ok(scPdf.bytes.length > 2000, "PDF with scanned rows builds");
 writeFileSync(process.argv[4] || "/tmp/sl-scan.pdf", scPdf.bytes);
+
+// ── Location map links ──
+sl.exec("UPDATE visits SET lat=50.8255, lng=-0.1385, accuracy=14, out_lat=50.8254, out_lng=-0.1386, out_accuracy=12 WHERE id='v1'");
+const noSecret = await ts.addMapLinks(env, "https://api.test", await ts.loadPeriod(env, "2026-10-12", "2026-10-12"), 3600);
+ok(!noSecret.find(p => p.name === "User One").visits[0].mapIn, "no signing secret → no map links");
+env.PORTAL_BRIDGE_SECRET = "s3cret";
+const withLinks = await ts.addMapLinks(env, "https://api.test", await ts.loadPeriod(env, "2026-10-12", "2026-10-12"), 3600);
+const lv = withLinks.find(p => p.name === "User One").visits[0];
+ok(lv.mapIn && lv.mapOut && lv.mapIn.startsWith("https://api.test/sitelog-map?key=p1%7C2026-10-12%7Cv1%7Cin&exp="), "signed in/out map links on a located visit");
+ok(!withLinks.find(p => p.name === "User Two").visits[0].mapOut, "auto-closed sign-out has no map pin");
+const page = async u => { const url = new URL(u); const r = await ts.handleMap(new Request(u), env, {}, url); return { status: r.status, text: await r.text() }; };
+let pg = await page(lv.mapIn);
+ok(pg.status === 200 && pg.text.includes("leaflet") && pg.text.includes("User One"), "map page opens from a signed link");
+const data = JSON.parse(pg.text.match(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/)[1]);
+ok(data.focus === "v1:in" && data.events.some(e => e.id === "v1:in" && e.dist < 50), "focused on the sign-in, distance from the site worked out");
+ok(data.sites.some(s => s.name === "Brighton North Road") && !data.sites.some(s => s.name === "Far Away"), "neighbouring site drawn, far sites not");
+pg = await page(lv.mapIn.replace(/sig=[0-9a-f]+/, "sig=" + "0".repeat(64)));
+ok(pg.status === 403, "tampered link refused");
+pg = await page(lv.mapIn.replace("%7Cin&", "%7Cout&"));
+ok(pg.status === 403, "changing the event in the link breaks the signature");
+sent.length = 0;
+main.prepare("UPDATE app_config SET value=? WHERE key='sitelog:tsmail:sent:1'").run("{}");
+await ts.emailTimesheet(env, 1, "daily", "2026-10-12", ["office@example.com"]);
+ok(sent.length === 1 && (sent[0].html.match(/sitelog-map\?key=/g) || []).length >= 2 && sent[0].html.includes("📍"), "email carries 📍 map links per event");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
