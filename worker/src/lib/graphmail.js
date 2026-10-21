@@ -56,6 +56,14 @@ export async function graphJson(env, method, path, body) {
   });
   let r = await call();
   if (r.status === 401 || r.status === 403) { _tok = { value: "", exp: 0 }; r = await call(); }
+  // Busy / throttled (429, 503, 504 — e.g. FileOpenHostTooManyRequests when
+  // several emails land at once): wait and try again, honouring Retry-After.
+  for (let i = 0; i < 4 && (r.status === 429 || r.status === 503 || r.status === 504); i++) {
+    const ra = Number(r.headers.get("retry-after"));
+    const wait = Math.min(10000, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * 2 ** i);
+    await new Promise(res => setTimeout(res, wait));
+    r = await call();
+  }
   let j = null; try { j = await r.json(); } catch {}
   if (!r.ok) {
     const d = j && j.error ? ((j.error.code ? j.error.code + ": " : "") + (j.error.message || "")) : "";

@@ -25,7 +25,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { recordFbcJob, appendFbcMessage } from "./fbc.js";
-import { appendCoopSheetRow, inspectSheet } from "../lib/coopsheet.js";
+import { appendCoopSheetRow, inspectSheet, coopSheetPending, jobForOrder } from "../lib/coopsheet.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 import { onceMigration } from "../lib/once.js";
 
@@ -447,7 +447,7 @@ export async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields.reference, siteCode: fields.siteCode, siteName: fields.siteName, postcode: fields.postcode, description: fields.description });
       made.reason = (made.reason || "") + (sr.ok
         ? (sr.skipped ? " · already on the Co-op spreadsheet (row " + sr.row + ")" : sr.filled ? " · already on the Co-op spreadsheet — filled in its blanks (row " + sr.row + ")" : " · added to the Co-op spreadsheet (row " + sr.row + ")")
-        : " · ⚠ Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
+        : " · ⚠ Co-op spreadsheet not updated yet: " + (sr.error || "unknown error") + (sr.queued ? " — will retry automatically" : ""));
     }
     return { ...out, fields, ...made };
   }
@@ -564,18 +564,14 @@ export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
   // its reference (backfill / retry after a failure — skips one already there).
   if (sub === "/sheet-check" && method === "GET") {
     const r = await inspectSheet(env, tid, "");
-    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto" }, {}, env, request);
+    const pending = await coopSheetPending(env, tid);
+    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto", pending: pending.map(p => ({ reference: p.reference, at: p.at, tries: p.tries, error: p.error })) }, {}, env, request);
   }
   if (sub === "/sheet-add" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const want = String(b.reference || "").trim();
     if (!want) return error("Type the job's order number (e.g. 32141/1)", 400, env, request);
-    const digits = want.replace(/^0+/, "");
-    let job = null;
-    try {
-      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(want, "%" + digits).all();
-      for (const row of (results || [])) { const d = JSON.parse(row.data || "{}"); const ref = String(d.helpdeskRef || d.reference || ""); if (ref.replace(/^0+/, "").split("-")[0] === digits) { job = d; break; } }
-    } catch {}
+    const job = await jobForOrder(env, want);
     if (!job) return error("No job with order number " + want + " on the board", 404, env, request);
     const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || want, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { dryRun: b.dryRun === true });
     return json(r, { status: r.ok ? 200 : 502 }, env, request);

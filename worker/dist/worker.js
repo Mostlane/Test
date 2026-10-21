@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -6425,6 +6430,12 @@ async function graphJson(env, method, path, body) {
   let r = await call();
   if (r.status === 401 || r.status === 403) {
     _tok = { value: "", exp: 0 };
+    r = await call();
+  }
+  for (let i = 0; i < 4 && (r.status === 429 || r.status === 503 || r.status === 504); i++) {
+    const ra = Number(r.headers.get("retry-after"));
+    const wait = Math.min(1e4, Number.isFinite(ra) && ra > 0 ? ra * 1e3 : 1500 * 2 ** i);
+    await new Promise((res) => setTimeout(res, wait));
     r = await call();
   }
   let j = null;
@@ -31752,7 +31763,7 @@ async function rowInfo(env, tid, { reference, siteCode, siteName, postcode, desc
   return {
     order: sheetOrderNo(reference),
     storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
-    type: site && TYPE_LABEL2[String(site.client || "").toLowerCase()] || "Retail",
+    type: site && TYPE_LABEL2[String(site.client || "").toLowerCase()] || "",
     name,
     desc: await aiShortDescription(env, description),
     trade: sheetTrade(description),
@@ -31772,6 +31783,7 @@ async function inspectSheet(env, tid, order) {
     const h = vals.findIndex((r) => String(r[1] || "").trim().toLowerCase() === "order number");
     if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
     let target = -1, maxWe = 0, lastOrder = "", existsRow = 0, existsVals = null;
+    const seen = {};
     for (let i = h + 1; i < vals.length; i++) {
       const r = vals[i];
       const blank = !String(r[1] || "").trim() && !String(r[4] || "").trim() && !String(r[5] || "").trim();
@@ -31788,9 +31800,14 @@ async function inspectSheet(env, tid, order) {
         existsRow = top + i + 1;
         existsVals = r;
       }
+      const sn = String(r[2] == null ? "" : r[2]).replace(/^'/, "").trim();
+      if (/^\d+$/.test(sn)) {
+        const k = String(Number(sn)), m = Number(r[12]);
+        seen[k] = { type: String(r[3] || "").trim() || seen[k] && seen[k].type || "", miles: m > 0 ? m : seen[k] && seen[k].miles || "" };
+      }
     }
     if (target < 0) target = vals.length;
-    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow, existsVals, headerRow: top + h + 1 };
+    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow, existsVals, headerRow: top + h + 1, seen };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300), status: e && e.status };
   }
@@ -31837,14 +31854,121 @@ async function copyRowFormat(env, cfg, src, dst) {
     return { ok: false, error: String(e && e.message || e).slice(0, 200) };
   }
 }
-async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
+var LOCK = (tid) => "coopsheet:lock:" + (Math.trunc(Number(tid)) || 1);
+async function withSheetLock(env, tid, fn) {
+  const key = LOCK(tid), me = crypto.randomUUID();
+  for (let i = 0; i < 40; i++) {
+    const now2 = Date.now();
+    try {
+      await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(json_extract(app_config.value,'$.until') AS INTEGER) < ?").bind(key, JSON.stringify({ by: me, until: now2 + 6e4 }), Math.trunc(Number(tid)) || 1, now2).run();
+      const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+      if (r && JSON.parse(r.value).by === me) {
+        try {
+          return await fn();
+        } finally {
+          try {
+            await env.DB.prepare("DELETE FROM app_config WHERE key=? AND json_extract(value,'$.by')=?").bind(key, me).run();
+          } catch {
+          }
+        }
+      }
+    } catch {
+      return fn();
+    }
+    await new Promise((res) => setTimeout(res, 750));
+  }
+  return { ok: false, error: "spreadsheet busy (another row was being written)" };
+}
+var PENDING = (tid) => "coopsheet:pending:" + (Math.trunc(Number(tid)) || 1);
+async function readPending(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(PENDING(tid)).first();
+    return r ? JSON.parse(r.value) || [] : [];
+  } catch {
+    return [];
+  }
+}
+async function writePending(env, tid, list) {
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(PENDING(tid), JSON.stringify(list.slice(-100)), Math.trunc(Number(tid)) || 1).run();
+}
+async function queueCoopSheetRow(env, tid, reference, error2) {
+  try {
+    const list = await readPending(env, tid);
+    const k = sheetOrderNo(reference);
+    const cur = list.find((x) => sheetOrderNo(x.reference) === k);
+    if (cur) {
+      cur.error = String(error2 || "").slice(0, 200);
+    } else list.push({ reference, at: (/* @__PURE__ */ new Date()).toISOString(), tries: 0, error: String(error2 || "").slice(0, 200) });
+    await writePending(env, tid, list);
+  } catch {
+  }
+}
+async function coopSheetPending(env, tid) {
+  return readPending(env, tid);
+}
+async function jobForOrder(env, want) {
+  const digits = String(want || "").trim().replace(/^0+/, "");
+  if (!digits) return null;
+  try {
+    const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(String(want).trim(), "%" + digits).all();
+    for (const row of results || []) {
+      const d = JSON.parse(row.data || "{}");
+      const ref = String(d.helpdeskRef || d.reference || "");
+      if (ref.replace(/^0+/, "").split("-")[0] === digits) return d;
+    }
+  } catch {
+  }
+  return null;
+}
+async function sweepCoopSheetPending(env, tid = 1) {
+  const list = await readPending(env, tid);
+  if (!list.length) return { done: 0 };
+  const keep = [];
+  let done = 0, n = 0;
+  for (const it of list) {
+    if (n >= 4) {
+      keep.push(it);
+      continue;
+    }
+    n++;
+    const job = await jobForOrder(env, it.reference);
+    if (!job) {
+      if ((it.tries || 0) < 3) keep.push({ ...it, tries: (it.tries || 0) + 1, error: "job not on the board" });
+      continue;
+    }
+    const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || it.reference, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { noQueue: true });
+    if (r.ok) done++;
+    else if ((it.tries || 0) < 288) keep.push({ ...it, tries: (it.tries || 0) + 1, error: String(r.error || "").slice(0, 200), lastTry: (/* @__PURE__ */ new Date()).toISOString() });
+  }
+  await writePending(env, tid, keep);
+  return { done, left: keep.length };
+}
+async function appendCoopSheetRow(env, tid, job, { dryRun = false, noQueue = false } = {}) {
+  let info = null;
   try {
     const cfg = await getSheetConfig2(env, tid);
     if (!cfg.enabled) return { ok: false, skipped: true, error: "spreadsheet feed is switched off" };
-    const info = await rowInfo(env, tid, job);
+    info = await rowInfo(env, tid, job);
     if (!info.order) return { ok: false, error: "no order number" };
+    const r = dryRun ? await writeRow(env, tid, cfg, info, true) : await withSheetLock(env, tid, () => writeRow(env, tid, cfg, info, false));
+    if (!r.ok && !dryRun && !noQueue) {
+      await queueCoopSheetRow(env, tid, job.reference, r.error);
+      r.queued = true;
+    }
+    return r;
+  } catch (e) {
+    const err = String(e && e.message || e).slice(0, 300);
+    if (!dryRun && !noQueue && job && job.reference) await queueCoopSheetRow(env, tid, job.reference, err);
+    return { ok: false, error: err, info, queued: !dryRun && !noQueue };
+  }
+}
+async function writeRow(env, tid, cfg, info, dryRun) {
+  try {
     const at = await inspectSheet(env, tid, info.order);
     if (!at.ok) return at;
+    const prev = /^\d+$/.test(info.storeNo) ? at.seen[String(Number(info.storeNo))] : null;
+    if (!info.type) info.type = prev && prev.type || "Retail";
+    if (info.miles === "" && prev && prev.miles) info.miles = prev.miles;
     if (at.existsRow) {
       const r2 = at.existsRow, ev = at.existsVals || [];
       const blank = (c) => ev[c] == null || String(ev[c]).trim() === "";
@@ -32339,7 +32463,7 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
     }
     if (made.outcome === "created" && /^concerto-(job|helpdesk)$/.test(tm.tpl.id)) {
       const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields2.reference, siteCode: fields2.siteCode, siteName: fields2.siteName, postcode: fields2.postcode, description: fields2.description });
-      made.reason = (made.reason || "") + (sr.ok ? sr.skipped ? " \xB7 already on the Co-op spreadsheet (row " + sr.row + ")" : sr.filled ? " \xB7 already on the Co-op spreadsheet \u2014 filled in its blanks (row " + sr.row + ")" : " \xB7 added to the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 \u26A0 Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
+      made.reason = (made.reason || "") + (sr.ok ? sr.skipped ? " \xB7 already on the Co-op spreadsheet (row " + sr.row + ")" : sr.filled ? " \xB7 already on the Co-op spreadsheet \u2014 filled in its blanks (row " + sr.row + ")" : " \xB7 added to the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 \u26A0 Co-op spreadsheet not updated yet: " + (sr.error || "unknown error") + (sr.queued ? " \u2014 will retry automatically" : ""));
     }
     return { ...out2, fields: fields2, ...made };
   }
@@ -32470,26 +32594,14 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
   }
   if (sub === "/sheet-check" && method === "GET") {
     const r = await inspectSheet(env, tid, "");
-    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto" }, {}, env, request);
+    const pending = await coopSheetPending(env, tid);
+    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto", pending: pending.map((p) => ({ reference: p.reference, at: p.at, tries: p.tries, error: p.error })) }, {}, env, request);
   }
   if (sub === "/sheet-add" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const want = String(b.reference || "").trim();
     if (!want) return error("Type the job's order number (e.g. 32141/1)", 400, env, request);
-    const digits = want.replace(/^0+/, "");
-    let job = null;
-    try {
-      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(want, "%" + digits).all();
-      for (const row of results || []) {
-        const d = JSON.parse(row.data || "{}");
-        const ref = String(d.helpdeskRef || d.reference || "");
-        if (ref.replace(/^0+/, "").split("-")[0] === digits) {
-          job = d;
-          break;
-        }
-      }
-    } catch {
-    }
+    const job = await jobForOrder(env, want);
     if (!job) return error("No job with order number " + want + " on the board", 404, env, request);
     const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || want, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { dryRun: b.dryRun === true });
     return json(r, { status: r.ok ? 200 : 502 }, env, request);
@@ -43566,9 +43678,9 @@ function simEmpat(sites, m, opts) {
     } else break;
   }
   const lastWork = now2;
-  if (lastWork > DAY_END) warnings.push("day runs to " + function(t) {
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t) {
     return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
-  }(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
+  })(lastWork) + " \u2014 past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0);
   if (back > 0) {
     steps.push({ t: now2, kind: "travel", mins: back });
@@ -50991,6 +51103,7 @@ var worker = {
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
     ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
+    ctx.waitUntil(sweepCoopSheetPending(env, 1).catch((e) => console.error("scheduled co-op sheet retry:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
@@ -51023,7 +51136,7 @@ var worker = {
     }
   }
 };
-var src_default = worker;
+var index_default = worker;
 async function remindDailyApprovals(env) {
   const now2 = /* @__PURE__ */ new Date();
   const lonHour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
@@ -51283,7 +51396,7 @@ function isSignedJobExport(pathname) {
   return /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname);
 }
 export {
-  src_default as default,
+  index_default as default,
   isPublic,
   isSignedJobExport
 };

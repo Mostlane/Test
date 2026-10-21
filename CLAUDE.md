@@ -6135,6 +6135,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   hand) only gets its BLANK trade / mileage / formula cells filled — nothing typed is overwritten. Every
   written row copies the row above's formatting cell by cell (`copyRowFormat`: number formats, font, fill,
   alignment, cell borders) via Graph `$batch` (`graphmail.js graphBatch`).
+  **Reliability (21 Oct, after the first live day: 3 of 24 rows missed in a 5-email burst — 503/429
+  FileOpenHost*):** `graphJson` retries 429/503/504 up to 4× (Retry-After / 1.5→12 s backoff); writes are
+  serialised by a D1 lock `coopsheet:lock:<tid>` (60 s stale) so a burst can't pick the same free row; a
+  row that still fails is queued in app_config `coopsheet:pending:<tid>` and the 5-min cron
+  (`sweepCoopSheetPending`, 4/tick, gives up after ~24 h) retries it — the intake reason says "will retry
+  automatically" and the email-intake card lists what's waiting. A store that isn't a portal site (e.g.
+  4150 Hinton Park) takes its Type + mileage from the sheet's OWN earlier rows for that store number.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on

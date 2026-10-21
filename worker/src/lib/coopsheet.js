@@ -128,7 +128,7 @@ export async function rowInfo(env, tid, { reference, siteCode, siteName, postcod
   return {
     order: sheetOrderNo(reference),
     storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
-    type: (site && TYPE_LABEL[String(site.client || "").toLowerCase()]) || "Retail",
+    type: (site && TYPE_LABEL[String(site.client || "").toLowerCase()]) || "",
     name,
     desc: await aiShortDescription(env, description),
     trade: sheetTrade(description),
@@ -152,15 +152,21 @@ export async function inspectSheet(env, tid, order) {
     const h = vals.findIndex(r => String(r[1] || "").trim().toLowerCase() === "order number");
     if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
     let target = -1, maxWe = 0, lastOrder = "", existsRow = 0, existsVals = null;
+    const seen = {}; // store no → {type, miles} from the office's own earlier rows
     for (let i = h + 1; i < vals.length; i++) {
       const r = vals[i];
       const blank = !String(r[1] || "").trim() && !String(r[4] || "").trim() && !String(r[5] || "").trim();
       if (blank) { if (target < 0) target = i; continue; }
       if (target < 0) { const we = Number(r[0]); if (Number.isFinite(we) && we > maxWe) maxWe = we; lastOrder = String(r[1] || ""); }
       if (order && !existsRow && sameOrder(r[1], order)) { existsRow = top + i + 1; existsVals = r; }
+      const sn = String(r[2] == null ? "" : r[2]).replace(/^'/, "").trim();
+      if (/^\d+$/.test(sn)) {
+        const k = String(Number(sn)), m = Number(r[12]);
+        seen[k] = { type: String(r[3] || "").trim() || (seen[k] && seen[k].type) || "", miles: m > 0 ? m : (seen[k] && seen[k].miles) || "" };
+      }
     }
     if (target < 0) target = vals.length;
-    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow, existsVals, headerRow: top + h + 1 };
+    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow, existsVals, headerRow: top + h + 1, seen };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e).slice(0, 300), status: e && e.status };
   }
@@ -208,17 +214,107 @@ export async function copyRowFormat(env, cfg, src, dst) {
   } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
 }
 
+// One writer at a time: two emails landing together would otherwise both read
+// the same "next free row". A short D1 lock (stale after 60 s) serialises them.
+const LOCK = tid => "coopsheet:lock:" + (Math.trunc(Number(tid)) || 1);
+async function withSheetLock(env, tid, fn) {
+  const key = LOCK(tid), me = crypto.randomUUID();
+  for (let i = 0; i < 40; i++) {
+    const now = Date.now();
+    try {
+      await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(json_extract(app_config.value,'$.until') AS INTEGER) < ?")
+        .bind(key, JSON.stringify({ by: me, until: now + 60000 }), Math.trunc(Number(tid)) || 1, now).run();
+      const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+      if (r && JSON.parse(r.value).by === me) {
+        try { return await fn(); }
+        finally { try { await env.DB.prepare("DELETE FROM app_config WHERE key=? AND json_extract(value,'$.by')=?").bind(key, me).run(); } catch {} }
+      }
+    } catch { return fn(); } // lock table trouble must never stop the write
+    await new Promise(res => setTimeout(res, 750));
+  }
+  return { ok: false, error: "spreadsheet busy (another row was being written)" };
+}
+
+// Rows that couldn't be written (Microsoft busy, file locked open…) are queued
+// and retried by the 5-minute cron until they land.
+const PENDING = tid => "coopsheet:pending:" + (Math.trunc(Number(tid)) || 1);
+async function readPending(env, tid) {
+  try { const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(PENDING(tid)).first(); return r ? JSON.parse(r.value) || [] : []; } catch { return []; }
+}
+async function writePending(env, tid, list) {
+  await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(PENDING(tid), JSON.stringify(list.slice(-100)), Math.trunc(Number(tid)) || 1).run();
+}
+export async function queueCoopSheetRow(env, tid, reference, error) {
+  try {
+    const list = await readPending(env, tid);
+    const k = sheetOrderNo(reference);
+    const cur = list.find(x => sheetOrderNo(x.reference) === k);
+    if (cur) { cur.error = String(error || "").slice(0, 200); }
+    else list.push({ reference, at: new Date().toISOString(), tries: 0, error: String(error || "").slice(0, 200) });
+    await writePending(env, tid, list);
+  } catch {}
+}
+export async function coopSheetPending(env, tid) { return readPending(env, tid); }
+
+// The job that carries an order number (bare or with zeros), from the board.
+export async function jobForOrder(env, want) {
+  const digits = String(want || "").trim().replace(/^0+/, "");
+  if (!digits) return null;
+  try {
+    const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(String(want).trim(), "%" + digits).all();
+    for (const row of (results || [])) { const d = JSON.parse(row.data || "{}"); const ref = String(d.helpdeskRef || d.reference || ""); if (ref.replace(/^0+/, "").split("-")[0] === digits) return d; }
+  } catch {}
+  return null;
+}
+
+// Cron: retry queued rows (a few per tick). Gives up after ~24 h of tries.
+export async function sweepCoopSheetPending(env, tid = 1) {
+  const list = await readPending(env, tid);
+  if (!list.length) return { done: 0 };
+  const keep = []; let done = 0, n = 0;
+  for (const it of list) {
+    if (n >= 4) { keep.push(it); continue; }
+    n++;
+    const job = await jobForOrder(env, it.reference);
+    if (!job) { if ((it.tries || 0) < 3) keep.push({ ...it, tries: (it.tries || 0) + 1, error: "job not on the board" }); continue; }
+    const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || it.reference, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { noQueue: true });
+    if (r.ok) done++;
+    else if ((it.tries || 0) < 288) keep.push({ ...it, tries: (it.tries || 0) + 1, error: String(r.error || "").slice(0, 200), lastTry: new Date().toISOString() });
+  }
+  await writePending(env, tid, keep);
+  return { done, left: keep.length };
+}
+
 // Add one job's row. If the order is already on the sheet (re-run, or typed by
 // the office) nothing typed is ever overwritten — only BLANK trade / mileage /
 // formula cells are filled. dryRun reports without writing.
-export async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
+export async function appendCoopSheetRow(env, tid, job, { dryRun = false, noQueue = false } = {}) {
+  let info = null;
   try {
     const cfg = await getSheetConfig(env, tid);
     if (!cfg.enabled) return { ok: false, skipped: true, error: "spreadsheet feed is switched off" };
-    const info = await rowInfo(env, tid, job);
+    info = await rowInfo(env, tid, job);
     if (!info.order) return { ok: false, error: "no order number" };
+    const r = dryRun ? await writeRow(env, tid, cfg, info, true) : await withSheetLock(env, tid, () => writeRow(env, tid, cfg, info, false));
+    if (!r.ok && !dryRun && !noQueue) { await queueCoopSheetRow(env, tid, job.reference, r.error); r.queued = true; }
+    return r;
+  } catch (e) {
+    const err = String(e && e.message || e).slice(0, 300);
+    if (!dryRun && !noQueue && job && job.reference) await queueCoopSheetRow(env, tid, job.reference, err);
+    return { ok: false, error: err, info, queued: !dryRun && !noQueue };
+  }
+}
+
+async function writeRow(env, tid, cfg, info, dryRun) {
+  try {
     const at = await inspectSheet(env, tid, info.order);
     if (!at.ok) return at;
+    // Not a portal site (or no mileage on record)? The sheet's own earlier rows
+    // for the same store know its type and round-trip miles.
+    const prev = /^\d+$/.test(info.storeNo) ? at.seen[String(Number(info.storeNo))] : null;
+    if (!info.type) info.type = (prev && prev.type) || "Retail";
+    if (info.miles === "" && prev && prev.miles) info.miles = prev.miles;
 
     if (at.existsRow) {
       const r = at.existsRow, ev = at.existsVals || [];
