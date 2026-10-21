@@ -26,7 +26,8 @@ import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { recordFbcJob, appendFbcMessage } from "./fbc.js";
 import { appendCoopSheetRow, inspectSheet, coopSheetPending, jobForOrder } from "../lib/coopsheet.js";
-import { runIntakeCheck, sendIntakeCheck, getIntakeCheckConfig, setIntakeCheckConfig } from "../lib/intakecheck.js";
+import { runIntakeCheck, sendIntakeCheck, getIntakeCheckConfig, setIntakeCheckConfig, getLiveIssues, refreshLiveIssues } from "../lib/intakecheck.js";
+import { canSeeMoney } from "../lib/auth.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
 import { onceMigration } from "../lib/once.js";
 
@@ -493,12 +494,38 @@ export async function handleInboundEmail(message, env, ctx, fetchSelf) {
    POST /rerun    {id} → re-run a logged email for real (force past the allow-list/dedupe)
    GET/POST /config {enabled, allowFrom[]}                                        */
 export async function handleApi(request, env, ctx, url, sess, fetchSelf) {
+  const res = await handleApiInner(request, env, ctx, url, sess, fetchSelf);
+  // A fix made on this page clears the ⚠ straight away (not at the next 15-min refresh).
+  if (request.method.toUpperCase() === "POST" && /\/(rerun|approve|dismiss|sheet-add)$/.test(url.pathname) && res && res.status < 300 && ctx && ctx.waitUntil) {
+    ctx.waitUntil(refreshLiveIssues(env, await resolveTenantId(env, request)).catch(() => {}));
+  }
+  return res;
+}
+async function handleApiInner(request, env, ctx, url, sess, fetchSelf) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/email-intake(?=\/|$)/, "") || "/";
   if (!sess || !sess.user) return error("Login required", 401, env, request);
   const tid = await resolveTenantId(env, request);
   const me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
+  // The ⚠ on the SLA board / sidebar — ANY office user (FullAccess or staffType office).
+  if (sub === "/issues" || sub === "/issues/fix") {
+    if (!(await canSeeMoney(env, tid, me))) return error("Office users only", 403, env, request);
+    if (sub === "/issues" && method === "GET") {
+      let live = url.searchParams.get("fresh") === "1" ? null : await getLiveIssues(env, tid);
+      if (!live) live = await refreshLiveIssues(env, tid);
+      return json({ ok: true, ...live, canAdmin: perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" }, {}, env, request);
+    }
+    if (sub === "/issues/fix" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const job = await jobForOrder(env, b.ref);
+      if (!job) return error("Can't find job " + (b.ref || "") + " on the board", 404, env, request);
+      const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || b.ref, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { noQueue: true });
+      const live = await refreshLiveIssues(env, tid);
+      return json({ ok: !!r.ok, result: r, error: r.error || "", ...live }, { status: r.ok ? 200 : 502 }, env, request);
+    }
+    return error("Not found", 404, env, request);
+  }
   if (!(perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes")) return error("SLA admin access required", 403, env, request);
   // inbound_emails.tenant_id is TEXT. The email handler logs under "1"; a session tenant id
   // binds as the number 1 → "1.0" in a TEXT column, so the page saw none of its own rows.

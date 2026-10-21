@@ -6152,6 +6152,15 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `{enabled, recipients[]}` (blank = the owner's users.email); email-intake.html "🩺 Daily intake check"
   card: on/off, recipients, 🔍 Check now (GET `/email-intake/daily-check`), 📧 Check & email now
   (POST `{force:true}`; POST `{config}` saves).
+  **⚠ Live issue marker on the SLA board + sidebar (21 Oct):** the same check (7-day look-back, no cosmetic
+  description warnings, 24 h silence rule) is saved to app_config `intakecheck:live:<tid>` by the cron every
+  15 min (`sweepLiveIssues`) and re-run straight after any fix (Email intake rerun/approve/dismiss/sheet-add,
+  or the panel). **GET /email-intake/issues** (`?fresh=1` recomputes) + **POST /email-intake/issues/fix
+  {ref}** (adds/fills the spreadsheet row) are open to ANY office user (`canSeeMoney`; the rest of
+  /email-intake stays SLA-admin). portal-config `intakeWarn()` (office/FullAccess only, polls 2 min) puts a
+  pulsing ⚠️ beside "SLA / Jobs" in the sidebar and a "⚠️ N" pill in the sla-main header; both open a panel
+  with one-tap fixes for spreadsheet rows and links to Email intake for the rest (admins), and vanish when
+  the list is empty. portal-config `?v=46`, SW `mostlane-v147`.
 - **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
   domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
   mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
