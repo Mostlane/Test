@@ -248,7 +248,7 @@
     $("sheetStatus").innerHTML = "Checking the link…";
     try{
       var r = await authFetch("/email-intake/sheet-check").then(function(x){ return x.json(); });
-      if(r && r.ok) $("sheetStatus").innerHTML = '<span class="light on"></span>Connected — the next job goes on row <b>'+esc(r.nextRow)+'</b> of the '+esc(r.sheet)+' tab (last order on the sheet: '+esc(r.lastOrder||"—")+').';
+      if(r && r.ok) $("sheetStatus").innerHTML = '<span class="light on"></span>Connected — the next job goes on row <b>'+esc(r.nextRow)+'</b> of the '+esc(r.sheet)+' tab (last order on the sheet: '+esc(r.lastOrder||"—")+').'+((r.pending&&r.pending.length)?'<br>⏳ <b>'+r.pending.length+' waiting to retry</b> (Microsoft was busy — tried again every 5 minutes): '+r.pending.map(function(p){return esc(p.reference)}).join(", "):'');
       else $("sheetStatus").innerHTML = '<span class="light off"></span><b>Not connected</b> — '+esc((r&&r.error)||"no reply")+'. New jobs still land on the board; only the spreadsheet row is missed.';
     }catch(e){ $("sheetStatus").innerHTML = '<span class="light off"></span>Couldn’t check ('+esc(e.message)+').'; }
   }
