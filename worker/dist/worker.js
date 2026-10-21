@@ -6377,6 +6377,7 @@ var graphmail_exports = {};
 __export(graphmail_exports, {
   downloadAttachment: () => downloadAttachment,
   graphConfigured: () => graphConfigured,
+  graphJson: () => graphJson,
   graphMailboxCheck: () => graphMailboxCheck,
   graphSendMail: () => graphSendMail,
   listPdfAttachments: () => listPdfAttachments,
@@ -6418,6 +6419,30 @@ async function graphGet(env, path, { raw } = {}) {
     throw e;
   }
   return raw ? new Uint8Array(await r.arrayBuffer()) : r.json();
+}
+async function graphJson(env, method, path, body) {
+  const call = async () => fetch(GRAPH + path, {
+    method,
+    headers: { authorization: "Bearer " + await getToken(env), ...body !== void 0 ? { "content-type": "application/json" } : {} },
+    body: body !== void 0 ? JSON.stringify(body) : void 0
+  });
+  let r = await call();
+  if (r.status === 401 || r.status === 403) {
+    _tok = { value: "", exp: 0 };
+    r = await call();
+  }
+  let j = null;
+  try {
+    j = await r.json();
+  } catch {
+  }
+  if (!r.ok) {
+    const d = j && j.error ? (j.error.code ? j.error.code + ": " : "") + (j.error.message || "") : "";
+    const e = new Error("Microsoft 365 refused (" + r.status + ")" + (d ? " \u2014 " + d.slice(0, 220) : ""));
+    e.status = r.status;
+    throw e;
+  }
+  return j;
 }
 async function graphMailboxCheck(env, mailbox) {
   if (!graphConfigured(env)) return { ok: false, error: "Graph isn't configured (missing GRAPH_* secrets)." };
@@ -31531,6 +31556,173 @@ async function handle18(request, env, ctx, url, sess) {
   return error("Unknown FBC route", 404, env, request);
 }
 
+// src/lib/coopsheet.js
+init_graphmail();
+init_worktypes();
+var DEFAULTS2 = {
+  enabled: true,
+  driveId: "b!NpDXAs0EE0OL71TDQZYd-bdykHFlnd9FjsgSt11fwgt0jcCyS10IR5OEI-3NYzYC",
+  itemId: "01SR6ZRFZSTGBV7G2BEZGJN6JXZHXELVHD",
+  sheet: "Concerto"
+};
+var HQ_PC = "PO15 5RQ";
+var KEY2 = (tid) => "coopsheet:" + (Math.trunc(Number(tid)) || 1);
+async function getSheetConfig2(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(KEY2(tid)).first();
+    if (r && r.value) return { ...DEFAULTS2, ...JSON.parse(r.value) };
+  } catch {
+  }
+  return { ...DEFAULTS2 };
+}
+function sheetOrderNo(ref) {
+  const m = String(ref || "").trim().match(/^0*(\d+)(\/\d+)?/);
+  return m ? m[1] + (m[2] || "") : String(ref || "").trim();
+}
+function sameOrder(a, b) {
+  return sheetOrderNo(a).toLowerCase() === sheetOrderNo(b).toLowerCase();
+}
+function shortDescription(desc) {
+  let t = String(desc || "").replace(/\s+/g, " ").trim();
+  t = t.replace(/^(?:Fault\/Issue:\s*)?[^-:]{1,60}:[^-]{1,60}\([^)]*\)\s*-\s*/i, "");
+  t = t.replace(/^(?:Observation|Issue|Fault|Description)\s*:\s*/i, "");
+  t = t.split(/\s*(?:ACCESS TIMES?|Recommendation|Access)\s*:/i)[0].trim();
+  const first = (t.match(/^.*?[.!?](?=\s|$)/) || [t])[0].trim();
+  if (first.length >= 12) t = first;
+  if (t.length > 70) t = t.slice(0, 70).replace(/\s+\S*$/, "").replace(/[,;:\-\s]+$/, "") + "\u2026";
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  return t && !/[.!?…]$/.test(t) ? t + "." : t;
+}
+function sheetTrade(desc) {
+  let w = null;
+  try {
+    w = classifyWork(String(desc || ""));
+  } catch {
+  }
+  if (!w) return "MT (Multi-trade)";
+  if (w.group === "Drainage") return "Drainage";
+  if (w.group === "Electrical") return "Electrician";
+  if (w.group === "Plumbing & water") return "Plumbing";
+  if (/glaz/i.test(w.name || "") || /glaz/i.test(w.id || "")) return "Glazing";
+  return "MT (Multi-trade)";
+}
+var TYPE_LABEL2 = { retail: "Retail", els: "ELS", els_private: "ELS", cobra: "COBRA", wenzels: "Wenzels" };
+async function roundTripMiles(env, tid, siteName, postcode) {
+  const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (key) {
+    try {
+      const r = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(Math.trunc(Number(tid)) || 1, key).first();
+      if (r && r.miles != null && Number(r.miles) > 0) return Math.round(Number(r.miles) * 10) / 10;
+    } catch {
+    }
+  }
+  const pc = String(postcode || "").replace(/[^A-Za-z0-9 ]/g, "").trim();
+  if (pc && env.GOOGLE_MAPS_KEY) {
+    try {
+      const u = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC) + "&destinations=" + encodeURIComponent(pc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
+      const d = await (await fetch(u)).json();
+      const el = d && d.status === "OK" && d.rows && d.rows[0] && d.rows[0].elements && d.rows[0].elements[0];
+      if (el && el.status === "OK") return Math.round(el.distance.value / 1609.344 * 2 * 10) / 10;
+    } catch {
+    }
+  }
+  return "";
+}
+async function rowInfo(env, tid, { reference, siteCode, siteName, postcode, description }) {
+  let site = null;
+  const code = String(siteCode || "").trim();
+  if (/^\d+$/.test(code)) {
+    try {
+      site = await env.DB.prepare("SELECT site_number, site_name, client, postcode FROM sites WHERE CAST(site_number AS INTEGER)=? ORDER BY length(site_number) DESC LIMIT 1").bind(Number(code)).first();
+    } catch {
+    }
+  }
+  const name = site && site.site_name || String(siteName || "").replace(/^\s*\d{3,4}\s*[-–]\s*/, "").trim();
+  const pc = site && site.postcode || postcode || "";
+  return {
+    order: sheetOrderNo(reference),
+    storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
+    type: site && TYPE_LABEL2[String(site.client || "").toLowerCase()] || "Retail",
+    name,
+    desc: shortDescription(description),
+    trade: sheetTrade(description),
+    miles: await roundTripMiles(env, tid, name, pc)
+  };
+}
+var colLetter = (i) => String.fromCharCode(65 + i);
+function sheetBase(cfg) {
+  return `/drives/${encodeURIComponent(cfg.driveId)}/items/${encodeURIComponent(cfg.itemId)}/workbook/worksheets('${encodeURIComponent(cfg.sheet)}')`;
+}
+async function inspectSheet(env, tid, order) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up (GRAPH_* secrets missing)" };
+  const cfg = await getSheetConfig2(env, tid);
+  try {
+    const ur = await graphJson(env, "GET", sheetBase(cfg) + "/usedRange(valuesOnly=true)?$select=address,rowIndex,values");
+    const vals = ur && ur.values || [], top = Number(ur && ur.rowIndex) || 0;
+    const h = vals.findIndex((r) => String(r[1] || "").trim().toLowerCase() === "order number");
+    if (h < 0) return { ok: false, error: "Couldn't find the 'Order Number' heading on the " + cfg.sheet + " tab" };
+    let target = -1, maxWe = 0, lastOrder = "", existsRow = 0;
+    for (let i = h + 1; i < vals.length; i++) {
+      const r = vals[i];
+      const blank = !String(r[1] || "").trim() && !String(r[4] || "").trim() && !String(r[5] || "").trim();
+      if (blank) {
+        if (target < 0) target = i;
+        continue;
+      }
+      if (target < 0) {
+        const we = Number(r[0]);
+        if (Number.isFinite(we) && we > maxWe) maxWe = we;
+        lastOrder = String(r[1] || "");
+      }
+      if (order && !existsRow && sameOrder(r[1], order)) existsRow = top + i + 1;
+    }
+    if (target < 0) target = vals.length;
+    return { ok: true, cfg, nextRow: top + target + 1, nextWe: maxWe + 1, lastOrder, existsRow };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 300), status: e && e.status };
+  }
+}
+async function appendCoopSheetRow(env, tid, job, { dryRun = false } = {}) {
+  try {
+    const cfg = await getSheetConfig2(env, tid);
+    if (!cfg.enabled) return { ok: false, skipped: true, error: "spreadsheet feed is switched off" };
+    const info = await rowInfo(env, tid, job);
+    if (!info.order) return { ok: false, error: "no order number" };
+    const at = await inspectSheet(env, tid, info.order);
+    if (!at.ok) return at;
+    if (at.existsRow) return { ok: true, skipped: true, row: at.existsRow, info, reason: "already on the sheet (row " + at.existsRow + ")" };
+    const r = at.nextRow;
+    const row = [
+      at.nextWe,
+      info.order,
+      info.storeNo ? "'" + info.storeNo : "",
+      info.type,
+      info.name,
+      info.desc,
+      "",
+      "",
+      "",
+      info.trade,
+      "",
+      "",
+      info.miles === "" ? "" : info.miles,
+      `=SUM(M${r}*0.5)`,
+      "",
+      "",
+      `=SUM(P${r}*0.18)`,
+      `=SUM(N${r},O${r},P${r},Q${r})`,
+      `=SUM(G${r}-R${r})`,
+      "",
+      ""
+    ];
+    if (dryRun) return { ok: true, dryRun: true, row: r, info, values: row };
+    await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
+    return { ok: true, row: r, info };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 300) };
+  }
+}
+
 // src/routes/emailjob.js
 init_push();
 init_once();
@@ -31972,6 +32164,10 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       } catch {
       }
     }
+    if (made.outcome === "created" && /^concerto-(job|helpdesk)$/.test(tm.tpl.id)) {
+      const sr = await appendCoopSheetRow(env, tid, { reference: made.reference || fields2.reference, siteCode: fields2.siteCode, siteName: fields2.siteName, postcode: fields2.postcode, description: fields2.description });
+      made.reason = (made.reason || "") + (sr.ok ? sr.skipped ? " \xB7 already on the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 added to the Co-op spreadsheet (row " + sr.row + ")" : " \xB7 \u26A0 Co-op spreadsheet not updated: " + (sr.error || "unknown error"));
+    }
     return { ...out2, fields: fields2, ...made };
   }
   let fields = null;
@@ -32098,6 +32294,32 @@ async function handleApi(request, env, ctx, url, sess, fetchSelf) {
     ctx?.waitUntil?.(resolveNotificationsByTag(env, tid, "email-review:" + row.id, { title: "\u{1F4E8} Email \u2192 job " + (res.reference || ""), body: (row.subject || "").slice(0, 120) + " \u2014 created by " + me }).catch(() => {
     }));
     return json({ ok: true, ...res, fields }, {}, env, request);
+  }
+  if (sub === "/sheet-check" && method === "GET") {
+    const r = await inspectSheet(env, tid, "");
+    return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto" }, {}, env, request);
+  }
+  if (sub === "/sheet-add" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const want = String(b.reference || "").trim();
+    if (!want) return error("Type the job's order number (e.g. 32141/1)", 400, env, request);
+    const digits = want.replace(/^0+/, "");
+    let job = null;
+    try {
+      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE helpdesk_ref=? OR helpdesk_ref LIKE ? ORDER BY created_at DESC LIMIT 5").bind(want, "%" + digits).all();
+      for (const row of results || []) {
+        const d = JSON.parse(row.data || "{}");
+        const ref = String(d.helpdeskRef || d.reference || "");
+        if (ref.replace(/^0+/, "").split("-")[0] === digits) {
+          job = d;
+          break;
+        }
+      }
+    } catch {
+    }
+    if (!job) return error("No job with order number " + want + " on the board", 404, env, request);
+    const r = await appendCoopSheetRow(env, tid, { reference: job.helpdeskRef || want, siteCode: job.siteCode, siteName: job.siteName, postcode: job.postcode, description: job.description }, { dryRun: b.dryRun === true });
+    return json(r, { status: r.ok ? 200 : 502 }, env, request);
   }
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getIntakeConfig(env, tid) }, {}, env, request);
@@ -35874,7 +36096,7 @@ async function handle28(request, env, ctx, url, sess) {
     if (!await canSeeMoney(env, tid, me)) return error("Financial information is for Full Access / office staff only", 403, env, request);
     const jobId = q.get("jobId") || q.get("job") || "";
     if (!jobId) return error("jobId required", 400, env, request);
-    const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR2 = 1.25, HQ_PC = "PO15 5RQ";
+    const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR2 = 1.25, HQ_PC2 = "PO15 5RQ";
     const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
     const geoPc = async (pc) => {
       try {
@@ -35956,7 +36178,7 @@ async function handle28(request, env, ctx, url, sess) {
     }
     if (sitePc && (env.GOOGLE_MAPS_KEY || "")) {
       try {
-        const gu = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC) + "&destinations=" + encodeURIComponent(sitePc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
+        const gu = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(HQ_PC2) + "&destinations=" + encodeURIComponent(sitePc) + "&mode=driving&units=imperial&key=" + encodeURIComponent(env.GOOGLE_MAPS_KEY);
         const gr = await fetch(gu);
         const gd = await gr.json();
         const el = gd && gd.status === "OK" && gd.rows && gd.rows[0] && gd.rows[0].elements && gd.rows[0].elements[0];
@@ -35972,7 +36194,7 @@ async function handle28(request, env, ctx, url, sess) {
       }
     }
     if (!rtMiles && sitePc) {
-      const base = await geoPc(HQ_PC), dest = await geoPc(sitePc);
+      const base = await geoPc(HQ_PC2), dest = await geoPc(sitePc);
       if (base && dest) {
         rtMiles = r1(havMi(base, dest) * ROAD_FACTOR2 * 2);
         milesSource = "geocoded";
@@ -49668,10 +49890,10 @@ init_http();
 init_auth();
 init_tenantdb();
 init_filesign();
-var KEY2 = (tid) => `fra:followup:${tid}`;
+var KEY3 = (tid) => `fra:followup:${tid}`;
 var VALID = /* @__PURE__ */ new Set(["quote_needed", "quote_submitted", "nfa", ""]);
 async function loadMap(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, KEY2(db.tenantId)).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, KEY3(db.tenantId)).first();
   let m = {};
   try {
     m = row ? JSON.parse(row.value) : {};
@@ -49680,7 +49902,7 @@ async function loadMap(db) {
   return m && typeof m === "object" ? m : {};
 }
 async function saveMap(db, m) {
-  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY3(db.tenantId), JSON.stringify(m)).run();
 }
 async function handle46(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);

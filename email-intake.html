@@ -79,6 +79,18 @@
     <pre class="out" id="tOut" hidden></pre>
   </div>
 
+  <div class="card" id="sheetCard">
+    <h2>📊 Co-op spreadsheet</h2>
+    <p class="muted">Every new Concerto job is also added as a row on the <b>Concerto</b> tab of <i>Admin › Co-op › Concerto Reactive Maintenance.xlsx</i> (order no., store, type, name, short description, trade, round-trip mileage + the sheet's formulas) — what the old Zap did. A job already on the sheet is never added twice. Each email's line below says whether its row went in.</p>
+    <div id="sheetStatus" class="muted">Checking the link…</div>
+    <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="sheetRef" placeholder="Order number, e.g. 32141/1" style="max-width:240px">
+      <button class="btn sm" id="sheetAdd">＋ Add this job to the sheet</button>
+      <button class="btn ghost sm" id="sheetRecheck">↻ Check link</button>
+      <span class="msg" id="sheetMsg"></span>
+    </div>
+  </div>
+
   <div class="card">
     <h2>Recent emails</h2>
     <p class="muted">Every email the intake address receives, newest first, with what happened to it. <span class="pill p-created">created</span> / <span class="pill p-updated">updated</span> = a job on the board · <span class="pill p-order">order</span> = a Concerto order sheet filed under Client orders (cert-review) · <span class="pill p-cancelled">cancelled</span> = a Concerto cancellation applied to the job (❌ pill + timestamp on the board) · <span class="pill p-review">review</span> = held for a human (above) · <span class="pill p-dropped">dropped</span> = a reply, notice, quote or supplier paperwork · <span class="pill p-duplicate">duplicate</span> = the same email arrived twice.</p>
@@ -232,7 +244,26 @@
       if(!r||!r.ok) throw new Error((r&&r.error)||"failed"); $("cfgMsg").textContent = "Saved ✓"; $("cfgMsg").className="msg ok"; loadStatus(); }
     catch(e){ $("cfgMsg").textContent = "Couldn’t save ("+e.message+")."; $("cfgMsg").className="msg err"; }
   };
-  loadStatus(); loadLog();
+  async function loadSheet(){
+    $("sheetStatus").innerHTML = "Checking the link…";
+    try{
+      var r = await authFetch("/email-intake/sheet-check").then(function(x){ return x.json(); });
+      if(r && r.ok) $("sheetStatus").innerHTML = '<span class="light on"></span>Connected — the next job goes on row <b>'+esc(r.nextRow)+'</b> of the '+esc(r.sheet)+' tab (last order on the sheet: '+esc(r.lastOrder||"—")+').';
+      else $("sheetStatus").innerHTML = '<span class="light off"></span><b>Not connected</b> — '+esc((r&&r.error)||"no reply")+'. New jobs still land on the board; only the spreadsheet row is missed.';
+    }catch(e){ $("sheetStatus").innerHTML = '<span class="light off"></span>Couldn’t check ('+esc(e.message)+').'; }
+  }
+  $("sheetRecheck").onclick = loadSheet;
+  $("sheetAdd").onclick = async function(){
+    var ref = $("sheetRef").value.trim(); var m = $("sheetMsg");
+    if(!ref){ m.textContent = "Type an order number"; m.className = "msg err"; return; }
+    m.textContent = "Adding…"; m.className = "msg";
+    try{
+      var r = await authFetch("/email-intake/sheet-add", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ reference: ref }) }).then(function(x){ return x.json(); });
+      if(r && r.ok){ m.textContent = r.skipped ? "Already on the sheet (row "+r.row+") ✓" : "Added on row "+r.row+" ✓"; m.className = "msg ok"; loadSheet(); }
+      else { m.textContent = (r && r.error) || "Failed"; m.className = "msg err"; }
+    }catch(e){ m.textContent = e.message; m.className = "msg err"; }
+  };
+  loadStatus(); loadLog(); loadSheet();
 })();
 </script>
 </body>
