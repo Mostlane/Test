@@ -20847,11 +20847,26 @@ async function handle13(request, env, ctx, url, sess) {
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
           if (active && activeSetOn(j, engNorm, st) !== londonDateOfIso((/* @__PURE__ */ new Date()).toISOString())) continue;
-          if (active) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+          if (active) {
+            const who = activeSetBy(j, engNorm, st);
+            const byOffice = !!who.by && normId(who.by) !== engNorm;
+            outstanding.push({
+              id: j.id,
+              ref: j.helpdeskRef || j.id,
+              status: st,
+              site: j.siteName || j.siteCode || "",
+              since: who.at || "",
+              by: who.by || "",
+              byOffice,
+              why: /travelling/i.test(st) ? byOffice ? `The office (${who.by}) marked you as travelling to this job.` : "You're marked as travelling to this job." : byOffice ? `The office (${who.by}) marked this job as in progress for you.` : "You started this job and it hasn't been finished.",
+              todo: /travelling/i.test(st) ? "Open it and either start it (In Progress) or, if you're not going today, put it On Hold with a reason." : "Open it and Complete it \u2014 or, if you can't finish today, put it On Hold with a reason so the office knows."
+            });
+          }
         }
         if (outstanding.length) {
           return jsonResponse({
-            error: "You still have " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " in progress \u2014 finish or park " + (outstanding.length === 1 ? "it" : "them") + " before ending your day.",
+            error: "You can't end your day yet \u2014 " + outstanding.length + " job" + (outstanding.length === 1 ? " is" : "s are") + " still on the go today.",
+            blocked: true,
             outstanding
           }, headers, 409);
         }
@@ -23856,6 +23871,18 @@ function londonDateOfIso(iso) {
   } catch {
     return "";
   }
+}
+function activeSetBy(job, engNorm, status) {
+  const want = String(status || "").toLowerCase();
+  const slice = job && job.engStatus && job.engStatus[engNorm];
+  if (slice && String(slice.status || "").toLowerCase() === want) return { by: slice.by || "", at: slice.at || "" };
+  const hist = Array.isArray(job && job.statusHistory) ? job.statusHistory : [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const h = hist[i] || {};
+    if (h.eng && h.eng !== engNorm) continue;
+    if (String(h.status || "").toLowerCase() === want) return { by: h.by || "", at: h.at || "" };
+  }
+  return { by: "", at: "" };
 }
 function activeSetOn(job, engNorm, status) {
   const today = londonDateOfIso((/* @__PURE__ */ new Date()).toISOString());

@@ -3,7 +3,7 @@
 <head>
   <script src="/portal-config.js?v=46"></script>
   <script src="/van-check-gate.js?v=4"></script>
-  <script src="day-timesheet.js?v=1"></script>
+  <script src="day-timesheet.js?v=2"></script>
   <meta charset="UTF-8">
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -848,11 +848,12 @@ async function clockOff(){
       body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal() }) });
     const d = await res.json().catch(()=>({}));
     if(!res.ok){
+      if(window.MLDaySheet && MLDaySheet.blocked){ MLDaySheet.blocked(d, { back:"engineer-jobs.html" }); return; }
       const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
       alert((d.error||"You can't end your day yet.")+(list?"\n\n"+list:""));
       return;
     }
-  }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
+  }catch(e){ if(window.MLDaySheet && MLDaySheet.blocked) MLDaySheet.blocked({ error:"Couldn't reach the office system — no signal. Move somewhere with signal and press End my day again." }); else alert("Couldn't end your day — no signal? Try again."); return; }
   // Clocked off — day-sheet while it's fresh, then refresh the bar.
   try{ if(window.MLDaySheet) await MLDaySheet.open({date:todayLocal()}); }catch(e){}
   await loadShift(); renderDayBar(); applyDayGate();
