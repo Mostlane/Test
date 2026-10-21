@@ -223,7 +223,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   not finished/parked (finished = Complete/Closed/Invoiced/Cancelled/`done` custom
   categories; parked = On Hold/Quote/Order — those need their packs via the
   cross-job guard instead). `{force:true}` bypasses for FullAccess|SLAAdmin only;
-  the check fails OPEN on an internal error so clock-off is never impossible. Both
+  the check fails OPEN on an internal error so clock-off is never impossible. **Since 24 Sep only an
+  ACTIVE job blocks (a job merely booked today never did), and since 21 Oct only one put on the go
+  TODAY (`activeSetOn` — the engineer's engStatus slice `at`, else the newest matching statusHistory
+  entry, London day):** 31191/1 Rowledge had sat office-set "Travelling" for Steve/Chris since 6 Oct
+  and silently barred them from ending any day. Both
   clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
