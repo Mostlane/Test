@@ -18,6 +18,27 @@ import { json, error } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import * as sitelogApi from "./sitelog-api.js";
+import { signedFileUrl } from "../lib/filesign.js";
+
+// Site photos live in the JOB_FILES bucket. The stored value stays the old
+// bucket URL (so nothing in D1 changes), but every READ hands out a signed,
+// expiring worker link instead — the bucket's public access can be switched
+// off. A save that comes back with a worker link is turned back into the
+// stored form.
+const R2_PUB_DEFAULT = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev";
+const r2Pub = env => (env.R2_PUBLIC_BASE || R2_PUB_DEFAULT).replace(/\/$/, "");
+async function imageForView(env, origin, u) {
+  const base = r2Pub(env) + "/";
+  if (typeof u !== "string" || !u.startsWith(base)) return u;
+  return signedFileUrl(env, origin, "/sla/site/doc", decodeURIComponent(u.slice(base.length)), 604800, { stable: true });
+}
+function imageForStore(env, u) {
+  if (typeof u !== "string") return u;
+  const m = u.match(/\/sla\/site\/doc\?key=([^&]+)/);
+  if (!m) return u;
+  const key = decodeURIComponent(m[1]);
+  return /^(sites|jobs|sitedocs)\//.test(key) ? `${r2Pub(env)}/${key}` : u;
+}
 
 const OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
 
@@ -38,7 +59,12 @@ export async function handle(request, env, ctx, url, sess) {
     } else {
       ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
     }
-    return json((rows || []).map(r => JSON.parse(r.data)), {}, env, request);
+    const out = await Promise.all((rows || []).map(async r => {
+      const site = JSON.parse(r.data);
+      if (site && site.imageURL) site.imageURL = await imageForView(env, url.origin, site.imageURL);
+      return site;
+    }));
+    return json(out, {}, env, request);
   }
 
   // Delete a site outright (Full Access only — destructive). Removes the row
@@ -76,6 +102,7 @@ export async function handle(request, env, ctx, url, sess) {
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
     if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
+    if (site.imageURL) site.imageURL = imageForStore(env, site.imageURL);
 
     // Projects auto-number: the project number (P0001…) doubles as the site
     // number, so a project can be added without typing one. Do this BEFORE the
@@ -174,8 +201,7 @@ export async function handle(request, env, ctx, url, sess) {
     const safeName = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
     const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
-    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+    return json({ success: true, url: await imageForView(env, url.origin, `${r2Pub(env)}/${key}`) }, { status: 201 }, env, request);
   }
 
   /* ── Customers (new) ─────────────────────────────────────────────────── */
@@ -283,7 +309,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (buf) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
         await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
-        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site.imageURL = `${r2Pub(env)}/${r2key}`;
         site._svAt = now;
         delete site._noImagery;
         await saveSite(env, tenantId, site);
