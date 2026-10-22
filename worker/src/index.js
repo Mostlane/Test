@@ -298,6 +298,7 @@ const worker = {
     ctx.waitUntil(sitelogts.sweepSitelogTimesheets(env, 1).catch(e => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(coopsheet.sweepCoopSheetPending(env, 1).catch(e => console.error("scheduled co-op sheet retry:", e)));
+    ctx.waitUntil(coopsheet.sweepTableFix(env, 1).catch(e => console.error("scheduled co-op sheet table fix:", e)));
     ctx.waitUntil(intakecheck.sweepIntakeCheck(env, 1).catch(e => console.error("scheduled intake check:", e)));
     ctx.waitUntil(intakecheck.sweepLiveIssues(env, 1).catch(e => console.error("scheduled live intake issues:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every

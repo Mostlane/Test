@@ -214,6 +214,108 @@ export async function copyRowFormat(env, cfg, src, dst) {
   } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 200) }; }
 }
 
+// Text that looks like a number ("0148") must go back in as text, or the
+// leading zero is lost when a row is re-added.
+const keepText = v => (typeof v === "string" && v.trim() !== "" && !v.startsWith("=") && Number.isFinite(Number(v)) ? "'" + v : v);
+const readBack = got => ((got && got.formulas) || []).map(r => r.map(v => keepText(v == null ? "" : v)));
+
+// The Concerto data is an Excel TABLE. Rows written to the cells just below a
+// table sit OUTSIDE it (no banding, no table formatting), so new rows go in
+// through the table itself and Excel styles them. Returns the table whose
+// header is the "Order Number" row, or null (plain range — old behaviour).
+export async function findTable(env, cfg, headerRow) {
+  try {
+    const base = sheetBase(cfg);
+    const list = await graphJson(env, "GET", base + "/tables?$select=id,name,showTotals");
+    for (const t of (list && list.value) || []) {
+      const tb = base + `/tables('${encodeURIComponent(t.id)}')`;
+      const rg = await graphJson(env, "GET", tb + "/range?$select=address,rowIndex,rowCount");
+      const top = Number(rg.rowIndex) + 1, last = top + Number(rg.rowCount) - 1; // 1-based
+      if (headerRow && (headerRow < top || headerRow > last)) continue;
+      return { id: t.id, name: t.name, url: tb, top, last, totals: !!t.showTotals, lastBody: last - (t.showTotals ? 1 : 0) };
+    }
+  } catch {}
+  return null;
+}
+
+// Rows sitting directly under the table (written before this fix, or typed by
+// hand below it) are moved INTO it: read their contents, clear the cells
+// (values + the copied formatting), then add them back as table rows in the
+// same sheet rows. Restores the originals if the add fails.
+async function addTableRows(env, cfg, tbl, firstStray, rows) {
+  const base = sheetBase(cfg);
+  let stray = [];
+  if (firstStray && rows.length > 0 && firstStray < rows.__dest) {
+    const addr = `A${firstStray}:${colLetter(COLS - 1)}${rows.__dest - 1}`;
+    const got = await graphJson(env, "GET", base + `/range(address='${addr}')?$select=formulas`);
+    stray = readBack(got);
+    if (stray.length) await graphJson(env, "POST", base + `/range(address='${addr}')/clear`, { applyTo: "All" });
+  }
+  const all = stray.concat(rows.map(r => r.slice()));
+  try {
+    await graphJson(env, "POST", tbl.url + "/rows/add", { index: null, values: all });
+  } catch (e) {
+    if (stray.length) {
+      try { await graphJson(env, "PATCH", base + `/range(address='A${firstStray}:${colLetter(COLS - 1)}${firstStray + stray.length - 1}')`, { formulas: stray }); } catch {}
+    }
+    throw e;
+  }
+  return stray.length;
+}
+
+// One-off tidy for rows the feed wrote before it knew about the table:
+// move any rows under the table into it, and strip the band colour the old
+// "copy the row above" stamped on feed rows inside it (so the table's own
+// banding shows). Number formats, values and borders are left alone.
+export async function repairTableRows(env, tid, from) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up" };
+  const cfg = await getSheetConfig(env, tid);
+  return withSheetLock(env, tid, async () => {
+    try {
+      const at = await inspectSheet(env, tid, "");
+      if (!at.ok) return at;
+      let tbl = await findTable(env, cfg, at.headerRow);
+      if (!tbl) return { ok: true, noTable: true };
+      let absorbed = 0;
+      if (!tbl.totals && at.nextRow > tbl.last + 1) {
+        const addr = `A${tbl.last + 1}:${colLetter(COLS - 1)}${at.nextRow - 1}`;
+        const got = await graphJson(env, "GET", sheetBase(cfg) + `/range(address='${addr}')?$select=formulas`);
+        const stray = readBack(got);
+        if (stray.length) {
+          await graphJson(env, "POST", sheetBase(cfg) + `/range(address='${addr}')/clear`, { applyTo: "All" });
+          try { await graphJson(env, "POST", tbl.url + "/rows/add", { index: null, values: stray }); }
+          catch (e) { await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='${addr}')`, { formulas: stray }); throw e; }
+          absorbed = stray.length;
+        }
+        tbl = await findTable(env, cfg, at.headerRow) || tbl;
+      }
+      const start = Math.max(Number(from) || 0, tbl.top + 1), end = tbl.lastBody;
+      let cleared = 0;
+      if (start <= end) {
+        await graphJson(env, "POST", sheetBase(cfg) + `/range(address='A${start}:${colLetter(COLS - 1)}${end}')/format/fill/clear`);
+        cleared = end - start + 1;
+      }
+      return { ok: true, table: tbl.name, absorbed, cleared, rows: start <= end ? `${start}-${end}` : "" };
+    } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 300) }; }
+  });
+}
+
+// Runs the repair once (from the first row the feed ever wrote — 233) via the
+// cron, then never again.
+const TABLEFIX = tid => "coopsheet:tablefix:" + (Math.trunc(Number(tid)) || 1);
+export async function sweepTableFix(env, tid = 1) {
+  try {
+    const done = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(TABLEFIX(tid)).first();
+    if (done) return { skipped: true };
+    const cfg = await getSheetConfig(env, tid);
+    if (!cfg.enabled || !graphConfigured(env)) return { skipped: true };
+    const r = await repairTableRows(env, tid, cfg.feedFromRow || 233);
+    if (r.ok) await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(TABLEFIX(tid), JSON.stringify({ ...r, at: new Date().toISOString() }), Math.trunc(Number(tid)) || 1).run();
+    return r;
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+}
+
 // One writer at a time: two emails landing together would otherwise both read
 // the same "next free row". A short D1 lock (stale after 60 s) serialises them.
 const LOCK = tid => "coopsheet:lock:" + (Math.trunc(Number(tid)) || 1);
@@ -325,22 +427,38 @@ async function writeRow(env, tid, cfg, info, dryRun) {
       const fx = formulasFor(r); for (const c of Object.keys(fx)) if (blank(+c)) fills[c] = fx[c];
       const cols = Object.keys(fills).map(Number);
       if (dryRun) return { ok: true, dryRun: true, row: r, info, filled: fills };
+      const tblE = await findTable(env, cfg, at.headerRow);
+      const inTable = tblE && r > tblE.top && r <= tblE.lastBody;
+      const fmtFor = async () => (inTable || r <= at.headerRow + 1) ? null : await copyRowFormat(env, cfg, r - 1, r);
       if (!cols.length) {
-        const fmt = r > at.headerRow + 1 ? await copyRowFormat(env, cfg, r - 1, r) : null;
+        const fmt = await fmtFor();
         return { ok: true, skipped: true, row: r, info, format: fmt, reason: "already on the sheet (row " + r + ")" };
       }
       await graphBatch(env, cols.map(c => ({ method: "PATCH", url: sheetBase(cfg) + `/range(address='${colLetter(c)}${r}')`, body: { formulas: [[fills[c]]] } })));
-      const fmt = r > at.headerRow + 1 ? await copyRowFormat(env, cfg, r - 1, r) : null;
+      const fmt = await fmtFor();
       return { ok: true, filled: true, row: r, info, cols: cols.map(colLetter), format: fmt };
     }
 
-    const r = at.nextRow, fx = formulasFor(r);
+    const tbl = dryRun ? null : await findTable(env, cfg, at.headerRow);
+    // With a totals row Excel inserts the new row above it; otherwise the row
+    // lands in the first free sheet row (rows under the table are pulled in).
+    const r = tbl && tbl.totals && at.nextRow > tbl.lastBody ? tbl.lastBody + 1 : at.nextRow, fx = formulasFor(r);
     const row = [
       at.nextWe, info.order, info.storeNo ? "'" + info.storeNo : "", info.type, info.name, info.desc,
       "", "", "", info.trade, "", "", info.miles === "" ? "" : info.miles,
       fx[13], "", "", fx[16], fx[17], fx[18], "", "",
     ];
     if (dryRun) return { ok: true, dryRun: true, row: r, info, values: row };
+    if (tbl && r <= tbl.lastBody) {
+      // A spare row already inside the table: just fill it — the table styles it.
+      await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
+      return { ok: true, row: r, info, table: tbl.name };
+    }
+    if (tbl) {
+      const rows = [row]; rows.__dest = r;
+      const absorbed = await addTableRows(env, cfg, tbl, tbl.totals ? 0 : tbl.last + 1, rows);
+      return { ok: true, row: r, info, table: tbl.name, absorbed };
+    }
     await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
     const fmt = r > at.headerRow + 1 ? await copyRowFormat(env, cfg, r - 1, r) : null;
     return { ok: true, row: r, info, format: fmt };

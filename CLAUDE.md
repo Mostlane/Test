@@ -6171,6 +6171,15 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   (`sweepCoopSheetPending`, 4/tick, gives up after ~24 h) retries it — the intake reason says "will retry
   automatically" and the email-intake card lists what's waiting. A store that isn't a portal site (e.g.
   4150 Hinton Park) takes its Type + mileage from the sheet's OWN earlier rows for that store number.
+  **The Concerto data is an Excel TABLE (22 Oct):** writing to the cells under it left new rows OUTSIDE the
+  table (no banding) and `copyRowFormat` then stamped one row's band colour on every new row. Now `writeRow`
+  finds the table (`findTable`, the one whose range holds the "Order Number" header) and adds rows through
+  `POST …/tables/{id}/rows/add` so Excel styles them; a spare blank row already inside the table is just
+  filled; rows sitting directly under the table are moved INTO it first (read formulas → clear → re-add, text
+  numbers kept as text, originals restored if the add fails); with a totals row the new row goes above it.
+  `copyRowFormat` now runs only when the tab has NO table. One-off tidy `repairTableRows(from)` (absorb strays +
+  `format/fill/clear` on feed rows from 233) runs once from the cron (`sweepTableFix`, flag app_config
+  `coopsheet:tablefix:<tid>`; delete the flag to re-run) and on demand via POST `/email-intake/sheet-repair {from}`.
   **Daily intake check (21 Oct, `lib/intakecheck.js`):** the 5-min cron runs `sweepIntakeCheck` once a day
   from **07:30 London** (dedupe app_config `intakecheck:sent:<tid>` = the date) over the last 24 h and
   emails ONLY when there's something to fix: email failed / still in Needs a look / a client-domain email
