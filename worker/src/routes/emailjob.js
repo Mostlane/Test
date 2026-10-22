@@ -25,7 +25,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { matchTemplate, templateDomain, lookupSite, TEMPLATES } from "./emailtemplates.js";
 import { recordFbcJob, appendFbcMessage } from "./fbc.js";
-import { appendCoopSheetRow, inspectSheet, coopSheetPending, jobForOrder } from "../lib/coopsheet.js";
+import { appendCoopSheetRow, inspectSheet, coopSheetPending, jobForOrder, repairTableRows } from "../lib/coopsheet.js";
 import { runIntakeCheck, sendIntakeCheck, getIntakeCheckConfig, setIntakeCheckConfig, getLiveIssues, refreshLiveIssues } from "../lib/intakecheck.js";
 import { canSeeMoney } from "../lib/auth.js";
 import { sendToPermission, resolveNotificationsByTag } from "./push.js";
@@ -607,6 +607,11 @@ async function handleApiInner(request, env, ctx, url, sess, fetchSelf) {
     const r = await inspectSheet(env, tid, "");
     const pending = await coopSheetPending(env, tid);
     return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto", pending: pending.map(p => ({ reference: p.reference, at: p.at, tries: p.tries, error: p.error })) }, {}, env, request);
+  }
+  if (sub === "/sheet-repair" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const r = await repairTableRows(env, tid, Number(b.from) || 233);
+    return json(r, { status: r.ok ? 200 : 502 }, env, request);
   }
   if (sub === "/sheet-add" && method === "POST") {
     const b = await request.json().catch(() => ({}));

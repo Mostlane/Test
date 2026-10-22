@@ -32019,6 +32019,98 @@ async function copyRowFormat(env, cfg, src, dst) {
     return { ok: false, error: String(e && e.message || e).slice(0, 200) };
   }
 }
+var keepText = (v) => typeof v === "string" && v.trim() !== "" && !v.startsWith("=") && Number.isFinite(Number(v)) ? "'" + v : v;
+var readBack = (got) => (got && got.formulas || []).map((r) => r.map((v) => keepText(v == null ? "" : v)));
+async function findTable(env, cfg, headerRow) {
+  try {
+    const base = sheetBase(cfg);
+    const list = await graphJson(env, "GET", base + "/tables?$select=id,name,showTotals");
+    for (const t of list && list.value || []) {
+      const tb = base + `/tables('${encodeURIComponent(t.id)}')`;
+      const rg = await graphJson(env, "GET", tb + "/range?$select=address,rowIndex,rowCount");
+      const top = Number(rg.rowIndex) + 1, last = top + Number(rg.rowCount) - 1;
+      if (headerRow && (headerRow < top || headerRow > last)) continue;
+      return { id: t.id, name: t.name, url: tb, top, last, totals: !!t.showTotals, lastBody: last - (t.showTotals ? 1 : 0) };
+    }
+  } catch {
+  }
+  return null;
+}
+async function addTableRows(env, cfg, tbl, firstStray, rows) {
+  const base = sheetBase(cfg);
+  let stray = [];
+  if (firstStray && rows.length > 0 && firstStray < rows.__dest) {
+    const addr = `A${firstStray}:${colLetter(COLS2 - 1)}${rows.__dest - 1}`;
+    const got = await graphJson(env, "GET", base + `/range(address='${addr}')?$select=formulas`);
+    stray = readBack(got);
+    if (stray.length) await graphJson(env, "POST", base + `/range(address='${addr}')/clear`, { applyTo: "All" });
+  }
+  const all = stray.concat(rows.map((r) => r.slice()));
+  try {
+    await graphJson(env, "POST", tbl.url + "/rows/add", { index: null, values: all });
+  } catch (e) {
+    if (stray.length) {
+      try {
+        await graphJson(env, "PATCH", base + `/range(address='A${firstStray}:${colLetter(COLS2 - 1)}${firstStray + stray.length - 1}')`, { formulas: stray });
+      } catch {
+      }
+    }
+    throw e;
+  }
+  return stray.length;
+}
+async function repairTableRows(env, tid, from) {
+  if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up" };
+  const cfg = await getSheetConfig2(env, tid);
+  return withSheetLock(env, tid, async () => {
+    try {
+      const at = await inspectSheet(env, tid, "");
+      if (!at.ok) return at;
+      let tbl = await findTable(env, cfg, at.headerRow);
+      if (!tbl) return { ok: true, noTable: true };
+      let absorbed = 0;
+      if (!tbl.totals && at.nextRow > tbl.last + 1) {
+        const addr = `A${tbl.last + 1}:${colLetter(COLS2 - 1)}${at.nextRow - 1}`;
+        const got = await graphJson(env, "GET", sheetBase(cfg) + `/range(address='${addr}')?$select=formulas`);
+        const stray = readBack(got);
+        if (stray.length) {
+          await graphJson(env, "POST", sheetBase(cfg) + `/range(address='${addr}')/clear`, { applyTo: "All" });
+          try {
+            await graphJson(env, "POST", tbl.url + "/rows/add", { index: null, values: stray });
+          } catch (e) {
+            await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='${addr}')`, { formulas: stray });
+            throw e;
+          }
+          absorbed = stray.length;
+        }
+        tbl = await findTable(env, cfg, at.headerRow) || tbl;
+      }
+      const start = Math.max(Number(from) || 0, tbl.top + 1), end = tbl.lastBody;
+      let cleared = 0;
+      if (start <= end) {
+        await graphJson(env, "POST", sheetBase(cfg) + `/range(address='A${start}:${colLetter(COLS2 - 1)}${end}')/format/fill/clear`);
+        cleared = end - start + 1;
+      }
+      return { ok: true, table: tbl.name, absorbed, cleared, rows: start <= end ? `${start}-${end}` : "" };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message || e).slice(0, 300) };
+    }
+  });
+}
+var TABLEFIX = (tid) => "coopsheet:tablefix:" + (Math.trunc(Number(tid)) || 1);
+async function sweepTableFix(env, tid = 1) {
+  try {
+    const done = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(TABLEFIX(tid)).first();
+    if (done) return { skipped: true };
+    const cfg = await getSheetConfig2(env, tid);
+    if (!cfg.enabled || !graphConfigured(env)) return { skipped: true };
+    const r = await repairTableRows(env, tid, cfg.feedFromRow || 233);
+    if (r.ok) await env.DB.prepare("INSERT INTO app_config (key, value, tenant_id) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(TABLEFIX(tid), JSON.stringify({ ...r, at: (/* @__PURE__ */ new Date()).toISOString() }), Math.trunc(Number(tid)) || 1).run();
+    return r;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
 var LOCK = (tid) => "coopsheet:lock:" + (Math.trunc(Number(tid)) || 1);
 async function withSheetLock(env, tid, fn) {
   const key = LOCK(tid), me = crypto.randomUUID();
@@ -32144,15 +32236,19 @@ async function writeRow(env, tid, cfg, info, dryRun) {
       for (const c of Object.keys(fx2)) if (blank(+c)) fills[c] = fx2[c];
       const cols = Object.keys(fills).map(Number);
       if (dryRun) return { ok: true, dryRun: true, row: r2, info, filled: fills };
+      const tblE = await findTable(env, cfg, at.headerRow);
+      const inTable = tblE && r2 > tblE.top && r2 <= tblE.lastBody;
+      const fmtFor = async () => inTable || r2 <= at.headerRow + 1 ? null : await copyRowFormat(env, cfg, r2 - 1, r2);
       if (!cols.length) {
-        const fmt3 = r2 > at.headerRow + 1 ? await copyRowFormat(env, cfg, r2 - 1, r2) : null;
+        const fmt3 = await fmtFor();
         return { ok: true, skipped: true, row: r2, info, format: fmt3, reason: "already on the sheet (row " + r2 + ")" };
       }
       await graphBatch(env, cols.map((c) => ({ method: "PATCH", url: sheetBase(cfg) + `/range(address='${colLetter(c)}${r2}')`, body: { formulas: [[fills[c]]] } })));
-      const fmt2 = r2 > at.headerRow + 1 ? await copyRowFormat(env, cfg, r2 - 1, r2) : null;
+      const fmt2 = await fmtFor();
       return { ok: true, filled: true, row: r2, info, cols: cols.map(colLetter), format: fmt2 };
     }
-    const r = at.nextRow, fx = formulasFor(r);
+    const tbl = dryRun ? null : await findTable(env, cfg, at.headerRow);
+    const r = tbl && tbl.totals && at.nextRow > tbl.lastBody ? tbl.lastBody + 1 : at.nextRow, fx = formulasFor(r);
     const row = [
       at.nextWe,
       info.order,
@@ -32177,6 +32273,16 @@ async function writeRow(env, tid, cfg, info, dryRun) {
       ""
     ];
     if (dryRun) return { ok: true, dryRun: true, row: r, info, values: row };
+    if (tbl && r <= tbl.lastBody) {
+      await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
+      return { ok: true, row: r, info, table: tbl.name };
+    }
+    if (tbl) {
+      const rows = [row];
+      rows.__dest = r;
+      const absorbed = await addTableRows(env, cfg, tbl, tbl.totals ? 0 : tbl.last + 1, rows);
+      return { ok: true, row: r, info, table: tbl.name, absorbed };
+    }
     await graphJson(env, "PATCH", sheetBase(cfg) + `/range(address='A${r}:${colLetter(row.length - 1)}${r}')`, { formulas: [row] });
     const fmt = r > at.headerRow + 1 ? await copyRowFormat(env, cfg, r - 1, r) : null;
     return { ok: true, row: r, info, format: fmt };
@@ -33007,6 +33113,11 @@ async function handleApiInner(request, env, ctx, url, sess, fetchSelf) {
     const r = await inspectSheet(env, tid, "");
     const pending = await coopSheetPending(env, tid);
     return json({ ok: r.ok, error: r.error || "", nextRow: r.nextRow || null, nextWe: r.nextWe || null, lastOrder: r.lastOrder || "", sheet: r.cfg ? r.cfg.sheet : "Concerto", pending: pending.map((p) => ({ reference: p.reference, at: p.at, tries: p.tries, error: p.error })) }, {}, env, request);
+  }
+  if (sub === "/sheet-repair" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const r = await repairTableRows(env, tid, Number(b.from) || 233);
+    return json(r, { status: r.ok ? 200 : 502 }, env, request);
   }
   if (sub === "/sheet-add" && method === "POST") {
     const b = await request.json().catch(() => ({}));
@@ -51748,6 +51859,7 @@ var worker = {
     ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     ctx.waitUntil(sweepCoopSheetPending(env, 1).catch((e) => console.error("scheduled co-op sheet retry:", e)));
+    ctx.waitUntil(sweepTableFix(env, 1).catch((e) => console.error("scheduled co-op sheet table fix:", e)));
     ctx.waitUntil(sweepIntakeCheck(env, 1).catch((e) => console.error("scheduled intake check:", e)));
     ctx.waitUntil(sweepLiveIssues(env, 1).catch((e) => console.error("scheduled live intake issues:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
