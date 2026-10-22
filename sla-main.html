@@ -780,6 +780,15 @@ function cancelTag(j){
   return "";
 }
 
+/* ⏱ AI duration estimate — only for a job with no length set. Labelled "est."
+   so it's never mistaken for a length the office typed. */
+function estTag(j){
+  const m = Number(j.estMinutes);
+  if (!(m > 0) || Number(j.durationMinutes) > 0) return "";
+  const h = Math.floor(m/60), mm = m%60, t = h ? (mm ? h+"h "+mm+"m" : h+"h") : mm+"m";
+  return ` <span class="rel-badge" style="background:#eef2f7;color:#475569;border-color:#cbd5e1" title="AI estimate of on-site time — not set by the office. Set a length in the job editor to replace it.">⏱ ~${esc(t)} est.</span>`;
+}
+
 /* 🚿 Drainage → Metro Rod pill: blue "Metro Rod?" while it's a flagged drainage job
    not yet sent; green "With Metro Rod" (+ when) once sent. Opened on the job card. */
 function drainTag(j){
@@ -1112,7 +1121,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap"><span class="pri">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</span></td>
       <td>
@@ -1145,7 +1154,7 @@ function render(){
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${esc(colour)}"></span>${eyeTag(j)}${esc(j.status)} <span class="caret">▾</span></span>${cancelTag(j)}${drainTag(j)}${estTag(j)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
         ${emTimerChip(j)}
       </div>

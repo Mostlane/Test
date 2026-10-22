@@ -130,7 +130,7 @@ export async function rowInfo(env, tid, { reference, siteCode, siteName, postcod
     storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
     type: (site && TYPE_LABEL[String(site.client || "").toLowerCase()]) || "",
     name,
-    desc: await aiShortDescription(env, description),
+    desc: null, descText: description || "", // the AI summary is only made when a NEW row needs it
     trade: sheetTrade(description),
     miles,
   };
@@ -439,6 +439,7 @@ async function writeRow(env, tid, cfg, info, dryRun) {
       return { ok: true, filled: true, row: r, info, cols: cols.map(colLetter), format: fmt };
     }
 
+    if (info.desc == null) info.desc = await aiShortDescription(env, info.descText);
     const tbl = dryRun ? null : await findTable(env, cfg, at.headerRow);
     // With a totals row Excel inserts the new row above it; otherwise the row
     // lands in the first free sheet row (rows under the table are pulled in).
