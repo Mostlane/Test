@@ -76,6 +76,15 @@
       <p id="error"></p>
     </form>
 
+    <!-- Two-step sign-in: the emailed code (shown only when the server asks) -->
+    <form id="codeForm" style="display:none" autocomplete="off">
+      <p id="codeMsg" style="margin:0 0 10px;color:#0f2438;line-height:1.4"></p>
+      <input type="text" id="loginCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" style="text-align:center;font-size:22px;letter-spacing:6px" />
+      <button type="submit" id="codeBtn">Verify</button>
+      <p id="codeErr" style="color:#c0392b"></p>
+      <a href="#" id="codeBack">‹ Back to sign in</a>
+    </form>
+
     <a href="forgot-password.html">Forgot password?</a>
     <a href="onboard.html">Sign up</a>
     <a href="install.html">📲 Add Mostlane to your phone</a>
@@ -85,6 +94,38 @@
   <script src="device-auth.js"></script>
 
   <script>
+
+    // Two-step sign-in: show the code box, POST /auth/login-verify, resolve with
+    // the same reply a normal login gives (or null if they go back).
+    function askForLoginCode(first, api) {
+      return new Promise(function (resolve) {
+        var lf = document.getElementById("loginForm"), cf = document.getElementById("codeForm");
+        var inp = document.getElementById("loginCode"), err = document.getElementById("codeErr"), btn = document.getElementById("codeBtn");
+        var challenge = first.challenge;
+        document.getElementById("codeMsg").textContent = "We've emailed a sign-in code to " + (first.sentTo || "your email") + ". Enter it below — it lasts 10 minutes.";
+        err.textContent = ""; inp.value = "";
+        lf.style.display = "none"; cf.style.display = "";
+        setTimeout(function () { try { inp.focus(); } catch (e) {} }, 50);
+        function done(v) { cf.onsubmit = null; document.getElementById("codeBack").onclick = null; cf.style.display = "none"; lf.style.display = ""; resolve(v); }
+        document.getElementById("codeBack").onclick = function (e) { e.preventDefault(); done(null); };
+        cf.onsubmit = async function (e) {
+          e.preventDefault();
+          var code = (inp.value || "").replace(/\D/g, "");
+          if (code.length !== 6) { err.textContent = "Enter the 6-digit code."; return; }
+          btn.disabled = true; err.textContent = "";
+          try {
+            var r = await fetch(api + "/auth/login-verify", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ challenge: challenge, code: code,
+                deviceId: (function(){ try { return (typeof getOrCreateDeviceId === "function") ? getOrCreateDeviceId() : (localStorage.getItem("deviceID") || ""); } catch (e) { return ""; } })() }) });
+            var j = {}; try { j = await r.json(); } catch (e2) {}
+            if (r.ok && j.ok) { cf.style.display = "none"; resolve(j); return; }
+            if (r.status === 410) { done(null); document.getElementById("error").textContent = j.error || "That code has expired — sign in again."; return; }
+            err.textContent = j.error || ("Couldn't check the code (HTTP " + r.status + ")");
+          } catch (e3) { err.textContent = "No connection — try again."; }
+          finally { btn.disabled = false; }
+        };
+      });
+    }
 
     // ⭐ New helper — safe, fallback-compatible
     // After login, go to the forced password-change screen if required,
@@ -231,6 +272,12 @@ try {
 } catch {
   errorBox.textContent = `Login failed (HTTP ${res.status})`;
   return;
+}
+
+// Two-step sign-in: the password was right, now the emailed code.
+if (res.ok && result && result.needCode) {
+  result = await askForLoginCode(result, LOGIN_API);
+  if (!result) return;   // went back to the sign-in form
 }
 
 if (!res.ok) {

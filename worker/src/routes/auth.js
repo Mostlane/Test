@@ -23,6 +23,66 @@ import { tenantDB } from "../lib/tenantdb.js";
 import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { sendEmail, resetEmail, issuePasswordToken, appBase } from "../lib/email.js";
 import { sendToPermission } from "./push.js";
+import { onceMigration } from "../lib/once.js";
+
+// ── Two-step login (22 Oct 2026) ─────────────────────────────────────────────
+// After a correct password, a 6-digit code is emailed when EITHER the account
+// is Full Access (every login) OR this device isn't one already registered to
+// the user. Everyday re-logins on your own phone need only the password.
+// The break-glass MASTER_PASSWORD skips it (audited "master"). View As never
+// logs in, so it's untouched. Switch off with app_config auth:twofactor:<tid>
+// = {"enabled":false}.
+const CODE_TTL_MS = 10 * 60 * 1000;
+const CODE_MAX_TRIES = 5;
+async function sha256Hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomHex(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, "0")).join(""); }
+function randomCode() { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 1000000).padStart(6, "0"); }
+function maskEmail(e) {
+  const [u, d] = String(e || "").split("@");
+  if (!d) return "";
+  return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, u.length - 2))) + "@" + d;
+}
+async function ensureLoginCodes__raw(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_codes (
+    id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 1, username TEXT NOT NULL,
+    code_hash TEXT NOT NULL, device_id TEXT, expires_at INTEGER NOT NULL,
+    tries INTEGER NOT NULL DEFAULT 0, created_at TEXT)`).run();
+}
+const ensureLoginCodes = onceMigration(ensureLoginCodes__raw);
+async function twoFactorEnabled(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?")
+      .bind(tid, "auth:twofactor:" + tid).first();
+    if (r && r.value) { const v = JSON.parse(r.value); if (v && v.enabled === false) return false; }
+  } catch {}
+  return true;
+}
+async function needsLoginCode(env, user, perms, deviceId) {
+  if (!(await twoFactorEnabled(env, user.tenant_id))) return false;
+  if (perms && perms.FullAccess === "Yes") return true;
+  if (!deviceId) return true;
+  const known = await env.DB.prepare("SELECT 1 AS k FROM devices WHERE tenant_id=? AND device_id=? AND username=?")
+    .bind(user.tenant_id, deviceId, user.username).first().catch(() => null);
+  return !known;
+}
+async function sendLoginCode(env, user, code) {
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f2438">
+    <h2 style="color:#003366;margin:0 0 12px">Your Mostlane sign-in code</h2>
+    <p>Enter this code to finish signing in to the portal:</p>
+    <p style="font-size:34px;letter-spacing:8px;font-weight:700;color:#003366;margin:18px 0">${code}</p>
+    <p>It expires in 10 minutes.</p>
+    <p style="color:#6b7a8c;font-size:13px">If you didn't just try to sign in, someone may know your password — change it and tell the office.</p></div>`;
+  const subject = "Your Mostlane sign-in code: " + code;
+  try {
+    const { sendSubconMail } = await import("./sla.js");   // Microsoft 365 first, Resend fallback
+    const r = await sendSubconMail(env, user.tenant_id, { to: user.email, subject, html });
+    if (r && r.ok) return r;
+  } catch {}
+  return sendEmail(env, { to: user.email, subject, html });
+}
 
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
@@ -60,7 +120,9 @@ export async function handle(request, env, ctx, url, sess) {
     const ok = passwordOk || masterOk;
 
     const tenantId = user ? user.tenant_id : 1;
-    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : (ok ? "success" : "fail"));
+    // "success" is logged once the session is actually issued (finishLogin) —
+    // a correct password still waiting on its emailed code isn't a sign-in yet.
+    if (!ok || masterOk) await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : "fail");
     if (!ok) return error("Invalid login credentials.", 401, env, request);
 
     // Transparently upgrade legacy sha256 hashes to PBKDF2 — only when the user's
@@ -71,46 +133,68 @@ export async function handle(request, env, ctx, url, sess) {
         .bind(newHash, user.tenant_id, user.username).run();
     }
 
-    // Device lock, server side: a device already registered to SOMEONE ELSE
-    // may not log this user in (the client-side prompt used to be the only
-    // check). Unknown devices are allowed through — the client registers them
-    // (capped per user) via /device/register-device right after login.
-    const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
-    const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
-    if (bindDevice) {
-      const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?")
-        .bind(user.tenant_id, bindDevice).first().catch(() => null);
-      if (dev && dev.username && dev.username !== user.username) {
-        await logLogin(env, tenantId, request, user.username, "device_mismatch");
-        return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+    const mismatch = await deviceMismatch(env, request, user, deviceId);
+    if (mismatch) return mismatch;
+
+    // Two-step: correct password, but a code is needed (Full Access, or a device
+    // this user hasn't used before). No session is created until it's entered.
+    const perms0 = await permissionsFor(env, user.tenant_id, user.username);
+    if (!masterOk && await needsLoginCode(env, user, perms0, deviceId)) {
+      if (!user.email || !/@/.test(user.email)) {
+        return error("Your account needs an email address for the sign-in code. Ask the office to add one.", 403, env, request);
       }
+      await ensureLoginCodes(env);
+      const code = randomCode();
+      const challenge = randomHex(24);
+      const id = await sha256Hex("chal:" + challenge);
+      await env.DB.prepare("DELETE FROM login_codes WHERE expires_at < ? OR (tenant_id=? AND username=?)")
+        .bind(Date.now(), user.tenant_id, user.username).run().catch(() => {});
+      await env.DB.prepare("INSERT INTO login_codes (id, tenant_id, username, code_hash, device_id, expires_at, tries, created_at) VALUES (?,?,?,?,?,?,0,?)")
+        .bind(id, user.tenant_id, user.username, await sha256Hex(id + ":" + code), deviceId, Date.now() + CODE_TTL_MS, new Date().toISOString()).run();
+      const sent = await sendLoginCode(env, user, code);
+      if (!sent || !sent.ok) {
+        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {});
+        return error("We couldn't send your sign-in code just now. Please try again in a minute, or call the office.", 503, env, request);
+      }
+      await logLogin(env, tenantId, request, user.username, "code_sent");
+      return json({ ok: false, needCode: true, challenge, sentTo: maskEmail(user.email) }, {}, env, request);
     }
-    const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
-    const perms = await permissionsFor(env, user.tenant_id, user.username);
+    return finishLogin(env, ctx, request, user, { masterOk, deviceId, perms: perms0 });
+  }
 
-    // Client (external) logins are surfaced to Full-Access users — visibility of
-    // when an outside client is in their portal. Their reads are also written to
-    // the Activity log (see index.js audit middleware). Skipped for a break-glass
-    // master login (that's an owner test, not the client themselves).
-    try {
-      const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : (user.profile || {});
-      if (prof && prof.staffType === "client" && !masterOk) {
-        const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
-        ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
-          title: "Client signed in",
-          body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
-          url: "/activity-log.html?user=" + encodeURIComponent(user.username),
-          tag: "client-login:" + user.username,
-        }, null, true).catch(() => {}));
+  // Step two of a login: the emailed code.
+  if (path === "/auth/login-verify" && request.method === "POST") {
+    const { challenge, code, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
+    if (!challenge || !code) return error("Enter the code from your email.", 400, env, request);
+    await ensureLoginCodes(env);
+    const id = await sha256Hex("chal:" + String(challenge));
+    const row = await env.DB.prepare("SELECT * FROM login_codes WHERE id=?").bind(id).first();
+    if (!row || row.expires_at < Date.now()) {
+      if (row) await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {});
+      return error("That code has expired. Sign in again to get a new one.", 410, env, request);
+    }
+    const good = await sha256Hex(id + ":" + String(code).replace(/\D/g, ""));
+    if (!safeEqual(good, row.code_hash)) {
+      const tries = (row.tries || 0) + 1;
+      await logLogin(env, row.tenant_id, request, row.username, "fail");
+      if (tries >= CODE_MAX_TRIES) {
+        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {});
+        return error("Too many wrong codes. Sign in again to get a new one.", 410, env, request);
       }
-    } catch { /* notification is best-effort */ }
-
-    return json({
-      ok: true, token, expires,
-      master: masterOk,                 // master-password login → client skips device lock
-      mustChangePassword: !!user.must_change_password,
-      user: shapeUser(user, perms)
-    }, {}, env, request);
+      await env.DB.prepare("UPDATE login_codes SET tries=? WHERE id=?").bind(tries, id).run();
+      return error(`That code isn't right — ${CODE_MAX_TRIES - tries} ${CODE_MAX_TRIES - tries === 1 ? "try" : "tries"} left.`, 401, env, request);
+    }
+    await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run();
+    const user = await env.DB.prepare("SELECT * FROM users WHERE tenant_id=? AND username=?").bind(row.tenant_id, row.username).first();
+    if (!user || !isActiveStatus(user.status)) return error("Invalid login credentials.", 401, env, request);
+    const deviceId = row.device_id || (typeof rawDeviceId === "string" && /^[\w.-]{4,80}$/.test(rawDeviceId) ? rawDeviceId : null);
+    const mismatch = await deviceMismatch(env, request, user, deviceId);
+    if (mismatch) return mismatch;
+    return finishLogin(env, ctx, request, user, { masterOk: false, deviceId });
   }
 
   // ── View As: the portal owner can open a real session as any user ─────────
@@ -361,4 +445,54 @@ async function logLogin(env, tenantId, request, username, outcome) {
       outcome
     ).run();
   } catch { /* non-fatal */ }
+}
+
+// Device lock, server side: a device already registered to SOMEONE ELSE may not
+// log this user in. Unknown devices are allowed through — the client registers
+// them (capped per user) via /device/register-device right after login.
+async function deviceMismatch(env, request, user, deviceId) {
+  const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+  const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+  if (!bindDevice) return null;
+  const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?")
+    .bind(user.tenant_id, bindDevice).first().catch(() => null);
+  if (dev && dev.username && dev.username !== user.username) {
+    await logLogin(env, user.tenant_id, request, user.username, "device_mismatch");
+    return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+  }
+  return null;
+}
+
+// Issue the session — the last step of a login (straight after the password,
+// or after the emailed code).
+async function finishLogin(env, ctx, request, user, { masterOk, deviceId, perms }) {
+  const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+  const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+  if (!masterOk) await logLogin(env, user.tenant_id, request, user.username, "success");
+  const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
+  if (!perms) perms = await permissionsFor(env, user.tenant_id, user.username);
+
+  // Client (external) logins are surfaced to Full-Access users — visibility of
+  // when an outside client is in their portal. Their reads are also written to
+  // the Activity log (see index.js audit middleware). Skipped for a break-glass
+  // master login (that's an owner test, not the client themselves).
+  try {
+    const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : (user.profile || {});
+    if (prof && prof.staffType === "client" && !masterOk) {
+      const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+      ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
+        title: "Client signed in",
+        body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
+        url: "/activity-log.html?user=" + encodeURIComponent(user.username),
+        tag: "client-login:" + user.username,
+      }, null, true).catch(() => {}));
+    }
+  } catch { /* notification is best-effort */ }
+
+  return json({
+    ok: true, token, expires,
+    master: masterOk,                 // master-password login → client skips device lock
+    mustChangePassword: !!user.must_change_password,
+    user: shapeUser(user, perms)
+  }, {}, env, request);
 }

@@ -35,6 +35,8 @@ async function makeEnv() {
     CREATE TABLE login_history (tenant_id INTEGER, username TEXT, device_id TEXT, ip TEXT, user_agent TEXT, outcome TEXT, at TEXT);
     CREATE TABLE password_resets (tenant_id INTEGER, token TEXT PRIMARY KEY, username TEXT, expires_at TEXT, used INTEGER DEFAULT 0, created_at TEXT);
     CREATE TABLE app_config (tenant_id INTEGER, key TEXT, value TEXT);`);
+  // Two-step sign-in has its own suite (test-two-factor.mjs); off here.
+  db.prepare("INSERT INTO app_config VALUES (1,'auth:twofactor:1',?)").run(JSON.stringify({ enabled: false }));
   const hash = await authLib.hashPassword(PW);
   const ins = db.prepare("INSERT INTO users (tenant_id,username,first_name,email,password_hash,password_algo,status,profile) VALUES (1,?,?,?,?,'pbkdf2','Active',?)");
   ins.run("Jamie Line", "Jamie", "j@x.test", hash, JSON.stringify({ staffType: "office", phone: "07000000001", hourlyRate: 99 }));

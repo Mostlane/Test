@@ -1571,6 +1571,856 @@ ${xrefAt}
   }
 });
 
+// src/routes/holidays.js
+var holidays_exports = {};
+__export(holidays_exports, {
+  approvedLeaveInRange: () => approvedLeaveInRange,
+  bankHolidaysInRange: () => bankHolidaysInRange,
+  handle: () => handle2,
+  jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
+  remindPendingHolidays: () => remindPendingHolidays
+});
+async function approvedLeaveInRange(env, tid, from, to, username) {
+  const out = {};
+  try {
+    const sql = "SELECT username, start_date, end_date, type, half FROM holidays WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
+    const binds = username ? [tid, to, from, username] : [tid, to, from];
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    for (const r of results || []) {
+      if (!r.start_date || !r.end_date) continue;
+      let d = /* @__PURE__ */ new Date(r.start_date + "T12:00:00Z");
+      const end = /* @__PURE__ */ new Date(r.end_date + "T12:00:00Z");
+      let guard = 0;
+      while (d <= end && guard++ < 400) {
+        const ds = d.toISOString().slice(0, 10);
+        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function jobsBookedInLeaveRange(env, tid, username, start, end) {
+  if (!username || !start || !end) return [];
+  try {
+    const { listJobs: listJobs2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+    const eid = _hNormId(username);
+    const all = await listJobs2(env, tid);
+    const out = [];
+    for (const j of all) {
+      const assigned = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [];
+      if (!assigned.some((a) => _hNormId(a) === eid)) continue;
+      const es = j.engSchedule && j.engSchedule[eid] || {};
+      const sched = es.scheduledAt || j.scheduledAt;
+      if (!sched) continue;
+      let day;
+      try {
+        day = new Date(sched).toISOString().slice(0, 10);
+      } catch {
+        continue;
+      }
+      if (day < start || day > end) continue;
+      const engStatus = j.engStatus && j.engStatus[eid] && j.engStatus[eid].status || j.status || "";
+      if (_hFinished.has(String(engStatus).toLowerCase())) continue;
+      out.push({
+        id: j.id,
+        ref: j.helpdeskRef || j.ref || j.title || "Job",
+        date: day,
+        status: engStatus || "Scheduled",
+        site: j.siteName || ""
+      });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch {
+    return [];
+  }
+}
+async function bankHolidaysInRange(env, tid, from, to) {
+  const out = {};
+  try {
+    const years = /* @__PURE__ */ new Set();
+    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
+    for (const y of years) {
+      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+        if (!row || !row.value) continue;
+        let arr = [];
+        try {
+          arr = JSON.parse(row.value) || [];
+        } catch {
+        }
+        for (const b of arr) {
+          const date = b && b.date;
+          if (date && date >= from && date <= to)
+            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
+        }
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function remindPendingHolidays(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
+    ).bind(tid).all();
+    const rows = results || [];
+    if (!rows.length) return;
+    for (const r of rows) {
+      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
+        title: "Holiday still awaiting approval",
+        body: `${r.username}'s request (${r.start_date} \u2192 ${r.end_date}) hasn't been actioned yet.`,
+        url: "/holiday-admin.html",
+        tag: "holiday-admin:" + r.id
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
+}
+async function handle2(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  const json4 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const text = (msg, status = 200) => new Response(msg, { status, headers });
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  let user = null;
+  let role = "Engineer";
+  {
+    const s = sess || await requireSession(env, request);
+    if (s) {
+      user = s.user.username;
+      const perms = await permissionsFor(env, tenantId, user);
+      role = perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes" ? "Admin" : "Engineer";
+    }
+  }
+  if (!user) return text("Unauthorised", 401);
+  const year = getYear(url);
+  const isAdmin = ["Admin", "Director"].includes(role);
+  async function cfgGet2(key) {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
+    return row ? JSON.parse(row.value) : null;
+  }
+  async function cfgPut(key, val2) {
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).bind(db.tenantId, key, JSON.stringify(val2)).run();
+  }
+  async function getYearConfig() {
+    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
+  }
+  async function getDefaultAllowance() {
+    return Number((await getYearConfig()).defaultAllowance ?? 28);
+  }
+  async function getBankHolidays() {
+    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
+  }
+  async function getShutdownDays() {
+    return await cfgGet2(`holiday:shutdown:${year}`) || [];
+  }
+  async function getUserAllowance(username) {
+    const row = await db.prepare(
+      "SELECT allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
+    ).bind(db.tenantId, year, username).first();
+    if (row && Number.isFinite(Number(row.allowance))) return { allowance: Number(row.allowance), exact: !!row.exact };
+    return { allowance: await getDefaultAllowance(), exact: false };
+  }
+  async function listAllowancesMap() {
+    const { results } = await db.prepare(
+      "SELECT username, allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
+    const out = {};
+    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = { allowance: Number(r.allowance), exact: !!r.exact };
+    return out;
+  }
+  async function getUserStart(username) {
+    const row = await db.prepare(
+      "SELECT json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ? AND username = ?"
+    ).bind(db.tenantId, username).first();
+    return row && row.sd || null;
+  }
+  async function listUserStarts() {
+    const { results } = await db.prepare(
+      "SELECT username, json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ?"
+    ).bind(db.tenantId).all();
+    const out = {};
+    for (const r of results || []) if (r.username && r.sd) out[r.username] = r.sd;
+    return out;
+  }
+  function proRataAllowance(base, startISO, yr) {
+    if (!Number.isFinite(base) || base <= 0 || base >= 365) return base;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+    if (!m) return base;
+    if (Number(m[1]) !== yr) return base;
+    const DAY2 = 864e5;
+    const startMs = Date.UTC(yr, Number(m[2]) - 1, Number(m[3]));
+    if (startMs <= Date.UTC(yr, 0, 1)) return base;
+    const yearEnd = Date.UTC(yr, 11, 31);
+    const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY2) + 1;
+    const daysEmployed = Math.round((yearEnd - startMs) / DAY2) + 1;
+    return Math.round(base * daysEmployed / daysInYear * 2) / 2;
+  }
+  async function getActiveUsers() {
+    const { results } = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
+    ).bind(db.tenantId).all();
+    return (results || []).map((r) => r.username).filter(Boolean);
+  }
+  async function getInactiveUsers() {
+    const { results } = await db.prepare(
+      "SELECT username, status FROM users WHERE tenant_id = ? AND COALESCE(status,'') NOT IN ('Active','')"
+    ).bind(db.tenantId).all();
+    return (results || []).map((r) => ({ username: r.username, status: r.status || "Disabled" })).filter((x) => x.username);
+  }
+  async function logAction(requestId, action, by) {
+    await db.prepare(
+      "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
+    ).bind(db.tenantId, requestId, action, by, (/* @__PURE__ */ new Date()).toISOString()).run();
+  }
+  async function overlappingBookings(username, start, end, excludeId) {
+    const binds = [db.tenantId, username, end, start];
+    let sql = "SELECT id, start_date, end_date, days, type, status FROM holidays WHERE tenant_id=? AND username=? AND status NOT IN ('Cancelled','Rejected') AND start_date<=? AND end_date>=?";
+    if (excludeId) {
+      sql += " AND id<>?";
+      binds.push(excludeId);
+    }
+    const { results } = await db.prepare(sql).bind(...binds).all();
+    return (results || []).map((r) => ({ id: r.id, start: r.start_date, end: r.end_date, days: r.days, type: r.type, status: r.status }));
+  }
+  const overlapWarning = (clashes) => clashes.length ? `\u26A0 Overlaps ${clashes.length} existing booking${clashes.length === 1 ? "" : "s"} on the calendar: ` + clashes.map((c) => `${c.start}${c.end !== c.start ? "\u2192" + c.end : ""} (${c.status})`).join(", ") : null;
+  async function ensureSystemDaysBulk(usernames) {
+    if (!usernames.length) return;
+    const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
+    if (!bank.length && !shut.length) return;
+    const { results } = await db.prepare(
+      "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
+    const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const stmts = [];
+    const ins = db.prepare(`
+      INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
+      ON CONFLICT(kind, year, date, username) DO NOTHING
+    `);
+    for (const u of usernames) {
+      for (const b of bank) {
+        if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
+        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now2));
+      }
+      for (const s of shut) {
+        if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
+        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now2));
+      }
+    }
+    if (stmts.length) await db.batch(stmts);
+  }
+  async function ensureSystemDaysForUser(username) {
+    return ensureSystemDaysBulk([username]);
+  }
+  async function listHolidayRequestsForYear() {
+    const { results } = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
+    return (results || []).map(reqOut);
+  }
+  async function getHolidayById(id) {
+    const row = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).first();
+    return row ? reqOut(row) : null;
+  }
+  async function listSystemRecordsForYear() {
+    const { results } = await db.prepare("SELECT * FROM holiday_system_days WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
+    return (results || []).map(sysOut);
+  }
+  function bookedHolidayDates(all, username) {
+    const set = /* @__PURE__ */ new Set();
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;
+      if (!h.start) continue;
+      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay();
+        if (wd === 0 || wd === 6) continue;
+        set.add(d.toISOString().slice(0, 10));
+      }
+    }
+    return set;
+  }
+  function computeUsage(all, sys, username, allowance, todayISO2, startISO) {
+    const dayMap = {};
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;
+      if (!h.start) continue;
+      const isHalf = Number(h.days) === 0.5 && (h.end || h.start) === h.start;
+      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay();
+        if (wd === 0 || wd === 6) continue;
+        const di = d.toISOString().slice(0, 10);
+        const m = dayMap[di] || (dayMap[di] = { full: false, am: false, pm: false, half: false });
+        if (isHalf) {
+          if (h.half === "AM") m.am = true;
+          else if (h.half === "PM") m.pm = true;
+          else m.half = true;
+        } else m.full = true;
+      }
+    }
+    let booked = 0, bookedTD = 0;
+    for (const di of Object.keys(dayMap)) {
+      const m = dayMap[di];
+      const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
+      booked += v;
+      if (di <= todayISO2) bookedTD += v;
+    }
+    const covered = bookedHolidayDates(all, username);
+    let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
+    for (const s of sys) {
+      if (s.username !== username) continue;
+      if (!isWeekdayISO(s.date)) continue;
+      if (startISO && (s.date || "") < startISO) continue;
+      if (s.worked === true || s.status === "Credited") {
+        credited += s.days || 1;
+        continue;
+      }
+      if (covered.has(s.date)) continue;
+      const passed = (s.date || "") <= todayISO2;
+      if (s.kind === "shutdown") {
+        shut += s.days || 1;
+        if (passed) shutTD += s.days || 1;
+      } else {
+        bank += s.days || 1;
+        if (passed) bankTD += s.days || 1;
+      }
+    }
+    const committed = booked + bank + shut - credited;
+    const usedToDate = bookedTD + bankTD + shutTD - credited;
+    return {
+      allowance,
+      booked,
+      bank,
+      shutdown: shut,
+      credited,
+      committed,
+      used: committed,
+      usedToDate,
+      remaining: Math.round((allowance - committed) * 100) / 100
+    };
+  }
+  if (path === "/holiday/request" && method === "POST") {
+    const body = await request.json();
+    const id = `H-${Date.now()}`;
+    const start = body.start, end = body.end;
+    if (!start || !end) return text("Missing start/end", 400);
+    if (new Date(end) < new Date(start)) return text("End before start", 400);
+    const note = String(body.notes || "").trim();
+    if (!note) return text("Notes (reminder) required", 400);
+    const half = ["AM", "PM"].includes(body.half) ? body.half : null;
+    if (half && start !== end) return text("Half days are for a single day", 400);
+    let days = countWeekdaysInclusive(start, end);
+    if (days <= 0) return text("No weekdays in range", 400);
+    if (half) days = 0.5;
+    const clashes = await overlappingBookings(user, start, end, null);
+    await db.prepare(`
+      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
+    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
+    await logAction(id, "Submitted", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday request",
+      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin:" + id,
+      actionable: true
+    }, user));
+    return json4({ success: true, id, warning: overlapWarning(clashes) || void 0 });
+  }
+  if (path === "/holiday/cancel" && method === "POST") {
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.username !== user) return text("Forbidden", 403);
+    if (!["Pending", "Approved"].includes(record.status))
+      return text("Only pending or approved requests can be cancelled", 409);
+    const wasApproved = record.status === "Approved";
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
+    await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday cancelled",
+      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} \u2192 ${record.end_date}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin"
+    }, user));
+    return json4({ success: true, wasApproved });
+  }
+  if (path === "/holiday/delete-own" && method === "POST") {
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.username !== user) return text("Forbidden", 403);
+    if (!["Cancelled", "Rejected"].includes(record.status)) {
+      return text("Can only delete cancelled or rejected requests", 409);
+    }
+    await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+    await logAction(id, "Deleted by engineer", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/cancel-approved" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const { id } = await request.json();
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (record.status !== "Approved") return text("Only approved holidays can be cancelled here", 409);
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
+    await logAction(id, "Approval cancelled by admin", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/admin-edit" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const b = await request.json();
+    const id = b.id;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (b.action === "delete") {
+      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+      await logAction(id, `Deleted by admin (${record.start} \u2192 ${record.end})`, user);
+      return json4({ success: true, deleted: true });
+    }
+    const sets = [], vals = [];
+    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) {
+      sets.push("type=?");
+      vals.push(b.type);
+    }
+    if (b.start) {
+      sets.push("start_date=?");
+      vals.push(b.start);
+      sets.push("year=?");
+      vals.push(Number(String(b.start).slice(0, 4)) || record.year);
+    }
+    if (b.end) {
+      sets.push("end_date=?");
+      vals.push(b.end);
+    }
+    if (b.days != null && !Number.isNaN(Number(b.days))) {
+      sets.push("days=?");
+      vals.push(Number(b.days));
+    }
+    if (b.half !== void 0) {
+      sets.push("half=?");
+      vals.push(b.half || null);
+    }
+    if (!sets.length) return json4({ success: true, unchanged: true });
+    vals.push(db.tenantId, id);
+    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
+    await logAction(id, `Edited by admin (${b.type || record.type} \xB7 ${b.start || record.start} \u2192 ${b.end || record.end})`, user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/my" && method === "GET") {
+    await ensureSystemDaysForUser(user);
+    const reqs = (await listHolidayRequestsForYear()).filter((h) => h.username === user);
+    const sys = (await listSystemRecordsForYear()).filter((s) => s.username === user);
+    const results = [...reqs, ...sys];
+    results.sort((a, b) => {
+      const da = a.date || a.start || "9999-12-31";
+      const db2 = b.date || b.start || "9999-12-31";
+      return da.localeCompare(db2);
+    });
+    return json4(results);
+  }
+  if (path === "/holiday/summary" && method === "GET") {
+    await ensureSystemDaysForUser(user);
+    const { allowance: baseAllowance, exact } = await getUserAllowance(user);
+    const startISO = await getUserStart(user);
+    const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
+    const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const u = computeUsage(all, sys, user, allowance, today, startISO);
+    return json4({
+      allowance,
+      // the entitlement (pro-rated in the join year)
+      baseAllowance,
+      // the full annual figure
+      proRated: allowance !== baseAllowance,
+      startDate: startISO || null,
+      used: u.usedToDate,
+      // headline = used TO DATE
+      committed: u.committed,
+      // full-year commitment
+      remaining: u.remaining,
+      accrualMode: !!cfg.accrualMode,
+      breakdown: { booked: u.booked, bankHolidays: u.bank, shutdown: u.shutdown, usedToDate: u.usedToDate, committed: u.committed }
+    });
+  }
+  if (path === "/holiday/all" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    return json4(await listHolidayRequestsForYear());
+  }
+  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
+    if (!sess) return text("Not authenticated", 401);
+    const q = url.searchParams;
+    const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const from = iso(q.get("from")) || today;
+    const to = iso(q.get("to")) || from;
+    const days = await approvedLeaveInRange(env, tenantId, from, to);
+    return json4({ ok: true, from, to, days });
+  }
+  if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const { id } = body;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    const status = path.endsWith("approve") ? "Approved" : "Rejected";
+    if (status === "Approved" && !body.force) {
+      const bookedJobs2 = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
+      if (bookedJobs2.length) return json4({ clash: true, jobs: bookedJobs2 });
+    }
+    const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
+    await db.prepare(
+      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
+    ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
+    await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
+    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `Your holiday ${record.start} \u2192 ${record.end} was ${status.toLowerCase()}.`,
+      url: "/holiday.html",
+      tag: "holiday-decision"
+    }));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `${record.username}'s holiday ${record.start} \u2192 ${record.end} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
+    }));
+    let warning;
+    if (status === "Approved") {
+      const clashes = (await overlappingBookings(record.username, record.start, record.end, id)).filter((c) => c.status === "Approved");
+      warning = overlapWarning(clashes) || void 0;
+    }
+    return json4({ success: true, warning });
+  }
+  if (path === "/holiday/config" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const cfg = await getYearConfig();
+    const [bank, shut, allowMap] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
+    const allowances = {};
+    for (const [u, r] of Object.entries(allowMap)) allowances[u] = r.allowance;
+    return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
+  }
+  if (path === "/holiday/set-year-config" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const defaultAllowance = Number(body.defaultAllowance);
+    if (!Number.isFinite(defaultAllowance)) return text("Bad payload", 400);
+    const prev = await getYearConfig();
+    await cfgPut(`holiday:config:${year}`, {
+      defaultAllowance,
+      accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
+    });
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-allowance" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const username = body.username;
+    const allowance = Number(body.allowance);
+    if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
+    const exact = body.exact ? 1 : 0;
+    await db.prepare(
+      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance, exact) VALUES (?,?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance, exact=excluded.exact"
+    ).bind(db.tenantId, year, username, allowance, exact).run();
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-bankholidays" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const days = Array.isArray(body.days) ? body.days : null;
+    if (!days) return text("Bad payload", 400);
+    const oldDays = await getBankHolidays();
+    const newDates = new Set(days.map((d) => d.date));
+    const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
+    if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
+    await cfgPut(`holiday:bankholidays:${year}`, days);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/set-shutdown" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const days = Array.isArray(body.days) ? body.days : null;
+    if (!days) return text("Bad payload", 400);
+    const oldDays = await getShutdownDays();
+    const newDates = new Set(days.map((d) => d.date));
+    const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
+    if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
+    await cfgPut(`holiday:shutdown:${year}`, days);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/toggle-worked" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const body = await request.json();
+    const kind = body.kind, username = body.username, date = body.date, worked = !!body.worked;
+    if (!["bankholiday", "shutdown"].includes(kind) || !username || !date) return text("Bad payload", 400);
+    await ensureSystemDaysForUser(username);
+    const row = await db.prepare(
+      "SELECT id FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(db.tenantId, kind, year, date, username).first();
+    if (!row) return text("Not found", 404);
+    await db.prepare(
+      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
+    await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
+    return json4({ success: true });
+  }
+  if (path === "/holiday/admin-summary" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers2 = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers2);
+    const inactiveMap = {};
+    let usernames = activeUsers2.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) {
+        usernames.push(iu.username);
+        inactiveMap[iu.username] = iu.status;
+      }
+    }
+    const [all, sys, allowMap, dflt, startsMap] = await Promise.all([
+      listHolidayRequestsForYear(),
+      listSystemRecordsForYear(),
+      listAllowancesMap(),
+      getDefaultAllowance(),
+      listUserStarts()
+    ]);
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const list = [];
+    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
+      const row = allowMap[u];
+      const baseAllowance = row && Number.isFinite(row.allowance) ? row.allowance : dflt;
+      const exact = !!(row && row.exact);
+      const startISO = startsMap[u] || null;
+      const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
+      const c = computeUsage(all, sys, u, allowance, today, startISO);
+      list.push({
+        username: u,
+        name: u.replace(".", " "),
+        allowance,
+        baseAllowance,
+        proRated: allowance !== baseAllowance,
+        exact,
+        startDate: startISO,
+        used: c.usedToDate,
+        // used TO DATE
+        committed: c.committed,
+        // full-year commitment
+        remaining: c.remaining,
+        booked: c.booked,
+        bankHolidays: c.bank,
+        shutdown: c.shutdown,
+        active: !inactiveMap[u],
+        status: inactiveMap[u] || "Active"
+      });
+    }
+    return json4({ year, engineers: list });
+  }
+  if (path === "/holiday/calendar" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const month = getMonth(url);
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 0));
+    const daysInMonth = monthEnd.getUTCDate();
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers2 = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers2);
+    const inactiveMap = {};
+    let usernames = activeUsers2.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) {
+        usernames.push(iu.username);
+        inactiveMap[iu.username] = iu.status;
+      }
+    }
+    const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
+    const engineers = [];
+    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
+      const cells = {};
+      for (const h of all) {
+        if (h.username !== u || h.status !== "Approved") continue;
+        const overlap = weekdayOverlapCount(h.start, h.end, monthStart, monthEnd);
+        if (!overlap) continue;
+        const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z");
+        const e = /* @__PURE__ */ new Date(h.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          const day = d.getUTCDay();
+          if (day === 0 || day === 6) continue;
+          if (d < monthStart || d > monthEnd) continue;
+          const di = isoDate(d);
+          cells[di] = {
+            kind: "holiday",
+            type: h.type || "Annual Leave",
+            note: h.notes || "",
+            label: "Holiday",
+            username: u,
+            requestId: h.id,
+            rangeStart: h.start,
+            rangeEnd: h.end,
+            days: h.days,
+            half: h.half || (Number(h.days) === 0.5 && h.start === h.end ? "HALF" : null)
+          };
+        }
+      }
+      for (const s of sys) {
+        if (s.username !== u) continue;
+        const di = s.date;
+        if (!di) continue;
+        const d = /* @__PURE__ */ new Date(di + "T00:00:00Z");
+        if (d < monthStart || d > monthEnd) continue;
+        if (!isWeekdayISO(di)) continue;
+        if (!cells[di]) {
+          cells[di] = {
+            kind: s.category === "Shutdown" ? "shutdown" : "bankholiday",
+            type: s.category,
+            note: "",
+            label: s.label || s.category,
+            worked: !!s.worked,
+            username: u
+          };
+        }
+      }
+      engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
+    }
+    return json4({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
+  }
+  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    try {
+      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
+      if (!resp.ok) return text("GOV.UK unavailable", 502);
+      const data = await resp.json();
+      const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
+      return json4({ year, events });
+    } catch (e) {
+      return text("GOV.UK unavailable", 502);
+    }
+  }
+  if (path === "/holiday/debug-users" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const activeUsers2 = await getActiveUsers();
+    return json4({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
+  }
+  return text("Not Found", 404);
+}
+function reqOut(r) {
+  return {
+    id: r.id,
+    engineer: r.engineer,
+    username: r.username,
+    year: r.year,
+    start: r.start_date,
+    end: r.end_date,
+    days: r.days,
+    half: r.half || null,
+    type: r.type,
+    notes: r.notes,
+    status: r.status,
+    submittedAt: r.submitted_at,
+    approvedBy: r.approved_by,
+    decisionAt: r.decision_at,
+    cancelledBy: r.cancelled_by,
+    cancelNote: r.cancel_note
+  };
+}
+function sysOut(r) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    username: r.username,
+    engineer: r.engineer,
+    year: r.year,
+    date: r.date,
+    label: r.label,
+    days: r.days,
+    category: r.category,
+    worked: !!r.worked,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at
+  };
+}
+async function deleteSystemDays(env, tenantId, kind, year, dates) {
+  const db = tenantDB(env, tenantId);
+  const placeholders = dates.map(() => "?").join(",");
+  await db.prepare(
+    `DELETE FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date IN (${placeholders})`
+  ).bind(db.tenantId, kind, year, ...dates).run();
+}
+function getYear(url) {
+  const y = url.searchParams.get("year");
+  const year = y ? parseInt(y, 10) : (/* @__PURE__ */ new Date()).getFullYear();
+  return Number.isFinite(year) ? year : (/* @__PURE__ */ new Date()).getFullYear();
+}
+function getMonth(url) {
+  const m = url.searchParams.get("month");
+  const month = m ? parseInt(m, 10) : (/* @__PURE__ */ new Date()).getMonth() + 1;
+  return Number.isFinite(month) && month >= 1 && month <= 12 ? month : (/* @__PURE__ */ new Date()).getMonth() + 1;
+}
+function isoDate(d) {
+  return new Date(d).toISOString().split("T")[0];
+}
+function countWeekdaysInclusive(startISO, endISO) {
+  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
+  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
+  if (isNaN(s) || isNaN(e)) return 0;
+  if (e < s) return 0;
+  let days = 0;
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) days++;
+  }
+  return days;
+}
+function isWeekdayISO(dateISO) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return day !== 0 && day !== 6;
+}
+function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
+  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
+  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
+  const a = s < monthStart ? monthStart : s;
+  const b = e > monthEnd ? monthEnd : e;
+  if (b < a) return 0;
+  let days = 0;
+  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) days++;
+  }
+  return days;
+}
+var _hNormId, _hFinished;
+var init_holidays = __esm({
+  "src/routes/holidays.js"() {
+    init_http();
+    init_auth();
+    init_tenantdb();
+    init_push();
+    _hNormId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    _hFinished = /* @__PURE__ */ new Set(["complete", "closed", "invoiced", "cancelled"]);
+  }
+});
+
 // src/routes/timesheets.js
 async function holidayDaysFor(env, tid, username, monday) {
   const end = weekDays(monday)[6];
@@ -3119,7 +3969,7 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   doc.text(L2, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
   return doc.bytes();
 }
-async function handle5(request, env, ctx, url, sess) {
+async function handle3(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ts(?=\/|$)/, "") || "/";
   const q = url.searchParams;
@@ -6131,7 +6981,7 @@ var init_statusemail = __esm({
 });
 
 // src/lib/invoiceparse.js
-function isoDate(y, m, d) {
+function isoDate2(y, m, d) {
   y = Number(y);
   m = Number(m);
   d = Number(d);
@@ -6148,12 +6998,12 @@ function parseInvoiceDate(text) {
     let m = s.match(/(\d{1,2})[\/.\- ]([A-Za-z]{3,9})[\/.\- ](\d{2,4})/);
     if (m) {
       const mo = MONTHS[m[2].toLowerCase().slice(0, 4)] || MONTHS[m[2].toLowerCase().slice(0, 3)];
-      return isoDate(m[3], mo, m[1]);
+      return isoDate2(m[3], mo, m[1]);
     }
     m = s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
-    if (m) return isoDate(m[3], m[2], m[1]);
+    if (m) return isoDate2(m[3], m[2], m[1]);
     m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (m) return isoDate(m[1], m[2], m[3]);
+    if (m) return isoDate2(m[1], m[2], m[3]);
     return null;
   };
   if (grab) {
@@ -6318,7 +7168,7 @@ function numOrNull(v) {
 }
 function normIsoLoose(s) {
   const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-  return m ? isoDate(m[1], m[2], m[3]) : null;
+  return m ? isoDate2(m[1], m[2], m[3]) : null;
 }
 function bytesToBase64(bytes) {
   try {
@@ -6580,7 +7430,7 @@ var init_graphmail = __esm({
 // src/routes/po.js
 var po_exports = {};
 __export(po_exports, {
-  handle: () => handle6,
+  handle: () => handle4,
   listPoSubcontractorNames: () => listPoSubcontractorNames,
   mergeSweepProposals: () => mergeSweepProposals,
   peekNextPoNumber: () => peekNextPoNumber,
@@ -6717,7 +7567,7 @@ function classifyProposal(f, po, supNames, subNames) {
   if (supName && !(f && f.poNumber)) return { category: "flag", subName: null, supName };
   return { category: "other", subName: null, supName: supName || null };
 }
-function staffTypeOf2(u) {
+function staffTypeOf(u) {
   try {
     const p = JSON.parse(u.profile || "{}");
     return p && p.staffType === "office" ? "office" : "field";
@@ -6789,7 +7639,7 @@ async function getRaiseOptions(env, username) {
   const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
-async function handle6(request, env, ctx, url, sess) {
+async function handle4(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const path = url.pathname.replace(/^\/po/, "") || "/";
@@ -6799,7 +7649,7 @@ async function handle6(request, env, ctx, url, sess) {
   if (!sess || !sess.user) return error("Not authenticated", 401, env, request);
   if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const field = staffTypeOf2(sess.user) === "field";
+  const field = staffTypeOf(sess.user) === "field";
   const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
   if (!office && !field) return error("Not allowed", 403, env, request);
   const q = url.searchParams;
@@ -9408,7 +10258,7 @@ async function logScan(env, row) {
     console.error("logScan", e);
   }
 }
-async function handle7(request, env, ctx) {
+async function handle5(request, env, ctx) {
   const u0 = new URL(request.url);
   const kind = SCAN_KINDS[u0.pathname];
   if (kind && request.method === "POST" && env.SITELOG_DB) {
@@ -11858,7 +12708,7 @@ function imageForStore(env, u) {
   const key = decodeURIComponent(m[1]);
   return /^(sites|jobs|sitedocs)\//.test(key) ? `${r2Pub(env)}/${key}` : u;
 }
-async function handle8(request, env, ctx, url, sess) {
+async function handle6(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -12204,7 +13054,7 @@ async function slCall(env, path, body) {
   const req = new Request(base + path, init);
   if (env.SITELOG_DB) {
     try {
-      const r = await handle7(req, env);
+      const r = await handle5(req, env);
       if (r) return await r.json().catch(() => ({ ok: r.ok }));
     } catch (e) {
     }
@@ -12614,7 +13464,7 @@ function importTokenOK(request, env) {
   for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
   return diff === 0;
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle7(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/compliance(?=\/|$)/, "") || "/";
@@ -14505,7 +15355,7 @@ async function fiveYearAudit(env, tid, year) {
   earlyRetest.sort((a, b) => a.gapMonths - b.gapMonths);
   return { year, offList, earlyRetest };
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle8(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
@@ -15591,7 +16441,7 @@ async function resignMedia(env, origin, rec) {
   }
   return rec;
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle9(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (method === "GET" && url.pathname === "/pump/media") {
     const key = url.searchParams.get("key") || "";
@@ -16001,7 +16851,7 @@ var init_pump = __esm({
 var certs_exports = {};
 __export(certs_exports, {
   fiveYearWorksCompleted: () => fiveYearWorksCompleted,
-  handle: () => handle12,
+  handle: () => handle10,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob,
   upsertFiveYearFromJob: () => upsertFiveYearFromJob
 });
@@ -17390,7 +18240,7 @@ async function fiveYearTestedMap(env, tid) {
   _fyrTestedCache = { tid, at: now2, map };
   return map;
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -19282,7 +20132,7 @@ __export(sla_exports, {
   getJob: () => getJob3,
   getSubconSender: () => getSubconSender,
   getSubconSenderCfg: () => getSubconSenderCfg,
-  handle: () => handle13,
+  handle: () => handle11,
   incidentKey: () => incidentKey,
   isDrainageJob: () => isDrainageJob,
   isKnownSubcon: () => isKnownSubcon,
@@ -19341,7 +20191,7 @@ function badScheduleIn(body) {
   }
   return null;
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -27909,856 +28759,6 @@ var init_sla = __esm({
   }
 });
 
-// src/routes/holidays.js
-var holidays_exports = {};
-__export(holidays_exports, {
-  approvedLeaveInRange: () => approvedLeaveInRange,
-  bankHolidaysInRange: () => bankHolidaysInRange,
-  handle: () => handle14,
-  jobsBookedInLeaveRange: () => jobsBookedInLeaveRange,
-  remindPendingHolidays: () => remindPendingHolidays
-});
-async function approvedLeaveInRange(env, tid, from, to, username) {
-  const out = {};
-  try {
-    const sql = "SELECT username, start_date, end_date, type, half FROM holidays WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
-    const binds = username ? [tid, to, from, username] : [tid, to, from];
-    const { results } = await env.DB.prepare(sql).bind(...binds).all();
-    for (const r of results || []) {
-      if (!r.start_date || !r.end_date) continue;
-      let d = /* @__PURE__ */ new Date(r.start_date + "T12:00:00Z");
-      const end = /* @__PURE__ */ new Date(r.end_date + "T12:00:00Z");
-      let guard = 0;
-      while (d <= end && guard++ < 400) {
-        const ds = d.toISOString().slice(0, 10);
-        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
-        d.setUTCDate(d.getUTCDate() + 1);
-      }
-    }
-  } catch {
-  }
-  return out;
-}
-async function jobsBookedInLeaveRange(env, tid, username, start, end) {
-  if (!username || !start || !end) return [];
-  try {
-    const { listJobs: listJobs2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
-    const eid = _hNormId(username);
-    const all = await listJobs2(env, tid);
-    const out = [];
-    for (const j of all) {
-      const assigned = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [];
-      if (!assigned.some((a) => _hNormId(a) === eid)) continue;
-      const es = j.engSchedule && j.engSchedule[eid] || {};
-      const sched = es.scheduledAt || j.scheduledAt;
-      if (!sched) continue;
-      let day;
-      try {
-        day = new Date(sched).toISOString().slice(0, 10);
-      } catch {
-        continue;
-      }
-      if (day < start || day > end) continue;
-      const engStatus = j.engStatus && j.engStatus[eid] && j.engStatus[eid].status || j.status || "";
-      if (_hFinished.has(String(engStatus).toLowerCase())) continue;
-      out.push({
-        id: j.id,
-        ref: j.helpdeskRef || j.ref || j.title || "Job",
-        date: day,
-        status: engStatus || "Scheduled",
-        site: j.siteName || ""
-      });
-    }
-    out.sort((a, b) => a.date.localeCompare(b.date));
-    return out;
-  } catch {
-    return [];
-  }
-}
-async function bankHolidaysInRange(env, tid, from, to) {
-  const out = {};
-  try {
-    const years = /* @__PURE__ */ new Set();
-    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
-    for (const y of years) {
-      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
-        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
-        if (!row || !row.value) continue;
-        let arr = [];
-        try {
-          arr = JSON.parse(row.value) || [];
-        } catch {
-        }
-        for (const b of arr) {
-          const date = b && b.date;
-          if (date && date >= from && date <= to)
-            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
-        }
-      }
-    }
-  } catch {
-  }
-  return out;
-}
-async function remindPendingHolidays(env, tid = 1) {
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
-    ).bind(tid).all();
-    const rows = results || [];
-    if (!rows.length) return;
-    for (const r of rows) {
-      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
-        title: "Holiday still awaiting approval",
-        body: `${r.username}'s request (${r.start_date} \u2192 ${r.end_date}) hasn't been actioned yet.`,
-        url: "/holiday-admin.html",
-        tag: "holiday-admin:" + r.id
-      }).catch(() => {
-      });
-    }
-  } catch {
-  }
-}
-async function handle14(request, env, ctx, url, sess) {
-  const headers = corsHeaders(env, request);
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  const json4 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
-  const text = (msg, status = 200) => new Response(msg, { status, headers });
-  const path = url.pathname;
-  const method = request.method.toUpperCase();
-  let user = null;
-  let role = "Engineer";
-  {
-    const s = sess || await requireSession(env, request);
-    if (s) {
-      user = s.user.username;
-      const perms = await permissionsFor(env, tenantId, user);
-      role = perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes" ? "Admin" : "Engineer";
-    }
-  }
-  if (!user) return text("Unauthorised", 401);
-  const year = getYear(url);
-  const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet2(key) {
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
-    return row ? JSON.parse(row.value) : null;
-  }
-  async function cfgPut(key, val2) {
-    await db.prepare(
-      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).bind(db.tenantId, key, JSON.stringify(val2)).run();
-  }
-  async function getYearConfig() {
-    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
-  }
-  async function getDefaultAllowance() {
-    return Number((await getYearConfig()).defaultAllowance ?? 28);
-  }
-  async function getBankHolidays() {
-    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
-  }
-  async function getShutdownDays() {
-    return await cfgGet2(`holiday:shutdown:${year}`) || [];
-  }
-  async function getUserAllowance(username) {
-    const row = await db.prepare(
-      "SELECT allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
-    ).bind(db.tenantId, year, username).first();
-    if (row && Number.isFinite(Number(row.allowance))) return { allowance: Number(row.allowance), exact: !!row.exact };
-    return { allowance: await getDefaultAllowance(), exact: false };
-  }
-  async function listAllowancesMap() {
-    const { results } = await db.prepare(
-      "SELECT username, allowance, exact FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
-    ).bind(db.tenantId, year).all();
-    const out = {};
-    for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = { allowance: Number(r.allowance), exact: !!r.exact };
-    return out;
-  }
-  async function getUserStart(username) {
-    const row = await db.prepare(
-      "SELECT json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ? AND username = ?"
-    ).bind(db.tenantId, username).first();
-    return row && row.sd || null;
-  }
-  async function listUserStarts() {
-    const { results } = await db.prepare(
-      "SELECT username, json_extract(profile,'$.startDate') AS sd FROM users WHERE tenant_id = ?"
-    ).bind(db.tenantId).all();
-    const out = {};
-    for (const r of results || []) if (r.username && r.sd) out[r.username] = r.sd;
-    return out;
-  }
-  function proRataAllowance(base, startISO, yr) {
-    if (!Number.isFinite(base) || base <= 0 || base >= 365) return base;
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
-    if (!m) return base;
-    if (Number(m[1]) !== yr) return base;
-    const DAY2 = 864e5;
-    const startMs = Date.UTC(yr, Number(m[2]) - 1, Number(m[3]));
-    if (startMs <= Date.UTC(yr, 0, 1)) return base;
-    const yearEnd = Date.UTC(yr, 11, 31);
-    const daysInYear = Math.round((yearEnd - Date.UTC(yr, 0, 1)) / DAY2) + 1;
-    const daysEmployed = Math.round((yearEnd - startMs) / DAY2) + 1;
-    return Math.round(base * daysEmployed / daysInYear * 2) / 2;
-  }
-  async function getActiveUsers() {
-    const { results } = await db.prepare(
-      "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
-    ).bind(db.tenantId).all();
-    return (results || []).map((r) => r.username).filter(Boolean);
-  }
-  async function getInactiveUsers() {
-    const { results } = await db.prepare(
-      "SELECT username, status FROM users WHERE tenant_id = ? AND COALESCE(status,'') NOT IN ('Active','')"
-    ).bind(db.tenantId).all();
-    return (results || []).map((r) => ({ username: r.username, status: r.status || "Disabled" })).filter((x) => x.username);
-  }
-  async function logAction(requestId, action, by) {
-    await db.prepare(
-      "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
-    ).bind(db.tenantId, requestId, action, by, (/* @__PURE__ */ new Date()).toISOString()).run();
-  }
-  async function overlappingBookings(username, start, end, excludeId) {
-    const binds = [db.tenantId, username, end, start];
-    let sql = "SELECT id, start_date, end_date, days, type, status FROM holidays WHERE tenant_id=? AND username=? AND status NOT IN ('Cancelled','Rejected') AND start_date<=? AND end_date>=?";
-    if (excludeId) {
-      sql += " AND id<>?";
-      binds.push(excludeId);
-    }
-    const { results } = await db.prepare(sql).bind(...binds).all();
-    return (results || []).map((r) => ({ id: r.id, start: r.start_date, end: r.end_date, days: r.days, type: r.type, status: r.status }));
-  }
-  const overlapWarning = (clashes) => clashes.length ? `\u26A0 Overlaps ${clashes.length} existing booking${clashes.length === 1 ? "" : "s"} on the calendar: ` + clashes.map((c) => `${c.start}${c.end !== c.start ? "\u2192" + c.end : ""} (${c.status})`).join(", ") : null;
-  async function ensureSystemDaysBulk(usernames) {
-    if (!usernames.length) return;
-    const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
-    if (!bank.length && !shut.length) return;
-    const { results } = await db.prepare(
-      "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
-    ).bind(db.tenantId, year).all();
-    const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
-    const now2 = (/* @__PURE__ */ new Date()).toISOString();
-    const stmts = [];
-    const ins = db.prepare(`
-      INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
-      ON CONFLICT(kind, year, date, username) DO NOTHING
-    `);
-    for (const u of usernames) {
-      for (const b of bank) {
-        if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now2));
-      }
-      for (const s of shut) {
-        if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
-        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now2));
-      }
-    }
-    if (stmts.length) await db.batch(stmts);
-  }
-  async function ensureSystemDaysForUser(username) {
-    return ensureSystemDaysBulk([username]);
-  }
-  async function listHolidayRequestsForYear() {
-    const { results } = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
-    return (results || []).map(reqOut);
-  }
-  async function getHolidayById(id) {
-    const row = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).first();
-    return row ? reqOut(row) : null;
-  }
-  async function listSystemRecordsForYear() {
-    const { results } = await db.prepare("SELECT * FROM holiday_system_days WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
-    return (results || []).map(sysOut);
-  }
-  function bookedHolidayDates(all, username) {
-    const set = /* @__PURE__ */ new Set();
-    for (const h of all) {
-      if (h.username !== username || h.status !== "Approved") continue;
-      if (h.type === "Other" || h.type === "Unpaid") continue;
-      if (!h.start) continue;
-      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
-      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-        const wd = d.getUTCDay();
-        if (wd === 0 || wd === 6) continue;
-        set.add(d.toISOString().slice(0, 10));
-      }
-    }
-    return set;
-  }
-  function computeUsage(all, sys, username, allowance, todayISO2, startISO) {
-    const dayMap = {};
-    for (const h of all) {
-      if (h.username !== username || h.status !== "Approved") continue;
-      if (h.type === "Other" || h.type === "Unpaid") continue;
-      if (!h.start) continue;
-      const isHalf = Number(h.days) === 0.5 && (h.end || h.start) === h.start;
-      const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z"), e = /* @__PURE__ */ new Date((h.end || h.start) + "T00:00:00Z");
-      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-        const wd = d.getUTCDay();
-        if (wd === 0 || wd === 6) continue;
-        const di = d.toISOString().slice(0, 10);
-        const m = dayMap[di] || (dayMap[di] = { full: false, am: false, pm: false, half: false });
-        if (isHalf) {
-          if (h.half === "AM") m.am = true;
-          else if (h.half === "PM") m.pm = true;
-          else m.half = true;
-        } else m.full = true;
-      }
-    }
-    let booked = 0, bookedTD = 0;
-    for (const di of Object.keys(dayMap)) {
-      const m = dayMap[di];
-      const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
-      booked += v;
-      if (di <= todayISO2) bookedTD += v;
-    }
-    const covered = bookedHolidayDates(all, username);
-    let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
-    for (const s of sys) {
-      if (s.username !== username) continue;
-      if (!isWeekdayISO(s.date)) continue;
-      if (startISO && (s.date || "") < startISO) continue;
-      if (s.worked === true || s.status === "Credited") {
-        credited += s.days || 1;
-        continue;
-      }
-      if (covered.has(s.date)) continue;
-      const passed = (s.date || "") <= todayISO2;
-      if (s.kind === "shutdown") {
-        shut += s.days || 1;
-        if (passed) shutTD += s.days || 1;
-      } else {
-        bank += s.days || 1;
-        if (passed) bankTD += s.days || 1;
-      }
-    }
-    const committed = booked + bank + shut - credited;
-    const usedToDate = bookedTD + bankTD + shutTD - credited;
-    return {
-      allowance,
-      booked,
-      bank,
-      shutdown: shut,
-      credited,
-      committed,
-      used: committed,
-      usedToDate,
-      remaining: Math.round((allowance - committed) * 100) / 100
-    };
-  }
-  if (path === "/holiday/request" && method === "POST") {
-    const body = await request.json();
-    const id = `H-${Date.now()}`;
-    const start = body.start, end = body.end;
-    if (!start || !end) return text("Missing start/end", 400);
-    if (new Date(end) < new Date(start)) return text("End before start", 400);
-    const note = String(body.notes || "").trim();
-    if (!note) return text("Notes (reminder) required", 400);
-    const half = ["AM", "PM"].includes(body.half) ? body.half : null;
-    if (half && start !== end) return text("Half days are for a single day", 400);
-    let days = countWeekdaysInclusive(start, end);
-    if (days <= 0) return text("No weekdays in range", 400);
-    if (half) days = 0.5;
-    const clashes = await overlappingBookings(user, start, end, null);
-    await db.prepare(`
-      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
-    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
-    await logAction(id, "Submitted", user);
-    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
-      title: "Holiday request",
-      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
-      url: "/holiday-admin.html",
-      tag: "holiday-admin:" + id,
-      actionable: true
-    }, user));
-    return json4({ success: true, id, warning: overlapWarning(clashes) || void 0 });
-  }
-  if (path === "/holiday/cancel" && method === "POST") {
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.username !== user) return text("Forbidden", 403);
-    if (!["Pending", "Approved"].includes(record.status))
-      return text("Only pending or approved requests can be cancelled", 409);
-    const wasApproved = record.status === "Approved";
-    await db.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
-    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
-    await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
-    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
-      title: "Holiday cancelled",
-      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} \u2192 ${record.end_date}).`,
-      url: "/holiday-admin.html",
-      tag: "holiday-admin"
-    }, user));
-    return json4({ success: true, wasApproved });
-  }
-  if (path === "/holiday/delete-own" && method === "POST") {
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.username !== user) return text("Forbidden", 403);
-    if (!["Cancelled", "Rejected"].includes(record.status)) {
-      return text("Can only delete cancelled or rejected requests", 409);
-    }
-    await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
-    await logAction(id, "Deleted by engineer", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/cancel-approved" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const { id } = await request.json();
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (record.status !== "Approved") return text("Only approved holidays can be cancelled here", 409);
-    await db.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
-    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
-    await logAction(id, "Approval cancelled by admin", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/admin-edit" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const b = await request.json();
-    const id = b.id;
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    if (b.action === "delete") {
-      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
-      await logAction(id, `Deleted by admin (${record.start} \u2192 ${record.end})`, user);
-      return json4({ success: true, deleted: true });
-    }
-    const sets = [], vals = [];
-    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) {
-      sets.push("type=?");
-      vals.push(b.type);
-    }
-    if (b.start) {
-      sets.push("start_date=?");
-      vals.push(b.start);
-      sets.push("year=?");
-      vals.push(Number(String(b.start).slice(0, 4)) || record.year);
-    }
-    if (b.end) {
-      sets.push("end_date=?");
-      vals.push(b.end);
-    }
-    if (b.days != null && !Number.isNaN(Number(b.days))) {
-      sets.push("days=?");
-      vals.push(Number(b.days));
-    }
-    if (b.half !== void 0) {
-      sets.push("half=?");
-      vals.push(b.half || null);
-    }
-    if (!sets.length) return json4({ success: true, unchanged: true });
-    vals.push(db.tenantId, id);
-    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
-    await logAction(id, `Edited by admin (${b.type || record.type} \xB7 ${b.start || record.start} \u2192 ${b.end || record.end})`, user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/my" && method === "GET") {
-    await ensureSystemDaysForUser(user);
-    const reqs = (await listHolidayRequestsForYear()).filter((h) => h.username === user);
-    const sys = (await listSystemRecordsForYear()).filter((s) => s.username === user);
-    const results = [...reqs, ...sys];
-    results.sort((a, b) => {
-      const da = a.date || a.start || "9999-12-31";
-      const db2 = b.date || b.start || "9999-12-31";
-      return da.localeCompare(db2);
-    });
-    return json4(results);
-  }
-  if (path === "/holiday/summary" && method === "GET") {
-    await ensureSystemDaysForUser(user);
-    const { allowance: baseAllowance, exact } = await getUserAllowance(user);
-    const startISO = await getUserStart(user);
-    const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
-    const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const u = computeUsage(all, sys, user, allowance, today, startISO);
-    return json4({
-      allowance,
-      // the entitlement (pro-rated in the join year)
-      baseAllowance,
-      // the full annual figure
-      proRated: allowance !== baseAllowance,
-      startDate: startISO || null,
-      used: u.usedToDate,
-      // headline = used TO DATE
-      committed: u.committed,
-      // full-year commitment
-      remaining: u.remaining,
-      accrualMode: !!cfg.accrualMode,
-      breakdown: { booked: u.booked, bankHolidays: u.bank, shutdown: u.shutdown, usedToDate: u.usedToDate, committed: u.committed }
-    });
-  }
-  if (path === "/holiday/all" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    return json4(await listHolidayRequestsForYear());
-  }
-  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
-    if (!sess) return text("Not authenticated", 401);
-    const q = url.searchParams;
-    const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const from = iso(q.get("from")) || today;
-    const to = iso(q.get("to")) || from;
-    const days = await approvedLeaveInRange(env, tenantId, from, to);
-    return json4({ ok: true, from, to, days });
-  }
-  if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const { id } = body;
-    if (!id) return text("Missing id", 400);
-    const record = await getHolidayById(id);
-    if (!record) return text("Not found", 404);
-    const status = path.endsWith("approve") ? "Approved" : "Rejected";
-    if (status === "Approved" && !body.force) {
-      const bookedJobs2 = await jobsBookedInLeaveRange(env, tenantId, record.username, record.start, record.end);
-      if (bookedJobs2.length) return json4({ clash: true, jobs: bookedJobs2 });
-    }
-    const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
-    await db.prepare(
-      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
-    ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
-    await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
-    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
-      title: `Holiday ${status.toLowerCase()}`,
-      body: `Your holiday ${record.start} \u2192 ${record.end} was ${status.toLowerCase()}.`,
-      url: "/holiday.html",
-      tag: "holiday-decision"
-    }));
-    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
-      title: `Holiday ${status.toLowerCase()}`,
-      body: `${record.username}'s holiday ${record.start} \u2192 ${record.end} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
-    }));
-    let warning;
-    if (status === "Approved") {
-      const clashes = (await overlappingBookings(record.username, record.start, record.end, id)).filter((c) => c.status === "Approved");
-      warning = overlapWarning(clashes) || void 0;
-    }
-    return json4({ success: true, warning });
-  }
-  if (path === "/holiday/config" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const cfg = await getYearConfig();
-    const [bank, shut, allowMap] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
-    const allowances = {};
-    for (const [u, r] of Object.entries(allowMap)) allowances[u] = r.allowance;
-    return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
-  }
-  if (path === "/holiday/set-year-config" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const defaultAllowance = Number(body.defaultAllowance);
-    if (!Number.isFinite(defaultAllowance)) return text("Bad payload", 400);
-    const prev = await getYearConfig();
-    await cfgPut(`holiday:config:${year}`, {
-      defaultAllowance,
-      accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
-    });
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-allowance" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const username = body.username;
-    const allowance = Number(body.allowance);
-    if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
-    const exact = body.exact ? 1 : 0;
-    await db.prepare(
-      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance, exact) VALUES (?,?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance, exact=excluded.exact"
-    ).bind(db.tenantId, year, username, allowance, exact).run();
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-bankholidays" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const days = Array.isArray(body.days) ? body.days : null;
-    if (!days) return text("Bad payload", 400);
-    const oldDays = await getBankHolidays();
-    const newDates = new Set(days.map((d) => d.date));
-    const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
-    if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
-    await cfgPut(`holiday:bankholidays:${year}`, days);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/set-shutdown" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const days = Array.isArray(body.days) ? body.days : null;
-    if (!days) return text("Bad payload", 400);
-    const oldDays = await getShutdownDays();
-    const newDates = new Set(days.map((d) => d.date));
-    const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
-    if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
-    await cfgPut(`holiday:shutdown:${year}`, days);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/toggle-worked" && method === "POST") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const body = await request.json();
-    const kind = body.kind, username = body.username, date = body.date, worked = !!body.worked;
-    if (!["bankholiday", "shutdown"].includes(kind) || !username || !date) return text("Bad payload", 400);
-    await ensureSystemDaysForUser(username);
-    const row = await db.prepare(
-      "SELECT id FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
-    ).bind(db.tenantId, kind, year, date, username).first();
-    if (!row) return text("Not found", 404);
-    await db.prepare(
-      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
-    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
-    await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
-    return json4({ success: true });
-  }
-  if (path === "/holiday/admin-summary" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const includeInactive = url.searchParams.get("all") === "1";
-    const activeUsers2 = await getActiveUsers();
-    await ensureSystemDaysBulk(activeUsers2);
-    const inactiveMap = {};
-    let usernames = activeUsers2.slice();
-    if (includeInactive) {
-      for (const iu of await getInactiveUsers()) {
-        usernames.push(iu.username);
-        inactiveMap[iu.username] = iu.status;
-      }
-    }
-    const [all, sys, allowMap, dflt, startsMap] = await Promise.all([
-      listHolidayRequestsForYear(),
-      listSystemRecordsForYear(),
-      listAllowancesMap(),
-      getDefaultAllowance(),
-      listUserStarts()
-    ]);
-    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const list = [];
-    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const row = allowMap[u];
-      const baseAllowance = row && Number.isFinite(row.allowance) ? row.allowance : dflt;
-      const exact = !!(row && row.exact);
-      const startISO = startsMap[u] || null;
-      const allowance = exact ? baseAllowance : proRataAllowance(baseAllowance, startISO, year);
-      const c = computeUsage(all, sys, u, allowance, today, startISO);
-      list.push({
-        username: u,
-        name: u.replace(".", " "),
-        allowance,
-        baseAllowance,
-        proRated: allowance !== baseAllowance,
-        exact,
-        startDate: startISO,
-        used: c.usedToDate,
-        // used TO DATE
-        committed: c.committed,
-        // full-year commitment
-        remaining: c.remaining,
-        booked: c.booked,
-        bankHolidays: c.bank,
-        shutdown: c.shutdown,
-        active: !inactiveMap[u],
-        status: inactiveMap[u] || "Active"
-      });
-    }
-    return json4({ year, engineers: list });
-  }
-  if (path === "/holiday/calendar" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const month = getMonth(url);
-    const monthStart = new Date(Date.UTC(year, month - 1, 1));
-    const monthEnd = new Date(Date.UTC(year, month, 0));
-    const daysInMonth = monthEnd.getUTCDate();
-    const includeInactive = url.searchParams.get("all") === "1";
-    const activeUsers2 = await getActiveUsers();
-    await ensureSystemDaysBulk(activeUsers2);
-    const inactiveMap = {};
-    let usernames = activeUsers2.slice();
-    if (includeInactive) {
-      for (const iu of await getInactiveUsers()) {
-        usernames.push(iu.username);
-        inactiveMap[iu.username] = iu.status;
-      }
-    }
-    const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
-    const engineers = [];
-    for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const cells = {};
-      for (const h of all) {
-        if (h.username !== u || h.status !== "Approved") continue;
-        const overlap = weekdayOverlapCount(h.start, h.end, monthStart, monthEnd);
-        if (!overlap) continue;
-        const s = /* @__PURE__ */ new Date(h.start + "T00:00:00Z");
-        const e = /* @__PURE__ */ new Date(h.end + "T00:00:00Z");
-        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
-          const day = d.getUTCDay();
-          if (day === 0 || day === 6) continue;
-          if (d < monthStart || d > monthEnd) continue;
-          const di = isoDate2(d);
-          cells[di] = {
-            kind: "holiday",
-            type: h.type || "Annual Leave",
-            note: h.notes || "",
-            label: "Holiday",
-            username: u,
-            requestId: h.id,
-            rangeStart: h.start,
-            rangeEnd: h.end,
-            days: h.days,
-            half: h.half || (Number(h.days) === 0.5 && h.start === h.end ? "HALF" : null)
-          };
-        }
-      }
-      for (const s of sys) {
-        if (s.username !== u) continue;
-        const di = s.date;
-        if (!di) continue;
-        const d = /* @__PURE__ */ new Date(di + "T00:00:00Z");
-        if (d < monthStart || d > monthEnd) continue;
-        if (!isWeekdayISO(di)) continue;
-        if (!cells[di]) {
-          cells[di] = {
-            kind: s.category === "Shutdown" ? "shutdown" : "bankholiday",
-            type: s.category,
-            note: "",
-            label: s.label || s.category,
-            worked: !!s.worked,
-            username: u
-          };
-        }
-      }
-      engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
-    }
-    return json4({ year, month, daysInMonth, monthStart: isoDate2(monthStart), monthEnd: isoDate2(monthEnd), engineers });
-  }
-  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    try {
-      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
-      if (!resp.ok) return text("GOV.UK unavailable", 502);
-      const data = await resp.json();
-      const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
-      return json4({ year, events });
-    } catch (e) {
-      return text("GOV.UK unavailable", 502);
-    }
-  }
-  if (path === "/holiday/debug-users" && method === "GET") {
-    if (!isAdmin) return text("Forbidden", 403);
-    const activeUsers2 = await getActiveUsers();
-    return json4({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
-  }
-  return text("Not Found", 404);
-}
-function reqOut(r) {
-  return {
-    id: r.id,
-    engineer: r.engineer,
-    username: r.username,
-    year: r.year,
-    start: r.start_date,
-    end: r.end_date,
-    days: r.days,
-    half: r.half || null,
-    type: r.type,
-    notes: r.notes,
-    status: r.status,
-    submittedAt: r.submitted_at,
-    approvedBy: r.approved_by,
-    decisionAt: r.decision_at,
-    cancelledBy: r.cancelled_by,
-    cancelNote: r.cancel_note
-  };
-}
-function sysOut(r) {
-  return {
-    id: r.id,
-    kind: r.kind,
-    username: r.username,
-    engineer: r.engineer,
-    year: r.year,
-    date: r.date,
-    label: r.label,
-    days: r.days,
-    category: r.category,
-    worked: !!r.worked,
-    status: r.status,
-    createdAt: r.created_at,
-    updatedBy: r.updated_by,
-    updatedAt: r.updated_at
-  };
-}
-async function deleteSystemDays(env, tenantId, kind, year, dates) {
-  const db = tenantDB(env, tenantId);
-  const placeholders = dates.map(() => "?").join(",");
-  await db.prepare(
-    `DELETE FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date IN (${placeholders})`
-  ).bind(db.tenantId, kind, year, ...dates).run();
-}
-function getYear(url) {
-  const y = url.searchParams.get("year");
-  const year = y ? parseInt(y, 10) : (/* @__PURE__ */ new Date()).getFullYear();
-  return Number.isFinite(year) ? year : (/* @__PURE__ */ new Date()).getFullYear();
-}
-function getMonth(url) {
-  const m = url.searchParams.get("month");
-  const month = m ? parseInt(m, 10) : (/* @__PURE__ */ new Date()).getMonth() + 1;
-  return Number.isFinite(month) && month >= 1 && month <= 12 ? month : (/* @__PURE__ */ new Date()).getMonth() + 1;
-}
-function isoDate2(d) {
-  return new Date(d).toISOString().split("T")[0];
-}
-function countWeekdaysInclusive(startISO, endISO) {
-  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
-  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
-  if (isNaN(s) || isNaN(e)) return 0;
-  if (e < s) return 0;
-  let days = 0;
-  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) days++;
-  }
-  return days;
-}
-function isWeekdayISO(dateISO) {
-  const [y, m, d] = dateISO.split("-").map(Number);
-  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return day !== 0 && day !== 6;
-}
-function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
-  const s = /* @__PURE__ */ new Date(startISO + "T00:00:00");
-  const e = /* @__PURE__ */ new Date(endISO + "T00:00:00");
-  const a = s < monthStart ? monthStart : s;
-  const b = e > monthEnd ? monthEnd : e;
-  if (b < a) return 0;
-  let days = 0;
-  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) days++;
-  }
-  return days;
-}
-var _hNormId, _hFinished;
-var init_holidays = __esm({
-  "src/routes/holidays.js"() {
-    init_http();
-    init_auth();
-    init_tenantdb();
-    init_push();
-    _hNormId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
-    _hFinished = /* @__PURE__ */ new Set(["complete", "closed", "invoiced", "cancelled"]);
-  }
-});
-
 // src/index.js
 init_http();
 init_auth();
@@ -28771,7 +28771,70 @@ init_tenantdb();
 init_complianceaccess();
 init_email();
 init_push();
-async function handle2(request, env, ctx, url, sess) {
+init_once();
+var CODE_TTL_MS = 10 * 60 * 1e3;
+var CODE_MAX_TRIES = 5;
+async function sha256Hex2(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomHex(n) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomCode() {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return String(a[0] % 1e6).padStart(6, "0");
+}
+function maskEmail(e) {
+  const [u, d] = String(e || "").split("@");
+  if (!d) return "";
+  return (u.length <= 2 ? u[0] + "*" : u.slice(0, 2) + "*".repeat(Math.min(6, u.length - 2))) + "@" + d;
+}
+async function ensureLoginCodes__raw(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_codes (
+    id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 1, username TEXT NOT NULL,
+    code_hash TEXT NOT NULL, device_id TEXT, expires_at INTEGER NOT NULL,
+    tries INTEGER NOT NULL DEFAULT 0, created_at TEXT)`).run();
+}
+var ensureLoginCodes = onceMigration(ensureLoginCodes__raw);
+async function twoFactorEnabled(env, tid) {
+  try {
+    const r = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "auth:twofactor:" + tid).first();
+    if (r && r.value) {
+      const v = JSON.parse(r.value);
+      if (v && v.enabled === false) return false;
+    }
+  } catch {
+  }
+  return true;
+}
+async function needsLoginCode(env, user, perms, deviceId) {
+  if (!await twoFactorEnabled(env, user.tenant_id)) return false;
+  if (perms && perms.FullAccess === "Yes") return true;
+  if (!deviceId) return true;
+  const known = await env.DB.prepare("SELECT 1 AS k FROM devices WHERE tenant_id=? AND device_id=? AND username=?").bind(user.tenant_id, deviceId, user.username).first().catch(() => null);
+  return !known;
+}
+async function sendLoginCode(env, user, code) {
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f2438">
+    <h2 style="color:#003366;margin:0 0 12px">Your Mostlane sign-in code</h2>
+    <p>Enter this code to finish signing in to the portal:</p>
+    <p style="font-size:34px;letter-spacing:8px;font-weight:700;color:#003366;margin:18px 0">${code}</p>
+    <p>It expires in 10 minutes.</p>
+    <p style="color:#6b7a8c;font-size:13px">If you didn't just try to sign in, someone may know your password \u2014 change it and tell the office.</p></div>`;
+  const subject = "Your Mostlane sign-in code: " + code;
+  try {
+    const { sendSubconMail: sendSubconMail2 } = await Promise.resolve().then(() => (init_sla(), sla_exports));
+    const r = await sendSubconMail2(env, user.tenant_id, { to: user.email, subject, html });
+    if (r && r.ok) return r;
+  } catch {
+  }
+  return sendEmail(env, { to: user.email, subject, html });
+}
+async function handle12(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/auth/login" && request.method === "POST") {
     const { username, password, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
@@ -28787,46 +28850,71 @@ async function handle2(request, env, ctx, url, sess) {
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
     const ok = passwordOk || masterOk;
     const tenantId = user ? user.tenant_id : 1;
-    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
+    if (!ok || masterOk) await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : "fail");
     if (!ok) return error("Invalid login credentials.", 401, env, request);
     if (passwordOk && user.password_algo !== "pbkdf2") {
       const newHash = await hashPassword(password);
       await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
     }
-    const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
-    const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
-    if (bindDevice) {
-      const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?").bind(user.tenant_id, bindDevice).first().catch(() => null);
-      if (dev && dev.username && dev.username !== user.username) {
-        await logLogin(env, tenantId, request, user.username, "device_mismatch");
-        return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+    const mismatch = await deviceMismatch(env, request, user, deviceId);
+    if (mismatch) return mismatch;
+    const perms0 = await permissionsFor(env, user.tenant_id, user.username);
+    if (!masterOk && await needsLoginCode(env, user, perms0, deviceId)) {
+      if (!user.email || !/@/.test(user.email)) {
+        return error("Your account needs an email address for the sign-in code. Ask the office to add one.", 403, env, request);
       }
-    }
-    const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
-    const perms = await permissionsFor(env, user.tenant_id, user.username);
-    try {
-      const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : user.profile || {};
-      if (prof && prof.staffType === "client" && !masterOk) {
-        const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
-        ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
-          title: "Client signed in",
-          body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
-          url: "/activity-log.html?user=" + encodeURIComponent(user.username),
-          tag: "client-login:" + user.username
-        }, null, true).catch(() => {
-        }));
+      await ensureLoginCodes(env);
+      const code = randomCode();
+      const challenge = randomHex(24);
+      const id = await sha256Hex2("chal:" + challenge);
+      await env.DB.prepare("DELETE FROM login_codes WHERE expires_at < ? OR (tenant_id=? AND username=?)").bind(Date.now(), user.tenant_id, user.username).run().catch(() => {
+      });
+      await env.DB.prepare("INSERT INTO login_codes (id, tenant_id, username, code_hash, device_id, expires_at, tries, created_at) VALUES (?,?,?,?,?,?,0,?)").bind(id, user.tenant_id, user.username, await sha256Hex2(id + ":" + code), deviceId, Date.now() + CODE_TTL_MS, (/* @__PURE__ */ new Date()).toISOString()).run();
+      const sent = await sendLoginCode(env, user, code);
+      if (!sent || !sent.ok) {
+        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {
+        });
+        return error("We couldn't send your sign-in code just now. Please try again in a minute, or call the office.", 503, env, request);
       }
-    } catch {
+      await logLogin(env, tenantId, request, user.username, "code_sent");
+      return json({ ok: false, needCode: true, challenge, sentTo: maskEmail(user.email) }, {}, env, request);
     }
-    return json({
-      ok: true,
-      token,
-      expires,
-      master: masterOk,
-      // master-password login → client skips device lock
-      mustChangePassword: !!user.must_change_password,
-      user: shapeUser(user, perms)
-    }, {}, env, request);
+    return finishLogin(env, ctx, request, user, { masterOk, deviceId, perms: perms0 });
+  }
+  if (path === "/auth/login-verify" && request.method === "POST") {
+    const { challenge, code, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
+    if (!challenge || !code) return error("Enter the code from your email.", 400, env, request);
+    await ensureLoginCodes(env);
+    const id = await sha256Hex2("chal:" + String(challenge));
+    const row = await env.DB.prepare("SELECT * FROM login_codes WHERE id=?").bind(id).first();
+    if (!row || row.expires_at < Date.now()) {
+      if (row) await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {
+      });
+      return error("That code has expired. Sign in again to get a new one.", 410, env, request);
+    }
+    const good = await sha256Hex2(id + ":" + String(code).replace(/\D/g, ""));
+    if (!safeEqual(good, row.code_hash)) {
+      const tries = (row.tries || 0) + 1;
+      await logLogin(env, row.tenant_id, request, row.username, "fail");
+      if (tries >= CODE_MAX_TRIES) {
+        await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run().catch(() => {
+        });
+        return error("Too many wrong codes. Sign in again to get a new one.", 410, env, request);
+      }
+      await env.DB.prepare("UPDATE login_codes SET tries=? WHERE id=?").bind(tries, id).run();
+      return error(`That code isn't right \u2014 ${CODE_MAX_TRIES - tries} ${CODE_MAX_TRIES - tries === 1 ? "try" : "tries"} left.`, 401, env, request);
+    }
+    await env.DB.prepare("DELETE FROM login_codes WHERE id=?").bind(id).run();
+    const user = await env.DB.prepare("SELECT * FROM users WHERE tenant_id=? AND username=?").bind(row.tenant_id, row.username).first();
+    if (!user || !isActiveStatus2(user.status)) return error("Invalid login credentials.", 401, env, request);
+    const deviceId = row.device_id || (typeof rawDeviceId === "string" && /^[\w.-]{4,80}$/.test(rawDeviceId) ? rawDeviceId : null);
+    const mismatch = await deviceMismatch(env, request, user, deviceId);
+    if (mismatch) return mismatch;
+    return finishLogin(env, ctx, request, user, { masterOk: false, deviceId });
   }
   if (path === "/auth/impersonate" && request.method === "POST") {
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -28958,7 +29046,7 @@ function shapeUser(u, perms) {
     // "office" | "field" | "client" (default field) — drives where the user lands:
     // office menu (main.html), the engineer app (route.html), or the walled client
     // portal (client-home.html) for an external customer login.
-    StaffType: staffTypeOf(u),
+    StaffType: staffTypeOf2(u),
     // The client org a "client" login is tied to (e.g. "fbc"); "" for staff.
     ClientOrg: clientOrgOf(u),
     // What a client login may see: "compliance" = that org's compliance chart
@@ -28983,7 +29071,7 @@ function areasOf(u) {
     return [];
   }
 }
-function staffTypeOf(u) {
+function staffTypeOf2(u) {
   try {
     const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
     return p && (p.staffType === "office" || p.staffType === "client") ? p.staffType : "field";
@@ -29033,6 +29121,47 @@ async function logLogin(env, tenantId, request, username, outcome) {
   } catch {
   }
 }
+async function deviceMismatch(env, request, user, deviceId) {
+  const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+  const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+  if (!bindDevice) return null;
+  const dev = await env.DB.prepare("SELECT username FROM devices WHERE tenant_id = ? AND device_id = ?").bind(user.tenant_id, bindDevice).first().catch(() => null);
+  if (dev && dev.username && dev.username !== user.username) {
+    await logLogin(env, user.tenant_id, request, user.username, "device_mismatch");
+    return error("This device is registered to a different user. Ask the office to reset it in Device Management.", 403, env, request);
+  }
+  return null;
+}
+async function finishLogin(env, ctx, request, user, { masterOk, deviceId, perms }) {
+  const OWNER_NAME = env.OWNER_USERNAME || "Jamie Line";
+  const bindDevice = deviceId && user.username !== OWNER_NAME ? deviceId : null;
+  if (!masterOk) await logLogin(env, user.tenant_id, request, user.username, "success");
+  const { token, expires } = await createSession(env, user.username, bindDevice, user.tenant_id);
+  if (!perms) perms = await permissionsFor(env, user.tenant_id, user.username);
+  try {
+    const prof = typeof user.profile === "string" ? JSON.parse(user.profile || "{}") : user.profile || {};
+    if (prof && prof.staffType === "client" && !masterOk) {
+      const nm = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+      ctx?.waitUntil(sendToPermission(env, user.tenant_id, ["FullAccess"], {
+        title: "Client signed in",
+        body: nm + (prof.clientOrg ? " (" + String(prof.clientOrg).toUpperCase() + ")" : "") + " opened their portal",
+        url: "/activity-log.html?user=" + encodeURIComponent(user.username),
+        tag: "client-login:" + user.username
+      }, null, true).catch(() => {
+      }));
+    }
+  } catch {
+  }
+  return json({
+    ok: true,
+    token,
+    expires,
+    master: masterOk,
+    // master-password login → client skips device lock
+    mustChangePassword: !!user.must_change_password,
+    user: shapeUser(user, perms)
+  }, {}, env, request);
+}
 
 // src/routes/users.js
 init_http();
@@ -29049,7 +29178,7 @@ async function requireAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle3(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -29527,7 +29656,7 @@ function orderUsers(a, b) {
 init_http();
 init_auth();
 init_tenantdb();
-async function handle4(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -31081,7 +31210,7 @@ async function handle17(request, env, ctx, url, sess) {
   let res;
   try {
     if (env.SITELOG_DB) {
-      res = await handle7(new Request(target, init), env, ctx);
+      res = await handle5(new Request(target, init), env, ctx);
     } else {
       res = await fetch(target, init);
     }
@@ -36758,7 +36887,7 @@ async function sitelogAdminFetch(env, pathQuery, ms) {
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
-      const res = await handle7(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      const res = await handle5(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
       if (res && res.ok) return res;
     } catch (e) {
     }
@@ -37989,7 +38118,7 @@ async function pushSiteToSiteLog(env, name, lat, lng, client) {
     let res;
     if (env.SITELOG_DB) {
       try {
-        res = await handle7(new Request(target, init), env);
+        res = await handle5(new Request(target, init), env);
       } catch (e) {
         res = null;
       }
@@ -45207,7 +45336,7 @@ async function buildAuthHeader(wwwAuth, user, pass, methodHttp, uri) {
   const ha2 = await md5(`${methodHttp}:${uri}`);
   let response, extra = "";
   if (qop) {
-    const cnonce = randomHex(16);
+    const cnonce = randomHex2(16);
     const nc = "00000001";
     response = await md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`);
     extra = `, qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
@@ -45227,7 +45356,7 @@ function parseAuthParams(header4) {
   while (m = re.exec(s)) out[m[1].toLowerCase()] = m[2] !== void 0 ? m[2] : (m[3] || "").trim();
   return out;
 }
-function randomHex(n) {
+function randomHex2(n) {
   const a = new Uint8Array(n);
   crypto.getRandomValues(a);
   return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -49013,7 +49142,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
       const req = new Request(base + path, init);
       if (env.SITELOG_DB) {
         try {
-          const r = await handle7(req, env);
+          const r = await handle5(req, env);
           if (r && r.ok) return r;
         } catch {
         }
@@ -50337,7 +50466,7 @@ async function loadKV(db, key) {
 async function saveKV2(db, key, obj) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
 }
-async function sha256Hex2(str) {
+async function sha256Hex3(str) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str || ""));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -50347,7 +50476,7 @@ async function hmacSha256Hex(secret, msg) {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 async function signRequest(accessId, secret, accessToken, method, path, bodyStr, t) {
-  const contentHash = await sha256Hex2(bodyStr || "");
+  const contentHash = await sha256Hex3(bodyStr || "");
   const stringToSign = method.toUpperCase() + "\n" + contentHash + "\n\n" + path;
   const signStr = accessId + (accessToken || "") + t + stringToSign;
   return hmacSha256Hex(secret, signStr);
@@ -51698,16 +51827,16 @@ function safeArr(s) {
 // src/index.js
 init_timesheets();
 var ROUTES = [
-  ["*", "/auth", handle2],
+  ["*", "/auth", handle12],
   ["*", "/admin/login-history", loginHistory],
-  ["*", "/user", handle3],
+  ["*", "/user", handle13],
   // /user and /users
-  ["*", "/onboard", handle3],
+  ["*", "/onboard", handle13],
   // public self-registration (Pending)
-  ["*", "/hs-plan-config", handle3],
-  ["*", "/po-config", handle3],
-  ["*", "/device", handle4],
-  ["*", "/holiday", handle14],
+  ["*", "/hs-plan-config", handle13],
+  ["*", "/po-config", handle13],
+  ["*", "/device", handle14],
+  ["*", "/holiday", handle2],
   ["*", "/asset", handle15],
   // /assets, /asset/*, /asset-image, /asset-thumb
   ["*", "/transfer", handle15],
@@ -51717,7 +51846,7 @@ var ROUTES = [
   ["*", "/delete-asset-image", handle15],
   ["*", "/sla/workever", handle47],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle13],
+  ["*", "/sla", handle11],
   ["*", "/stats", handle24],
   ["*", "/staff", handle25],
   // staff personal + company documents
@@ -51735,19 +51864,19 @@ var ROUTES = [
   // company memos (draft/send/sign)
   ["*", "/documents", handle32],
   // signable documents (library → send → sign → filed to My Documents)
-  ["*", "/ts", handle5],
+  ["*", "/ts", handle3],
   // engineer timesheets + invoices + mileage
   ["*", "/ai", handle35],
   // AI job assistant (draft → preview → create)
-  ["*", "/get-sites", handle8],
-  ["*", "/add-site", handle8],
-  ["*", "/update-site", handle8],
-  ["*", "/delete-site", handle8],
-  ["*", "/next-project-job-number", handle8],
-  ["*", "/upload-image", handle8],
-  ["*", "/customers", handle8],
-  ["*", "/import-sites", handle8],
-  ["*", "/sites", handle8],
+  ["*", "/get-sites", handle6],
+  ["*", "/add-site", handle6],
+  ["*", "/update-site", handle6],
+  ["*", "/delete-site", handle6],
+  ["*", "/next-project-job-number", handle6],
+  ["*", "/upload-image", handle6],
+  ["*", "/customers", handle6],
+  ["*", "/import-sites", handle6],
+  ["*", "/sites", handle6],
   // /sites/street-images (bulk imagery)
   ["*", "/sites/register", handle28],
   // master site register (longest prefix wins over /sites)
@@ -51757,7 +51886,7 @@ var ROUTES = [
   // per-site labour cost roll-up
   ["*", "/exceptions", handle28],
   // needs-a-human-eye list
-  ["*", "/compliance", handle9],
+  ["*", "/compliance", handle7],
   // Southern Co-op compliance certs (R2 + D1)
   ["*", "/chapplins", handle33],
   // Chapplins customer: site tenants (current/previous) + directory
@@ -51784,7 +51913,7 @@ var ROUTES = [
   // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck", handle23],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle6],
+  ["*", "/po", handle4],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/accounts", handle34],
   // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
@@ -51796,11 +51925,11 @@ var ROUTES = [
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/fbc", handle18],
   // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
-  ["*", "/concerto", handle10],
+  ["*", "/concerto", handle8],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
-  ["*", "/certs", handle12],
+  ["*", "/certs", handle10],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle11],
+  ["*", "/pump", handle9],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
   ["*", "/sitelog-ts", handle39],
   // SiteLog timesheet PDFs (FullAccess)
@@ -51835,7 +51964,7 @@ var worker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
-      return handle7(request, env, ctx);
+      return handle5(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {
@@ -52117,6 +52246,7 @@ function auditAction(env, ctx, sess, request, url, status, clone, note) {
 }
 var PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
+  ["POST", "/auth/login-verify"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
   // Public self-registration form (login page → "Sign up").

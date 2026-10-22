@@ -365,6 +365,23 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   currently mints one.
 - `/certs/status?count=1` (the home-hub tile) memoises its tallies per isolate for
   60 s (`STATUS_COUNT_MEMO`) — it was the last endpoint still brushing 2.5 s.
+- **Two-step sign-in (22 Oct 2026, routes/auth.js + login.html).** After a correct
+  password, `needsLoginCode` asks for a 6-digit code when the account is **Full
+  Access (every login)** OR the device isn't one already in `devices` for that user
+  (or no deviceId). The code is emailed via `sendSubconMail` (Microsoft 365 orders@
+  first, Resend fallback — Resend alone didn't reliably reach mostlane.com inboxes)
+  and stored HASHED in **`login_codes`** (self-migrating; id = sha256 of the
+  challenge, 10 min, 5 tries, one use). /auth/login replies `{needCode, challenge,
+  sentTo}` with NO session; **POST /auth/login-verify** `{challenge, code, deviceId}`
+  (PUBLIC_ROUTES) issues it via `finishLogin`. Device-mismatch check runs before the
+  code. MASTER_PASSWORD skips it (audited `master`); **View As never logs in, so it's
+  unaffected**. login_history: `code_sent`, then `success` only when the session is
+  issued (wrong codes log `fail`, so the IP throttle covers code guessing). No email
+  on the account → 403 "ask the office"; email send failure → 503, no challenge left.
+  **Kill switch:** app_config `auth:twofactor:<tid>` = `{"enabled":false}`. login.html
+  `askForLoginCode` shows the code box (autocomplete one-time-code). Test
+  `node --no-warnings worker/tools/test-two-factor.mjs` (21); test-auth-sessions turns
+  it off in its own env.
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
   auto-upgraded on login. NEVER paste plaintext into D1 — it won't work.
 - **Sessions last 90 days** (SESSION_TTL_HOURS default 2160). login.html
@@ -2967,7 +2984,7 @@ bucket's public access (mostlane-job-files → Settings → Public access → r2
 be switched OFF in the dashboard.** Old downloaded job-sheet HTML files that embedded
 r2.dev links stop showing photos after that.
 Still open from the same review: git history still holding old data files,
-no second factor, 90-day sessions, `ALLOWED_ORIGINS="*"`.
+90-day sessions, `ALLOWED_ORIGINS="*"`.
 
 ## Why the portal was slow — and the two fixes (9 Sep 2026)
 Jamie: "Why so slow anyway?" Evidence from `health_events` (kind='slow', >2.5 s):
