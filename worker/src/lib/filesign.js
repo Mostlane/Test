@@ -33,11 +33,14 @@ async function hmacHex(secret, msg) {
 // Build a worker URL for a file. Signed + expiring when a secret exists,
 // otherwise a plain worker URL (still proxied + CORS'd, just not access-gated).
 // streamPath is the route that serves the bytes, e.g. "/sla/site/doc".
-export async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
+// opts.stable: round the expiry to the start of the day so the same file gets
+// the SAME link all day — lets the browser cache photos between page loads.
+export async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800, opts = {}) {
   const base = `${origin}${streamPath}?key=${encodeURIComponent(key)}`;
   const secret = fileSecret(env);
   if (!secret) return base;
-  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const now = Math.floor(Date.now() / 1000);
+  const exp = (opts && opts.stable ? now - (now % 86400) : now) + ttlSec;
   const sig = await hmacHex(secret, key + "|" + exp);
   return `${base}&exp=${exp}&sig=${sig}`;
 }

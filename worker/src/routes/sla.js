@@ -1891,7 +1891,7 @@ export async function handle(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
-      const files = await getJobFilesPublicList(env, id);
+      const files = await getJobFilesPublicList(env, id, url.origin);
       const html = buildJobExportHtml(decorated, files, resolveLogo(env));
       const filename = `Job-${safeRef(decorated, id)}.html`;
       return new Response(html, { status: 200, headers: {
@@ -1905,7 +1905,7 @@ export async function handle(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
-      const files = await getJobFilesPublicList(env, id);
+      const files = await getJobFilesPublicList(env, id, url.origin);
       const html = buildJobExportHtml(decorated, files, resolveLogo(env));
       const filename = `Job-${safeRef(decorated, id)}.pdf`;
       if (!env.PDFSHIFT_API_KEY) return jsonResponse({ error: "Missing PDFSHIFT_API_KEY" }, headers, 500);
@@ -2075,7 +2075,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (thumb && typeof thumb.stream === "function") {
         try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
       }
-      return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
+      return jsonResponse({ ok: true, publicURL: await r2Url(env, key, url.origin), stage }, headers, 201);
     }
 
     // GET /sla/jobs/{id}/files  -> list photos (with their Before/During/After tag)
@@ -2096,7 +2096,7 @@ export async function handle(request, env, ctx, url, sess) {
         files.push({
           name,
           key: o.key,
-          publicURL: r2Url(env, o.key),
+          publicURL: await r2Url(env, o.key, url.origin),
           thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
           hasThumb: thumbSet.has(o.key + ".thumb"),
           stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || ""
@@ -2111,7 +2111,7 @@ export async function handle(request, env, ctx, url, sess) {
           signedBy: jobSig.signedBy || "",
           signedAt: jobSig.signedAt || "",
           url: await signedFileUrl(env, url.origin, "/sla/site/thumb", jobSig.fileKey),
-          publicURL: r2Url(env, jobSig.fileKey),
+          publicURL: await r2Url(env, jobSig.fileKey, url.origin),
         };
       }
       return jsonResponse(out, headers);
@@ -2233,8 +2233,8 @@ export async function handle(request, env, ctx, url, sess) {
       job.updatedAt = new Date().toISOString();
       await saveJob(env, tenantId, job);
       const remaining = (job.auditItems || []).filter(it => !(it.done && it.donePhoto)).length;
-      return jsonResponse({ ok: true, itemId, stage, key, url: r2Url(env, key),
-        thumb: r2Url(env, key + ".thumb"), done: !!item.done, remaining }, headers, 201);
+      return jsonResponse({ ok: true, itemId, stage, key, url: await r2Url(env, key, url.origin),
+        thumb: await r2Thumb(env, key, url.origin), done: !!item.done, remaining }, headers, 201);
     }
 
     // POST /sla/jobs/{id}/audit-item  -> item tweaks: undo a completion, or remove
@@ -2281,7 +2281,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (thumb && typeof thumb.stream === "function") {
         try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
       }
-      return jsonResponse({ ok: true, key, url: r2Url(env, key), thumb: r2Url(env, key + ".thumb") }, headers, 201);
+      return jsonResponse({ ok: true, key, url: await r2Url(env, key, url.origin), thumb: await r2Thumb(env, key, url.origin) }, headers, 201);
     }
 
     // DELETE /sla/jobs/{id}/remedial-photo?key=  -> remove a remedial photo from R2.
@@ -2417,7 +2417,7 @@ export async function handle(request, env, ctx, url, sess) {
         job.updatedAt = new Date().toISOString();
         await saveJob(env, tenantId, job);
       }
-      return jsonResponse({ ok: true, key, publicURL: r2Url(env, key) }, headers, 201);
+      return jsonResponse({ ok: true, key, publicURL: await r2Url(env, key, url.origin) }, headers, 201);
     }
 
     // POST /sla/jobs/{id}/hold-approve  — an admin OKs a parked job. It becomes
@@ -2854,8 +2854,8 @@ export async function handle(request, env, ctx, url, sess) {
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));   // this viewer's own slice
-      if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);   // add viewable photo URLs
-      if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);        // electrical-test remedials
+      if (isAuditJob(job)) d.auditItems = await decorateAuditItems(env, job.auditItems, url.origin);   // add viewable photo URLs
+      if (job.remedials) d.remedials = await decorateRemedials(env, job.remedials, url.origin);        // electrical-test remedials
       if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) d = stripMoney(d);
       return jsonResponse(d, headers);
     }
@@ -3508,7 +3508,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (thumb && typeof thumb.stream === "function") {
       try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
     }
-    return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
+    return jsonResponse({ ok: true, url: await r2Url(env, key, url.origin), key }, headers, 201);
   }
 
   // Serve a small thumbnail for a site photo / job photo — <key>.thumb if it
@@ -3560,7 +3560,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (subpath === "/site/doc" && method === "GET") {
     const key = searchParams.get("key");
     // Only ever serve site documents / job photos (never arbitrary bucket keys).
-    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/") || String(key).startsWith("sites/")))
       return jsonResponse({ error: "Bad key" }, headers, 400);
     // Access control: a valid, unexpired signature (minted by the authenticated
     // listing) or a live session. Falls open only when no signing secret is set.
@@ -3572,7 +3572,7 @@ export async function handle(request, env, ctx, url, sess) {
       ...headers,
       "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
       "Content-Disposition": "inline",
-      "Cache-Control": "private, max-age=3600"
+      "Cache-Control": "private, max-age=86400"
     }});
   }
 
@@ -3740,12 +3740,12 @@ function normRemedials(input, existing) {
   return out;
 }
 // Response-only: viewable photo URLs per remedial item.
-function decorateRemedials(env, remedials) {
+async function decorateRemedials(env, remedials, origin) {
   if (!Array.isArray(remedials)) return remedials;
-  return remedials.map(r => ({
+  return Promise.all(remedials.map(async r => ({
     ...r,
-    photoUrls: (r.photos || []).map(k => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") })),
-  }));
+    photoUrls: await Promise.all((r.photos || []).map(async k => ({ key: k, url: await r2Url(env, k, origin), thumb: await r2Thumb(env, k, origin) }))),
+  })));
 }
 
 function completionMissing(job, patch, afterPhotoCount) {
@@ -8478,9 +8478,16 @@ async function inferWorkArea(env, tenantId, description) {
 
 /* ================= FILES (R2) + PDF ================= */
 
-export function r2Url(env, key) {
-  const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
-  return `${base}/${key}`;
+// Job files (photos, signatures, audit/remedial photos) are served through the
+// worker on a SIGNED, expiring link — never the bucket's public r2.dev URL, so
+// the bucket's public access can be switched off. `stable` keeps the link the
+// same all day so browsers can cache the photo.
+export const API_ORIGIN = "https://mostlane-api.jamie-def.workers.dev";
+export async function r2Url(env, key, origin) {
+  return signedFileUrl(env, origin || env.API_BASE_URL || API_ORIGIN, "/sla/site/doc", key, 604800, { stable: true });
+}
+export async function r2Thumb(env, key, origin) {
+  return signedFileUrl(env, origin || env.API_BASE_URL || API_ORIGIN, "/sla/site/thumb", key, 604800, { stable: true });
 }
 
 // Map a site's client group → the billing CUSTOMER name (what a job sheet shows
@@ -8517,15 +8524,15 @@ async function resolveSiteMeta(env, tenantId, job) {
 async function resolveCustomerName(env, tenantId, job) { return (await resolveSiteMeta(env, tenantId, job)).customer; }
 // Attach public view URLs to a site-audit job's checklist items (their photos
 // live in the public JOB_FILES bucket). Response-only — never stored.
-function decorateAuditItems(env, items) {
+async function decorateAuditItems(env, items, origin) {
   if (!Array.isArray(items)) return items;
-  const ph = k => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") });
-  return items.map(it => ({
+  const ph = async k => ({ key: k, url: await r2Url(env, k, origin), thumb: await r2Thumb(env, k, origin) });
+  return Promise.all(items.map(async it => ({
     ...it,
-    refPhotoUrls: (it.refPhotos || []).map(ph),
-    donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null,
-    extraPhotoUrls: (it.extraPhotos || []).map(ph),
-  }));
+    refPhotoUrls: await Promise.all((it.refPhotos || []).map(ph)),
+    donePhotoUrl: it.donePhoto ? await ph(it.donePhoto) : null,
+    extraPhotoUrls: await Promise.all((it.extraPhotos || []).map(ph)),
+  })));
 }
 
 // Access-controlled URL for a site document / photo. Routes through the worker
@@ -8536,10 +8543,10 @@ async function fileUrl(env, url, key) {
   return signedFileUrl(env, url.origin, "/sla/site/doc", key);
 }
 
-async function getJobFilesPublicList(env, id) {
+async function getJobFilesPublicList(env, id, origin) {
   if (!env.JOB_FILES) return [];
   const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
-  return listed.objects.map(o => ({ name: o.key.split("/").pop(), publicURL: r2Url(env, o.key) }));
+  return Promise.all(listed.objects.map(async o => ({ name: o.key.split("/").pop(), publicURL: await r2Url(env, o.key, origin) })));
 }
 
 function resolveLogo(env) {

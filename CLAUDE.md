@@ -2954,9 +2954,19 @@ no new JS errors. **395 fixes across ~100 files.** Rules now in force:
 `NODE_PATH=/opt/node22/lib/node_modules node hostile.cjs 8099 [pages]`) — any
 `exec>0` is a regression. The static scanner (`scan.mjs`) is only a lead generator
 (~2000 noisy flags remain: numbers, class names, page-built HTML).
-Still open from the same review: the job-files R2 bucket's public r2.dev access
-(job photos/signatures are linked by public URL — confirm in the dashboard and
-route them through the signed streams), git history still holding old data files,
+**Job files off the public bucket URL (22 Oct 2026):** `sla.js r2Url(env,key,origin)`
+(now ASYNC) + `r2Thumb` return SIGNED `/sla/site/doc` / `/sla/site/thumb` links
+(7 days, `signedFileUrl(...,{stable:true})` = expiry rounded to the day so the link
+is identical all day and the browser caches the photo) for job photos, signatures,
+audit + remedial photos (sla.js, concerto.js). Shop pictures (sites.js): the STORED
+`imageURL` stays the old r2.dev form; `/get-sites` + `/upload-image` hand out a
+signed link (`imageForView`), and add/update-site turn a signed link back into the
+stored form (`imageForStore`). `/sla/site/doc` also serves `sites/` keys. job-pdf.html
+no longer builds an r2.dev URL. **Nothing hands out the r2.dev link any more — the
+bucket's public access (mostlane-job-files → Settings → Public access → r2.dev) can
+be switched OFF in the dashboard.** Old downloaded job-sheet HTML files that embedded
+r2.dev links stop showing photos after that.
+Still open from the same review: git history still holding old data files,
 no second factor, 90-day sessions, `ALLOWED_ORIGINS="*"`.
 
 ## Why the portal was slow — and the two fixes (9 Sep 2026)

@@ -186,7 +186,6 @@
 
 <script>
 const MOSTLANE_API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
-const R2_PUBLIC = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev";
 const params = new URLSearchParams(location.search);
 const jobId = params.get("id");
 const copyType = (params.get("type") === "client") ? "client" : "mostlane";
@@ -399,8 +398,7 @@ async function load(){
     const signedBy = (sigMeta && sigMeta.signedBy) || job.signature.signedBy || "";
     const signedAt = (sigMeta && sigMeta.signedAt) || job.signature.signedAt;
     const primary = (sigMeta && sigMeta.url) || "";
-    const fallback = (sigMeta && sigMeta.publicURL) ||
-      (job.signature.fileKey !== "local" ? `${R2_PUBLIC}/${encodeURIComponent(job.signature.fileKey).replace(/%2F/g,'/')}` : "");
+    const fallback = (sigMeta && sigMeta.publicURL) || "";
     renderSignature(primary || fallback, fallback, signedBy, signedAt);
   } else {
     document.getElementById("signature").innerHTML = '<div class="muted">Not signed.</div>';

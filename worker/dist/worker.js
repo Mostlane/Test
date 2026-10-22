@@ -213,11 +213,12 @@ async function hmacHex(secret, msg) {
   const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
   return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
+async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800, opts = {}) {
   const base = `${origin}${streamPath}?key=${encodeURIComponent(key)}`;
   const secret = fileSecret(env);
   if (!secret) return base;
-  const exp = Math.floor(Date.now() / 1e3) + ttlSec;
+  const now2 = Math.floor(Date.now() / 1e3);
+  const exp = (opts && opts.stable ? now2 - now2 % 86400 : now2) + ttlSec;
   const sig = await hmacHex(secret, key + "|" + exp);
   return `${base}&exp=${exp}&sig=${sig}`;
 }
@@ -11845,6 +11846,18 @@ var init_sitelog_api = __esm({
 });
 
 // src/routes/sites.js
+async function imageForView(env, origin, u) {
+  const base = r2Pub(env) + "/";
+  if (typeof u !== "string" || !u.startsWith(base)) return u;
+  return signedFileUrl(env, origin, "/sla/site/doc", decodeURIComponent(u.slice(base.length)), 604800, { stable: true });
+}
+function imageForStore(env, u) {
+  if (typeof u !== "string") return u;
+  const m = u.match(/\/sla\/site\/doc\?key=([^&]+)/);
+  if (!m) return u;
+  const key = decodeURIComponent(m[1]);
+  return /^(sites|jobs|sitedocs)\//.test(key) ? `${r2Pub(env)}/${key}` : u;
+}
 async function handle8(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
@@ -11859,7 +11872,12 @@ async function handle8(request, env, ctx, url, sess) {
     } else {
       ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
     }
-    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
+    const out = await Promise.all((rows || []).map(async (r) => {
+      const site = JSON.parse(r.data);
+      if (site && site.imageURL) site.imageURL = await imageForView(env, url.origin, site.imageURL);
+      return site;
+    }));
+    return json(out, {}, env, request);
   }
   if (path === "/delete-site" && method === "POST") {
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -11891,6 +11909,7 @@ async function handle8(request, env, ctx, url, sess) {
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
     if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
+    if (site.imageURL) site.imageURL = imageForStore(env, site.imageURL);
     if (path === "/add-site" && client === "projects") {
       if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
       if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
@@ -11962,8 +11981,7 @@ async function handle8(request, env, ctx, url, sess) {
     const safeName6 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
     const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName6}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
-    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+    return json({ success: true, url: await imageForView(env, url.origin, `${r2Pub(env)}/${key}`) }, { status: 201 }, env, request);
   }
   if (path === "/customers" && method === "GET") {
     const { results } = await db.prepare(`
@@ -12068,7 +12086,7 @@ async function handle8(request, env, ctx, url, sess) {
       if (buf) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
         await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
-        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site.imageURL = `${r2Pub(env)}/${r2key}`;
         site._svAt = now2;
         delete site._noImagery;
         await saveSite(env, tenantId, site);
@@ -12285,13 +12303,16 @@ function slug(s) {
 function prettify(id) {
   return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-var OLD_SITES_WORKER;
+var R2_PUB_DEFAULT, r2Pub, OLD_SITES_WORKER;
 var init_sites = __esm({
   "src/routes/sites.js"() {
     init_http();
     init_tenantdb();
     init_auth();
     init_sitelog_api();
+    init_filesign();
+    R2_PUB_DEFAULT = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev";
+    r2Pub = (env) => (env.R2_PUBLIC_BASE || R2_PUB_DEFAULT).replace(/\/$/, "");
     OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
   }
 });
@@ -13992,7 +14013,7 @@ async function caseContext(env, tid, type, jobs) {
       engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
       worksJobId: j.remedialsWorksJobId || null,
       remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
-      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map((x) => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: (Array.isArray(x.photos) ? x.photos : []).map((k) => r2Url(env, k)) }))
+      remedialsList: await Promise.all((Array.isArray(j.remedials) ? j.remedials : []).map(async (x) => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: await Promise.all((Array.isArray(x.photos) ? x.photos : []).map((k) => r2Url(env, k))) })))
     });
   }
   try {
@@ -19244,6 +19265,7 @@ var init_certs = __esm({
 // src/routes/sla.js
 var sla_exports = {};
 __export(sla_exports, {
+  API_ORIGIN: () => API_ORIGIN,
   SUBCON_STATUS: () => SUBCON_STATUS,
   activeSetOn: () => activeSetOn,
   applyOrderToJob: () => applyOrderToJob,
@@ -19270,6 +19292,7 @@ __export(sla_exports, {
   listJobs: () => listJobs,
   notifyNewlyAssigned: () => notifyNewlyAssigned,
   optimiseEmDay: () => optimiseEmDay,
+  r2Thumb: () => r2Thumb,
   r2Url: () => r2Url,
   raiseJobForOrder: () => raiseJobForOrder,
   reconcileRelease: () => reconcileRelease,
@@ -21022,7 +21045,7 @@ async function handle13(request, env, ctx, url, sess) {
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
-      const files = await getJobFilesPublicList(env, id);
+      const files = await getJobFilesPublicList(env, id, url.origin);
       const html = buildJobExportHtml(decorated, files, resolveLogo(env));
       const filename = `Job-${safeRef(decorated, id)}.html`;
       return new Response(html, { status: 200, headers: {
@@ -21036,7 +21059,7 @@ async function handle13(request, env, ctx, url, sess) {
       const job = await getJob3(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
-      const files = await getJobFilesPublicList(env, id);
+      const files = await getJobFilesPublicList(env, id, url.origin);
       const html = buildJobExportHtml(decorated, files, resolveLogo(env));
       const filename = `Job-${safeRef(decorated, id)}.pdf`;
       if (!env.PDFSHIFT_API_KEY) return jsonResponse({ error: "Missing PDFSHIFT_API_KEY" }, headers, 500);
@@ -21216,7 +21239,7 @@ async function handle13(request, env, ctx, url, sess) {
         } catch {
         }
       }
-      return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
+      return jsonResponse({ ok: true, publicURL: await r2Url(env, key, url.origin), stage }, headers, 201);
     }
     if (parts[2] === "files" && method === "GET") {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
@@ -21236,7 +21259,7 @@ async function handle13(request, env, ctx, url, sess) {
         files.push({
           name,
           key: o.key,
-          publicURL: r2Url(env, o.key),
+          publicURL: await r2Url(env, o.key, url.origin),
           thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
           hasThumb: thumbSet.has(o.key + ".thumb"),
           stage: overrides[name] || o.customMetadata && o.customMetadata.stage || ""
@@ -21248,7 +21271,7 @@ async function handle13(request, env, ctx, url, sess) {
           signedBy: jobSig.signedBy || "",
           signedAt: jobSig.signedAt || "",
           url: await signedFileUrl(env, url.origin, "/sla/site/thumb", jobSig.fileKey),
-          publicURL: r2Url(env, jobSig.fileKey)
+          publicURL: await r2Url(env, jobSig.fileKey, url.origin)
         };
       }
       return jsonResponse(out, headers);
@@ -21376,8 +21399,8 @@ async function handle13(request, env, ctx, url, sess) {
         itemId,
         stage,
         key,
-        url: r2Url(env, key),
-        thumb: r2Url(env, key + ".thumb"),
+        url: await r2Url(env, key, url.origin),
+        thumb: await r2Thumb(env, key, url.origin),
         done: !!item.done,
         remaining
       }, headers, 201);
@@ -21443,7 +21466,7 @@ async function handle13(request, env, ctx, url, sess) {
         } catch {
         }
       }
-      return jsonResponse({ ok: true, key, url: r2Url(env, key), thumb: r2Url(env, key + ".thumb") }, headers, 201);
+      return jsonResponse({ ok: true, key, url: await r2Url(env, key, url.origin), thumb: await r2Thumb(env, key, url.origin) }, headers, 201);
     }
     if (parts[2] === "remedial-photo" && method === "DELETE") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -21558,7 +21581,7 @@ async function handle13(request, env, ctx, url, sess) {
         job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
         await saveJob(env, tenantId, job);
       }
-      return jsonResponse({ ok: true, key, publicURL: r2Url(env, key) }, headers, 201);
+      return jsonResponse({ ok: true, key, publicURL: await r2Url(env, key, url.origin) }, headers, 201);
     }
     if (parts[2] === "hold-approve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -21987,8 +22010,8 @@ async function handle13(request, env, ctx, url, sess) {
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
-      if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);
-      if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);
+      if (isAuditJob(job)) d.auditItems = await decorateAuditItems(env, job.auditItems, url.origin);
+      if (job.remedials) d.remedials = await decorateRemedials(env, job.remedials, url.origin);
       if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) d = stripMoney(d);
       return jsonResponse(d, headers);
     }
@@ -22633,7 +22656,7 @@ async function handle13(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
+    return jsonResponse({ ok: true, url: await r2Url(env, key, url.origin), key }, headers, 201);
   }
   if (subpath === "/site/thumb" && method === "GET") {
     const key = searchParams.get("key");
@@ -22682,7 +22705,7 @@ async function handle13(request, env, ctx, url, sess) {
   }
   if (subpath === "/site/doc" && method === "GET") {
     const key = searchParams.get("key");
-    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/") || String(key).startsWith("sites/")))
       return jsonResponse({ error: "Bad key" }, headers, 400);
     if (!sess && !await verifyFileSig(env, key, searchParams))
       return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
@@ -22692,7 +22715,7 @@ async function handle13(request, env, ctx, url, sess) {
       ...headers,
       "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
       "Content-Disposition": "inline",
-      "Cache-Control": "private, max-age=3600"
+      "Cache-Control": "private, max-age=86400"
     } });
   }
   if (subpath === "/site/doc-delete" && method === "POST") {
@@ -22826,12 +22849,12 @@ function normRemedials(input, existing) {
   }
   return out;
 }
-function decorateRemedials(env, remedials) {
+async function decorateRemedials(env, remedials, origin) {
   if (!Array.isArray(remedials)) return remedials;
-  return remedials.map((r) => ({
+  return Promise.all(remedials.map(async (r) => ({
     ...r,
-    photoUrls: (r.photos || []).map((k) => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") }))
-  }));
+    photoUrls: await Promise.all((r.photos || []).map(async (k) => ({ key: k, url: await r2Url(env, k, origin), thumb: await r2Thumb(env, k, origin) })))
+  })));
 }
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
@@ -27553,9 +27576,11 @@ Which single area id best fits this work?`;
   const match = areas.find((a) => a.id === id);
   return { ok: true, areaId: match ? match.id : "", name: match ? match.name : "", confidence: r.input.confidence || "" };
 }
-function r2Url(env, key) {
-  const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
-  return `${base}/${key}`;
+async function r2Url(env, key, origin) {
+  return signedFileUrl(env, origin || env.API_BASE_URL || API_ORIGIN, "/sla/site/doc", key, 604800, { stable: true });
+}
+async function r2Thumb(env, key, origin) {
+  return signedFileUrl(env, origin || env.API_BASE_URL || API_ORIGIN, "/sla/site/thumb", key, 604800, { stable: true });
 }
 function customerForClient(c) {
   c = String(c || "").toLowerCase().trim();
@@ -27588,23 +27613,23 @@ async function resolveSiteMeta(env, tenantId, job) {
 async function resolveCustomerName(env, tenantId, job) {
   return (await resolveSiteMeta(env, tenantId, job)).customer;
 }
-function decorateAuditItems(env, items) {
+async function decorateAuditItems(env, items, origin) {
   if (!Array.isArray(items)) return items;
-  const ph = (k) => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") });
-  return items.map((it) => ({
+  const ph = async (k) => ({ key: k, url: await r2Url(env, k, origin), thumb: await r2Thumb(env, k, origin) });
+  return Promise.all(items.map(async (it) => ({
     ...it,
-    refPhotoUrls: (it.refPhotos || []).map(ph),
-    donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null,
-    extraPhotoUrls: (it.extraPhotos || []).map(ph)
-  }));
+    refPhotoUrls: await Promise.all((it.refPhotos || []).map(ph)),
+    donePhotoUrl: it.donePhoto ? await ph(it.donePhoto) : null,
+    extraPhotoUrls: await Promise.all((it.extraPhotos || []).map(ph))
+  })));
 }
 async function fileUrl(env, url, key) {
   return signedFileUrl(env, url.origin, "/sla/site/doc", key);
 }
-async function getJobFilesPublicList(env, id) {
+async function getJobFilesPublicList(env, id, origin) {
   if (!env.JOB_FILES) return [];
   const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
-  return listed.objects.map((o) => ({ name: o.key.split("/").pop(), publicURL: r2Url(env, o.key) }));
+  return Promise.all(listed.objects.map(async (o) => ({ name: o.key.split("/").pop(), publicURL: await r2Url(env, o.key, origin) })));
 }
 function resolveLogo(env) {
   let logo = (env.MOSTLANE_LOGO_BASE64 || "").trim();
@@ -27768,7 +27793,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBCON_SENDER_DEFAULT, SUBCON_STATUS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBCON_SENDER_DEFAULT, SUBCON_STATUS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, API_ORIGIN, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -27879,6 +27904,7 @@ var init_sla = __esm({
     CONCERTO_TRADE_NAMES = WORK_TYPES.map((t) => t.name).concat("General / other");
     _londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
     AI_CAP_DEFAULT = 400;
+    API_ORIGIN = "https://mostlane-api.jamie-def.workers.dev";
     FS_DEFAULT_DECL = "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. All materials used are correctly installed in accordance with training and to a good standard. Local identification labelling installed to each penetration seal.";
   }
 });

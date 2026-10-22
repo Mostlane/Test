@@ -590,7 +590,7 @@ async function caseContext(env, tid, type, jobs) {
     push(ctx.testJobs, code, { id: j.id, ref: j.helpdeskRef || j.siteName || "", status: j.status || "", done, doneDate, scheduledAt: j.scheduledAt || null,
       date: doneDate || (j.scheduledAt || "").slice(0, 10) || null, engineer: (Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []).join(", "),
       worksJobId: j.remedialsWorksJobId || null, remedials: Array.isArray(j.remedials) ? j.remedials.length : 0,
-      remedialsList: (Array.isArray(j.remedials) ? j.remedials : []).map(x => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: (Array.isArray(x.photos) ? x.photos : []).map(k => r2Url(env, k)) })) });
+      remedialsList: await Promise.all((Array.isArray(j.remedials) ? j.remedials : []).map(async x => ({ id: String(x.id || ""), code: String(x.code || ""), description: String(x.description || "").slice(0, 300), minutes: Number(x.minutes) || 0, materialCost: Number(x.materialCost) || 0, photos: Array.isArray(x.photos) ? x.photos.length : 0, photoUrls: await Promise.all((Array.isArray(x.photos) ? x.photos : []).map(k => r2Url(env, k))) }))) });
   }
   try {
     const { results } = await env.DB.prepare("SELECT id, code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
