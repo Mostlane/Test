@@ -806,6 +806,7 @@ export async function handle(request, env, ctx, url, sess) {
         } catch {}
       })());
     }
+    if (!before) ctx?.waitUntil(estimateNewJobDuration(env, tenantId, job));
     if (payload.visitGroupId) { try { await stampVisitGroup(env, tenantId, payload.visitGroupId); } catch (e) { console.error("stampVisitGroup:", e && e.message); } }
     // A client order for this reference may already be waiting → stamp its value on.
     try { if (await applyOrderToJob(env, tenantId, job)) job = (await getJob(env, tenantId, job.id)) || job; } catch {}
@@ -876,6 +877,9 @@ export async function handle(request, env, ctx, url, sess) {
       return d;
     });
     if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
+    // AI estimate for jobs with no set length — shown as "est.", never saved on the job.
+    { const est = await loadAiDurCache(env, tenantId);
+      jobs = jobs.map(j => (!(Number(j.durationMinutes) > 0) && est[j.id] != null) ? { ...j, estMinutes: est[j.id] } : j); }
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -4924,6 +4928,7 @@ export async function sweepStatusNudges(env, tenantId = 1) {
     return m > 0 ? m / 2 : null;
   };
   const certJob = j => !!(j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping);
+  let estCache = null;
   for (const j of all) {
     const engs = assignedList(j);
     if (!engs.length) continue;
@@ -4946,7 +4951,10 @@ export async function sweepStatusNudges(env, tenantId = 1) {
         const first = m ? Math.min(100, Math.max(25, m * 1.6 + 10)) : 40;
         due = rec.n === 0 ? since >= first : (rec.n < 2 && (now - new Date(rec.last)) / 60000 >= 30);
       } else {
-        const first = Math.max(30, Number(j.durationMinutes) || 60) + 10;
+        // Typed length → the AI estimate (made when the job arrived) → 60 min.
+        let len = Number(j.durationMinutes) > 0 ? Number(j.durationMinutes) : 0;
+        if (!len) { if (!estCache) estCache = await loadAiDurCache(env, tenantId); len = Number(estCache[j.id]) || 60; }
+        const first = Math.max(30, len) + 10;
         due = rec.n === 0 ? since >= first : (rec.n < 3 && (now - new Date(rec.last)) / 60000 >= 45);
       }
       if (!due) continue;
@@ -6816,6 +6824,30 @@ async function saveAiDurCache(env, tid, cache) {
     if (keys.length > 3000) { obj = {}; for (const k of keys.slice(-3000)) obj[k] = cache[k]; }
     await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:aidur:" + tid, JSON.stringify(obj)).run();
   } catch { /* cache is best-effort */ }
+}
+// Estimate ONE newly-arrived job's on-site time and keep it in the AI cache —
+// never on the job's own durationMinutes, so a guess can't masquerade as a typed
+// length. The scheduler (autoScheduleDay) and the status nudges read the cache;
+// the board shows it as "est.". Skips jobs with a set length, cert/project/fleet
+// jobs, and honours the daily AI cap. Best-effort: any failure = no estimate.
+export async function estimateNewJobDuration(env, tid, job) {
+  try {
+    if (!job || !job.id || !env.ANTHROPIC_API_KEY) return null;
+    if (Number(job.durationMinutes) > 0) return null;
+    if (job.emTest || job.pat || job.pumpMaintenance || job.elecTest || job.firestopping || job.fleetRenewal || job.fallbackTemplate || jobIsProject(job)) return null;
+    const have = await loadAiDurCache(env, tid);
+    if (have[job.id] != null) return have[job.id];
+    if ((await aiCapCheck(env, tid)).capped) return null;
+    const got = await aiEstimateDurations(env, [{ id: job.id, ref: job.helpdeskRef || "", description: job.description || "", priority: job.priority || "", site: job.siteName || "", workArea: job.workArea || "" }]);
+    await bumpAiUsage(env, tid, "duration");
+    const m = got[job.id];
+    if (m == null) return null;
+    // Re-read just before saving so a burst of emails doesn't drop each other's estimates.
+    const cache = await loadAiDurCache(env, tid);
+    cache[job.id] = m;
+    await saveAiDurCache(env, tid, cache);
+    return m;
+  } catch { return null; }
 }
 // metas: [{id, ref, description, priority, site, workArea}] → {id: minutes}
 async function aiEstimateDurations(env, metas) {

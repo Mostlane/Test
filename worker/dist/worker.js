@@ -19254,6 +19254,7 @@ __export(sla_exports, {
   cloneJobAsVisit: () => cloneJobAsVisit,
   createOrUpdateJobFromPayload: () => createOrUpdateJobFromPayload,
   createWorksJobFromRemedials: () => createWorksJobFromRemedials,
+  estimateNewJobDuration: () => estimateNewJobDuration,
   findBlockingJob: () => findBlockingJob,
   formatPoRef: () => formatPoRef,
   getJob: () => getJob3,
@@ -20004,6 +20005,7 @@ async function handle13(request, env, ctx, url, sess) {
         }
       })());
     }
+    if (!before) ctx?.waitUntil(estimateNewJobDuration(env, tenantId, job));
     if (payload.visitGroupId) {
       try {
         await stampVisitGroup(env, tenantId, payload.visitGroupId);
@@ -20083,6 +20085,10 @@ async function handle13(request, env, ctx, url, sess) {
       return d;
     });
     if (!(sess && await canSeeMoney(env, tenantId, sess.user.username))) jobs = jobs.map(stripMoney);
+    {
+      const est = await loadAiDurCache(env, tenantId);
+      jobs = jobs.map((j) => !(Number(j.durationMinutes) > 0) && est[j.id] != null ? { ...j, estMinutes: est[j.id] } : j);
+    }
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -23957,6 +23963,7 @@ async function sweepStatusNudges(env, tenantId = 1) {
     return m > 0 ? m / 2 : null;
   };
   const certJob = (j) => !!(j.emTest || j.pat || j.pumpMaintenance || j.elecTest || j.firestopping);
+  let estCache = null;
   for (const j of all) {
     const engs = assignedList(j);
     if (!engs.length) continue;
@@ -23979,7 +23986,12 @@ async function sweepStatusNudges(env, tenantId = 1) {
         const first = m ? Math.min(100, Math.max(25, m * 1.6 + 10)) : 40;
         due = rec.n === 0 ? since >= first : rec.n < 2 && (now2 - new Date(rec.last)) / 6e4 >= 30;
       } else {
-        const first = Math.max(30, Number(j.durationMinutes) || 60) + 10;
+        let len = Number(j.durationMinutes) > 0 ? Number(j.durationMinutes) : 0;
+        if (!len) {
+          if (!estCache) estCache = await loadAiDurCache(env, tenantId);
+          len = Number(estCache[j.id]) || 60;
+        }
+        const first = Math.max(30, len) + 10;
         due = rec.n === 0 ? since >= first : rec.n < 3 && (now2 - new Date(rec.last)) / 6e4 >= 45;
       }
       if (!due) continue;
@@ -25825,6 +25837,26 @@ async function saveAiDurCache(env, tid, cache) {
     }
     await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:aidur:" + tid, JSON.stringify(obj)).run();
   } catch {
+  }
+}
+async function estimateNewJobDuration(env, tid, job) {
+  try {
+    if (!job || !job.id || !env.ANTHROPIC_API_KEY) return null;
+    if (Number(job.durationMinutes) > 0) return null;
+    if (job.emTest || job.pat || job.pumpMaintenance || job.elecTest || job.firestopping || job.fleetRenewal || job.fallbackTemplate || jobIsProject(job)) return null;
+    const have = await loadAiDurCache(env, tid);
+    if (have[job.id] != null) return have[job.id];
+    if ((await aiCapCheck(env, tid)).capped) return null;
+    const got = await aiEstimateDurations(env, [{ id: job.id, ref: job.helpdeskRef || "", description: job.description || "", priority: job.priority || "", site: job.siteName || "", workArea: job.workArea || "" }]);
+    await bumpAiUsage(env, tid, "duration");
+    const m = got[job.id];
+    if (m == null) return null;
+    const cache = await loadAiDurCache(env, tid);
+    cache[job.id] = m;
+    await saveAiDurCache(env, tid, cache);
+    return m;
+  } catch {
+    return null;
   }
 }
 async function aiEstimateDurations(env, metas) {
@@ -31930,7 +31962,9 @@ async function rowInfo(env, tid, { reference, siteCode, siteName, postcode, desc
     storeNo: /^\d+$/.test(code) ? code.padStart(4, "0") : code,
     type: site && TYPE_LABEL2[String(site.client || "").toLowerCase()] || "",
     name,
-    desc: await aiShortDescription(env, description),
+    desc: null,
+    descText: description || "",
+    // the AI summary is only made when a NEW row needs it
     trade: sheetTrade(description),
     miles
   };
@@ -32247,6 +32281,7 @@ async function writeRow(env, tid, cfg, info, dryRun) {
       const fmt2 = await fmtFor();
       return { ok: true, filled: true, row: r2, info, cols: cols.map(colLetter), format: fmt2 };
     }
+    if (info.desc == null) info.desc = await aiShortDescription(env, info.descText);
     const tbl = dryRun ? null : await findTable(env, cfg, at.headerRow);
     const r = tbl && tbl.totals && at.nextRow > tbl.lastBody ? tbl.lastBody + 1 : at.nextRow, fx = formulasFor(r);
     const row = [

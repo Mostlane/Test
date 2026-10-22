@@ -2800,6 +2800,15 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
 - **Apply** writes the new times back: the client builds each `scheduledAt`/
   `scheduledEnd` from date + dayStart + offset and PATCHes each job (nothing is
   written until the office presses ✓ Apply).
+- **AI duration estimate at INTAKE (22 Oct 2026):** every NEW job through `/sla/inbound` (email intake + Zap)
+  gets `estimateNewJobDuration(env,tid,job)` (sla.js, ctx.waitUntil) — one Claude call, honours the daily AI cap,
+  bumps `ai_usage` kind `duration`, saved ONLY in the existing AI cache `sla:aidur:<tid>` (never on
+  `job.durationMinutes`, so a guess never looks like a typed length; cache re-read before save for bursts).
+  Skips jobs with a set length, cert/project/fleet/standby jobs. Readers: `autoScheduleDay` (unchanged — it
+  already used the cache), the **status nudge** (`sweepStatusNudges` finish timer = typed length → estimate →
+  60 min), and **GET /sla/jobs** adds `estMinutes` for jobs with no length → sla-main `estTag` grey "⏱ ~1h 30m
+  est." pill. ~0.2p per job (~£1/month at ~400 jobs). Jobs that arrived before 22 Oct have no estimate until the
+  scheduler's auto-day estimates them.
 - **Per-job expected duration**: a real persisted **`job.durationMinutes`** field
   (create + patch in sla.js) so an UNSCHEDULED job still carries its on-site time
   (the finish time only exists once scheduled). Input on **add-job.html** (allocate
@@ -6180,6 +6189,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `copyRowFormat` now runs only when the tab has NO table. One-off tidy `repairTableRows(from)` (absorb strays +
   `format/fill/clear` on feed rows from 233) runs once from the cron (`sweepTableFix`, flag app_config
   `coopsheet:tablefix:<tid>`; delete the flag to re-run) and on demand via POST `/email-intake/sheet-repair {from}`.
+  **"Fill in the blanks" speed (22 Oct):** filling an existing row no longer makes the AI short-description
+  call (`rowInfo` now returns `desc:null` + `descText`; `writeRow` only summarises for a NEW row) and, with the
+  table, no longer runs `copyRowFormat` (~85 reads + ~80 writes) — those two were the slow part.
   **Daily intake check (21 Oct, `lib/intakecheck.js`):** the 5-min cron runs `sweepIntakeCheck` once a day
   from **07:30 London** (dedupe app_config `intakecheck:sent:<tid>` = the date) over the last 24 h and
   emails ONLY when there's something to fix: email failed / still in Needs a look / a client-domain email
