@@ -475,6 +475,7 @@ function auditAction(env, ctx, sess, request, url, status, clone, note) {
 // Routes reachable WITHOUT a session token.
 const PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
+  ["POST", "/auth/login-verify"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
   // Public self-registration form (login page → "Sign up").
