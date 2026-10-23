@@ -396,8 +396,8 @@
       const locked = enabled && !c && d.overdue;
       let lockBtn = "";
       if (r.lockoutWaived)
-        lockBtn = ` <span class="pill" style="background:#fef3c7;color:#92400e;" title="This driver can use the app despite the overdue check — the check is still outstanding">🔓 lockout lifted</span> <button class="btn ghost small" data-lock="${esc(r.username)}" data-waive="0" title="Put the full-screen lockout back for this driver">Restore</button>`;
-      else if (locked)
+        lockBtn = ` <span class="pill" style="background:#fef3c7;color:#92400e;" title="This driver can use the app despite the overdue check — the check is still outstanding">🔓 lockout lifted</span> ${IS_FULL ? `<button class="btn ghost small" data-lock="${esc(r.username)}" data-waive="0" title="Put the full-screen lockout back for this driver">Restore</button>` : ``}`;
+      else if (locked && IS_FULL)
         lockBtn = ` <button class="btn small" style="background:#b45309;color:#fff;" data-lock="${esc(r.username)}" data-waive="1" title="Let this driver back into the app now (this week only). The check stays outstanding.">🔓 Lift lockout</button>`;
       const toggle = enabled
         ? `<button class="btn ghost small" data-toggle="${esc(r.username)}" data-enable="0" title="Take this driver out of the weekly van-check cycle">On ✓</button>`

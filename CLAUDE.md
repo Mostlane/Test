@@ -4655,7 +4655,7 @@ so the bot clears a task once it sees a sent reply. No-match = success (idempote
   week while the check stays outstanding + snoozeable. Stored in app_config
   **`vancheck:lockoutwaive:<tid>`** = `{username: week}` (auto-pruned to the current
   week, so it self-expires); **POST /vancheck/lockout-waive** `{username, week?,
-  waived}` (Vehicles|FullAccess) sets/clears it. `/vancheck/attention` returns
+  waived}` (**FullAccess only** since 23 Oct 2026 — Vehicles users see the "lockout lifted" pill but get no Lift/Restore button and a 403) sets/clears it. `/vancheck/attention` returns
   **`lockoutWaived`** (mineDue stays true — still badged) and the gate blocks only
   on `mineDue && overdue && !lockoutWaived`; `/vancheck/week` returns `lockoutWaived`
   per driver. Surfaced on **van-checks.html**: a **🔓 Lift lockout** button on any

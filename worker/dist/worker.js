@@ -35381,7 +35381,7 @@ async function handle23(request, env, ctx, url, sess) {
     return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
   }
   if (path === "/vancheck/lockout-waive" && method === "POST") {
-    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    if ((await permissionsFor(env, tenantId, me)).FullAccess !== "Yes") return error("Only Full Access users can lift or restore a lockout", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);

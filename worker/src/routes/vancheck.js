@@ -927,7 +927,8 @@ export async function handle(request, env, ctx, url, sess) {
   // but they still owe the check" override, distinct from skip (Not required) and
   // Off (out of the cycle).
   if (path === "/vancheck/lockout-waive" && method === "POST") {
-    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    // Full Access only (Jamie, 23 Oct 2026) — Vehicles users can see the lockout but not lift it.
+    if ((await permissionsFor(env, tenantId, me)).FullAccess !== "Yes") return error("Only Full Access users can lift or restore a lockout", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
