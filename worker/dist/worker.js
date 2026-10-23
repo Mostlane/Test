@@ -32023,6 +32023,9 @@ function sheetOrderNo(ref) {
   const m = String(ref || "").trim().match(/^0*(\d+)(\/\d+)?/);
   return m ? m[1] + (m[2] || "") : String(ref || "").trim();
 }
+function isLookupRow(r) {
+  return !!sheetOrderNo((r || [])[1]) && [2, 3, 4, 5].every((c) => r[c] == null || String(r[c]).trim() === "");
+}
 function sameOrder(a, b) {
   return sheetOrderNo(a).toLowerCase() === sheetOrderNo(b).toLowerCase();
 }
@@ -32150,7 +32153,7 @@ async function inspectSheet(env, tid, order) {
         if (Number.isFinite(we) && we > maxWe) maxWe = we;
         lastOrder = String(r[1] || "");
       }
-      if (order && !existsRow && sameOrder(r[1], order)) {
+      if (order && !existsRow && !isLookupRow(r) && sameOrder(r[1], order)) {
         existsRow = top + i + 1;
         existsVals = r;
       }
@@ -32492,7 +32495,7 @@ async function sheetOrderRows(env, tid) {
     const byOrder = {};
     for (let i = h + 1; i < vals.length; i++) {
       const r = vals[i], o = sheetOrderNo(r[1]);
-      if (!o) continue;
+      if (!o || isLookupRow(r)) continue;
       const k = o.toLowerCase();
       (byOrder[k] = byOrder[k] || []).push({
         row: top + i + 1,
