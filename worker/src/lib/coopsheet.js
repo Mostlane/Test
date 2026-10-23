@@ -34,6 +34,12 @@ export function sheetOrderNo(ref) {
   const m = String(ref || "").trim().match(/^0*(\d+)(\/\d+)?/);
   return m ? m[1] + (m[2] || "") : String(ref || "").trim();
 }
+// A row with ONLY an order number typed in it (no store no., type, name or
+// description) is the office's own lookup line — typed at the bottom so Excel's
+// "highlight duplicates" finds the real row. Never treat it as a job row.
+export function isLookupRow(r) {
+  return !!sheetOrderNo((r || [])[1]) && [2, 3, 4, 5].every(c => r[c] == null || String(r[c]).trim() === "");
+}
 function sameOrder(a, b) { return sheetOrderNo(a).toLowerCase() === sheetOrderNo(b).toLowerCase(); }
 
 // One readable line from a Concerto description: drop the "Windows : Cracked
@@ -158,7 +164,7 @@ export async function inspectSheet(env, tid, order) {
       const blank = !String(r[1] || "").trim() && !String(r[4] || "").trim() && !String(r[5] || "").trim();
       if (blank) { if (target < 0) target = i; continue; }
       if (target < 0) { const we = Number(r[0]); if (Number.isFinite(we) && we > maxWe) maxWe = we; lastOrder = String(r[1] || ""); }
-      if (order && !existsRow && sameOrder(r[1], order)) { existsRow = top + i + 1; existsVals = r; }
+      if (order && !existsRow && !isLookupRow(r) && sameOrder(r[1], order)) { existsRow = top + i + 1; existsVals = r; }
       const sn = String(r[2] == null ? "" : r[2]).replace(/^'/, "").trim();
       if (/^\d+$/.test(sn)) {
         const k = String(Number(sn)), m = Number(r[12]);
@@ -481,7 +487,7 @@ export async function sheetOrderRows(env, tid) {
     const byOrder = {};
     for (let i = h + 1; i < vals.length; i++) {
       const r = vals[i], o = sheetOrderNo(r[1]);
-      if (!o) continue;
+      if (!o || isLookupRow(r)) continue;
       const k = o.toLowerCase();
       (byOrder[k] = byOrder[k] || []).push({ row: top + i + 1, type: String(r[3] || "").trim(), name: String(r[4] || "").trim(),
         desc: String(r[5] || "").trim(), trade: String(r[9] || "").trim(), miles: String(r[12] == null ? "" : r[12]).trim() });
