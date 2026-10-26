@@ -1922,6 +1922,8 @@ async function sendToSubcontractor(key, name){
   const res = await previewSubconEmail(id, key, name);
   if(res == null) return false;
   const body = { to: key, details: res.details, target: res.target };
+  if(res.attachKeys && res.attachKeys.length) body.attachKeys = res.attachKeys;
+  if(res.attachUploads && res.attachUploads.length) body.attachUploads = res.attachUploads;
   for(;;){
     const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
     const d = await r.json().catch(()=>({}));
@@ -1950,7 +1952,11 @@ function previewSubconEmail(id, key, name){
       '<textarea id="pvDet" rows="4" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box"></textarea>' +
       '<label style="display:block;font-size:12.5px;font-weight:700;color:#334155;margin:10px 0 4px">Target response time shown to them (defaults to the job’s SLA — leave blank to hide)</label>' +
       '<input id="pvTarget" type="text" maxlength="60" placeholder="e.g. 4 Hours" style="width:100%;border:1px solid #ccd5dd;border-radius:10px;padding:10px;font:14px/1.45 inherit;box-sizing:border-box">' +
-      '<iframe id="pvFrame" sandbox="" title="Email preview" style="width:100%;height:420px;border:1px solid #e2e6ec;border-radius:12px;margin-top:10px;background:#eef1f5"></iframe>' +
+      '<div style="margin-top:12px"><div style="font-size:12.5px;font-weight:700;color:#334155;margin-bottom:5px">📎 Attachments <span style="font-weight:400;color:#64748b">— photos/files sent with the email</span></div>' +
+      '<div id="pvPhotos" style="display:flex;flex-wrap:wrap;gap:6px"><span style="font-size:12px;color:#94a3b8">Loading job photos…</span></div>' +
+      '<div style="margin-top:7px"><label style="border:1px solid #15599d;color:#15599d;border-radius:9px;padding:6px 12px;font-weight:700;font-size:13px;cursor:pointer;display:inline-block">＋ Attach a file<input id="pvFile" type="file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" style="display:none"></label> <span id="pvAttInfo" style="font-size:12px;color:#64748b;margin-left:4px">none</span></div>' +
+      '<div id="pvAttList" style="margin-top:6px;display:flex;flex-direction:column;gap:3px"></div></div>' +
+      '<iframe id="pvFrame" sandbox="" title="Email preview" style="width:100%;height:360px;border:1px solid #e2e6ec;border-radius:12px;margin-top:10px;background:#eef1f5"></iframe>' +
       '<div id="pvMsg" style="font-size:12.5px;margin-top:8px"></div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">' +
       '<button id="pvCancel" style="border:0;background:#eef2f7;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer">Cancel</button>' +
@@ -1958,6 +1964,43 @@ function previewSubconEmail(id, key, name){
       '<button id="pvSend" class="sc-send" style="flex:0 0 auto" disabled>Send to ' + esc(name||"them") + '</button></div></div>';
     document.body.appendChild(wrap);
     const det = wrap.querySelector("#pvDet"), tgt = wrap.querySelector("#pvTarget"), msg = wrap.querySelector("#pvMsg"), sendBtn = wrap.querySelector("#pvSend");
+    // ── Attachments: tick the job's photos and/or add files from the device ──
+    const photosEl = wrap.querySelector("#pvPhotos"), fileIn = wrap.querySelector("#pvFile"), attInfo = wrap.querySelector("#pvAttInfo"), attList = wrap.querySelector("#pvAttList");
+    const selKeys = new Set();     // chosen job-photo R2 keys
+    const uploads = [];            // [{filename, contentType, content(base64), bytes}]
+    const fmtKB = b => b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(0) + " KB" : (b / 1048576).toFixed(1) + " MB";
+    const collectAttach = () => ({ attachKeys: [...selKeys], attachUploads: uploads.map(u => ({ filename: u.filename, contentType: u.contentType, content: u.content })) });
+    function renderAttInfo(){ const np = selKeys.size, nf = uploads.length, ub = uploads.reduce((a, u) => a + u.bytes, 0);
+      attInfo.textContent = (np || nf) ? [np ? np + " photo" + (np > 1 ? "s" : "") : "", nf ? nf + " file" + (nf > 1 ? "s" : "") : "", ub ? fmtKB(ub) : ""].filter(Boolean).join(" · ") : "none"; }
+    function renderUploads(){ attList.innerHTML = uploads.map((u, i) => '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ' + esc(u.filename) + ' <span style="color:#94a3b8">' + fmtKB(u.bytes) + '</span></span><button type="button" data-rm="' + i + '" style="border:0;background:#f1f5f9;border-radius:6px;padding:2px 9px;cursor:pointer">✕</button></div>').join("");
+      attList.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { uploads.splice(+b.dataset.rm, 1); renderUploads(); renderAttInfo(); }); }
+    const toB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).replace(/^data:[^,]*,/, "")); fr.onerror = () => rej(new Error("couldn't read the file")); fr.readAsDataURL(blob); });
+    const shrinkImg = file => new Promise(res => {   // always resolves (null = use original); 8s safety timeout
+      const u = URL.createObjectURL(file), img = new Image(), fin = v => { URL.revokeObjectURL(u); res(v); }, to = setTimeout(() => fin(null), 8000);
+      img.onload = () => { clearTimeout(to); try { const max = 1600; let w = img.width, h = img.height; if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); } const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); c.toBlob(b => fin(b || null), "image/jpeg", 0.82); } catch (e) { fin(null); } };
+      img.onerror = () => { clearTimeout(to); fin(null); }; img.src = u;
+    });
+    fileIn.onchange = async () => {
+      for (const file of Array.from(fileIn.files || [])) {
+        try {
+          let blob = file, name = file.name || "file", type = file.type || "";
+          if (/^image\//i.test(type) && !/heic|heif/i.test(type)) { const s = await shrinkImg(file); if (s) { blob = s; type = "image/jpeg"; name = name.replace(/\.[^.]+$/, "") + ".jpg"; } }
+          if (blob.size > 3 * 1024 * 1024) { alert('"' + name + '" is too big to attach (max 3 MB each).'); continue; }
+          uploads.push({ filename: name, contentType: type || "application/octet-stream", content: await toB64(blob), bytes: blob.size });
+        } catch (e) { alert("Couldn't attach " + (file.name || "that file") + ": " + (e.message || e)); }
+      }
+      fileIn.value = ""; renderUploads(); renderAttInfo();
+    };
+    (async () => {
+      try {
+        const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/files");
+        const d = await r.json().catch(() => ({})); const files = (d && d.files) || [];
+        if (!files.length) { photosEl.innerHTML = '<span style="font-size:12px;color:#94a3b8">No job photos to attach.</span>'; return; }
+        photosEl.innerHTML = files.map(f => '<button type="button" class="pvph" data-key="' + esc(f.key) + '" data-thumb="' + esc(f.thumb || f.publicURL || "") + '" title="' + esc(f.name || "photo") + '" style="width:52px;height:52px;border-radius:8px;border:2px solid #d7dee6;background:#eef1f5;background-size:cover;background-position:center;cursor:pointer;padding:0"></button>').join("");
+        photosEl.querySelectorAll(".pvph").forEach(btn => { if (btn.dataset.thumb) btn.style.backgroundImage = "url('" + btn.dataset.thumb + "')";
+          btn.onclick = () => { const k = btn.dataset.key; if (selKeys.has(k)) { selKeys.delete(k); btn.style.borderColor = "#d7dee6"; btn.style.boxShadow = ""; } else { selKeys.add(k); btn.style.borderColor = "#15803d"; btn.style.boxShadow = "0 0 0 2px #15803d inset"; } renderAttInfo(); }; });
+      } catch (e) { photosEl.innerHTML = '<span style="font-size:12px;color:#94a3b8">Couldn\'t load job photos.</span>'; }
+    })();
     const done = v => { wrap.remove(); resolve(v); };
     wrap.addEventListener("click", e => { if(e.target === wrap) done(null); });
     wrap.querySelector("#pvCancel").onclick = () => done(null);
@@ -1965,6 +2008,7 @@ function previewSubconEmail(id, key, name){
     async function load(test){
       const body = { to: key, test: !!test };
       if(!first){ body.details = det.value; body.target = tgt.value; }
+      if(test){ const a = collectAttach(); body.attachKeys = a.attachKeys; body.attachUploads = a.attachUploads; }
       const r = await mApi("/sla/jobs/" + encodeURIComponent(id) + "/subcontract-preview", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(()=>({}));
       if(!r.ok) throw new Error(d.error || ("HTTP " + r.status));
@@ -1989,7 +2033,7 @@ function previewSubconEmail(id, key, name){
       catch(e){ msg.style.color = "#b91c1c"; msg.textContent = e.message || e; }
       this.disabled = false;
     };
-    sendBtn.onclick = () => done({ details: det.value, target: tgt.value });
+    sendBtn.onclick = () => done(Object.assign({ details: det.value, target: tgt.value }, collectAttach()));
     load(false).catch(e => { wrap.querySelector("#pvHead").innerHTML = '<span style="color:#b91c1c">' + esc(e.message||e) + '</span>'; });
   });
 }

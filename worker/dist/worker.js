@@ -7386,7 +7386,7 @@ async function listPdfAttachments(env, mailbox, messageId) {
 async function downloadAttachment(env, mailbox, messageId, attachmentId) {
   return graphGet(env, `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { raw: true });
 }
-async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, from } = {}) {
+async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, from, attachments } = {}) {
   if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up (GRAPH_* secrets missing)" };
   const list = (v) => (Array.isArray(v) ? v : String(v || "").split(/[,;]/)).map((s) => String(s).trim()).filter(Boolean).map((address) => ({ emailAddress: { address } }));
   const message = { subject: String(subject || ""), body: { contentType: "HTML", content: String(html || "") }, toRecipients: list(to) };
@@ -7395,6 +7395,14 @@ async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, fro
   if (ccl.length) message.ccRecipients = ccl;
   const rtl = list(replyTo);
   if (rtl.length) message.replyTo = rtl;
+  if (Array.isArray(attachments) && attachments.length) {
+    message.attachments = attachments.map((a) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: String(a.filename || a.name || "attachment").slice(0, 120),
+      contentType: String(a.contentType || "application/octet-stream").slice(0, 120),
+      contentBytes: String(a.content || "")
+    }));
+  }
   if (from && String(from).trim().toLowerCase() !== String(mailbox).trim().toLowerCase()) message.from = { emailAddress: { address: String(from).trim() } };
   try {
     const send = async () => fetch(`${GRAPH}/users/${encodeURIComponent(mailbox)}/sendMail`, {
@@ -22585,7 +22593,9 @@ async function handle11(request, env, ctx, url, sess) {
         const u = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(sess.user.username).first().catch(() => null);
         const me = u && String(u.email || "").trim();
         if (!me) return jsonResponse({ error: "There's no email address on your user \u2014 add one in Users Admin to get test copies." }, headers, 400);
-        const r = await sendSubconMail(env, tenantId, { to: me, subject: "[TEST \u2014 not sent to " + sc.name + "] " + mail.subject, html: mail.html });
+        const ab = await collectSubconAttachments(env, tenantId, id, b);
+        if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
+        const r = await sendSubconMail(env, tenantId, { to: me, subject: "[TEST \u2014 not sent to " + sc.name + "] " + mail.subject, html: mail.html, attachments: ab.attachments });
         if (!r || !r.ok) return jsonResponse({ error: "Test email didn't send" + (r && r.error ? " \u2014 " + String(r.error).slice(0, 160) : "") }, headers, 502);
         out.testSentTo = me;
         out.testVia = r.via;
@@ -22634,6 +22644,8 @@ async function handle11(request, env, ctx, url, sess) {
           return jsonResponse({ error: sc.name + " won\u2019t accept a job without a valid phone number. Add a site contact number and try again.", needPhone: true, site: job.siteName || job.siteCode || "" }, headers, 400);
         }
       }
+      const ab = await collectSubconAttachments(env, tenantId, id, b);
+      if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
       const lockId = "subcon:" + key + ":" + id;
       if (!await firstTime(env, tenantId, lockId, "subcontract")) {
         const fresh = await getJob3(env, tenantId, id);
@@ -22674,7 +22686,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (typeof b.target === "string") sOpts.target = b.target;
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
-      const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
+      const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html, attachments: ab.attachments });
       if (!r || !r.ok) {
         await unlock();
         const fAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -22688,9 +22700,11 @@ async function handle11(request, env, ctx, url, sess) {
       }
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now2, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details, via: r.via, from: r.from };
+      if (ab.names && ab.names.length) job.subcontract.attachments = ab.names.slice(0, 20);
       if (r.fallbackReason) job.subcontract.fallbackReason = String(r.fallbackReason).slice(0, 200);
+      const attachNote = ab.names && ab.names.length ? ` with ${ab.names.length} attachment${ab.names.length === 1 ? "" : "s"} (${ab.names.join(", ")})` : "";
       job.events ||= [];
-      job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail \u2014 Microsoft 365 unavailable)" : ""} \u2014 "${mail.subject}"` });
+      job.events.push({ at: now2, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail \u2014 Microsoft 365 unavailable)" : ""}${attachNote} \u2014 "${mail.subject}"` });
       job.updatedAt = now2;
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "\u{1F6BF} Sent to " + sc.name, body: `${job.helpdeskRef || id} \u2014 sent by ${sess.user.username}` }).catch(() => {
@@ -27105,20 +27119,81 @@ async function setSubconSender(env, tid, from, via) {
   await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:subconsender:" + tid, JSON.stringify({ from: f, via: v })).run();
   return { from: f, mailbox: v };
 }
-async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html }) {
+async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html, attachments }) {
   const cfg = await getSubconSenderCfg(env, tid);
   const mailbox = cfg.from;
   let reason = "no sending mailbox set";
   if (mailbox) {
     const { graphSendMail: graphSendMail2 } = await Promise.resolve().then(() => (init_graphmail(), graphmail_exports));
-    const g = await graphSendMail2(env, cfg.mailbox || mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html, from: mailbox });
+    const g = await graphSendMail2(env, cfg.mailbox || mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html, from: mailbox, attachments });
     if (g.ok) return { ok: true, via: "m365", from: mailbox };
     reason = g.error || "Microsoft 365 send failed";
   }
   const { sendEmail: sendEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
-  const r = await sendEmail2(env, { to, cc, replyTo: replyTo || mailbox || void 0, subject, html });
+  const r = await sendEmail2(env, { to, cc, replyTo: replyTo || mailbox || void 0, subject, html, attachments });
   if (r && r.ok) return { ok: true, via: "portal", from: env.EMAIL_FROM || "no-reply@mostlane-portal.com", fallbackReason: reason };
   return { ok: false, error: r && (r.error || r.reason) || "email send failed", fallbackReason: reason };
+}
+function abToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const CH = 32768;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+function ctFromName(name) {
+  const e = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  const m = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    heic: "image/heic",
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    txt: "text/plain",
+    csv: "text/csv"
+  };
+  return e && m[e[1]] || "application/octet-stream";
+}
+async function collectSubconAttachments(env, tid, id, b) {
+  const out = [];
+  const names = [];
+  let total = 0;
+  const prefix2 = "jobs/" + id + "/";
+  for (const k of Array.isArray(b.attachKeys) ? b.attachKeys.slice(0, 20) : []) {
+    const key = String(k || "");
+    if (!key.startsWith(prefix2) || key.endsWith(".thumb")) continue;
+    let obj = null;
+    try {
+      obj = await env.JOB_FILES.get(key);
+    } catch {
+    }
+    if (!obj) continue;
+    const buf = await obj.arrayBuffer();
+    if (buf.byteLength > SUBCON_ATTACH_MAX_ONE) return { error: (key.split("/").pop() || "a photo") + " is too big to attach (max 3 MB each)." };
+    total += buf.byteLength;
+    if (total > SUBCON_ATTACH_MAX_TOTAL) return { error: "Attachments are too big in total (max 12 MB)." };
+    const name = obj.customMetadata && obj.customMetadata.filename || key.split("/").pop() || "photo.jpg";
+    out.push({ filename: name, content: abToB64(buf), contentType: obj.httpMetadata && obj.httpMetadata.contentType || ctFromName(name) });
+    names.push(name);
+  }
+  for (const u of Array.isArray(b.attachUploads) ? b.attachUploads.slice(0, 20) : []) {
+    const content = String(u && u.content || "").replace(/^data:[^,]*,/, "");
+    if (!content) continue;
+    const approx = Math.floor(content.length * 3 / 4);
+    if (approx > SUBCON_ATTACH_MAX_ONE) return { error: (u && u.filename || "a file") + " is too big to attach (max 3 MB each)." };
+    total += approx;
+    if (total > SUBCON_ATTACH_MAX_TOTAL) return { error: "Attachments are too big in total (max 12 MB)." };
+    const name = String(u && u.filename || "attachment").slice(0, 120);
+    out.push({ filename: name, content, contentType: String(u && u.contentType || ctFromName(name)).slice(0, 80) });
+    names.push(name);
+  }
+  return { attachments: out, names };
 }
 function inferAreaKw(description, areas) {
   const r = classifyWork(description);
@@ -28643,7 +28718,7 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
-var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBCON_SENDER_DEFAULT, SUBCON_STATUS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, API_ORIGIN, FS_DEFAULT_DECL;
+var SCHED_YEARS_BACK, SCHED_YEARS_FWD, PHOTO_STAGES, MIN_COMPLETE_NOTE, CANONICAL_STATUSES, normId, PRIORITY_SET, DONE_STATES, isCancelledStatus, RELEASE_DONE, orderRefIncident, shapeOrderRow, MONEY_KEY, NEARBY_FINISHED, isOpenJobStatus, nearbyLite, SLA_BLOCKS_KEY, _durCache, _durCacheAt, _archiveReady, _archiveFilesReady, _safeSeg, SUBCON_DEFAULTS, SUBCON_FIELD_KEYS, SUBCON_SENDER_DEFAULT, SUBCON_ATTACH_MAX_ONE, SUBCON_ATTACH_MAX_TOTAL, SUBCON_STATUS, SUBKEY_STOP, PO_SUG_STOP, DEFAULT_CONFIG3, SHEET_FIELDS, areaSlug, GROUP_COLOUR, DEFAULT_WORK_AREAS, FALLBACK_KEY, FALLBACK_NOTIFY, CONCERTO_TRADE_NAMES, _londonFmt, AI_CAP_DEFAULT, API_ORIGIN, FS_DEFAULT_DECL;
 var init_sla = __esm({
   "src/routes/sla.js"() {
     init_http();
@@ -28700,6 +28775,8 @@ var init_sla = __esm({
     };
     SUBCON_FIELD_KEYS = ["site", "address", "phone", "priority", "target", "description"];
     SUBCON_SENDER_DEFAULT = "enquiries@mostlane.com";
+    SUBCON_ATTACH_MAX_ONE = 3 * 1024 * 1024;
+    SUBCON_ATTACH_MAX_TOTAL = 12 * 1024 * 1024;
     SUBCON_STATUS = "Sent to Subcontractor";
     SUBKEY_STOP = /* @__PURE__ */ new Set(["the", "mr", "mrs", "ms", "and", "ltd", "limited", "services", "service", "group", "uk"]);
     PO_SUG_STOP = /* @__PURE__ */ new Set(["road", "street", "lane", "avenue", "close", "drive", "park", "retail", "store", "shop", "the", "and", "coop", "operative", "cooperative", "funeralcare", "funeral", "starbucks", "branch", "unit", "site", "with", "from", "attend", "attended", "works", "work", "please", "required", "quote", "quotation", "recommended", "needs", "needed", "fixing", "fixed", "repair", "repairs", "engineer", "check", "job", "jobs", "incident", "drainage"]);

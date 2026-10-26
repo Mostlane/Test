@@ -186,7 +186,7 @@ export async function downloadAttachment(env, mailbox, messageId, attachmentId) 
 // via Graph sendMail — it goes out from Microsoft's own servers and lands in
 // that mailbox's Sent Items. Needs the APPLICATION permission Mail.Send
 // (admin-consented). Returns {ok:true, via:"m365"} or {ok:false, error}.
-export async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, from } = {}) {
+export async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, html, from, attachments } = {}) {
   if (!graphConfigured(env)) return { ok: false, error: "Microsoft 365 connection isn't set up (GRAPH_* secrets missing)" };
   const list = v => (Array.isArray(v) ? v : String(v || "").split(/[,;]/)).map(s => String(s).trim()).filter(Boolean)
     .map(address => ({ emailAddress: { address } }));
@@ -194,6 +194,15 @@ export async function graphSendMail(env, mailbox, { to, cc, replyTo, subject, ht
   if (!message.toRecipients.length) return { ok: false, error: "no recipient" };
   const ccl = list(cc); if (ccl.length) message.ccRecipients = ccl;
   const rtl = list(replyTo); if (rtl.length) message.replyTo = rtl;
+  // File attachments (each ≤3 MB for a direct sendMail): [{filename, content(base64), contentType}]
+  if (Array.isArray(attachments) && attachments.length) {
+    message.attachments = attachments.map(a => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: String(a.filename || a.name || "attachment").slice(0, 120),
+      contentType: String(a.contentType || "application/octet-stream").slice(0, 120),
+      contentBytes: String(a.content || "")
+    }));
+  }
   // Send AS an alias / shared address of this mailbox (e.g. enquiries@ on jamie@).
   if (from && String(from).trim().toLowerCase() !== String(mailbox).trim().toLowerCase()) message.from = { emailAddress: { address: String(from).trim() } };
   try {

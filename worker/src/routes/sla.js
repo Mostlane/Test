@@ -2566,7 +2566,9 @@ export async function handle(request, env, ctx, url, sess) {
         const u = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(sess.user.username).first().catch(() => null);
         const me = u && String(u.email || "").trim();
         if (!me) return jsonResponse({ error: "There's no email address on your user — add one in Users Admin to get test copies." }, headers, 400);
-        const r = await sendSubconMail(env, tenantId, { to: me, subject: "[TEST — not sent to " + sc.name + "] " + mail.subject, html: mail.html });
+        const ab = await collectSubconAttachments(env, tenantId, id, b);
+        if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
+        const r = await sendSubconMail(env, tenantId, { to: me, subject: "[TEST — not sent to " + sc.name + "] " + mail.subject, html: mail.html, attachments: ab.attachments });
         if (!r || !r.ok) return jsonResponse({ error: "Test email didn't send" + (r && r.error ? " — " + String(r.error).slice(0, 160) : "") }, headers, 502);
         out.testSentTo = me; out.testVia = r.via; out.testFrom = r.from; if (r.fallbackReason) out.testFallbackReason = r.fallbackReason;
       }
@@ -2617,6 +2619,10 @@ export async function handle(request, env, ctx, url, sess) {
           return jsonResponse({ error: sc.name + " won’t accept a job without a valid phone number. Add a site contact number and try again.", needPhone: true, site: job.siteName || job.siteCode || "" }, headers, 400);
         }
       }
+      // Collect any attachments (job photos by key + new uploads) BEFORE raising a PO
+      // or taking the lock, so a size problem fails cleanly with nothing side-effected.
+      const ab = await collectSubconAttachments(env, tenantId, id, b);
+      if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
       const lockId = "subcon:" + key + ":" + id;
       if (!(await firstTime(env, tenantId, lockId, "subcontract"))) {
         const fresh = await getJob(env, tenantId, id);
@@ -2651,7 +2657,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (typeof b.target === "string") sOpts.target = b.target;   // per-email response-time override ("" hides it)
       if (sc.declineLink) sOpts.declineUrl = await subconReplyUrl(env, url.origin, id, key, poRef, false);
       const mail = buildMetroRodEmail(job, hours, poRef, sc, sOpts);
-      const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html });
+      const r = await sendSubconMail(env, tenantId, { to: sc.to, cc: sc.cc, replyTo: sc.replyTo, subject: mail.subject, html: mail.html, attachments: ab.attachments });
       if (!r || !r.ok) {
         await unlock();
         // Record the FAILED attempt on the job so the office can SEE it didn't go
@@ -2668,9 +2674,11 @@ export async function handle(request, env, ctx, url, sess) {
       }
       const now = new Date().toISOString();
       job.subcontract = { key, name: sc.name, to: sc.to, sentAt: now, sentBy: sess.user.username, subject: mail.subject, ref: mail.ref, poNumber, poRef, status: "open", details: mail.details, via: r.via, from: r.from };
+      if (ab.names && ab.names.length) job.subcontract.attachments = ab.names.slice(0, 20);
       if (r.fallbackReason) job.subcontract.fallbackReason = String(r.fallbackReason).slice(0, 200);
+      const attachNote = ab.names && ab.names.length ? ` with ${ab.names.length} attachment${ab.names.length === 1 ? "" : "s"} (${ab.names.join(", ")})` : "";
       job.events ||= [];
-      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail — Microsoft 365 unavailable)" : ""} — "${mail.subject}"` });
+      job.events.push({ at: now, by: sess.user.username, type: "subcontract", note: `Sent to ${sc.name} (${sc.to}) from ${r.from}${r.via === "portal" ? " (portal mail — Microsoft 365 unavailable)" : ""}${attachNote} — "${mail.subject}"` });
       job.updatedAt = now;
       await saveJob(env, tenantId, job);
       ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "drain:" + id, { title: "🚿 Sent to " + sc.name, body: `${job.helpdeskRef || id} — sent by ${sess.user.username}` }).catch(() => {}));
@@ -7226,20 +7234,66 @@ async function setSubconSender(env, tid, from, via) {
 // deliverability, Sent Items copy); if 365 can't (not set up / no permission),
 // fall back to the portal's own mail service with Reply-To = the mailbox, so an
 // order is never lost. Returns {ok, via:"m365"|"portal", from, fallbackReason?, error?}.
-export async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html }) {
+export async function sendSubconMail(env, tid, { to, cc, replyTo, subject, html, attachments }) {
   const cfg = await getSubconSenderCfg(env, tid);
   const mailbox = cfg.from;   // the address shown + replied to
   let reason = "no sending mailbox set";
   if (mailbox) {
     const { graphSendMail } = await import("../lib/graphmail.js");
-    const g = await graphSendMail(env, cfg.mailbox || mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html, from: mailbox });
+    const g = await graphSendMail(env, cfg.mailbox || mailbox, { to, cc, replyTo: replyTo || mailbox, subject, html, from: mailbox, attachments });
     if (g.ok) return { ok: true, via: "m365", from: mailbox };
     reason = g.error || "Microsoft 365 send failed";
   }
   const { sendEmail } = await import("../lib/email.js");
-  const r = await sendEmail(env, { to, cc, replyTo: replyTo || mailbox || undefined, subject, html });
+  const r = await sendEmail(env, { to, cc, replyTo: replyTo || mailbox || undefined, subject, html, attachments });
   if (r && r.ok) return { ok: true, via: "portal", from: env.EMAIL_FROM || "no-reply@mostlane-portal.com", fallbackReason: reason };
   return { ok: false, error: (r && (r.error || r.reason)) || "email send failed", fallbackReason: reason };
+}
+// Base64-encode an ArrayBuffer in chunks (btoa chokes on very long strings).
+function abToB64(buf) {
+  const bytes = new Uint8Array(buf); let bin = ""; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+const SUBCON_ATTACH_MAX_ONE = 3 * 1024 * 1024;    // 3 MB per file (Microsoft 365 sendMail inline limit)
+const SUBCON_ATTACH_MAX_TOTAL = 12 * 1024 * 1024; // 12 MB total — still deliverable once base64'd
+function ctFromName(name) {
+  const e = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  const m = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", heic: "image/heic",
+    pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", txt: "text/plain", csv: "text/csv" };
+  return (e && m[e[1]]) || "application/octet-stream";
+}
+// Build email attachments for a subcontractor send from (a) the job's own R2 files
+// (attachKeys — each MUST be under jobs/<id>/, so no arbitrary R2 reads) and (b)
+// brand-new base64 uploads (attachUploads [{filename, contentType, content}]).
+// Returns { attachments, names } or { error } when a size cap is exceeded.
+async function collectSubconAttachments(env, tid, id, b) {
+  const out = []; const names = []; let total = 0;
+  const prefix = "jobs/" + id + "/";
+  for (const k of (Array.isArray(b.attachKeys) ? b.attachKeys.slice(0, 20) : [])) {
+    const key = String(k || "");
+    if (!key.startsWith(prefix) || key.endsWith(".thumb")) continue;   // only this job's real files
+    let obj = null; try { obj = await env.JOB_FILES.get(key); } catch {}
+    if (!obj) continue;
+    const buf = await obj.arrayBuffer();
+    if (buf.byteLength > SUBCON_ATTACH_MAX_ONE) return { error: (key.split("/").pop() || "a photo") + " is too big to attach (max 3 MB each)." };
+    total += buf.byteLength; if (total > SUBCON_ATTACH_MAX_TOTAL) return { error: "Attachments are too big in total (max 12 MB)." };
+    const name = (obj.customMetadata && obj.customMetadata.filename) || key.split("/").pop() || "photo.jpg";
+    out.push({ filename: name, content: abToB64(buf), contentType: (obj.httpMetadata && obj.httpMetadata.contentType) || ctFromName(name) });
+    names.push(name);
+  }
+  for (const u of (Array.isArray(b.attachUploads) ? b.attachUploads.slice(0, 20) : [])) {
+    const content = String((u && u.content) || "").replace(/^data:[^,]*,/, "");   // tolerate a data: URL
+    if (!content) continue;
+    const approx = Math.floor(content.length * 3 / 4);
+    if (approx > SUBCON_ATTACH_MAX_ONE) return { error: ((u && u.filename) || "a file") + " is too big to attach (max 3 MB each)." };
+    total += approx; if (total > SUBCON_ATTACH_MAX_TOTAL) return { error: "Attachments are too big in total (max 12 MB)." };
+    const name = String((u && u.filename) || "attachment").slice(0, 120);
+    out.push({ filename: name, content, contentType: String((u && u.contentType) || ctFromName(name)).slice(0, 80) });
+    names.push(name);
+  }
+  return { attachments: out, names };
 }
 // Description → work area, NO AI cost: the shared classifier (lib/worktypes.js),
 // mapped onto the tenant's area list. A tenant still on an old area id ("plumbing"
