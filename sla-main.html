@@ -647,7 +647,17 @@ let allJobs = [];
 const BOARD_CACHE_KEY = "mlSlaBoardCache:" + (getCurrentUser() || "").toLowerCase();
 let boardPainted = false;   // true once a cached snapshot has been painted
 function saveBoardCache(){
-  try{ localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ at: Date.now(), jobs: allJobs, cats: CUSTOM_CATS })); }catch(e){}
+  const write = jobs => localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ at: Date.now(), jobs, cats: CUSTOM_CATS }));
+  try{ write(allJobs); }
+  catch(e){
+    // localStorage quota (a very large board): keep instant paint working by
+    // storing only the most-recent slice — the full set still refreshes from the
+    // server on open, so this is only the placeholder that paints immediately.
+    try{
+      const recent = allJobs.slice().sort((a,b) => new Date(b.raisedAt||0) - new Date(a.raisedAt||0)).slice(0, 400);
+      write(recent);
+    }catch(_){}
+  }
 }
 function readBoardCache(){
   try{
@@ -900,7 +910,7 @@ async function loadNotAttended(){
 async function loadJobs(quiet){
   if(!quiet && !boardPainted) $("statusBar").textContent = "Loading jobs…";
   try{
-    const res = await authFetch("/sla/jobs?t=" + Date.now());
+    const res = await authFetch("/sla/jobs?board=1&t=" + Date.now());
     const json = await res.json();
     // EM/PAT certificate jobs are ON the board (Sep 2026 — they used to be
     // dropped here so the yearly test run didn't swamp it, which silently hid

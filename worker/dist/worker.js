@@ -20982,6 +20982,14 @@ async function handle11(request, env, ctx, url, sess) {
     if (priorityFilter) jobs = jobs.filter((j) => j.priority === priorityFilter);
     if (siteCodeFilter) jobs = jobs.filter((j) => (j.siteCode || "") === siteCodeFilter);
     if (overdueFilter === "true") jobs = jobs.filter((j) => j.sla?.state === "BREACHED");
+    if (searchParams.get("board") === "1") {
+      const STRIP = ["riskAssessment", "firestop", "signature", "remedials", "auditItems", "statusHistory", "events"];
+      jobs = jobs.map((j) => {
+        const o = { ...j };
+        for (const k of STRIP) delete o[k];
+        return o;
+      });
+    }
     return jsonResponse(jobs, headers);
   }
   if (subpath === "/archive-file" && method === "GET") {
