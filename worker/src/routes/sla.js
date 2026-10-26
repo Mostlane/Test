@@ -892,6 +892,18 @@ export async function handle(request, env, ctx, url, sess) {
     if (priorityFilter) jobs = jobs.filter(j => j.priority === priorityFilter);
     if (siteCodeFilter) jobs = jobs.filter(j => (j.siteCode || "") === siteCodeFilter);
     if (overdueFilter === "true") jobs = jobs.filter(j => j.sla?.state === "BREACHED");
+    // Slim board payload (?board=1): drop the heavy evidence/history blobs the
+    // board never renders. riskAssessment alone is ~80% of the full response
+    // (base64 RA photos/signatures), so a full board of ~1000 jobs is ~12 MB —
+    // which both slows the fetch AND silently blows the localStorage quota the
+    // sla-main "instant paint" cache relies on (so it stopped painting as the
+    // board grew). These fields aren't read to view OR edit from the board: the
+    // editor builds its PATCH from form fields and the server merges into the
+    // full stored job. Cuts ~12 MB → ~1.5 MB for 1000 jobs.
+    if (searchParams.get("board") === "1") {
+      const STRIP = ["riskAssessment", "firestop", "signature", "remedials", "auditItems", "statusHistory", "events"];
+      jobs = jobs.map(j => { const o = { ...j }; for (const k of STRIP) delete o[k]; return o; });
+    }
     return jsonResponse(jobs, headers);
   }
 
