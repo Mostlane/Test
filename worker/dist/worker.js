@@ -2675,7 +2675,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const shifts = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT date, clock_on_at, clock_off_at, home_drive_mins FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+      "SELECT date, clock_on_at, clock_off_at, home_drive_mins, data FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
     ).bind(tid, username, monday, end).all();
     for (const s of results || []) {
       const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date;
@@ -2699,8 +2699,15 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       if (cs && (!start || cs < start)) start = cs;
     }
     let finish = null, open = false, travelHome = false;
+    let endAttempt = null;
+    try {
+      endAttempt = sh && sh.data ? (JSON.parse(sh.data) || {}).endAttempt : null;
+    } catch {
+    }
     if (sh && sh.clock_off_at) {
       finish = lTime(sh.clock_off_at);
+    } else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 6e4)) {
+      finish = lTime(endAttempt.at);
     } else if (o) {
       if (o.open || !o.e) open = true;
       else {
@@ -21726,6 +21733,7 @@ async function handle11(request, env, ctx, url, sess) {
           if (!releaseVisibleNowFor(j, engNorm, all)) continue;
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
+          if (jobIsProject(j) || j.projectId) continue;
           const active = /^(travelling|in progress)$/i.test(st);
           if (active && activeSetOn(j, engNorm, st) !== londonDateOfIso((/* @__PURE__ */ new Date()).toISOString())) continue;
           if (active) {
@@ -21745,6 +21753,19 @@ async function handle11(request, env, ctx, url, sess) {
           }
         }
         if (outstanding.length && b.acknowledge !== true) {
+          try {
+            const row = await getShift(env, tenantId, b.engineer, date);
+            if (row && !row.clock_off_at) {
+              let dd = {};
+              try {
+                dd = JSON.parse(row.data || "{}") || {};
+              } catch {
+              }
+              dd.endAttempt = { at: (/* @__PURE__ */ new Date()).toISOString(), gps: b.gps || null };
+              await db.prepare("UPDATE shifts SET data=? WHERE tenant_id=? AND username=? AND date=?").bind(JSON.stringify(dd), db.tenantId, b.engineer, date).run();
+            }
+          } catch {
+          }
           return jsonResponse({
             error: "You've still got " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " on the go today.",
             blocked: true,
@@ -21759,12 +21780,12 @@ async function handle11(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE shifts SET clock_off_at=?, clock_off_gps=COALESCE(?, clock_off_gps), end_mileage=COALESCE(?, end_mileage), fuel=COALESCE(?, fuel) WHERE tenant_id=? AND username=? AND date=?"
     ).bind((/* @__PURE__ */ new Date()).toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
+    try {
+      await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL").bind((/* @__PURE__ */ new Date()).toISOString(), tenantId, b.engineer).run();
+    } catch {
+    }
     if (leftOpen.length) {
       const now2 = (/* @__PURE__ */ new Date()).toISOString(), who = sess?.user?.username || b.engineer;
-      try {
-        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL").bind(now2, tenantId, b.engineer).run();
-      } catch {
-      }
       for (const o of leftOpen) {
         try {
           const j = await getJob3(env, tenantId, o.id);

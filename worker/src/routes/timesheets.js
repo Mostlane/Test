@@ -269,7 +269,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const shifts = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT date, clock_on_at, clock_off_at, home_drive_mins FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+      "SELECT date, clock_on_at, clock_off_at, home_drive_mins, data FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
     ).bind(tid, username, monday, end).all();
     for (const s of results || []) { const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date; if (dt) shifts[dt] = s; }
   } catch {}
@@ -283,8 +283,14 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     let start = o ? lTime(new Date(o.s).toISOString()) : "";
     if (sh && sh.clock_on_at) { const cs = lTime(sh.clock_on_at); if (cs && (!start || cs < start)) start = cs; }   // Start Day = real start
     let finish = null, open = false, travelHome = false;
+    let endAttempt = null;
+    try { endAttempt = sh && sh.data ? (JSON.parse(sh.data) || {}).endAttempt : null; } catch {}
     if (sh && sh.clock_off_at) {
       finish = lTime(sh.clock_off_at);   // End Day = real finish
+    } else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 60000)) {
+      // They pressed End my day but were stopped by an open job — that press
+      // is when they finished; never add a drive home on top of it.
+      finish = lTime(endAttempt.at);
     } else if (o) {
       if (o.open || !o.e) open = true;
       else {

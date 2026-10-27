@@ -234,6 +234,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   job →" button, and "call the office — they can close your day". engineer-jobs / route / my-day all
   use it (also for no-signal); my-day's own client-side activeJob pre-check was removed (server
   decides). Previously the reason was an auto-fading toast (portal-wide alert), easily missed.
+  **Project jobs never block End my day (27 Oct 2026, Lionel's P0918):** `jobIsProject(j)||j.projectId` is skipped
+  in the check (no paperwork, multi-day); every End now closes ALL the engineer's open `job_time_segments`.
+  **A refused press is remembered:** the 409 stores `shifts.data.endAttempt {at,gps}`, and timesheets.js
+  `jobTimeAuto` uses it as the day's FINISH (no drive home added) when there's no real clock-off and the press came
+  no more than 5 min before the last job ended. Start/End presses already store GPS (`clock_on_gps`/`clock_off_gps`).
   NB a PENDING On Hold does NOT block clock-off (parked() counts any On Hold) — the approval only
   holds up starting the NEXT job (findBlockingJob holdPending); the pop-up text says so.
   **Warning, not a wall (21 Oct, Jamie: engineers tap Travelling, do the job, drive home, then can't

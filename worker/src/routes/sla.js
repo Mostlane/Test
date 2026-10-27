@@ -1711,6 +1711,10 @@ export async function handle(request, env, ctx, url, sess) {
           if (!releaseVisibleNowFor(j, engNorm, all)) continue;
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
+          // Project jobs have no completion paperwork and run over many days, so
+          // one left Travelling / In Progress never stops the day ending (27 Oct
+          // 2026, Lionel's P0918 Dilaps). Its time segment still closes below.
+          if (jobIsProject(j) || j.projectId) continue;
           const active = /^(travelling|in progress)$/i.test(st);
           // Only a job put on the go TODAY blocks. One left Travelling / In
           // Progress from an earlier day (often by the office — 31191/1 Rowledge
@@ -1741,6 +1745,17 @@ export async function handle(request, env, ctx, url, sess) {
         // the office is told, and the cross-job guard still makes them sort it
         // before they can start their next job.
         if (outstanding.length && b.acknowledge !== true) {
+          // Remember the refused press (time + location): if they never press
+          // "End my day anyway", the timesheet uses THIS as the finish instead of
+          // guessing a drive home from the last job.
+          try {
+            const row = await getShift(env, tenantId, b.engineer, date);
+            if (row && !row.clock_off_at) {
+              let dd = {}; try { dd = JSON.parse(row.data || "{}") || {}; } catch {}
+              dd.endAttempt = { at: new Date().toISOString(), gps: b.gps || null };
+              await db.prepare("UPDATE shifts SET data=? WHERE tenant_id=? AND username=? AND date=?").bind(JSON.stringify(dd), db.tenantId, b.engineer, date).run();
+            }
+          } catch {}
           return jsonResponse({
             error: "You've still got " + outstanding.length + " job" + (outstanding.length === 1 ? "" : "s") + " on the go today.",
             blocked: true, canOverride: true,
@@ -1755,10 +1770,11 @@ export async function handle(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE shifts SET clock_off_at=?, clock_off_gps=COALESCE(?, clock_off_gps), end_mileage=COALESCE(?, end_mileage), fuel=COALESCE(?, fuel) WHERE tenant_id=? AND username=? AND date=?"
     ).bind(new Date().toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
+    // Their job clock stops with the day — not at the lazy 19:00 guess (covers a
+    // project job left on the go, which no longer blocks).
+    try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL").bind(new Date().toISOString(), tenantId, b.engineer).run(); } catch {}
     if (leftOpen.length) {
       const now = new Date().toISOString(), who = sess?.user?.username || b.engineer;
-      // Their job clock stops with the day — not at the lazy 19:00 guess.
-      try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL").bind(now, tenantId, b.engineer).run(); } catch {}
       for (const o of leftOpen) {
         try {
           const j = await getJob(env, tenantId, o.id);
