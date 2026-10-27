@@ -308,8 +308,13 @@ export async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     // The End press (a real clock-off, or one refused by an open job) is the
     // finish. Pressed AT HOME → that's it. Pressed AWAY from home (on site) →
     // they still had to drive back, so the drive home is added on top.
-    let pressAt = null, pressGps = null;
-    if (sh && sh.clock_off_at) { pressAt = sh.clock_off_at; pressGps = sh.clock_off_gps; }
+    let pressAt = null, pressGps = null, endManual = null;
+    try { endManual = sh && sh.data ? (JSON.parse(sh.data) || {}).endManual : null; } catch {}
+    if (endManual && endManual.at) {
+      // An office correction of the day's end (shifts.data.endManual {at, note, home, by}) beats everything.
+      finish = lTime(endManual.at);
+      endWhere = { miles: null, home: endManual.home !== false, note: endManual.note || "", by: endManual.by || "" };
+    } else if (sh && sh.clock_off_at) { pressAt = sh.clock_off_at; pressGps = sh.clock_off_gps; }
     else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 60000)) { pressAt = endAttempt.at; pressGps = endAttempt.gps; }
     if (pressAt) {
       finish = lTime(pressAt);
@@ -334,9 +339,9 @@ export async function jobTimeAuto(env, tid, username, monday, opts = {}) {
         if (mins != null && mins > 0 && mins < 300) { finish = lTime(new Date(o.e + mins * 60000).toISOString()); travelHome = true; homeMins = mins; }
       }
     }
-    const strip = w => w ? { miles: w.miles, home: w.home } : null;
+    const strip = w => w ? { miles: w.miles, home: w.home, ...(w.note ? { note: w.note, by: w.by } : {}) } : null;
     shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome, homeMins,
-      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!pressAt, endRefused: !!(pressAt && !(sh && sh.clock_off_at)) } };
+      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!(pressAt || (endManual && endManual.at)), endRefused: !!(pressAt && !(sh && sh.clock_off_at)), manual: !!(endManual && endManual.at) } };
   }
   return shaped;
 }

@@ -2722,8 +2722,15 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     }
     const startWhere = sh && sh.clock_on_gps ? await whereOf(sh.clock_on_gps) : null;
     let endWhere = null, homeMins = null;
-    let pressAt = null, pressGps = null;
-    if (sh && sh.clock_off_at) {
+    let pressAt = null, pressGps = null, endManual = null;
+    try {
+      endManual = sh && sh.data ? (JSON.parse(sh.data) || {}).endManual : null;
+    } catch {
+    }
+    if (endManual && endManual.at) {
+      finish = lTime(endManual.at);
+      endWhere = { miles: null, home: endManual.home !== false, note: endManual.note || "", by: endManual.by || "" };
+    } else if (sh && sh.clock_off_at) {
       pressAt = sh.clock_off_at;
       pressGps = sh.clock_off_gps;
     } else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 6e4)) {
@@ -2762,7 +2769,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
         }
       }
     }
-    const strip = (w) => w ? { miles: w.miles, home: w.home } : null;
+    const strip = (w) => w ? { miles: w.miles, home: w.home, ...w.note ? { note: w.note, by: w.by } : {} } : null;
     shaped[date] = {
       start,
       finish,
@@ -2770,7 +2777,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       jobs: o ? o.jobs : [],
       travelHome,
       homeMins,
-      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!pressAt, endRefused: !!(pressAt && !(sh && sh.clock_off_at)) }
+      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!(pressAt || endManual && endManual.at), endRefused: !!(pressAt && !(sh && sh.clock_off_at)), manual: !!(endManual && endManual.at) }
     };
   }
   return shaped;

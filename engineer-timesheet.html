@@ -185,7 +185,7 @@ function whereText(w, homeMins){
   const parts=[];
   const s=one(w.start,"Started"); if(s) parts.push(s);
   if(w.endPressed){
-    const e=w.end?one(w.end,"Ended"):"Ended (no location)";
+    const e=(w.end&&w.end.note)?`Ended — ${w.end.note}${w.end.by?` (set by ${w.end.by})`:""}`:w.end?one(w.end,"Ended"):"Ended (no location)";
     parts.push(e+(homeMins?` · +${homeMins} min drive home added`:"")+(w.endRefused?" · End press was blocked by an open job":""));
   } else if(homeMins){ parts.push(`Didn't press End my day · drive home estimated +${homeMins} min`); }
   return parts.join(" · ");
