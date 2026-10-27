@@ -2,9 +2,12 @@
 // Single canonical SW (scope "/"). Registering this replaces any earlier SW at
 // the same scope (the old push-only service-worker.js), so there's just one.
 
-const CACHE_NAME = "mostlane-v147";
+const CACHE_NAME = "mostlane-v148";
 
-// Precache the shell so the app can at least boot on a dead/flaky connection.
+// Precache the shell so the app can at least boot on a dead/flaky connection —
+// and so the hot office + field pages are warm the FIRST time they're opened
+// after an update (navigations are now served cache-first, below, so a warm
+// cache = an instant open with no network wait).
 const CORE_ASSETS = [
   "/",
   "/main.html",
@@ -12,6 +15,13 @@ const CORE_ASSETS = [
   "/you.html",
   "/route.html",
   "/offline.html",
+  "/sla-main.html",
+  "/sla-scheduler.html",
+  "/add-job.html",
+  "/job-view.html",
+  "/vehicles.html",
+  "/engineer-jobs.html",
+  "/engineer-job.html",
   "/Mostlane_Embossed.png",
   "/icons/icon-192.png",
   "/pwa.js",
@@ -68,44 +78,56 @@ self.addEventListener("fetch", (e) => {
   // Never touch the API / cross-origin workers — always straight to network.
   if (url.hostname.includes("workers.dev") || url.origin !== self.location.origin) return;
 
-  // Page navigations: network-first with a short timeout, then cached copy,
-  // then the offline page. Prevents the blank white screen on poor signal.
+  // Page navigations: STALE-WHILE-REVALIDATE. Serve the cached page INSTANTLY
+  // (no network wait) and refresh it in the background for next time — the same
+  // pattern the scripts below already use. This is what makes a page open feel
+  // instant on any signal: network-first made every open wait on the HTML fetch
+  // (up to the timeout) before anything painted, which on mobile was the 2–3s
+  // delay. The trade-off is that an HTML change lands on the NEXT open, exactly
+  // like portal-config.js / auth.js already do; the data on these pages is
+  // instant-painted from localStorage and refreshed from the API, so a one-load-
+  // old shell is invisible. Pull-to-refresh / the 🔄 button still force-refresh.
   //
   // CRITICAL for installed PWAs: a navigation must NEVER be answered with a
   // failed response (Response.error()) OR a redirected response — iOS reacts by
-  // ejecting the standalone app into a blank Safari tab ("Search or enter
-  // website name"). So we (a) rebuild any redirected network response into a
-  // plain one, and (b) guarantee the fallback chain always returns real HTML.
+  // ejecting the standalone app into a blank Safari tab. So we rebuild any
+  // redirected network response into a plain one, only ever return a clean
+  // cached/real HTML response, and swallow every background error.
   if (req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html")) {
     e.respondWith((async () => {
-      try {
-        const res = await fetchWithTimeout(req, 4000);
-        // A redirected response can't be returned to a navigation — it fails
-        // the load. Reconstruct it as a clean, non-redirected response.
+      // Background revalidate → clean (non-redirected) response → update cache.
+      const revalidate = () => fetchWithTimeout(req, 5000).then(async (res) => {
         if (res && res.redirected) {
           const buf = await res.clone().arrayBuffer();
-          const clean = new Response(buf, { status: res.status, statusText: res.statusText, headers: res.headers });
-          cachePut(req, clean.clone());
-          return clean;
+          res = new Response(buf, { status: res.status, statusText: res.statusText, headers: res.headers });
         }
         cachePut(req, res);
         return res;
-      } catch {
-        return (await caches.match(req, { ignoreSearch: true }))
-          || (await caches.match("/main.html"))
-          || (await caches.match("/login.html"))
-          || (await caches.match("/offline.html"))
-          // Last resort: a tiny self-reloading page — anything but a blank tab.
-          || new Response(
-               "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>" +
-               "<title>Reconnecting…</title><body style='margin:0;font:16px system-ui;display:flex;height:100vh;" +
-               "align-items:center;justify-content:center;background:#e6e8eb;color:#123'>" +
-               "<div style='text-align:center'><p>Reconnecting…</p>" +
-               "<p><a href='/login.html' style='color:#0066cc'>Open Mostlane</a></p></div>" +
-               "<script>setTimeout(function(){location.replace('/login.html')},1500)</script>",
-               { headers: { "Content-Type": "text/html; charset=utf-8" } }
-             );
-      }
+      }).catch(() => null);
+
+      // INSTANT: a page we've cached (precached shell, or any page visited
+      // before) is served at once and refreshed behind the scenes.
+      const cached = await caches.match(req, { ignoreSearch: true });
+      if (cached) { e.waitUntil(revalidate()); return cached; }
+
+      // Not cached yet (first-ever visit / brand-new page): go to network, then
+      // fall back through the shell so a navigation is never left blank.
+      const net = await revalidate();
+      if (net) return net;
+      return (await caches.match(req, { ignoreSearch: true }))
+        || (await caches.match("/main.html"))
+        || (await caches.match("/login.html"))
+        || (await caches.match("/offline.html"))
+        // Last resort: a tiny self-reloading page — anything but a blank tab.
+        || new Response(
+             "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>" +
+             "<title>Reconnecting…</title><body style='margin:0;font:16px system-ui;display:flex;height:100vh;" +
+             "align-items:center;justify-content:center;background:#e6e8eb;color:#123'>" +
+             "<div style='text-align:center'><p>Reconnecting…</p>" +
+             "<p><a href='/login.html' style='color:#0066cc'>Open Mostlane</a></p></div>" +
+             "<script>setTimeout(function(){location.replace('/login.html')},1500)</script>",
+             { headers: { "Content-Type": "text/html; charset=utf-8" } }
+           );
     })());
     return;
   }
