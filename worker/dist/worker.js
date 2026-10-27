@@ -2930,7 +2930,7 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
       notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status });
       continue;
     }
-    const hours = saved != null ? saved : capturedMins > 0 ? r2q(capturedMins / 60) : 0;
+    const hours = capturedMins > 0 ? r2q(capturedMins / 60) : saved != null ? saved : 0;
     jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " \u2014 " + m.site : ""), capturedMins, hours, status: m.status });
   }
   jobs.sort((a, b) => b.capturedMins - a.capturedMins || String(a.ref).localeCompare(String(b.ref)));
@@ -3188,7 +3188,7 @@ function cleanDays(monday, days) {
     const noLunchReason = noLunch ? String(d.noLunchReason || "").slice(0, 200) : "";
     const timeReason = String(d.timeReason || "").slice(0, 200);
     const disp = { ...noLunch ? { noLunch, noLunchReason } : {}, ...timeReason ? { timeReason } : {} };
-    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed || noLunch)
       out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {}, ...disp };
   }
   return out;
@@ -4276,8 +4276,8 @@ async function handle3(request, env, ctx, url, sess) {
     const start = saved.start || a.start || "";
     const finish = saved.finish || a.finish || "";
     if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
-      const s = toMin(start), f = toMin(finish);
-      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+      const paidMin = dayCalc({ start, finish }, eff).paid;
+      if (paidMin > 0) jobs[0].hours = round1(paidMin / 60);
     }
     const inv = await invoiceFor(env, tid, who, monday);
     return json({

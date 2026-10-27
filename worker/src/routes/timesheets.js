@@ -470,7 +470,9 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
     const saved = savedJobHours && savedJobHours[id] != null ? Number(savedJobHours[id]) : null;
     const attended = saved != null || capturedMins > 0 || !NOT_ATTENDED.has(String(m.status || "").toLowerCase());
     if (!attended) { notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status }); continue; }
-    const hours = saved != null ? saved : (capturedMins > 0 ? r2q(capturedMins / 60) : 0);
+    // Captured status-tap time ALWAYS wins; a saved/typed figure is only used
+    // when nothing was captured for the job that day.
+    const hours = capturedMins > 0 ? r2q(capturedMins / 60) : (saved != null ? saved : 0);
     jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " — " + m.site : ""), capturedMins, hours, status: m.status });
   }
   jobs.sort((a, b) => (b.capturedMins - a.capturedMins) || String(a.ref).localeCompare(String(b.ref)));
@@ -699,7 +701,7 @@ function cleanDays(monday, days) {
     const noLunchReason = noLunch ? String(d.noLunchReason || "").slice(0, 200) : "";
     const timeReason = String(d.timeReason || "").slice(0, 200);
     const disp = { ...(noLunch ? { noLunch, noLunchReason } : {}), ...(timeReason ? { timeReason } : {}) };
-    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed || noLunch)
       out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}), ...(hasLeave ? { leaveHours } : {}), ...(confirmed ? { confirmed } : {}), ...disp };
   }
   return out;
@@ -1689,8 +1691,8 @@ export async function handle(request, env, ctx, url, sess) {
     // shift so it's a one-tap confirm, not a fiddly split. Only when nothing was
     // captured or already saved for it.
     if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
-      const s = toMin(start), f = toMin(finish);
-      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+      const paidMin = dayCalc({ start, finish }, eff).paid;   // the day's PAID hours (after deductions)
+      if (paidMin > 0) jobs[0].hours = round1(paidMin / 60);
     }
     const inv = await invoiceFor(env, tid, who, monday);
     return json({ ok: true, date, week: monday,
