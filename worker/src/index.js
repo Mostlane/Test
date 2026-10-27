@@ -285,6 +285,10 @@ const worker = {
     // about field engineers with no job for the next working day, then auto-assign
     // each still-empty engineer their configured fallback at 19:00 (Fri covers Mon).
     ctx.waitUntil(sla.sweepFallbacks(env, 1).catch(e => console.error("scheduled fallback sweep:", e)));
+    // One-time backfill: migrate the base64 RA signatures still in the jobs table
+    // out to R2 (a small batch per tick, then it sets a done flag and stops). New
+    // RA signatures are already offloaded on save; this clears the existing ones.
+    ctx.waitUntil(sla.sweepOffloadRaSigs(env, 1).catch(e => console.error("scheduled RA-signature offload:", e)));
     // Watchdog probes run EVERY tick (every 5 min) — cheap D1/R2 liveness touches
     // that keep health.html fresh and push the owner (deduped) the moment a probe
     // fails or server errors spike. Fails soft; never blocks the other cron work.
