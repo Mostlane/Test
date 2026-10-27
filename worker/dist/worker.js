@@ -2687,8 +2687,24 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   let homeCoord;
   const getHome = async () => {
     if (homeCoord !== void 0) return homeCoord;
-    homeCoord = homePc ? await lookupPostcode(homePc).catch(() => null) : null;
+    homeCoord = null;
+    try {
+      const u = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+      const pr = u && u.profile ? JSON.parse(u.profile) : {};
+      const lat = Number(pr.homeLat), lng = Number(pr.homeLng ?? pr.homeLon);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) homeCoord = { lat, lng };
+    } catch {
+    }
+    if (!homeCoord && homePc) homeCoord = await lookupPostcode(homePc).catch(() => null);
     return homeCoord;
+  };
+  const whereOf = async (gps) => {
+    const p = parseGps(gps);
+    if (!p) return null;
+    const h = await getHome();
+    if (!h) return { miles: null, home: null, unknownHome: true };
+    const miles = Math.round(haversineMiles(p, h) * 10) / 10;
+    return { miles, home: miles <= AT_HOME_MILES, at: p };
   };
   const shaped = {};
   for (const date of /* @__PURE__ */ new Set([...Object.keys(out), ...Object.keys(shifts)])) {
@@ -2704,10 +2720,28 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       endAttempt = sh && sh.data ? (JSON.parse(sh.data) || {}).endAttempt : null;
     } catch {
     }
+    const startWhere = sh && sh.clock_on_gps ? await whereOf(sh.clock_on_gps) : null;
+    let endWhere = null, homeMins = null;
+    let pressAt = null, pressGps = null;
     if (sh && sh.clock_off_at) {
-      finish = lTime(sh.clock_off_at);
+      pressAt = sh.clock_off_at;
+      pressGps = sh.clock_off_gps;
     } else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 6e4)) {
-      finish = lTime(endAttempt.at);
+      pressAt = endAttempt.at;
+      pressGps = endAttempt.gps;
+    }
+    if (pressAt) {
+      finish = lTime(pressAt);
+      endWhere = pressGps ? await whereOf(pressGps) : null;
+      if (endWhere && endWhere.home === false && endWhere.at) {
+        let mins = await driveMinutesCoords(env, endWhere.at, await getHome());
+        if (mins == null) mins = Math.round(endWhere.miles * ROAD_FACTOR / 30 * 60);
+        if (mins != null && mins > 0 && mins < 300) {
+          finish = lTime(new Date(Date.parse(pressAt) + mins * 6e4).toISOString());
+          travelHome = true;
+          homeMins = mins;
+        }
+      }
     } else if (o) {
       if (o.open || !o.e) open = true;
       else {
@@ -2724,10 +2758,20 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
         if (mins != null && mins > 0 && mins < 300) {
           finish = lTime(new Date(o.e + mins * 6e4).toISOString());
           travelHome = true;
+          homeMins = mins;
         }
       }
     }
-    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome };
+    const strip = (w) => w ? { miles: w.miles, home: w.home } : null;
+    shaped[date] = {
+      start,
+      finish,
+      open,
+      jobs: o ? o.jobs : [],
+      travelHome,
+      homeMins,
+      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!pressAt, endRefused: !!(pressAt && !(sh && sh.clock_off_at)) }
+    };
   }
   return shaped;
 }
@@ -3515,6 +3559,37 @@ async function driveMinutesGoogle(env, fromPc, toPc, opts = {}) {
     DRIVE_MEMO.set(mk, { mins, at: Date.now() });
   }
   return mins;
+}
+function parseGps(g) {
+  if (!g) return null;
+  if (typeof g === "object") {
+    const lat2 = Number(g.lat), lng2 = Number(g.lng ?? g.lon);
+    return Number.isFinite(lat2) && Number.isFinite(lng2) ? { lat: lat2, lng: lng2 } : null;
+  }
+  const m = String(g).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = Number(m[1]), lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng) ? { lat, lng } : null;
+}
+async function driveMinutesCoords(env, a, b) {
+  const key = env && env.GOOGLE_MAPS_KEY;
+  if (!key || !a || !b) return null;
+  const mk = "c:" + a.lat.toFixed(3) + "," + a.lng.toFixed(3) + "|" + b.lat.toFixed(3) + "," + b.lng.toFixed(3);
+  const hit = DRIVE_MEMO.get(mk);
+  if (hit && Date.now() - hit.at < DRIVE_MEMO_TTL) return hit.mins;
+  try {
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
+    const j = await (await fetch(u)).json().catch(() => null);
+    const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
+    if (el && el.status === "OK" && el.duration && el.duration.value != null) {
+      const mins = Math.round(el.duration.value / 60);
+      if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear();
+      DRIVE_MEMO.set(mk, { mins, at: Date.now() });
+      return mins;
+    }
+  } catch {
+  }
+  return null;
 }
 async function driveMinutesGoogleLive(key, f, t) {
   try {
@@ -4874,9 +4949,12 @@ async function handle3(request, env, ctx, url, sess) {
       const out = await Promise.all((users || []).map(async (u) => {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
+        let autoWhere = null;
         try {
           const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
+          autoWhere = {};
           for (const [date, a] of Object.entries(auto)) {
+            autoWhere[date] = { ...a.where || {}, homeMins: a.homeMins || null };
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
             if (!day.finish && a.finish) day.finish = a.finish;
@@ -4890,7 +4968,7 @@ async function handle3(request, env, ctx, url, sess) {
         const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
         const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null, where: autoWhere && autoWhere[date] || null };
         const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
         return {
           username: u.username,
@@ -5021,7 +5099,7 @@ async function handle3(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL;
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES;
 var init_timesheets = __esm({
   "src/routes/timesheets.js"() {
     init_http();
@@ -5067,6 +5145,7 @@ var init_timesheets = __esm({
     ROAD_FACTOR = 1.25;
     DRIVE_MEMO = /* @__PURE__ */ new Map();
     DRIVE_MEMO_TTL = 12 * 3600 * 1e3;
+    AT_HOME_MILES = 1;
   }
 });
 
