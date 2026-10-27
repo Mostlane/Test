@@ -239,6 +239,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   **A refused press is remembered:** the 409 stores `shifts.data.endAttempt {at,gps}`, and timesheets.js
   `jobTimeAuto` uses it as the day's FINISH (no drive home added) when there's no real clock-off and the press came
   no more than 5 min before the last job ended. Start/End presses already store GPS (`clock_on_gps`/`clock_off_gps`).
+  **Where the presses were (27 Oct 2026):** `jobTimeAuto` compares the Start/End GPS with the engineer's home
+  (profile homeLat/homeLng pin first, else the home postcode; `AT_HOME_MILES`=1) and returns `where {start,end,
+  endPressed,endRefused}` + `homeMins`. An End press AWAY from home adds the drive home on top (Google from the
+  press point, `driveMinutesCoords`, memoised; else straight-line ×1.25 @30mph); at home / no GPS = the press time.
+  Shown as a 📍 line on engineer-timesheet.html + timesheets-admin.html (grid pin tooltip + edit modal).
   NB a PENDING On Hold does NOT block clock-off (parked() counts any On Hold) — the approval only
   holds up starting the NEXT job (findBlockingJob holdPending); the pop-up text says so.
   **Warning, not a wall (21 Oct, Jamie: engineers tap Travelling, do the job, drive home, then can't

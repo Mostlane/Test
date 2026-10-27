@@ -205,6 +205,19 @@ function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok(
 function authFetchTO(p,o={},ms=9000){return Promise.race([authFetch(p,o),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);}
 const g=id=>document.getElementById(id);
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+// Where the Start / End presses were, relative to home (from /ts jobTimeAuto `where`).
+function whereText(w, homeMins){
+  if(!w) return "";
+  const mi=m=>m<10?m.toFixed(1):Math.round(m);
+  const one=(x,verb)=>!x?"":x.home===true?`${verb} at home`:x.miles!=null?`${verb} ${mi(x.miles)} mi from home`:`${verb} (home address not set)`;
+  const parts=[];
+  const s=one(w.start,"Started"); if(s) parts.push(s);
+  if(w.endPressed){
+    const e=w.end?one(w.end,"Ended"):"Ended (no location)";
+    parts.push(e+(homeMins?` · +${homeMins} min drive home added`:"")+(w.endRefused?" · End press was blocked by an open job":""));
+  } else if(homeMins){ parts.push(`Didn't press End my day · drive home estimated +${homeMins} min`); }
+  return parts.join(" · ");
+}
 function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.toISOString().slice(0,10);}
 function addDays(iso,n){const d=new Date(iso+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
 const hmS=m=>(!m||m<=0)?"—":Math.floor(m/60)+"h"+String(Math.round(m%60)).padStart(2,"0");
@@ -256,7 +269,9 @@ function renderTable(){
       const p=u.perDay[d];
       if(bh && !(p&&p.worked)) return `<td style="background:#eef2ff"><span title="${esc(bh.label)}" style="font-size:16px">🏦</span></td>`;
       const bhTag=bh?` <span title="${esc(bh.label)}">🏦</span>`:"";
-      return "<td>"+(p&&p.worked?hmS(p.paid)+bhTag:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
+      const wt=p&&p.where?whereText(p.where,p.where.homeMins):"";
+      const pin=wt?` <span title="${esc(wt)}" style="cursor:help;font-size:11px">📍${p.where.end&&p.where.end.home===false?"🚗":""}</span>`:"";
+      return "<td>"+(p&&p.worked?hmS(p.paid)+bhTag+pin:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
     }).join("");
     const inv=u.invoice?`<a class="inv" href="${esc(u.invoice.url)}" target="_blank" title="Open invoice PDF">#${u.invoice.number}</a>`
       :(u.selfEmployed?"<span class='muted'>—</span>":"");
@@ -327,6 +342,7 @@ function openEdit(username){
     return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${hol.half?` ${esc(hol.half)}`:""}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 ${bh.kind==="shutdown"?"Shutdown":"Bank Hol"}</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
+      ${(()=>{const p=u.perDay&&u.perDay[date];const wt=p&&p.where?whereText(p.where,p.where.homeMins):"";return wt?`<div class="muted" style="font-size:12px;margin-top:4px">📍 ${esc(wt)}</div>`:"";})()}
       ${leaveRow}${miBlock}</div>`;
   }).join("");
   const appr=u.approval||null;

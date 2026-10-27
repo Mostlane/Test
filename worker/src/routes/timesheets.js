@@ -224,7 +224,7 @@ export async function trackJobTime(env, tid, actor, before, after) {
 // A segment left open on an earlier day is lazily closed at 19:00 that day
 // (or an hour after it started, if it started later than that).
 const MAX_SEG_MS = 14 * 3600e3; // a session longer than a long shift = forgotten status change → clamp
-async function jobTimeAuto(env, tid, username, monday, opts = {}) {
+export async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
   const end = endD.toISOString().slice(0, 10);
   const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
@@ -274,8 +274,26 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     for (const s of results || []) { const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date; if (dt) shifts[dt] = s; }
   } catch {}
   const homePc = normPc(opts.homePostcode || "");
-  let homeCoord;   // resolved lazily, once
-  const getHome = async () => { if (homeCoord !== undefined) return homeCoord; homeCoord = homePc ? await lookupPostcode(homePc).catch(() => null) : null; return homeCoord; };
+  let homeCoord;   // resolved lazily, once — the dropped home PIN first, else the postcode
+  const getHome = async () => {
+    if (homeCoord !== undefined) return homeCoord;
+    homeCoord = null;
+    try {
+      const u = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+      const pr = u && u.profile ? JSON.parse(u.profile) : {};
+      const lat = Number(pr.homeLat), lng = Number(pr.homeLng ?? pr.homeLon);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) homeCoord = { lat, lng };
+    } catch {}
+    if (!homeCoord && homePc) homeCoord = await lookupPostcode(homePc).catch(() => null);
+    return homeCoord;
+  };
+  // Where a Start / End press happened, relative to home: {miles, home}.
+  const whereOf = async gps => {
+    const p = parseGps(gps); if (!p) return null;
+    const h = await getHome(); if (!h) return { miles: null, home: null, unknownHome: true };
+    const miles = Math.round(haversineMiles(p, h) * 10) / 10;
+    return { miles, home: miles <= AT_HOME_MILES, at: p };
+  };
 
   const shaped = {};
   for (const date of new Set([...Object.keys(out), ...Object.keys(shifts)])) {
@@ -285,12 +303,22 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     let finish = null, open = false, travelHome = false;
     let endAttempt = null;
     try { endAttempt = sh && sh.data ? (JSON.parse(sh.data) || {}).endAttempt : null; } catch {}
-    if (sh && sh.clock_off_at) {
-      finish = lTime(sh.clock_off_at);   // End Day = real finish
-    } else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 60000)) {
-      // They pressed End my day but were stopped by an open job — that press
-      // is when they finished; never add a drive home on top of it.
-      finish = lTime(endAttempt.at);
+    const startWhere = sh && sh.clock_on_gps ? await whereOf(sh.clock_on_gps) : null;
+    let endWhere = null, homeMins = null;
+    // The End press (a real clock-off, or one refused by an open job) is the
+    // finish. Pressed AT HOME → that's it. Pressed AWAY from home (on site) →
+    // they still had to drive back, so the drive home is added on top.
+    let pressAt = null, pressGps = null;
+    if (sh && sh.clock_off_at) { pressAt = sh.clock_off_at; pressGps = sh.clock_off_gps; }
+    else if (endAttempt && endAttempt.at && (!o || !o.e || Date.parse(endAttempt.at) >= o.e - 5 * 60000)) { pressAt = endAttempt.at; pressGps = endAttempt.gps; }
+    if (pressAt) {
+      finish = lTime(pressAt);
+      endWhere = pressGps ? await whereOf(pressGps) : null;
+      if (endWhere && endWhere.home === false && endWhere.at) {
+        let mins = await driveMinutesCoords(env, endWhere.at, await getHome());
+        if (mins == null) mins = Math.round(endWhere.miles * ROAD_FACTOR / 30 * 60);
+        if (mins != null && mins > 0 && mins < 300) { finish = lTime(new Date(Date.parse(pressAt) + mins * 60000).toISOString()); travelHome = true; homeMins = mins; }
+      }
     } else if (o) {
       if (o.open || !o.e) open = true;
       else {
@@ -303,10 +331,12 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
         if (mins == null && o.lastPc && homePc) {
           try { const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]); if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); } catch {}
         }
-        if (mins != null && mins > 0 && mins < 300) { finish = lTime(new Date(o.e + mins * 60000).toISOString()); travelHome = true; }
+        if (mins != null && mins > 0 && mins < 300) { finish = lTime(new Date(o.e + mins * 60000).toISOString()); travelHome = true; homeMins = mins; }
       }
     }
-    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome };
+    const strip = w => w ? { miles: w.miles, home: w.home } : null;
+    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome, homeMins,
+      where: { start: strip(startWhere), end: strip(endWhere), endPressed: !!pressAt, endRefused: !!(pressAt && !(sh && sh.clock_off_at)) } };
   }
   return shaped;
 }
@@ -1024,6 +1054,33 @@ async function driveMinutesGoogle(env, fromPc, toPc, opts = {}) {
   const mins = await driveMinutesGoogleLive(key, f, t);
   if (opts.cached && mins != null) { if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear(); DRIVE_MEMO.set(mk, { mins, at: Date.now() }); }
   return mins;
+}
+// A press within this distance of home counts as "at home" (GPS + postcode-centre slack).
+const AT_HOME_MILES = 1;
+function parseGps(g) {
+  if (!g) return null;
+  if (typeof g === "object") { const lat = Number(g.lat), lng = Number(g.lng ?? g.lon); return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null; }
+  const m = String(g).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = Number(m[1]), lng = Number(m[2]);
+  return (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng)) ? { lat, lng } : null;
+}
+// Drive minutes from a point (an End press) to home — Google, memoised by ~100 m.
+async function driveMinutesCoords(env, a, b) {
+  const key = env && env.GOOGLE_MAPS_KEY; if (!key || !a || !b) return null;
+  const mk = "c:" + a.lat.toFixed(3) + "," + a.lng.toFixed(3) + "|" + b.lat.toFixed(3) + "," + b.lng.toFixed(3);
+  const hit = DRIVE_MEMO.get(mk); if (hit && Date.now() - hit.at < DRIVE_MEMO_TTL) return hit.mins;
+  try {
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
+    const j = await (await fetch(u)).json().catch(() => null);
+    const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
+    if (el && el.status === "OK" && el.duration && el.duration.value != null) {
+      const mins = Math.round(el.duration.value / 60);
+      if (DRIVE_MEMO.size > 500) DRIVE_MEMO.clear(); DRIVE_MEMO.set(mk, { mins, at: Date.now() });
+      return mins;
+    }
+  } catch {}
+  return null;
 }
 async function driveMinutesGoogleLive(key, f, t) {
   try {
@@ -2210,9 +2267,12 @@ export async function handle(request, env, ctx, url, sess) {
         // Job-status time capture fills gaps the engineer hasn't typed over,
         // so the admin sees captured days even before the engineer opens
         // their timesheet.
+        let autoWhere = null;
         try {
           const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
+          autoWhere = {};
           for (const [date, a] of Object.entries(auto)) {
+            autoWhere[date] = { ...(a.where || {}), homeMins: a.homeMins || null };
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
             if (!day.finish && a.finish) day.finish = a.finish;
@@ -2226,7 +2286,7 @@ export async function handle(request, env, ctx, url, sess) {
         const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
         const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null, where: (autoWhere && autoWhere[date]) || null };
         const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
         return ({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },

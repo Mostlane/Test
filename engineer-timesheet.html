@@ -177,6 +177,19 @@ function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok(
 function authFetchTO(p,o={},ms=9000){return Promise.race([authFetch(p,o),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);}
 const g=id=>document.getElementById(id);
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+// Where the Start / End presses were, relative to home (from /ts jobTimeAuto `where`).
+function whereText(w, homeMins){
+  if(!w) return "";
+  const mi=m=>m<10?m.toFixed(1):Math.round(m);
+  const one=(x,verb)=>!x?"":x.home===true?`${verb} at home`:x.miles!=null?`${verb} ${mi(x.miles)} mi from home`:`${verb} (home address not set)`;
+  const parts=[];
+  const s=one(w.start,"Started"); if(s) parts.push(s);
+  if(w.endPressed){
+    const e=w.end?one(w.end,"Ended"):"Ended (no location)";
+    parts.push(e+(homeMins?` · +${homeMins} min drive home added`:"")+(w.endRefused?" · End press was blocked by an open job":""));
+  } else if(homeMins){ parts.push(`Didn't press End my day · drive home estimated +${homeMins} min`); }
+  return parts.join(" · ");
+}
 function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.toISOString().slice(0,10);}
 function addDays(iso,n){const d=new Date(iso+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
 const toMin=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||""));return m?(+m[1])*60+(+m[2]):null;};
@@ -425,7 +438,7 @@ function render(){
           <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
         </div>
         ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
-        ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. drive home, live traffic)":""}</span>`:""}
+        ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. drive home)":""}${whereText(a.where,a.homeMins)?`<br>📍 ${esc(whereText(a.where,a.homeMins))}`:""}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
     if(ME&&ME.mileage&&!(AUTOMI&&AUTOMI.applies)){
