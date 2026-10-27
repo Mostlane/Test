@@ -701,17 +701,24 @@ function claimedMiles(miles, eff) {
   if (!eff.radius || !(miles > 0)) return miles;
   return Math.max(0, round1(miles - 2 * eff.radiusMiles));
 }
-function dayCalc(d, eff) {
+export function dayCalc(d, eff) {
   const miles = dayMiles(d);
   const base = { miles, milesClaimed: claimedMiles(miles, eff) };
   const s = toMin(d.start), e0 = toMin(d.finish);
   if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, ...base };
   const e = e0 <= s ? e0 + 1440 : e0;   // finishing "past midnight" rolls to the next day
   const span = e - s;
-  const commute = eff.commute ? eff.commuteMins * 2 : 0;
+  // Each end: the drive (home → first site, last site → home) up to commuteMins,
+  // unpaid. A short drive only costs its own minutes. Unknown drive (no sites
+  // found) = the full commuteMins, as before (27 Oct 2026, Jamie's rule).
+  const cm = eff.commuteMins, cap = x => (x == null || !isFinite(x)) ? cm : Math.min(cm, Math.max(0, Math.round(x)));
+  const cl = d._commute || {};
+  const commute = eff.commute ? cap(cl.am) + cap(cl.pm) : 0;
   const lunch = (eff.lunch && span >= eff.lunchThresholdH * 60) ? eff.lunchMins : 0;
   return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
 }
+// Per-day {am, pm} drive minutes behind the travel deduction (for the engineer page).
+function commuteMap(days) { const m = {}; for (const [k, d] of Object.entries(days || {})) if (d && d._commute) m[k] = d._commute; return m; }
 function dayMiles(d) { return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0)); }
 function weekTotals(days, eff) {
   const r2 = n => Math.round(n * 100) / 100;
@@ -1329,9 +1336,12 @@ export async function sweepTimesheetReminders(env, tid = 1) {
 // → home. Returns a working copy of `days` (manual mileage ignored) + a per-date
 // breakdown for display. Anyone else → days unchanged, applies:false.
 async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
-  if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
+  const wantMi = !!(eff.selfEmployed && eff.mileage), wantCm = !!eff.commute;
+  if (!wantMi && !wantCm) return { days, auto: { applies: false } };
   const basePc = normPc(basePostcode || "PO15 5RQ");
   const homePc = normPc(eff.homePostcode || "") || basePc;
+  // Travel deduction measures from where they actually live.
+  const homeCm = wantCm ? (normPc(eff.homePostcode || "") || normPc(await homePostcodeFor(env, tid, username).catch(() => "")) || "") : "";
   const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
   const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
   const coordCache = new Map();
@@ -1359,6 +1369,12 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
       }
       fromSchedule = seq.length > 0;
     }
+    if (wantCm && worked && seq.length && homeCm) {
+      const [h, f, l] = await Promise.all([coord(homeCm), coord(seq[0].pc), coord(seq[seq.length - 1].pc)]);
+      const mins = async (a, b) => { if (!a || !b) return null; const m = await driveMinutesCoords(env, a, b); return m != null ? m : Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); };
+      if (h) out[date]._commute = { am: await mins(h, f), pm: await mins(l, h) };
+    }
+    if (!wantMi) continue;
     if (!worked || !seq.length) {
       out[date].mileage = [];
       if (worked) byDate[date] = { miles: 0, legs: [], sites: seq.map(s => s.site), home: homePc, noRoute: !seq.length };
@@ -1383,7 +1399,7 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
     out[date].mileage = [{ site: "Door-to-door (auto)", postcode: "", miles: total, auto: true }];
     byDate[date] = { miles: total, legs, sites: seq.map(s => s.site), home: homePc, missing, fromSchedule };
   }
-  return { days: out, auto: { applies: true, home: homePc, base: basePc, byDate } };
+  return { days: out, auto: wantMi ? { applies: true, home: homePc, base: basePc, byDate } : { applies: false } };
 }
 
 // ── Invoice PDF ──────────────────────────────────────────────────────────────
@@ -1580,7 +1596,7 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
       viewingUser: who !== me ? who : null, remindersOn: remindersEnabled(cfg),
       due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue }, missingHours: gaps.missing,
-      totals: weekTotals(am.days, eff), autoMileage: am.auto,
+      totals: weekTotals(am.days, eff), autoMileage: am.auto, commuteByDate: commuteMap(am.days),
       invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -1629,7 +1645,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Push the per-job hours into the labour ledger for job costing.
     await materialiseTimesheet(env, tid, me, monday, days);
     const amSave = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
-    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
+    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto, commuteByDate: commuteMap(amSave.days) }, {}, env, request);
   }
 
   // ── GET /ts/day?date= — one day's sheet, pre-filled for the day-end popup ──

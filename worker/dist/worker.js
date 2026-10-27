@@ -3196,9 +3196,16 @@ function dayCalc(d, eff) {
   if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, ...base };
   const e = e0 <= s ? e0 + 1440 : e0;
   const span = e - s;
-  const commute = eff.commute ? eff.commuteMins * 2 : 0;
+  const cm = eff.commuteMins, cap2 = (x) => x == null || !isFinite(x) ? cm : Math.min(cm, Math.max(0, Math.round(x)));
+  const cl = d._commute || {};
+  const commute = eff.commute ? cap2(cl.am) + cap2(cl.pm) : 0;
   const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
   return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
+}
+function commuteMap(days) {
+  const m = {};
+  for (const [k, d] of Object.entries(days || {})) if (d && d._commute) m[k] = d._commute;
+  return m;
 }
 function dayMiles(d) {
   return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
@@ -3880,9 +3887,11 @@ async function sweepTimesheetReminders(env, tid = 1) {
   }
 }
 async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
-  if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
+  const wantMi = !!(eff.selfEmployed && eff.mileage), wantCm = !!eff.commute;
+  if (!wantMi && !wantCm) return { days, auto: { applies: false } };
   const basePc = normPc(basePostcode || "PO15 5RQ");
   const homePc = normPc(eff.homePostcode || "") || basePc;
+  const homeCm = wantCm ? normPc(eff.homePostcode || "") || normPc(await homePostcodeFor(env, tid, username).catch(() => "")) || "" : "";
   const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
   const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
   const coordCache = /* @__PURE__ */ new Map();
@@ -3912,6 +3921,16 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
       }
       fromSchedule = seq.length > 0;
     }
+    if (wantCm && worked && seq.length && homeCm) {
+      const [h, f, l] = await Promise.all([coord(homeCm), coord(seq[0].pc), coord(seq[seq.length - 1].pc)]);
+      const mins = async (a, b) => {
+        if (!a || !b) return null;
+        const m = await driveMinutesCoords(env, a, b);
+        return m != null ? m : Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
+      };
+      if (h) out[date]._commute = { am: await mins(h, f), pm: await mins(l, h) };
+    }
+    if (!wantMi) continue;
     if (!worked || !seq.length) {
       out[date].mileage = [];
       if (worked) byDate[date] = { miles: 0, legs: [], sites: seq.map((s) => s.site), home: homePc, noRoute: !seq.length };
@@ -3943,7 +3962,7 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
     out[date].mileage = [{ site: "Door-to-door (auto)", postcode: "", miles: total, auto: true }];
     byDate[date] = { miles: total, legs, sites: seq.map((s) => s.site), home: homePc, missing, fromSchedule };
   }
-  return { days: out, auto: { applies: true, home: homePc, base: basePc, byDate } };
+  return { days: out, auto: wantMi ? { applies: true, home: homePc, base: basePc, byDate } : { applies: false } };
 }
 function fmtDate(iso) {
   return (/* @__PURE__ */ new Date(iso + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -4173,6 +4192,7 @@ async function handle3(request, env, ctx, url, sess) {
       missingHours: gaps.missing,
       totals: weekTotals(am.days, eff),
       autoMileage: am.auto,
+      commuteByDate: commuteMap(am.days),
       invoice: inv ? {
         id: inv.id,
         number: inv.number,
@@ -4221,7 +4241,7 @@ async function handle3(request, env, ctx, url, sess) {
     ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
     await materialiseTimesheet(env, tid, me, monday, days);
     const amSave = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
-    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
+    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto, commuteByDate: commuteMap(amSave.days) }, {}, env, request);
   }
   if (sub === "/day" && method === "GET") {
     const who = await viewUser();

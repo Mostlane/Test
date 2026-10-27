@@ -1125,7 +1125,11 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   page) — debounced ~1s, instant on taps, 8s retry loop, keepalive flush on
   pagehide, flush before week-nav/modal close; status text shows Saved ✓.
   Per-user deduction switches (app_config `engts:cfg:<tid>` — no schema churn):
-  **commute** (30 min each way, shown greyed/read-only on the engineer's page),
+  **commute** (since 27 Oct 2026 = the ACTUAL drive home→first site and last site→home, each capped at
+  commuteMins/30 — a 20-min drive costs 20 min; worked out in `applyAutoMileage` as `day._commute {am,pm}`
+  [Google no-traffic from the home postcode, else straight-line], used by `dayCalc`; unknown route = full 30;
+  the engineer page gets `commuteByDate` from /ts/my + save and shows "−Xm + −Ym travel"; NB /ts/day's popup
+  summary still uses the flat 30 — no route there),
   **lunch** (30 min on days ≥ 6 h), **mileage** allowed, rate (£/hour or /day),
   pence-per-mile, home postcode, next invoice number; defaults + the invoice
   "To" company block editable in the admin ⚙️ Settings modal. Tables (live in
