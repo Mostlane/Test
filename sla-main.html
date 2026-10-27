@@ -1086,21 +1086,17 @@ function scheduleRender(){
   _renderPending = true;
   (window.requestAnimationFrame || (f => setTimeout(f, 16)))(() => { _renderPending = false; render(); });
 }
+let _renderSeq = 0;   // bumped each render so an in-flight chunked stream can tell it's been superseded
 function render(){
   _renderPending = false;   // a direct render satisfies any pending scheduled one
+  const mySeq = ++_renderSeq;
   persistFilters();   // remember search + status + priority + client so Back restores them
   renderChips();
   populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
   const list = filteredJobs();
   const tbody = $("jobsTbody");
   const cards = $("jobCards");
-  // Assemble the whole table + card list as one string each and write it with a
-  // single innerHTML — far cheaper than hundreds of createElement/appendChild
-  // calls, and it lands as ONE DOM insertion (the shared busy-mark observer then
-  // scans it once instead of per row). This is the heaviest work on the page, so
-  // keeping it to two parses is what lets a big board open without pinning the
-  // main thread. (NB build strings, so every dynamic value stays esc()'d.)
-  let rowsH = "", cardsH = "";
+  tbody.innerHTML = ""; cards.innerHTML = "";
 
   // Count members of each multi-engineer group so a split job shows "👥 A/2".
   const groupCounts = {};
@@ -1116,7 +1112,11 @@ function render(){
     ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
     : "";
 
-  for(const j of list){
+  // ── Per-row builders (string → one DOM insertion). Pulled out of the loop so the
+  // board can be STREAMED: the first screenful lands instantly and the rest fill in
+  // over the next frames, keeping the main thread free so the header buttons
+  // (Scheduler / Add Job) are tappable at once even on a 600-job board. ──────────
+  function liveParts(j){
     // The "Job" title should read "<ticket number> - <site>" (e.g.
     // "28548-Bristol, Ashley Down Road"). That's the helpdeskRef when it starts
     // with the number; but the ref sometimes gets defaulted to just the site name
@@ -1145,7 +1145,7 @@ function render(){
     const addr = esc([j.address, j.postcode].filter(Boolean).join(", "));
 
     const trCls = (isP1(j) ? "p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
-    rowsH += `<tr data-job-id="${esc(j.id)}"${trCls.trim() ? ` class="${trCls.trim()}"` : ""}>
+    const row = `<tr data-job-id="${esc(j.id)}"${trCls.trim() ? ` class="${trCls.trim()}"` : ""}>
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
@@ -1171,7 +1171,7 @@ function render(){
       </td></tr>`;
 
     const cardCls = "mjob" + (isP1(j) ? " p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
-    cardsH += `<div class="${cardCls}" data-job-id="${esc(j.id)}">
+    const card = `<div class="${cardCls}" data-job-id="${esc(j.id)}">
       <div class="mjob-top">
         ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}${clientTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
@@ -1189,14 +1189,15 @@ function render(){
         <button class="btn small" data-action="sheet">📄 Sheet</button>
         <button class="btn small primary" data-action="view">Open</button>
       </div></div>`;
+    return { row, card };
   }
 
   // Archived jobs matching the search — read-only, tagged 🗄️, shown after live.
-  for(const j of archiveMatches){
+  function archParts(j){
     const ref = esc(j.helpdeskRef || j.id);
     const site = esc(j.siteName || "");
     const created = esc((j.createdAt||"").slice(0,10));
-    rowsH += `<tr class="archrow" data-archref="${ref}">
+    const row = `<tr class="archrow" data-archref="${ref}">
       <td></td>
       <td>
         <div class="jobdesc" data-action="archive-view">${esc(j.jobName || j.description || "(no description)")}</div>
@@ -1210,23 +1211,43 @@ function render(){
       <td class="small muted">${esc(j.assignedTo||"")}</td>
       <td><div class="rowactions"><button class="btn small" data-action="archive-view">🗄️ View</button></div></td></tr>`;
 
-    cardsH += `<div class="mjob archrow" data-archref="${ref}">
+    const card = `<div class="mjob archrow" data-archref="${ref}">
       <div class="mjob-top"><span class="ref">${ref}</span> <span class="arch-tag">🗄️ archive</span></div>
       <div class="mjob-title">${esc(j.jobName || j.description || "")}</div>
       <div class="small muted">${site}${j.postcode ? " · " + esc(j.postcode) : ""}</div>
       <div class="mjob-meta small muted">${esc(j.status||"")}${created ? " · " + created : ""}</div>
       <div class="mjob-actions"><button class="btn small primary" data-action="archive-view">🗄️ View in Archive</button></div></div>`;
+    return { row, card };
   }
-
-  tbody.innerHTML = rowsH;
-  cards.innerHTML = cardsH;
 
   const liveN = list.length, archN = archiveMatches.length;
   $("statusBar").textContent = liveN || archN
     ? `${liveN} job(s)` + (archN ? ` · ${archN} in archive` : "") + " shown"
     : "No jobs match the filters.";
-  startCountdown();
-  applyPhotoFlags();
+
+  // Stream the rows in. First chunk is a screenful (instant); the rest fill in over
+  // subsequent frames so a big board never pins the thread at open.
+  const FIRST = 30, BATCH = 90;
+  let li = 0, ai = 0;   // cursors into list + archiveMatches
+  function buildChunk(limit){
+    let rowsH = "", cardsH = "", n = 0;
+    while(n < limit && li < list.length){ const p = liveParts(list[li++]); rowsH += p.row; cardsH += p.card; n++; }
+    while(n < limit && ai < archiveMatches.length){ const p = archParts(archiveMatches[ai++]); rowsH += p.row; cardsH += p.card; n++; }
+    if(rowsH) tbody.insertAdjacentHTML("beforeend", rowsH);
+    if(cardsH) cards.insertAdjacentHTML("beforeend", cardsH);
+  }
+  const done = () => li >= list.length && ai >= archiveMatches.length;
+  const raf = window.requestAnimationFrame || (f => setTimeout(f, 16));
+  buildChunk(FIRST);
+  applyPhotoFlags();           // badge the first screenful at once
+  function more(){
+    if(mySeq !== _renderSeq) return;   // a newer render has taken over — stop
+    buildChunk(BATCH);
+    if(done()){ startCountdown(); applyPhotoFlags(); }
+    else raf(more);
+  }
+  if(done()){ startCountdown(); applyPhotoFlags(); }
+  else raf(more);
 }
 
 /* 📷 badge. The set of jobs-with-photos is fetched once per data load
