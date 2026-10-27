@@ -922,7 +922,7 @@ async function loadJobs(quiet){
         ? j.assignedEngineers.filter(Boolean)
         : (j.assignedTo ? [j.assignedTo] : [])
     }));
-    render();
+    scheduleRender();
     saveBoardCache();               // keep the instant-paint snapshot fresh
     if(!quiet) fetchPhotoFlags();   // once per load; render() then just applies the cached set (a quiet live refresh keeps it)
   }catch(err){
@@ -1072,14 +1072,35 @@ function filteredJobs(){
   }).sort((a,b) => new Date(b.raisedAt||0) - new Date(a.raisedAt||0));
 }
 
+// Coalesce renders. The board is ~2 DOM nodes per job (a table row AND a mobile
+// card), so a full render of a busy board is hundreds of ms — and during load
+// up to five things ask to render in quick succession (instant paint, then the
+// jobs / users / sites / categories fetches each resolving). Firing render()
+// synchronously from each stacked them back-to-back and pinned the main thread
+// for seconds (on a phone, long enough that taps on the header buttons queued
+// and "did nothing" for ~20s). scheduleRender() collapses a burst into ONE
+// render on the next frame and yields between, so the header stays responsive.
+let _renderPending = false;
+function scheduleRender(){
+  if(_renderPending) return;
+  _renderPending = true;
+  (window.requestAnimationFrame || (f => setTimeout(f, 16)))(() => { _renderPending = false; render(); });
+}
 function render(){
+  _renderPending = false;   // a direct render satisfies any pending scheduled one
   persistFilters();   // remember search + status + priority + client so Back restores them
   renderChips();
   populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
   const list = filteredJobs();
   const tbody = $("jobsTbody");
   const cards = $("jobCards");
-  tbody.innerHTML = ""; cards.innerHTML = "";
+  // Assemble the whole table + card list as one string each and write it with a
+  // single innerHTML — far cheaper than hundreds of createElement/appendChild
+  // calls, and it lands as ONE DOM insertion (the shared busy-mark observer then
+  // scans it once instead of per row). This is the heaviest work on the page, so
+  // keeping it to two parses is what lets a big board open without pinning the
+  // main thread. (NB build strings, so every dynamic value stays esc()'d.)
+  let rowsH = "", cardsH = "";
 
   // Count members of each multi-engineer group so a split job shows "👥 A/2".
   const groupCounts = {};
@@ -1123,11 +1144,8 @@ function render(){
     const site = esc(j.siteName || j.siteCode || "");
     const addr = esc([j.address, j.postcode].filter(Boolean).join(", "));
 
-    const tr = document.createElement("tr");
-    tr.dataset.jobId = j.id;
-    if (isP1(j)) tr.classList.add("p1");
-    if (j.status === "Cancelled") tr.classList.add("cancelled");
-    tr.innerHTML = `
+    const trCls = (isP1(j) ? "p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
+    rowsH += `<tr data-job-id="${esc(j.id)}"${trCls.trim() ? ` class="${trCls.trim()}"` : ""}>
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)}${clientTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
@@ -1150,13 +1168,10 @@ function render(){
           <button class="btn small" data-action="sheet">📄</button>
           <button class="btn small" data-action="view">View</button>
         </div>
-      </td>`;
-    tbody.appendChild(tr);
+      </td></tr>`;
 
-    const card = document.createElement("div");
-    card.className = "mjob" + (isP1(j) ? " p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
-    card.dataset.jobId = j.id;
-    card.innerHTML = `
+    const cardCls = "mjob" + (isP1(j) ? " p1" : "") + (j.status === "Cancelled" ? " cancelled" : "");
+    cardsH += `<div class="${cardCls}" data-job-id="${esc(j.id)}">
       <div class="mjob-top">
         ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}${clientTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap pri">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
@@ -1173,8 +1188,7 @@ function render(){
         <button class="btn small" data-action="update">✏️ Edit</button>
         <button class="btn small" data-action="sheet">📄 Sheet</button>
         <button class="btn small primary" data-action="view">Open</button>
-      </div>`;
-    cards.appendChild(card);
+      </div></div>`;
   }
 
   // Archived jobs matching the search — read-only, tagged 🗄️, shown after live.
@@ -1182,9 +1196,7 @@ function render(){
     const ref = esc(j.helpdeskRef || j.id);
     const site = esc(j.siteName || "");
     const created = esc((j.createdAt||"").slice(0,10));
-    const tr = document.createElement("tr");
-    tr.className = "archrow"; tr.dataset.archref = ref;
-    tr.innerHTML = `
+    rowsH += `<tr class="archrow" data-archref="${ref}">
       <td></td>
       <td>
         <div class="jobdesc" data-action="archive-view">${esc(j.jobName || j.description || "(no description)")}</div>
@@ -1196,19 +1208,18 @@ function render(){
       <td class="nowrap small muted">${created}</td>
       <td class="nowrap small muted">—</td>
       <td class="small muted">${esc(j.assignedTo||"")}</td>
-      <td><div class="rowactions"><button class="btn small" data-action="archive-view">🗄️ View</button></div></td>`;
-    tbody.appendChild(tr);
+      <td><div class="rowactions"><button class="btn small" data-action="archive-view">🗄️ View</button></div></td></tr>`;
 
-    const card = document.createElement("div");
-    card.className = "mjob archrow"; card.dataset.archref = ref;
-    card.innerHTML = `
+    cardsH += `<div class="mjob archrow" data-archref="${ref}">
       <div class="mjob-top"><span class="ref">${ref}</span> <span class="arch-tag">🗄️ archive</span></div>
       <div class="mjob-title">${esc(j.jobName || j.description || "")}</div>
       <div class="small muted">${site}${j.postcode ? " · " + esc(j.postcode) : ""}</div>
       <div class="mjob-meta small muted">${esc(j.status||"")}${created ? " · " + created : ""}</div>
-      <div class="mjob-actions"><button class="btn small primary" data-action="archive-view">🗄️ View in Archive</button></div>`;
-    cards.appendChild(card);
+      <div class="mjob-actions"><button class="btn small primary" data-action="archive-view">🗄️ View in Archive</button></div></div>`;
   }
+
+  tbody.innerHTML = rowsH;
+  cards.innerHTML = cardsH;
 
   const liveN = list.length, archN = archiveMatches.length;
   $("statusBar").textContent = liveN || archN
@@ -1870,7 +1881,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // chained) so fresh data lands a round trip sooner; names refresh when users
     // arrive.
     const jobsP = loadJobs();
-    ensureUsers().then(() => { if(allJobs.length) render(); });
+    ensureUsers().then(() => { if(allJobs.length) scheduleRender(); });
     jobsP.then(() => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
@@ -1879,9 +1890,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Load the sites register in the background so the client filter can bucket
     // jobs that carry only a site code; re-render once the map is ready so the
     // dropdown counts are accurate. Never blocks the board.
-    ensureSites().then(() => { if(allJobs.length) render(); }).catch(()=>{});
+    ensureSites().then(() => { if(allJobs.length) scheduleRender(); }).catch(()=>{});
     loadCategories().then(() => {
-      populateBulkDropdown(); render();
+      populateBulkDropdown(); scheduleRender();
       // Deep-link from ⚙️ Settings: open the Categories / Sheet-settings modal
       // (their buttons now live on sla-settings.html). Categories must be loaded
       // first, so this runs after loadCategories resolves.
