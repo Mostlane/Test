@@ -4364,6 +4364,48 @@ export async function reconcileRelease(env, tid, job, allJobs) {
 }
 // Cron sweep: announce any timed job whose release has now passed (per engineer),
 // and re-check afterPrev queues (fallback in case a completion happened offline).
+/* One-time (self-completing) backfill: move the base64 RA signatures already in
+   the jobs table out to R2. Runs a small batch per 5-min cron tick, then writes a
+   done flag so it stops scanning. Gentle on a live system (~40 jobs/tick → the
+   whole backlog within the hour).
+
+   RACE-SAFE BY DESIGN — this is the important bit. The jobs that carry an RA
+   signature are exactly the ones engineers are actively working, so a naive
+   read-modify-write could clobber a concurrent PATCH (a note, a status change).
+   Instead this is a COMPARE-AND-SWAP: it reads the raw `data`, offloads the
+   signature, then UPDATEs `data` ONLY WHERE `data` still equals what it read. If
+   a concurrent write landed in between, the UPDATE matches nothing and we leave
+   it — that concurrent write went through saveJob, which offloads the signature
+   itself, so the migration still happens, just by the other path. Only the `data`
+   column changes (signature→sigKey); the indexed columns are untouched. */
+export async function sweepOffloadRaSigs(env, tid = 1) {
+  try {
+    const db = tenantDB(env, tid);
+    const DONE_KEY = "sla:raSigOffloadDone";
+    try { const f = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, DONE_KEY).first(); if (f && f.value === "1") return; } catch {}
+    const { results } = await db.prepare(
+      "SELECT id FROM sla_jobs WHERE tenant_id=? AND substr(COALESCE(json_extract(data,'$.riskAssessment.signature'),''),1,5)='data:' LIMIT 40"
+    ).bind(tid).all();
+    if (!results || !results.length) {
+      try { await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,'1') ON CONFLICT(key) DO UPDATE SET value='1'").bind(tid, DONE_KEY).run(); } catch {}
+      return;
+    }
+    for (const row of results) {
+      try {
+        const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, row.id).first();
+        if (!cur || !cur.data) continue;
+        const j = JSON.parse(cur.data);
+        if (!(j.riskAssessment && typeof j.riskAssessment.signature === "string" && j.riskAssessment.signature.startsWith("data:"))) continue;
+        await offloadRaSignature(env, j);          // base64 → R2, sets sigKey + deletes signature
+        if (j.riskAssessment.signature) continue;  // R2 write failed (kept inline) → retry next tick
+        // Compare-and-swap: write only if nothing changed the row since we read it.
+        await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=? AND data=?")
+          .bind(JSON.stringify(j), tid, row.id, cur.data).run();
+      } catch {}
+    }
+  } catch {}
+}
+
 export async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
@@ -5233,7 +5275,39 @@ async function d1Retry(fn, tries = 3) {
   throw err;
 }
 
+// ── RA signature offload (keep the jobs table lean) ──────────────────────────
+// The risk-assessment drawn signature arrives inline as a base64 data-URL in the
+// atomic "start the job" PATCH (status→In Progress + riskAssessment together), so
+// there's no separate on-site upload that could fail on weak signal — that's WHY
+// it was base64, and the client flow is kept exactly as-is. It's a write-once
+// record that no view/PDF/export reads, yet it was by far the biggest field in the
+// table (~10 MB across the board). On every save we move a freshly-captured base64
+// RA signature out to R2 and replace it with `sigKey`, mirroring the proven
+// completion-signature store (jobs/<id>/signature/…). SAFE BY DESIGN: if the R2
+// write fails for ANY reason the inline base64 is KEPT, so this can never block
+// saving a risk assessment. Idempotent — an already-offloaded RA (sigKey, no
+// base64) is a no-op, so the many routine saves per job never re-run it.
+async function offloadRaSignature(env, job) {
+  try {
+    const ra = job && job.riskAssessment;
+    const sig = ra && ra.signature;
+    if (!env || !env.JOB_FILES || !job || !job.id) return;
+    if (typeof sig !== "string" || !sig.startsWith("data:")) return;
+    const comma = sig.indexOf(",");
+    if (comma < 0) return;
+    const contentType = (sig.slice(5, comma).split(";")[0]) || "image/png";
+    const bytes = Uint8Array.from(atob(sig.slice(comma + 1)), c => c.charCodeAt(0));
+    if (!bytes.length) return;
+    const ext = /jpe?g/i.test(contentType) ? "jpg" : "png";
+    const key = `jobs/${job.id}/ra-signature/${Date.now()}.${ext}`;
+    await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType } });
+    ra.sigKey = key;
+    delete ra.signature;   // the bytes now live in R2
+  } catch (e) { /* keep the inline base64 — never block the save */ }
+}
+
 async function saveJob(env, tenantId, job) {
+  await offloadRaSignature(env, job);   // move a fresh base64 RA signature to R2 (fail-soft)
   const db = tenantDB(env, tenantId);
   await db.prepare(`
     INSERT INTO sla_jobs (tenant_id, id, helpdesk_ref, description, priority, status, assigned_to,

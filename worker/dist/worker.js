@@ -20169,6 +20169,7 @@ __export(sla_exports, {
   suggestJobsForPo: () => suggestJobsForPo,
   sweepFallbacks: () => sweepFallbacks,
   sweepJobReleases: () => sweepJobReleases,
+  sweepOffloadRaSigs: () => sweepOffloadRaSigs,
   sweepStatusNudges: () => sweepStatusNudges,
   unlinkOrderFromJob: () => unlinkOrderFromJob
 });
@@ -24198,6 +24199,40 @@ async function reconcileRelease(env, tid, job, allJobs) {
   await saveJob(env, tid, job);
   return true;
 }
+async function sweepOffloadRaSigs(env, tid = 1) {
+  try {
+    const db = tenantDB(env, tid);
+    const DONE_KEY = "sla:raSigOffloadDone";
+    try {
+      const f = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, DONE_KEY).first();
+      if (f && f.value === "1") return;
+    } catch {
+    }
+    const { results } = await db.prepare(
+      "SELECT id FROM sla_jobs WHERE tenant_id=? AND substr(COALESCE(json_extract(data,'$.riskAssessment.signature'),''),1,5)='data:' LIMIT 40"
+    ).bind(tid).all();
+    if (!results || !results.length) {
+      try {
+        await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,'1') ON CONFLICT(key) DO UPDATE SET value='1'").bind(tid, DONE_KEY).run();
+      } catch {
+      }
+      return;
+    }
+    for (const row of results) {
+      try {
+        const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, row.id).first();
+        if (!cur || !cur.data) continue;
+        const j = JSON.parse(cur.data);
+        if (!(j.riskAssessment && typeof j.riskAssessment.signature === "string" && j.riskAssessment.signature.startsWith("data:"))) continue;
+        await offloadRaSignature(env, j);
+        if (j.riskAssessment.signature) continue;
+        await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=? AND data=?").bind(JSON.stringify(j), tid, row.id, cur.data).run();
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
 async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
@@ -25155,7 +25190,27 @@ async function d1Retry(fn, tries = 3) {
   }
   throw err;
 }
+async function offloadRaSignature(env, job) {
+  try {
+    const ra = job && job.riskAssessment;
+    const sig = ra && ra.signature;
+    if (!env || !env.JOB_FILES || !job || !job.id) return;
+    if (typeof sig !== "string" || !sig.startsWith("data:")) return;
+    const comma = sig.indexOf(",");
+    if (comma < 0) return;
+    const contentType = sig.slice(5, comma).split(";")[0] || "image/png";
+    const bytes = Uint8Array.from(atob(sig.slice(comma + 1)), (c) => c.charCodeAt(0));
+    if (!bytes.length) return;
+    const ext = /jpe?g/i.test(contentType) ? "jpg" : "png";
+    const key = `jobs/${job.id}/ra-signature/${Date.now()}.${ext}`;
+    await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType } });
+    ra.sigKey = key;
+    delete ra.signature;
+  } catch (e) {
+  }
+}
 async function saveJob(env, tenantId, job) {
+  await offloadRaSignature(env, job);
   const db = tenantDB(env, tenantId);
   await db.prepare(`
     INSERT INTO sla_jobs (tenant_id, id, helpdesk_ref, description, priority, status, assigned_to,
@@ -52133,6 +52188,7 @@ var worker = {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
     ctx.waitUntil(sweepStatusNudges(env, 1).catch((e) => console.error("scheduled status nudges:", e)));
     ctx.waitUntil(sweepFallbacks(env, 1).catch((e) => console.error("scheduled fallback sweep:", e)));
+    ctx.waitUntil(sweepOffloadRaSigs(env, 1).catch((e) => console.error("scheduled RA-signature offload:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
     ctx.waitUntil(sweepSitelogTimesheets(env, 1).catch((e) => console.error("scheduled sitelog timesheets:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
