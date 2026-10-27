@@ -75,6 +75,10 @@
   .jh-in .jh-x{border:none;background:none;color:#c0c9d6;font-size:15px;cursor:pointer;padding:0 2px;line-height:1}
   .jh-in .jh-x:hover{color:#dc2626}
   .jh-none{font-size:13px;color:var(--muted);padding:8px 2px}
+  /* system-known hours (captured / single-job) shown read-only, no input box */
+  .jh-ro{flex:none;font-size:14px;font-weight:700;color:#0e3a6d;white-space:nowrap}
+  .jh-ro .jh-src{font-size:11px;font-weight:400;color:var(--muted)}
+  .jobhrs-hint{font-size:12px;color:var(--muted);margin:0 0 7px 3px}
   .addjobwrap{margin-top:8px}
   .addjob{border:1.5px dashed #cfdaea;background:#fbfdff;color:var(--brand);border-radius:12px;padding:9px 12px;font-size:13.5px;font-weight:700;cursor:pointer;width:100%}
   .addjob:hover{background:#f2f7fd}
@@ -84,10 +88,22 @@
   .addjob-res button{text-align:left;border:1.5px solid #e3e9f2;background:#fff;border-radius:11px;padding:10px 12px;font-size:13.5px;color:#0e3a6d;cursor:pointer}
   .addjob-res button:hover{background:#eef4fb;border-color:#cfdff4}
   .addjob-none{font-size:13px;color:var(--muted);padding:6px 2px}
-  /* deduction + assigned chips */
-  .dedrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-  .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f2f5fa;border-radius:999px;padding:4px 10px}
-  .ded.off{opacity:.4;text-decoration:line-through}
+  /* deductions — tucked behind a tap, understated grey */
+  .dedpanel{margin-top:12px}
+  .dedtog{display:inline-flex;align-items:baseline;gap:2px;border:none;background:none;padding:2px 0;margin:0;font-size:12px;font-weight:400;color:#9aa3b2;cursor:pointer}
+  .dedtog .ded-chev{margin-left:3px;transition:transform .15s}
+  .dedpanel.open .ded-chev{transform:rotate(90deg)}
+  .dedbody{margin-top:6px;display:flex;flex-direction:column;gap:3px;max-width:320px}
+  .ded-line{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#9aa3b2}
+  .ded-line b{font-weight:400}
+  .ded-rule{border-top:1px solid #e8edf4;margin:3px 0}
+  .ded-paid b,.ded-day b{font-weight:600;color:#6b7482}
+  .ded-nolunch{align-self:flex-start;margin-top:5px;border:none;background:none;padding:0;font-size:12px;color:#9aa3b2;text-decoration:underline;cursor:pointer}
+  .ded-nolunch.on{color:#0e7a3c;text-decoration:none;font-weight:600}
+  .ded-why{margin-top:6px;display:flex;flex-direction:column;gap:3px}
+  .ded-why label{font-size:11px;color:#9aa3b2}
+  .ded-why label span{font-weight:400}
+  .ded-why-box{width:100%;font-size:13px;padding:7px 9px;border:1.5px solid #e3e9f2;border-radius:10px;resize:vertical}
   /* overhead (non-site) one-tap chips */
   .ovhrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   .ovh{border:1px dashed #c7d2e2;background:#fff;color:var(--muted);border-radius:999px;padding:5px 11px;font:600 12px inherit;font-family:inherit;cursor:pointer}
@@ -189,17 +205,23 @@ const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Su
 const WEEK_PARAM=new URLSearchParams(location.search).get("week")||"";
 let ME=null, WEEK=(/^\d{4}-\d{2}-\d{2}$/.test(WEEK_PARAM)?mondayOf(new Date(WEEK_PARAM+"T12:00:00")):mondayOf(new Date())), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null, REMIND=true;
 // Booked jobs (data-booked=1) with no hours = still to complete before the deadline.
-function countEmptyBooked(){ let n=0; document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const v=parseFloat(r.querySelector('.jh-hrs').value); if(!(v>0))n++;}); return n; }
-function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); inp.classList.toggle('needhrs', REMIND&&!(parseFloat(inp.value)>0)); }); }
+// Only INPUT-mode booked rows (2+ jobs, nothing captured) can be a "gap" — a
+// captured or single-job (auto) day already has its hours from the system.
+function countEmptyBooked(){ let n=0; document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"][data-mode="input"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); if(!(inp&&parseFloat(inp.value)>0))n++;}); return n; }
+function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"][data-mode="input"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); if(inp)inp.classList.toggle('needhrs', REMIND&&!(parseFloat(inp.value)>0)); }); }
 // Persist any prefilled-but-unsaved job hours (captured from status/day) so a job
 // isn't counted "blank" just because the engineer hasn't touched the box.
 function maybeSavePrefill(){
   if(INVOICE||APPROVAL||VIEWONLY)return;
+  // Persist any system-derived hours (a single-job day's paid figure) that aren't
+  // yet saved, so a job isn't counted "blank" just because nobody touched a box.
+  const days=collect();
   let dirty=false;
-  document.querySelectorAll('.card[data-date]').forEach(card=>{const date=card.dataset.date;
-    card.querySelectorAll('.jhrow').forEach(r=>{const jid=r.dataset.jobid,v=parseFloat(r.querySelector('.jh-hrs').value);
-      const saved=DAYS[date]&&DAYS[date].jobHours&&DAYS[date].jobHours[jid];
-      if(v>0&&!(parseFloat(saved)>0))dirty=true;});});
+  for(const [date,d] of Object.entries(days)){
+    const cur=(DAYS[date]&&DAYS[date].jobHours)||{};
+    for(const [jid,v] of Object.entries(d.jobHours||{})){ if(!(parseFloat(cur[jid])>0)){dirty=true;break;} }
+    if(dirty)break;
+  }
   if(dirty){clearTimeout(saveTimer);doSave();}
 }
 // Door-to-door fuel mileage is computed + locked server-side for self-employed
@@ -258,22 +280,33 @@ function collect(){
   const days={};
   document.querySelectorAll(".card[data-date]").forEach(card=>{
     const date=card.dataset.date;
-    // Per-job hours — keyed by the portal job's id (no free text).
+    const sEl=card.querySelector(".t-start"), fEl=card.querySelector(".t-finish");
+    const start=sEl?sEl.value:"", finish=fEl?fEl.value:"";
+    // Per-job hours — keyed by the portal job's id (no free text). A row may be:
+    //   input    → the engineer typed it;
+    //   auto     → one-job day with no capture → store the day's PAID hours;
+    //   captured → status-tap time; the SERVER computes it for a booked job, so we
+    //              don't store it (captured always wins) — only persist a captured
+    //              EXTRA so a non-booked captured job stays visible.
     const jobHours={}; const refs=[];
     card.querySelectorAll(".jhrow").forEach(r=>{
-      const jid=(r.dataset.jobid||"").trim();
-      const v=parseFloat(r.querySelector(".jh-hrs").value);
-      if(jid && v>0){ jobHours[jid]=Math.round(v*100)/100; if(r.dataset.ref)refs.push(r.dataset.ref); }
+      const jid=(r.dataset.jobid||"").trim(); if(!jid) return;
+      const inp=r.querySelector(".jh-hrs");
+      let v=0;
+      if(inp){ v=parseFloat(inp.value)||0; }
+      else if(r.dataset.mode==="auto"){ v=dayCalc({start,finish}).paid/60; }
+      else if(r.dataset.mode==="captured"){ if(r.dataset.booked==="1") return; v=(parseFloat(r.dataset.cap)||0)/60; }
+      if(v>0){ jobHours[jid]=Math.round(v*100)/100; if(r.dataset.ref)refs.push(r.dataset.ref); }
     });
-    const sEl=card.querySelector(".t-start"), fEl=card.querySelector(".t-finish");
-    const d={ start:sEl?sEl.value:"", finish:fEl?fEl.value:"",
-      jobs:refs.join(", "), jobHours, mileage:[] };
+    const d={ start, finish, jobs:refs.join(", "), jobHours, mileage:[] };
     card.querySelectorAll(".mirow").forEach(r=>{
       const site=(r.dataset.site||"").trim(), pc=(r.dataset.pc||"").toUpperCase(),
         miles=parseFloat(r.dataset.miles)||0;
       if(site) d.mileage.push({site,postcode:pc,miles});
     });
-    if(d.start||d.finish||Object.keys(jobHours).length||d.mileage.length) days[date]=d;
+    // "Didn't stop for lunch?" — flag + reason, recorded for the office only.
+    if(card.dataset.nolunch==="1"){ d.noLunch=true; const wb=card.querySelector(".ded-why-box"); const rs=wb?wb.value.trim():""; if(rs)d.lunchReason=rs; }
+    if(d.start||d.finish||Object.keys(jobHours).length||d.mileage.length||d.noLunch) days[date]=d;
   });
   return days;
 }
@@ -320,9 +353,36 @@ function refreshTotals(){
       else if(dm)sum.innerHTML=`<span class="times">${Math.round(dm*10)/10} mi mileage</span>`;
       else sum.innerHTML=`<span class="empty">${INVOICE?"—":"Add ›"}</span>`;
     }
-    const lc=card.querySelector(".ded.lunch");
-    if(lc) lc.classList.toggle("off", !(c.worked&&c.lunch>0));
+    paintDed(card);
   });
+}
+
+// Fill the "After deductions" panel for one card from its LIVE start/finish.
+// Flag only — it never changes the paid figure (that's what the panel shows).
+function paintDed(card){
+  const panel=card.querySelector(".dedpanel"); if(!panel) return;
+  const sEl=card.querySelector(".t-start"), fEl=card.querySelector(".t-finish");
+  const d={start:sEl?sEl.value:"", finish:fEl?fEl.value:""};
+  const c=dayCalc(d);
+  // Keep a single-job (auto) day's read-only figure in step with the times.
+  const autoCell=card.querySelector(".jh-auto");
+  if(autoCell) autoCell.innerHTML=c.paid>0?hmS(c.paid)+' <span class="jh-src">from your day</span>':"—";
+  const hasComm=!!(ME&&ME.commute), hasLunchCfg=!!(ME&&ME.lunch);
+  const show=!!(c.worked && (hasComm||hasLunchCfg));
+  panel.hidden=!show;
+  if(!show) return;
+  const t1=panel.querySelector(".ded-travel1"), t2=panel.querySelector(".ded-travel2"), lr=panel.querySelector(".ded-lunchrow");
+  if(t1){ t1.hidden=!hasComm; t1.querySelector("b").textContent="−"+(ME.commuteMins||0)+"m"; }
+  if(t2){ t2.hidden=!hasComm; t2.querySelector("b").textContent="−"+(ME.commuteMins||0)+"m"; }
+  if(lr){ lr.hidden=!(c.lunch>0); lr.querySelector("b").textContent="−"+(ME.lunchMins||0)+"m"; }
+  panel.querySelector(".ded-day-lab").textContent="Day "+(d.start||"")+"–"+(d.finish||"");
+  panel.querySelector(".ded-day b").textContent=hmS(c.span);
+  panel.querySelector(".ded-paid b").textContent=hmS(c.paid);
+  const nl=card.dataset.nolunch==="1";
+  const link=panel.querySelector(".ded-nolunch"), why=panel.querySelector(".ded-why");
+  if(link){ link.hidden=!hasLunchCfg; link.textContent=nl?"✓ No lunch stop — tap to undo":"Didn't stop for lunch?"; link.classList.toggle("on",nl); }
+  if(why) why.hidden=!(hasLunchCfg&&nl);
+  panel.querySelector(".ded-nl").textContent=(hasLunchCfg&&nl)?" · no lunch stop":"";
 }
 
 // Mileage rows are READ-ONLY: the site comes from the job box pick and the
@@ -385,10 +445,6 @@ function render(){
       continue;
     }
     card.className="card"+(hol?" hashalf":"")+(i>=5?" wknd":"")+(isToday&&!locked?" open":"");
-    const deds=[];
-    if(ME&&ME.commute) deds.push(`<span class="ded" title="Set by the office — not editable">🚐 −${ME.commuteMins}m travel ×2</span>`);
-    if(ME&&ME.lunch) deds.push(`<span class="ded lunch" title="Deducted on days of ${ME.lunchThresholdH}h or more">🥪 −${ME.lunchMins}m lunch</span>`);
-    if(ME&&ME.mileage&&ME.radius) deds.push(`<span class="ded">🚗 first/last ${ME.radiusMiles} mi unpaid</span>`);
     const booked=(ASSIGNED[date]||[]);
     // Rows = the booked jobs + any OTHER portal job the engineer added earlier
     // (saved in jobHours but not booked) — resolved via JOBMETA so they persist.
@@ -397,6 +453,13 @@ function render(){
       jobId:jid, ref:(JOBMETA[jid]&&JOBMETA[jid].ref)||jid, site:(JOBMETA[jid]&&JOBMETA[jid].site)||"",
       label:(JOBMETA[jid]&&JOBMETA[jid].label)||jid, extra:true }));
     const jhRows=[...booked,...extras];
+    // How the hours for this day are known:
+    //   captured → each job carries status-tap minutes (read-only, system wins);
+    //   soleAuto → one job, nothing captured → it gets the day's paid hours;
+    //   multiInput → 2+ jobs, nothing captured → the ONLY case we ask the engineer.
+    const anyCap=jhRows.some(b=>(b.capturedMins||0)>0);
+    const soleAuto=jhRows.length===1 && !anyCap;
+    const multiInput=jhRows.length>=2 && !anyCap;
     card.innerHTML=`
       <button class="dhead" type="button">
         <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${dayMark(date)?` · ${dayMark(date)}`:(booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:"")}</span></span>
@@ -409,15 +472,19 @@ function render(){
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
         </div>
-        <div class="flab">Hours on each job — booked jobs are listed; add any other portal job you worked</div>
+        <div class="flab">Jobs worked</div>
+        ${multiInput?`<div class="jobhrs-hint">No job updates recorded — roughly how long on each?</div>`:""}
         <div class="jobhrs">${jhRows.length ? jhRows.map(b => {
           const saved = (d.jobHours && d.jobHours[b.jobId] != null) ? d.jobHours[b.jobId] : null;
-          const capH = b.capturedMins ? Math.round(b.capturedMins/60*4)/4 : 0;
-          const val = (saved != null ? saved : (capH || ""));
+          const capM = b.capturedMins || 0;
           const lab0 = b.label || b.ref || "Job"; const lab = lab0.length>40 ? lab0.slice(0,39)+"…" : lab0;
-          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}" data-booked="${b.extra?"":"1"}">
-            <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:(b.extra?" · added":"")}</span></span>
-            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${esc(val)}"><span class="jh-unit">h</span>${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
+          let mode, cell;
+          if(capM>0){ mode="captured"; cell=`<span class="jh-ro">${hmS(capM)} <span class="jh-src">from job updates</span></span>`; }
+          else if(soleAuto){ mode="auto"; const pc=dayCalc(d); cell=`<span class="jh-ro jh-auto">${pc.paid>0?hmS(pc.paid)+' <span class="jh-src">from your day</span>':'—'}</span>`; }
+          else { mode="input"; const val=(saved!=null?saved:""); cell=`<input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${esc(val)}"><span class="jh-unit">h</span>`; }
+          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}" data-booked="${b.extra?"":"1"}" data-mode="${mode}" data-cap="${capM}">
+            <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.extra?" · added":""}</span></span>
+            <span class="jh-in">${cell}${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
           </div>`;
         }).join("") : `<div class="jh-none">No portal jobs booked for you this day.</div>`}</div>
         <div class="addjobwrap">
@@ -426,13 +493,27 @@ function render(){
         </div>
         ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
         ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. drive home, live traffic)":""}</span>`:""}
-        ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
+        <div class="dedpanel">
+          <button type="button" class="dedtog"><span class="ded-lab">After deductions</span><span class="ded-nl"></span><span class="ded-chev">›</span></button>
+          <div class="dedbody" hidden>
+            <div class="ded-line ded-travel1" hidden><span>Travel to site</span><b></b></div>
+            <div class="ded-line ded-travel2" hidden><span>Travel home</span><b></b></div>
+            <div class="ded-line ded-lunchrow" hidden><span>Lunch</span><b></b></div>
+            <div class="ded-rule"></div>
+            <div class="ded-line ded-day"><span class="ded-day-lab">Day</span><b></b></div>
+            <div class="ded-line ded-paid"><span>Paid</span><b></b></div>
+            <button type="button" class="ded-nolunch" hidden>Didn't stop for lunch?</button>
+            <div class="ded-why" hidden><label>Why? <span>(the office will see this)</span></label><textarea class="ded-why-box" rows="2" maxlength="300" placeholder="e.g. no cover on site, worked through"></textarea></div>
+          </div>
+        </div>
       </div>`;
     if(ME&&ME.mileage&&!(AUTOMI&&AUTOMI.applies)){
       const list=card.querySelector(".milist");
       (d.mileage||[]).forEach(m=>list.appendChild(mileRow(m)));
     }
     card.querySelector(".dhead").addEventListener("click",()=>{card.classList.toggle("open");});
+    // Seed the "didn't stop for lunch" flag + reason from storage, then paint.
+    { const dd0=DAYS[date]||{}; if(dd0.noLunch){ card.dataset.nolunch="1"; const wb=card.querySelector(".ded-why-box"); if(wb)wb.value=dd0.lunchReason||""; } paintDed(card); }
     host.appendChild(card);
   }
   if(autoChanged){setTimeout(()=>{refreshTotals();queueSave();},0);}
@@ -456,7 +537,7 @@ function render(){
   g("invBanner").innerHTML=banner;
   markGaps();
   if(!locked)setTimeout(maybeSavePrefill,0);
-  document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk,.card[data-date] .addjob,.card[data-date] .jh-x").forEach(el=>{if(locked)el.disabled=true;});
+  document.querySelectorAll(".card[data-date] input,.card[data-date] textarea,.card[data-date] .btn,.card[data-date] .bk,.card[data-date] .addjob,.card[data-date] .jh-x,.card[data-date] .ded-nolunch").forEach(el=>{if(locked)el.disabled=true;});
   g("saveState").textContent=APPROVAL?"Week approved & locked by the office":(INVOICE?"Week locked (invoiced)":"All changes save automatically");
   renderInvoiceCard();
   refreshTotals();
@@ -751,6 +832,20 @@ document.addEventListener("change",e=>{
   if(e.target.closest&&e.target.closest(".card[data-date]")){clearTimeout(saveTimer);doSave();}
 });
 document.addEventListener("click",e=>{
+  // Expand / collapse the "After deductions" panel.
+  const tog=e.target.closest&&e.target.closest(".dedtog");
+  if(tog){ const panel=tog.closest(".dedpanel"); const body=panel.querySelector(".dedbody"); body.hidden=!body.hidden; panel.classList.toggle("open",!body.hidden); return; }
+  // "Didn't stop for lunch?" — flag it (reveals the Why box). Never changes pay.
+  const nlb=e.target.closest&&e.target.closest(".ded-nolunch");
+  if(nlb){
+    if(INVOICE||APPROVAL||VIEWONLY)return;
+    const card=nlb.closest(".card[data-date]");
+    if(card.dataset.nolunch==="1"){ delete card.dataset.nolunch; } else { card.dataset.nolunch="1"; }
+    paintDed(card);
+    if(card.dataset.nolunch==="1"){ const wb=card.querySelector(".ded-why-box"); if(wb)setTimeout(()=>wb.focus(),30); }
+    clearTimeout(saveTimer);doSave();
+    return;
+  }
   const b=e.target.closest("button");if(!b)return;
   if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();clearTimeout(saveTimer);doSave();}
   else if(b.classList.contains("jdel")){b.closest(".jpill").remove();refreshTotals();clearTimeout(saveTimer);doSave();}
@@ -766,7 +861,7 @@ document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".ca
 // ── Add-a-known-job picker (per day) — real portal jobs only, no free text ──
 function makeJhRow(job){
   const div=document.createElement("div");
-  div.className="jhrow";div.dataset.jobid=job.id||job.jobId||"";div.dataset.ref=job.ref||"";div.dataset.site=job.site||"";div.dataset.pc="";
+  div.className="jhrow";div.dataset.jobid=job.id||job.jobId||"";div.dataset.ref=job.ref||"";div.dataset.site=job.site||"";div.dataset.pc="";div.dataset.mode="input";div.dataset.cap="0";
   const lab0=job.label||job.ref||"Job";const lab=lab0.length>40?lab0.slice(0,39)+"…":lab0;
   div.innerHTML=`<span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${esc(job.site||"")}${job.site?" · ":""}added</span></span>`+
     `<span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value=""><span class="jh-unit">h</span><button type="button" class="jh-x" title="Remove this job">✕</button></span>`;

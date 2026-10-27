@@ -2875,7 +2875,7 @@ async function dayJobRows(env, tid, who, date, savedJobHours = {}) {
       notAttended.push({ jobId: id, ref: m.ref, site: m.site, status: m.status });
       continue;
     }
-    const hours = saved != null ? saved : capturedMins > 0 ? r2q(capturedMins / 60) : 0;
+    const hours = capturedMins > 0 ? r2q(capturedMins / 60) : saved != null ? saved : 0;
     jobs.push({ jobId: id, ref: m.ref, site: m.site, label: m.ref + (m.site ? " \u2014 " + m.site : ""), capturedMins, hours, status: m.status });
   }
   jobs.sort((a, b) => b.capturedMins - a.capturedMins || String(a.ref).localeCompare(String(b.ref)));
@@ -3129,8 +3129,10 @@ function cleanDays(monday, days) {
     let confirmed = null;
     if (d.confirmed && typeof d.confirmed === "object" && d.confirmed.at)
       confirmed = { at: String(d.confirmed.at).slice(0, 40), by: String(d.confirmed.by || "").slice(0, 80) };
-    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
-      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {} };
+    const noLunch = !!d.noLunch;
+    const lunchReason = noLunch ? String(d.lunchReason || "").slice(0, 300) : "";
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed || noLunch)
+      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {}, ...noLunch ? { noLunch: true, ...lunchReason ? { lunchReason } : {} } : {} };
   }
   return out;
 }
@@ -4155,8 +4157,8 @@ async function handle3(request, env, ctx, url, sess) {
     const start = saved.start || a.start || "";
     const finish = saved.finish || a.finish || "";
     if (jobs.length === 1 && !jobs[0].hours && jobs[0].capturedMins === 0) {
-      const s = toMin(start), f = toMin(finish);
-      if (s != null && f != null) jobs[0].hours = round1(((f <= s ? f + 1440 : f) - s) / 60);
+      const paidMin = dayCalc({ start, finish }, eff).paid;
+      if (paidMin > 0) jobs[0].hours = round1(paidMin / 60);
     }
     const inv = await invoiceFor(env, tid, who, monday);
     return json({
@@ -4890,7 +4892,7 @@ async function handle3(request, env, ctx, url, sess) {
         const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
         const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null, noLunch: !!day.noLunch, lunchReason: day.lunchReason || "" };
         const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
         return {
           username: u.username,

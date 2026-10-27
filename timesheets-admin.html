@@ -327,6 +327,7 @@ function openEdit(username){
     return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip" title="${esc(leaveFull(hol.type))}">🌴 ${leaveShort(hol.type)}${hol.half?` ${esc(hol.half)}`:""}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 ${bh.kind==="shutdown"?"Shutdown":"Bank Hol"}</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
+      ${d.noLunch?`<div class="nolunch-note" style="margin-top:6px;font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:5px 9px">🥪 Engineer says they didn't stop for lunch${d.lunchReason?` — <b>${esc(d.lunchReason)}</b>`:""}</div>`:""}
       ${leaveRow}${miBlock}</div>`;
   }).join("");
   const appr=u.approval||null;
@@ -380,6 +381,9 @@ function collectEditDays(){
     // Preserve the engineer's per-job hours (the modal doesn't edit them) so the
     // admin correcting times never wipes the job-costing data.
     if(orig.jobHours&&Object.keys(orig.jobHours).length)d.jobHours=orig.jobHours;
+    // Preserve the engineer's "didn't stop for lunch" flag + reason — the office
+    // editing times must never wipe it (it's a record, not a deduction change).
+    if(orig.noLunch){d.noLunch=true; if(orig.lunchReason)d.lunchReason=orig.lunchReason;}
     const lv=ed.querySelector(".e-leave");
     if(lv&&lv.value!=="")d.leaveHours=lv.value;
     ed.querySelectorAll(".mirow").forEach(r=>{
@@ -387,7 +391,7 @@ function collectEditDays(){
         miles=parseFloat(r.querySelector(".m-miles").value)||0;
       if(site||pc||miles)d.mileage.push({site,postcode:pc,miles});
     });
-    if(d.start||d.finish||d.jobs||d.mileage.length||d.jobHours||d.leaveHours!=null)days[date]=d;
+    if(d.start||d.finish||d.jobs||d.mileage.length||d.jobHours||d.leaveHours!=null||d.noLunch)days[date]=d;
   });
   return days;
 }
