@@ -2683,7 +2683,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     }
   } catch {
   }
-  const homePc = normPc(opts.homePostcode || "");
+  const homePc = normPc(await profileHomePostcode(env, tid, username)) || normPc(opts.homePostcode || "");
   let homeCoord;
   const getHome = async () => {
     if (homeCoord !== void 0) return homeCoord;
@@ -2694,6 +2694,10 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       const lat = Number(pr.homeLat), lng = Number(pr.homeLng ?? pr.homeLon);
       if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) homeCoord = { lat, lng };
     } catch {
+    }
+    if (!homeCoord) {
+      const pp = normPc(await profileHomePostcode(env, tid, username));
+      if (pp) homeCoord = await lookupPostcode(pp).catch(() => null);
     }
     if (!homeCoord && homePc) homeCoord = await lookupPostcode(homePc).catch(() => null);
     return homeCoord;
@@ -3180,8 +3184,12 @@ function cleanDays(monday, days) {
     let confirmed = null;
     if (d.confirmed && typeof d.confirmed === "object" && d.confirmed.at)
       confirmed = { at: String(d.confirmed.at).slice(0, 40), by: String(d.confirmed.by || "").slice(0, 80) };
+    const noLunch = d.noLunch === true;
+    const noLunchReason = noLunch ? String(d.noLunchReason || "").slice(0, 200) : "";
+    const timeReason = String(d.timeReason || "").slice(0, 200);
+    const disp = { ...noLunch ? { noLunch, noLunchReason } : {}, ...timeReason ? { timeReason } : {} };
     if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
-      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {} };
+      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {}, ...confirmed ? { confirmed } : {}, ...disp };
   }
   return out;
 }
@@ -3199,8 +3207,8 @@ function dayCalc(d, eff) {
   const cm = eff.commuteMins, cap2 = (x) => x == null || !isFinite(x) ? cm : Math.min(cm, Math.max(0, Math.round(x)));
   const cl = d._commute || {};
   const commute = eff.commute ? cap2(cl.am) + cap2(cl.pm) : 0;
-  const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
-  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
+  const lunch = eff.lunch && !d.noLunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
+  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, noLunch: !!(eff.lunch && d.noLunch), ...base };
 }
 function commuteMap(days) {
   const m = {};
@@ -3621,7 +3629,18 @@ async function driveMinutesGoogleLive(key, f, t) {
   }
   return null;
 }
+async function profileHomePostcode(env, tid, username) {
+  try {
+    const u = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+    const pr = u && u.profile ? JSON.parse(u.profile) : {};
+    return String(pr.homePostcode || "");
+  } catch {
+    return "";
+  }
+}
 async function homePostcodeFor(env, tid, username) {
+  const prof = await profileHomePostcode(env, tid, username);
+  if (prof) return prof;
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
     if (row && row.value) {
@@ -3891,7 +3910,7 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
   if (!wantMi && !wantCm) return { days, auto: { applies: false } };
   const basePc = normPc(basePostcode || "PO15 5RQ");
   const homePc = normPc(eff.homePostcode || "") || basePc;
-  const homeCm = wantCm ? normPc(eff.homePostcode || "") || normPc(await homePostcodeFor(env, tid, username).catch(() => "")) || "" : "";
+  const homeCm = wantCm ? normPc(await profileHomePostcode(env, tid, username)) || normPc(eff.homePostcode || "") || "" : "";
   const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
   const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
   const coordCache = /* @__PURE__ */ new Map();
@@ -4981,7 +5000,13 @@ async function handle3(request, env, ctx, url, sess) {
           const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
           autoWhere = {};
           for (const [date, a] of Object.entries(auto)) {
-            autoWhere[date] = { ...a.where || {}, homeMins: a.homeMins || null };
+            const before = d.days[date] || {};
+            const off = (x, y) => {
+              const m1 = toMin(x), m2 = toMin(y);
+              return m1 != null && m2 != null && Math.abs(m1 - m2) >= 5;
+            };
+            const changed = a.start && off(before.start, a.start) || a.finish && off(before.finish, a.finish);
+            autoWhere[date] = { ...a.where || {}, homeMins: a.homeMins || null, ...changed ? { timesChanged: { autoStart: a.start || "", autoFinish: a.finish || "" } } : {} };
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
             if (!day.finish && a.finish) day.finish = a.finish;

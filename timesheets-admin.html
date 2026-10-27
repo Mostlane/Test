@@ -81,6 +81,11 @@
   .invTable th{background:#f1f5f9;color:var(--ink);padding:7px}
   .invTable td{padding:7px;border-bottom:1px solid #f1f5f9;text-align:center}
   @media(max-width:700px){ .hideS{display:none} }
+  .disp{font-size:11px;cursor:help}
+  td.hasdisp{background:#fff7ed}
+  .dispbox{margin-top:6px;font-size:12px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:6px 9px}
+  .dispchk{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:12.5px;color:#334}
+  .dispchk.on{color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:6px 9px}
 </style>
 </head>
 <body>
@@ -269,9 +274,13 @@ function renderTable(){
       const p=u.perDay[d];
       if(bh && !(p&&p.worked)) return `<td style="background:#eef2ff"><span title="${esc(bh.label)}" style="font-size:16px">🏦</span></td>`;
       const bhTag=bh?` <span title="${esc(bh.label)}">🏦</span>`:"";
+      const dd=(u.days||{})[d]||{};
+      const tc=p&&p.where&&p.where.timesChanged;
+      const flags=(dd.noLunch?` <span class="disp" title="${esc("Says no lunch break"+(dd.noLunchReason?": "+dd.noLunchReason:" (no reason given)"))}">🥪✗</span>`:"")
+        +(tc?` <span class="disp" title="${esc("Changed the times from their day ("+(tc.autoStart||"?")+"–"+(tc.autoFinish||"?")+")"+(dd.timeReason?": "+dd.timeReason:" — no reason given"))}">✏️</span>`:"");
       const wt=p&&p.where?whereText(p.where,p.where.homeMins):"";
       const pin=wt?` <span title="${esc(wt)}" style="cursor:help;font-size:11px">📍${p.where.end&&p.where.end.home===false?"🚗":""}</span>`:"";
-      return "<td>"+(p&&p.worked?hmS(p.paid)+bhTag+pin:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
+      return "<td"+(flags?' class="hasdisp"':"")+">"+(p&&p.worked?hmS(p.paid)+bhTag+pin+flags:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
     }).join("");
     const inv=u.invoice?`<a class="inv" href="${esc(u.invoice.url)}" target="_blank" title="Open invoice PDF">#${u.invoice.number}</a>`
       :(u.selfEmployed?"<span class='muted'>—</span>":"");
@@ -280,7 +289,9 @@ function renderTable(){
     const lv=u.totals.leaveHours>0?`<br><span style="font-size:11px;color:#4f46e5">Leave ${u.totals.leaveHours}h${u.totals.leavePay?` · ${money(u.totals.leavePay)}`:""}</span>`:"";
     const gap=u.gapCount>0?` <span title="${u.gapCount} job(s) still need hours${u.due&&u.due.label?' — due '+esc(u.due.label):''}" style="display:inline-block;background:${u.due&&u.due.overdue?'#dc2626':'#f59e0b'};color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚠ ${u.gapCount} no hrs</span>`:"";
     const vchip=verdictChip(vfFor(u.username));
-    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}${gap}${vchip}</td>${cells}
+    const nDisp=days.filter(d=>{const dd=(u.days||{})[d]||{};const p=u.perDay[d];return dd.noLunch||(p&&p.where&&p.where.timesChanged);}).length;
+    const dchip=nDisp?` <span title="${nDisp} day(s) where they've said no lunch or changed their times — open ✎ to review" style="display:inline-block;background:#b45309;color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚑ ${nDisp} to review</span>`:"";
+    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}${gap}${vchip}${dchip}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${ot}${lv}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
       <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit(${esc(JSON.stringify(String(u.username)))})" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
@@ -343,6 +354,9 @@ function openEdit(username){
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
       ${(()=>{const p=u.perDay&&u.perDay[date];const wt=p&&p.where?whereText(p.where,p.where.homeMins):"";return wt?`<div class="muted" style="font-size:12px;margin-top:4px">📍 ${esc(wt)}</div>`:"";})()}
+      ${(()=>{const p=u.perDay&&u.perDay[date];const tc=p&&p.where&&p.where.timesChanged;
+        return tc?`<div class="dispbox">✏️ Changed from their day's ${esc(tc.autoStart||"?")}–${esc(tc.autoFinish||"?")}${d.timeReason?` — “${esc(d.timeReason)}”`:" — no reason given"}</div>`:"";})()}
+      ${(u.cfg&&u.cfg.lunch)?`<label class="dispchk${d.noLunch?" on":""}"><input type="checkbox" class="e-nolunch" ${d.noLunch?"checked":""}> 🥪 No lunch (no deduction)${d.noLunch?` — ${d.noLunchReason?`“${esc(d.noLunchReason)}”`:"no reason given"} · untick to deduct it`:""}</label>`:""}
       ${leaveRow}${miBlock}</div>`;
   }).join("");
   const appr=u.approval||null;
@@ -396,6 +410,10 @@ function collectEditDays(){
     // Preserve the engineer's per-job hours (the modal doesn't edit them) so the
     // admin correcting times never wipes the job-costing data.
     if(orig.jobHours&&Object.keys(orig.jobHours).length)d.jobHours=orig.jobHours;
+    // Engineer disputes ride along; the office can untick No lunch to put the deduction back.
+    const nl=ed.querySelector(".e-nolunch");
+    if(nl?nl.checked:orig.noLunch){d.noLunch=true;d.noLunchReason=orig.noLunchReason||"";}
+    if(orig.timeReason)d.timeReason=orig.timeReason;
     const lv=ed.querySelector(".e-leave");
     if(lv&&lv.value!=="")d.leaveHours=lv.value;
     ed.querySelectorAll(".mirow").forEach(r=>{

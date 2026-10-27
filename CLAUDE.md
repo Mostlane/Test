@@ -1125,6 +1125,12 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   page) — debounced ~1s, instant on taps, 8s retry loop, keepalive flush on
   pagehide, flush before week-nav/modal close; status text shows Saved ✓.
   Per-user deduction switches (app_config `engts:cfg:<tid>` — no schema churn):
+  **Disputes (27 Oct 2026):** an engineer can tick "🥪 I didn't get a lunch break today" (`day.noLunch` +
+  `noLunchReason` → no lunch deduction) and, when they type times over the ones their day recorded, give a reason
+  (`day.timeReason`). Office sees 🥪✗ / ✏️ in the Engineer Timesheets grid (amber cell + "⚑ N to review" chip; the
+  ✏️ = saved start/finish ≥5 min off jobTimeAuto, `perDay.where.timesChanged`) and in the ✎ modal, where unticking
+  No lunch puts the deduction back. Home for travel/"where"/drive-home = the PROFILE home first (Users Admin); the
+  timesheet-settings home postcode (PO15 5RQ for most) is only a fallback and stays what door-to-door MILEAGE uses.
   **commute** (since 27 Oct 2026 = the ACTUAL drive home→first site and last site→home, each capped at
   commuteMins/30 — a 20-min drive costs 20 min; worked out in `applyAutoMileage` as `day._commute {am,pm}`
   [Google no-traffic from the home postcode, else straight-line], used by `dayCalc`; unknown route = full 30;

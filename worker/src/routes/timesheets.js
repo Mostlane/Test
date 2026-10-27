@@ -273,7 +273,8 @@ export async function jobTimeAuto(env, tid, username, monday, opts = {}) {
     ).bind(tid, username, monday, end).all();
     for (const s of results || []) { const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date; if (dt) shifts[dt] = s; }
   } catch {}
-  const homePc = normPc(opts.homePostcode || "");
+  // Real home (profile) first; the timesheet-settings postcode is mostly the office.
+  const homePc = normPc(await profileHomePostcode(env, tid, username)) || normPc(opts.homePostcode || "");
   let homeCoord;   // resolved lazily, once — the dropped home PIN first, else the postcode
   const getHome = async () => {
     if (homeCoord !== undefined) return homeCoord;
@@ -284,6 +285,7 @@ export async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       const lat = Number(pr.homeLat), lng = Number(pr.homeLng ?? pr.homeLon);
       if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) homeCoord = { lat, lng };
     } catch {}
+    if (!homeCoord) { const pp = normPc(await profileHomePostcode(env, tid, username)); if (pp) homeCoord = await lookupPostcode(pp).catch(() => null); }
     if (!homeCoord && homePc) homeCoord = await lookupPostcode(homePc).catch(() => null);
     return homeCoord;
   };
@@ -690,8 +692,15 @@ function cleanDays(monday, days) {
     let confirmed = null;
     if (d.confirmed && typeof d.confirmed === "object" && d.confirmed.at)
       confirmed = { at: String(d.confirmed.at).slice(0, 40), by: String(d.confirmed.by || "").slice(0, 80) };
+    // Disputes the engineer raises (27 Oct 2026): "No lunch today" stops the lunch
+    // deduction; a reason for changing the times from the ones their day recorded.
+    // Both show to the office, who can undo the No lunch.
+    const noLunch = d.noLunch === true;
+    const noLunchReason = noLunch ? String(d.noLunchReason || "").slice(0, 200) : "";
+    const timeReason = String(d.timeReason || "").slice(0, 200);
+    const disp = { ...(noLunch ? { noLunch, noLunchReason } : {}), ...(timeReason ? { timeReason } : {}) };
     if (start || finish || jobs || note || mileage.length || hasHours || hasLeave || confirmed)
-      out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}), ...(hasLeave ? { leaveHours } : {}), ...(confirmed ? { confirmed } : {}) };
+      out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}), ...(hasLeave ? { leaveHours } : {}), ...(confirmed ? { confirmed } : {}), ...disp };
   }
   return out;
 }
@@ -714,8 +723,8 @@ export function dayCalc(d, eff) {
   const cm = eff.commuteMins, cap = x => (x == null || !isFinite(x)) ? cm : Math.min(cm, Math.max(0, Math.round(x)));
   const cl = d._commute || {};
   const commute = eff.commute ? cap(cl.am) + cap(cl.pm) : 0;
-  const lunch = (eff.lunch && span >= eff.lunchThresholdH * 60) ? eff.lunchMins : 0;
-  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
+  const lunch = (eff.lunch && !d.noLunch && span >= eff.lunchThresholdH * 60) ? eff.lunchMins : 0;
+  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, noLunch: !!(eff.lunch && d.noLunch), ...base };
 }
 // Per-day {am, pm} drive minutes behind the travel deduction (for the engineer page).
 function commuteMap(days) { const m = {}; for (const [k, d] of Object.entries(days || {})) if (d && d._commute) m[k] = d._commute; return m; }
@@ -1114,8 +1123,17 @@ async function driveMinutesGoogleLive(key, f, t) {
   } catch {}
   return null;
 }
-// The engineer's home postcode: their timesheet override first, else their profile.
+// The home postcode on their portal profile (Users Admin) — where they actually live.
+async function profileHomePostcode(env, tid, username) {
+  try { const u = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first(); const pr = u && u.profile ? JSON.parse(u.profile) : {}; return String(pr.homePostcode || ""); } catch { return ""; }
+}
+// The engineer's home postcode for the drive-home estimate: their profile (where
+// they live) first, else the timesheet-settings postcode (27 Oct 2026 — that
+// setting is the office for most people, which made the "drive home" a drive to
+// the office).
 async function homePostcodeFor(env, tid, username) {
+  const prof = await profileHomePostcode(env, tid, username);
+  if (prof) return prof;
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
     if (row && row.value) { const v = JSON.parse(row.value); const mine = (v.byUser && v.byUser[username]) || {}; if (mine.homePostcode) return String(mine.homePostcode); }
@@ -1341,7 +1359,10 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
   const basePc = normPc(basePostcode || "PO15 5RQ");
   const homePc = normPc(eff.homePostcode || "") || basePc;
   // Travel deduction measures from where they actually live.
-  const homeCm = wantCm ? (normPc(eff.homePostcode || "") || normPc(await homePostcodeFor(env, tid, username).catch(() => "")) || "") : "";
+  // Travel deduction measures from where they LIVE: the profile home (Users Admin) first.
+  // The timesheet-settings "home postcode" is mostly the office (PO15 5RQ) and is
+  // only a last resort here — it stays what door-to-door MILEAGE routes from.
+  const homeCm = wantCm ? (normPc(await profileHomePostcode(env, tid, username)) || normPc(eff.homePostcode || "") || "") : "";
   const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
   const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
   const coordCache = new Map();
@@ -2293,7 +2314,11 @@ export async function handle(request, env, ctx, url, sess) {
           const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
           autoWhere = {};
           for (const [date, a] of Object.entries(auto)) {
-            autoWhere[date] = { ...(a.where || {}), homeMins: a.homeMins || null };
+            const before = d.days[date] || {};
+            // Times the engineer typed over the ones their day recorded (≥5 min out).
+            const off = (x, y) => { const m1 = toMin(x), m2 = toMin(y); return m1 != null && m2 != null && Math.abs(m1 - m2) >= 5; };
+            const changed = (a.start && off(before.start, a.start)) || (a.finish && off(before.finish, a.finish));
+            autoWhere[date] = { ...(a.where || {}), homeMins: a.homeMins || null, ...(changed ? { timesChanged: { autoStart: a.start || "", autoFinish: a.finish || "" } } : {}) };
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
             if (!day.finish && a.finish) day.finish = a.finish;

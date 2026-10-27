@@ -86,6 +86,9 @@
   .addjob-none{font-size:13px;color:var(--muted);padding:6px 2px}
   /* deduction + assigned chips */
   .dedrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .nlrow{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#334}
+  .nl-why,.t-why{display:block;width:100%;box-sizing:border-box;margin-top:6px;font-size:13px;padding:7px 9px;border:1px solid #f2c48a;border-radius:8px;background:#fffaf2}
+  .twrow{margin-top:8px;font-size:12.5px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px}
   .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f2f5fa;border-radius:999px;padding:4px 10px}
   .ded.off{opacity:.4;text-decoration:line-through}
   /* overhead (non-site) one-tap chips */
@@ -271,7 +274,7 @@ function dayCalc(d,date){
   const e=e0<=s?e0+1440:e0;
   const span=e-s;
   const commute=commuteFor(date).total;
-  const lunch=(ME&&ME.lunch&&span>=ME.lunchThresholdH*60)?ME.lunchMins:0;
+  const lunch=(ME&&ME.lunch&&!d.noLunch&&span>=ME.lunchThresholdH*60)?ME.lunchMins:0;
   return {span,paid:Math.max(0,span-commute-lunch),commute,lunch,worked:true,miles,milesClaimed:mc};
 }
 
@@ -289,6 +292,9 @@ function collect(){
     const sEl=card.querySelector(".t-start"), fEl=card.querySelector(".t-finish");
     const d={ start:sEl?sEl.value:"", finish:fEl?fEl.value:"",
       jobs:refs.join(", "), jobHours, mileage:[] };
+    const nl=card.querySelector(".nl-chk");
+    if(nl&&nl.checked){ d.noLunch=true; const w=card.querySelector(".nl-why"); d.noLunchReason=w?w.value.trim():""; }
+    const tw=card.querySelector(".t-why"); if(tw&&tw.value.trim()) d.timeReason=tw.value.trim();
     card.querySelectorAll(".mirow").forEach(r=>{
       const site=(r.dataset.site||"").trim(), pc=(r.dataset.pc||"").toUpperCase(),
         miles=parseFloat(r.dataset.miles)||0;
@@ -448,6 +454,10 @@ function render(){
         ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
         ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. drive home)":""}${whereText(a.where,a.homeMins)?`<br>📍 ${esc(whereText(a.where,a.homeMins))}`:""}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
+        ${ME&&ME.lunch?`<label class="nlrow"><input type="checkbox" class="nl-chk" ${d.noLunch?"checked":""} ${locked?"disabled":""}> 🥪 I didn't get a lunch break today</label>
+          <input type="text" class="nl-why" placeholder="Why? (the office will see this)" value="${esc(d.noLunchReason||"")}" ${d.noLunch?"":"hidden"} ${locked?"disabled":""}>`:""}
+        ${(a&&(a.start||a.finish))?`<div class="twrow" data-as="${esc(a.start||"")}" data-af="${esc(a.finish||"")}" ${((a.start&&d.start&&a.start!==d.start)||(a.finish&&d.finish&&a.finish!==d.finish))?"":"hidden"}>✏️ You've changed the times from your day (${esc(a.start||"?")}–${esc(a.finish||"?")}) — the office will see this.
+          <input type="text" class="t-why" placeholder="Say why" value="${esc(d.timeReason||"")}" ${locked?"disabled":""}></div>`:""}
       </div>`;
     if(ME&&ME.mileage&&!(AUTOMI&&AUTOMI.applies)){
       const list=card.querySelector(".milist");
@@ -782,6 +792,15 @@ document.addEventListener("keydown",e=>{
   e.preventDefault();
   const card=e.target.closest(".card[data-date]");
   if(addJobPill(card,e.target.value)){e.target.value="";hideAllSug();refreshTotals();clearTimeout(saveTimer);doSave();}
+});
+// Dispute controls: show the "why" boxes as soon as they apply.
+document.addEventListener("input",e=>{
+  const card=e.target.closest&&e.target.closest(".card[data-date]"); if(!card)return;
+  if(e.target.classList.contains("nl-chk")){const w=card.querySelector(".nl-why"); if(w){w.hidden=!e.target.checked; if(e.target.checked)w.focus();}}
+  if(e.target.classList.contains("t-start")||e.target.classList.contains("t-finish")){
+    const tw=card.querySelector(".twrow"); if(tw){const s=card.querySelector(".t-start").value,f=card.querySelector(".t-finish").value;
+      tw.hidden=!((tw.dataset.as&&s&&s!==tw.dataset.as)||(tw.dataset.af&&f&&f!==tw.dataset.af));}
+  }
 });
 document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();markGaps();queueSave();}});
 
