@@ -244,6 +244,8 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   endPressed,endRefused}` + `homeMins`. An End press AWAY from home adds the drive home on top (Google from the
   press point, `driveMinutesCoords`, memoised; else straight-line ×1.25 @30mph); at home / no GPS = the press time.
   Shown as a 📍 line on engineer-timesheet.html + timesheets-admin.html (grid pin tooltip + edit modal).
+  **Office correction of a day's end:** `shifts.data.endManual {at, note, home, by}` beats every press/estimate and
+  shows as "Ended — <note> (set by <name>)". Set in D1 only (no UI). First use: Lionel 26 Oct = 17:23 "stopped at home".
   NB a PENDING On Hold does NOT block clock-off (parked() counts any On Hold) — the approval only
   holds up starting the NEXT job (findBlockingJob holdPending); the pop-up text says so.
   **Warning, not a wall (21 Oct, Jamie: engineers tap Travelling, do the job, drive home, then can't
