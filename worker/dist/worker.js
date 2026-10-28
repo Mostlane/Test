@@ -14442,6 +14442,10 @@ async function ensureTables__raw(env) {
     } catch {
     }
   }
+  try {
+    await env.DB.prepare("ALTER TABLE concerto_cases ADD COLUMN works_job_id TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS concerto_refs (
     tenant_id TEXT NOT NULL, ref TEXT NOT NULL, store_code TEXT, site_name TEXT,
     kind TEXT, source TEXT, updated_at TEXT,
@@ -14969,6 +14973,16 @@ function fyStage12Auto(c) {
   if (done("quoted")) return "remedials_quoted";
   return hasRem ? "remedials_to_quote" : "remedials_required";
 }
+function fyStageEffective(manual, auto, works) {
+  const fwd = (a, b) => b && FY_UNSAT_STAGES.has(b) && FY_IDX[b] > FY_IDX[a] ? b : a;
+  if (manual) {
+    if (!FY_UNSAT_STAGES.has(manual)) return { stage: manual, source: "manual" };
+    const s2 = fwd(fwd(manual, auto), works);
+    return { stage: s2, source: s2 === manual ? "manual" : "auto" };
+  }
+  const s = works && FY_IDX[works] > (FY_IDX[auto] ?? -1) ? works : auto;
+  return { stage: s, source: "auto" };
+}
 function fyDocStatus(chartDue, c, lastDone, today) {
   const outcome = c ? c.outcome || "" : "";
   const remedied = !!(c && (c.certUpdated || c.outcomeAuto === "remedied" || (c.steps || []).some((s) => s.key === "cert_updated" && s.done)));
@@ -15016,7 +15030,7 @@ async function caseContext(env, tid, type, jobs) {
     const { results } = await env.DB.prepare("SELECT id, code, doc_date, uploaded_at, year, filename, label FROM compliance_files WHERE scheme='coop' AND type=?").bind(type).all();
     for (const f of results || []) {
       const d = toIsoDate(f.doc_date) || (f.year ? f.year + "-01-01" : null) || (f.uploaded_at || "").slice(0, 10) || null;
-      push(ctx.certs, padCode(f.code), { id: f.id, date: d, name: f.label || f.filename || "" });
+      push(ctx.certs, padCode(f.code), { id: f.id, date: d, docDate: toIsoDate(f.doc_date) || "", uploaded: String(f.uploaded_at || "").slice(0, 10), name: f.label || f.filename || "" });
     }
     for (const l of ctx.certs.values()) l.sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
   } catch {
@@ -15088,13 +15102,16 @@ function deriveCase(r, ctx, today, money2, rec) {
   const ords = (code ? ctx.orders.get(code) || [] : []).filter((o) => o.matched_kind !== "em" && String(o.created_at || "") >= (testDate || wStart) && REMEDIAL_ORDER.test([o.title, o.description, o.detail].join(" ")));
   const order = ords[0] || null;
   if (order) auto.ordered = { done: true, at: order.created_at, detail: "Client order " + (order.order_number || "") + (money2 && order.order_value != null ? " (\xA3" + Number(order.order_value).toFixed(2) + ")" : ""), source: "order", orderId: order.id };
-  const wj = testJob && testJob.worksJobId ? ctx.jobsById.get(String(testJob.worksJobId)) : null;
+  const wjId = testJob && testJob.worksJobId || c && c.works_job_id || null;
+  const wj0 = wjId ? ctx.jobsById.get(String(wjId)) : null;
+  const wj = wj0 && String(wj0.status || "").toLowerCase() !== "cancelled" ? wj0 : null;
   if (wj) {
     const wst = String(wj.status || "").toLowerCase(), wdone = FINISHED.has(wst) && wst !== "cancelled";
     auto.works_done = { done: wdone, at: wdone ? jobDoneDate(wj) || (wj.scheduledAt || "").slice(0, 10) || null : null, detail: wdone ? "Works job complete" : "Works job raised \u2014 " + (wj.status || "Pending") + (wj.scheduledAt ? ", booked " + String(wj.scheduledAt).slice(0, 10) : ""), source: "job", jobId: wj.id };
   } else if (outcomeAuto === "remedied") auto.works_done = { done: true, at: null, detail: "Compliance check found a later Minor Works / EIC on file", source: "review" };
   const worksAt = auto.works_done && auto.works_done.done ? String(auto.works_done.at || "").slice(0, 10) : "";
-  const cert2 = worksAt ? cycleCerts.find((f) => f.date >= worksAt && (!cert || f.id !== cert.id)) || null : null;
+  const postWorks = (f) => f.docDate ? f.docDate >= worksAt : !!(f.uploaded && f.uploaded >= worksAt);
+  const cert2 = worksAt ? certs.find((f) => postWorks(f) && (!cert || f.id !== cert.id || !f.docDate)) || null : null;
   if (cert2) auto.cert_updated = { done: true, at: cert2.date, detail: cert2.name, source: "cert" };
   else if (outcomeAuto === "remedied") auto.cert_updated = { done: true, at: null, detail: "Remedial certificate on file", source: "review" };
   const steps = CASE_STEPS.map((s) => {
@@ -15130,7 +15147,9 @@ function deriveCase(r, ctx, today, money2, rec) {
   const stage = closed ? "closed" : !active ? "not_due" : held ? "held" : allDone ? "complete" : nextStep.key;
   const stage12Auto = fyStage12Auto({ steps, outcome, remedialCount: testJob ? testJob.remedials : 0, worksJob: wj ? { id: wj.id, scheduledAt: wj.scheduledAt } : null });
   const stage12Manual = c && c.stage12 && FY_STAGE_KEYS.has(c.stage12) ? c.stage12 : "";
-  const stage12 = stage12Manual || stage12Auto;
+  const worksStage = !wj ? "" : cert2 ? "certificate_updated" : auto.works_done && auto.works_done.done ? "remedials_complete" : "remedials_scheduled";
+  const eff = fyStageEffective(stage12Manual, stage12Auto, worksStage);
+  const stage12 = eff.stage;
   return {
     id: c ? c.id : caseId(r.id, cycleDue),
     stored: !!c,
@@ -15141,7 +15160,8 @@ function deriveCase(r, ctx, today, money2, rec) {
     closedBy: c && c.closed_by || "",
     stage12,
     stage12Auto,
-    stage12Source: stage12Manual ? "manual" : "auto",
+    stage12Manual,
+    stage12Source: eff.source,
     stage12At: c && c.stage12_at || null,
     stage12By: c && c.stage12_by || "",
     held,
@@ -15173,7 +15193,7 @@ function deriveCase(r, ctx, today, money2, rec) {
     // Material £ is money-gated; minutes/description are shown to anyone with the page.
     remedialLines: testJob ? (testJob.remedialsList || []).map((x) => ({ id: x.id, code: x.code, description: x.description, minutes: x.minutes, photos: x.photos, photoUrls: x.photoUrls || [], materialCost: money2 ? x.materialCost : void 0 })) : [],
     quote: c && c.quote_value != null ? { ref: c.quote_ref || "", value: money2 ? c.quote_value : void 0, at: c.quote_at || null, by: c.quote_by || "" } : null,
-    worksJob: wj ? { id: wj.id, status: wj.status || "", scheduledAt: wj.scheduledAt || null } : null,
+    worksJob: wj ? { id: wj.id, ref: wj.helpdeskRef || "", status: wj.status || "", scheduledAt: wj.scheduledAt || null, engineers: Array.isArray(wj.assignedEngineers) ? wj.assignedEngineers.slice() : [], items: Array.isArray(wj.auditItems) ? wj.auditItems.length : 0, itemsDone: Array.isArray(wj.auditItems) ? wj.auditItems.filter((x) => x && (x.done || x.donePhoto)).length : 0 } : null,
     cert: cert ? { id: cert.id, date: cert.date, name: cert.name } : null,
     certUpdated: cert2 ? { id: cert2.id, date: cert2.date, name: cert2.name } : null,
     review: rv && rv.outcome ? { outcome: rv.outcome, attention: !!rv.attention, summary: rv.summary || "", checkedAt: rv.checked_at || null } : null,
@@ -15361,7 +15381,7 @@ async function buildMySchedule(env, tid, opts) {
   const jcodes = jstat.codes || {};
   const applyConcerto = (caseView, imp) => {
     const stg = mapConcertoStatus(imp.status);
-    if (stg && caseView.stage12Source !== "manual") {
+    if (stg && caseView.stage12Source !== "manual" && !FY_UNSAT_STAGES.has(caseView.stage12)) {
       caseView.stage12 = stg;
       caseView.stage12Source = "concerto";
     }
@@ -15735,6 +15755,116 @@ async function handle8(request, env, ctx, url, sess) {
     for (const ev of events) await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, ...ev }), now2).run();
     return json({ ok: true, caseId: c.id, events: events.length }, {}, env, request);
   }
+  if (path === "/concerto/remedial-queue" && method === "GET") {
+    const [sch, mine] = await Promise.all([
+      buildSchedule(env, tid, { type: "fiveYear", status: "all", money: money2 }),
+      buildMySchedule(env, tid, { year: "all", money: money2 })
+    ]);
+    const byId = /* @__PURE__ */ new Map();
+    for (const r of [...sch.rows, ...mine.rows]) if (r && r.case && !byId.has(r.id)) byId.set(r.id, r);
+    const byCode = /* @__PURE__ */ new Map();
+    for (const r of byId.values()) {
+      const k = r.storeCode || r.id;
+      const cur = byCode.get(k);
+      if (!cur || String(cur.id).startsWith("MYS:") && !String(r.id).startsWith("MYS:")) byCode.set(k, r);
+    }
+    const slim = (r) => ({ id: r.id, storeCode: r.storeCode, siteName: r.siteName, inactive: !!r.inactive, chartDue: r.chartDue || null, docStatus: r.docStatus || null, onConcerto: !String(r.id).startsWith("MYS:"), case: r.case });
+    const toComplete = [], certs = [];
+    for (const r of byCode.values()) {
+      const st = r.case.stage12;
+      if (st === "orders_received" || st === "remedials_scheduled") toComplete.push(slim(r));
+      else if (st === "remedials_complete") certs.push(slim(r));
+    }
+    const cmp = (a, b) => String(a.storeCode).localeCompare(String(b.storeCode), void 0, { numeric: true });
+    toComplete.sort(cmp);
+    certs.sort(cmp);
+    let labourRate = 0;
+    try {
+      const rr = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("fiveyear:labourrate:" + tid).first();
+      labourRate = rr ? Number(rr.value) || 0 : 0;
+    } catch {
+    }
+    return json({ ok: true, money: money2, labourRate, toComplete, certs, stages12: FY_STAGES }, {}, env, request);
+  }
+  if (path === "/concerto/create-works" && method === "POST") {
+    const b = await body();
+    const ppmId = String(b.ppmId || "").trim();
+    if (!ppmId) return error("Need ppmId", 400, env, request);
+    await ensureTables2(env);
+    let row;
+    if (ppmId.startsWith("MYS:")) row = { id: ppmId, store_code: ppmId.slice(4), ppm_type: "fiveYear", next_date: null, planned_date: null };
+    else {
+      row = await env.DB.prepare("SELECT * FROM concerto_ppm WHERE tenant_id=? AND id=?").bind(tid, ppmId).first();
+      if (!row) return error("Schedule row not found", 404, env, request);
+    }
+    const code = padCode(row.store_code);
+    if (!code) return error("This row has no store number \u2014 map the store first.", 400, env, request);
+    let jobs = [];
+    try {
+      jobs = await listJobs(env, tid);
+    } catch {
+    }
+    const cctx = await caseContext(env, tid, "fiveYear", jobs);
+    const cv = deriveCase(row, cctx, todayIso(), money2, null);
+    if (cv.worksJob) return json({ ok: true, existing: true, id: cv.worksJob.id, ref: cv.worksJob.ref }, {}, env, request);
+    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    let c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND ppm_id=? AND closed_at IS NULL").bind(tid, ppmId).first();
+    if (!c) {
+      const id = cv.id || caseId(ppmId, cv.cycleDue);
+      c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      if (!c) {
+        await env.DB.prepare("INSERT INTO concerto_cases (tenant_id,id,ppm_id,store_code,ppm_type,cycle_due,outcome,engineer,steps,opened_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(tid, id, ppmId, code, "fiveYear", cv.cycleDue || "", "unsatisfactory", "", "{}", now2, now2, me).run();
+        c = await env.DB.prepare("SELECT * FROM concerto_cases WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      }
+    }
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 10) : [];
+    const items = Array.isArray(b.items) ? b.items.map((x) => String(x || "").trim().slice(0, 500)).filter(Boolean).slice(0, 80) : [];
+    const opts = {
+      by: me,
+      assignedEngineers: engineers,
+      scheduledAt: b.scheduledAt || void 0,
+      scheduledEnd: b.scheduledEnd || void 0,
+      durationMinutes: b.durationMinutes || void 0,
+      fiveYearCase: c.id,
+      existingId: c.works_job_id || void 0
+    };
+    let res;
+    const src = !items.length && cv.testJob ? await getJob(env, tid, cv.testJob.id).catch(() => null) : null;
+    if (src && (Array.isArray(src.remedials) ? src.remedials.length : 0)) {
+      res = await createWorksJobFromRemedials(env, tid, src, { ...opts, pickIds: Array.isArray(b.itemIds) ? b.itemIds.map(String) : null });
+    } else {
+      if (!items.length) return error("No remedials are logged on a portal test job for this site \u2014 type the remedial items (one per line).", 400, env, request);
+      let site = null;
+      try {
+        site = await env.DB.prepare("SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER) ORDER BY LENGTH(site_number) LIMIT 1").bind(tid, code).first();
+      } catch {
+      }
+      let sd = {};
+      try {
+        sd = JSON.parse(site && site.data || "{}") || {};
+      } catch {
+      }
+      const siteName = site && site.site_name || cv.testJob && cv.testJob.ref || code;
+      const synth = {
+        siteCode: site && site.site_number || code,
+        siteName,
+        postcode: site && site.postcode || sd.postcode || "",
+        address: sd.address || sd.siteAddress || "",
+        telephone: sd.phone || sd.telephone || "",
+        client: site && site.client || "",
+        storeType: site && site.client || "",
+        lat: sd.lat,
+        lon: sd.lng ?? sd.lon,
+        helpdeskRef: code + " EICR remedials"
+      };
+      res = await createWorksJobFromRemedials(env, tid, synth, { ...opts, items, synthetic: true });
+    }
+    if (res.error) return error(res.error, res.status || 400, env, request);
+    await env.DB.prepare("UPDATE concerto_cases SET works_job_id=?, updated_at=?, updated_by=? WHERE tenant_id=? AND id=?").bind(res.id, now2, me, tid, c.id).run();
+    const txt = (res.existing ? "Works job already raised" : "Remedial works job raised (" + (res.items || 0) + " item" + (res.items === 1 ? "" : "s") + ")") + (engineers.length ? " \u2014 assigned to " + engineers.join(", ") : " \u2014 unassigned");
+    await env.DB.prepare("INSERT INTO concerto_log (tenant_id, ppm_id, event, detail, at) VALUES (?,?,?,?,?)").bind(tid, ppmId, "case", JSON.stringify({ caseId: c.id, by: me, action: "works", jobId: res.id, text: txt }), now2).run();
+    return json({ ok: true, id: res.id, ref: res.ref, existing: !!res.existing, items: res.items || 0 }, {}, env, request);
+  }
   if (path === "/concerto/alex-list") {
     const key = "fyr:alexlist:" + tid;
     const load = async () => {
@@ -15824,7 +15954,7 @@ async function handle8(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS2, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS2, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, FY_IDX, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -15881,6 +16011,7 @@ var init_concerto = __esm({
     FY_STAGE_KEYS = new Set(FY_STAGES.map((s) => s.key));
     CONCERTO_RANK = { cancelled: 1, closed: 2, awaiting_assignment: 3, scheduled: 4, awaiting_review: 5 };
     FY_UNSAT_STAGES = /* @__PURE__ */ new Set(["remedials_required", "remedials_to_quote", "remedials_quoted", "orders_received", "remedials_scheduled", "remedials_complete", "certificate_updated"]);
+    FY_IDX = Object.fromEntries(FY_STAGES.map((x, i) => [x.key, i]));
     caseId = (ppmId, cycleDue) => ppmId + "@" + (cycleDue || "none");
     REMEDIAL_ORDER = /eicr|5\s*-?\s*y(ea)?r|five\s*year|fixed\s*wire|electrical|remedial|\bC[123]\b/i;
   }
@@ -16413,7 +16544,7 @@ async function getConfig2(env, tid) {
 async function saveConfig(env, tid, c) {
   await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "pump:config:" + tid, JSON.stringify(c)).run();
 }
-async function getJob(env, tid, id) {
+async function getJob2(env, tid, id) {
   try {
     const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
     return row ? JSON.parse(row.data) : null;
@@ -16610,7 +16741,7 @@ async function handle9(request, env, ctx, url, sess) {
     if (!rec) return true;
     if (String(rec.engineer || "").toLowerCase().trim() === String(me).toLowerCase().trim()) return true;
     try {
-      const job = rec.job_id ? await getJob(env, tid, String(rec.job_id)) : null;
+      const job = rec.job_id ? await getJob2(env, tid, String(rec.job_id)) : null;
       const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
       return engs.some((e) => String(e || "").toLowerCase().trim() === String(me).toLowerCase().trim());
     } catch {
@@ -16649,7 +16780,7 @@ async function handle9(request, env, ctx, url, sess) {
     const jobId = q.get("jobId") || "";
     if (!jobId) return error("jobId required", 400, env, request);
     const cfg = await getConfig2(env, tid);
-    const job = await getJob(env, tid, jobId);
+    const job = await getJob2(env, tid, jobId);
     let storeId = q.get("store") || job && job.pumpStore || "";
     const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
     if (existing) {
@@ -17337,7 +17468,7 @@ async function fileCertNow(env, tid, cert, rec, number, { bump = false, docDate 
   let emKind = cert.type === "em" ? rec.emKind || "" : "";
   if (cert.type === "em" && !emKind) {
     try {
-      const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+      const jb = cert.job_id ? await getJob3(env, tid, cert.job_id) : null;
       emKind = jb && jb.emKind || "";
     } catch {
     }
@@ -17381,7 +17512,7 @@ async function createRemedialWorksJob(env, tid, certId, { awaitingBatteries = fa
   const pend = results || [];
   if (!pend.length) return null;
   const jobId = "emrem:" + certId;
-  const existing = await getJob2(env, tid, jobId).catch(() => null);
+  const existing = await getJob3(env, tid, jobId).catch(() => null);
   if (existing) return existing.id;
   const first = pend[0];
   const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
@@ -17795,7 +17926,7 @@ function dataUrlToBytes2(u) {
     return null;
   }
 }
-async function getJob2(env, tid, id) {
+async function getJob3(env, tid, id) {
   try {
     const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
     return row ? JSON.parse(row.data) : null;
@@ -18433,7 +18564,7 @@ async function handle10(request, env, ctx, url, sess) {
     const m = String(me || "").toLowerCase().trim();
     if (String(cert.engineer || "").toLowerCase().trim() === m) return true;
     try {
-      const job = cert.job_id ? await getJob2(env, tid, String(cert.job_id)) : null;
+      const job = cert.job_id ? await getJob3(env, tid, String(cert.job_id)) : null;
       const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
       return engs.some((e) => String(e || "").toLowerCase().trim() === m);
     } catch {
@@ -18513,7 +18644,7 @@ async function handle10(request, env, ctx, url, sess) {
   if (sub === "/jobs/create-next" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const src = await getJob2(env, tid, String(b.jobId || ""));
+    const src = await getJob3(env, tid, String(b.jobId || ""));
     if (!src) return error("Job not found", 404, env, request);
     let months = Number(b.months);
     if (!Number.isFinite(months) || months < 1 || months > 60) months = src.emKind === "monthly" ? 1 : 12;
@@ -18699,7 +18830,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     const type = T(q.get("type"));
     let code = q.get("code") || "";
     if (!code && q.get("jobId")) {
-      const job = await getJob2(env, tid, String(q.get("jobId")));
+      const job = await getJob3(env, tid, String(q.get("jobId")));
       code = job ? job.siteCode || "" : "";
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
@@ -18736,7 +18867,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
     const config = await getConfig3(env, tid);
-    const job = await getJob2(env, tid, jobId);
+    const job = await getJob3(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
     let siteData = {};
@@ -18829,7 +18960,7 @@ PAT: Import certificate number ${num5}-${yr}`;
       let owner = me;
       if (isOffice && b.jobId) {
         try {
-          const j = await getJob2(env, tid, String(b.jobId));
+          const j = await getJob3(env, tid, String(b.jobId));
           const engs = j ? Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [] : [];
           if (engs.length && !engs.some((e) => String(e || "").toLowerCase().trim() === String(me || "").toLowerCase().trim())) owner = String(engs[0]);
         } catch {
@@ -19039,7 +19170,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob3(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
@@ -19114,7 +19245,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     let emKind = cert.type === "em" ? rec.emKind || "" : "";
     if (cert.type === "em" && !emKind) {
       try {
-        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+        const jb = cert.job_id ? await getJob3(env, tid, cert.job_id) : null;
         emKind = jb && jb.emKind || "";
       } catch {
       }
@@ -19648,7 +19779,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     await env.DB.prepare("UPDATE em_remedial_acks SET awaiting_batteries=0, batteries_arrived_at=? WHERE tenant_id=? AND cert_id=?").bind(now2, tid, certId).run();
     const jobId = row.job_id || "emrem:" + certId;
     try {
-      const job = await getJob2(env, tid, jobId);
+      const job = await getJob3(env, tid, jobId);
       if (job && /AWAITING BATTERIES/.test(String(job.description || ""))) {
         await createOrUpdateJobFromPayload(env, tid, { id: jobId, description: String(job.description).replace(/^⏳ AWAITING BATTERIES[^\n]*\n\n?/, "") });
       }
@@ -20111,7 +20242,7 @@ Total: ${lines.length} item${lines.length === 1 ? "" : "s"}` + (mat ? ` \xB7 est
     } catch {
     }
     if (!d.jobId) return error("This case isn't linked to a test job \u2014 create the works job from the job card.", 400, env, request);
-    const src = await getJob2(env, tid, d.jobId);
+    const src = await getJob3(env, tid, d.jobId);
     if (!src) return error("The linked test job no longer exists.", 404, env, request);
     const pickIds = Array.isArray(b.itemIds) ? b.itemIds.map(String) : null;
     const res = await createWorksJobFromRemedials(env, tid, src, { pickIds, by: me || "office" });
@@ -20275,7 +20406,7 @@ __export(sla_exports, {
   estimateNewJobDuration: () => estimateNewJobDuration,
   findBlockingJob: () => findBlockingJob,
   formatPoRef: () => formatPoRef,
-  getJob: () => getJob3,
+  getJob: () => getJob,
   getSubconSender: () => getSubconSender,
   getSubconSenderCfg: () => getSubconSenderCfg,
   handle: () => handle11,
@@ -20480,7 +20611,7 @@ async function handle11(request, env, ctx, url, sess) {
       const out = { ok: true, list: Object.keys(cfg).map((k) => cfg[k]), areas: await getWorkAreas(env, tenantId), sender: snd.from, senderVia: snd.mailbox };
       const jobId = url.searchParams.get("jobId");
       if (jobId) {
-        const job = await getJob3(env, tenantId, jobId);
+        const job = await getJob(env, tenantId, jobId);
         if (job) {
           const s = await subcontractorSuggestions(env, tenantId, job);
           out.job = { id: job.id, ref: job.helpdeskRef || "", priority: job.priority || "", areaId: s.areaId, areaName: s.areaName, hasCoords: s.hasJobCoords };
@@ -20693,7 +20824,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const jobId = method === "GET" ? searchParams.get("jobId") : null;
       if (method === "GET") {
-        const job = await getJob3(env, tenantId, jobId);
+        const job = await getJob(env, tenantId, jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const cfg = await getFsConfig(env, tenantId);
         const rec = job.firestop || {};
@@ -20722,7 +20853,7 @@ async function handle11(request, env, ctx, url, sess) {
       }
       if (method === "POST") {
         const b = await readJson2(request);
-        const job = await getJob3(env, tenantId, b.jobId);
+        const job = await getJob(env, tenantId, b.jobId);
         if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
         const rec = b.record && typeof b.record === "object" ? b.record : {};
         if (!String(rec.ref || "").trim()) {
@@ -20796,7 +20927,7 @@ async function handle11(request, env, ctx, url, sess) {
     };
     if (subpath === "/firestop/pdf" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const pdf = await buildJobPdf(job);
       const fn = `RIA form ${job.firestop && job.firestop.ref || job.helpdeskRef || job.id}.pdf`;
@@ -20804,7 +20935,7 @@ async function handle11(request, env, ctx, url, sess) {
     }
     if (subpath === "/firestop/bundle" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const job = await getJob3(env, tenantId, searchParams.get("jobId"));
+      const job = await getJob(env, tenantId, searchParams.get("jobId"));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       const rec = job.firestop || {};
       const pdf = await buildJobPdf(job);
@@ -20976,7 +21107,7 @@ async function handle11(request, env, ctx, url, sess) {
       const why = sameIncident.kind === "reopened" ? `\u21A9 Same incident sent again by the client \u2014 previous visit ${prev.helpdeskRef || prev.id} was ${prev.status}${when ? " (" + when + ")" : ""}.` : `\u21A9 Re-assigned incident \u2014 follows our earlier visit ${prev.helpdeskRef || prev.id} (${prev.status}${when ? ", " + when : ""}); usually the ordered works after a quote.`;
       payload.description = [payload.description || "", why].filter(Boolean).join("\n\n");
     } else if (!sameIncident) {
-      before = payload.reference ? await d1Retry(() => getJob3(env, tenantId, payload.reference)) : null;
+      before = payload.reference ? await d1Retry(() => getJob(env, tenantId, payload.reference)) : null;
     }
     const beforeId = payload.reference;
     if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
@@ -21034,7 +21165,7 @@ async function handle11(request, env, ctx, url, sess) {
       }
     }
     try {
-      if (await applyOrderToJob(env, tenantId, job)) job = await getJob3(env, tenantId, job.id) || job;
+      if (await applyOrderToJob(env, tenantId, job)) job = await getJob(env, tenantId, job.id) || job;
     } catch {
     }
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
@@ -21091,7 +21222,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (bad) return jsonResponse({ error: bad }, headers, 400);
     }
     const beforeId = payload.id || payload.reference;
-    const before = beforeId ? await d1Retry(() => getJob3(env, tenantId, beforeId)) : null;
+    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
@@ -21763,7 +21894,7 @@ async function handle11(request, env, ctx, url, sess) {
     for (const id of rec.jobIds) {
       let job = null;
       try {
-        job = await getJob3(env, tenantId, id);
+        job = await getJob(env, tenantId, id);
       } catch {
       }
       if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) {
@@ -21936,7 +22067,7 @@ async function handle11(request, env, ctx, url, sess) {
       const now2 = (/* @__PURE__ */ new Date()).toISOString(), who = sess?.user?.username || b.engineer;
       for (const o of leftOpen) {
         try {
-          const j = await getJob3(env, tenantId, o.id);
+          const j = await getJob(env, tenantId, o.id);
           if (!j) continue;
           j.events ||= [];
           j.events.push({ at: now2, by: who, type: "note", note: `${b.engineer} ended their day with this job still ${o.status} \u2014 needs completing (photos / note / signature).` });
@@ -22024,7 +22155,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (perms.FullAccess !== "Yes") return jsonResponse({ error: "Forbidden" }, headers, 403);
     const q = safeDecode(searchParams.get("id") || "");
     const hexOf = (s) => [...String(s)].map((c) => c.codePointAt(0).toString(16).padStart(2, "0")).join(" ");
-    const byId = q ? await getJob3(env, tenantId, q) : null;
+    const byId = q ? await getJob(env, tenantId, q) : null;
     const needle = q.toLowerCase();
     const near = (await listJobs(env, tenantId)).filter((j) => String(j.id).toLowerCase().includes(needle) || String(j.helpdeskRef || "").toLowerCase().includes(needle)).slice(0, 5).map((j) => ({ id: j.id, idHex: hexOf(j.id), ref: j.helpdeskRef, status: j.status, exactMatch: j.id === q }));
     return jsonResponse({ ok: true, lookedUp: q, lookedUpHex: hexOf(q), foundById: !!byId, similar: near }, headers);
@@ -22045,7 +22176,7 @@ async function handle11(request, env, ctx, url, sess) {
       release: body.release,
       changedBy: body.changedBy || "scheduler"
     };
-    const before = await getJob3(env, tenantId, id);
+    const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
@@ -22061,7 +22192,7 @@ async function handle11(request, env, ctx, url, sess) {
     const id = safeDecode(parts[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     if (method === "GET" && parts[2] === "export") {
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id, url.origin);
@@ -22075,7 +22206,7 @@ async function handle11(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "export.pdf") {
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id, url.origin);
@@ -22092,7 +22223,7 @@ async function handle11(request, env, ctx, url, sess) {
       } });
     }
     if (method === "GET" && parts[2] === "sheet.pdf") {
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const j = decorateJobWithLiveSla(job);
       const copyType = searchParams.get("type") === "client" ? "client" : "mostlane";
@@ -22264,7 +22395,7 @@ async function handle11(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       let overrides = {}, jobSig = null, customerName = "";
       try {
-        const j = await getJob3(env, tenantId, id);
+        const j = await getJob(env, tenantId, id);
         overrides = j && j.photoStages || {};
         jobSig = j && j.signature;
         if (j) customerName = await resolveCustomerName(env, tenantId, j);
@@ -22310,7 +22441,7 @@ async function handle11(request, env, ctx, url, sess) {
       } catch {
       }
       try {
-        const j = await getJob3(env, tenantId, id);
+        const j = await getJob(env, tenantId, id);
         const name = key.split("/").pop();
         if (j && j.photoStages && name in j.photoStages) {
           delete j.photoStages[name];
@@ -22384,7 +22515,7 @@ async function handle11(request, env, ctx, url, sess) {
       const stageRaw = String(form.get("stage") || searchParams.get("stage") || "done");
       const stage = stageRaw === "ref" || stageRaw === "extra" ? stageRaw : "done";
       if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === itemId);
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -22427,7 +22558,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "audit-item" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const item = (job.auditItems || []).find((it) => it && it.id === String(b.itemId || ""));
       if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
@@ -22502,7 +22633,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "create-works-job" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob3(env, tenantId, id);
+      const src = await getJob(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const wbody = await readJson2(request).catch(() => ({}));
       const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
@@ -22513,7 +22644,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const src = await getJob3(env, tenantId, id);
+      const src = await getJob(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const rb = await readJson2(request).catch(() => ({}));
       const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : void 0;
@@ -22530,7 +22661,7 @@ async function handle11(request, env, ctx, url, sess) {
     }
     if (parts[2] === "visits" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob3(env, tenantId, id);
+      const src = await getJob(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       const groupId = src.visitGroupId || src.id;
       const all = await listJobs(env, tenantId);
@@ -22554,7 +22685,7 @@ async function handle11(request, env, ctx, url, sess) {
     }
     if (parts[2] === "series" && method === "GET") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-      const src = await getJob3(env, tenantId, id);
+      const src = await getJob(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
       if (!src.seriesId) return jsonResponse({ ok: true, seriesId: null, jobs: [] }, headers);
       const all = await listJobs(env, tenantId, { includeDormant: true });
@@ -22574,7 +22705,7 @@ async function handle11(request, env, ctx, url, sess) {
       const { filename, stage } = await readJson2(request);
       if (!filename) return jsonResponse({ error: "filename required" }, headers, 400);
       const st = PHOTO_STAGES.includes(stage) ? stage : "";
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       job.photoStages = job.photoStages || {};
       if (st) job.photoStages[filename] = st;
@@ -22587,14 +22718,14 @@ async function handle11(request, env, ctx, url, sess) {
       const { signedBy, signedAt, signatureBase64, opId } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
       if (opId && !await firstTime(env, tenantId, opId, "sig:" + id)) {
-        const cur = await getJob3(env, tenantId, id);
+        const cur = await getJob(env, tenantId, id);
         return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
       }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
       await env.JOB_FILES.put(key, binary, { httpMetadata: { contentType: "image/png" } });
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (job) {
         job.signature = { signedBy, signedAt, fileKey: key };
         job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -22605,7 +22736,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "hold-approve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -22632,7 +22763,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const body = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
@@ -22663,7 +22794,7 @@ async function handle11(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const reason = String(b.reason || "").trim();
       if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       job.raBlock = {
@@ -22691,7 +22822,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       if (b.value === true || b.value === false) job.drainage = b.value;
       else delete job.drainage;
@@ -22709,7 +22840,7 @@ async function handle11(request, env, ctx, url, sess) {
       const sc = (await getSubconConfig(env, tenantId))[key];
       if (!sc) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
       if (!sc.to) return jsonResponse({ error: sc.name + " has no email address \u2014 add one on the Subcontractors page." }, headers, 400);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const reused = job.subconPO && job.subconPO.key === key && job.subconPO.poNumber;
       let nextNo = null;
@@ -22771,7 +22902,7 @@ async function handle11(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       if (b.name && !b.to) {
         const name = String(b.name).trim().slice(0, 80);
-        const job2 = await getJob3(env, tenantId, id);
+        const job2 = await getJob(env, tenantId, id);
         if (!job2) return jsonResponse({ error: "Not found" }, headers, 404);
         if (job2.subcontract && job2.subcontract.sentAt && job2.subcontract.status !== "returned" && job2.subcontract.status !== "done")
           return jsonResponse({ ok: true, already: true, subcontract: job2.subcontract }, headers);
@@ -22791,7 +22922,7 @@ async function handle11(request, env, ctx, url, sess) {
       const sc = cfgAll[key];
       if (!sc) return jsonResponse({ error: "Unknown subcontractor" }, headers, 400);
       if (!sc.to) return jsonResponse({ error: sc.name + " has no email address \u2014 add one on the Subcontractors page." }, headers, 400);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       if (job.subcontract && job.subcontract.sentAt && job.subcontract.status !== "returned") return jsonResponse({ ok: true, already: true, subcontract: job.subcontract }, headers);
       if (sc.requirePhone) {
@@ -22809,7 +22940,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (ab.error) return jsonResponse({ error: ab.error }, headers, 400);
       const lockId = "subcon:" + key + ":" + id;
       if (!await firstTime(env, tenantId, lockId, "subcontract")) {
-        const fresh = await getJob3(env, tenantId, id);
+        const fresh = await getJob(env, tenantId, id);
         return jsonResponse({ ok: true, already: true, subcontract: fresh && fresh.subcontract || { name: sc.name, sentBy: "someone else", sentAt: null } }, headers);
       }
       const unlock = () => env.DB.prepare("DELETE FROM idempotency WHERE op_id=?").bind(lockId).run().catch(() => {
@@ -22879,7 +23010,7 @@ async function handle11(request, env, ctx, url, sess) {
       const b = await readJson2(request);
       const st = String(b.status || "").toLowerCase();
       if (!["open", "done", "returned"].includes(st)) return jsonResponse({ error: "status must be open, done or returned" }, headers, 400);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       if (!job.subcontract) {
@@ -22926,7 +23057,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "subcontract-clear" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Full Access only" }, headers, 403);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const was = job.subcontract;
       if (was) {
@@ -22947,7 +23078,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const txt = String(b.note == null ? "" : b.note).trim().slice(0, 1e3);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
@@ -22974,7 +23105,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "em-timer" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       const b = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       if (String(b.action || "start") === "clear") {
@@ -22990,7 +23121,7 @@ async function handle11(request, env, ctx, url, sess) {
     if (parts[2] === "undo-schedule" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-      const before = await getJob3(env, tenantId, id);
+      const before = await getJob(env, tenantId, id);
       if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
       const ps = before.prevSchedule;
       if (!ps) return jsonResponse({ error: "Nothing to undo \u2014 no earlier schedule on file for this job." }, headers, 400);
@@ -23012,7 +23143,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const b = await readJson2(request);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const now2 = (/* @__PURE__ */ new Date()).toISOString();
       const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
@@ -23031,7 +23162,7 @@ async function handle11(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (method === "GET") {
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       let d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
@@ -23045,7 +23176,7 @@ async function handle11(request, env, ctx, url, sess) {
       const perms = await permissionsFor(env, tenantId, sess.user.username);
       if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
         return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
-      const job = await getJob3(env, tenantId, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const delScope = searchParams.get("scope");
       let targets = [job];
@@ -23074,7 +23205,7 @@ async function handle11(request, env, ctx, url, sess) {
       }, headers);
     }
     if (method === "PATCH") {
-      const before = await getJob3(env, tenantId, id);
+      const before = await getJob(env, tenantId, id);
       const body = await readJson2(request);
       {
         const bad = badScheduleIn(body);
@@ -23218,7 +23349,7 @@ async function handle11(request, env, ctx, url, sess) {
       return page("Link expired", "<p>This link has expired or isn't valid. Please reply to the order email or call us instead.</p>", 403);
     const [jobId, subk, poRef, testFlag] = key.split("|");
     const isTest = testFlag === "1";
-    const job = await getJob3(env, tenantId, jobId);
+    const job = await getJob(env, tenantId, jobId);
     const sc = job && job.subcontract;
     const site = job ? [job.siteCode, job.siteName].filter(Boolean).join(" ") + (job.postcode ? ", " + job.postcode : "") : "";
     if (!job) return page("Job not found", "<p>We couldn't find this job. Please reply to the order email or call us.</p>", 404);
@@ -23308,7 +23439,7 @@ async function handle11(request, env, ctx, url, sess) {
     const map = await getPoOnlyClosed(env, tenantId);
     let job = null;
     if (b.jobId) {
-      job = await getJob3(env, tenantId, String(b.jobId));
+      job = await getJob(env, tenantId, String(b.jobId));
       if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
       await env.PO_DB.prepare("UPDATE po_log SET job_id=?, job_ref=? WHERE po_number=?").bind(job.id, job.helpdeskRef || job.id, po).run();
       delete map["nolink:po:" + po];
@@ -23325,7 +23456,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (b.fromJobId) ids.add(String(b.fromJobId));
       await env.PO_DB.prepare("UPDATE po_log SET job_id=NULL, job_ref=NULL WHERE po_number=?").bind(po).run();
       for (const jid of ids) {
-        const j = await getJob3(env, tenantId, jid).catch(() => null);
+        const j = await getJob(env, tenantId, jid).catch(() => null);
         if (j && j.subcontract && j.subcontract.fromPo && String(j.subcontract.poNumber) === String(row.po_number)) {
           delete j.subcontract;
           j.events ||= [];
@@ -23353,7 +23484,7 @@ async function handle11(request, env, ctx, url, sess) {
       if (!r.meta || !r.meta.changes) return jsonResponse({ error: "PO " + po + " not found" }, headers, 404);
       return jsonResponse({ ok: true, cost }, headers);
     }
-    const job = b.jobId ? await getJob3(env, tenantId, String(b.jobId)) : null;
+    const job = b.jobId ? await getJob(env, tenantId, String(b.jobId)) : null;
     if (!job || !job.subcontract) return jsonResponse({ error: "No subcontractor record on that job" }, headers, 404);
     if (cost == null) delete job.subcontract.cost;
     else job.subcontract.cost = cost;
@@ -23381,7 +23512,7 @@ async function handle11(request, env, ctx, url, sess) {
   if (subpath === "/quotes/sent" && method === "POST") {
     if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const b = await readJson2(request);
-    const j = await getJob3(env, tenantId, b.jobId);
+    const j = await getJob(env, tenantId, b.jobId);
     if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
     const num5 = (v) => {
       const n = parseFloat(v);
@@ -23405,7 +23536,7 @@ async function handle11(request, env, ctx, url, sess) {
   if (subpath === "/quotes/reopen" && method === "POST") {
     if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const b = await readJson2(request);
-    const j = await getJob3(env, tenantId, b.jobId);
+    const j = await getJob(env, tenantId, b.jobId);
     if (!j) return jsonResponse({ error: "Not found" }, headers, 404);
     delete j.quoteSent;
     j.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -23415,10 +23546,10 @@ async function handle11(request, env, ctx, url, sess) {
   if (subpath === "/quotes/make-job" && method === "POST") {
     if (!sess || !await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const b = await readJson2(request);
-    const src = await getJob3(env, tenantId, b.jobId);
+    const src = await getJob(env, tenantId, b.jobId);
     if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
     if (src.quoteWorksJobId) {
-      const ex = await getJob3(env, tenantId, src.quoteWorksJobId);
+      const ex = await getJob(env, tenantId, src.quoteWorksJobId);
       if (ex) return jsonResponse({ ok: true, jobId: ex.id, already: true }, headers);
     }
     const qs = src.quoteSent || {};
@@ -24446,7 +24577,7 @@ async function notifyNewlyAssigned(env, tid, before, after) {
     });
   }
 }
-async function getJob3(env, tenantId, id) {
+async function getJob(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
@@ -24501,7 +24632,7 @@ async function matchSameIncident(env, tenantId, reference) {
   }
   if (!same.length) {
     try {
-      const j = await getJob3(env, tenantId, ref);
+      const j = await getJob(env, tenantId, ref);
       if (j && !j.fallbackTemplate) same = [j];
     } catch {
     }
@@ -24536,7 +24667,7 @@ async function matchSameIncident(env, tenantId, reference) {
 async function stampVisitGroup(env, tenantId, groupId) {
   if (!groupId) return;
   try {
-    const root = await getJob3(env, tenantId, groupId);
+    const root = await getJob(env, tenantId, groupId);
     if (root && !root.visitGroupId) {
       root.visitGroupId = groupId;
       root.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -24613,7 +24744,7 @@ async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
     }
   }
   try {
-    const nj = await getJob3(env, tenantId, job.id);
+    const nj = await getJob(env, tenantId, job.id);
     if (nj) {
       if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
       if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
@@ -24645,7 +24776,7 @@ async function cloneJobAsVisit(env, tenantId, src, opts = {}) {
     await stampVisitGroup(env, tenantId, groupId);
   } catch {
   }
-  return await getJob3(env, tenantId, job.id) || job;
+  return await getJob(env, tenantId, job.id) || job;
 }
 function stripPricing(text) {
   const labelled = /^\s*(?:labou?r|materials?(?:\s*\/\s*specialist equipment)?|specialist equipment|plant|equipment|parts|sub-?total|total|vat|price|cost|net|gross)\b/i;
@@ -24687,7 +24818,7 @@ async function unlinkOrderFromJob(env, tenantId, o, by) {
   const jobId = String(o.matchedJobId || "").trim();
   let job = null;
   if (jobId) {
-    job = await getJob3(env, tenantId, jobId);
+    job = await getJob(env, tenantId, jobId);
     if (job && (job.clientOrderId === o.id || o.orderNumber && job.orderNumber === o.orderNumber)) {
       delete job.orderNumber;
       delete job.orderValue;
@@ -24752,12 +24883,12 @@ async function jobsWithRefContaining(env, tenantId, ref) {
   }).filter((j) => j && !j.fallbackTemplate && re.test(String(j.helpdeskRef || "")));
 }
 async function linkOrderToJobById(env, tenantId, o, jobId, by, opts = {}) {
-  const job = await getJob3(env, tenantId, jobId);
+  const job = await getJob(env, tenantId, jobId);
   if (!job) return null;
   await stampOrderOnJob(env, tenantId, job, o);
   if (by) {
     try {
-      const j2 = await getJob3(env, tenantId, jobId);
+      const j2 = await getJob(env, tenantId, jobId);
       if (j2) {
         (j2.events ||= []).push({ at: (/* @__PURE__ */ new Date()).toISOString(), by, type: "note", note: "Order linked by " + by });
         await saveJob(env, tenantId, j2);
@@ -24866,7 +24997,7 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
     } catch {
     }
     try {
-      const j = await getJob3(env, tenantId, ref);
+      const j = await getJob(env, tenantId, ref);
       if (j && !j.fallbackTemplate) add([j]);
     } catch {
     }
@@ -24879,7 +25010,7 @@ async function findIncidentJobs(env, tenantId, { reference, incident }) {
     }
     add(sibs.filter((j) => new RegExp("^" + inc + "/\\d{1,3}$").test(String(j.helpdeskRef || ""))));
     try {
-      const j = await getJob3(env, tenantId, inc);
+      const j = await getJob(env, tenantId, inc);
       if (j && !j.fallbackTemplate) add([j]);
     } catch {
     }
@@ -25135,8 +25266,22 @@ async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
         if (certs.upsertFiveYearFromJob) await certs.upsertFiveYearFromJob(env, tid, updated);
       }
     }
-    if (updated.fromRemedialsOf && fin(updated.status) && !(before && fin(before.status))) {
-      if (certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+    const isWorks = updated.fromRemedialsOf || updated.fromFiveYearCase;
+    const cancelled = /cancel/i.test(String(updated.status || ""));
+    if (isWorks && fin(updated.status) && !cancelled && !(before && fin(before.status))) {
+      if (updated.fromRemedialsOf && certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+      const site = updated.siteName || updated.siteCode || updated.helpdeskRef || "a site";
+      try {
+        await sendToPermission(
+          env,
+          tid,
+          ["FullAccess", "SLAAdmin", "Compliance"],
+          { title: "\u{1F4C4} 5-Year remedials done \u2014 update the certificate", body: site + ": the remedial works job is complete. Upload the updated EICR.", url: "/five-year-remedials.html?view=certq", tag: "fyr-certq:" + updated.id },
+          null,
+          true
+        );
+      } catch {
+      }
     }
   } catch {
   }
@@ -25144,13 +25289,17 @@ async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
 async function createWorksJobFromRemedials(env, tenantId, src, opts) {
   opts = opts || {};
   const pickIds = Array.isArray(opts.pickIds) ? opts.pickIds.map(String) : null;
-  let rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
-  if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
+  let rem = Array.isArray(opts.items) && opts.items.length ? opts.items.map((t) => typeof t === "string" ? { description: t } : t).filter((r) => r && String(r.description || "").trim()) : Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+  if (pickIds && pickIds.length && !(opts.items && opts.items.length)) rem = rem.filter((r) => pickIds.includes(String(r.id)));
   if (!rem.length) return { error: "Pick at least one remedial to turn into works.", status: 400 };
-  if (src.remedialsWorksJobId) {
-    const ex = await getJob3(env, tenantId, src.remedialsWorksJobId).catch(() => null);
-    if (ex) return { existing: true, id: ex.id, ref: ex.helpdeskRef };
+  const prevId = opts.existingId || src.remedialsWorksJobId;
+  if (prevId) {
+    const ex = await getJob(env, tenantId, prevId).catch(() => null);
+    if (ex && String(ex.status || "").toLowerCase() !== "cancelled") return { existing: true, id: ex.id, ref: ex.helpdeskRef };
   }
+  const engs = Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers.map(String).filter(Boolean) : [];
+  const schedErr = badScheduleDate(opts.scheduledAt, "Scheduled start") || badScheduleDate(opts.scheduledEnd, "Scheduled finish");
+  if (schedErr) return { error: schedErr, status: 400 };
   const newId4 = crypto.randomUUID();
   const auditItems = [];
   for (const r of rem) {
@@ -25200,20 +25349,27 @@ async function createWorksJobFromRemedials(env, tenantId, src, opts) {
     requiresSignature: false,
     requiresPhoto: false,
     requiresNote: false,
-    assignedEngineers: [],
-    // unassigned — the office allocates it
+    assignedEngineers: engs,
+    // the office may allocate it there and then; else unassigned
     priority: src.priority || "",
     changedBy: opts.by || "system"
   };
+  if (opts.scheduledAt) payload.scheduledAt = new Date(opts.scheduledAt).toISOString();
+  if (opts.scheduledEnd) payload.scheduledEnd = new Date(opts.scheduledEnd).toISOString();
+  if (opts.durationMinutes) payload.durationMinutes = Math.max(15, Number(opts.durationMinutes) || 0);
   const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-  src.remedialsWorksJobId = job.id;
-  src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-  await saveJob(env, tenantId, src);
+  if (!opts.synthetic && src.id) {
+    src.remedialsWorksJobId = job.id;
+    src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveJob(env, tenantId, src);
+  }
   try {
-    const nj = await getJob3(env, tenantId, job.id);
+    const nj = await getJob(env, tenantId, job.id);
     if (nj) {
-      nj.fromRemedialsOf = src.id;
+      if (!opts.synthetic && src.id) nj.fromRemedialsOf = src.id;
+      if (opts.fiveYearCase) nj.fromFiveYearCase = String(opts.fiveYearCase);
       await saveJob(env, tenantId, nj);
+      if (engs.length) await reconcileRelease(env, tenantId, nj);
     }
   } catch {
   }
@@ -25396,7 +25552,7 @@ async function saveJob(env, tenantId, job) {
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig4(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
-  const existing = await getJob3(env, tenantId, id);
+  const existing = await getJob(env, tenantId, id);
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
@@ -25615,7 +25771,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   return job;
 }
 async function patchJob(env, tenantId, id, patch, ctx) {
-  const job = await getJob3(env, tenantId, id);
+  const job = await getJob(env, tenantId, id);
   if (!job) return null;
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
@@ -25959,7 +26115,7 @@ async function jobCoordServer(env, job) {
   return null;
 }
 async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
-  const target = await getJob3(env, tenantId, jobId);
+  const target = await getJob(env, tenantId, jobId);
   if (!target) return { ok: false, error: "job not found" };
   const eng = normId(engineer || "");
   const tKey = siteKeyOf(target.siteCode);
@@ -27656,7 +27812,7 @@ async function subcontractedRows(env, tid, money2) {
   }
   for (const j of stamp) {
     try {
-      const fresh = await getJob3(env, tid, j.id);
+      const fresh = await getJob(env, tid, j.id);
       if (fresh && !fresh.subcontract) {
         fresh.subcontract = j.subcontract;
         await saveJob(env, tid, fresh);
@@ -27714,7 +27870,7 @@ async function subcontractedRows(env, tid, money2) {
   return { rows: list };
 }
 async function toSubconStatus(env, tid, id, by, ctx) {
-  const job = await getJob3(env, tid, id);
+  const job = await getJob(env, tid, id);
   if (!job || !job.subcontract || job.subcontract.statusSet) return job;
   const finished = await jobFinishedFor(env, tid);
   if (finished(job)) return job;
@@ -27725,7 +27881,7 @@ async function toSubconStatus(env, tid, id, by, ctx) {
   return await patchJob(env, tid, id, { status: SUBCON_STATUS, changedBy: by || "system" }, ctx) || job;
 }
 async function fromSubconStatus(env, tid, id, by, ctx, prev) {
-  const job = await getJob3(env, tid, id);
+  const job = await getJob(env, tid, id);
   if (!job || job.status !== SUBCON_STATUS) return job;
   const back = prev || job.subcontract && job.subcontract.prevStatus || "Pending";
   return await patchJob(env, tid, id, { status: back === SUBCON_STATUS ? "Pending" : back, changedBy: by || "system" }, ctx) || job;
@@ -28193,7 +28349,7 @@ async function sweepFallbacks(env, tid = 1) {
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
-      const src = await getJob3(env, tid, fb.jobId);
+      const src = await getJob(env, tid, fb.jobId);
       if (!src) continue;
       let payload = null;
       if (src.fallbackTemplate) {

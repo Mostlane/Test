@@ -23,7 +23,7 @@ function makeEnv() {
     CREATE TABLE users (tenant_id, username, profile);
     CREATE TABLE compliance_stores (tenant_id INTEGER, scheme TEXT, code TEXT, category TEXT, name TEXT, postcode TEXT, due TEXT, active INTEGER DEFAULT 1, meta TEXT, updated_at TEXT);
     CREATE TABLE sites (tenant_id INTEGER, client TEXT, site_number TEXT, site_name TEXT, postcode TEXT, active INTEGER, job_number TEXT, data TEXT, updated_at TEXT);
-    CREATE TABLE sla_jobs (tenant_id, id TEXT, data TEXT, status TEXT, helpdesk_ref TEXT, site_code TEXT);
+    CREATE TABLE sla_jobs (tenant_id, id TEXT PRIMARY KEY, data TEXT, status TEXT, helpdesk_ref TEXT, site_code TEXT, description TEXT, priority TEXT, assigned_to TEXT, raised_at TEXT, target_at TEXT, scheduled_at TEXT, created_at TEXT, updated_at TEXT, closed_at TEXT);
     CREATE TABLE app_config (tenant_id, key TEXT UNIQUE, value);
     CREATE TABLE sla_jobs_archive (tenant_id INTEGER, id TEXT PRIMARY KEY, ref TEXT, status TEXT, assigned_to TEXT, site_name TEXT, postcode TEXT, created_at TEXT, completed_at TEXT, search TEXT, data TEXT, site_code TEXT);
     CREATE TABLE compliance_review (tenant_id INTEGER, scheme TEXT, code TEXT, type TEXT, status TEXT, outcome TEXT, attention INTEGER, summary TEXT, flags TEXT, file_id INTEGER, doc_at TEXT, checked_at TEXT, notes TEXT, updated_by TEXT, updated_at TEXT);
@@ -433,6 +433,53 @@ const ROWS = [
   const r2 = (my3.body.rows || []).find(r => r.storeCode === "0305");
   ok("my-schedule: MYS note persists too", note.body.ok && r2 && r2.case.note === "Cert to file", JSON.stringify(r2 && r2.case.note));
   ok("my-schedule: non-office 403", (await call(env, "Nobody", "GET", "/concerto/my-schedule?year=2026")).status === 403);
+}
+// ── Remedials to complete / Certs to update queues + stage precedence ────────
+{
+  const E = concerto.fyStageEffective;
+  ok("precedence: manual orders_received moves on to remedials_scheduled when a works job exists", E("orders_received", "needs_booking", "remedials_scheduled").stage === "remedials_scheduled");
+  ok("precedence: …and to remedials_complete when it's finished (source auto)", JSON.stringify(E("orders_received", "remedials_to_quote", "remedials_complete")) === JSON.stringify({ stage: "remedials_complete", source: "auto" }));
+  ok("precedence: never moves a later manual pick backwards", E("certificate_updated", "remedials_scheduled", "remedials_complete").stage === "certificate_updated");
+  ok("precedence: a manual non-remedial pick (invoiced/satisfactory) is left alone", E("invoiced", "remedials_scheduled", "remedials_complete").stage === "invoiced" && E("complete_satisfactory", "needs_booking", "remedials_scheduled").stage === "complete_satisfactory");
+  ok("precedence: no manual pick, no test job, works job done → remedials_complete", E("", "needs_booking", "remedials_complete").stage === "remedials_complete");
+  ok("precedence: auto invoiced not pulled back by works", E("", "invoiced", "certificate_updated").stage === "invoiced");
+
+  const { env, db } = makeEnv();
+  const q = async () => { const r = await call(env, "Jamie Line", "GET", "/concerto/remedial-queue"); return { r, tc: Object.fromEntries((r.body.toComplete||[]).map(x => [x.storeCode, x])), ct: Object.fromEntries((r.body.certs||[]).map(x => [x.storeCode, x])) }; };
+  await call(env, "Tanya", "POST", "/concerto/case", { ppmId: "MYS:0305", stage12: "orders_received" });
+  let s1 = await q();
+  ok("queue: office GET ok; a site set to Remedial orders received is in Remedials to complete", s1.r.status === 200 && !!s1.tc["0305"] && !s1.ct["0305"] && s1.tc["0305"].case.stage12 === "orders_received", JSON.stringify(Object.keys(s1.tc)));
+  ok("queue: non-office 403", (await call(env, "Nobody", "GET", "/concerto/remedial-queue")).status === 403);
+  const caseRow = db.prepare("SELECT id FROM concerto_cases WHERE ppm_id='MYS:0305'").get();
+  db.prepare("INSERT INTO sla_jobs (tenant_id,id,data,status) VALUES (1,'W1',?, 'Scheduled')").run(JSON.stringify({ id:"W1", siteCode:"0305", status:"Scheduled", scheduledAt:"2026-11-02T08:00:00.000Z", assignedEngineers:["Daniel Walker"], auditItems:[{id:"a",text:"[C2] Replace socket"}], fromFiveYearCase: caseRow.id }));
+  db.prepare("UPDATE concerto_cases SET works_job_id='W1' WHERE id=?").run(caseRow.id);
+  let s2 = await q();
+  ok("queue: works job raised + booked → still in Remedials to complete as remedials_scheduled (engineer shown)", !!s2.tc["0305"] && s2.tc["0305"].case.stage12 === "remedials_scheduled" && s2.tc["0305"].case.worksJob.id === "W1" && s2.tc["0305"].case.worksJob.engineers[0] === "Daniel Walker", JSON.stringify(s2.tc["0305"] && s2.tc["0305"].case.worksJob));
+  db.prepare("UPDATE sla_jobs SET status='Complete', data=? WHERE id='W1'").run(JSON.stringify({ id:"W1", siteCode:"0305", status:"Complete", scheduledAt:"2026-11-02T08:00:00.000Z", statusHistory:[{status:"Complete",at:"2026-11-02T14:00:00Z"}], assignedEngineers:["Daniel Walker"], fromFiveYearCase: caseRow.id }));
+  let s3 = await q();
+  ok("queue: engineer completes the works job → moves to Certs to update (despite the manual pick)", !s3.tc["0305"] && !!s3.ct["0305"] && s3.ct["0305"].case.stage12 === "remedials_complete", JSON.stringify(s3.ct["0305"] && s3.ct["0305"].case.stage12));
+  db.prepare("INSERT INTO compliance_files (tenant_id,scheme,code,type,year,filename,r2_key,uploaded_at) VALUES (1,'coop','0305','fiveYear','2026','0305 EICR updated.pdf','k9','2026-11-05T09:00:00Z')").run();
+  let s4 = await q();
+  ok("queue: updated cert uploaded after the works (no doc date) → leaves Certs to update", !s4.ct["0305"] && !s4.tc["0305"]);
+  db.prepare("DELETE FROM compliance_files WHERE r2_key='k9'").run();
+  db.prepare("UPDATE sla_jobs SET status='Cancelled', data=? WHERE id='W1'").run(JSON.stringify({ id:"W1", siteCode:"0305", status:"Cancelled" }));
+  let s5 = await q();
+  ok("queue: a CANCELLED works job counts as none → back to orders_received, can raise again", !!s5.tc["0305"] && s5.tc["0305"].case.stage12 === "orders_received" && !s5.tc["0305"].case.worksJob);
+  const s6 = await call(env, "Jamie Line", "GET", "/concerto/my-schedule?year=all");
+  ok("my-schedule shows the same stage as the queue", ((s6.body.rows||[]).find(r => r.storeCode === "0305") || {}).case.stage12 === "orders_received");
+  const noItems = await call(env, "Jamie Line", "POST", "/concerto/create-works", { ppmId: "MYS:0305" });
+  ok("create-works: no portal remedials + no typed items → 400 telling them to type the items", noItems.status === 400 && /type the remedial items/i.test(noItems.body.error || ""), JSON.stringify(noItems.body));
+  env.JOB_FILES = { async get() { return null; }, async put() {}, async list() { return { objects: [] }; } };
+  const mk = await call(env, "Jamie Line", "POST", "/concerto/create-works", { ppmId: "MYS:0305", items: ["[C2] Replace damaged socket — kitchen", "[FI] Investigate RCD trip"], engineers: ["Daniel Walker"], scheduledAt: "2026-11-10T08:00:00.000Z", durationMinutes: 240 });
+  ok("create-works: typed items → a site-audit works job, assigned + booked, linked to the case", mk.status === 200 && mk.body.ok && mk.body.items === 2, JSON.stringify(mk.body));
+  const wj = mk.body.id ? JSON.parse((db.prepare("SELECT data FROM sla_jobs WHERE id=?").get(mk.body.id) || {}).data || "{}") : {};
+  ok("create-works: job carries the checklist, engineer, date, RA on, link back", (wj.auditItems||[]).length === 2 && (wj.assignedEngineers||[])[0] === "Daniel Walker" && String(wj.scheduledAt||"").startsWith("2026-11-10") && wj.requiresRA === true && !!wj.fromFiveYearCase, JSON.stringify({ items: (wj.auditItems||[]).map(x=>x.text), eng: wj.assignedEngineers, at: wj.scheduledAt, ra: wj.requiresRA, link: wj.fromFiveYearCase }));
+  const again = await call(env, "Jamie Line", "POST", "/concerto/create-works", { ppmId: "MYS:0305", items: ["x"] });
+  ok("create-works: pressing again returns the same job (no duplicate)", again.body.existing === true && again.body.id === mk.body.id);
+  const s7 = await q();
+  ok("queue: after create-works the site is remedials_scheduled with the new job", !!s7.tc["0305"] && s7.tc["0305"].case.stage12 === "remedials_scheduled" && s7.tc["0305"].case.worksJob.id === mk.body.id);
+  const badYr = await call(env, "Jamie Line", "POST", "/concerto/create-works", { ppmId: "MYS:0999", items: ["x"], scheduledAt: "2006-11-10T08:00:00.000Z" });
+  ok("create-works: an absurd year is refused", badYr.status === 400 && /2006/.test(badYr.body.error||""), JSON.stringify(badYr.body));
 }
 console.log(fail ? `\n${fail} FAILED` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
