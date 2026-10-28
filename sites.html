@@ -717,24 +717,28 @@ function cleanPostcode(site) {
     renderRows();
     statusEl.textContent = "Ready";
   }
- async function saveSiteChanges(site, oldSiteNumberIfChanged = null) {
+ // `orig` = the record's identity BEFORE the edit ({client, siteNumber}); null
+ // for a brand-new site. A site is keyed by category + number, so to change
+ // EITHER (e.g. re-file a store from retail → cobra, keeping its number) we must
+ // tell the worker where the record currently lives (oldClient / oldSiteNumber)
+ // so it MOVES the row instead of trying to add a second one.
+ async function saveSiteChanges(site, orig = null) {
   const cat = (site.client || "").toLowerCase();
+  const newNum = String(site.siteNumber || "").trim();
 
-  // Decide if this is a brand-new site (no existing record with same siteNumber + client)
-  const trimmedNew = String(site.siteNumber || "").trim();
-  const isNew =
-    !oldSiteNumberIfChanged &&
-    !ALL_SITES.some(
-      s =>
-        String(s.siteNumber || "").trim() === trimmedNew &&
-        (s.client || "").toLowerCase() === cat
-    );
+  const origNum = orig && orig.siteNumber != null ? String(orig.siteNumber).trim() : "";
+  const origCat = orig ? (orig.client || "").toLowerCase() : "";
+  // It's an existing record (→ update, possibly a move) when we were handed an
+  // original identity that actually exists in the loaded list.
+  const existing = !!origNum && ALL_SITES.some(
+    s => String(s.siteNumber || "").trim() === origNum && (s.client || "").toLowerCase() === origCat
+  );
 
-  const endpoint = isNew ? "add-site" : "update-site";
-
+  const endpoint = existing ? "update-site" : "add-site";
   const url = new URL(`${workerBase}/${endpoint}?category=${cat}`);
-  if (!isNew && oldSiteNumberIfChanged) {
-    url.searchParams.set("oldSiteNumber", oldSiteNumberIfChanged);
+  if (existing) {
+    if (origNum && origNum !== newNum) url.searchParams.set("oldSiteNumber", origNum);
+    if (origCat && origCat !== cat)    url.searchParams.set("oldClient", origCat);
   }
 
   const r = await fetch(url.toString(), {
@@ -772,7 +776,7 @@ cleanPostcode(s).toLowerCase().includes(q) ||
     const old = site.active!==false;
     try{
       site.active = newVal;
-      await saveSiteChanges({ ...site, active:newVal });
+      await saveSiteChanges({ ...site, active:newVal }, { client: site.client, siteNumber: site.siteNumber });
       renderRows(); // may move between tabs
     }catch(e){
       console.error(e);
@@ -1095,6 +1099,10 @@ if (marker && marker.setPosition) {
     await new Promise(r => setTimeout(r, 0));
     try{
       const oldNum = currentEditing.siteNumber;
+      // Snapshot the record's identity BEFORE the form overwrites client/number,
+      // so saveSiteChanges can move an existing row to a new category/number.
+      // null for a brand-new site (no number yet) → treated as an add.
+      const origIdentity = oldNum ? { client: (currentEditing.client || "").toLowerCase(), siteNumber: oldNum } : null;
       currentEditing.client = editClient.value;
       const isProjectSave = (currentEditing.client || "").toLowerCase() === "projects";
       const isSiteSave = (currentEditing.client || "").toLowerCase() === "site";
@@ -1172,7 +1180,10 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       if (!currentEditing.postcode) return alert("Postcode required");
 
       statusEl.textContent = "Saving...";
-      await saveSiteChanges(currentEditing, oldNum && oldNum !== currentEditing.siteNumber ? oldNum : null);
+      // Pass the record's identity as it was when the modal opened (captured in
+      // origIdentity before the form overwrote client/number) so a category or
+      // number change moves the existing row rather than adding a duplicate.
+      await saveSiteChanges(currentEditing, origIdentity);
       await fetchAllSites();
       closeEdit();
       statusEl.textContent = "Ready";
@@ -1286,7 +1297,7 @@ btnRecalc.onclick = async () => {
     if (mins !== "") s.travelTimeFromHQMinutes = parseInt(mins, 10);
 
     try {
-      await saveSiteChanges(s);
+      await saveSiteChanges(s, { client: s.client, siteNumber: s.siteNumber });
       updatedCount++;
     } catch (e) {
       console.error("Failed saving site:", s.siteNumber, e);

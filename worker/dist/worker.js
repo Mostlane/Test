@@ -12788,20 +12788,20 @@ async function handle6(request, env, ctx, url, sess) {
     if (!siteNumber) return error("siteNumber required", 400, env, request);
     site.siteNumber = siteNumber;
     const oldNum = q.get("oldSiteNumber");
+    const oldClient = ((q.get("oldClient") || "") + "").toLowerCase().trim();
+    const srcClient = oldClient || client;
+    const srcNum = String(oldNum || siteNumber).trim();
+    const moving = path === "/update-site" && (srcClient !== client || srcNum !== siteNumber);
     if (client !== "projects" && /^p\d/i.test(siteNumber))
       return error(`"${siteNumber}" uses the project number format (P####), reserved for projects. Give this ${client} site a different number.`, 400, env, request);
     if (path === "/add-site" || oldNum && oldNum !== siteNumber) {
-      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(db.tenantId, siteNumber).first();
+      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? AND NOT (client=? AND site_number=?) LIMIT 1").bind(db.tenantId, siteNumber, srcClient, srcNum).first();
       if (dup) return error(`Site number ${siteNumber} is already used by "${dup.site_name}"${dup.client && dup.client !== client ? " (" + dup.client + ")" : ""}. Site numbers must be unique.`, 400, env, request);
-    }
-    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
-      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
     let auditNote = "";
     let oldName = null;
     if (path === "/update-site") {
-      const lookNum = String(oldNum || siteNumber).trim();
-      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
+      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, srcClient, srcNum).first();
       if (row) {
         let cur = {};
         try {
@@ -12820,11 +12820,15 @@ async function handle6(request, env, ctx, url, sess) {
           }
         }
         if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
+        if (oldClient && oldClient !== client) chg.unshift(`category "${clean(oldClient)}" \u2192 "${clean(client)}"`);
         merged.siteNumber = siteNumber;
         merged.client = client;
         site = merged;
         const label2 = clean(merged.name) || siteNumber;
         auditNote = (chg.length ? `${label2} \u2014 ${chg.join(", ")}` : label2).slice(0, 380);
+      }
+      if (moving) {
+        await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, srcClient, srcNum).run();
       }
     }
     await saveSite(env, tenantId, site);
