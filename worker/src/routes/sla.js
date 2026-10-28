@@ -5110,8 +5110,17 @@ async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
       }
     }
     // (b) the works job raised from a case just finished → advance the case to done.
-    if (updated.fromRemedialsOf && fin(updated.status) && !(before && fin(before.status))) {
-      if (certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+    const isWorks = updated.fromRemedialsOf || updated.fromFiveYearCase;
+    const cancelled = /cancel/i.test(String(updated.status || ""));
+    if (isWorks && fin(updated.status) && !cancelled && !(before && fin(before.status))) {
+      if (updated.fromRemedialsOf && certs.fiveYearWorksCompleted) await certs.fiveYearWorksCompleted(env, tid, updated);
+      // The site now sits in "Certs to update" on the 5-Year EICR schedule — tell the office.
+      const site = updated.siteName || updated.siteCode || updated.helpdeskRef || "a site";
+      try {
+        await sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"],
+          { title: "📄 5-Year remedials done — update the certificate", body: site + ": the remedial works job is complete. Upload the updated EICR.", url: "/five-year-remedials.html?view=certq", tag: "fyr-certq:" + updated.id },
+          null, true);
+      } catch {}
     }
   } catch {}
 }
@@ -5124,14 +5133,24 @@ async function maybeOpenFiveYearRemedial(env, tid, before, updated) {
 export async function createWorksJobFromRemedials(env, tenantId, src, opts) {
   opts = opts || {};
   const pickIds = Array.isArray(opts.pickIds) ? opts.pickIds.map(String) : null;
-  let rem = Array.isArray(src.remedials) ? src.remedials.filter(r => r && (r.description || (r.photos || []).length)) : [];
-  if (pickIds && pickIds.length) rem = rem.filter(r => pickIds.includes(String(r.id)));
+  // opts.items = typed remedial lines (no portal test job carries them) — each a
+  // plain checklist item. opts.synthetic = src is a stand-in site record, not a
+  // real job, so nothing is written back to it (the caller links the works job).
+  let rem = Array.isArray(opts.items) && opts.items.length
+    ? opts.items.map(t => (typeof t === "string" ? { description: t } : t)).filter(r => r && String(r.description || "").trim())
+    : (Array.isArray(src.remedials) ? src.remedials.filter(r => r && (r.description || (r.photos || []).length)) : []);
+  if (pickIds && pickIds.length && !(opts.items && opts.items.length)) rem = rem.filter(r => pickIds.includes(String(r.id)));
   if (!rem.length) return { error: "Pick at least one remedial to turn into works.", status: 400 };
-  // Idempotent: if a works job was already created and still exists, return it.
-  if (src.remedialsWorksJobId) {
-    const ex = await getJob(env, tenantId, src.remedialsWorksJobId).catch(() => null);
-    if (ex) return { existing: true, id: ex.id, ref: ex.helpdeskRef };
+  // Idempotent: if a works job was already created and still exists, return it —
+  // unless it was CANCELLED (then a fresh one may be raised).
+  const prevId = opts.existingId || src.remedialsWorksJobId;
+  if (prevId) {
+    const ex = await getJob(env, tenantId, prevId).catch(() => null);
+    if (ex && String(ex.status || "").toLowerCase() !== "cancelled") return { existing: true, id: ex.id, ref: ex.helpdeskRef };
   }
+  const engs = Array.isArray(opts.assignedEngineers) ? opts.assignedEngineers.map(String).filter(Boolean) : [];
+  const schedErr = badScheduleDate(opts.scheduledAt, "Scheduled start") || badScheduleDate(opts.scheduledEnd, "Scheduled finish");
+  if (schedErr) return { error: schedErr, status: 400 };
   const newId = crypto.randomUUID();
   const auditItems = [];
   for (const r of rem) {
@@ -5166,15 +5185,28 @@ export async function createWorksJobFromRemedials(env, tenantId, src, opts) {
     lat: src.lat, lon: src.lon,
     auditItems,                      // a SITE-AUDIT job — one checklist item per remedial
     requiresRA: true, requiresSignature: false, requiresPhoto: false, requiresNote: false,
-    assignedEngineers: [],           // unassigned — the office allocates it
+    assignedEngineers: engs,         // the office may allocate it there and then; else unassigned
     priority: src.priority || "",
     changedBy: opts.by || "system",
   };
+  if (opts.scheduledAt) payload.scheduledAt = new Date(opts.scheduledAt).toISOString();
+  if (opts.scheduledEnd) payload.scheduledEnd = new Date(opts.scheduledEnd).toISOString();
+  if (opts.durationMinutes) payload.durationMinutes = Math.max(15, Number(opts.durationMinutes) || 0);
   const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
-  src.remedialsWorksJobId = job.id;
-  src.updatedAt = new Date().toISOString();
-  await saveJob(env, tenantId, src);
-  try { const nj = await getJob(env, tenantId, job.id); if (nj) { nj.fromRemedialsOf = src.id; await saveJob(env, tenantId, nj); } } catch {}
+  if (!opts.synthetic && src.id) {
+    src.remedialsWorksJobId = job.id;
+    src.updatedAt = new Date().toISOString();
+    await saveJob(env, tenantId, src);
+  }
+  try {
+    const nj = await getJob(env, tenantId, job.id);
+    if (nj) {
+      if (!opts.synthetic && src.id) nj.fromRemedialsOf = src.id;
+      if (opts.fiveYearCase) nj.fromFiveYearCase = String(opts.fiveYearCase);
+      await saveJob(env, tenantId, nj);
+      if (engs.length) await reconcileRelease(env, tenantId, nj);   // assignment push
+    }
+  } catch {}
   return { id: job.id, ref: job.helpdeskRef, items: auditItems.length };
 }
 

@@ -3991,6 +3991,31 @@ these jobs.
     engineer was Daniel though its `engineers[]` read "Dan Walker", badges + newest-first
     + no cross-engineer leak, 0 page errors. **TODO/next:** same per-engineer diary could
     cover EM/PAT/pump cert jobs, not just EICR.
+  - **🔧 Remedials to complete + 📄 Certs to update (28 Oct 2026, Jamie).** Two tabs on
+    five-year-remedials.html (`?view=remq|certq` deep-links), fed by **GET
+    /concerto/remedial-queue** (merges the Concerto schedule + My schedule, ALL years, one
+    row per store): **remq** = stage `orders_received` or `remedials_scheduled`; **certq** =
+    `remedials_complete`. remq → **🔧 Create & assign** = **POST /concerto/create-works**
+    `{ppmId, itemIds?|items?, engineers?, scheduledAt?, scheduledEnd?, durationMinutes?}`:
+    a site-audit works job from the remedials on the ⚡ test job (C3 unticked by default) or,
+    when there's no portal test job, from typed lines (`createWorksJobFromRemedials` gained
+    `opts.items/synthetic/assignedEngineers/scheduledAt/fiveYearCase/existingId`; assignment
+    push via reconcileRelease); linked on **`concerto_cases.works_job_id`** + `job.fromFiveYearCase`;
+    idempotent; a CANCELLED works job counts as none. Existing jobs get **👷 Assign** (PATCH).
+    When the works job completes the site moves to certq on its own and the office gets a push
+    (sla.js maybeOpenFiveYearRemedial, tag `fyr-certq:`). certq → **⬆ Upload updated cert**
+    (POST /compliance/file type fiveYear, NO bump — a remedial cert must not restart the
+    5-year cycle) + sets `certificate_updated`, or **✓ Certificate updated** by hand.
+    **Flaws fixed in the same pass:** (1) a MANUAL stage12 froze a site for good — now
+    `fyStageEffective(manual, auto, worksStage)` moves a manual remedial-path pick FORWARD on
+    real progress (works raised → scheduled → complete → cert filed), never backwards, never
+    over a later manual pick or a non-remedial pick (invoiced/satisfactory); (2) the works job
+    was only found via the test job's `remedialsWorksJobId`, so Concerto-staged/archive sites
+    could never progress — now also `concerto_cases.works_job_id`; (3) My schedule's imported
+    Concerto status overwrote remedial-path stages — it no longer touches a site on the
+    remedial path; (4) the re-issued cert was only detected by its doc date (a no-date upload
+    read as 1 Jan) — now a cert with no doc date counts by its upload day. Tests in
+    test-concerto.mjs ("Remedials to complete" block).
   - **"📋 My schedule" tab (29 Sep 2026, Jamie: "a new page in the 5-year remedial
     area — my full schedule this year, current status of each site from
     compliance/remedials, with clear notes + a clear status on each, reflected
