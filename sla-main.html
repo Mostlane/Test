@@ -105,7 +105,20 @@
 
     /* ---- Table ---- */
     .table-wrapper{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
-    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:15px;background:#fff;}
+    /* Fixed layout + proportioned columns so the SITE column can never be
+       crushed by a long value in the (nowrap) date/scheduled columns when the
+       window is narrower than the table's natural width — that squeeze was what
+       made the site name + address wrap into a thin, unreadable strip. Widths
+       are deterministic and content-independent, so the board looks the same at
+       every width. The chk + actions columns keep their inline th widths. */
+    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:15px;background:#fff;table-layout:fixed;}
+    thead th:nth-child(2){width:170px;}   /* Job */
+    thead th:nth-child(3){width:88px;}    /* Priority (fits the header word) */
+    /* th:nth-child(4) = Site: no width → takes all remaining space */
+    thead th:nth-child(5){width:140px;}   /* Due date (fits "30/10/2026, 08:30") */
+    thead th:nth-child(6){width:120px;}   /* Scheduled */
+    thead th:nth-child(7){width:140px;}   /* Assigned to */
+    #jobsTbody td{word-wrap:break-word;overflow-wrap:break-word;}
     thead th{
       text-align:left;padding:11px 12px;background:#f3f4f6;color:#374151;
       border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:13px;
@@ -1160,7 +1173,7 @@ function render(){
         ${isProjectJob(j) ? "<span class='muted'>—</span>" : fmtShort(parseDate(j.targetAt))}
         ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
       </td>
-      <td class="nowrap small">${sched || "<span class='muted'>—</span>"}</td>
+      <td class="small">${sched || "<span class='muted'>—</span>"}</td>
       <td class="small">${engNames ? esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</td>
       <td>
         <div class="rowactions">
