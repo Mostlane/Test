@@ -434,6 +434,7 @@
       </table>
     </div>
     <div id="jobCards" class="job-cards"></div>
+    <div id="loadMoreSentinel" aria-hidden="true" style="height:1px"></div>
     <div id="statusBar">Loading jobs…</div>
   </div>
 </div>
@@ -660,6 +661,13 @@ let allJobs = [];
 const BOARD_CACHE_KEY = "mlSlaBoardCache:" + (getCurrentUser() || "").toLowerCase();
 let boardPainted = false;   // true once a cached snapshot has been painted
 function saveBoardCache(){
+  // Defer the stringify+write to idle: on a big board it's ~250KB of JSON, and it
+  // runs on every load INCLUDING the 60s live refresh — no reason to block the
+  // frame for a snapshot that only matters on the NEXT open.
+  const ric = window.requestIdleCallback || (f => setTimeout(f, 200));
+  ric(() => saveBoardCacheNow());
+}
+function saveBoardCacheNow(){
   const write = jobs => localStorage.setItem(BOARD_CACHE_KEY, JSON.stringify({ at: Date.now(), jobs, cats: CUSTOM_CATS }));
   try{ write(allJobs); }
   catch(e){
@@ -713,9 +721,12 @@ let countdownTimerId = null;
 
 /* ============ helpers ============ */
 function parseDate(v){ if(!v) return null; const d = new Date(v); return isNaN(d) ? null : d; }
+// Reuse ONE Intl formatter — `toLocaleString` with an options object builds a new
+// formatter on every call, which showed up as a real cost across the board's rows.
+const _fmtShortIntl = new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 function fmtShort(d){
   if(!(d instanceof Date) || isNaN(d)) return "—";
-  return d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  return _fmtShortIntl.format(d);
 }
 function fmtSched(job){
   const s = parseDate(job.scheduledAt);
@@ -983,7 +994,7 @@ function renderSubChips(){
   host.innerHTML = `<button class="schip allchip${!activeSub ? " active" : ""}" data-subk="">Every subcontractor <span class="n">${inCat.length}</span></button>` +
     [...subs.entries()].sort((a,b) => b[1].n - a[1].n).map(([k,e]) => `<button class="schip${activeSub === k ? " active" : ""}" style="--c:#7c3aed" data-subk="${esc(k)}">${esc(e.name)} <span class="n">${e.n}</span></button>`).join("") +
     `<a class="schip" style="text-decoration:none" href="subcontracted-jobs.html?tab=all${activeSub ? "&sub=" + encodeURIComponent(activeSub) : ""}" title="Every job ever sent — including finished and handed back">📋 Full history →</a>`;
-  host.querySelectorAll("[data-subk]").forEach(b => b.onclick = () => { activeSub = b.dataset.subk; render(); });
+  host.querySelectorAll("[data-subk]").forEach(b => b.onclick = () => { activeSub = b.dataset.subk; render(true); });
 }
 function renderChips(){
   const counts = chipCounts();
@@ -992,7 +1003,7 @@ function renderChips(){
   const openChip = document.createElement("button");
   openChip.className = "schip allchip" + (activeStatus === "open" ? " active" : "");
   openChip.innerHTML = `Open <span class="n">${boardJobs().filter(j => !isClosed(j)).length}</span>`;
-  openChip.onclick = () => { activeStatus = "open"; render(); };
+  openChip.onclick = () => { activeStatus = "open"; render(true); };
   host.appendChild(openChip);
   // Only the primary statuses show by default; the rest hide behind "More ▾"
   // (but the one you're currently filtered to always stays visible).
@@ -1003,13 +1014,13 @@ function renderChips(){
     b.className = "schip" + (activeStatus === s ? " active" : "");
     b.style.setProperty("--c", c);
     b.innerHTML = `${esc(s)} <span class="n">${counts[s]}</span>`;
-    b.onclick = () => { activeStatus = s; render(); };
+    b.onclick = () => { activeStatus = s; render(true); };
     host.appendChild(b);
   });
   const all = document.createElement("button");
   all.className = "schip allchip" + (activeStatus === "all" ? " active" : "");
   all.innerHTML = `All <span class="n">${boardJobs().length}</span>`;
-  all.onclick = () => { activeStatus = "all"; render(); };
+  all.onclick = () => { activeStatus = "all"; render(true); };
   host.appendChild(all);
   // 📄 EM/PAT toggle — lit = certificate jobs are on the board; greyed = hidden.
   // A secondary control: only shown once expanded.
@@ -1020,7 +1031,7 @@ function renderChips(){
     cert.style.setProperty("--c", "#0e7490");
     cert.title = showCertJobs ? "EM/PAT certificate jobs are shown — click to hide them" : "EM/PAT certificate jobs are HIDDEN — click to show them";
     cert.innerHTML = `📄 EM/PAT <span class="n">${certN}</span>`;
-    cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(); };
+    cert.onclick = () => { showCertJobs = !showCertJobs; try{ localStorage.setItem("slaMainCertJobs", showCertJobs ? "1" : "0"); }catch(e){} render(true); };
     host.appendChild(cert);
   } else {
     hidden++;   // EM/PAT chip is hidden while collapsed
@@ -1066,9 +1077,20 @@ function populateClientFilter(){
   else { activeClient = "all"; sel.value = "all"; }
 }
 
+// Memoised: a busy board (1000+ jobs) is filtered AND sorted on every render,
+// and render() runs ~4× at open (instant paint, then jobs / users / categories
+// arriving). Re-filtering + re-sorting 1000 jobs each time was most of the open
+// cost, so cache the result and only recompute when the job list OR the filters
+// actually change. invalidateJobsCache() is called wherever a job is mutated in
+// place without a fresh load (optimistic status change); loadJobs() reassigns
+// allJobs to a new array, which the identity check below catches on its own.
+let _fjCache = null, _fjSig = "", _fjRef = null;
+function invalidateJobsCache(){ _fjRef = null; }
 function filteredJobs(){
   const search = $("searchBox").value.trim().toLowerCase();
-  return boardJobs().filter(j => {
+  const sig = [activeStatus, activePriority, activeClient, activeSub, showCertJobs, search].join("\u0001");
+  if(_fjRef === allJobs && _fjSig === sig && _fjCache) return _fjCache;
+  const res = boardJobs().filter(j => {
     if(activeStatus === "open"){ if(isClosed(j)) return false; }
     else if(activeStatus !== "all" && j.status !== activeStatus) return false;
     if(activeStatus === SUBCON_STATUS && activeSub && subKeyOf(j.subcontract && j.subcontract.name) !== activeSub) return false;
@@ -1082,7 +1104,11 @@ function filteredJobs(){
       if(!search.split(/\s+/).every(t => blob.includes(t))) return false;
     }
     return true;
-  }).sort((a,b) => new Date(b.raisedAt||0) - new Date(a.raisedAt||0));
+  // Sort by a cached numeric timestamp (no Date allocation per comparison).
+  }).sort((a,b) => (b._rms != null ? b._rms : (b._rms = Date.parse(b.raisedAt)||0))
+                 - (a._rms != null ? a._rms : (a._rms = Date.parse(a.raisedAt)||0)));
+  _fjRef = allJobs; _fjSig = sig; _fjCache = res;
+  return res;
 }
 
 // Coalesce renders. The board is ~2 DOM nodes per job (a table row AND a mobile
@@ -1099,36 +1125,33 @@ function scheduleRender(){
   _renderPending = true;
   (window.requestAnimationFrame || (f => setTimeout(f, 16)))(() => { _renderPending = false; render(); });
 }
-let _renderSeq = 0;   // bumped each render so an in-flight chunked stream can tell it's been superseded
-function render(){
-  _renderPending = false;   // a direct render satisfies any pending scheduled one
-  const mySeq = ++_renderSeq;
-  persistFilters();   // remember search + status + priority + client so Back restores them
-  renderChips();
-  populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
-  const list = filteredJobs();
-  const tbody = $("jobsTbody");
-  const cards = $("jobCards");
-  tbody.innerHTML = ""; cards.innerHTML = "";
+// ── Windowed rendering ──────────────────────────────────────────────────────
+// A big board (1000+ jobs) is TWO DOM nodes per job, and portal-config's shared
+// busy-mark MutationObserver scans every node we insert — so building the whole
+// board (even streamed over frames) pinned the main thread for ~4-5s each time
+// render() ran, and it runs a few times as jobs/users/categories arrive. The
+// search box and Add Job button were unusable until it finished. So we render
+// only a WINDOW of rows and append more as the user scrolls near the bottom.
+// The full filtered set still lives in _curList, so select-all and counts cover
+// everything, not just what's on screen. Jamie asked for exactly this: "load say
+// 20, then the rest load after … I want it instant and slick".
+const WINDOW = 60;
+let renderedN = 0;      // rows currently in the DOM
+let _curList = [];      // the filtered live list of the last render
+let _groupCounts = {};  // multi-engineer group sizes for the last render
 
-  // Count members of each multi-engineer group so a split job shows "👥 A/2".
-  const groupCounts = {};
-  for(const g of allJobs){ if(g.groupId) groupCounts[g.groupId] = (groupCounts[g.groupId]||0)+1; }
-  const groupTag = j => (j.groupId && groupCounts[j.groupId] > 1)
-    ? ` <span class="grp-tag" title="Multi-engineer job — each engineer works their own day independently">👥 ${esc(j.groupLabel||"")}/${groupCounts[j.groupId]}</span>`
-    : "";
-  // Re-visit chain badge: this job is one of N visits raised against the same original.
-  // Client-raised jobs came in through a client portal login — flag them so the
-  // office can spot them at a glance.
-  const clientTag = j => j.raisedByClient ? ` <span class="client-tag" title="Raised by the client via their portal">🏢 Client</span>` : "";
-  const visitTag = j => (j.visitCount > 1)
-    ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
-    : "";
+const groupTag = j => (j.groupId && _groupCounts[j.groupId] > 1)
+  ? ` <span class="grp-tag" title="Multi-engineer job — each engineer works their own day independently">👥 ${esc(j.groupLabel||"")}/${_groupCounts[j.groupId]}</span>`
+  : "";
+// Client-raised jobs came in through a client portal login — flag them.
+const clientTag = j => j.raisedByClient ? ` <span class="client-tag" title="Raised by the client via their portal">🏢 Client</span>` : "";
+// Re-visit chain badge: this job is one of N visits raised against the same original.
+const visitTag = j => (j.visitCount > 1)
+  ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
+  : "";
 
-  // ── Per-row builders (string → one DOM insertion). Pulled out of the loop so the
-  // board can be STREAMED: the first screenful lands instantly and the rest fill in
-  // over the next frames, keeping the main thread free so the header buttons
-  // (Scheduler / Add Job) are tappable at once even on a 600-job board. ──────────
+  // ── Per-row builders (string → one DOM insertion), at module scope so both the
+  // initial window and appendMore() can use them. ─────────────────────────────
   function liveParts(j){
     // The "Job" title should read "<ticket number> - <site>" (e.g.
     // "28548-Bristol, Ashley Down Road"). That's the helpdeskRef when it starts
@@ -1233,34 +1256,77 @@ function render(){
     return { row, card };
   }
 
-  const liveN = list.length, archN = archiveMatches.length;
-  $("statusBar").textContent = liveN || archN
-    ? `${liveN} job(s)` + (archN ? ` · ${archN} in archive` : "") + " shown"
-    : "No jobs match the filters.";
-
-  // Stream the rows in. First chunk is a screenful (instant); the rest fill in over
-  // subsequent frames so a big board never pins the thread at open.
-  const FIRST = 30, BATCH = 90;
-  let li = 0, ai = 0;   // cursors into list + archiveMatches
-  function buildChunk(limit){
-    let rowsH = "", cardsH = "", n = 0;
-    while(n < limit && li < list.length){ const p = liveParts(list[li++]); rowsH += p.row; cardsH += p.card; n++; }
-    while(n < limit && ai < archiveMatches.length){ const p = archParts(archiveMatches[ai++]); rowsH += p.row; cardsH += p.card; n++; }
-    if(rowsH) tbody.insertAdjacentHTML("beforeend", rowsH);
-    if(cardsH) cards.insertAdjacentHTML("beforeend", cardsH);
+// Build the HTML for rows [from, to) across the combined live+archive list.
+function buildWindowHtml(from, to){
+  const liveN = _curList.length;
+  let rowsH = "", cardsH = "";
+  for(let i = from; i < to; i++){
+    const p = i < liveN ? liveParts(_curList[i]) : archParts(archiveMatches[i - liveN]);
+    rowsH += p.row; cardsH += p.card;
   }
-  const done = () => li >= list.length && ai >= archiveMatches.length;
-  const raf = window.requestAnimationFrame || (f => setTimeout(f, 16));
-  buildChunk(FIRST);
-  applyPhotoFlags();           // badge the first screenful at once
-  function more(){
-    if(mySeq !== _renderSeq) return;   // a newer render has taken over — stop
-    buildChunk(BATCH);
-    if(done()){ startCountdown(); applyPhotoFlags(); }
-    else raf(more);
-  }
-  if(done()){ startCountdown(); applyPhotoFlags(); }
-  else raf(more);
+  return { rowsH, cardsH };
+}
+function setStatusBar(){
+  const liveN = _curList.length, archN = archiveMatches.length, total = liveN + archN;
+  const el = $("statusBar");
+  if(!el) return;
+  if(!total){ el.textContent = "No jobs match the filters."; return; }
+  const more = renderedN < total;
+  const liveShown = Math.min(renderedN, liveN);
+  el.textContent = (more ? `Showing ${liveShown} of ${liveN} job(s)` : `${liveN} job(s)`)
+    + (archN ? ` · ${archN} in archive` : "")
+    + (more ? " — scroll for more" : " shown");
+}
+// reset=true → rebuild from the top (a user filter/search/chip); falsy → keep the
+// window the user has already scrolled open (a live refresh / data arriving).
+function render(reset){
+  _renderPending = false;
+  persistFilters();   // remember search + status + priority + client so Back restores them
+  renderChips();
+  populateClientFilter();   // BEFORE filteredJobs so a vanished pick resets to "All"
+  _curList = filteredJobs();
+  _groupCounts = {};
+  for(const g of allJobs){ if(g.groupId) _groupCounts[g.groupId] = (_groupCounts[g.groupId]||0)+1; }
+  const total = _curList.length + archiveMatches.length;
+  let target = reset ? WINDOW : Math.max(WINDOW, renderedN || WINDOW);
+  target = Math.min(target, total);
+  const { rowsH, cardsH } = buildWindowHtml(0, target);
+  $("jobsTbody").innerHTML = rowsH;
+  $("jobCards").innerHTML = cardsH;
+  renderedN = target;
+  if(reset) window.scrollTo(0, 0);
+  setStatusBar();
+  startCountdown();
+  applyPhotoFlags();
+  ensureMoreObserver();
+}
+// Append the next window of rows as the user nears the bottom.
+function appendMore(){
+  const total = _curList.length + archiveMatches.length;
+  if(renderedN >= total) return;
+  const to = Math.min(renderedN + WINDOW, total);
+  const { rowsH, cardsH } = buildWindowHtml(renderedN, to);
+  $("jobsTbody").insertAdjacentHTML("beforeend", rowsH);
+  $("jobCards").insertAdjacentHTML("beforeend", cardsH);
+  renderedN = to;
+  setStatusBar();
+  applyPhotoFlags();
+}
+// Infinite-scroll via an IntersectionObserver sentinel at the end of the list.
+// This is robust to whatever the real scroll container is, and — crucially — it
+// never fires while the board is hidden (the permission gate hides it until
+// /user resolves), so it can't pre-append the whole board off-screen. When the
+// sentinel is near the viewport it tops up one window; if the list still doesn't
+// reach the sentinel it fires again next frame until the screen fills or every
+// job is shown (appendMore no-ops once everything's in).
+let _moreIO = null;
+function ensureMoreObserver(){
+  if(_moreIO || !("IntersectionObserver" in window)) return;
+  const sentinel = $("loadMoreSentinel"); if(!sentinel) return;
+  _moreIO = new IntersectionObserver(entries => {
+    if(entries.some(e => e.isIntersecting)) appendMore();
+  }, { rootMargin: "700px 0px" });
+  _moreIO.observe(sentinel);
 }
 
 /* 📷 badge. The set of jobs-with-photos is fetched once per data load
@@ -1691,14 +1757,14 @@ function resetView(){
   const cf = $("clientFilter"); if(cf) cf.value = "all";
   $("searchBox").value = ""; archiveMatches = [];
   resetSavedFilters();
-  render();
+  render(true);
 }
 let searchDeb = null;
 function onSearchInput(){
-  render();   // instant live filter
+  render(true);   // instant live filter, back to the top
   clearTimeout(searchDeb);
   const q = $("searchBox").value.trim();
-  if(q.length < 2){ if(archiveMatches.length){ archiveMatches = []; render(); } return; }
+  if(q.length < 2){ if(archiveMatches.length){ archiveMatches = []; render(true); } return; }
   searchDeb = setTimeout(() => fetchArchiveMatches(q), 300);
 }
 async function fetchArchiveMatches(q){
@@ -1784,6 +1850,7 @@ async function changeJobStatus(id, status){
   const job = allJobs.find(j => j.id === id); if(!job) return;
   const prev = job.status;
   job.status = status;            // optimistic
+  invalidateJobsCache();          // in-place mutation — drop the memoised list
   render();
   try{
     const res = await authFetch("/sla/jobs/" + encodeURIComponent(id), {
@@ -1797,7 +1864,7 @@ async function changeJobStatus(id, status){
     }
     await loadJobs();             // refresh counts + true server state
   }catch(err){
-    job.status = prev; render();
+    job.status = prev; invalidateJobsCache(); render();
     alert("Couldn't change status: " + err.message);
   }
 }
@@ -1812,10 +1879,10 @@ function init(){
   });
   $("checkAll").addEventListener("change", () => {
     const on = $("checkAll").checked;
-    document.querySelectorAll(".rowcheck").forEach(cb => {
-      cb.checked = on;
-      if(on) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
-    });
+    // Select ALL filtered live jobs, not just the rows currently rendered —
+    // with windowing most rows aren't in the DOM. (Archive rows aren't selectable.)
+    if(on){ for(const j of _curList) selected.add(j.id); } else { selected.clear(); }
+    document.querySelectorAll(".rowcheck").forEach(cb => { cb.checked = on; });
   });
   $("bulkApply").addEventListener("click", applyBulk);
   // 🏷️ Categories / 🧾 Sheet settings buttons moved to ⚙️ Settings; the modals
@@ -1834,8 +1901,8 @@ function init(){
   ["catBackdrop","catDelBackdrop"].forEach(id => {
     $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
   });
-  $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
-  $("clientFilter").addEventListener("change", () => { activeClient = $("clientFilter").value; render(); });
+  $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(true); });
+  $("clientFilter").addEventListener("change", () => { activeClient = $("clientFilter").value; render(true); });
   $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", resetView);
   { const jt = $("jobsTitle"); if(jt) jt.addEventListener("click", resetView); }
@@ -1944,7 +2011,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 // bfcache (Back on iOS/Safari): the DOM is restored but re-assert the saved
 // filters + repaint so a stale reset can never show through.
 window.addEventListener("pageshow", e => {
-  if(e.persisted && restoreFilters()) render();
+  if(e.persisted && restoreFilters()) render(true);
 });
 </script>
 
