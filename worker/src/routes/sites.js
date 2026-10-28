@@ -121,8 +121,17 @@ export async function handle(request, env, ctx, url, sess) {
     if (!siteNumber) return error("siteNumber required", 400, env, request);
     site.siteNumber = siteNumber;
 
-    // Renamed site number: drop the old row.
+    // A site is keyed by (client, site_number). An edit can MOVE it to a new
+    // number (oldSiteNumber) AND/OR a new category (oldClient) — e.g. a store
+    // filed under "retail" that should be "cobra". srcClient/srcNum say where the
+    // record currently lives so we can find, merge, and remove it rather than
+    // treating the change as a brand-new site (which the uniqueness guard would
+    // then reject against the row that's actually being moved).
     const oldNum = q.get("oldSiteNumber");
+    const oldClient = ((q.get("oldClient") || "") + "").toLowerCase().trim();
+    const srcClient = oldClient || client;
+    const srcNum = String(oldNum || siteNumber).trim();
+    const moving = path === "/update-site" && (srcClient !== client || srcNum !== siteNumber);
 
     // Guard against duplicate / reserved site numbers. A collision — e.g. a
     // generic "site" (office/yard) typed with a project's P-number — makes jobs
@@ -131,13 +140,13 @@ export async function handle(request, env, ctx, url, sess) {
     // number must be unique. Checked when a number is being SET or CHANGED.
     if (client !== "projects" && /^p\d/i.test(siteNumber))
       return error(`"${siteNumber}" uses the project number format (P####), reserved for projects. Give this ${client} site a different number.`, 400, env, request);
+    // Reject a number collision — but NEVER against the record we're moving (its
+    // source row at (srcClient, srcNum) is removed below), so re-filing a site
+    // under a new category keeping its number is allowed.
     if (path === "/add-site" || (oldNum && oldNum !== siteNumber)) {
-      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1")
-        .bind(db.tenantId, siteNumber).first();
+      const dup = await db.prepare("SELECT client, site_name FROM sites WHERE tenant_id=? AND site_number=? AND NOT (client=? AND site_number=?) LIMIT 1")
+        .bind(db.tenantId, siteNumber, srcClient, srcNum).first();
       if (dup) return error(`Site number ${siteNumber} is already used by "${dup.site_name}"${dup.client && dup.client !== client ? " (" + dup.client + ")" : ""}. Site numbers must be unique.`, 400, env, request);
-    }
-    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
-      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
 
     // Update = MERGE into the existing record so a partial edit (e.g. just adding
@@ -147,9 +156,10 @@ export async function handle(request, env, ctx, url, sess) {
     let auditNote = "";
     let oldName = null;   // pre-save name — passed to SiteLog so a rename follows
     if (path === "/update-site") {
-      const lookNum = String(oldNum || siteNumber).trim();
+      // Look the record up where it currently lives (srcClient/srcNum), which may
+      // differ from the destination when the category and/or number changed.
       const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
-        .bind(db.tenantId, client, lookNum).first();
+        .bind(db.tenantId, srcClient, srcNum).first();
       if (row) {
         let cur = {}; try { cur = JSON.parse(row.data) || {}; } catch {}
         oldName = String(cur.siteName || "").trim() || null;
@@ -165,10 +175,17 @@ export async function handle(request, env, ctx, url, sess) {
           }
         }
         if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" → "${clean(siteNumber)}"`);
+        if (oldClient && oldClient !== client) chg.unshift(`category "${clean(oldClient)}" → "${clean(client)}"`);
         merged.siteNumber = siteNumber; merged.client = client;
         site = merged;
         const label = clean(merged.name) || siteNumber;
         auditNote = (chg.length ? `${label} — ${chg.join(", ")}` : label).slice(0, 380);
+      }
+      // Moving category/number: remove the record from where it used to live so
+      // no duplicate is left behind under the old (client, number).
+      if (moving) {
+        await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+          .bind(db.tenantId, srcClient, srcNum).run();
       }
     }
 
