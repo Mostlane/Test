@@ -44,16 +44,21 @@ const money = n => {
 };
 const pctStr = f => (isFinite(f) ? Math.round(f * 100) : 0) + "%";
 
-// Two-rate retention (mirrors routes/valuations.js computeValuation + costing.js):
-// interim valuations hold `retentionPct`% (5), the final account releases all of
-// that and holds `finalRetentionPct`% (2.5) of the contract value instead.
+// Per-job two-rate retention (mirrors routes/valuations.js computeValuation +
+// costing.js): a `data.hasRetention` toggle (new sheets off); when on, interim
+// valuations hold `retentionPct`% (5), the final account releases all of that and
+// holds `finalRetentionPct`% (2.5) of the contract value instead.
 function compute(data) {
+  data = data || {};
   const clampPct = (v, d) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : d; };
-  const interimPct = clampPct(data && data.retentionPct, 5);
-  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
-  const retOn = interimPct > 0 || finalPct > 0;
-  const cols = Array.isArray(data && data.columns) ? data.columns : [];
-  const items = Array.isArray(data && data.items) ? data.items : [];
+  const interimPct = clampPct(data.retentionPct, 5);
+  const finalPct = clampPct(data.finalRetentionPct, interimPct / 2);
+  const hasRetention = data.hasRetention === true ? true
+    : data.hasRetention === false ? false
+    : clampPct(data.retentionPct, 0) > 0;
+  const retOn = hasRetention && (interimPct > 0 || finalPct > 0);
+  const cols = Array.isArray(data.columns) ? data.columns : [];
+  const items = Array.isArray(data.items) ? data.items : [];
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
   let contractTotal = 0, grandGross = 0;
   const perItem = items.map(it => {

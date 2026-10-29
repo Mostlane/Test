@@ -49545,15 +49545,17 @@ var money2 = (n) => {
 };
 var pctStr = (f) => (isFinite(f) ? Math.round(f * 100) : 0) + "%";
 function compute(data) {
+  data = data || {};
   const clampPct = (v, d) => {
     const n = Number(v);
     return isFinite(n) ? Math.max(0, Math.min(100, n)) : d;
   };
-  const interimPct = clampPct(data && data.retentionPct, 5);
-  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
-  const retOn = interimPct > 0 || finalPct > 0;
-  const cols = Array.isArray(data && data.columns) ? data.columns : [];
-  const items = Array.isArray(data && data.items) ? data.items : [];
+  const interimPct = clampPct(data.retentionPct, 5);
+  const finalPct = clampPct(data.finalRetentionPct, interimPct / 2);
+  const hasRetention = data.hasRetention === true ? true : data.hasRetention === false ? false : clampPct(data.retentionPct, 0) > 0;
+  const retOn = hasRetention && (interimPct > 0 || finalPct > 0);
+  const cols = Array.isArray(data.columns) ? data.columns : [];
+  const items = Array.isArray(data.items) ? data.items : [];
   const num5 = (v) => {
     const n = Number(v);
     return isFinite(n) ? n : 0;
@@ -49860,15 +49862,17 @@ async function gate(env, request) {
   return { sess };
 }
 function computeValuation(data) {
+  data = data || {};
   const clampPct = (v, d) => {
     const n = Number(v);
     return isFinite(n) ? Math.max(0, Math.min(100, n)) : d;
   };
-  const interimPct = clampPct(data && data.retentionPct, 5);
-  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
-  const retOn = interimPct > 0 || finalPct > 0;
-  const cols = Array.isArray(data && data.columns) ? data.columns : [];
-  const items = Array.isArray(data && data.items) ? data.items : [];
+  const interimPct = clampPct(data.retentionPct, 5);
+  const finalPct = clampPct(data.finalRetentionPct, interimPct / 2);
+  const hasRetention = data.hasRetention === true ? true : data.hasRetention === false ? false : clampPct(data.retentionPct, 0) > 0;
+  const retOn = hasRetention && (interimPct > 0 || finalPct > 0);
+  const cols = Array.isArray(data.columns) ? data.columns : [];
+  const items = Array.isArray(data.items) ? data.items : [];
   const num5 = (v) => {
     const n = Number(v);
     return isFinite(n) ? n : 0;
@@ -49925,6 +49929,7 @@ function computeValuation(data) {
   return {
     retentionPct: interimPct,
     finalRetentionPct: finalPct,
+    hasRetention,
     retentionOn: retOn,
     hasFinal,
     retBase,
@@ -50147,6 +50152,7 @@ async function handle42(request, env, ctx, url) {
       title: String(out.title || hintTitle || "Valuation").slice(0, 200),
       client: String(b.client || "").slice(0, 200),
       projectNumber: "",
+      hasRetention: false,
       retentionPct: 5,
       finalRetentionPct: 2.5,
       vatRate: 20,
