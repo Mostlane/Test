@@ -66,13 +66,25 @@ async function gate(env, request) {
   return { sess };
 }
 
-// ── Compute the whole sheet from its data (shared by the PDF; the builder mirrors
-// this in JS). Retention: `final` mode holds retentionPct% on the column flagged
-// final (= the final account — Jamie's rule); `each` mode holds it on every
-// valuation (standard construction retention). 0% = no retention. ──────────────
+// ── Compute the whole sheet from its data (shared by the PDF + Excel; the builder
+// mirrors this in JS). RETENTION = the standard UK two-rate "moiety" model, the
+// same one the job-costing engine uses (costing.js computeFin):
+//   • every INTERIM valuation holds `retentionPct`% (default 5) of the cumulative
+//     value certified to date;
+//   • the FINAL account RELEASES all that interim retention and instead holds
+//     `finalRetentionPct`% (default 2.5 — the other half, released after the
+//     defects period) of the CONTRACT value.
+// So net-due on the final account naturally "adds back" the interim retention and
+// then deducts the 2.5%. Set retentionPct = 0 for a job with no retention. Each
+// column exposes retHeld (held AT that valuation), interimAccrued (5% to date) and
+// released (interim retention given back, non-zero only on the final account) so
+// the bubbles/PDF can show the release → 2.5%-held calculation. ─────────────────
 export function computeValuation(data) {
-  const pct = Math.max(0, Math.min(100, Number(data && data.retentionPct) || 0));
-  const mode = (data && data.retentionMode) === "each" ? "each" : "final";
+  const clampPct = (v, d) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : d; };
+  const interimPct = clampPct(data && data.retentionPct, 5);
+  // finalRetentionPct defaults to half the interim rate (5 → 2.5) when not set.
+  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
+  const retOn = interimPct > 0 || finalPct > 0;
   const cols = Array.isArray(data && data.columns) ? data.columns : [];
   const items = Array.isArray(data && data.items) ? data.items : [];
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -88,21 +100,30 @@ export function computeValuation(data) {
              remaining: cost - taken, pct: cost ? taken / cost : 0 };
   });
 
+  // The final-account retention is held on the contract value where one is set,
+  // else on the gross certified (a sheet with no item costs yet).
+  const retBase = contractTotal > 0 ? contractTotal : grandGross;
+
   let grossCum = 0, prevNetCum = 0;
   const perCol = cols.map(c => {
     let gross = 0; for (const it of items) gross += num((it.amounts || {})[c.id]);
     grossCum += gross;
-    const retHeld = mode === "each" ? (pct / 100) * grossCum : (c.final ? (pct / 100) * grossCum : 0);
+    const isFinal = !!c.final;
+    const interimAccrued = retOn ? (interimPct / 100) * grossCum : 0; // 5% held to date
+    // On the final account: release the interim retention, hold the final % instead.
+    const retHeld = !retOn ? 0 : (isFinal ? (finalPct / 100) * retBase : interimAccrued);
+    const released = (retOn && isFinal) ? interimAccrued : 0; // interim retention added back at final
     const netCum = grossCum - retHeld;
     const dueThis = netCum - prevNetCum;
     prevNetCum = netCum;
-    return { id: c.id, name: c.name || "", date: c.date || "", note: c.note || "", final: !!c.final,
-             gross, grossCum, retHeld, netCum, dueThis };
+    return { id: c.id, name: c.name || "", date: c.date || "", note: c.note || "", final: isFinal,
+             gross, grossCum, interimAccrued, retHeld, released, netCum, dueThis };
   });
 
   const lastCol = perCol[perCol.length - 1] || null;
+  const hasFinal = cols.some(c => c.final);
   return {
-    retentionPct: pct, retentionMode: mode,
+    retentionPct: interimPct, finalRetentionPct: finalPct, retentionOn: retOn, hasFinal, retBase,
     contractTotal, grandGross,
     remaining: contractTotal - grandGross,
     completion: contractTotal ? grandGross / contractTotal : 0,
@@ -294,7 +315,7 @@ export async function handle(request, env, ctx, url) {
     const data = {
       title: String(out.title || hintTitle || "Valuation").slice(0, 200),
       client: String(b.client || "").slice(0, 200),
-      projectNumber: "", retentionPct: 0, retentionMode: "final", vatRate: 20,
+      projectNumber: "", retentionPct: 5, finalRetentionPct: 2.5, vatRate: 20,
       columns: [col], currentColumnId: col.id, items,
     };
     const now = new Date().toISOString();
