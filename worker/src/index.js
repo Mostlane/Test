@@ -61,6 +61,7 @@ import * as cpd from "./routes/cpd.js";            // DONE  (CPD training for el
 import * as sitelogts from "./routes/sitelogts.js"; // SiteLog daily/weekly timesheet PDFs emailed to the office
 import * as cablecalc from "./routes/cablecalc.js"; // Cable Calculator (BS 7671 single-circuit sizing / verification + report PDF)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
+import * as valuations from "./routes/valuations.js"; // DONE (valuation sheets: line-item applications for payment + AI draft + PDF)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
@@ -147,6 +148,7 @@ const ROUTES = [
   ["*", "/cablecalc",  cablecalc.handle], // Cable Calculator (BS 7671 single-circuit sizing / verification)
   ["*", "/cpd",        cpd.handle],       // CPD training (electricians): read material + test → logged per user for the NICEIC audit
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
+  ["*", "/val",        valuations.handle], // valuation sheets (line-item applications for payment)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.

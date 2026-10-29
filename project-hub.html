@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Project</title>
-  <script src="/portal-config.js?v=46"></script>
+  <script src="/portal-config.js?v=47"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="docviewer.js?v=7"></script>
@@ -247,7 +247,9 @@
       if (key === "rams") return CAN ? `<button class="btn small ghost" data-docpick="rams">📎 Add / link</button>` : "";
       if (key === "cpp") return CAN ? `<button class="btn small ghost" data-docpick="cpp">📎 Add / link</button>` : "";
       if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
-        return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
+        return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>`
+          + ` <button class="btn small" data-valsheet="1" title="Build a line-item valuation sheet with retention + PDF/Excel export">📊 Valuation sheet</button>`
+          + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
       if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
       return "";
     }
@@ -475,6 +477,8 @@
       document.querySelectorAll("[data-tick]").forEach(el => el.onclick = () => toggleTodo(el.dataset.tick, !el.classList.contains("done")));
       // build buttons
       document.querySelectorAll("[data-build]").forEach(el => el.onclick = () => build(el.dataset.build));
+      // Valuation SHEET: open the project's existing sheet, else start one tied to it.
+      document.querySelectorAll("[data-valsheet]").forEach(el => el.onclick = () => openValuationSheet());
       // required-document picker (build / link existing / upload) — programme, rams, cpp
       document.querySelectorAll("[data-docpick]").forEach(el => el.onclick = () => openDocPicker(el.dataset.docpick));
       // sitelog
@@ -661,6 +665,17 @@
       if (r.ok) { P.todo = r.todo; render(); }
     }
 
+    // Open this project's detailed valuation SHEET — its existing one if there is
+    // one, else a fresh sheet already tied to the project (prefilled with its name
+    // and number; it saves + links to the project on first edit).
+    async function openValuationSheet() {
+      try {
+        const r = await authFetch("/val/for-project?projectId=" + encodeURIComponent(PID)).then(r => r.json()).catch(() => ({}));
+        if (r && r.ok && r.id) { location.href = "/valuation-edit.html?id=" + encodeURIComponent(r.id); return; }
+      } catch (e) {}
+      location.href = "/valuation-edit.html?project=" + encodeURIComponent(PID)
+        + "&title=" + encodeURIComponent(P.name || "") + "&number=" + encodeURIComponent(P.number || "");
+    }
     async function build(kind) {
       if (kind === "programme") {
         const data = { title: P.name, client: "projects", site: P.name, projectId: PID, contractors: [], tasks: [] };

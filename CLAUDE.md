@@ -2695,6 +2695,59 @@ Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
+## Valuation sheets (routes/valuations.js + lib/valuationpdf.js + valuations.html / valuation-edit.html / valuation-export.js — Oct 2026)
+A line-item **valuation / application-for-payment** document — the Excel sheet Jamie
+kept per project (`Starbucks Jubilee Street … Valuation No 1.xlsm`), rebuilt in the
+portal and progressively added to as the job runs. Permission **`Valuations`** (new
+PERMISSION_KEY; FullAccess implies) gates the 💷 Valuations tile (main.html MAP
+`Valuations:["Valuations"]`) + sidebar NAV + all `/val/*` routes. Built to mirror
+the **programmes** subsystem (builder + document + AI draft + PDF/Excel), but
+**internal only — no client share links**.
+- **Model:** one row per work **item** (`{id, desc, cost, extra, amounts:{colId:amt}}`),
+  one **column** per valuation (`columns:[{id,name,date,note,final}]` + `currentColumnId`).
+  On each valuation you enter the amount taken that time per item; the sheet totals
+  **Total Taken** (sum across columns), **Remaining** (cost − taken), **Completion %**.
+  `data` JSON also holds `title, client, projectNumber, retentionPct, retentionMode
+  (final|each), vatRate`. **The current valuation column is highlighted** (yellow),
+  like the Excel.
+- **Retention** (Jamie: "2.5% … on the final account"): `retentionPct` (0 = none);
+  **`retentionMode:"final"`** (default) holds the % only on the column flagged
+  **`final`** (the final account); `"each"` = standard, held on every valuation's
+  cumulative. Per column: `grossCum` (cumulative), `retHeld`, `netCum`, `dueThis`
+  (net due this valuation). **`computeValuation(data)`** (exported from valuations.js)
+  is the one source of the maths; the builder + Excel export mirror it in JS, the PDF
+  (lib/valuationpdf.js) reimplements it locally (kept dependency-free — imports only
+  lib/pdf.js — to avoid an import cycle). Test `node --no-warnings
+  worker/tools/test-valuations.mjs` (31 cases: totals, both retention modes, edges).
+- **Tables (self-migrating):** `valuations` (id `VS-…`, ref `VAL-####` from app_config
+  `val:seq`, tenant/title/client/project_id/status/data/created/updated/updated_by).
+- **Routes (gate FullAccess|Valuations):** GET /val/list, GET /val/one?id= (+ a
+  `projects` list for the link dropdown), POST /val/save (optimistic concurrency via
+  `baseVersion`, like /prog/save), POST /val/delete, GET /val/for-project?projectId=
+  (the project-hub button target), **POST /val/ai-draft** (items + costs from an
+  uploaded schedule of works / pasted text / scanned PDF → a new sheet; shared
+  Anthropic pattern, `env.ANTHROPIC_API_KEY`, fails soft), **POST /val/export** (PDF).
+- **Front-end:** **valuations.html** (library — list with contract total/%/status, 🤖
+  Build-from-a-document modal reusing the programmes PDF.js/xlsx-lite/base64 reader).
+  **valuation-edit.html** (the builder, autosaves): the sheet as an HTML table (items ×
+  valuation columns, current column highlighted, totals row), add item / **add extra
+  works** (amber row) / add valuation / set-current / mark-final / remove, a Details &
+  settings collapsible (title/client/Project dropdown/status/retention % + mode), and
+  **side bubbles** (contract total, current valuation net due, each previous valuation,
+  certified to date, retention held, remaining) — the "little bubbles" Jamie asked for.
+  **⬇ PDF** (POST /val/export → blob) + **⬇ Excel** (client-side **valuation-export.js**
+  `MLValXlsx.download(V)`, built on the shared **ml-xlsx.js** values-only writer).
+- **Projects tie-in:** a sheet carries `projectId`; project-hub.html's Valuations row
+  has a **📊 Valuation sheet** button → `openValuationSheet()` opens the project's
+  existing sheet (GET /val/for-project) else `valuation-edit.html?project=&title=&number=`
+  (creates + ties on first save). The project-new wizard's Valuations tick note mentions
+  it. The existing proj_fin P&L card (contract value/retention totals) is unchanged —
+  the sheet is the detailed line-item companion.
+- `_headers` no-cache on valuations.html / valuation-edit.html / valuation-export.js;
+  portal-config `?v=47`, SW `mostlane-v150`; login PERM_KEYS + portal-config slim list
+  carry `Valuations`. **TODO/next:** VAT line on the PDF/Excel; optional client share
+  link (like programmes) if ever wanted; fold the certified figure into job costing.
+
 ## Engineer skills & skills-aware scheduling (sla.js + engineer-skills.html — Aug 2026)
 A **competency "rock sheet"** so the scheduler can prefer the right engineer for a
 job. **Phase 1 (DONE):** managed **areas of work** (app_config `sla_work_areas` =

@@ -189,6 +189,12 @@
   Cache-Control: no-cache
 /programme-export.js
   Cache-Control: no-cache
+/valuations.html
+  Cache-Control: no-cache
+/valuation-edit.html
+  Cache-Control: no-cache
+/valuation-export.js
+  Cache-Control: no-cache
 /firestop-admin.html
   Cache-Control: no-cache
 /firestop-form.js
