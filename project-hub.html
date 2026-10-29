@@ -232,7 +232,7 @@
       const done = items.filter(i => i.done).length;
       const body = items.map(it => `<div class="todo">
           <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${esc(it.key)}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
-          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${esc(it.key)}RefLine"></small>` : ""}</span>
+          <span class="lbl">${esc(it.label)}${["programme","rams","cpp","valuations"].includes(it.key) ? `<small id="${esc(it.key)}RefLine"></small>` : ""}</span>
           <span class="act" data-actfor="${esc(it.key)}"></span>
         </div>`).join("");
       return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
@@ -756,7 +756,7 @@
 
     // Linked-doc pills on each to-do row (programme / rams / cpp).
     async function loadDocRefs() {
-      const keys = ["programme", "rams", "cpp"].filter(k => g(k + "RefLine"));
+      const keys = ["programme", "rams", "cpp", "valuations"].filter(k => g(k + "RefLine"));
       if (!keys.length) return;
       const L = P.links || {}, df = L.docFiles || {};
       let docs = [];
@@ -776,6 +776,7 @@
         if (key === "programme" && L.programmeId) pills.push(wrap(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`, { kind: "programme", value: "" }));
         if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(wrap(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`, { kind: "rams-remove", value: id })));
         if (key === "cpp" && L.cppRef && /^HSD-/.test(String(L.cppRef))) pills.push(wrap(`<a class="pill" href="/cpp-builder.html?doc=${encodeURIComponent(L.cppRef)}" style="text-decoration:none;">📄 ${esc((cppBy[L.cppRef] && (cppBy[L.cppRef].ref || cppBy[L.cppRef].site)) || "CPP")}</a>`, { kind: "cpp", value: "" }));
+        if (key === "valuations" && P.valuation && P.valuation.id) pills.push(wrap(`<a class="pill" href="/valuation-edit.html?id=${encodeURIComponent(P.valuation.id)}" style="text-decoration:none;">📊 ${esc(P.valuation.ref || P.valuation.title || "Valuation sheet")}</a>`, { kind: "valuation", value: "" }));
         (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(wrap(p, { kind: "doc-file-remove", docKey: key, value: id })); });
         line.innerHTML = pills.length ? " " + pills.join(" ") : "";
       }

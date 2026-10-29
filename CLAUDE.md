@@ -2755,12 +2755,23 @@ the **programmes** subsystem (builder + document + AI draft + PDF/Excel), but
   certified to date, retention held, remaining) — the "little bubbles" Jamie asked for.
   **⬇ PDF** (POST /val/export → blob) + **⬇ Excel** (client-side **valuation-export.js**
   `MLValXlsx.download(V)`, built on the shared **ml-xlsx.js** values-only writer).
-- **Projects tie-in:** a sheet carries `projectId`; project-hub.html's Valuations row
-  has a **📊 Valuation sheet** button → `openValuationSheet()` opens the project's
-  existing sheet (GET /val/for-project) else `valuation-edit.html?project=&title=&number=`
-  (creates + ties on first save). The project-new wizard's Valuations tick note mentions
-  it. The existing proj_fin P&L card (contract value/retention totals) is unchanged —
-  the sheet is the detailed line-item companion.
+- **Projects tie-in — a valuation links to a project LIKE a programme/RAMS/CPP (Oct
+  2026):** a sheet carries `projectId` (authoritative reverse link =
+  `valuations.project_id`). project-hub.html's Valuations to-do row has a **📊 Valuation
+  sheet** button → `openValuationSheet()` opens the project's existing sheet (GET
+  /val/for-project) else `valuation-edit.html?project=&title=&number=` (creates + ties on
+  first save). **It's an option when CREATING a project** (project-new.html step 2 →
+  `req_valuations` tick). **The linked sheet now shows as a 📊 pill with an ✕ Unlink** on
+  the Valuations row (like the programme/RAMS/CPP pills) — `/project/get` returns
+  `project.valuation {id,ref,title}` (via `linkedValuation`, the newest
+  `valuations.project_id=<pid>` row) and `loadDocRefs` renders it. **Unlink** = POST
+  `/project/link {kind:"valuation", value:""}` → clears `project_id` on the sheet(s) for
+  that project (the sheet is NOT deleted — it stays in the Valuations library and can be
+  re-tied from its own Project dropdown or the 📊 button). `normLinks` carries
+  `valuationId`; `computeTodo` ticks Valuations on a contract value OR a linked sheet.
+  (A sheet is also tied/untied from the builder's own "Project" dropdown.) The existing
+  proj_fin P&L card (contract value/retention totals) is unchanged — the sheet is the
+  detailed line-item companion.
 - `_headers` no-cache on valuations.html / valuation-edit.html / valuation-export.js;
   portal-config `?v=47`, SW `mostlane-v150`; login PERM_KEYS + portal-config slim list
   carry `Valuations`. **TODO/next:** VAT line on the PDF/Excel; optional client share
