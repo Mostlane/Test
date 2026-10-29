@@ -49851,7 +49851,7 @@ async function nextRef(db) {
     }
   } catch {
   }
-  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'val:seq', ?) ON CONFLICT(tenant_id, key) DO UPDATE SET value=?").bind(db.tenantId, String(n), String(n)).run();
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'val:seq', ?) ON CONFLICT(key) DO UPDATE SET value=?").bind(db.tenantId, String(n), String(n)).run();
   return "VAL-" + String(n).padStart(4, "0");
 }
 async function gate(env, request) {
