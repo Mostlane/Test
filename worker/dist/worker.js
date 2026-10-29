@@ -49260,8 +49260,13 @@ var money2 = (n) => {
 };
 var pctStr = (f) => (isFinite(f) ? Math.round(f * 100) : 0) + "%";
 function compute(data) {
-  const pct = Math.max(0, Math.min(100, Number(data && data.retentionPct) || 0));
-  const mode = (data && data.retentionMode) === "each" ? "each" : "final";
+  const clampPct = (v, d) => {
+    const n = Number(v);
+    return isFinite(n) ? Math.max(0, Math.min(100, n)) : d;
+  };
+  const interimPct = clampPct(data && data.retentionPct, 5);
+  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
+  const retOn = interimPct > 0 || finalPct > 0;
   const cols = Array.isArray(data && data.columns) ? data.columns : [];
   const items = Array.isArray(data && data.items) ? data.items : [];
   const num5 = (v) => {
@@ -49277,20 +49282,28 @@ function compute(data) {
     grandGross += taken;
     return { desc: it.desc || "", cost, extra: !!it.extra, amounts: amounts2, taken, remaining: cost - taken, pct: cost ? taken / cost : 0 };
   });
+  const retBase = contractTotal > 0 ? contractTotal : grandGross;
   let grossCum = 0, prevNet = 0;
   const perCol = cols.map((c) => {
     let gross = 0;
     for (const it of items) gross += num5((it.amounts || {})[c.id]);
     grossCum += gross;
-    const retHeld = mode === "each" ? pct / 100 * grossCum : c.final ? pct / 100 * grossCum : 0;
+    const isFinal = !!c.final;
+    const interimAccrued = retOn ? interimPct / 100 * grossCum : 0;
+    const retHeld = !retOn ? 0 : isFinal ? finalPct / 100 * retBase : interimAccrued;
+    const released = retOn && isFinal ? interimAccrued : 0;
     const netCum = grossCum - retHeld, dueThis = netCum - prevNet;
     prevNet = netCum;
-    return { id: c.id, name: c.name || "", date: c.date || "", final: !!c.final, gross, grossCum, retHeld, netCum, dueThis };
+    return { id: c.id, name: c.name || "", date: c.date || "", final: isFinal, gross, grossCum, interimAccrued, retHeld, released, netCum, dueThis };
   });
   const last = perCol[perCol.length - 1] || null;
+  const hasFinal = cols.some((c) => c.final);
   return {
-    pct,
-    mode,
+    pct: interimPct,
+    finalPct,
+    retOn,
+    hasFinal,
+    retBase,
     contractTotal,
     grandGross,
     remaining: contractTotal - grandGross,
@@ -49483,12 +49496,19 @@ function buildValuationPdf(data, meta = {}) {
       bubble("Contract total", [money2(C.contractTotal)]);
       C.perCol.forEach((pc, i) => {
         const l = ["This valuation: " + money2(pc.gross), "To date: " + money2(pc.grossCum)];
-        if (pc.retHeld) l.push("Retention: -" + money2(pc.retHeld));
+        if (pc.final && pc.released) {
+          l.push("Retention released: +" + money2(pc.released));
+          l.push("Final retention " + C.finalPct + "%: -" + money2(pc.retHeld));
+        } else if (pc.retHeld) {
+          l.push("Retention " + C.pct + "%: -" + money2(pc.retHeld));
+        }
         l.push("Net due: " + money2(pc.dueThis));
-        bubble((pc.name || "Valuation " + (i + 1)) + (pc.final ? " (final)" : ""), l);
+        bubble((pc.name || "Valuation " + (i + 1)) + (pc.final ? " (final a/c)" : ""), l);
       });
       bubble("Certified to date", [money2(C.grandGross), "Net: " + money2(C.netCertified)]);
-      if (C.pct > 0) bubble("Retention held (" + C.pct + "%)", [money2(C.retentionHeld), C.mode === "final" ? "on final account" : "each valuation"]);
+      if (C.retOn) {
+        bubble("Retention held", C.hasFinal ? [money2(C.retentionHeld), "final account @ " + C.finalPct + "%"] : [money2(C.retentionHeld), "interim @ " + C.pct + "% (" + C.finalPct + "% at final a/c)"]);
+      }
       bubble("Remaining", [money2(C.remaining), pctStr(C.completion) + " complete"]);
     }
   });
@@ -49555,8 +49575,13 @@ async function gate(env, request) {
   return { sess };
 }
 function computeValuation(data) {
-  const pct = Math.max(0, Math.min(100, Number(data && data.retentionPct) || 0));
-  const mode = (data && data.retentionMode) === "each" ? "each" : "final";
+  const clampPct = (v, d) => {
+    const n = Number(v);
+    return isFinite(n) ? Math.max(0, Math.min(100, n)) : d;
+  };
+  const interimPct = clampPct(data && data.retentionPct, 5);
+  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
+  const retOn = interimPct > 0 || finalPct > 0;
   const cols = Array.isArray(data && data.columns) ? data.columns : [];
   const items = Array.isArray(data && data.items) ? data.items : [];
   const num5 = (v) => {
@@ -49582,12 +49607,16 @@ function computeValuation(data) {
       pct: cost ? taken / cost : 0
     };
   });
+  const retBase = contractTotal > 0 ? contractTotal : grandGross;
   let grossCum = 0, prevNetCum = 0;
   const perCol = cols.map((c) => {
     let gross = 0;
     for (const it of items) gross += num5((it.amounts || {})[c.id]);
     grossCum += gross;
-    const retHeld = mode === "each" ? pct / 100 * grossCum : c.final ? pct / 100 * grossCum : 0;
+    const isFinal = !!c.final;
+    const interimAccrued = retOn ? interimPct / 100 * grossCum : 0;
+    const retHeld = !retOn ? 0 : isFinal ? finalPct / 100 * retBase : interimAccrued;
+    const released = retOn && isFinal ? interimAccrued : 0;
     const netCum = grossCum - retHeld;
     const dueThis = netCum - prevNetCum;
     prevNetCum = netCum;
@@ -49596,18 +49625,24 @@ function computeValuation(data) {
       name: c.name || "",
       date: c.date || "",
       note: c.note || "",
-      final: !!c.final,
+      final: isFinal,
       gross,
       grossCum,
+      interimAccrued,
       retHeld,
+      released,
       netCum,
       dueThis
     };
   });
   const lastCol = perCol[perCol.length - 1] || null;
+  const hasFinal = cols.some((c) => c.final);
   return {
-    retentionPct: pct,
-    retentionMode: mode,
+    retentionPct: interimPct,
+    finalRetentionPct: finalPct,
+    retentionOn: retOn,
+    hasFinal,
+    retBase,
     contractTotal,
     grandGross,
     remaining: contractTotal - grandGross,
@@ -49827,8 +49862,8 @@ async function handle42(request, env, ctx, url) {
       title: String(out.title || hintTitle || "Valuation").slice(0, 200),
       client: String(b.client || "").slice(0, 200),
       projectNumber: "",
-      retentionPct: 0,
-      retentionMode: "final",
+      retentionPct: 5,
+      finalRetentionPct: 2.5,
       vatRate: 20,
       columns: [col],
       currentColumnId: col.id,
