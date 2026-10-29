@@ -168,7 +168,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
 // every required document supports, and folds the legacy `cppFiles` array into
 // `docFiles.cpp` so old projects keep working. Returns the same object mutated.
 function normLinks(links) {
-  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", costingKey: "" }, links || {});
+  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", valuationId: "", costingKey: "" }, links || {});
   if (!Array.isArray(l.ramsIds)) l.ramsIds = [];
   l.docFiles = (l.docFiles && typeof l.docFiles === "object" && !Array.isArray(l.docFiles)) ? l.docFiles : {};
   if (Array.isArray(l.cppFiles) && l.cppFiles.length) {
@@ -179,7 +179,7 @@ function normLinks(links) {
 
 // Compute the To-Do list from the required-docs config + the current links +
 // what actually exists, honouring any manual overrides stored in data.doneOverride.
-function computeTodo(p, data, fileCount) {
+function computeTodo(p, data, fileCount, valuation) {
   const req = data.required || {};
   const links = normLinks(data.links);
   const df = links.docFiles || {};
@@ -195,7 +195,8 @@ function computeTodo(p, data, fileCount) {
     if (dt.key === "programme") auto = !!links.programmeId || nf("programme");
     else if (dt.key === "rams") auto = (links.ramsIds.length > 0) || nf("rams");
     else if (dt.key === "cpp") auto = !!links.cppRef || nf("cpp");
-    else if (dt.key === "valuations") auto = fin;
+    // Valuations: a contract value set OR a line-item valuation sheet tied to it.
+    else if (dt.key === "valuations") auto = fin || !!(valuation && valuation.id) || !!links.valuationId;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
     out.push({ key: dt.key, label: dt.label, done: isDone, auto });
@@ -203,7 +204,7 @@ function computeTodo(p, data, fileCount) {
   return out;
 }
 
-function projectView(row, data, fileCount) {
+function projectView(row, data, fileCount, valuation) {
   return {
     id: row.id, number: row.number, name: row.name,
     siteClient: row.site_client, siteNumber: row.site_number,
@@ -218,8 +219,19 @@ function projectView(row, data, fileCount) {
     links: normLinks(data.links),
     costingKey: (data.links && data.links.costingKey) || normName(row.name),
     visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
-    todo: computeTodo(row, data, fileCount),
+    valuation: valuation || null,   // the linked line-item valuation sheet, if any
+    todo: computeTodo(row, data, fileCount, valuation),
   };
+}
+
+// The line-item valuation sheet tied to a project (reverse link: valuations.project_id).
+async function linkedValuation(db, projectId) {
+  try {
+    const r = await db.prepare(
+      "SELECT id, ref, title FROM valuations WHERE tenant_id=? AND project_id=? ORDER BY updated_at DESC LIMIT 1"
+    ).bind(db.tenantId, projectId).first();
+    return r ? { id: r.id, ref: r.ref || "", title: r.title || "" } : null;
+  } catch { return null; }
 }
 
 // Empty visibleTo (or missing) = visible to everyone with the Projects
@@ -308,7 +320,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Opportunistically heal an existing project whose PO-site push was missed
     // when it was created (idempotent add-only; PO_DB may not be bound yet).
     if (canManage) ctx?.waitUntil(pushSiteToPO(env, row.name));
-    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id), await linkedValuation(db, row.id)), canManage }, {}, env, request);
   }
 
   // ── Create (the wizard save) ──────────────────────────────────────────────
@@ -459,7 +471,7 @@ export async function handle(request, env, ctx, url, sess) {
       } catch {}
     }
     const fresh = await getRow(row.id);
-    return json({ ok: true, project: projectView(fresh, parse(fresh), await fileCountFor(row.id)) }, {}, env, request);
+    return json({ ok: true, project: projectView(fresh, parse(fresh), await fileCountFor(row.id), await linkedValuation(db, row.id)) }, {}, env, request);
   }
 
   // ── Link a built document to the project ──────────────────────────────────
@@ -476,6 +488,19 @@ export async function handle(request, env, ctx, url, sess) {
     const docKey = kind.startsWith("cpp-file") ? "cpp" : String(b.docKey || "").trim();
     if (kind === "programme") data.links.programmeId = value;
     else if (kind === "cpp") data.links.cppRef = value;
+    else if (kind === "valuation") {
+      // Link an existing line-item valuation sheet, or clear the link. The sheet's
+      // own `project_id` is the authoritative reverse link, so stamp/clear it too
+      // (clearing unlinks whatever sheet(s) currently point at this project).
+      data.links.valuationId = value;
+      try {
+        if (value) {
+          await db.prepare("UPDATE valuations SET project_id=? WHERE tenant_id=? AND id=?").bind(row.id, db.tenantId, value).run();
+        } else {
+          await db.prepare("UPDATE valuations SET project_id='' WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).run();
+        }
+      } catch {}
+    }
     else if (kind === "rams") {
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {

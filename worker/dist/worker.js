@@ -50308,7 +50308,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
   }
 }
 function normLinks(links) {
-  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", costingKey: "" }, links || {});
+  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", valuationId: "", costingKey: "" }, links || {});
   if (!Array.isArray(l.ramsIds)) l.ramsIds = [];
   l.docFiles = l.docFiles && typeof l.docFiles === "object" && !Array.isArray(l.docFiles) ? l.docFiles : {};
   if (Array.isArray(l.cppFiles) && l.cppFiles.length) {
@@ -50316,7 +50316,7 @@ function normLinks(links) {
   }
   return l;
 }
-function computeTodo(p, data, fileCount) {
+function computeTodo(p, data, fileCount, valuation) {
   const req = data.required || {};
   const links = normLinks(data.links);
   const df = links.docFiles || {};
@@ -50330,14 +50330,14 @@ function computeTodo(p, data, fileCount) {
     if (dt.key === "programme") auto = !!links.programmeId || nf("programme");
     else if (dt.key === "rams") auto = links.ramsIds.length > 0 || nf("rams");
     else if (dt.key === "cpp") auto = !!links.cppRef || nf("cpp");
-    else if (dt.key === "valuations") auto = fin;
+    else if (dt.key === "valuations") auto = fin || !!(valuation && valuation.id) || !!links.valuationId;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
     out.push({ key: dt.key, label: dt.label, done: isDone, auto });
   }
   return out;
 }
-function projectView(row, data, fileCount) {
+function projectView(row, data, fileCount, valuation) {
   return {
     id: row.id,
     number: row.number,
@@ -50360,8 +50360,20 @@ function projectView(row, data, fileCount) {
     links: normLinks(data.links),
     costingKey: data.links && data.links.costingKey || normName2(row.name),
     visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
-    todo: computeTodo(row, data, fileCount)
+    valuation: valuation || null,
+    // the linked line-item valuation sheet, if any
+    todo: computeTodo(row, data, fileCount, valuation)
   };
+}
+async function linkedValuation(db, projectId) {
+  try {
+    const r = await db.prepare(
+      "SELECT id, ref, title FROM valuations WHERE tenant_id=? AND project_id=? ORDER BY updated_at DESC LIMIT 1"
+    ).bind(db.tenantId, projectId).first();
+    return r ? { id: r.id, ref: r.ref || "", title: r.title || "" } : null;
+  } catch {
+    return null;
+  }
 }
 function canSeeProject(data, me, canManage2) {
   if (canManage2) return true;
@@ -50439,7 +50451,7 @@ async function handle43(request, env, ctx, url, sess) {
     const data = parse2(row);
     if (!canSeeProject(data, me, canManage2)) return error("Project not found", 404, env, request);
     if (canManage2) ctx?.waitUntil(pushSiteToPO(env, row.name));
-    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage: canManage2 }, {}, env, request);
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id), await linkedValuation(db, row.id)), canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
     if (!canManage2) return error("Forbidden", 403, env, request);
@@ -50579,7 +50591,7 @@ async function handle43(request, env, ctx, url, sess) {
       }
     }
     const fresh = await getRow(row.id);
-    return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
+    return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id), await linkedValuation(db, row.id)) }, {}, env, request);
   }
   if (path === "/project/link" && method === "POST") {
     if (!canManage2) return error("Forbidden", 403, env, request);
@@ -50592,7 +50604,17 @@ async function handle43(request, env, ctx, url, sess) {
     const docKey = kind.startsWith("cpp-file") ? "cpp" : String(b.docKey || "").trim();
     if (kind === "programme") data.links.programmeId = value;
     else if (kind === "cpp") data.links.cppRef = value;
-    else if (kind === "rams") {
+    else if (kind === "valuation") {
+      data.links.valuationId = value;
+      try {
+        if (value) {
+          await db.prepare("UPDATE valuations SET project_id=? WHERE tenant_id=? AND id=?").bind(row.id, db.tenantId, value).run();
+        } else {
+          await db.prepare("UPDATE valuations SET project_id='' WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).run();
+        }
+      } catch {
+      }
+    } else if (kind === "rams") {
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {
       data.links.ramsIds = data.links.ramsIds.filter((x) => x !== value);
