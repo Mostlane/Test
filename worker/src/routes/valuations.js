@@ -67,26 +67,36 @@ async function gate(env, request) {
 }
 
 // ── Compute the whole sheet from its data (shared by the PDF + Excel; the builder
-// mirrors this in JS). RETENTION = the standard UK two-rate "moiety" model, the
-// same one the job-costing engine uses (costing.js computeFin):
+// mirrors this in JS). RETENTION is PER-JOB (Jamie: "not all jobs which have
+// valuations have a retention… job by job whether bits are needed or not"): a sheet
+// carries an explicit **`data.hasRetention`** toggle. When OFF, no retention is ever
+// applied; when ON it's the standard UK two-rate "moiety" model (the same one the
+// job-costing engine uses, costing.js computeFin):
 //   • every INTERIM valuation holds `retentionPct`% (default 5) of the cumulative
 //     value certified to date;
 //   • the FINAL account RELEASES all that interim retention and instead holds
 //     `finalRetentionPct`% (default 2.5 — the other half, released after the
 //     defects period) of the CONTRACT value.
 // So net-due on the final account naturally "adds back" the interim retention and
-// then deducts the 2.5%. Set retentionPct = 0 for a job with no retention. Each
-// column exposes retHeld (held AT that valuation), interimAccrued (5% to date) and
-// released (interim retention given back, non-zero only on the final account) so
+// then deducts the 2.5%. A NEW sheet defaults hasRetention:false (the office ticks
+// it on per job); legacy sheets with no toggle fall back to "on if a rate is set".
+// Each column exposes retHeld (held AT that valuation), interimAccrued (5% to date)
+// and released (interim retention given back, non-zero only on the final account) so
 // the bubbles/PDF can show the release → 2.5%-held calculation. ─────────────────
 export function computeValuation(data) {
+  data = data || {};
   const clampPct = (v, d) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : d; };
-  const interimPct = clampPct(data && data.retentionPct, 5);
+  const interimPct = clampPct(data.retentionPct, 5);
   // finalRetentionPct defaults to half the interim rate (5 → 2.5) when not set.
-  const finalPct = clampPct(data && data.finalRetentionPct, interimPct / 2);
-  const retOn = interimPct > 0 || finalPct > 0;
-  const cols = Array.isArray(data && data.columns) ? data.columns : [];
-  const items = Array.isArray(data && data.items) ? data.items : [];
+  const finalPct = clampPct(data.finalRetentionPct, interimPct / 2);
+  // Per-job toggle: explicit true/false wins; legacy sheets (no toggle) = on if a
+  // positive interim rate was stored.
+  const hasRetention = data.hasRetention === true ? true
+    : data.hasRetention === false ? false
+    : clampPct(data.retentionPct, 0) > 0;
+  const retOn = hasRetention && (interimPct > 0 || finalPct > 0);
+  const cols = Array.isArray(data.columns) ? data.columns : [];
+  const items = Array.isArray(data.items) ? data.items : [];
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
 
   let contractTotal = 0, grandGross = 0;
@@ -123,7 +133,7 @@ export function computeValuation(data) {
   const lastCol = perCol[perCol.length - 1] || null;
   const hasFinal = cols.some(c => c.final);
   return {
-    retentionPct: interimPct, finalRetentionPct: finalPct, retentionOn: retOn, hasFinal, retBase,
+    retentionPct: interimPct, finalRetentionPct: finalPct, hasRetention, retentionOn: retOn, hasFinal, retBase,
     contractTotal, grandGross,
     remaining: contractTotal - grandGross,
     completion: contractTotal ? grandGross / contractTotal : 0,
@@ -315,7 +325,7 @@ export async function handle(request, env, ctx, url) {
     const data = {
       title: String(out.title || hintTitle || "Valuation").slice(0, 200),
       client: String(b.client || "").slice(0, 200),
-      projectNumber: "", retentionPct: 5, finalRetentionPct: 2.5, vatRate: 20,
+      projectNumber: "", hasRetention: false, retentionPct: 5, finalRetentionPct: 2.5, vatRate: 20,
       columns: [col], currentColumnId: col.id, items,
     };
     const now = new Date().toISOString();

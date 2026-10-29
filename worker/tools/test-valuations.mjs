@@ -31,6 +31,22 @@ const items = [
 // col1 gross = 3610, col2 gross = 3988, col3 gross = 0
 // contractTotal = 12464, grandGross = 7598, remaining = 4866
 
+// ── Per-job toggle OFF — no retention whatever the rates ─────────────────────
+{
+  const C = computeValuation({ hasRetention: false, retentionPct: 5, finalRetentionPct: 2.5, columns: cols, items });
+  is("toggle off → retentionOn false", C.retentionOn, false);
+  is("toggle off → hasRetention false", C.hasRetention, false);
+  eq("toggle off → nothing held", C.retentionHeld, 0);
+  eq("toggle off → final due is gross", C.perCol[2].dueThis, 0);
+  eq("toggle off → netCertified = gross", C.netCertified, 7598);
+}
+// ── New-sheet default (no toggle, no rate) → off ─────────────────────────────
+{
+  const C = computeValuation({ columns: cols, items });
+  is("default off", C.retentionOn, false);
+  eq("default nothing held", C.retentionHeld, 0);
+}
+
 // ── No retention (interim 0) ─────────────────────────────────────────────────
 {
   const C = computeValuation({ retentionPct: 0, finalRetentionPct: 0, columns: cols, items });
@@ -114,8 +130,8 @@ const items = [
   eq("empty retentionHeld", C.retentionHeld, 0);
 }
 {
-  // bad numbers fall back to the defaults (5% / 2.5%), never NaN
-  const C = computeValuation({ retentionPct: "oops", finalRetentionPct: "x", columns: cols, items });
+  // retention ON but bad numbers fall back to the defaults (5% / 2.5%), never NaN
+  const C = computeValuation({ hasRetention: true, retentionPct: "oops", finalRetentionPct: "x", columns: cols, items });
   eq("bad interim pct → 5%", C.retentionPct, 5);
   eq("bad final pct → 2.5%", C.finalRetentionPct, 2.5);
   eq("bad pct still computes final retention", C.retentionHeld, 0.025 * 12464);

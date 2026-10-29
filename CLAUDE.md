@@ -2707,15 +2707,22 @@ the **programmes** subsystem (builder + document + AI draft + PDF/Excel), but
   one **column** per valuation (`columns:[{id,name,date,note,final}]` + `currentColumnId`).
   On each valuation you enter the amount taken that time per item; the sheet totals
   **Total Taken** (sum across columns), **Remaining** (cost − taken), **Completion %**.
-  `data` JSON also holds `title, client, projectNumber, retentionPct, finalRetentionPct,
-  vatRate`. **The current valuation column is highlighted** (yellow), like the Excel.
-- **Retention = the standard UK two-rate "moiety" model — the SAME one the job-costing
-  engine uses (costing.js computeFin), confirmed from history with Jamie (Oct 2026):**
+  `data` JSON also holds `title, client, projectNumber, hasRetention, retentionPct,
+  finalRetentionPct, vatRate`. **The current valuation column is highlighted** (yellow),
+  like the Excel.
+- **Retention is PER JOB (Jamie Oct 2026: "not all jobs which have valuations have a
+  retention… job by job whether bits are needed or not").** A sheet carries an explicit
+  **`hasRetention`** toggle — a "This job has retention" checkbox in the builder's Details
+  & settings. **A NEW sheet defaults `hasRetention:false`** (the % fields stay pre-filled
+  5/2.5 but are hidden until ticked); legacy sheets with no toggle fall back to "on if a
+  positive `retentionPct` was stored". When OFF, no retention is ever applied (net = gross,
+  no retention bubble/row anywhere). When ON it's **the standard UK two-rate "moiety" model
+  — the SAME one the job-costing engine uses (costing.js computeFin):**
   **every INTERIM valuation holds `retentionPct`% (default 5)** of the cumulative value
   certified to date; **the FINAL account (the column flagged `final`) RELEASES all that
   interim retention and instead holds `finalRetentionPct`% (default 2.5 — the other half,
   released after the defects period) of the CONTRACT value.** So net-due on the final
-  account naturally "adds back" the 5% and then deducts 2.5%. Set `retentionPct:0` for a
+  account naturally "adds back" the 5% and then deducts 2.5%. Untick `hasRetention` for a
   job with no retention; `finalRetentionPct` defaults to HALF the interim rate when unset
   (5→2.5). Per column: `grossCum` (cumulative), `interimAccrued` (5% held to date),
   `retHeld` (held AT this valuation — interim% on interims, final% of contract on the
@@ -2727,8 +2734,8 @@ the **programmes** subsystem (builder + document + AI draft + PDF/Excel), but
   (lib/valuationpdf.js) reimplements it locally (kept dependency-free — imports only
   lib/pdf.js — to avoid an import cycle). **The earlier single-rate `retentionMode
   (final|each)` model was REPLACED by this two-rate model (Oct 2026) — don't reintroduce
-  a mode toggle.** Test `node --no-warnings worker/tools/test-valuations.mjs` (49 cases:
-  totals, two-rate interim/release/final, interim-only, no-cost base, edges).
+  a mode toggle.** Test `node --no-warnings worker/tools/test-valuations.mjs` (56 cases:
+  totals, per-job toggle on/off, two-rate interim/release/final, interim-only, edges).
 - **Tables (self-migrating):** `valuations` (id `VS-…`, ref `VAL-####` from app_config
   `val:seq`, tenant/title/client/project_id/status/data/created/updated/updated_by).
 - **Routes (gate FullAccess|Valuations):** GET /val/list, GET /val/one?id= (+ a
@@ -2742,8 +2749,8 @@ the **programmes** subsystem (builder + document + AI draft + PDF/Excel), but
   **valuation-edit.html** (the builder, autosaves): the sheet as an HTML table (items ×
   valuation columns, current column highlighted, totals row), add item / **add extra
   works** (amber row) / add valuation / set-current / mark-final / remove, a Details &
-  settings collapsible (title/client/Project dropdown/status/interim retention % +
-  final-account retention %), and **side bubbles** (contract total, current valuation
+  settings collapsible (title/client/Project dropdown/status/"This job has retention"
+  tick → interim % + final-account %), and **side bubbles** (contract total, current valuation
   net due with the retention-release line on the final a/c, each previous valuation,
   certified to date, retention held, remaining) — the "little bubbles" Jamie asked for.
   **⬇ PDF** (POST /val/export → blob) + **⬇ Excel** (client-side **valuation-export.js**

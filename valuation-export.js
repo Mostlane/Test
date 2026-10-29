@@ -15,7 +15,10 @@
     const clampPct = (v, d) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : d; };
     const interimPct = clampPct(data.retentionPct, 5);
     const finalPct = clampPct(data.finalRetentionPct, interimPct / 2);
-    const retOn = interimPct > 0 || finalPct > 0;
+    const hasRetention = data.hasRetention === true ? true
+      : data.hasRetention === false ? false
+      : clampPct(data.retentionPct, 0) > 0;
+    const retOn = hasRetention && (interimPct > 0 || finalPct > 0);
     const cols = data.columns || [], items = data.items || [];
     let contractTotal = 0, grandGross = 0;
     const perItem = items.map(it => {
