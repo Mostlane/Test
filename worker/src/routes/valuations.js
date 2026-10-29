@@ -53,7 +53,7 @@ async function nextRef(db) {
     const mx = await db.prepare("SELECT ref FROM valuations WHERE tenant_id=? AND ref LIKE 'VAL-%'").bind(db.tenantId).all();
     for (const r of (mx.results || [])) { const m = /VAL-(\d+)/.exec(r.ref || ""); if (m) n = Math.max(n, parseInt(m[1], 10) + 1); }
   } catch {}
-  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'val:seq', ?) ON CONFLICT(tenant_id, key) DO UPDATE SET value=?")
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'val:seq', ?) ON CONFLICT(key) DO UPDATE SET value=?")
     .bind(db.tenantId, String(n), String(n)).run();
   return "VAL-" + String(n).padStart(4, "0");
 }
