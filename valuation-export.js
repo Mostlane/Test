@@ -7,8 +7,8 @@
 // finalRetentionPct% (2.5) of the contract value instead.
 (function () {
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
-  const money = v => ({ v: Math.round(num(v) * 100) / 100, money: true });
-  const moneyB = v => ({ v: Math.round(num(v) * 100) / 100, money: true, bold: true });
+  const money = v => ({ v: Math.round(num(v) * 100) / 100, money: true, center: true });
+  const moneyB = v => ({ v: Math.round(num(v) * 100) / 100, money: true, bold: true, center: true });
   const pctStr = f => (isFinite(f) ? Math.round(f * 100) : 0) + "%";
 
   function compute(data) {
@@ -55,18 +55,18 @@
     const head = ["#", "Description", "Cost"];
     cols.forEach(c => head.push((c.name || "Valuation") + (c.final ? " (final)" : "")));
     head.push("Taken", "Remaining", "%");
-    rows.push(head.map(h => ({ v: h, bold: true })));
+    rows.push(head.map((h, ix) => ({ v: h, bold: true, center: ix >= 2 })));
     // items
     C.perItem.forEach((pi, i) => {
       const r = [pi.extra ? "EXTRA" : (i + 1), pi.desc, money(pi.cost)];
       cols.forEach(c => { const a = num(pi.am[c.id]); r.push(a ? money(a) : ""); });
-      r.push(moneyB(pi.taken), money(pi.remaining), pctStr(pi.pct));
+      r.push(moneyB(pi.taken), money(pi.remaining), { v: pctStr(pi.pct), center: true });
       rows.push(r);
     });
     // totals
     const tot = ["", { v: "TOTALS", bold: true }, moneyB(C.contractTotal)];
     C.perCol.forEach(c => tot.push(moneyB(c.gross)));
-    tot.push(moneyB(C.grandGross), moneyB(C.remaining), { v: pctStr(C.completion), bold: true });
+    tot.push(moneyB(C.grandGross), moneyB(C.remaining), { v: pctStr(C.completion), bold: true, center: true });
     rows.push(tot);
     // summary
     rows.push([]);
