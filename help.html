@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=46"></script>
+  <script src="/portal-config.js?v=47"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -527,6 +527,26 @@
           ["Add anything helpful (title, client, site, and a <b>start date</b>), then press <b>✨ Draft it</b>. It reads the scope and builds a sensible <b>ordered task list with contractors</b>, staggering the dates so trades follow on — this can take up to a minute. You don't even need a document — you can just describe the works in the notes box and let it draft from that."],
           ["It opens straight into the builder as a <b>new draft</b>. Nothing is issued or shared — it's a starting point. Tidy the tasks, fix any dates, then use <b>Auto-order</b> to re-stagger, and <b>Issue</b> when you're happy."],
           ["First time only: if it says AI drafting isn't switched on, the <b>ANTHROPIC_API_KEY</b> needs adding to the mostlane-api worker in Cloudflare (a one-off) — the message tells you exactly what to do."],
+        ]},
+      ]},
+      { title: "Valuations", arts: [
+        { icon: "💷", title: "Build a valuation sheet", perms: ["Valuations"], intro: "Like your Excel valuation — each item has a cost, you take an amount on each valuation, and the sheet totals everything for you.", steps: [
+          ["Open <b>💷 Valuations</b> from the menu and tap <b>＋ New valuation</b>. Give it a title and client. Press <b>＋ Add item</b> for each line of works and type its <b>Cost</b> (the contract value for that item). Everything autosaves as you type."],
+          ["Each <b>valuation</b> is a column. On the current valuation, type the <b>amount taken this time</b> against each item. The sheet works out <b>Total taken</b>, <b>Remaining</b> and <b>% complete</b> for every item and the whole job automatically."],
+          ["Press <b>＋ Add valuation</b> for the next round — it becomes the <b>current</b> column (highlighted). Tap <b>◎ set</b> on any column header to make a different one current. Rename a column (e.g. \"Final Account\") and tick <b>Final</b> on the last one."],
+          ["The <b>bubbles down the side</b> show it at a glance: this valuation's net due, each previous valuation, total certified to date, retention held and what's remaining."],
+          ["<b>Extra works?</b> Press <b>＋ Add extra works</b> — it adds a highlighted row you can price and valuate like any other."],
+          ["<b>Retention</b> (where it applies): open <b>Details &amp; settings</b> and set the <b>Retention %</b> (e.g. 2.5). Leave it as <b>“on the final account only”</b> and the portal holds that percentage back on the last valuation — exactly how the final account works."],
+          ["Need a copy outside the portal? <b>⬇ PDF</b> gives a clean print-ready sheet (current valuation highlighted, totals and summary bubbles), and <b>⬇ Excel</b> gives a workbook of the figures."],
+        ]},
+        { icon: "🤖", title: "Build a valuation from a document (AI)", perms: ["Valuations"], intro: "Turn a schedule of works into a ready-made item list in seconds.", steps: [
+          ["On the <b>💷 Valuations</b> page press <b>🤖 Build from a document</b>. Choose a <b>PDF</b>, <b>spreadsheet (.xlsx)</b> or <b>text/CSV</b> of the schedule of works — or paste it in. The file is read <b>on your device</b>; only the text is sent."],
+          ["It pulls out each work item and its cost into a new sheet, keeping the wording. Open it, check the figures, then start taking valuations. <b>Scanned/picture PDFs work too</b> (up to ~6 MB)."],
+          ["First time only: if it says AI isn't switched on, the <b>ANTHROPIC_API_KEY</b> needs adding to the worker (a one-off) — the message tells you what to do."],
+        ]},
+        { icon: "📁", title: "Tie a valuation to a project", perms: ["Valuations"], steps: [
+          ["On a project's hub, the <b>Valuations</b> row has a <b>📊 Valuation sheet</b> button — it opens that project's sheet (or starts one tied to it, prefilled with the project name)."],
+          ["You can also pick the project from the <b>Project</b> dropdown in a sheet's <b>Details &amp; settings</b>."],
         ]},
       ]},
     ];

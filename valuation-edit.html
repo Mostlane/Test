@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Valuation — Mostlane</title>
+  <script src="/portal-config.js?v=47"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <link rel="manifest" href="/manifest.json">
+  <script src="auth.js"></script>
+  <script src="/ml-xlsx.js?v=1"></script>
+  <script src="/valuation-export.js?v=1"></script>
+  <style>
+    :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; --hi:#fff7cc; --hiln:#f0d94b; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f6;color:#1f2a37;}
+    header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:12px 60px 12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    header.page h1{font-size:17px;margin:0;flex:1;min-width:140px;}
+    .btn{border:none;border-radius:9px;padding:8px 12px;font:600 13px 'Segoe UI';cursor:pointer;text-decoration:none;display:inline-block;}
+    .btn.grey{background:rgba(255,255,255,.16);color:#fff;} .btn.ghost{background:#eef2f6;color:#1f2a44;}
+    .btn.primary{background:#2563eb;color:#fff;} .btn.danger{background:#dc2626;color:#fff;} .btn.sm{padding:5px 9px;font-size:12px;}
+    #saveState{font-size:12px;color:#d7e3f2;min-width:70px;}
+    .layout{display:flex;gap:14px;align-items:flex-start;max-width:1500px;margin:0 auto;padding:14px;}
+    .main{flex:1;min-width:0;}
+    .side{width:250px;flex:none;position:sticky;top:12px;}
+    @media(max-width:980px){ .layout{flex-direction:column;} .side{width:100%;position:static;} }
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
+    .card h3{margin:0 0 8px;font-size:14px;color:var(--navy);}
+    label.f{display:block;font-weight:600;font-size:12px;color:#334;margin:8px 0 3px;}
+    input.t,select.t,textarea.t{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;font:13.5px 'Segoe UI';}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;} @media(max-width:520px){.grid2{grid-template-columns:1fr;}}
+    details.det>summary{cursor:pointer;font-weight:600;color:var(--navy);font-size:13px;}
+    .tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:12px;background:#fff;}
+    table{border-collapse:collapse;width:100%;font-size:12.5px;}
+    th,td{border-bottom:1px solid #eef1f5;padding:4px 6px;text-align:left;vertical-align:top;}
+    thead th{background:var(--navy);color:#fff;position:sticky;top:0;font-size:11px;font-weight:700;vertical-align:bottom;}
+    thead th.valcol{min-width:118px;}
+    th.num,td.num{text-align:right;white-space:nowrap;}
+    tbody tr:nth-child(even) td{background:#fafbfd;}
+    tr.extra td{background:#fff6ea !important;}
+    td.cur,th.cur{background:var(--hi) !important;box-shadow:inset 2px 0 0 var(--hiln),inset -2px 0 0 var(--hiln);}
+    thead th.cur{background:#15406b !important;box-shadow:inset 0 -3px 0 var(--hiln);}
+    .idesc{width:100%;border:1px solid transparent;border-radius:6px;padding:4px 6px;font:12.5px 'Segoe UI';resize:none;min-height:30px;background:transparent;}
+    .idesc:focus{border-color:#cbd5e1;background:#fff;}
+    .cell{width:92px;border:1px solid #d7dee6;border-radius:6px;padding:4px 6px;font:12.5px 'Segoe UI';text-align:right;}
+    .cell:focus{border-color:#2563eb;outline:none;}
+    .colname{width:104px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.12);color:#fff;border-radius:6px;padding:3px 5px;font:600 11.5px 'Segoe UI';}
+    .coldate{width:104px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.12);color:#fff;border-radius:6px;padding:2px 4px;font:11px 'Segoe UI';margin-top:3px;}
+    .colbtns{display:flex;gap:4px;align-items:center;margin-top:4px;font-size:10.5px;font-weight:600;}
+    .colbtns button{border:none;border-radius:5px;padding:2px 5px;font-size:10.5px;cursor:pointer;background:rgba(255,255,255,.2);color:#fff;}
+    .colbtns label{color:#dbe6f3;display:flex;align-items:center;gap:2px;}
+    .xrow{border:none;background:none;color:#c0392b;cursor:pointer;font-size:14px;}
+    .muted{color:var(--muted);font-size:12px;}
+    .bub{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:9px;background:#fff;}
+    .bub.cur{border-color:var(--hiln);background:#fffdf3;}
+    .bub h4{margin:0 0 4px;font-size:11.5px;color:var(--navy);text-transform:uppercase;letter-spacing:.3px;}
+    .bub .big{font-size:18px;font-weight:800;color:#0f2438;}
+    .bub .ln{font-size:12px;color:#334;display:flex;justify-content:space-between;gap:8px;margin-top:2px;}
+    .bub .ln b{font-variant-numeric:tabular-nums;}
+    .barS{height:8px;border-radius:999px;background:#e5eaf0;overflow:hidden;margin-top:6px;}
+    .barS>span{display:block;height:100%;background:linear-gradient(90deg,#1A4F8F,#2563eb);}
+    .addbar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+    .tf td{background:#eaf0f6 !important;font-weight:800;border-top:2px solid var(--navy);}
+    .pct{color:#5b6b78;font-variant-numeric:tabular-nums;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="valuations.html" title="Back">‹ Back</a>
+    <h1 id="hTitle">💷 Valuation</h1>
+    <span id="saveState"></span>
+    <button class="btn grey" id="btnPdf">⬇ PDF</button>
+    <button class="btn grey" id="btnXls">⬇ Excel</button>
+  </header>
+
+  <div class="layout">
+    <div class="main">
+      <div class="card">
+        <details class="det" id="detDetails">
+          <summary>Details &amp; settings</summary>
+          <div class="grid2" style="margin-top:8px;">
+            <div><label class="f">Title</label><input class="t" id="fTitle" placeholder="e.g. Starbucks Jubilee Street"></div>
+            <div><label class="f">Client</label><input class="t" id="fClient" placeholder="e.g. Cobra Coffee"></div>
+            <div><label class="f">Project (optional)</label><select class="t" id="fProject"><option value="">— Not tied to a project —</option></select></div>
+            <div><label class="f">Status</label><select class="t" id="fStatus"><option value="live">Live</option><option value="complete">Complete</option><option value="archived">Archived</option></select></div>
+            <div><label class="f">Retention %</label><input class="t" id="fRet" inputmode="decimal" placeholder="0 = none, e.g. 2.5"></div>
+            <div><label class="f">Retention applies</label><select class="t" id="fRetMode"><option value="final">On the final account only</option><option value="each">On every valuation</option></select></div>
+          </div>
+          <p class="muted" style="margin:8px 0 0;">Retention is held back from what's certified. “Final account only” matches most jobs — 2.5% comes off the last valuation.</p>
+        </details>
+      </div>
+
+      <div class="card" style="padding:10px 12px;">
+        <div class="tablewrap"><table id="grid"></table></div>
+        <div class="addbar">
+          <button class="btn ghost sm" id="btnAddItem">＋ Add item</button>
+          <button class="btn ghost sm" id="btnAddExtra" style="color:#9a3412;">＋ Add extra works</button>
+          <button class="btn primary sm" id="btnAddVal">＋ Add valuation</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="side" id="bubbles"></div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  const tok = () => localStorage.getItem("mostlaneToken");
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const money = n => "£" + (Math.round((Number(n)||0)*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pctStr = f => (isFinite(f)?Math.round(f*100):0)+"%";
+  const num = v => { const n=Number(v); return isFinite(n)?n:0; };
+  const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
+  (function(){ try{ const p=JSON.parse(localStorage.getItem("mostlanePermissions")||"{}"); if(p.FullAccess!=="Yes"&&p.Valuations!=="Yes") location.replace("main.html"); }catch(e){} })();
+
+  const qid = new URLSearchParams(location.search).get("id") || "";
+  let V = null;             // { id, ref, title, client, projectId, status, data }
+  let baseVersion = null;   // updated_at we last saw (optimistic concurrency)
+  let dirty = false, saveTimer = null;
+
+  function blank(){
+    const c = { id: uid("c"), name: "Valuation 1", date: "", note: "", final: false };
+    return { title:"", client:"", projectNumber:"", retentionPct:0, retentionMode:"final", vatRate:20,
+             columns:[c], currentColumnId:c.id, items:[ newItem(), newItem(), newItem() ] };
+  }
+  function newItem(extra){ return { id: uid("it"), desc:"", cost:0, extra:!!extra, amounts:{} }; }
+
+  // ── Compute (mirrors worker computeValuation) ──────────────────────────────
+  function compute(){
+    const d=V.data; const pct=Math.max(0,Math.min(100,Number(d.retentionPct)||0)); const mode=d.retentionMode==="each"?"each":"final";
+    const cols=d.columns||[], items=d.items||[];
+    let contractTotal=0, grandGross=0;
+    const perItem=items.map(it=>{ const cost=num(it.cost), am=it.amounts||{}; let taken=0; for(const c of cols) taken+=num(am[c.id]); contractTotal+=cost; grandGross+=taken; return {id:it.id,cost,taken,remaining:cost-taken,pct:cost?taken/cost:0}; });
+    let grossCum=0, prevNet=0;
+    const perCol=cols.map(c=>{ let gross=0; for(const it of items) gross+=num((it.amounts||{})[c.id]); grossCum+=gross; const retHeld=mode==="each"?(pct/100)*grossCum:(c.final?(pct/100)*grossCum:0); const netCum=grossCum-retHeld; const dueThis=netCum-prevNet; prevNet=netCum; return {id:c.id,name:c.name,date:c.date,final:!!c.final,gross,grossCum,retHeld,netCum,dueThis}; });
+    const last=perCol[perCol.length-1]||null;
+    return {pct,mode,contractTotal,grandGross,remaining:contractTotal-grandGross,completion:contractTotal?grandGross/contractTotal:0,retentionHeld:last?last.retHeld:0,netCertified:last?last.netCum:0,perItem,perCol};
+  }
+
+  // ── Render the grid (structural: headers + rows + inputs) ──────────────────
+  function renderGrid(){
+    const d=V.data, cols=d.columns||[], items=d.items||[], cur=d.currentColumnId;
+    let head = '<thead><tr>'
+      + '<th style="min-width:26px;">#</th>'
+      + '<th style="min-width:260px;">Description</th>'
+      + '<th class="num" style="min-width:84px;">Cost</th>';
+    cols.forEach(c=>{
+      const isCur = c.id===cur;
+      head += `<th class="valcol num${isCur?' cur':''}">`
+        + `<input class="colname" data-col="${esc(c.id)}" data-f="name" value="${esc(c.name||'')}" placeholder="Valuation">`
+        + `<input type="date" class="coldate" data-col="${esc(c.id)}" data-f="date" value="${esc(c.date||'')}">`
+        + `<div class="colbtns">`
+          + `<label><input type="checkbox" data-colfinal="${esc(c.id)}"${c.final?' checked':''}>Final</label>`
+          + `<button data-setcur="${esc(c.id)}" title="Make this the current valuation">${isCur?'● current':'◎ set'}</button>`
+          + `<button data-delcol="${esc(c.id)}" title="Remove this valuation">✕</button>`
+        + `</div></th>`;
+    });
+    head += '<th class="num" style="min-width:84px;">Taken</th><th class="num" style="min-width:84px;">Remaining</th><th class="num" style="min-width:48px;">%</th><th style="min-width:28px;"></th></tr></thead>';
+
+    let body = '<tbody>';
+    items.forEach((it,i)=>{
+      body += `<tr class="${it.extra?'extra':''}" data-row="${esc(it.id)}">`
+        + `<td class="muted">${i+1}${it.extra?'<div style="font-size:9px;color:#9a3412;font-weight:700;">EXTRA</div>':''}</td>`
+        + `<td><textarea class="idesc" data-item="${esc(it.id)}" data-f="desc" rows="1" placeholder="Describe the work item…">${esc(it.desc||'')}</textarea></td>`
+        + `<td class="num"><input class="cell" data-item="${esc(it.id)}" data-f="cost" inputmode="decimal" value="${it.cost?esc(it.cost):''}"></td>`;
+      cols.forEach(c=>{
+        const v = (it.amounts||{})[c.id];
+        body += `<td class="num${c.id===cur?' cur':''}"><input class="cell" data-item="${esc(it.id)}" data-amt="${esc(c.id)}" inputmode="decimal" value="${v?esc(v):''}"></td>`;
+      });
+      body += `<td class="num"><b id="tk-${esc(it.id)}"></b></td>`
+        + `<td class="num" id="rm-${esc(it.id)}"></td>`
+        + `<td class="num pct" id="pc-${esc(it.id)}"></td>`
+        + `<td><button class="xrow" data-delrow="${esc(it.id)}" title="Remove item">✕</button></td></tr>`;
+    });
+    body += '</tbody>';
+    // totals foot
+    let foot = '<tfoot><tr class="tf"><td></td><td>TOTALS</td><td class="num" id="ft-cost"></td>';
+    cols.forEach(c=> foot += `<td class="num${c.id===cur?' cur':''}" id="ft-${esc(c.id)}"></td>`);
+    foot += '<td class="num" id="ft-taken"></td><td class="num" id="ft-rem"></td><td class="num" id="ft-pct"></td><td></td></tr></tfoot>';
+
+    document.getElementById("grid").innerHTML = head + body + foot;
+    document.querySelectorAll(".idesc").forEach(autoGrow);
+    recalc();
+  }
+  function autoGrow(t){ t.style.height="auto"; t.style.height=(t.scrollHeight)+"px"; }
+
+  // ── Recalc computed cells + totals + bubbles (no input re-render) ──────────
+  function recalc(){
+    const C=compute();
+    C.perItem.forEach(pi=>{
+      const tk=document.getElementById("tk-"+pi.id); if(tk) tk.textContent=money(pi.taken);
+      const rm=document.getElementById("rm-"+pi.id); if(rm){ rm.textContent=money(pi.remaining); rm.style.color = pi.remaining>0.005?"#b4442d":(pi.remaining<-0.005?"#b4442d":"#1f7a37"); }
+      const pc=document.getElementById("pc-"+pi.id); if(pc) pc.textContent=pctStr(pi.pct);
+    });
+    const fc=document.getElementById("ft-cost"); if(fc) fc.textContent=money(C.contractTotal);
+    C.perCol.forEach(c=>{ const e=document.getElementById("ft-"+c.id); if(e) e.textContent=money(c.gross); });
+    const ft=document.getElementById("ft-taken"); if(ft) ft.textContent=money(C.grandGross);
+    const fr=document.getElementById("ft-rem"); if(fr) fr.textContent=money(C.remaining);
+    const fp=document.getElementById("ft-pct"); if(fp) fp.textContent=pctStr(C.completion);
+    renderBubbles(C);
+  }
+
+  function renderBubbles(C){
+    const cur = V.data.currentColumnId;
+    let h = `<div class="bub"><h4>Contract total</h4><div class="big">${money(C.contractTotal)}</div>`
+      + `<div class="barS"><span style="width:${Math.min(100,Math.round(C.completion*100))}%"></span></div>`
+      + `<div class="ln"><span>Certified to date</span><b>${money(C.grandGross)}</b></div>`
+      + `<div class="ln"><span>Remaining</span><b>${money(C.remaining)}</b></div>`
+      + `<div class="ln"><span>Complete</span><b>${pctStr(C.completion)}</b></div></div>`;
+    // current valuation bubble
+    const cc = C.perCol.find(c=>c.id===cur);
+    if(cc){
+      h += `<div class="bub cur"><h4>${esc(cc.name||"Current valuation")}${cc.final?" · final a/c":""} <span style="color:#b8860b;">● current</span></h4>`
+        + `<div class="big">${money(cc.dueThis)}</div><div class="muted" style="margin-top:-2px;">net due this valuation</div>`
+        + `<div class="ln"><span>Gross this time</span><b>${money(cc.gross)}</b></div>`
+        + `<div class="ln"><span>Gross to date</span><b>${money(cc.grossCum)}</b></div>`
+        + (cc.retHeld?`<div class="ln"><span>Retention held</span><b>-${money(cc.retHeld)}</b></div>`:"")
+        + `</div>`;
+    }
+    // previous valuations (all columns, newest first, small)
+    if(C.perCol.length){
+      h += `<div class="bub"><h4>Valuations</h4>`;
+      C.perCol.forEach((c,i)=>{ h += `<div class="ln"><span>${esc(c.name||("Valuation "+(i+1)))}${c.final?" (final)":""}</span><b>${money(c.dueThis)}</b></div>`; });
+      if(C.retentionHeld) h += `<div class="ln" style="margin-top:4px;border-top:1px solid #eef1f5;padding-top:4px;"><span>Retention held (${C.pct}%)</span><b>${money(C.retentionHeld)}</b></div>`;
+      h += `<div class="ln"><span><b>Net certified</b></span><b>${money(C.netCertified)}</b></div></div>`;
+    }
+    document.getElementById("bubbles").innerHTML = h;
+  }
+
+  // ── Load / save ────────────────────────────────────────────────────────────
+  function setSave(t,ok){ const e=document.getElementById("saveState"); e.textContent=t; e.style.color=ok===false?"#ffd0d0":"#d7e3f2"; }
+  function markDirty(){ dirty=true; setSave("Saving…"); clearTimeout(saveTimer); saveTimer=setTimeout(save,900); }
+  async function save(){
+    if(!V) return;
+    try{
+      const body={ id:V.id||"", title:V.data.title||"", client:V.data.client||"", projectId:V.data.projectId||"", status:V.data.status||"live", data:V.data };
+      if(V.id && baseVersion!=null) body.baseVersion=baseVersion;
+      const r=await aFetch("/val/save",{method:"POST",body:JSON.stringify(body)});
+      const d=await r.json().catch(()=>({}));
+      if(r.status===409 && d.conflict){ setSave("⚠ changed elsewhere",false); if(confirm("This valuation was changed on another device ("+(d.updatedBy||"someone")+"). Reload their version? (Cancel keeps yours — next save overwrites theirs.)")){ location.reload(); } else { baseVersion=null; markDirty(); } return; }
+      if(!d.ok){ setSave("⚠ not saved",false); return; }
+      if(!V.id){ V.id=d.id; V.ref=d.ref; history.replaceState(null,"","valuation-edit.html?id="+encodeURIComponent(d.id)); }
+      baseVersion=d.updatedAt||baseVersion; dirty=false; setSave("Saved ✓");
+    }catch(e){ setSave("⚠ offline",false); }
+  }
+  // flush on leave
+  addEventListener("pagehide",()=>{ if(dirty){ try{ const body=JSON.stringify({ id:V.id||"", title:V.data.title||"", client:V.data.client||"", projectId:V.data.projectId||"", status:V.data.status||"live", data:V.data, baseVersion }); aFetch("/val/save",{method:"POST",body,keepalive:true}); }catch(e){} } });
+
+  function fillDetails(){
+    document.getElementById("fTitle").value=V.data.title||"";
+    document.getElementById("fClient").value=V.data.client||"";
+    document.getElementById("fStatus").value=V.data.status||"live";
+    document.getElementById("fRet").value=V.data.retentionPct||"";
+    document.getElementById("fRetMode").value=V.data.retentionMode==="each"?"each":"final";
+    document.getElementById("hTitle").textContent="💷 "+(V.data.title||"Valuation")+(V.ref?" · "+V.ref:"");
+  }
+  function fillProjects(projects){
+    const sel=document.getElementById("fProject");
+    (projects||[]).forEach(p=>{ const o=document.createElement("option"); o.value=p.id; o.textContent=(p.number?p.number+" · ":"")+p.name; sel.appendChild(o); });
+    sel.value=V.data.projectId||V.projectId||"";
+  }
+
+  async function load(){
+    if(!qid){
+      // Prefill a brand-new sheet from query params (e.g. opened from a project).
+      const q=new URLSearchParams(location.search);
+      const data=blank();
+      data.title=q.get("title")||""; data.client=q.get("client")||""; data.projectNumber=q.get("number")||"";
+      const pid=q.get("project")||"";
+      V={ id:"", ref:"", title:data.title, client:data.client, projectId:pid, status:"live", data:Object.assign(data,{projectId:pid}) };
+      // Show the project it's tied to in the dropdown (built from the query).
+      const projs = pid ? [{ id:pid, number:q.get("number")||"", name:q.get("title")||"Project", status:"live" }] : [];
+      renderGrid(); fillDetails(); fillProjects(projs); setSave(""); markDirty(); return;
+    }
+    setSave("Loading…");
+    try{
+      const r=await aFetch("/val/one?id="+encodeURIComponent(qid)); const d=await r.json().catch(()=>({}));
+      if(!d.ok){ document.querySelector(".main").innerHTML='<div class="card"><p>⚠ '+esc(d.error||"Couldn't load this valuation.")+'</p><a class="btn ghost" href="valuations.html">‹ Back</a></div>'; return; }
+      V={ id:d.val.id, ref:d.val.ref, title:d.val.title, client:d.val.client, projectId:d.val.projectId, status:d.val.status, data:Object.assign(blank(), d.val.data||{}) };
+      if(!Array.isArray(V.data.columns)||!V.data.columns.length){ const c={id:uid("c"),name:"Valuation 1",date:"",note:"",final:false}; V.data.columns=[c]; V.data.currentColumnId=c.id; }
+      if(!Array.isArray(V.data.items)) V.data.items=[];
+      V.data.title=V.data.title||d.val.title||""; V.data.client=V.data.client||d.val.client||""; V.data.projectId=V.data.projectId||d.val.projectId||"";
+      baseVersion=d.val.updatedAt||null;
+      renderGrid(); fillDetails(); fillProjects(d.projects); setSave("Saved ✓");
+    }catch(e){ setSave("⚠ offline",false); }
+  }
+
+  // ── Events ──────────────────────────────────────────────────────────────
+  document.getElementById("grid").addEventListener("input", e=>{
+    const t=e.target;
+    if(t.dataset.item && t.dataset.f==="desc"){ const it=V.data.items.find(x=>x.id===t.dataset.item); if(it){ it.desc=t.value; autoGrow(t); markDirty(); } return; }
+    if(t.dataset.item && t.dataset.f==="cost"){ const it=V.data.items.find(x=>x.id===t.dataset.item); if(it){ it.cost=num(t.value.replace(/[^0-9.\-]/g,"")); recalc(); markDirty(); } return; }
+    if(t.dataset.item && t.dataset.amt){ const it=V.data.items.find(x=>x.id===t.dataset.item); if(it){ const v=t.value.replace(/[^0-9.\-]/g,""); if(v==="") delete it.amounts[t.dataset.amt]; else it.amounts[t.dataset.amt]=num(v); recalc(); markDirty(); } return; }
+    if(t.dataset.col && t.dataset.f==="name"){ const c=V.data.columns.find(x=>x.id===t.dataset.col); if(c){ c.name=t.value; markDirty(); } return; }
+    if(t.dataset.col && t.dataset.f==="date"){ const c=V.data.columns.find(x=>x.id===t.dataset.col); if(c){ c.date=t.value; markDirty(); } return; }
+  });
+  document.getElementById("grid").addEventListener("change", e=>{
+    const t=e.target;
+    if(t.dataset.colfinal){ const id=t.dataset.colfinal; V.data.columns.forEach(c=>{ c.final = (c.id===id) ? t.checked : false; }); renderGrid(); markDirty(); }
+  });
+  document.getElementById("grid").addEventListener("click", e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    if(b.dataset.setcur){ V.data.currentColumnId=b.dataset.setcur; renderGrid(); markDirty(); }
+    else if(b.dataset.delcol){ delCol(b.dataset.delcol); }
+    else if(b.dataset.delrow){ const id=b.dataset.delrow; V.data.items=V.data.items.filter(x=>x.id!==id); renderGrid(); markDirty(); }
+  });
+  function delCol(id){
+    if(V.data.columns.length<=1){ alert("A valuation sheet needs at least one valuation column."); return; }
+    const c=V.data.columns.find(x=>x.id===id);
+    const taken=V.data.items.some(it=>num((it.amounts||{})[id]));
+    if(taken && !confirm("Remove “"+((c&&c.name)||"this valuation")+"”? Amounts entered against it will be lost.")) return;
+    V.data.columns=V.data.columns.filter(x=>x.id!==id);
+    V.data.items.forEach(it=>{ if(it.amounts) delete it.amounts[id]; });
+    if(V.data.currentColumnId===id) V.data.currentColumnId=V.data.columns[V.data.columns.length-1].id;
+    renderGrid(); markDirty();
+  }
+  document.getElementById("btnAddItem").onclick=()=>{ V.data.items.push(newItem(false)); renderGrid(); markDirty(); const t=document.querySelector('tr:last-child .idesc'); if(t) t.focus(); };
+  document.getElementById("btnAddExtra").onclick=()=>{ V.data.items.push(newItem(true)); renderGrid(); markDirty(); const t=document.querySelector('tr:last-child .idesc'); if(t) t.focus(); };
+  document.getElementById("btnAddVal").onclick=()=>{ const n=V.data.columns.length+1; const c={id:uid("c"),name:"Valuation "+n,date:"",note:"",final:false}; V.data.columns.push(c); V.data.currentColumnId=c.id; renderGrid(); markDirty(); };
+
+  document.getElementById("fTitle").addEventListener("input",e=>{ V.data.title=e.target.value; document.getElementById("hTitle").textContent="💷 "+(V.data.title||"Valuation")+(V.ref?" · "+V.ref:""); markDirty(); });
+  document.getElementById("fClient").addEventListener("input",e=>{ V.data.client=e.target.value; markDirty(); });
+  document.getElementById("fProject").addEventListener("change",e=>{ V.data.projectId=e.target.value; markDirty(); });
+  document.getElementById("fStatus").addEventListener("change",e=>{ V.data.status=e.target.value; markDirty(); });
+  document.getElementById("fRet").addEventListener("input",e=>{ V.data.retentionPct=Math.max(0,Math.min(100,num(e.target.value.replace(/[^0-9.]/g,"")))); recalc(); markDirty(); });
+  document.getElementById("fRetMode").addEventListener("change",e=>{ V.data.retentionMode=e.target.value==="each"?"each":"final"; recalc(); markDirty(); });
+
+  // ── Exports ──────────────────────────────────────────────────────────────
+  document.getElementById("btnXls").onclick=()=>{ try{ if(dirty) save(); window.MLValXlsx && MLValXlsx.download(V); }catch(e){ alert("Couldn't build the Excel file: "+(e.message||e)); } };
+  document.getElementById("btnPdf").onclick=async ()=>{
+    if(!V.id){ await save(); }
+    const btn=document.getElementById("btnPdf"); const old=btn.textContent; btn.textContent="…";
+    try{
+      if(dirty) await save();
+      const r=await aFetch("/val/export",{method:"POST",body:JSON.stringify({id:V.id})});
+      if(!r.ok){ const j=await r.json().catch(()=>({})); alert(j.error||("Couldn't build the PDF (HTTP "+r.status+")")); btn.textContent=old; return; }
+      const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=u; a.download=((V.data.title||"Valuation")+" - "+(V.ref||"")).replace(/[^\w .\-()]/g,"_")+".pdf"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000);
+    }catch(e){ alert("Couldn't reach the server for the PDF."); }
+    btn.textContent=old;
+  };
+
+  load();
+</script>
+</body>
+</html>
