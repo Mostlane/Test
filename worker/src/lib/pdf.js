@@ -165,6 +165,7 @@ export class PdfDoc {
     const col = opt.color ? `${opt.color.map(n => n.toFixed(3)).join(" ")} rg ` : (opt.grey ? "0.45 g " : "");
     let tx = x;
     if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
+    else if (opt.center) tx = x - textWidth(str, size, !!opt.bold) / 2;
     const y = this._page.h - yTop;
     this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${(opt.grey || opt.color) ? " 0 g" : ""}`);
     return this;

@@ -1410,6 +1410,7 @@ var init_pdf = __esm({
         const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
         let tx = x;
         if (opt.alignRight) tx = x - textWidth(str, size, !!opt.bold);
+        else if (opt.center) tx = x - textWidth(str, size, !!opt.bold) / 2;
         const y = this._page.h - yTop;
         this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
         return this;
@@ -49708,13 +49709,13 @@ function buildValuationPdf(data, meta = {}) {
       const lbl = toWinAnsi(c.label);
       if (c.key === "idx") continue;
       if (c.label.length > 1 && textWidth(lbl, 8, true) > c.w - 4 && c.key.startsWith("val")) {
-        doc.text(c.x + c.w - 3, HEAD_H + 11, lbl.slice(0, 16), { size: 7.5, bold: true, color: [1, 1, 1], alignRight: true });
+        doc.text(c.x + c.w / 2, HEAD_H + 11, lbl.slice(0, 16), { size: 7.5, bold: true, color: [1, 1, 1], center: true });
       } else {
-        doc.text(c.right ? c.x + c.w - 3 : c.x + 3, HEAD_H + 12, lbl, { size: 8, bold: true, color: [1, 1, 1], alignRight: !!c.right });
+        doc.text(c.right ? c.x + c.w / 2 : c.x + 3, HEAD_H + 12, lbl, { size: 8, bold: true, color: [1, 1, 1], center: !!c.right });
       }
       const pc = c.key.startsWith("val") ? C.perCol[parseInt(c.key.slice(3), 10)] : null;
-      if (pc && pc.date) doc.text(c.x + c.w - 3, HEAD_H + 21, toWinAnsi(pc.date), { size: 6.5, color: [0.8, 0.86, 0.93], alignRight: true });
-      else if (pc && pc.final) doc.text(c.x + c.w - 3, HEAD_H + 21, "final a/c", { size: 6.5, color: [0.95, 0.85, 0.6], alignRight: true });
+      if (pc && pc.date) doc.text(c.x + c.w / 2, HEAD_H + 21, toWinAnsi(pc.date), { size: 6.5, color: [0.8, 0.86, 0.93], center: true });
+      else if (pc && pc.final) doc.text(c.x + c.w / 2, HEAD_H + 21, "final a/c", { size: 6.5, color: [0.95, 0.85, 0.6], center: true });
     }
   };
   pages.forEach((pageRows, pi) => {
@@ -49729,16 +49730,16 @@ function buildValuationPdf(data, meta = {}) {
       if (curCol) doc.rect(curCol.x, y, curCol.w, r.h, { fill: HILITE });
       r.lines.forEach((ln, li) => doc.text(cols[1].x + 4, y + 10 + li * LINE_H2, ln, { size: 8, color: it.extra ? EXTRA : [0.1, 0.14, 0.2] }));
       const by = y + 10;
-      doc.text(cols[2].x + cols[2].w - 3, by, money2(it.cost), { size: 8, alignRight: true });
+      doc.text(cols[2].x + cols[2].w / 2, by, money2(it.cost), { size: 8, center: true });
       C.perCol.forEach((pc, i) => {
         const amt = Number((it.amounts || {})[pc.id]) || 0;
         const cc = cols.find((c) => c.key === "val" + i);
-        if (amt) doc.text(cc.x + cc.w - 3, by, money2(amt), { size: 8, alignRight: true });
+        if (amt) doc.text(cc.x + cc.w / 2, by, money2(amt), { size: 8, center: true });
       });
       const ct = cols.find((c) => c.key === "tot"), cr = cols.find((c) => c.key === "rem"), cp = cols.find((c) => c.key === "pct");
-      doc.text(ct.x + ct.w - 3, by, money2(it.taken), { size: 8, bold: true, alignRight: true });
-      doc.text(cr.x + cr.w - 3, by, money2(it.remaining), { size: 8, alignRight: true, color: it.remaining > 5e-3 ? [0.6, 0.2, 0.2] : [0.2, 0.45, 0.2] });
-      doc.text(cp.x + cp.w - 3, by, pctStr(it.pct), { size: 8, alignRight: true, grey: true });
+      doc.text(ct.x + ct.w / 2, by, money2(it.taken), { size: 8, bold: true, center: true });
+      doc.text(cr.x + cr.w / 2, by, money2(it.remaining), { size: 8, center: true, color: it.remaining > 5e-3 ? [0.6, 0.2, 0.2] : [0.2, 0.45, 0.2] });
+      doc.text(cp.x + cp.w / 2, by, pctStr(it.pct), { size: 8, center: true, grey: true });
       doc.line(gridX, y + r.h, gridRight, y + r.h, { stroke: GRID2, lw: 0.4 });
       y += r.h;
     });
@@ -49747,15 +49748,15 @@ function buildValuationPdf(data, meta = {}) {
       if (y + th < PH3 - 40) {
         doc.rect(gridX, y, gridRight - gridX, th, { fill: [0.9, 0.93, 0.96] });
         doc.text(cols[1].x + 4, y + 13, "TOTALS", { size: 9, bold: true });
-        doc.text(cols[2].x + cols[2].w - 3, y + 13, money2(C.contractTotal), { size: 9, bold: true, alignRight: true });
+        doc.text(cols[2].x + cols[2].w / 2, y + 13, money2(C.contractTotal), { size: 9, bold: true, center: true });
         C.perCol.forEach((pc, i) => {
           const cc = cols.find((c) => c.key === "val" + i);
-          doc.text(cc.x + cc.w - 3, y + 13, money2(pc.gross), { size: 8.5, bold: true, alignRight: true });
+          doc.text(cc.x + cc.w / 2, y + 13, money2(pc.gross), { size: 8.5, bold: true, center: true });
         });
         const ct = cols.find((c) => c.key === "tot"), cr = cols.find((c) => c.key === "rem"), cp = cols.find((c) => c.key === "pct");
-        doc.text(ct.x + ct.w - 3, y + 13, money2(C.grandGross), { size: 9, bold: true, alignRight: true });
-        doc.text(cr.x + cr.w - 3, y + 13, money2(C.remaining), { size: 9, bold: true, alignRight: true });
-        doc.text(cp.x + cp.w - 3, y + 13, pctStr(C.completion), { size: 9, bold: true, alignRight: true });
+        doc.text(ct.x + ct.w / 2, y + 13, money2(C.grandGross), { size: 9, bold: true, center: true });
+        doc.text(cr.x + cr.w / 2, y + 13, money2(C.remaining), { size: 9, bold: true, center: true });
+        doc.text(cp.x + cp.w / 2, y + 13, pctStr(C.completion), { size: 9, bold: true, center: true });
         y += th + 14;
       } else {
         doc.newPage(PW3, PH3);
