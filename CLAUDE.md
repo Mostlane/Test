@@ -3865,7 +3865,16 @@ them all.
 An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;
 sends requiresRA/Sig/Photo/Note=false) lets the engineer record a **remedial-works
 list** on the job: `job.remedials = [{id, code (C1/C2/C3/FI/""), description,
-minutes, materialCost, photos:[R2 keys]}]`. Threaded through
+minutes, materialCost, photos:[R2 keys]}]`. **Ticking ⚡ Electrical test on add-job.html
+auto-fills the standard EICR description (Oct 2026)** — `applyElecTest()`: `'Carry out EICR.
+Import "<siteCode> <siteName>" from EasyCert Cloud. If certificate is not there, create a new
+one and use certificate name and number "<siteCode> <siteName>"'` + 3 bullets (remedials with
+photos / export cert to EasyCert Cloud / set complete); the `<siteCode> <siteName>` label is
+dynamic, re-filled on site change, and respects a manual edit or a `?desc=` prefill
+(`elecAutoDesc`). It also defaults `reqPhoto`+`reqNote` OFF (elec-aware `applyReqDefaults`;
+RA/sig untouched — all four are forced false server-side anyway) and the release to
+`dayBefore` (5pm the evening before; `relTouched`/`elecSetRelease` guard a manual choice, and
+unticking reverts photo/note + release). HTML-only, no `?v=` bump. Threaded through
 `createOrUpdateJobFromPayload` + `patchJob` (`normRemedials` preserves photos by id);
 GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion is
 **relaxed** (`completionMissing`/engineer-job `outcomeMissing` return [] for elecTest

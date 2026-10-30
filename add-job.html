@@ -502,6 +502,34 @@ function buildRelease(){
   return null;
 }
 
+// ⚡ Electrical test (EICR): auto-fill the standard description (site code + name
+// are dynamic), default completion photo+note OFF, and default the job to show
+// from 5pm the evening before. All respect manual edits.
+var elecAutoDesc = "";      // the EICR description WE last auto-filled
+var relTouched = false;     // user manually chose a release mode
+var elecSetRelease = false; // WE set the release to dayBefore for an EICR
+function elecDescText(){
+  var code = ($("siteCode").value || "").trim(), name = ($("siteName").value || "").trim();
+  var label = (code && name) ? (code + " " + name) : (code || name || "{site code} {site name}");
+  return 'Carry out EICR. Import "' + label + '" from EasyCert Cloud. If certificate is not there, create a new one and use certificate name and number "' + label + '"\n\n'
+    + '- Complete all remedial works with photos in this job.\n'
+    + '- Export complete certificate to EasyCert Cloud\n'
+    + '- Set job as complete';
+}
+function applyElecTest(){
+  var on = $("elecTest") && $("elecTest").checked;
+  var rm = $("releaseMode");
+  if(on){
+    var text = elecDescText(), cur = $("description").value.trim();
+    if(cur === "" || cur === elecAutoDesc.trim()){ $("description").value = text; elecAutoDesc = text; $("description").dispatchEvent(new Event("input")); }
+    applyReqDefaults();                                   // completion photo + note OFF
+    if(rm && !relTouched && rm.value === "now"){ rm.value = "dayBefore"; elecSetRelease = true; $("releaseAtWrap").style.display = "none"; }
+  } else {
+    applyReqDefaults();                                   // restore photo + note defaults
+    if(rm && elecSetRelease && !relTouched && rm.value === "dayBefore"){ rm.value = "now"; elecSetRelease = false; $("releaseAtWrap").style.display = "none"; }
+  }
+}
+
 
 /* ------------------------
    FETCH PORTAL USERS
@@ -621,6 +649,7 @@ function applyUrlPrefill(){
   if(q.get("elecTest")==="1" && $("elecTest")){ $("elecTest").checked = true; var det = $("elecTest").closest("details"); if(det) det.open = true; }
   var nm = (q.get("name")||"").trim(); if(nm && $("jobName")){ $("jobName").value = nm; window.jobNameAuto = nm; }
   var ds = (q.get("desc")||"").trim(); if(ds && $("description") && !$("description").value.trim()){ $("description").value = ds; $("description").dispatchEvent(new Event("input")); }
+  if($("elecTest") && $("elecTest").checked) applyElecTest();   // auto-desc/photo/note/release (skips if ?desc= already filled it)
 }
 async function populateSites(){
   const siteTypeVal = $("siteType").value.trim().toLowerCase();
@@ -717,10 +746,11 @@ function isProjectContext(){
 function applyReqDefaults(){
   if(reqTouched) return;
   const proj = isProjectContext();
+  const elec = $("elecTest") && $("elecTest").checked;   // EICR: completion photo + note default OFF
   $("reqRA").checked = !proj;
   $("reqSig").checked = !proj;
-  $("reqPhoto").checked = !proj;
-  $("reqNote").checked = !proj;
+  $("reqPhoto").checked = !proj && !elec;
+  $("reqNote").checked = !proj && !elec;
 }
 
 /* -----------------------------
@@ -993,7 +1023,13 @@ async function init(){
   // don't apply — dim them when firestopping is ticked.
   // Visibility: reveal the datetime picker only for "At a set time".
   (function(){
-    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAtWrap").style.display = rm.value==="at" ? "flex" : "none"; }); }
+    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ relTouched = true; $("releaseAtWrap").style.display = rm.value==="at" ? "flex" : "none"; }); }
+  })();
+  // ⚡ Electrical test: auto-fill description + default photo/note off + 5pm-before.
+  (function(){
+    var el = $("elecTest"), ss = $("siteSelect");
+    if(el) el.addEventListener("change", applyElecTest);
+    if(ss) ss.addEventListener("change", function(){ if(el && el.checked) setTimeout(applyElecTest, 0); });
   })();
   // EM/PAT test type: load the cert set-numbers, wire the ticks + refresh.
   (function(){
