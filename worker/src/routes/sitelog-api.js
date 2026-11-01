@@ -2442,7 +2442,15 @@ async function handleInner(request, env, ctx) {
       ).bind(device.person_id, siteCode).first();
 
       if (intent === "out") {
-        if (!openVisit) return await logPending(siteCode, "no_open_visit");
+        if (!openVisit) {
+          // A retry of a sign-out we already applied (the reply was lost):
+          // the visit is closed at exactly this offline time. Not a lost event.
+          const done = await env.SITELOG_DB.prepare(
+            "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at = ? AND COALESCE(offline_synced,0) = 1 LIMIT 1"
+          ).bind(device.person_id, siteCode, occurredSql).first();
+          if (done) return json({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+          return await logPending(siteCode, "no_open_visit");
+        }
         // Use the offline time only if it's after check-in; else fall back to now.
         // Both strings are 'YYYY-MM-DD HH:MM:SS' UTC, so they compare lexically.
         const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
@@ -2866,6 +2874,18 @@ async function handleInner(request, env, ctx) {
       if (!device) return json({ ok: false, error: "This phone isn't registered" }, 404);
       const { personWeek } = await import("./sitelogts.js");
       return json(await personWeek(env, device.person_id, url.searchParams.get("week") || ""));
+    }
+
+    // GET /my-summary?deviceToken=&range=this_week|last_14|this_month|last_month|all
+    // Totals by site, from the same calculation as /my-timesheet.
+    if (url.pathname === "/my-summary" && request.method === "GET") {
+      const deviceToken = url.searchParams.get("deviceToken");
+      if (!deviceToken) return json({ error: "Missing deviceToken" }, 400);
+      const device = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ?").bind(String(deviceToken).slice(0, 128)).first();
+      if (!device) return json({ ok: false, error: "This phone isn't registered" }, 404);
+      const { personSummary } = await import("./sitelogts.js");
+      return json(await personSummary(env, device.person_id, url.searchParams.get("range") || "this_week"));
     }
 
     // GET /scan-log?days=7&refused=1 — admin: who tried to scan and what happened.
