@@ -6230,6 +6230,13 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   perms `["SiteLogAdmin"]`; main.html tile MAP `SiteLog:["SiteLog","SiteLogAdmin"]`. Toggle in Users
   Admin → Sites & assets. At launch only the Full Access users (Jamie/Greg/Joe) have it — no one else
   was granted. Added to login PERM_KEYS + portal-config slim list; portal-config `?v=44`, SW `mostlane-v145`.
+- **Worker "My Hours" in the SiteLog app (1 Nov 2026).** The app's History card (now **My Hours**)
+  reads **GET /my-timesheet?deviceToken=&week=** (sitelog-api.js → `sitelogts.personWeek`), which runs
+  the SAME `loadPeriod` as the office timesheet (now takes `{personId}`), so the worker sees exactly the
+  hours the office sees — missed sign-outs, scanned-not-confirmed, ✓/✗ location checks — week by week
+  (‹ Earlier / Later ›), plus "Scans that didn't go through" from `scan_log` in plain English. The old
+  client-side list (UTC days, its own maths) is kept only as a fallback (`loadHistoryListOld`). No
+  coordinates or ids are returned. Summary card still uses /my-visits (TODO: move it over too).
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
