@@ -1441,6 +1441,7 @@ async function handleInner(request, env, ctx) {
                COALESCE(is_main,0) as is_main,
                portal_username,
                COALESCE(doc_access_always,0) as doc_access_always,
+               COALESCE(is_transfer_pending,0) as is_transfer_pending,
                (SELECT COUNT(*) FROM visits WHERE visits.person_id = people.id) AS visit_count,
                (SELECT COUNT(*) FROM devices WHERE devices.person_id = people.id) AS device_count,
                (SELECT MAX(last_seen) FROM devices WHERE devices.person_id = people.id) AS device_last_seen
@@ -1723,6 +1724,13 @@ async function handleInner(request, env, ctx) {
           `UPDATE document_attendees SET person_id = ? WHERE person_id IN (${placeholders})`
         ).bind(primaryId, ...mergeIds).run();
       } catch (e) { /* documents tables may not exist on every deployment */ }
+
+      // Keep the scan log pointing at the kept person (refused-scan lists).
+      try {
+        await env.SITELOG_DB.prepare(
+          `UPDATE scan_log SET person_id = ? WHERE person_id IN (${placeholders})`
+        ).bind(primaryId, ...mergeIds).run();
+      } catch (e) { /* scan_log not created yet */ }
 
       await env.SITELOG_DB.prepare(
         `DELETE FROM people WHERE id IN (${placeholders})`

@@ -54,6 +54,10 @@ export async function handle(request, env, ctx, url, sess) {
 
   const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
   const target = SITELOG_API + sub + url.search;
+  // Pay rates / travel allowances are Full Access only (Jamie, 1 Nov 2026).
+  const money = perms.FullAccess === "Yes";
+  if (!money && MONEY_ONLY_PATHS.has(sub))
+    return error("Only Full Access users can see SiteLog costs", 403, env, request);
 
   const init = {
     method: request.method,
@@ -62,6 +66,13 @@ export async function handle(request, env, ctx, url, sess) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.headers["Content-Type"] = request.headers.get("Content-Type") || "application/json";
     init.body = await request.arrayBuffer();
+    if (!money && MONEY_WRITE_PATHS.has(sub)) {
+      try {
+        const b = JSON.parse(new TextDecoder().decode(init.body) || "{}");
+        init.body = JSON.stringify(stripMoneyFromBody(b));
+        init.headers["Content-Type"] = "application/json";
+      } catch (e) { return error("Bad request body", 400, env, request); }
+    }
   }
 
   let res;
@@ -79,6 +90,11 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   const headers = new Headers(corsHeaders(env, request));
+  if (!money && MONEY_READ_PATHS.has(sub) && res.ok) {
+    const data = await res.json().catch(() => null);
+    headers.set("Content-Type", "application/json");
+    return new Response(JSON.stringify(stripMoneyFromPeople(data)), { status: res.status, headers });
+  }
   const ct = res.headers.get("Content-Type");
   if (ct) headers.set("Content-Type", ct);
   const cd = res.headers.get("Content-Disposition");
@@ -87,6 +103,24 @@ export async function handle(request, env, ctx, url, sess) {
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
+
+// Pay / travel-allowance fields on a SiteLog person. Hidden from, and not
+// writable by, Site Log admins without Full Access.
+export const MONEY_FIELDS = ["hourly_rate", "hourlyRate", "fuel_rate", "fuelRate", "fuel_paid", "fuelPaid",
+  "travel_time_paid", "travelTimePaid", "travel_status", "travelStatus", "travel_cap_type", "travelCapType",
+  "travel_cap_value", "travelCapValue"];
+const MONEY_ONLY_PATHS = new Set(["/job-costing"]);
+const MONEY_WRITE_PATHS = new Set(["/update-engineer", "/add-engineer"]);
+const MONEY_READ_PATHS = new Set(["/engineers"]);
+export function stripMoneyFromBody(b) {
+  const out = { ...(b || {}) };
+  for (const k of MONEY_FIELDS) delete out[k];
+  return out;
+}
+export function stripMoneyFromPeople(data) {
+  if (!data || !Array.isArray(data.engineers)) return data;
+  return { ...data, money: false, engineers: data.engineers.map(stripMoneyFromBody) };
+}
 
 function b64u(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))

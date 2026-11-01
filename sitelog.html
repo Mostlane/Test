@@ -48,6 +48,28 @@
     .tvv .note{ grid-column:1/-1; color:var(--muted); font-size:12px; }
     .g{ color:#0e7a3b; font-weight:700; } .x{ color:#b91c1c; font-weight:700; }
     .tvtot{ display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 10px; }
+    .tabs{ display:none; gap:6px; margin:0 0 14px; overflow-x:auto; }
+    .tabs button{ flex:0 0 auto; border:1px solid var(--border); background:#fff; color:var(--ml-blue); border-radius:999px; padding:9px 16px; font:inherit; font-weight:700; cursor:pointer; }
+    .tabs button.on{ background:var(--ml-blue); color:#fff; border-color:var(--ml-blue); }
+    .tabs .cnt{ background:#b91c1c; color:#fff; border-radius:999px; font-size:11px; padding:1px 6px; margin-left:4px; }
+    .pp{ display:flex; gap:10px; align-items:center; padding:11px 4px; border-bottom:1px solid #eef1f5; cursor:pointer; }
+    .pp:last-child{ border-bottom:none; } .pp:hover{ background:#f8fafc; }
+    .pp .nm{ font-weight:700; color:#0f172a; } .pp .sub{ font-size:12.5px; color:var(--muted); margin-top:2px; }
+    .pp .r{ margin-left:auto; text-align:right; font-size:12.5px; color:var(--muted); white-space:nowrap; }
+    .pp.arch .nm{ color:var(--muted); text-decoration:line-through; }
+    .ptools{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+    .ptools input[type=search]{ flex:1 1 180px; font:inherit; border:1px solid var(--border); border-radius:10px; padding:9px 11px; }
+    .dup{ border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:10px 12px; margin-bottom:8px; font-size:13.5px; }
+    .mb{ position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; align-items:flex-end; justify-content:center; z-index:9000; }
+    .mb.show{ display:flex; }
+    .mc{ background:#fff; width:100%; max-width:560px; max-height:90vh; overflow:auto; border-radius:18px 18px 0 0; padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px)); box-sizing:border-box; }
+    @media(min-width:700px){ .mb{ align-items:center; } .mc{ border-radius:18px; } }
+    .fg{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .fg label{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); font-weight:600; }
+    .fg label.full{ grid-column:1/-1; }
+    .fg input,.fg select{ font:inherit; font-size:15px; color:#0f172a; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
+    .ck{ grid-column:1/-1; display:flex; gap:8px; align-items:center; font-size:14px; color:#0f172a; }
+    .sect{ grid-column:1/-1; margin-top:6px; font-size:12px; font-weight:800; color:var(--ml-blue); text-transform:uppercase; letter-spacing:.4px; }
   </style>
 </head>
 <body>
@@ -61,6 +83,31 @@
     <a class="bigbtn green" id="scanBtn" href="https://site-log.co.uk/scan.html" target="_blank" rel="noopener">📲 Scan in / out of site</a>
   </div>
 
+
+  <div class="tabs" id="tabs">
+    <button data-tab="overview" class="on">📊 Overview</button>
+    <button data-tab="people">👷 People <span class="cnt" id="trCount" style="display:none"></span></button>
+  </div>
+
+  <div id="pane-people" style="display:none;">
+    <div class="card" id="trCard" style="display:none;">
+      <h2>📲 New phones waiting for approval</h2>
+      <p class="muted" style="margin:0 0 8px;">Someone registered a new phone and said they already have a SiteLog record. Pick who they are to move the phone (and any visits on it) to their record, or reject it.</p>
+      <div id="trList"></div>
+    </div>
+    <div class="card">
+      <h2>👷 People <span class="muted" id="ppCount"></span></h2>
+      <div class="ptools">
+        <input type="search" id="ppSearch" placeholder="Search name, company or portal user">
+        <div class="seg"><button data-pf="active" class="on">Active</button><button data-pf="archived">Archived</button><button data-pf="all">All</button></div>
+        <button class="tsbtn primary" id="ppAdd">＋ Add person</button>
+      </div>
+      <div id="ppDups"></div>
+      <div id="ppList" class="muted">Loading…</div>
+    </div>
+  </div>
+
+  <div id="pane-overview">
   <div class="card" id="adminCard" style="display:none;">
     <h2>🟢 On site right now <span class="muted" id="onSiteCount"></span></h2>
     <div id="onSiteList" class="muted">Loading…</div>
@@ -109,7 +156,10 @@
     </div>
     <div class="msg" id="tsMsg"></div>
   </div>
+  </div>
 </div>
+
+<div class="mb" id="ppModal"><div class="mc" id="ppBody"></div></div>
 
 <script>
 const API = window.MOSTLANE_API;
@@ -359,6 +409,208 @@ if (pb) pb.addEventListener("click", async () => {
     $("pushMsg").className = "msg err"; $("pushMsg").textContent = e.message;
   }finally{ pb.disabled = false; }
 });
+
+
+// ── Tabs (admin only) ───────────────────────────────────────────────────────
+const IS_FULL = perms().FullAccess === "Yes";
+function showTab(t){
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  document.querySelectorAll("[id^=pane-]").forEach(p => p.style.display = p.id === "pane-" + t ? "block" : "none");
+  if (t === "people") loadPeople();
+  try { history.replaceState(null, "", "#" + t); } catch(e){}
+}
+if (IS_FULL || perms().SiteLogAdmin === "Yes") {
+  $("tabs").style.display = "flex";
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  loadTransfers();
+  if (location.hash === "#people") showTab("people");
+}
+
+// ── People ──────────────────────────────────────────────────────────────────
+const PP = { list: [], filter: "active", users: null, transfers: [] };
+const nameOf = p => [p.first_name, p.last_name].filter(Boolean).join(" ").trim() || "Unnamed";
+const normName = s => String(s||"").toLowerCase().replace(/[^a-z]/g, "");
+async function slGet(path){ const r = await authFetch(`${API}/sitelog${path}`, {cache:"no-store"}); const d = await r.json().catch(() => ({})); if(!r.ok) throw new Error(d.error || ("HTTP " + r.status)); return d; }
+async function slPost(path, body){ const r = await authFetch(`${API}/sitelog${path}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }); const d = await r.json().catch(() => ({})); if(!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status)); return d; }
+const ask = (msg, opt) => window.MLUI ? MLUI.confirm(msg, opt) : Promise.resolve(confirm(msg));
+const toast = m => alert(m);
+function ago(ts){ if(!ts) return ""; const d = new Date(String(ts).replace(" ","T") + (/Z|\+/.test(ts) ? "" : "Z")); if(isNaN(d)) return ""; const days = Math.floor((Date.now()-d)/864e5); return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 60 ? days + " days ago" : d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"}); }
+
+async function loadPeople(){
+  try{
+    const d = await slGet("/engineers");
+    PP.list = d.engineers || [];
+    renderPeople();
+  }catch(e){ $("ppList").textContent = "Couldn't load people: " + e.message; }
+}
+function renderPeople(){
+  const q = $("ppSearch").value.trim().toLowerCase();
+  const list = PP.list.filter(p => {
+    if (Number(p.is_transfer_pending) === 1) return false; // shown in "New phones waiting" instead
+    const arch = Number(p.archived) === 1;
+    if (PP.filter === "active" && arch) return false;
+    if (PP.filter === "archived" && !arch) return false;
+    return !q || (nameOf(p) + " " + (p.company||"") + " " + (p.portal_username||"")).toLowerCase().includes(q);
+  });
+  $("ppCount").textContent = `(${PP.list.filter(p => Number(p.archived) !== 1).length} active)`;
+  // Possible duplicates: same name among active people.
+  const groups = {};
+  PP.list.filter(p => Number(p.archived) !== 1 && Number(p.is_transfer_pending) !== 1).forEach(p => { const k = normName(nameOf(p)); if (k) (groups[k] = groups[k] || []).push(p); });
+  const dups = Object.values(groups).filter(g => g.length > 1);
+  $("ppDups").innerHTML = dups.map((g, i) => `<div class="dup">⚠️ <b>${esc(nameOf(g[0]))}</b> appears ${g.length} times (${g.map(p => esc(p.company||"no company") + " · " + (p.visit_count||0) + " visits").join(" / ")}).
+    <button class="tsbtn" style="margin-left:6px;padding:6px 10px" data-dup="${i}">Merge…</button></div>`).join("");
+  $("ppDups").querySelectorAll("[data-dup]").forEach(b => b.onclick = () => openMerge(dups[b.dataset.dup]));
+  if (!list.length) { $("ppList").innerHTML = '<div class="muted" style="padding:10px 0">Nobody matches.</div>'; return; }
+  $("ppList").innerHTML = list.map(p => {
+    const bits = [p.company || "No company"];
+    if (p.purpose) bits.push(p.purpose);
+    if (Number(p.is_main) === 1) bits.push("Main");
+    if (p.portal_username) bits.push("🔗 " + p.portal_username);
+    if (IS_FULL && p.hourly_rate != null && Number(p.hourly_rate) > 0) bits.push("£" + Number(p.hourly_rate).toFixed(2) + "/hr");
+    const phone = Number(p.device_count) > 0 ? "📱 " + (ago(p.device_last_seen) || "registered") : "No phone";
+    return `<div class="pp${Number(p.archived) === 1 ? " arch" : ""}" data-id="${esc(p.id)}">
+      <div><div class="nm">${esc(nameOf(p))}</div><div class="sub">${esc(bits.join(" · "))}</div></div>
+      <div class="r">${p.visit_count || 0} visits<br>${esc(phone)}</div></div>`;
+  }).join("");
+  $("ppList").querySelectorAll(".pp").forEach(el => el.onclick = () => openPerson(PP.list.find(p => p.id === el.dataset.id)));
+}
+$("ppSearch").addEventListener("input", renderPeople);
+document.querySelectorAll("[data-pf]").forEach(b => b.onclick = () => { PP.filter = b.dataset.pf; document.querySelectorAll("[data-pf]").forEach(x => x.classList.toggle("on", x === b)); renderPeople(); });
+$("ppAdd").onclick = () => openPerson(null);
+
+function closeModal(){ $("ppModal").classList.remove("show"); }
+$("ppModal").addEventListener("click", e => { if (e.target.id === "ppModal") closeModal(); });
+async function portalUsers(){
+  if (PP.users) return PP.users;
+  try { const r = await authFetch(`${API}/users`); const d = await r.json(); const arr = Array.isArray(d) ? d : (d.Users || d.users || []);
+    PP.users = arr.map(u => ({ u: u.Username || u.username, n: ((u.FirstName||u.first_name||"") + " " + (u.LastName||u.last_name||"")).trim() })).filter(x => x.u);
+  } catch(e){ PP.users = []; }
+  return PP.users;
+}
+
+async function openPerson(p){
+  const isNew = !p; p = p || {};
+  const arch = Number(p.archived) === 1;
+  const fuelOn = Number(p.fuel_paid) === 1, timeOn = Number(p.travel_time_paid) === 1;
+  const users = await portalUsers();
+  const v = x => esc(x == null ? "" : String(x));
+  $("ppBody").innerHTML = `
+    <h2 style="margin-bottom:12px">${isNew ? "＋ Add a person" : esc(nameOf(p))}</h2>
+    ${isNew ? "" : `<p class="muted" style="margin:-6px 0 12px">${p.visit_count||0} visits · ${Number(p.device_count) > 0 ? "phone last used " + esc(ago(p.device_last_seen) || "—") : "no phone registered"}${arch ? " · <b>archived</b>" : ""}</p>`}
+    <div class="fg">
+      <label>First name<input id="fFirst" value="${v(p.first_name)}"></label>
+      <label>Last name<input id="fLast" value="${v(p.last_name)}"></label>
+      <label>Company<input id="fCompany" value="${v(p.company)}"></label>
+      <label>Purpose / role<input id="fPurpose" value="${v(p.purpose)}"></label>
+      ${isNew ? "" : `<label class="full">Linked portal user<input id="fPortal" list="fPortalList" value="${v(p.portal_username)}" placeholder="Not linked">
+        <datalist id="fPortalList">${users.map(u => `<option value="${esc(u.u)}">${esc(u.n)}</option>`).join("")}</datalist></label>`}
+      <label class="ck"><input type="checkbox" id="fMain" ${Number(p.is_main) === 1 ? "checked" : ""}> Main (Mostlane) — shown by default in reports</label>
+      ${isNew ? "" : `<label class="ck"><input type="checkbox" id="fDocs" ${Number(p.doc_access_always) === 1 ? "checked" : ""}> Can open any site's documents without signing in</label>`}
+      ${IS_FULL ? `
+      <div class="sect">Pay (Full Access only)</div>
+      <label>Hourly rate (£)<input id="fRate" type="number" min="0" step="0.01" value="${v(p.hourly_rate)}"></label>
+      <label>Fuel (£ per mile)<input id="fFuel" type="number" min="0" step="0.01" value="${v(p.fuel_rate)}"></label>
+      ${isNew ? "" : `
+      <label class="ck"><input type="checkbox" id="fTime" ${timeOn ? "checked" : ""}> Pay travel time (first/last journey)</label>
+      <label class="ck"><input type="checkbox" id="fFuelOn" ${fuelOn ? "checked" : ""}> Pay fuel / mileage</label>
+      <label>Commute cap<select id="fCapType"><option value="none">No cap</option><option value="time" ${p.travel_cap_type==="time"?"selected":""}>Time (mins)</option><option value="distance" ${p.travel_cap_type==="distance"?"selected":""}>Distance (miles)</option></select></label>
+      <label>Cap amount<input id="fCapVal" type="number" min="0" step="1" value="${v(p.travel_cap_value)}"></label>`}` : ""}
+    </div>
+    <div class="msg" id="fMsg"></div>
+    <div class="tsbtns">
+      <button class="tsbtn primary" id="fSave">${isNew ? "Add" : "Save"}</button>
+      ${isNew ? "" : `<button class="tsbtn" id="fArch">${arch ? "Unarchive" : "Archive"}</button>
+      ${Number(p.device_count) > 0 ? '<button class="tsbtn" id="fReset">Forget their phone</button>' : ""}
+      <button class="tsbtn" id="fMerge">Merge…</button>`}
+      <button class="tsbtn" id="fClose" style="margin-left:auto">Close</button>
+    </div>`;
+  $("ppModal").classList.add("show");
+  $("fClose").onclick = closeModal;
+  const msg = (t, err) => { $("fMsg").className = "msg" + (err ? " err" : ""); $("fMsg").textContent = t; };
+  $("fSave").onclick = async () => {
+    const body = { firstName: $("fFirst").value.trim(), lastName: $("fLast").value.trim(), company: $("fCompany").value.trim(),
+      purpose: $("fPurpose").value.trim(), isMain: $("fMain").checked };
+    if (!body.firstName && !body.lastName) return msg("Enter a name", true);
+    if (!isNew) { body.id = p.id; body.portalUsername = $("fPortal").value.trim(); body.docAccessAlways = $("fDocs").checked; }
+    if (IS_FULL) {
+      body.hourlyRate = $("fRate").value; body.fuelRate = $("fFuel").value;
+      if (!isNew) { body.travelTimePaid = $("fTime").checked; body.fuelPaid = $("fFuelOn").checked;
+        body.travelCapType = $("fCapType").value === "none" ? null : $("fCapType").value; body.travelCapValue = $("fCapVal").value; }
+    }
+    $("fSave").disabled = true; msg("Saving…");
+    try { await slPost(isNew ? "/add-engineer" : "/update-engineer", body); closeModal(); toast(isNew ? "Person added" : "Saved"); loadPeople(); }
+    catch(e){ msg(e.message, true); } finally { $("fSave").disabled = false; }
+  };
+  if (isNew) return;
+  $("fArch").onclick = async () => {
+    if (!arch && !(await ask(`Archive ${nameOf(p)}? Their visits stay in the timesheets; they just drop off the active list.`, { title:"Archive" }))) return;
+    try { await slPost("/toggle-engineer", { id: p.id }); closeModal(); loadPeople(); } catch(e){ msg(e.message, true); }
+  };
+  if ($("fReset")) $("fReset").onclick = async () => {
+    if (!(await ask(`Forget ${nameOf(p)}'s phone? Next time they scan they'll register again — use this when they've changed phone.`, { title:"Forget phone", danger:true }))) return;
+    try { const r = await slPost("/reset-device", { personId: p.id }); closeModal(); toast(`Phone forgotten (${r.removedDevices || 0})`); loadPeople(); } catch(e){ msg(e.message, true); }
+  };
+  $("fMerge").onclick = () => openMerge([p]);
+}
+
+// Merge: pick which record to keep; everything else in the group moves onto it.
+function openMerge(group){
+  const others = PP.list.filter(x => !group.some(g => g.id === x.id) && Number(x.archived) !== 1);
+  const opt = x => `<option value="${esc(x.id)}">${esc(nameOf(x))} — ${esc(x.company||"no company")} · ${x.visit_count||0} visits</option>`;
+  const single = group.length === 1;
+  $("ppBody").innerHTML = `
+    <h2>🔗 Merge duplicate records</h2>
+    <p class="muted">Every visit, phone and document link moves onto the record you keep. The other record is deleted. This can't be undone.</p>
+    <div class="fg">
+      ${single ? `<label class="full">Merge <b style="color:#0f172a">${esc(nameOf(group[0]))}</b> (${group[0].visit_count||0} visits) into…
+        <select id="mKeep"><option value="">Choose who to keep…</option>${others.map(opt).join("")}</select></label>`
+      : `<label class="full">Keep this record<select id="mKeep">${group.slice().sort((a,b) => (b.visit_count||0) - (a.visit_count||0)).map(opt).join("")}</select></label>`}
+    </div>
+    <div class="msg" id="mMsg"></div>
+    <div class="tsbtns"><button class="tsbtn primary" id="mGo">Merge</button><button class="tsbtn" id="mCancel" style="margin-left:auto">Cancel</button></div>`;
+  $("ppModal").classList.add("show");
+  $("mCancel").onclick = closeModal;
+  $("mGo").onclick = async () => {
+    const keep = $("mKeep").value;
+    if (!keep) { $("mMsg").className = "msg err"; $("mMsg").textContent = "Choose who to keep"; return; }
+    const mergeIds = single ? [group[0].id] : group.map(g => g.id).filter(id => id !== keep);
+    const kept = PP.list.find(x => x.id === keep);
+    if (!(await ask(`Merge ${mergeIds.length} record(s) into ${nameOf(kept)}? This can't be undone.`, { title:"Merge", danger:true, okLabel:"Merge" }))) return;
+    try { const r = await slPost("/merge-people", { primaryId: keep, mergeIds }); closeModal(); toast(`Merged — ${r.visitsMoved || 0} visits moved`); loadPeople(); }
+    catch(e){ $("mMsg").className = "msg err"; $("mMsg").textContent = e.message; }
+  };
+}
+
+// ── Phone transfer requests ─────────────────────────────────────────────────
+async function loadTransfers(){
+  try{
+    const d = await slGet("/pending-transfers");
+    PP.transfers = d.transfers || [];
+    $("trCount").textContent = PP.transfers.length; $("trCount").style.display = PP.transfers.length ? "inline" : "none";
+    $("trCard").style.display = PP.transfers.length ? "block" : "none";
+    if (!PP.transfers.length) return;
+    const people = (await slGet("/all-engineers-for-transfer")).engineers || [];
+    $("trList").innerHTML = PP.transfers.map(t => {
+      const claimed = [t.first_name || t.claimed_first_name, t.last_name || t.claimed_last_name].filter(Boolean).join(" ") || "Someone";
+      const guess = people.find(x => normName(nameOf(x)) === normName(claimed));
+      return `<div class="dup" style="background:#f0f7ff;border-color:#bfdbfe">
+        <b>${esc(claimed)}</b>${t.company ? " · " + esc(t.company) : ""} <span class="muted">· asked ${esc(ago(t.requested_at))}${t.visit_count ? " · " + t.visit_count + " visits on the new phone" : ""}</span>
+        <div class="ptools" style="margin:8px 0 0"><select data-tsel="${esc(t.id)}" style="flex:1 1 200px;font:inherit;border:1px solid var(--border);border-radius:10px;padding:8px">
+          <option value="">This is…</option>${people.map(x => `<option value="${esc(x.id)}"${guess && guess.id === x.id ? " selected" : ""}>${esc(nameOf(x))} — ${esc(x.company||"")}</option>`).join("")}</select>
+          <button class="tsbtn primary" data-tok="${esc(t.id)}">Approve</button><button class="tsbtn" data-trej="${esc(t.id)}">Reject</button></div></div>`;
+    }).join("");
+    $("trList").querySelectorAll("[data-tok]").forEach(b => b.onclick = async () => {
+      const target = $("trList").querySelector(`[data-tsel="${b.dataset.tok}"]`).value;
+      if (!target) return toast("Choose who this is first");
+      if (!(await ask("Move this phone to that person? Their old phone stops working for SiteLog.", { title:"Approve new phone" }))) return;
+      try { await slPost("/approve-transfer", { transferId: b.dataset.tok, targetPersonId: target }); toast("Approved"); loadTransfers(); loadPeople(); } catch(e){ toast(e.message); }
+    });
+    $("trList").querySelectorAll("[data-trej]").forEach(b => b.onclick = async () => {
+      if (!(await ask("Reject this request? The new phone's temporary record is deleted.", { title:"Reject", danger:true }))) return;
+      try { await slPost("/reject-transfer", { transferId: b.dataset.trej }); loadTransfers(); } catch(e){ toast(e.message); }
+    });
+  }catch(e){ /* not an admin, or SiteLog unreachable — the Overview shows the error */ }
+}
 
 // Identity hand-off: swap the plain scan link for one carrying a signed
 // portal-identity token, so the phone auto-registers as this user.
