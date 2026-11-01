@@ -448,7 +448,7 @@ export async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
 }
 
 async function slCall(env, path, body) {
-  const base = (env.SITELOG_API || "https://api.site-log.co.uk");
+  const base = (env.SITELOG_API || "https://api2.site-log.co.uk");
   const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
   const req = new Request(base + path, init);
   if (env.SITELOG_DB) { try { const r = await sitelogApi.handle(req, env); if (r) return await r.json().catch(() => ({ ok: r.ok })); } catch (e) {} }

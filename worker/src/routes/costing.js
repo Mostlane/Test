@@ -45,7 +45,7 @@ import { onceMigration } from "../lib/once.js";
 // way so the callers are unchanged. `pathQuery` e.g. "/job-costing?from=…&to=…".
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
-  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     // Ported backend, in-process. Belt-and-braces during rollout: if it errors
     // or returns non-ok, fall through to the still-running remote worker so
@@ -1186,7 +1186,7 @@ function parseLatLngPair(latIn, lngIn) {
 async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
+    const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + "/bulk-add-sites";
     const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim() || "Projects";
     const init = {
       method: "POST",
