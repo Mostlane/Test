@@ -9972,7 +9972,9 @@ __export(sitelogts_exports, {
   loadPeriod: () => loadPeriod,
   periodFor: () => periodFor,
   personDayEvents: () => personDayEvents,
+  personSummary: () => personSummary,
   personWeek: () => personWeek,
+  summaryRange: () => summaryRange,
   sweepSitelogTimesheets: () => sweepSitelogTimesheets
 });
 async function readKV(env, tid, key) {
@@ -10271,6 +10273,53 @@ async function personWeek(env, personId, weekKey2) {
     days,
     totals,
     refused
+  };
+}
+function summaryRange(range, today) {
+  const [y, mo] = today.split("-").map(Number);
+  const first = (yy2, mm) => {
+    const d = new Date(Date.UTC(yy2, mm - 1, 1));
+    return d.toISOString().slice(0, 10);
+  };
+  if (range === "last_14") return { from: addDays(today, -13), to: today, label: "Last 14 days" };
+  if (range === "this_month") return { from: first(y, mo), to: today, label: "This month" };
+  if (range === "last_month") return { from: first(y, mo - 1), to: addDays(first(y, mo), -1), label: "Last month" };
+  if (range === "all") return { from: null, to: today, label: "All time" };
+  return { from: mondayOf2(today), to: today, label: "This week" };
+}
+async function personSummary(env, personId, range) {
+  const today = london().key;
+  const r = summaryRange(range, today);
+  let from = r.from;
+  if (!from) {
+    const first = await env.SITELOG_DB.prepare("SELECT MIN(check_in_at) AS t FROM visits WHERE person_id = ?").bind(personId).first();
+    const d = first && parseUtc(first.t);
+    from = d ? london(d).key : today;
+  }
+  const people = await loadPeriod(env, from, r.to, { personId });
+  const visits = people.length ? people[0].visits : [];
+  const bySite = /* @__PURE__ */ new Map();
+  for (const v of visits) {
+    const k = v.site || "Unknown site";
+    if (!bySite.has(k)) bySite.set(k, { site: k, mins: 0, visits: 0, open: 0, missed: 0, scanned: 0 });
+    const e = bySite.get(k);
+    e.visits++;
+    if (v.state === "open") e.open++;
+    else e.mins += v.mins || 0;
+    if (v.state === "auto") e.missed++;
+    if (v.state === "scanned") e.scanned++;
+  }
+  const sites = [...bySite.values()].map((e) => ({ ...e, mins: Math.round(e.mins) })).sort((a, b) => b.mins - a.mins);
+  const t = personTotals({ visits });
+  return {
+    ok: true,
+    range: range || "this_week",
+    label: r.label,
+    from,
+    to: r.to,
+    today,
+    totals: { ...t, mins: Math.round(t.mins), sites: sites.length },
+    sites
   };
 }
 async function buildPdf(env, kind, dateKey) {
@@ -12632,7 +12681,13 @@ async function handleInner(request, env, ctx) {
       "SELECT id, check_in_at FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL ORDER BY check_in_at DESC"
     ).bind(device.person_id, siteCode).first();
     if (intent === "out") {
-      if (!openVisit) return await logPending(siteCode, "no_open_visit");
+      if (!openVisit) {
+        const done = await env.SITELOG_DB.prepare(
+          "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at = ? AND COALESCE(offline_synced,0) = 1 LIMIT 1"
+        ).bind(device.person_id, siteCode, occurredSql).first();
+        if (done) return json4({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+        return await logPending(siteCode, "no_open_visit");
+      }
       const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
       await env.SITELOG_DB.prepare(
         "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1, out_lat = ?, out_lng = ?, out_accuracy = ?, sign_out_verified = 1, sign_out_distance_m = ? WHERE id = ? AND check_out_at IS NULL"
@@ -12944,6 +12999,16 @@ async function handleInner(request, env, ctx) {
     if (!device) return json4({ ok: false, error: "This phone isn't registered" }, 404);
     const { personWeek: personWeek2 } = await Promise.resolve().then(() => (init_sitelogts(), sitelogts_exports));
     return json4(await personWeek2(env, device.person_id, url.searchParams.get("week") || ""));
+  }
+  if (url.pathname === "/my-summary" && request.method === "GET") {
+    const deviceToken = url.searchParams.get("deviceToken");
+    if (!deviceToken) return json4({ error: "Missing deviceToken" }, 400);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(String(deviceToken).slice(0, 128)).first();
+    if (!device) return json4({ ok: false, error: "This phone isn't registered" }, 404);
+    const { personSummary: personSummary2 } = await Promise.resolve().then(() => (init_sitelogts(), sitelogts_exports));
+    return json4(await personSummary2(env, device.person_id, url.searchParams.get("range") || "this_week"));
   }
   if (url.pathname === "/scan-log" && request.method === "GET") {
     const guard = requireAdmin2();

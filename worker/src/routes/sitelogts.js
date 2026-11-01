@@ -293,6 +293,44 @@ export async function personWeek(env, personId, weekKey) {
     label: periodFor("weekly", from).label, days, totals, refused };
 }
 
+// ── A worker's own totals by site ("Summary" in the SiteLog app) ────────────
+// Same loadPeriod as My Hours and the office timesheet, so all three agree.
+export function summaryRange(range, today) {
+  const [y, mo] = today.split("-").map(Number);
+  const first = (yy, mm) => { const d = new Date(Date.UTC(yy, mm - 1, 1)); return d.toISOString().slice(0, 10); };
+  if (range === "last_14") return { from: addDays(today, -13), to: today, label: "Last 14 days" };
+  if (range === "this_month") return { from: first(y, mo), to: today, label: "This month" };
+  if (range === "last_month") return { from: first(y, mo - 1), to: addDays(first(y, mo), -1), label: "Last month" };
+  if (range === "all") return { from: null, to: today, label: "All time" };
+  return { from: mondayOf(today), to: today, label: "This week" };
+}
+export async function personSummary(env, personId, range) {
+  const today = london().key;
+  const r = summaryRange(range, today);
+  let from = r.from;
+  if (!from) {
+    const first = await env.SITELOG_DB.prepare("SELECT MIN(check_in_at) AS t FROM visits WHERE person_id = ?").bind(personId).first();
+    const d = first && parseUtc(first.t);
+    from = d ? london(d).key : today;
+  }
+  const people = await loadPeriod(env, from, r.to, { personId });
+  const visits = people.length ? people[0].visits : [];
+  const bySite = new Map();
+  for (const v of visits) {
+    const k = v.site || "Unknown site";
+    if (!bySite.has(k)) bySite.set(k, { site: k, mins: 0, visits: 0, open: 0, missed: 0, scanned: 0 });
+    const e = bySite.get(k);
+    e.visits++;
+    if (v.state === "open") e.open++; else e.mins += v.mins || 0;
+    if (v.state === "auto") e.missed++;
+    if (v.state === "scanned") e.scanned++;
+  }
+  const sites = [...bySite.values()].map(e => ({ ...e, mins: Math.round(e.mins) })).sort((a, b) => b.mins - a.mins);
+  const t = personTotals({ visits });
+  return { ok: true, range: range || "this_week", label: r.label, from, to: r.to, today,
+    totals: { ...t, mins: Math.round(t.mins), sites: sites.length }, sites };
+}
+
 export async function buildPdf(env, kind, dateKey) {
   const per = periodFor(kind, dateKey);
   const people = await loadPeriod(env, per.from, per.to);
