@@ -35717,7 +35717,7 @@ async function handle23(request, env, ctx, url, sess) {
     return json({ ok: true, week, ...r }, {}, env, request);
   }
   if (path === "/vancheck/skip" && method === "POST") {
-    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    if (!await isAdmin()) return error("Only Full Access users can skip a van check.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
@@ -35742,7 +35742,7 @@ async function handle23(request, env, ctx, url, sess) {
     return json({ ok: true, week: wk, skippedBy: me }, {}, env, request);
   }
   if (path === "/vancheck/unskip" && method === "POST") {
-    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    if (!await isAdmin()) return error("Only Full Access users can change a skip.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);

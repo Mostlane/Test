@@ -805,7 +805,9 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Admin: skip a driver's van check for a week (logged in the grid) ────────
   if (path === "/vancheck/skip" && method === "POST") {
-    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    // Full Access only (Jamie, 1 Nov 2026) — skipping removes the requirement + lockout,
+    // so a plain Vehicles admin must not be able to; mirrors /vancheck/lockout-waive.
+    if (!(await isAdmin())) return error("Only Full Access users can skip a van check.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
@@ -831,7 +833,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Admin: undo a skip (van check becomes due again) ────────────────────────
   if (path === "/vancheck/unskip" && method === "POST") {
-    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    if (!(await isAdmin())) return error("Only Full Access users can change a skip.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
