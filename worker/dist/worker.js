@@ -11909,6 +11909,7 @@ async function handleInner(request, env, ctx) {
                COALESCE(is_main,0) as is_main,
                portal_username,
                COALESCE(doc_access_always,0) as doc_access_always,
+               COALESCE(is_transfer_pending,0) as is_transfer_pending,
                (SELECT COUNT(*) FROM visits WHERE visits.person_id = people.id) AS visit_count,
                (SELECT COUNT(*) FROM devices WHERE devices.person_id = people.id) AS device_count,
                (SELECT MAX(last_seen) FROM devices WHERE devices.person_id = people.id) AS device_last_seen
@@ -12096,6 +12097,12 @@ async function handleInner(request, env, ctx) {
     try {
       await env.SITELOG_DB.prepare(
         `UPDATE document_attendees SET person_id = ? WHERE person_id IN (${placeholders})`
+      ).bind(primaryId, ...mergeIds).run();
+    } catch (e) {
+    }
+    try {
+      await env.SITELOG_DB.prepare(
+        `UPDATE scan_log SET person_id = ? WHERE person_id IN (${placeholders})`
       ).bind(primaryId, ...mergeIds).run();
     } catch (e) {
     }
@@ -32670,6 +32677,9 @@ async function handle18(request, env, ctx, url, sess) {
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
   const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
   const target = SITELOG_API + sub + url.search;
+  const money3 = perms.FullAccess === "Yes";
+  if (!money3 && MONEY_ONLY_PATHS.has(sub))
+    return error("Only Full Access users can see SiteLog costs", 403, env, request);
   const init = {
     method: request.method,
     headers: { "x-admin-secret": env.SITELOG_ADMIN_SECRET }
@@ -32677,6 +32687,15 @@ async function handle18(request, env, ctx, url, sess) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.headers["Content-Type"] = request.headers.get("Content-Type") || "application/json";
     init.body = await request.arrayBuffer();
+    if (!money3 && MONEY_WRITE_PATHS.has(sub)) {
+      try {
+        const b = JSON.parse(new TextDecoder().decode(init.body) || "{}");
+        init.body = JSON.stringify(stripMoneyFromBody(b));
+        init.headers["Content-Type"] = "application/json";
+      } catch (e) {
+        return error("Bad request body", 400, env, request);
+      }
+    }
   }
   let res;
   try {
@@ -32689,11 +32708,44 @@ async function handle18(request, env, ctx, url, sess) {
     return error("SiteLog API unreachable: " + e.message, 502, env, request);
   }
   const headers = new Headers(corsHeaders(env, request));
+  if (!money3 && MONEY_READ_PATHS.has(sub) && res.ok) {
+    const data = await res.json().catch(() => null);
+    headers.set("Content-Type", "application/json");
+    return new Response(JSON.stringify(stripMoneyFromPeople(data)), { status: res.status, headers });
+  }
   const ct = res.headers.get("Content-Type");
   if (ct) headers.set("Content-Type", ct);
   const cd = res.headers.get("Content-Disposition");
   if (cd) headers.set("Content-Disposition", cd);
   return new Response(res.body, { status: res.status, headers });
+}
+var MONEY_FIELDS = [
+  "hourly_rate",
+  "hourlyRate",
+  "fuel_rate",
+  "fuelRate",
+  "fuel_paid",
+  "fuelPaid",
+  "travel_time_paid",
+  "travelTimePaid",
+  "travel_status",
+  "travelStatus",
+  "travel_cap_type",
+  "travelCapType",
+  "travel_cap_value",
+  "travelCapValue"
+];
+var MONEY_ONLY_PATHS = /* @__PURE__ */ new Set(["/job-costing"]);
+var MONEY_WRITE_PATHS = /* @__PURE__ */ new Set(["/update-engineer", "/add-engineer"]);
+var MONEY_READ_PATHS = /* @__PURE__ */ new Set(["/engineers"]);
+function stripMoneyFromBody(b) {
+  const out = { ...b || {} };
+  for (const k of MONEY_FIELDS) delete out[k];
+  return out;
+}
+function stripMoneyFromPeople(data) {
+  if (!data || !Array.isArray(data.engineers)) return data;
+  return { ...data, money: false, engineers: data.engineers.map(stripMoneyFromBody) };
 }
 function b64u(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
