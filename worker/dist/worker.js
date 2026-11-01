@@ -9963,6 +9963,7 @@ var init_sitelogtspdf = __esm({
 var sitelogts_exports = {};
 __export(sitelogts_exports, {
   addMapLinks: () => addMapLinks,
+  adminLogs: () => adminLogs,
   apiOrigin: () => apiOrigin,
   buildPdf: () => buildPdf,
   emailTimesheet: () => emailTimesheet,
@@ -9970,6 +9971,7 @@ __export(sitelogts_exports, {
   handle: () => handle5,
   handleMap: () => handleMap,
   loadPeriod: () => loadPeriod,
+  logPickers: () => logPickers,
   periodFor: () => periodFor,
   personDayEvents: () => personDayEvents,
   personSummary: () => personSummary,
@@ -10322,6 +10324,117 @@ async function personSummary(env, personId, range) {
     sites
   };
 }
+async function adminLogs(env, origin, { from, to, personId, site }) {
+  const today = london().key;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to || "")) to = today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) from = to;
+  if (from > to) [from, to] = [to, from];
+  if (addDays(from, MAX_RANGE_DAYS) < to) from = addDays(to, -MAX_RANGE_DAYS);
+  const db = env.SITELOG_DB;
+  const people = await loadPeriod(env, from, to, { personId: personId || null });
+  for (const p of people) {
+    p.pid = (p.visits.find((v) => v.pid) || {}).pid || "";
+    if (site) p.visits = p.visits.filter((v) => v.site === site);
+  }
+  await addMapLinks(env, origin, people, MAP_TTL_VIEW);
+  let refused = [];
+  try {
+    refused = (await db.prepare(`
+      SELECT l.at, l.outcome, l.reason, l.person_id, l.device_token, l.site, l.nearest_site, l.lat, l.lng, l.distance_m,
+             p.first_name, p.last_name, p.company
+      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+      WHERE l.refused = 1 AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+      ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all()).results || [];
+  } catch (e) {
+  }
+  const byKey = new Map(people.map((p) => [p.pid || p.name, p]));
+  const canSign = fileSigningEnabled(env);
+  for (const r of refused) {
+    const d = parseUtc(r.at);
+    if (!d) continue;
+    const day = london(d).key;
+    if (day < from || day > to) continue;
+    const where = r.site || r.nearest_site || "";
+    if (site && where !== site) continue;
+    const key = r.person_id || "dev:" + (r.device_token || "?").slice(0, 8);
+    let p = byKey.get(key);
+    if (!p) {
+      const name = r.person_id ? [r.first_name, r.last_name].filter(Boolean).join(" ") || "Unknown person" : "Unregistered phone";
+      p = { pid: r.person_id || "", name, company: r.company || "", visits: [] };
+      byKey.set(key, p);
+      people.push(p);
+    }
+    p.refused = p.refused || [];
+    let mapUrl = null;
+    if (canSign && r.person_id && num(r.lat) != null)
+      mapUrl = await signedFileUrl(env, origin, MAP_PATH, [r.person_id, day, "scan:" + r.at, "x"].join("|"), MAP_TTL_VIEW);
+    p.refused.push({
+      day,
+      date: niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", ""),
+      time: london(d).hhmm,
+      site: where,
+      why: REFUSAL_TEXT[r.outcome] || r.reason || "The scan didn't go through",
+      distance: r.distance_m != null ? Math.round(Number(r.distance_m)) : null,
+      mapUrl,
+      hasLocation: num(r.lat) != null
+    });
+  }
+  const out = people.filter((p) => p.visits.length || p.refused && p.refused.length).map((p) => {
+    const t = personTotals(p);
+    const refusedN = (p.refused || []).length;
+    return {
+      pid: p.pid,
+      name: p.name,
+      company: p.company,
+      refused: p.refused || [],
+      visits: p.visits.map((v) => ({
+        day: v.day,
+        date: v.date,
+        site: v.site,
+        inTime: v.inTime,
+        outTime: v.outTime,
+        mins: Math.round(v.mins || 0),
+        state: v.state,
+        note: v.note,
+        inOk: v.inOk,
+        outOk: v.outOk,
+        inDist: v.inDist != null ? Math.round(Number(v.inDist)) : null,
+        outDist: v.outDist != null ? Math.round(Number(v.outDist)) : null,
+        mapIn: v.mapIn || null,
+        mapOut: v.mapOut || null,
+        scannedIn: !!v.scannedIn,
+        scannedOut: !!v.scannedOut
+      })),
+      totals: {
+        ...t,
+        mins: Math.round(t.mins),
+        refused: refusedN,
+        issues: t.missed + t.open + t.scanned + refusedN
+      }
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  const sum = out.reduce(
+    (a, p) => {
+      a.mins += p.totals.mins;
+      a.visits += p.totals.visits;
+      a.missed += p.totals.missed;
+      a.open += p.totals.open;
+      a.scanned += p.totals.scanned;
+      a.refused += p.totals.refused;
+      a.unver += p.totals.unver;
+      return a;
+    },
+    { people: out.length, mins: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 }
+  );
+  return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
+}
+async function logPickers(env) {
+  const db = env.SITELOG_DB;
+  const people = ((await db.prepare(`SELECT id, first_name, last_name, company, COALESCE(archived,0) AS archived FROM people
+    WHERE COALESCE(is_transfer_pending,0) = 0 ORDER BY first_name, last_name`).all()).results || []).map((p) => ({ id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Unnamed", company: p.company || "", archived: !!p.archived }));
+  const sites = ((await db.prepare("SELECT site_name FROM sites WHERE COALESCE(archived,0) = 0 ORDER BY site_name").all()).results || []).map((s) => s.site_name);
+  return { ok: true, people, sites };
+}
 async function buildPdf(env, kind, dateKey) {
   const per = periodFor(kind, dateKey);
   const people = await loadPeriod(env, per.from, per.to);
@@ -10632,6 +10745,26 @@ async function handle5(request, env, ctx, url, sess) {
       people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
     }, {}, env, request);
   }
+  if (path === "/logs" && request.method === "GET") {
+    const q = url.searchParams;
+    try {
+      return json(await adminLogs(env, apiOrigin(env, url), {
+        from: q.get("from"),
+        to: q.get("to"),
+        personId: q.get("person") || "",
+        site: q.get("site") || ""
+      }), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
+  if (path === "/pickers" && request.method === "GET") {
+    try {
+      return json(await logPickers(env), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
   const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
   if (path === "/config" && request.method === "POST") {
     const cur = await getConfig2(env, tid);
@@ -10665,7 +10798,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, REFUSAL_TEXT, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
+var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, REFUSAL_TEXT, MAX_RANGE_DAYS, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
 var init_sitelogts = __esm({
   "src/routes/sitelogts.js"() {
     init_http();
@@ -10703,6 +10836,7 @@ var init_sitelogts = __esm({
       phone_timeout: "Your phone took too long to find its location",
       phone_no_fix: "Your phone had no location when you registered"
     };
+    MAX_RANGE_DAYS = 93;
     esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     MAP_PATH = "/sitelog-map";
     MAP_TTL_EMAIL = 90 * 86400;

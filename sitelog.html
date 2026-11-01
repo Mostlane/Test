@@ -70,23 +70,100 @@
     .fg input,.fg select{ font:inherit; font-size:15px; color:#0f172a; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
     .ck{ grid-column:1/-1; display:flex; gap:8px; align-items:center; font-size:14px; color:#0f172a; }
     .sect{ grid-column:1/-1; margin-top:6px; font-size:12px; font-weight:800; color:var(--ml-blue); text-transform:uppercase; letter-spacing:.4px; }
+    /* Logs view */
+    .lgbar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+    .lgbar select,.lgbar input[type=date]{ font:inherit; font-size:15px; border:1px solid var(--border); border-radius:10px; padding:9px 10px; background:#fff; min-width:0; }
+    .lgbar select{ flex:1 1 170px; }
+    .chips{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+    .chips button{ border:1px solid var(--border); background:#fff; color:var(--ml-blue); border-radius:999px; padding:7px 12px; font:inherit; font-size:13.5px; font-weight:600; cursor:pointer; }
+    .chips button.on{ background:var(--ml-blue); color:#fff; border-color:var(--ml-blue); }
+    .sumrow{ display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 12px; }
+    .lp{ border:1px solid #e5e9ef; border-radius:12px; margin-bottom:10px; overflow:hidden; background:#fff; }
+    .lp.warn{ border-left:5px solid #f59e0b; } .lp.bad{ border-left:5px solid #dc2626; } .lp.good{ border-left:5px solid #16a34a; }
+    .lp > summary{ list-style:none; cursor:pointer; padding:12px 14px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+    .lp > summary::-webkit-details-marker{ display:none; }
+    .lp .nm{ font-weight:800; font-size:16px; color:#0f172a; } .lp .co{ color:var(--muted); font-size:13px; }
+    .lp .hrs{ margin-left:auto; font-weight:800; color:var(--ml-blue); font-size:17px; white-space:nowrap; }
+    .lp .badges{ flex-basis:100%; display:flex; flex-wrap:wrap; gap:5px; }
+    .dayh{ background:#f4f6f9; color:#334155; font-weight:700; font-size:13px; padding:6px 14px; border-top:1px solid #eef1f5; }
+    .ev{ display:grid; grid-template-columns:1fr auto; gap:4px 10px; padding:10px 14px; border-top:1px solid #eef1f5; font-size:14px; }
+    .ev .site{ font-weight:700; } .ev .dur{ font-weight:800; white-space:nowrap; text-align:right; }
+    .ev .pair{ grid-column:1/-1; display:flex; flex-wrap:wrap; gap:6px 14px; }
+    .ev .st{ grid-column:1/-1; font-size:12.5px; }
+    .stamp{ display:inline-flex; align-items:center; gap:5px; font-variant-numeric:tabular-nums; }
+    .stamp b{ font-size:15px; }
+    .ok-tick{ display:inline-flex; width:20px; height:20px; border-radius:50%; background:#16a34a; color:#fff; font-size:13px; font-weight:900; align-items:center; justify-content:center; }
+    .no-tick{ display:inline-flex; width:20px; height:20px; border-radius:50%; background:#fde2e2; color:#b91c1c; font-size:12px; font-weight:900; align-items:center; justify-content:center; }
+    .mapb{ display:inline-flex; align-items:center; gap:3px; border:1px solid #c7d2fe; background:#eef2ff; color:#1e3a8a; border-radius:8px; padding:3px 8px; font-size:12.5px; font-weight:700; text-decoration:none; }
+    .mapb.off{ border-color:#e5e7eb; background:#f9fafb; color:#9ca3af; }
+    .ev.auto{ background:#fff5f5; } .ev.open{ background:#fffbeb; } .ev.scanned{ background:#f5f3ff; } .ev.refused{ background:#fef2f2; }
+    .ev.refused .site{ color:#b91c1c; }
+    .lgempty{ padding:22px; text-align:center; color:var(--muted); }
+    .site-grp{ margin-bottom:10px; } .site-grp h3{ margin:0 0 4px; font-size:14px; color:#0f172a; }
+    .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
+    .kpi{ border:1px solid #e5e9ef; border-radius:12px; padding:10px 12px; cursor:pointer; background:#fff; }
+    .kpi b{ display:block; font-size:24px; color:var(--ml-blue); } .kpi span{ font-size:12.5px; color:var(--muted); }
+    .kpi.bad b{ color:#b91c1c; } .kpi.good b{ color:#16a34a; }
+    @media(min-width:900px){ .shell{ max-width:980px; } .ev{ grid-template-columns:220px 1fr auto; } .ev .pair{ grid-column:auto; } .ev .st{ grid-column:2/-1; } }
   </style>
 </head>
 <body>
 <div class="shell">
-  <div class="card">
+  <div class="card" id="topCard">
     <header>
-      <h1>📍 SiteLog</h1>
-      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+      <h1>📍 Site Log</h1>
+      <span style="display:flex;gap:8px;align-items:center">
+        <a class="back-btn" id="scanSmall" href="https://site-log.co.uk/scan.html" target="_blank" rel="noopener" style="display:none">📲 Scan</a>
+        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+      </span>
     </header>
-    <p class="muted" style="margin:0 0 6px;">GPS site check-in and attendance. Scanning opens the SiteLog app — your phone stays registered to you.</p>
-    <a class="bigbtn green" id="scanBtn" href="https://site-log.co.uk/scan.html" target="_blank" rel="noopener">📲 Scan in / out of site</a>
+    <div id="workerBlock">
+      <p class="muted" style="margin:0 0 6px;">GPS site check-in and attendance. Scanning opens the SiteLog app — your phone stays registered to you.</p>
+      <a class="bigbtn green" id="scanBtn" href="https://site-log.co.uk/scan.html" target="_blank" rel="noopener">📲 Scan in / out of site</a>
+    </div>
+    <div class="tabs" id="tabs" style="margin:12px 0 0">
+      <button data-tab="now" class="on">🟢 Now</button>
+      <button data-tab="logs">📋 Logs</button>
+      <button data-tab="people">👷 People <span class="cnt" id="trCount" style="display:none"></span></button>
+      <button data-tab="settings">⚙ Settings</button>
+    </div>
   </div>
 
+  <div id="pane-now" style="display:none;">
+    <div class="card">
+      <h2>🟢 On site right now <span class="muted" id="onSiteCount"></span></h2>
+      <div id="onSiteList" class="muted">Loading…</div>
+      <div class="msg err" id="adminMsg"></div>
+    </div>
+    <div class="card">
+      <h2>📅 Today so far</h2>
+      <div class="kpis" id="todayKpis"><div class="muted">Loading…</div></div>
+      <button class="tsbtn primary" id="todayOpen" style="margin-top:10px">Open today's logs →</button>
+    </div>
+  </div>
 
-  <div class="tabs" id="tabs">
-    <button data-tab="overview" class="on">📊 Overview</button>
-    <button data-tab="people">👷 People <span class="cnt" id="trCount" style="display:none"></span></button>
+  <div id="pane-logs" style="display:none;">
+    <div class="card">
+      <h2>📋 Logs</h2>
+      <div class="lgbar">
+        <select id="lgPerson"><option value="">Everyone</option></select>
+        <select id="lgSite"><option value="">All sites</option></select>
+      </div>
+      <div class="chips" id="lgChips">
+        <button data-r="today" class="on">Today</button><button data-r="yesterday">Yesterday</button>
+        <button data-r="week">This week</button><button data-r="lastweek">Last week</button>
+        <button data-r="month">This month</button><button data-r="lastmonth">Last month</button>
+      </div>
+      <div class="lgbar">
+        <input type="date" id="lgFrom" aria-label="From"><span class="muted">to</span><input type="date" id="lgTo" aria-label="To">
+        <button class="tsbtn" id="lgCsv">⬇ CSV</button>
+        <button class="tsbtn" id="lgExpand">Expand all</button>
+      </div>
+      <div class="sumrow" id="lgSum"></div>
+      <div id="lgList" class="muted">Loading…</div>
+      <p class="muted" style="margin:10px 0 0;font-size:12px"><span class="ok-tick">✓</span> = the phone was inside the site boundary when it signed in or out.
+        <span class="no-tick">✗</span> = not checked (automatic sign-out, office edit, or before location checks began). 📍 Map shows exactly where the phone was.</p>
+    </div>
   </div>
 
   <div id="pane-people" style="display:none;">
@@ -107,41 +184,9 @@
     </div>
   </div>
 
-  <div id="pane-overview">
-  <div class="card" id="adminCard" style="display:none;">
-    <h2>🟢 On site right now <span class="muted" id="onSiteCount"></span></h2>
-    <div id="onSiteList" class="muted">Loading…</div>
-    <div class="msg err" id="adminMsg"></div>
-    <button class="bigbtn" id="pushBtn" style="border:none;cursor:pointer;background:#374151;">⇪ Push portal sites to SiteLog geofences</button>
-    <div class="msg" id="pushMsg"></div>
-    <a class="bigbtn" href="site-arrival.html" style="background:linear-gradient(90deg,#0e7a3b,#12a150);">📋 Set what visitors see on arrival</a>
-    <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
-  </div>
 
-  <div class="card" id="tvCard" style="display:none;">
-    <h2>📋 Timesheet — who signed in and out</h2>
-    <p class="muted" style="margin:0 0 10px;">The same record the timesheet email is built from. ✔ = the phone was at the site when it signed in/out; ✘ = not checked (automatic sign-out, office edit, or before location checks began).</p>
-    <div class="tvbar">
-      <div class="seg"><button id="tvDay" class="on">Day</button><button id="tvWeek">Week</button></div>
-      <button class="tsbtn" id="tvPrev" title="Previous">‹</button>
-      <input type="date" id="tvDate">
-      <button class="tsbtn" id="tvNext" title="Next">›</button>
-      <button class="tsbtn" id="tvToday">Today</button>
-      <button class="tsbtn" id="tvPdf">📄 PDF</button>
-    </div>
-    <div class="muted" id="tvLabel" style="font-weight:600;color:#0f172a;margin-bottom:6px;"></div>
-    <div class="tvtot" id="tvTot"></div>
-    <div id="tvList" class="muted">Loading…</div>
-  </div>
-
-  <div class="card" id="refCard" style="display:none;">
-    <h2>🚫 Scans that didn't sign anyone in <span class="muted" id="refCount"></span></h2>
-    <p class="muted" style="margin:0 0 8px;">Every time a phone scanned but nobody was signed in or out — and why. Last
-      <select id="refDays" style="font:inherit;"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select>.</p>
-    <div id="refList" class="muted">Loading…</div>
-  </div>
-
-  <div class="card" id="tsCard" style="display:none;">
+  <div id="pane-settings" style="display:none;">
+  <div class="card" id="tsCard">
     <h2>🧾 Timesheet emails</h2>
     <p class="muted" style="margin:0 0 10px;">A PDF of everyone's visits — hours on site, with a green tick or red cross showing whether each sign-in and sign-out was GPS-checked at the site, and missed sign-outs highlighted.</p>
     <label class="tsrow"><input type="checkbox" id="tsDaily"> <span><b>Daily</b> — once everyone has signed out (from 4pm), or at 8pm with anyone still in shown as such</span></label>
@@ -156,6 +201,13 @@
     </div>
     <div class="msg" id="tsMsg"></div>
   </div>
+    <div class="card">
+      <h2>🗺 Sites and visitor messages</h2>
+      <p class="muted" style="margin:0 0 6px;">Site names and map pins are managed on the portal Sites page and sent to SiteLog automatically.</p>
+      <button class="bigbtn" id="pushBtn" style="border:none;cursor:pointer;background:#374151;width:100%">⇪ Re-send all portal sites to SiteLog</button>
+      <div class="msg" id="pushMsg"></div>
+      <a class="bigbtn" href="site-arrival.html" style="background:linear-gradient(90deg,#0e7a3b,#12a150);">📋 Set what visitors see on arrival</a>
+    </div>
   </div>
 </div>
 
@@ -179,154 +231,26 @@ function fmtTime(v){ try { const d = new Date(v); return isNaN(d) ? String(v||""
 async function loadOnSite(){
   try{
     const res = await authFetch(`${API}/sitelog/on-site`, {cache:"no-store"});
-    if(res.status === 403 || res.status === 401) { $("adminCard").style.display = "none"; return; }
+    if(res.status === 403 || res.status === 401) return;
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || "SiteLog error");
-    // Defensive rendering — accept an array or {rows|visits|onSite:[...]}
     const list = Array.isArray(data) ? data : (data.rows || data.visits || data.onSite || data.people || []);
     $("onSiteCount").textContent = `(${list.length})`;
     if(!list.length){ $("onSiteList").textContent = "Nobody is signed in to a site right now."; return; }
-    $("onSiteList").innerHTML = list.map(v => {
-      const name = v.name || [v.first_name, v.last_name].filter(Boolean).join(" ") || v.person_name || "Unknown";
-      const site = v.site_name || v.site || v.site_code || v.provided_site_name || "";
-      const co   = v.company || "";
-      const inAt = v.check_in_at || v.checkin_at || v.in_at || "";
-      return `<div class="row"><b>${esc(name)}</b><span>${esc(site)}${co ? " · " + esc(co) : ""}</span><span class="meta">${inAt ? "in " + esc(fmtTime(inAt)) : ""}</span></div>`;
-    }).join("");
+    const bySite = {};
+    list.forEach(v => { const site = v.site_name || v.site || v.site_code || v.provided_site_name || "Unknown site"; (bySite[site] = bySite[site] || []).push(v); });
+    $("onSiteList").innerHTML = Object.keys(bySite).sort().map(site => `<div class="site-grp"><h3>${esc(site)} <span class="muted">(${bySite[site].length})</span></h3>` +
+      bySite[site].map(v => {
+        const name = v.name || [v.first_name, v.last_name].filter(Boolean).join(" ") || v.person_name || "Unknown";
+        const inAt = v.check_in_at || v.checkin_at || v.in_at || "";
+        return `<div class="row"><b>${esc(name)}</b><span class="muted">${esc(v.company || "")}</span><span class="meta">${inAt ? "since " + esc(fmtTime(inAt)) : ""}</span></div>`;
+      }).join("") + `</div>`).join("");
   }catch(e){
     $("onSiteList").textContent = "";
     $("adminMsg").textContent = e.message === "SITELOG_ADMIN_SECRET is not configured on this worker"
       ? "SiteLog secret isn't set on the portal worker yet."
       : "Couldn't reach SiteLog: " + e.message;
   }
-}
-
-if (perms().FullAccess === "Yes" || perms().SiteLogAdmin === "Yes") {
-  $("adminCard").style.display = "block";
-  loadOnSite();
-  loadRefusals();
-  $("refDays").addEventListener("change", loadRefusals);
-  loadTimesheetCfg();
-  setTimeout(initTimesheetView, 0);   // after the script below has defined it
-}
-
-// ── Timesheet view (same data as the emailed PDF: GET /sitelog-ts/data) ──
-const TV = { kind:"daily", date:"" };
-function londonToday(){ return new Date().toLocaleDateString("en-CA",{ timeZone:"Europe/London" }); }
-function shiftDate(key, n){ const d = new Date(key + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); }
-function hm(mins){ mins = Math.round(mins||0); return Math.floor(mins/60) + "h " + String(mins%60).padStart(2,"0") + "m"; }
-function initTimesheetView(){
-  $("tvCard").style.display = "block";
-  TV.date = londonToday(); $("tvDate").value = TV.date;
-  const setKind = k => { TV.kind = k; $("tvDay").classList.toggle("on", k==="daily"); $("tvWeek").classList.toggle("on", k==="weekly"); loadTimesheetView(); };
-  $("tvDay").onclick = () => setKind("daily");
-  $("tvWeek").onclick = () => setKind("weekly");
-  $("tvPrev").onclick = () => { TV.date = shiftDate(TV.date, TV.kind==="weekly" ? -7 : -1); $("tvDate").value = TV.date; loadTimesheetView(); };
-  $("tvNext").onclick = () => { TV.date = shiftDate(TV.date, TV.kind==="weekly" ? 7 : 1); $("tvDate").value = TV.date; loadTimesheetView(); };
-  $("tvToday").onclick = () => { TV.date = londonToday(); $("tvDate").value = TV.date; loadTimesheetView(); };
-  $("tvDate").onchange = () => { if ($("tvDate").value) { TV.date = $("tvDate").value; loadTimesheetView(); } };
-  $("tvPdf").onclick = async () => {
-    const w = window.open("", "_blank");
-    try{
-      const r = await authFetch(`${API}/sitelog-ts/pdf`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ kind: TV.kind, date: TV.date }) });
-      if(!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Couldn't build the PDF");
-      const url = URL.createObjectURL(await r.blob());
-      if(w) w.location = url; else location.href = url;
-    }catch(e){ if(w) w.close(); $("tvList").textContent = e.message; }
-  };
-  loadTimesheetView();
-}
-let tvSeq = 0;
-async function loadTimesheetView(){
-  const seq = ++tvSeq;
-  $("tvList").textContent = "Loading timesheet…"; $("tvTot").innerHTML = "";
-  try{
-    const r = await authFetch(`${API}/sitelog-ts/data?kind=${TV.kind}&date=${TV.date}`, { cache:"no-store" });
-    const d = await r.json().catch(() => ({}));
-    if (seq !== tvSeq) return;
-    if (!r.ok) throw new Error(d.error || "Couldn't load the timesheet");
-    $("tvLabel").textContent = d.period.label;
-    const people = d.people || [];
-    if (!people.length) { $("tvList").textContent = "Nobody signed in on SiteLog in this period."; return; }
-    let tot = 0, missed = 0, open = 0, unver = 0, scanned = 0;
-    people.forEach(p => { tot += p.totals.mins; missed += p.totals.missed; open += p.totals.open; unver += p.totals.unver; scanned += p.totals.scanned || 0; });
-    $("tvTot").innerHTML = `<span class="pill ok">${people.length} ${people.length>1?"people":"person"} · ${hm(tot)}</span>` +
-      (missed ? `<span class="pill bad">${missed} missed sign-out${missed>1?"s":""}</span>` : "") +
-      (scanned ? `<span class="pill scn">${scanned} scanned but not confirmed</span>` : "") +
-      (open ? `<span class="pill amb">${open} still signed in</span>` : "") +
-      (unver ? `<span class="pill bad">${unver} not GPS-checked</span>` : "");
-    const weekly = TV.kind === "weekly";
-    $("tvList").innerHTML = people.map(p => {
-      const t = p.totals;
-      const status = t.missed ? `<span class="pill bad">${t.missed} missed sign-out</span>`
-        : t.scanned ? `<span class="pill scn">Scanned but not confirmed</span>`
-        : t.open ? `<span class="pill amb">Still signed in</span>`
-        : t.unver ? `<span class="pill bad">${t.unver} not verified</span>`
-        : `<span class="pill ok">All verified</span>`;
-      const rows = p.visits.map(v => {
-        const mark = ok => ok ? `<span class="g">✔</span>` : `<span class="x">✘</span>`;
-        const noEnd = v.state === "open" || (v.state === "scanned" && !v.outTime);
-        const out = v.state === "open" ? "still in" : noEnd ? "?" : v.scannedOut ? `<span class="sc">${esc(v.outTime)}</span>` : esc(v.outTime);
-        const inT = v.scannedIn ? `<span class="sc">${esc(v.inTime)}</span>` : esc(v.inTime);
-        const pin = (u, what) => u ? ` <a class="pin" href="${esc(u)}" target="_blank" rel="noopener" title="Where the phone was at ${what}">📍</a>` : "";
-        return `<div class="tvv ${v.state==="auto"?"auto":v.state==="open"?"open":v.state==="scanned"?"scanned":""}">
-          <span class="t">${weekly ? esc(v.date) + " · " : ""}${inT} ${mark(v.inOk)}${pin(v.mapIn,"sign-in")} → ${out} ${noEnd ? "" : mark(v.outOk)}${noEnd ? "" : pin(v.mapOut,"sign-out")}</span>
-          <span>${esc(v.site)}</span>
-          <span class="t"><b>${noEnd ? "–" : hm(v.mins)}</b></span>
-          ${v.note ? `<span class="note">${esc(v.note)}</span>` : ""}
-        </div>`;
-      }).join("");
-      return `<details class="tvp${t.missed||t.unver||t.scanned?" bad":""}"><summary><b>${esc(p.name)}</b><span class="muted">${esc(p.company||"")} · ${t.visits} visit${t.visits>1?"s":""}</span>${status}<span class="hrs">${hm(t.mins)}</span></summary>${rows}</details>`;
-    }).join("");
-  }catch(e){ if (seq === tvSeq) $("tvList").textContent = e.message; }
-}
-
-// ── Refused / abandoned scans (scan_log) ──
-const REF_WHY = {
-  unknown_site: "Not at any SiteLog site",
-  outside_site: "Outside the site boundary",
-  outside_site_signed_in: "Tried to sign out away from the site",
-  no_location: "No location sent with the sign-in/out",
-  no_site_location: "Site has no location set",
-  blocked: "Person is archived",
-  phone_denied: "Location permission turned off on the phone",
-  phone_unavailable: "Phone couldn't get a location",
-  phone_timeout: "Location timed out on the phone",
-  phone_no_fix: "No location when registering",
-  error: "Refused",
-  abandoned: "Offered a sign-in but never confirmed it"
-};
-function fmtDay(v){ try { const d = new Date(v); return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}) + " " + d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
-async function loadRefusals(){
-  const days = $("refDays").value;
-  try{
-    const r = await authFetch(`${API}/sitelog/scan-log?days=${days}`, {cache:"no-store"});
-    if(!r.ok) return;
-    const d = await r.json();
-    $("refCard").style.display = "block";
-    const rows = d.rows || [];
-    // Offered a sign-in/out but no sign-in/out from the same phone within 20 minutes.
-    const out = [];
-    rows.forEach(x => {
-      if (x.refused) { out.push(x); return; }
-      if (x.kind === "scan" && (x.outcome === "confirm_check_in" || x.outcome === "confirm_sign_out")) {
-        const t = new Date(x.at).getTime();
-        const done = rows.some(y => (y.kind === "sign_in" || y.kind === "sign_out") && y.device_token === x.device_token
-          && new Date(y.at).getTime() >= t && new Date(y.at).getTime() - t < 20*60000);
-        if (!done) out.push(Object.assign({}, x, { outcome: "abandoned", reason: null }));
-      }
-    });
-    $("refCount").textContent = `(${out.length})`;
-    if(!out.length){ $("refList").textContent = "None — every scan in this period ended in a sign-in or sign-out."; return; }
-    $("refList").innerHTML = out.map(x => {
-      const name = [x.first_name, x.last_name].filter(Boolean).join(" ") || "Unknown phone";
-      const why = REF_WHY[x.outcome] || x.outcome;
-      const where = x.site || (x.nearest_site ? "nearest: " + x.nearest_site : "");
-      const dist = x.distance_m != null ? ` · ${x.distance_m >= 1000 ? (x.distance_m/1000).toFixed(1)+" km" : x.distance_m+" m"} away` : "";
-      const acc = x.accuracy != null ? ` · ±${Math.round(x.accuracy)} m` : "";
-      return `<div class="row" style="flex-wrap:wrap"><b>${esc(name)}</b><span>${esc(why)}${where ? " — " + esc(where) : ""}${esc(dist)}${esc(acc)}</span><span class="meta">${esc(fmtDay(x.at))}</span>${x.reason && x.reason !== why ? `<span class="meta" style="flex-basis:100%">${esc(x.reason)}</span>` : ""}</div>`;
-    }).join("");
-  }catch(e){ $("refList").textContent = "Couldn't load the scan log."; }
 }
 
 // ── Timesheet emails (daily + weekly PDF) ──
@@ -413,17 +337,155 @@ if (pb) pb.addEventListener("click", async () => {
 
 // ── Tabs (admin only) ───────────────────────────────────────────────────────
 const IS_FULL = perms().FullAccess === "Yes";
+const IS_ADMIN = IS_FULL || perms().SiteLogAdmin === "Yes";
+const loaded = {};
 function showTab(t){
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
   document.querySelectorAll("[id^=pane-]").forEach(p => p.style.display = p.id === "pane-" + t ? "block" : "none");
+  if (t === "now") { loadOnSite(); loadToday(); }
+  if (t === "logs" && !loaded.logs) { loaded.logs = true; initLogs(); }
   if (t === "people") loadPeople();
+  if (t === "settings" && !loaded.settings) { loaded.settings = true; loadTimesheetCfg(); }
   try { history.replaceState(null, "", "#" + t); } catch(e){}
 }
-if (IS_FULL || perms().SiteLogAdmin === "Yes") {
-  $("tabs").style.display = "flex";
-  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
-  loadTransfers();
-  if (location.hash === "#people") showTab("people");
+// ── Today so far ────────────────────────────────────────────────────────────
+function londonToday(){ return new Date().toLocaleDateString("en-CA",{ timeZone:"Europe/London" }); }
+function shiftDate(key, n){ const d = new Date(key + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); }
+function hm(mins){ mins = Math.round(mins||0); return Math.floor(mins/60) + "h " + String(mins%60).padStart(2,"0") + "m"; }
+async function tsGet(path){ const r = await authFetch(`${API}/sitelog-ts${path}`, {cache:"no-store"}); const d = await r.json().catch(() => ({})); if(!r.ok) throw new Error(d.error || ("HTTP " + r.status)); return d; }
+async function loadToday(){
+  try{
+    const t = londonToday(), d = await tsGet(`/logs?from=${t}&to=${t}`), s = d.summary;
+    const k = (n, label, cls, filter) => `<div class="kpi ${cls||""}" data-f="${filter||""}"><b>${n}</b><span>${label}</span></div>`;
+    $("todayKpis").innerHTML = k(s.people, "people signed in", "", "") + k(hm(s.mins), "hours so far", "", "") +
+      k(s.open, "still on site", "", "") +
+      k(s.missed, "missed sign-outs", s.missed ? "bad" : "good", "issues") +
+      k(s.refused, "failed scans", s.refused ? "bad" : "good", "issues") +
+      k(s.scanned, "scanned, not confirmed", s.scanned ? "bad" : "good", "issues");
+    $("todayKpis").querySelectorAll(".kpi").forEach(el => el.onclick = () => { LG.onlyIssues = el.dataset.f === "issues"; openLogs("today"); });
+  }catch(e){ $("todayKpis").innerHTML = `<div class="muted">Couldn't load today: ${esc(e.message)}</div>`; }
+}
+$("todayOpen").onclick = () => { LG.onlyIssues = false; openLogs("today"); };
+
+// ── Logs ────────────────────────────────────────────────────────────────────
+const LG = { from:"", to:"", person:"", site:"", data:null, onlyIssues:false, seq:0 };
+function rangeFor(r){
+  const t = londonToday(), dow = (new Date(t + "T12:00:00Z").getUTCDay() + 6) % 7, mon = shiftDate(t, -dow);
+  const first = t.slice(0,8) + "01";
+  if (r === "yesterday") return [shiftDate(t,-1), shiftDate(t,-1)];
+  if (r === "week") return [mon, t];
+  if (r === "lastweek") return [shiftDate(mon,-7), shiftDate(mon,-1)];
+  if (r === "month") return [first, t];
+  if (r === "lastmonth") { const lmEnd = shiftDate(first,-1); return [lmEnd.slice(0,8) + "01", lmEnd]; }
+  return [t, t];
+}
+function setRange(r){
+  [LG.from, LG.to] = rangeFor(r); $("lgFrom").value = LG.from; $("lgTo").value = LG.to;
+  document.querySelectorAll("#lgChips button").forEach(b => b.classList.toggle("on", b.dataset.r === r));
+}
+function openLogs(r){ if (!loaded.logs) { loaded.logs = true; initLogs(r); } else { setRange(r); loadLogs(); } showTabOnly("logs"); }
+function showTabOnly(t){ document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  document.querySelectorAll("[id^=pane-]").forEach(p => p.style.display = p.id === "pane-" + t ? "block" : "none");
+  try { history.replaceState(null, "", "#" + t); } catch(e){} }
+async function initLogs(r){
+  setRange(r || "today");
+  document.querySelectorAll("#lgChips button").forEach(b => b.onclick = () => { setRange(b.dataset.r); loadLogs(); });
+  const onDate = () => { if ($("lgFrom").value && $("lgTo").value) { LG.from = $("lgFrom").value; LG.to = $("lgTo").value;
+    document.querySelectorAll("#lgChips button").forEach(b => b.classList.remove("on")); loadLogs(); } };
+  $("lgFrom").onchange = onDate; $("lgTo").onchange = onDate;
+  $("lgPerson").onchange = () => { LG.person = $("lgPerson").value; loadLogs(); };
+  $("lgSite").onchange = () => { LG.site = $("lgSite").value; loadLogs(); };
+  $("lgExpand").onclick = () => { const all = [...document.querySelectorAll("#lgList details")]; const open = !all.every(d => d.open);
+    all.forEach(d => d.open = open); $("lgExpand").textContent = open ? "Collapse all" : "Expand all"; };
+  $("lgCsv").onclick = downloadCsv;
+  tsGet("/pickers").then(d => {
+    $("lgPerson").innerHTML = `<option value="">Everyone</option>` + d.people.filter(p => !p.archived).map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.company ? " — " + esc(p.company) : ""}</option>`).join("") +
+      (d.people.some(p => p.archived) ? `<optgroup label="Archived">` + d.people.filter(p => p.archived).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("") + `</optgroup>` : "");
+    $("lgSite").innerHTML = `<option value="">All sites</option>` + d.sites.map(x => `<option>${esc(x)}</option>`).join("");
+    $("lgPerson").value = LG.person; $("lgSite").value = LG.site;
+  }).catch(() => {});
+  loadLogs();
+}
+const STATE = {
+  ok: ["Complete", "ok"], moved: ["Moved to another site", "ok"], manual: ["Added by the office", "amb"],
+  auto: ["Missed sign-out", "bad"], open: ["Still on site", "amb"], scanned: ["Scanned, not confirmed", "scn"],
+};
+function tick(ok){ return ok ? `<span class="ok-tick" title="Location checked at the site">✓</span>` : `<span class="no-tick" title="Location not checked">✗</span>`; }
+function mapBtn(u){ return u ? `<a class="mapb" href="${esc(u)}" target="_blank" rel="noopener">📍 Map</a>` : `<span class="mapb off" title="No location was recorded">📍 —</span>`; }
+function dist(m){ return m == null ? "" : `<span class="muted" style="font-size:12px">${m >= 1000 ? (m/1000).toFixed(1) + " km" : m + " m"}</span>`; }
+function personIssues(p){ return p.totals.missed + p.totals.open + p.totals.scanned + p.totals.refused; }
+async function loadLogs(){
+  const seq = ++LG.seq;
+  $("lgList").innerHTML = window.MLUI && MLUI.loading ? MLUI.loading("Loading logs…") : "Loading logs…"; $("lgSum").innerHTML = "";
+  try{
+    const q = new URLSearchParams({ from: LG.from, to: LG.to }); if (LG.person) q.set("person", LG.person); if (LG.site) q.set("site", LG.site);
+    const d = await tsGet("/logs?" + q);
+    if (seq !== LG.seq) return;
+    LG.data = d; renderLogs();
+  }catch(e){ if (seq === LG.seq) $("lgList").innerHTML = `<div class="lgempty">Couldn't load logs: ${esc(e.message)}</div>`; }
+}
+function renderLogs(){
+  const d = LG.data; if (!d) return;
+  const s = d.summary;
+  const pill = (n, txt, cls) => n ? `<span class="pill ${cls}">${n} ${txt}</span>` : "";
+  $("lgSum").innerHTML = `<span class="pill ok">${s.people} ${s.people === 1 ? "person" : "people"} · ${hm(s.mins)}</span>` +
+    pill(s.missed, s.missed === 1 ? "missed sign-out" : "missed sign-outs", "bad") + pill(s.refused, s.refused === 1 ? "failed scan" : "failed scans", "bad") +
+    pill(s.scanned, "scanned, not confirmed", "scn") + pill(s.open, "still on site", "amb") +
+    (s.missed + s.refused + s.scanned + s.open ? `<label class="pill" style="cursor:pointer;background:#f1f5f9"><input type="checkbox" id="lgOnly" ${LG.onlyIssues ? "checked" : ""} style="vertical-align:-2px"> only show problems</label>` : "");
+  const only = $("lgOnly"); if (only) only.onchange = () => { LG.onlyIssues = only.checked; renderLogs(); };
+  let people = d.people;
+  if (LG.onlyIssues) people = people.filter(p => personIssues(p) > 0);
+  if (!people.length) { $("lgList").innerHTML = `<div class="lgempty">${d.people.length ? "No problems in this period 👍" : "Nobody signed in or scanned in this period."}</div>`; return; }
+  const multiDay = d.from !== d.to, autoOpen = people.length <= 3 || !!LG.person;
+  $("lgList").innerHTML = people.map((p, i) => {
+    const t = p.totals, iss = personIssues(p);
+    const cls = t.missed || t.refused || t.scanned ? "bad" : t.open ? "warn" : "good";
+    const badges = (iss ? "" : `<span class="pill ok">✓ All complete</span>`) +
+      pill(t.missed, t.missed === 1 ? "missed sign-out" : "missed sign-outs", "bad") + pill(t.refused, t.refused === 1 ? "failed scan" : "failed scans", "bad") +
+      pill(t.scanned, "not confirmed", "scn") + pill(t.open, "on site now", "amb") + pill(t.unver, "not location-checked", "amb");
+    const items = [];
+    p.visits.forEach(v => items.push({ day: v.day, date: v.date, t: v.inTime, html: visitRow(v) }));
+    (p.refused || []).forEach(r => items.push({ day: r.day, date: r.date, t: r.time, html: refusedRow(r) }));
+    items.sort((a, b) => (a.day + a.t).localeCompare(b.day + b.t));
+    let last = "", body = "";
+    items.forEach(it => { if (multiDay && it.day !== last) { body += `<div class="dayh">${esc(it.date)}</div>`; last = it.day; } body += it.html; });
+    return `<details class="lp ${cls}"${autoOpen ? " open" : ""}><summary><span class="nm">${esc(p.name)}</span><span class="co">${esc(p.company || "")}</span>
+      <span class="hrs">${hm(t.mins)}</span><span class="badges">${badges}<span class="muted" style="font-size:12px">${t.visits} visit${t.visits === 1 ? "" : "s"}</span></span></summary>${body}</details>`;
+  }).join("");
+}
+function visitRow(v){
+  const st = STATE[v.state] || ["", ""];
+  const inPart = `<span class="stamp">In <b>${esc(v.inTime)}</b> ${v.scannedIn ? `<span class="pill scn">scan only</span>` : tick(v.inOk)} ${mapBtn(v.mapIn)} ${v.inOk ? dist(v.inDist) : ""}</span>`;
+  let outPart;
+  if (v.state === "open") outPart = `<span class="stamp">Out <b>—</b> <span class="pill amb">still on site</span></span>`;
+  else if (v.state === "scanned" && !v.outTime) outPart = `<span class="stamp">Out <b>?</b> <span class="pill bad">never signed out</span></span>`;
+  else if (v.state === "auto") outPart = `<span class="stamp">Out <b>${esc(v.outTime)}</b> <span class="pill bad">closed by SiteLog</span> ${mapBtn(null)}</span>`;
+  else outPart = `<span class="stamp">Out <b>${esc(v.outTime)}</b> ${v.scannedOut ? `<span class="pill scn">scan only</span>` : tick(v.outOk)} ${mapBtn(v.mapOut)} ${v.outOk ? dist(v.outDist) : ""}</span>`;
+  const noHours = v.state === "open" || (v.state === "scanned" && !v.outTime);
+  return `<div class="ev ${v.state === "ok" || v.state === "moved" || v.state === "manual" ? "" : v.state}">
+    <span class="site">${esc(v.site)}</span>
+    <span class="pair">${inPart}${outPart}</span>
+    <span class="dur">${noHours ? "–" : hm(v.mins)}</span>
+    <span class="st"><span class="pill ${st[1]}">${esc(st[0])}</span> ${v.state === "ok" ? "" : `<span class="muted">${esc(v.note || "")}</span>`}</span></div>`;
+}
+function refusedRow(r){
+  return `<div class="ev refused">
+    <span class="site">❌ Failed scan${r.site ? " — " + esc(r.site) : ""}</span>
+    <span class="pair"><span class="stamp">At <b>${esc(r.time)}</b> ${mapBtn(r.mapUrl)} ${dist(r.distance)}${r.distance != null ? '<span class="muted" style="font-size:12px"> from site</span>' : ""}</span></span>
+    <span class="dur"></span>
+    <span class="st" style="color:#b91c1c">${esc(r.why)}</span></div>`;
+}
+function downloadCsv(){
+  const d = LG.data; if (!d) return;
+  const q = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const rows = [["Person","Company","Date","Site","Event","In","In location checked","Out","Out location checked","Hours","Status","Note"]];
+  d.people.forEach(p => {
+    p.visits.forEach(v => rows.push([p.name, p.company, v.day, v.site, "Visit", v.inTime, v.inOk ? "Yes" : "No", v.outTime || "",
+      v.state === "open" ? "" : (v.outOk ? "Yes" : "No"), v.state === "open" ? "" : (v.mins / 60).toFixed(2), (STATE[v.state] || [v.state])[0], v.note || ""]));
+    (p.refused || []).forEach(r => rows.push([p.name, p.company, r.day, r.site, "Failed scan", r.time, "", "", "", "", "Failed scan", r.why]));
+  });
+  const blob = new Blob([rows.map(r => r.map(q).join(",")).join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `SiteLog-${d.from}${d.to !== d.from ? "-to-" + d.to : ""}.csv`; a.click();
 }
 
 // ── People ──────────────────────────────────────────────────────────────────
@@ -612,12 +674,25 @@ async function loadTransfers(){
   }catch(e){ /* not an admin, or SiteLog unreachable — the Overview shows the error */ }
 }
 
+// ── Start-up (admins) — last, once everything above is defined ──
+if (IS_ADMIN) {
+  $("tabs").style.display = "flex";
+  $("workerBlock").style.display = "none";
+  $("scanSmall").style.display = "inline-block";
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  loadTransfers();
+  const h = (location.hash || "").slice(1);
+  showTab(["now","logs","people","settings"].includes(h) ? h : "now");
+  setInterval(() => { if (document.visibilityState === "visible" && $("pane-now").style.display === "block") loadOnSite(); }, 60000);
+}
+
+
 // Identity hand-off: swap the plain scan link for one carrying a signed
 // portal-identity token, so the phone auto-registers as this user.
 (async () => {
   try{
     const r = await (await authFetch(`${API}/sitelog-launch`, {cache:"no-store"})).json();
-    if(r.ok && r.url) $("scanBtn").href = r.url;
+    if(r.ok && r.url) { $("scanBtn").href = r.url; $("scanSmall").href = r.url; }
   }catch(e){}
 })();
 </script>
