@@ -14,7 +14,7 @@ import { corsHeaders, json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import * as sitelogApi from "./sitelog-api.js";
 
-const SITELOG_API = "https://api.site-log.co.uk";
+const SITELOG_API = "https://api2.site-log.co.uk";
 const SCAN_URL = "https://site-log.co.uk/scan.html";
 
 export async function handle(request, env, ctx, url, sess) {

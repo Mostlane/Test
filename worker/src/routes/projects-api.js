@@ -142,7 +142,7 @@ export async function removeSiteFromPO(env, name) {
 async function applySiteLogRules(env, siteName, rules, visitorRules) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return false;
-    const base = (env.SITELOG_API || "https://api.site-log.co.uk");
+    const base = (env.SITELOG_API || "https://api2.site-log.co.uk");
     const hdr = { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET };
     const call = async (path, init) => {
       const req = new Request(base + path, init);
