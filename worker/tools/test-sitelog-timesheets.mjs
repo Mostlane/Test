@@ -132,4 +132,14 @@ sent.length = 0;
 main.prepare("UPDATE app_config SET value=? WHERE key='sitelog:tsmail:sent:1'").run("{}");
 await ts.emailTimesheet(env, 1, "daily", "2026-10-12", ["office@example.com"]);
 ok(sent.length === 1 && (sent[0].html.match(/sitelog-map\?key=/g) || []).length >= 2 && sent[0].html.includes("📍"), "email carries 📍 map links per event");
+
+// A worker's own week (the app's "My hours")
+const mine = await ts.personWeek(env, "p1", "2026-10-14");
+ok(mine.from === "2026-10-12" && mine.to === "2026-10-18" && mine.days.length === 7, "my week runs Mon-Sun from any day in it");
+const mon = mine.days.find(d => d.day === "2026-10-12");
+ok(mon.visits.length === 2 && mon.visits.every(v => !("pid" in v) && !("inLat" in v)), "only my visits, no ids or coordinates");
+const office = (await ts.loadPeriod(env, "2026-10-12", "2026-10-18")).find(p => p.name === "User One");
+ok(Math.round(mine.totals.mins) === Math.round(office.visits.reduce((n, v) => n + (v.state === "open" ? 0 : v.mins), 0)), "same hours as the office timesheet");
+ok((await ts.personWeek(env, "p2", "2026-10-12")).totals.missed === 1, "missed sign-out counted for the worker too");
+ok((await ts.personWeek(env, "nobody", "2026-10-12")).days.every(d => !d.visits.length), "someone else's visits never leak");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

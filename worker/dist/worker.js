@@ -9731,6 +9731,947 @@ var init_certpdf = __esm({
   }
 });
 
+// src/lib/sitelogtspdf.js
+function fit2(str, size, max) {
+  str = String(str == null ? "" : str);
+  if (textWidth(str, size) <= max) return str;
+  while (str.length > 1 && textWidth(str + "...", size) > max) str = str.slice(0, -1);
+  return str.trimEnd() + "...";
+}
+function fmtHM(mins) {
+  mins = Math.max(0, Math.round(Number(mins) || 0));
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+function mark(doc, cx, cy, ok) {
+  const r = 5.2;
+  doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: ok ? GREEN2 : RED2 });
+  const w = [1, 1, 1];
+  if (ok) {
+    doc.line(cx - 2.6, cy + 0.2, cx - 0.7, cy + 2.2, { stroke: w, lw: 1.4 });
+    doc.line(cx - 0.7, cy + 2.2, cx + 2.8, cy - 2.2, { stroke: w, lw: 1.4 });
+  } else {
+    doc.line(cx - 2.2, cy - 2.2, cx + 2.2, cy + 2.2, { stroke: w, lw: 1.4 });
+    doc.line(cx - 2.2, cy + 2.2, cx + 2.2, cy - 2.2, { stroke: w, lw: 1.4 });
+  }
+}
+function header(doc, meta, subtitle) {
+  doc.rect(0, 0, PW, 58, { fill: NAVY2 });
+  if (meta.logo) {
+    try {
+      doc.image(meta.logo, M4, 12, 85, 34);
+    } catch (e) {
+    }
+  }
+  const x0 = meta.logo ? M4 + 98 : M4;
+  doc.text(x0, 28, meta.title || "SiteLog timesheet", { size: 16, bold: true, color: [1, 1, 1] });
+  doc.text(x0, 45, subtitle || meta.periodLabel || "", { size: 10, color: [0.85, 0.9, 1] });
+  doc.text(PW - M4, 28, meta.periodLabel || "", { size: 11, bold: true, color: [1, 1, 1], alignRight: true });
+  return 80;
+}
+function legend(doc, y) {
+  mark(doc, M4 + 5, y - 3, true);
+  doc.text(M4 + 14, y, "GPS verified at the site", { size: 8.5, grey: true });
+  mark(doc, M4 + 135, y - 3, false);
+  doc.text(M4 + 144, y, "Not verified (no location, auto sign-out, or edited by the office)", { size: 8.5, grey: true });
+  doc.rect(M4 + 418, y - 8, 10, 8, { fill: ROW_RED, stroke: [0.95, 0.7, 0.7], lw: 0.5 });
+  doc.text(M4 + 432, y, "Missed sign-out", { size: 8.5, grey: true });
+  doc.rect(M4 + 512, y - 8, 10, 8, { fill: ROW_AMBER, stroke: [0.95, 0.82, 0.6], lw: 0.5 });
+  doc.text(M4 + 526, y, "Still signed in", { size: 8.5, grey: true });
+  doc.rect(M4 + 606, y - 8, 10, 8, { fill: ROW_PURPLE, stroke: [0.8, 0.72, 0.98], lw: 0.5 });
+  doc.text(M4 + 620, y, "Scanned but not confirmed", { size: 8.5, grey: true });
+}
+function personTotals(p) {
+  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0, scanned = 0;
+  for (const v of p.visits) {
+    if (v.state === "scanned") scanned++;
+    if (v.state !== "open") mins += v.mins || 0;
+    if (v.state === "auto") {
+      missed++;
+      autoMins += v.mins || 0;
+    }
+    if (v.state === "open") open++;
+    if (!v.inOk) unver++;
+    if (v.state !== "open" && !v.outOk) unver++;
+  }
+  return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
+}
+function summaryPage(doc, meta, people) {
+  let y = header(doc, meta, "Summary \u2014 everyone");
+  const cols = [
+    { k: "name", x: M4, w: 200, label: "Person" },
+    { k: "company", x: M4 + 205, w: 150, label: "Company" },
+    { k: "visits", x: M4 + 410, label: "Visits", right: true },
+    { k: "hours", x: M4 + 500, label: "Hours on site", right: true },
+    { k: "missed", x: M4 + 600, label: "Missed sign-outs", right: true },
+    { k: "open", x: M4 + 680, label: "Still in", right: true },
+    { k: "unver", x: PW - M4 - 6, label: "Not verified", right: true }
+  ];
+  const head = () => {
+    doc.rect(M4, y, PW - 2 * M4, 18, { fill: [0.92, 0.94, 0.97] });
+    for (const c of cols) doc.text(c.x + (c.right ? 0 : 4), y + 12.5, c.label, { size: 8.5, bold: true, alignRight: !!c.right });
+    y += 18;
+  };
+  head();
+  const tot = { mins: 0, missed: 0, open: 0, unver: 0, visits: 0 };
+  people.forEach((p, i) => {
+    if (y > PH - 70) {
+      doc.newPage(PW, PH);
+      y = header(doc, meta, "Summary \u2014 everyone (continued)");
+      head();
+    }
+    const t = personTotals(p);
+    tot.mins += t.mins;
+    tot.missed += t.missed;
+    tot.open += t.open;
+    tot.unver += t.unver;
+    tot.visits += t.visits;
+    const bad = t.missed || t.unver || t.scanned;
+    doc.rect(M4, y, PW - 2 * M4, 18, { fill: t.missed ? ROW_RED : t.scanned ? ROW_PURPLE : bad ? ROW_RED : i % 2 ? ZEBRA2 : [1, 1, 1] });
+    doc.text(M4 + 4, y + 12.5, fit2(p.name, 9.5, 195), { size: 9.5, bold: true });
+    doc.text(M4 + 209, y + 12.5, fit2(p.company || "", 9, 190), { size: 9, grey: true });
+    doc.text(M4 + 410, y + 12.5, String(t.visits), { size: 9.5, alignRight: true });
+    doc.text(M4 + 500, y + 12.5, fmtHM(t.mins), { size: 9.5, bold: true, alignRight: true });
+    doc.text(M4 + 600, y + 12.5, String(t.missed), { size: 9.5, bold: !!t.missed, alignRight: true, color: t.missed ? RED2 : null });
+    doc.text(M4 + 680, y + 12.5, String(t.open), { size: 9.5, alignRight: true, color: t.open ? AMBER : null });
+    doc.text(PW - M4 - 6, y + 12.5, String(t.unver), { size: 9.5, bold: !!t.unver, alignRight: true, color: t.unver ? RED2 : null });
+    y += 18;
+  });
+  if (!people.length) {
+    doc.text(M4 + 4, y + 16, "Nobody signed in to a site in this period.", { size: 10, grey: true });
+    y += 24;
+  }
+  doc.hr(M4, y + 2, PW - M4);
+  doc.text(M4 + 4, y + 16, "Total", { size: 10, bold: true });
+  doc.text(M4 + 410, y + 16, String(tot.visits), { size: 10, bold: true, alignRight: true });
+  doc.text(M4 + 500, y + 16, fmtHM(tot.mins), { size: 10, bold: true, alignRight: true });
+  doc.text(M4 + 600, y + 16, String(tot.missed), { size: 10, bold: true, alignRight: true, color: tot.missed ? RED2 : null });
+  doc.text(M4 + 680, y + 16, String(tot.open), { size: 10, bold: true, alignRight: true });
+  doc.text(PW - M4 - 6, y + 16, String(tot.unver), { size: 10, bold: true, alignRight: true, color: tot.unver ? RED2 : null });
+  y += 34;
+  doc.text(M4, y, "Hours on site include visits the system closed automatically (missed sign-outs) \u2014 those times are an assumption, not a scan.", { size: 8.5, grey: true });
+  y += 12;
+  doc.text(M4, y, "Purple rows: scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used because nothing else was recorded.", { size: 8.5, grey: true });
+  legend(doc, y + 18);
+}
+function personPages(doc, meta, p) {
+  doc.newPage(PW, PH);
+  let y = header(doc, meta, `${p.name}${p.company ? " \u2014 " + p.company : ""}`);
+  const t = personTotals(p);
+  const chips = [
+    ["Hours on site", fmtHM(t.mins), null],
+    ["Visits", String(t.visits), null],
+    ["Missed sign-outs", String(t.missed), t.missed ? RED2 : null],
+    ["Not verified", String(t.unver), t.unver ? RED2 : null]
+  ];
+  if (t.scanned) chips.push(["Scanned, not confirmed", String(t.scanned), PURPLE]);
+  if (t.open) chips.push(["Still signed in", String(t.open), AMBER]);
+  let cx = M4;
+  for (const [lab, val2, col] of chips) {
+    doc.roundRect(cx, y, 130, 36, 6, { fill: [0.95, 0.96, 0.98] });
+    doc.text(cx + 10, y + 14, lab, { size: 8, grey: true });
+    doc.text(cx + 10, y + 30, val2, { size: 13, bold: true, color: col });
+    cx += 140;
+  }
+  y += 52;
+  const head = () => {
+    doc.rect(M4, y, PW - 2 * M4, 18, { fill: [0.92, 0.94, 0.97] });
+    const h = (x, s, r) => doc.text(x, y + 12.5, s, { size: 8.5, bold: true, alignRight: !!r });
+    h(VC.date + 4, "Date");
+    h(VC.site, "Site");
+    h(VC.inT, "Signed in");
+    h(VC.outT, "Signed out");
+    h(VC.hrs, "Hours", true);
+    h(VC.note, "Notes");
+    y += 18;
+  };
+  head();
+  let lastDate = "";
+  p.visits.forEach((v, i) => {
+    if (y > PH - 56) {
+      doc.newPage(PW, PH);
+      y = header(doc, meta, `${p.name} (continued)`);
+      head();
+      lastDate = "";
+    }
+    const bg = v.state === "scanned" ? ROW_PURPLE : v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA2 : [1, 1, 1];
+    doc.rect(M4, y, PW - 2 * M4, 20, { fill: bg });
+    if (v.date !== lastDate) {
+      doc.text(VC.date + 4, y + 13.5, v.date, { size: 9, bold: true });
+      if (lastDate) doc.line(M4, y, PW - M4, y, { stroke: GRID, lw: 0.6 });
+      lastDate = v.date;
+    }
+    doc.text(VC.site, y + 13.5, fit2(v.site, 9.5, 250), { size: 9.5 });
+    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true, color: v.scannedIn ? PURPLE : null });
+    mark(doc, VC.inM, y + 10, !!v.inOk);
+    if (v.state === "open" || v.state === "scanned" && !v.outTime) {
+      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: v.state === "open" ? AMBER : PURPLE });
+    } else {
+      doc.text(VC.outT, y + 13.5, v.outTime || (v.state === "scanned" ? "\u2014" : ""), { size: 9.5, bold: true, color: v.state === "auto" ? RED2 : v.state === "scanned" && v.scannedOut ? PURPLE : null });
+      mark(doc, VC.outM, y + 10, !!v.outOk);
+    }
+    doc.text(VC.hrs, y + 13.5, v.state === "open" || v.state === "scanned" && !v.scannedOut ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
+    const note = v.note || "";
+    if (note) doc.text(VC.note, y + 13.5, fit2(note, 8.5, PW - M4 - VC.note - 4), {
+      size: 8.5,
+      bold: v.state === "auto" || v.state === "open" || v.state === "scanned",
+      color: v.state === "scanned" ? PURPLE : v.state === "auto" ? RED2 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
+    });
+    y += 20;
+  });
+  if (!p.visits.length) {
+    doc.text(M4 + 4, y + 16, "No visits.", { size: 10, grey: true });
+    y += 24;
+  }
+  if (y < PH - 40) legend(doc, y + 22);
+}
+function buildSiteLogTimesheetPdf(meta) {
+  const people = meta.people || [];
+  const doc = new PdfDoc(PW, PH);
+  summaryPage(doc, meta, people);
+  for (const p of people) personPages(doc, meta, p);
+  const n = doc.pages.length;
+  const gen = meta.generatedAt ? `Generated ${meta.generatedAt}` : "";
+  for (let i = 0; i < n; i++) {
+    doc.lineOn(i, M4, PH - 26, PW - M4, { grey: true });
+    doc.textOn(i, M4, PH - 14, `Mostlane SiteLog \xB7 ${meta.periodLabel || ""}${gen ? " \xB7 " + gen : ""}`, { size: 7.5, grey: true });
+    doc.textOn(i, PW - M4, PH - 14, `Page ${i + 1} of ${n}`, { size: 7.5, grey: true, alignRight: true });
+  }
+  return doc.bytes();
+}
+var PW, PH, M4, NAVY2, GREEN2, RED2, AMBER, ROW_RED, ROW_AMBER, ZEBRA2, PURPLE, ROW_PURPLE, GRID, VC;
+var init_sitelogtspdf = __esm({
+  "src/lib/sitelogtspdf.js"() {
+    init_pdf();
+    PW = 842;
+    PH = 595;
+    M4 = 36;
+    NAVY2 = [0, 0.2, 0.4];
+    GREEN2 = [0.086, 0.639, 0.29];
+    RED2 = [0.863, 0.149, 0.149];
+    AMBER = [0.851, 0.467, 0.024];
+    ROW_RED = [0.996, 0.937, 0.937];
+    ROW_AMBER = [1, 0.969, 0.898];
+    ZEBRA2 = [0.973, 0.976, 0.984];
+    PURPLE = [0.486, 0.228, 0.929];
+    ROW_PURPLE = [0.953, 0.937, 1];
+    GRID = [0.85, 0.87, 0.9];
+    VC = { date: M4, site: M4 + 72, inT: M4 + 330, inM: M4 + 372, outT: M4 + 392, outM: M4 + 434, hrs: M4 + 505, note: M4 + 520 };
+  }
+});
+
+// src/routes/sitelogts.js
+var sitelogts_exports = {};
+__export(sitelogts_exports, {
+  addMapLinks: () => addMapLinks,
+  apiOrigin: () => apiOrigin,
+  buildPdf: () => buildPdf,
+  emailTimesheet: () => emailTimesheet,
+  getConfig: () => getConfig2,
+  handle: () => handle5,
+  handleMap: () => handleMap,
+  loadPeriod: () => loadPeriod,
+  periodFor: () => periodFor,
+  personDayEvents: () => personDayEvents,
+  personWeek: () => personWeek,
+  sweepSitelogTimesheets: () => sweepSitelogTimesheets
+});
+async function readKV(env, tid, key) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+  try {
+    return row && row.value ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function writeKV(env, tid, key, obj) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(obj)).run();
+}
+async function getConfig2(env, tid) {
+  const c = await readKV(env, tid, CFG_KEY3(tid)) || {};
+  return {
+    enabled: c.enabled !== false,
+    daily: c.daily !== false,
+    weekly: c.weekly !== false,
+    recipients: Array.isArray(c.recipients) ? c.recipients.filter(Boolean) : []
+  };
+}
+function london(d = /* @__PURE__ */ new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(d).map((x) => [x.type, x.value]));
+  return { key: `${p.year}-${p.month}-${p.day}`, hhmm: `${p.hour}:${p.minute}` };
+}
+function parseUtc(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  const iso = s.includes("T") ? s : s.replace(" ", "T");
+  const d = new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+  return isNaN(d) ? null : d;
+}
+function addDays(key, n) {
+  const d = /* @__PURE__ */ new Date(key + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function niceDate(key, opts) {
+  return (/* @__PURE__ */ new Date(key + "T12:00:00Z")).toLocaleDateString("en-GB", Object.assign({ timeZone: "UTC" }, opts));
+}
+function periodFor(kind, dateKey) {
+  if (kind === "weekly") {
+    const from = mondayOf2(dateKey), to = addDays(from, 6);
+    const label2 = `Week ${niceDate(from, { day: "numeric", month: "short" })} \u2013 ${niceDate(to, { day: "numeric", month: "short", year: "numeric" })}`;
+    return { kind, from, to, label: label2, file: `SiteLog-week-${from}.pdf` };
+  }
+  return {
+    kind: "daily",
+    from: dateKey,
+    to: dateKey,
+    label: niceDate(dateKey, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", ""),
+    file: `SiteLog-${dateKey}.pdf`
+  };
+}
+function plausible(d) {
+  const m = minsOfDay(london(d).hhmm);
+  return m >= SCAN_EARLY && m <= SCAN_LATE;
+}
+async function loadUnconfirmedScans(db, from, to, personId) {
+  try {
+    const r = await db.prepare(`
+      SELECT l.at, l.outcome, l.person_id, l.site, l.lat, l.lng, p.first_name, p.last_name, p.company
+      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+      WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
+        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+      ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all();
+    return r.results || [];
+  } catch (e) {
+    return [];
+  }
+}
+async function loadPeriod(env, from, to, opts = {}) {
+  const personId = opts.personId || null;
+  const db = env.SITELOG_DB;
+  if (!db) throw new Error("SiteLog database is not connected to this worker");
+  const res = await db.prepare(`
+    SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
+           COALESCE(v.auto_checkout,0) AS auto_checkout, v.transferred_to,
+           COALESCE(v.manual_entry,0) AS manual_entry, v.provided_site_name,
+           COALESCE(v.sign_in_verified,0) AS sign_in_verified,
+           COALESCE(v.sign_out_verified,0) AS sign_out_verified,
+           v.sign_in_distance_m, v.sign_out_distance_m,
+           v.lat AS in_lat, v.lng AS in_lng, v.out_lat, v.out_lng,
+           p.first_name, p.last_name, p.company
+    FROM visits v LEFT JOIN people p ON p.id = v.person_id
+    WHERE v.check_in_at >= ? AND v.check_in_at < ?${personId ? " AND v.person_id = ?" : ""}
+    ORDER BY v.check_in_at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all();
+  const scans = await loadUnconfirmedScans(db, from, to, personId);
+  const today = london().key;
+  const spans = /* @__PURE__ */ new Map();
+  for (const r of res.results || []) {
+    const a = parseUtc(r.check_in_at);
+    if (!a || !r.person_id) continue;
+    const b = parseUtc(r.check_out_at);
+    if (!spans.has(r.person_id)) spans.set(r.person_id, []);
+    spans.get(r.person_id).push([a.getTime(), b ? b.getTime() : Infinity]);
+  }
+  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b + POST_SIGNOUT_MS);
+  const scansBy = /* @__PURE__ */ new Map();
+  for (const s of scans) {
+    const d = parseUtc(s.at);
+    if (!d) continue;
+    s._d = d;
+    if (!scansBy.has(s.person_id)) scansBy.set(s.person_id, []);
+    scansBy.get(s.person_id).push(s);
+  }
+  const byPerson = /* @__PURE__ */ new Map();
+  const ensure7 = (key, first, last, company) => {
+    const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
+    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
+    return byPerson.get(key);
+  };
+  const dayLabel = (day) => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
+  const m = (d) => Math.round(Number(d));
+  for (const r of res.results || []) {
+    const inD = parseUtc(r.check_in_at);
+    if (!inD) continue;
+    const day = london(inD).key;
+    if (day < from || day > to) continue;
+    let outD = parseUtc(r.check_out_at);
+    const auto = Number(r.auto_checkout) === 1;
+    let state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
+    const inOk = Number(r.sign_in_verified) === 1;
+    let outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
+    let note = "";
+    let scannedOut = null, scannedOutAt = null;
+    if ((state === "auto" || state === "open" && day < today) && r.person_id) {
+      const limit = outD ? outD.getTime() : Infinity;
+      for (const s of scansBy.get(r.person_id) || []) {
+        const t = s._d.getTime();
+        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
+        if (london(s._d).key !== day || !plausible(s._d)) continue;
+        scannedOut = s._d;
+        scannedOutAt = s;
+      }
+    }
+    if (scannedOut) {
+      state = "scanned";
+      outD = scannedOut;
+      outOk = false;
+      note = "Scanned, not confirmed \u2014 sign-out time from a scan";
+    } else if (state === "auto") note = "Did not sign out \u2014 closed automatically";
+    else if (state === "open") note = "Still signed in";
+    else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
+    else if (state === "manual") note = "Added by the office";
+    if (!note) {
+      const bits = [];
+      if (inOk && r.sign_in_distance_m != null) bits.push(`in ${m(r.sign_in_distance_m)} m from site`);
+      if (outOk && r.sign_out_distance_m != null) bits.push(`out ${m(r.sign_out_distance_m)} m`);
+      if (!inOk) bits.push("sign-in location not checked");
+      if (!outOk) bits.push("sign-out location not checked");
+      note = bits.join(" \xB7 ");
+    }
+    const p = ensure7(r.person_id || [r.first_name, r.last_name].join(" "), r.first_name, r.last_name, r.company);
+    p.visits.push({
+      _t: inD.getTime(),
+      date: dayLabel(day),
+      site: r.site_code || r.provided_site_name || "",
+      inTime: london(inD).hhmm,
+      outTime: outD ? london(outD).hhmm : "",
+      mins: outD ? Math.max(0, (outD - inD) / 6e4) : 0,
+      inOk,
+      outOk,
+      state,
+      note,
+      scannedIn: false,
+      scannedOut: !!scannedOut,
+      pid: r.person_id || "",
+      vid: r.id,
+      day,
+      inLat: num(r.in_lat),
+      inLng: num(r.in_lng),
+      outLat: scannedOutAt ? num(scannedOutAt.lat) : auto ? null : num(r.out_lat),
+      outLng: scannedOutAt ? num(scannedOutAt.lng) : auto ? null : num(r.out_lng),
+      inDist: r.sign_in_distance_m,
+      outDist: r.sign_out_distance_m
+    });
+  }
+  for (const [pid, list] of scansBy) {
+    const ins = list.filter((s) => s.outcome === "confirm_check_in");
+    const used = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ins.length; i++) {
+      const s = ins[i];
+      if (used.has(s)) continue;
+      const t = s._d.getTime(), day = london(s._d).key;
+      if (day < from || day > to || !plausible(s._d) || insideVisit(pid, t)) {
+        used.add(s);
+        continue;
+      }
+      used.add(s);
+      const nextVisit = Math.min(...(spans.get(pid) || []).map(([a]) => a).filter((a) => a > t), Infinity);
+      let end = null, endScan = null;
+      for (let j = i + 1; j < ins.length; j++) {
+        const e = ins[j], et = e._d.getTime();
+        if (london(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
+        used.add(e);
+        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) {
+          end = e._d;
+          endScan = e;
+        } else if ((e.site || "") !== (s.site || "")) {
+          used.delete(e);
+          break;
+        }
+      }
+      const p = ensure7(pid, s.first_name, s.last_name, s.company);
+      p.visits.push({
+        _t: t,
+        date: dayLabel(day),
+        site: s.site || "",
+        inTime: london(s._d).hhmm,
+        outTime: end ? london(end).hhmm : "",
+        mins: end ? Math.max(0, (end - s._d) / 6e4) : 0,
+        inOk: false,
+        outOk: false,
+        state: "scanned",
+        scannedIn: true,
+        scannedOut: !!end,
+        note: end ? "Scanned, not confirmed \u2014 in & out times from scans" : "Scanned, not confirmed \u2014 no sign-out, hours not counted",
+        inDist: null,
+        outDist: null,
+        pid,
+        vid: "scan:" + s.at,
+        day,
+        inLat: num(s.lat),
+        inLng: num(s.lng),
+        outLat: endScan ? num(endScan.lat) : null,
+        outLng: endScan ? num(endScan.lng) : null
+      });
+    }
+  }
+  for (const p of byPerson.values()) {
+    p.visits.sort((a, b) => a._t - b._t);
+    for (const v of p.visits) delete v._t;
+  }
+  return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+async function personWeek(env, personId, weekKey2) {
+  const today = london().key;
+  const from = mondayOf2(/^\d{4}-\d{2}-\d{2}$/.test(weekKey2 || "") ? weekKey2 : today);
+  const to = addDays(from, 6);
+  const people = await loadPeriod(env, from, to, { personId });
+  const visits = people.length ? people[0].visits : [];
+  const days = [];
+  for (let k = from; k <= to; k = addDays(k, 1)) {
+    const vs = visits.filter((v) => v.day === k);
+    const mins = vs.reduce((n, v) => n + (v.state === "open" ? 0 : v.mins || 0), 0);
+    days.push({
+      day: k,
+      label: niceDate(k, { weekday: "long", day: "numeric", month: "short" }).replace(",", ""),
+      mins,
+      visits: vs.map((v) => ({
+        site: v.site,
+        inTime: v.inTime,
+        outTime: v.outTime,
+        mins: v.mins,
+        state: v.state,
+        inOk: v.inOk,
+        outOk: v.outOk,
+        note: v.note
+      }))
+    });
+  }
+  const totals = personTotals({ visits });
+  let refused = [];
+  try {
+    const r = await env.SITELOG_DB.prepare(`SELECT at, outcome, reason, site, nearest_site, distance_m FROM scan_log
+      WHERE person_id = ? AND refused = 1 AND at >= ? AND at < ? ORDER BY at DESC LIMIT 40`).bind(personId, from, addDays(to, 1)).all();
+    refused = (r.results || []).map((x) => {
+      const d = parseUtc(x.at);
+      return {
+        day: d ? london(d).key : "",
+        time: d ? london(d).hhmm : "",
+        why: REFUSAL_TEXT[x.outcome] || x.reason || "The scan didn't go through",
+        site: x.site || x.nearest_site || "",
+        distance: x.distance_m
+      };
+    });
+  } catch (e) {
+  }
+  return {
+    ok: true,
+    from,
+    to,
+    today,
+    isThisWeek: from === mondayOf2(today),
+    label: periodFor("weekly", from).label,
+    days,
+    totals,
+    refused
+  };
+}
+async function buildPdf(env, kind, dateKey) {
+  const per = periodFor(kind, dateKey);
+  const people = await loadPeriod(env, per.from, per.to);
+  let logo = null;
+  try {
+    logo = logoBytes();
+  } catch (e) {
+  }
+  const now2 = london();
+  const bytes = buildSiteLogTimesheetPdf({
+    title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
+    periodLabel: per.label,
+    generatedAt: `${niceDate(now2.key, { day: "numeric", month: "short", year: "numeric" })} ${now2.hhmm}`,
+    people,
+    logo
+  });
+  return { per, people, bytes };
+}
+function b64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return btoa(s);
+}
+async function emailTimesheet(env, tid, kind, dateKey, recipients) {
+  const { per, people, bytes } = await buildPdf(env, kind, dateKey);
+  await addMapLinks(env, apiOrigin(env), people, MAP_TTL_EMAIL);
+  const pin = (u) => u ? ` <a href="${esc3(u)}" style="text-decoration:none" title="Show on a map">\u{1F4CD}</a>` : "";
+  const evRows = (p) => p.visits.map((v) => {
+    const out = v.state === "open" ? "still in" : v.outTime || "\u2014";
+    const bad = v.state === "auto" || v.state === "scanned";
+    return `<tr><td></td><td colspan="2" style="padding:1px 0 1px 10px;font-size:12.5px;color:${bad ? "#b45309" : "#475569"}">${kind === "weekly" ? esc3(v.date) + " \xB7 " : ""}${esc3(v.site)} \xB7 in ${esc3(v.inTime)}${v.inOk ? " \u2714" : " \u2718"}${pin(v.mapIn)} \u2192 out ${esc3(out)}${v.state === "open" ? "" : v.outOk ? " \u2714" : " \u2718"}${pin(v.mapOut)}` + (bad ? ` \xB7 ${esc3(v.note)}` : "") + `</td></tr>`;
+  }).join("");
+  const rows = people.map((p) => {
+    const t = personTotals(p);
+    const flag = [
+      t.missed ? `${t.missed} missed sign-out${t.missed > 1 ? "s" : ""}` : "",
+      t.scanned ? `${t.scanned} scanned but not confirmed` : "",
+      t.unver ? `${t.unver} not verified` : "",
+      t.open ? `${t.open} still in` : ""
+    ].filter(Boolean).join(" \xB7 ");
+    return `<tr><td style="padding:4px 10px 4px 0">${esc3(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc3(flag) : "All verified"}</td></tr>` + evRows(p);
+  }).join("");
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
+    <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc3(per.label)}</b></p>
+    ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
+    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded. Tap \u{1F4CD} to see on a map where the phone was for that sign-in or sign-out (links work for 90 days).</p></div>`;
+  const r = await sendEmail(env, {
+    to: recipients,
+    subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
+    html,
+    attachments: [{ filename: per.file, content: b64(bytes) }]
+  });
+  return { ...r, people: people.length, period: per.label };
+}
+function apiOrigin(env, url) {
+  return url ? url.origin : String(env.API_BASE_URL || "https://mostlane-api.jamie-def.workers.dev").replace(/\/$/, "");
+}
+async function addMapLinks(env, origin, people, ttl) {
+  if (!fileSigningEnabled(env)) return people;
+  for (const p of people) for (const v of p.visits) {
+    if (!v.pid) continue;
+    const key = (side) => [v.pid, v.day, v.vid, side].join("|");
+    if (v.inLat != null && v.inLng != null) v.mapIn = await signedFileUrl(env, origin, MAP_PATH, key("in"), ttl);
+    if (v.outLat != null && v.outLng != null) v.mapOut = await signedFileUrl(env, origin, MAP_PATH, key("out"), ttl);
+  }
+  return people;
+}
+function hav(a, b, c, d) {
+  const R2 = 6371e3, r = (x) => x * Math.PI / 180;
+  const s = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2;
+  return 2 * R2 * Math.asin(Math.sqrt(s));
+}
+async function personDayEvents(env, personId, dateKey) {
+  const db = env.SITELOG_DB;
+  const person = await db.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(personId).first();
+  const vis = (await db.prepare(`SELECT * FROM visits WHERE person_id = ? AND check_in_at >= ? AND check_in_at < ? ORDER BY check_in_at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
+  let scans = [];
+  try {
+    scans = (await db.prepare(`SELECT at, kind, outcome, refused, site, nearest_site, lat, lng, accuracy, distance_m FROM scan_log
+      WHERE person_id = ? AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
+  } catch (e) {
+  }
+  const sites = (await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites WHERE COALESCE(archived,0) = 0").all()).results || [];
+  const siteBy = new Map(sites.map((x) => [x.site_name, x]));
+  const distTo = (name2, lat, lng) => {
+    const st = siteBy.get(name2);
+    return st && lat != null ? Math.round(hav(lat, lng, +st.lat, +st.lng)) : null;
+  };
+  const events = [];
+  for (const v of vis) {
+    const inD = parseUtc(v.check_in_at);
+    if (!inD || london(inD).key !== dateKey) continue;
+    const auto = Number(v.auto_checkout) === 1;
+    if (num(v.lat) != null) events.push({
+      id: v.id + ":in",
+      t: inD.toISOString(),
+      time: london(inD).hhmm,
+      kind: "in",
+      label: "Signed in",
+      site: v.site_code,
+      lat: num(v.lat),
+      lng: num(v.lng),
+      acc: num(v.accuracy),
+      ok: Number(v.sign_in_verified) === 1,
+      dist: distTo(v.site_code, num(v.lat), num(v.lng))
+    });
+    const outD = parseUtc(v.check_out_at);
+    if (outD && !auto && num(v.out_lat) != null) events.push({
+      id: v.id + ":out",
+      t: outD.toISOString(),
+      time: london(outD).hhmm,
+      kind: "out",
+      label: "Signed out",
+      site: v.site_code,
+      lat: num(v.out_lat),
+      lng: num(v.out_lng),
+      acc: num(v.out_accuracy),
+      ok: Number(v.sign_out_verified) === 1,
+      dist: distTo(v.site_code, num(v.out_lat), num(v.out_lng))
+    });
+  }
+  for (const sc of scans) {
+    const d = parseUtc(sc.at);
+    if (!d || london(d).key !== dateKey || num(sc.lat) == null) continue;
+    if (sc.kind !== "scan" && !Number(sc.refused)) continue;
+    const site = sc.site || sc.nearest_site || "";
+    events.push({
+      id: "scan:" + sc.at,
+      t: d.toISOString(),
+      time: london(d).hhmm,
+      kind: Number(sc.refused) ? "refused" : "scan",
+      label: SCAN_LABEL[sc.outcome] || "Scan \u2014 " + sc.outcome,
+      site,
+      lat: num(sc.lat),
+      lng: num(sc.lng),
+      acc: num(sc.accuracy),
+      ok: null,
+      dist: sc.site ? distTo(sc.site, num(sc.lat), num(sc.lng)) : sc.distance_m != null ? Number(sc.distance_m) : null
+    });
+  }
+  events.sort((a, b) => a.t < b.t ? -1 : 1);
+  const want = new Set(events.map((e) => e.site).filter(Boolean));
+  for (const st of sites) {
+    if (want.size > 40) break;
+    if (events.some((e) => hav(e.lat, e.lng, +st.lat, +st.lng) <= 1e3)) want.add(st.site_name);
+  }
+  const drawSites = [...want].map((n) => siteBy.get(n)).filter(Boolean).map((x) => ({ name: x.site_name, lat: +x.lat, lng: +x.lng, radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }));
+  const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "Unknown person";
+  return { name, company: person && person.company || "", date: dateKey, events, sites: drawSites };
+}
+function mapPage(title, body, status = 200) {
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>${esc3(title)}</title>${body}`, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" }
+  });
+}
+async function handleMap(request, env, ctx, url) {
+  if (request.method !== "GET") return mapPage("Not allowed", "</head><body>Not allowed</body></html>", 405);
+  const key = url.searchParams.get("key") || "";
+  if (!fileSigningEnabled(env) || !await verifyFileSig(env, key, url.searchParams))
+    return mapPage("Link expired", `</head><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#0f172a"><h2>This map link has expired or isn't valid</h2><p>Open the timesheet in the portal (Site Log) for a fresh link.</p></body></html>`, 403);
+  if (!env.SITELOG_DB) return mapPage("Unavailable", "</head><body>SiteLog is not connected.</body></html>", 503);
+  const [pid, day, vid, side] = key.split("|");
+  if (!pid || !/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return mapPage("Bad link", "</head><body>Bad link</body></html>", 400);
+  const data = await personDayEvents(env, pid, day);
+  data.focus = vid && vid.startsWith("scan:") ? vid : vid ? vid + ":" + (side === "out" ? "out" : "in") : "";
+  data.dayLabel = niceDate(day, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", "");
+  const json4 = JSON.stringify(data).replace(/</g, "\\u003c");
+  return mapPage(`${data.name} \u2014 ${data.dayLabel}`, `
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<style>
+  body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;background:#f4f6f9}
+  header{background:#003468;color:#fff;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
+  header h1{font-size:17px;margin:0} header div{font-size:13px;opacity:.85;margin-top:2px}
+  #map{height:58vh;min-height:300px}
+  ul{list-style:none;margin:0;padding:8px 12px 24px;max-width:760px}
+  li{background:#fff;border:1px solid #e2e6ec;border-radius:10px;padding:9px 12px;margin:6px 0;cursor:pointer;display:flex;gap:10px;align-items:baseline}
+  li.on{border-color:#003468;box-shadow:0 0 0 2px #00346833}
+  .t{font-weight:700;font-variant-numeric:tabular-nums;min-width:44px}
+  .d{font-size:12.5px;color:#64748b} .ok{color:#16a34a} .bad{color:#dc2626}
+  .dot{width:10px;height:10px;border-radius:50%;flex:none;align-self:center}
+  .note{font-size:12px;color:#64748b;padding:6px 14px 0;max-width:760px}
+</style></head><body>
+<header><h1 id="h"></h1><div id="sub"></div></header>
+<div id="map"></div>
+<p class="note">Pins show where the phone said it was. The blue circles are each site's sign-in boundary. GPS on a phone is usually accurate to 10\u201325 m (the faint ring round the selected pin).</p>
+<ul id="list"></ul>
+<script type="application/json" id="data">${json4}<\/script>
+<script>
+(function(){
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var esc = function(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); };
+  document.getElementById("h").textContent = D.name + (D.company ? " \u2014 " + D.company : "");
+  document.getElementById("sub").textContent = D.dayLabel + " \xB7 " + D.events.length + " event" + (D.events.length==1?"":"s");
+  var COL = { in:"#16a34a", out:"#1d4ed8", scan:"#94a3b8", refused:"#dc2626" };
+  var map = L.map("map", { zoomControl:true });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    { maxZoom:20, subdomains:"abcd", attribution:"&copy; OpenStreetMap &copy; CARTO" }).addTo(map);
+  D.sites.forEach(function(s){
+    L.circle([s.lat,s.lng], { radius:s.radius, color:"#2563eb", weight:1, fillOpacity:.05 }).addTo(map);
+    L.circleMarker([s.lat,s.lng], { radius:4, color:"#1e3a8a", fillColor:"#1e3a8a", fillOpacity:1, weight:1 })
+      .addTo(map).bindTooltip(esc(s.name), { permanent:true, direction:"right", offset:[6,0], className:"" });
+  });
+  var marks = {}, acc = null, bounds = [];
+  function text(e){
+    var where = e.site ? esc(e.site) : "no site";
+    var dist = e.dist != null ? (e.dist + " m from " + (e.kind==="refused" && !e.ok ? "the nearest site" : "the site")) : "";
+    var gps = e.ok === true ? '<span class="ok">\u2714 GPS verified</span>' : e.ok === false ? '<span class="bad">\u2718 not verified</span>' : "";
+    return "<b>" + esc(e.time) + " \xB7 " + esc(e.label) + "</b><br>" + where + (dist ? " \xB7 " + dist : "") + (gps ? "<br>" + gps : "")
+      + (e.acc ? '<br><span style="color:#64748b">phone accuracy \xB1' + Math.round(e.acc) + ' m</span>' : "");
+  }
+  D.events.forEach(function(e){
+    var m = L.circleMarker([e.lat,e.lng], { radius:8, color:"#fff", weight:2, fillColor:COL[e.kind]||"#64748b", fillOpacity:1 })
+      .addTo(map).bindPopup(text(e));
+    marks[e.id] = { m:m, e:e }; bounds.push([e.lat,e.lng]);
+  });
+  function focus(id, pan){
+    var x = marks[id]; if (!x) return;
+    if (acc) map.removeLayer(acc);
+    if (x.e.acc) acc = L.circle([x.e.lat,x.e.lng], { radius:x.e.acc, color:COL[x.e.kind], weight:1, fillOpacity:.12 }).addTo(map);
+    Object.keys(marks).forEach(function(k){ marks[k].m.setRadius(k===id?12:8); });
+    if (pan) map.setView([x.e.lat,x.e.lng], 18);
+    x.m.openPopup();
+    [].forEach.call(document.querySelectorAll("#list li"), function(li){ li.classList.toggle("on", li.dataset.id===id); });
+  }
+  var list = document.getElementById("list");
+  list.innerHTML = D.events.map(function(e){
+    return '<li data-id="' + esc(e.id) + '"><span class="dot" style="background:' + (COL[e.kind]||"#64748b") + '"></span><span class="t">' + esc(e.time)
+      + '</span><span>' + esc(e.label) + '<div class="d">' + (e.kind === "refused" && e.site ? "nearest site: " : "") + (e.site ? esc(e.site) : "no site") + (e.dist != null ? " \xB7 " + e.dist + " m away" : "")
+      + (e.ok === true ? ' \xB7 <span class="ok">\u2714</span>' : e.ok === false ? ' \xB7 <span class="bad">\u2718</span>' : "") + '</div></span></li>';
+  }).join("") || '<li>No events with a location on this day.</li>';
+  list.addEventListener("click", function(ev){ var li = ev.target.closest("li[data-id]"); if (li) focus(li.dataset.id, true); });
+  if (D.focus && marks[D.focus]) { map.setView([marks[D.focus].e.lat, marks[D.focus].e.lng], 17); focus(D.focus, false); }
+  else if (bounds.length) map.fitBounds(bounds, { padding:[40,40], maxZoom:17 });
+  else if (D.sites.length) map.setView([D.sites[0].lat, D.sites[0].lng], 16);
+  else map.setView([50.86,-1.2], 9);
+})();
+<\/script></body></html>`);
+}
+async function sweepSitelogTimesheets(env, tid = 1) {
+  if (!env.SITELOG_DB) return;
+  const cfg = await getConfig2(env, tid);
+  if (!cfg.enabled || !cfg.recipients.length) return;
+  const now2 = london();
+  const sent = await readKV(env, tid, SENT_KEY(tid)) || {};
+  if (cfg.weekly && dow(now2.key) === 1 && now2.hhmm >= WEEKLY_FROM) {
+    const lastMon = addDays(now2.key, -7);
+    if (sent.weekly !== lastMon) {
+      const r = await emailTimesheet(env, tid, "weekly", lastMon, cfg.recipients);
+      if (r.ok || r.skipped) {
+        sent.weekly = lastMon;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    }
+  }
+  if (cfg.daily && now2.hhmm >= DAILY_FROM && sent.daily !== now2.key) {
+    const people = await loadPeriod(env, now2.key, now2.key);
+    const visits = people.reduce((n, p) => n + p.visits.length, 0);
+    const open = people.reduce((n, p) => n + p.visits.filter((v) => v.state === "open").length, 0);
+    const force = now2.hhmm >= DAILY_FORCE;
+    if (!visits) {
+      if (force) {
+        sent.daily = now2.key;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    } else if (!open || force) {
+      const r = await emailTimesheet(env, tid, "daily", now2.key, cfg.recipients);
+      if (r.ok || r.skipped) {
+        sent.daily = now2.key;
+        await writeKV(env, tid, SENT_KEY(tid), sent);
+      }
+    }
+  }
+}
+async function handle5(request, env, ctx, url, sess) {
+  if (!sess) return error("Not signed in", 401, env, request);
+  const tid = sess.tenantId;
+  const perms = await permissionsFor(env, tid, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes") return error("Needs the SiteLog admin permission", 403, env, request);
+  const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
+  if (path === "/config" && request.method === "GET") {
+    return json({
+      ok: true,
+      config: await getConfig2(env, tid),
+      sent: await readKV(env, tid, SENT_KEY(tid)) || {},
+      emailConfigured: !!(env.RESEND_API_KEY || env.RESET_EMAIL_WEBHOOK),
+      sitelogConnected: !!env.SITELOG_DB
+    }, {}, env, request);
+  }
+  if (path === "/data" && request.method === "GET") {
+    const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
+    const qd = url.searchParams.get("date") || "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london().key;
+    const per = periodFor(k, d);
+    let people;
+    try {
+      people = await loadPeriod(env, per.from, per.to);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+    await addMapLinks(env, apiOrigin(env, url), people, MAP_TTL_VIEW);
+    return json({
+      ok: true,
+      period: per,
+      today: london().key,
+      people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
+    }, {}, env, request);
+  }
+  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  if (path === "/config" && request.method === "POST") {
+    const cur = await getConfig2(env, tid);
+    const recips = Array.isArray(body.recipients) ? body.recipients : typeof body.recipients === "string" ? body.recipients.split(/[,;\s]+/) : cur.recipients;
+    const clean = [...new Set(recips.map((s) => String(s).trim().toLowerCase()).filter((s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))].slice(0, 20);
+    const next = {
+      enabled: body.enabled === void 0 ? cur.enabled : !!body.enabled,
+      daily: body.daily === void 0 ? cur.daily : !!body.daily,
+      weekly: body.weekly === void 0 ? cur.weekly : !!body.weekly,
+      recipients: clean
+    };
+    await writeKV(env, tid, CFG_KEY3(tid), next);
+    return json({ ok: true, config: next }, {}, env, request);
+  }
+  const kind = body.kind === "weekly" ? "weekly" : "daily";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays(london().key, -7) : london().key;
+  if (path === "/pdf" && request.method === "POST") {
+    const { per, bytes } = await buildPdf(env, kind, date);
+    return new Response(bytes, { headers: Object.assign({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${per.file}"`,
+      "Cache-Control": "no-store"
+    }, corsHeaders(env, request)) });
+  }
+  if (path === "/send" && request.method === "POST") {
+    const cfg = await getConfig2(env, tid);
+    if (!cfg.recipients.length) return error("Add at least one email address first", 400, env, request);
+    const r = await emailTimesheet(env, tid, kind, date, cfg.recipients);
+    if (!r.ok) return error(r.reason === "no provider" ? "Email isn't set up on the portal (RESEND_API_KEY)" : r.error || "Email failed", 502, env, request);
+    return json({ ok: true, sentTo: cfg.recipients, period: r.period, people: r.people }, {}, env, request);
+  }
+  return error("Not found", 404, env, request);
+}
+var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, REFUSAL_TEXT, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
+var init_sitelogts = __esm({
+  "src/routes/sitelogts.js"() {
+    init_http();
+    init_auth();
+    init_email();
+    init_logo();
+    init_sitelogtspdf();
+    init_filesign();
+    CFG_KEY3 = (tid) => `sitelog:tsmail:${tid}`;
+    SENT_KEY = (tid) => `sitelog:tsmail:sent:${tid}`;
+    DAILY_FROM = "16:00";
+    DAILY_FORCE = "20:00";
+    WEEKLY_FROM = "07:00";
+    dow = (key) => (/* @__PURE__ */ new Date(key + "T12:00:00Z")).getUTCDay();
+    mondayOf2 = (key) => addDays(key, -((dow(key) + 6) % 7));
+    num = (v) => v === null || v === void 0 || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+    SCAN_EARLY = 5 * 60;
+    SCAN_LATE = 21 * 60;
+    PRE_CONFIRM_MS = 20 * 6e4;
+    POST_SIGNOUT_MS = 30 * 6e4;
+    MIN_SPAN_MS = 30 * 6e4;
+    minsOfDay = (hhmm) => {
+      const [h, m] = hhmm.split(":").map(Number);
+      return h * 60 + m;
+    };
+    REFUSAL_TEXT = {
+      unknown_site: "You weren't at any SiteLog site",
+      outside_site: "You were too far from the site for it to sign you in or out",
+      outside_site_signed_in: "You tried to sign out away from the site",
+      no_location: "Your phone didn't send its location",
+      no_site_location: "The site has no location set yet \u2014 tell the office",
+      blocked: "Your SiteLog account is switched off \u2014 tell the office",
+      phone_denied: "Location was switched off for SiteLog on your phone",
+      phone_unavailable: "Your phone couldn't get a GPS fix",
+      phone_timeout: "Your phone took too long to find its location",
+      phone_no_fix: "Your phone had no location when you registered"
+    };
+    esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    MAP_PATH = "/sitelog-map";
+    MAP_TTL_EMAIL = 90 * 86400;
+    MAP_TTL_VIEW = 7 * 86400;
+    SCAN_LABEL = {
+      confirm_check_in: "Scanned \u2014 offered sign-in",
+      confirm_sign_out: "Scanned \u2014 offered sign-out",
+      checked_in: "Signed in",
+      checked_out: "Signed out",
+      first_visit: "Scanned \u2014 new phone",
+      unknown_site: "Refused \u2014 not at a site",
+      outside_site: "Refused \u2014 outside the site boundary",
+      outside_site_signed_in: "Refused \u2014 tried to sign out away from the site",
+      no_location: "Refused \u2014 no location"
+    };
+  }
+});
+
 // src/routes/sitelog-api.js
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
@@ -10368,7 +11309,7 @@ async function ensureScanLog(env) {
   }
   scanLogReady = true;
 }
-function num(v) {
+function num2(v) {
   return isFiniteNumber(v) ? Number(v) : null;
 }
 async function logScan(env, row) {
@@ -10390,9 +11331,9 @@ async function logScan(env, row) {
       row.deviceToken ? String(row.deviceToken).slice(0, 128) : null,
       personId,
       row.site ? String(row.site).slice(0, 160) : null,
-      num(row.lat),
-      num(row.lng),
-      num(row.accuracy),
+      num2(row.lat),
+      num2(row.lng),
+      num2(row.accuracy),
       isFiniteNumber(row.distance) ? Math.round(Number(row.distance)) : null,
       row.nearest ? String(row.nearest).slice(0, 160) : null,
       row.detail ? String(row.detail).slice(0, 300) : null
@@ -10405,7 +11346,7 @@ async function logScan(env, row) {
     console.error("logScan", e);
   }
 }
-async function handle5(request, env, ctx) {
+async function handle6(request, env, ctx) {
   const u0 = new URL(request.url);
   const kind = SCAN_KINDS[u0.pathname];
   if (kind && request.method === "POST" && env.SITELOG_DB) {
@@ -11994,6 +12935,16 @@ async function handleInner(request, env, ctx) {
       `).bind(device.person_id, limit).all();
     return json4({ visits: rows.results || [] });
   }
+  if (url.pathname === "/my-timesheet" && request.method === "GET") {
+    const deviceToken = url.searchParams.get("deviceToken");
+    if (!deviceToken) return json4({ error: "Missing deviceToken" }, 400);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(String(deviceToken).slice(0, 128)).first();
+    if (!device) return json4({ ok: false, error: "This phone isn't registered" }, 404);
+    const { personWeek: personWeek2 } = await Promise.resolve().then(() => (init_sitelogts(), sitelogts_exports));
+    return json4(await personWeek2(env, device.person_id, url.searchParams.get("week") || ""));
+  }
   if (url.pathname === "/scan-log" && request.method === "GET") {
     const guard = requireAdmin2();
     if (guard) return guard;
@@ -12855,7 +13806,7 @@ function imageForStore(env, u) {
   const key = decodeURIComponent(m[1]);
   return /^(sites|jobs|sitedocs)\//.test(key) ? `${r2Pub(env)}/${key}` : u;
 }
-async function handle6(request, env, ctx, url, sess) {
+async function handle7(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -13200,12 +14151,12 @@ async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
   }
 }
 async function slCall(env, path, body) {
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const base = env.SITELOG_API || "https://api2.site-log.co.uk";
   const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
   const req = new Request(base + path, init);
   if (env.SITELOG_DB) {
     try {
-      const r = await handle5(req, env);
+      const r = await handle6(req, env);
       if (r) return await r.json().catch(() => ({ ok: r.ok }));
     } catch (e) {
     }
@@ -13615,7 +14566,7 @@ function importTokenOK(request, env) {
   for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
   return diff === 0;
 }
-async function handle7(request, env, ctx, url, sess) {
+async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/compliance(?=\/|$)/, "") || "/";
@@ -14788,13 +15739,13 @@ function reconcileRow(row, store, today) {
   const chartDue = store.due[type] || null;
   if (!freq || !chartDue) return { flag: "no_chart_date", text: `The chart has no ${TYPE_LABEL[type] || type} date for this store`, chartDue };
   const pStart = row.planned_date || (row.period ? row.period + "-01" : null);
-  const pEnd = row.planned_date ? row.planned_date : row.period ? addDays(addMonths2(row.period + "-01", 1), -1) : null;
+  const pEnd = row.planned_date ? row.planned_date : row.period ? addDays2(addMonths2(row.period + "-01", 1), -1) : null;
   const cDue = fmtUk(chartDue), cPer = fmtPeriodUk(row);
   if (!pStart) return { flag: chartDue < today ? "overdue" : "due", text: chartDue < today ? `Overdue on the chart (${cDue})` : `Due ${cDue}`, chartDue };
   const slack = freq >= 12 ? 45 : 10;
   const lastDone = addMonths2(chartDue, -freq);
-  if (lastDone >= addDays(pStart, -slack)) return { flag: "done", text: `Done our side around ${fmtUk(lastDone)} \u2014 Concerto still shows it open`, chartDue, lastDone };
-  if (chartDue >= addDays(pStart, -slack) && chartDue <= addDays(pEnd, slack)) {
+  if (lastDone >= addDays2(pStart, -slack)) return { flag: "done", text: `Done our side around ${fmtUk(lastDone)} \u2014 Concerto still shows it open`, chartDue, lastDone };
+  if (chartDue >= addDays2(pStart, -slack) && chartDue <= addDays2(pEnd, slack)) {
     return chartDue < today ? { flag: "overdue", text: `Overdue \u2014 chart ${cDue}, Concerto ${cPer}`, chartDue } : { flag: "due", text: `Due ${cDue} (Concerto ${cPer})`, chartDue };
   }
   if (chartDue < pStart) {
@@ -14862,7 +15813,7 @@ async function buildList(env, tid, opts) {
   });
   const covered = new Set((allOpen || []).filter((r) => r.status === "open" && r.store_code).map((r) => r.store_code + "|" + r.ppm_type));
   const chartMissing = [];
-  const soon = addDays(today, 30);
+  const soon = addDays2(today, 30);
   for (const s of stores.values()) {
     if (s.closed) continue;
     for (const type of ["fiveYear", "em", "pat", "pump", "pv", "ev"]) {
@@ -15094,7 +16045,7 @@ function deriveCase(r, ctx, today, money3, rec) {
   if (testJob && testJob.done) auto.tested = { done: true, at: testJob.doneDate, detail: "Job " + testJob.status + (testJob.engineer ? " \u2014 " + testJob.engineer : ""), source: "job", jobId: testJob.id };
   const testDate = testJob && testJob.done ? testJob.doneDate : null;
   const certs = code ? ctx.certs.get(code) || [] : [];
-  const cycleCerts = certs.filter((f) => f.date && (testDate ? f.date >= addDays(testDate, -7) : inWin(f.date)));
+  const cycleCerts = certs.filter((f) => f.date && (testDate ? f.date >= addDays2(testDate, -7) : inWin(f.date)));
   const cert = cycleCerts.length ? cycleCerts[cycleCerts.length - 1] : null;
   const rv = code ? ctx.reviews.get(code) : null;
   let outcomeAuto = "";
@@ -15299,7 +16250,7 @@ async function buildSchedule(env, tid, opts) {
     if (opts.money && r.orderedValue) b.value += Number(r.orderedValue) || 0;
   }
   stats.byMonth = byMonth;
-  stats.dueSoonNotReleased = rows.filter((r) => !r.released && r.nextDate && r.nextDate <= addDays(today, 90) && r.status === "open").length;
+  stats.dueSoonNotReleased = rows.filter((r) => !r.released && r.nextDate && r.nextDate <= addDays2(today, 90) && r.status === "open").length;
   if (pipeline) {
     const byStage = {}, byEngineer = {}, byStage12 = {};
     for (const r of rows) {
@@ -15526,7 +16477,7 @@ async function fiveYearAudit(env, tid, year) {
   earlyRetest.sort((a, b) => a.gapMonths - b.gapMonths);
   return { year, offList, earlyRetest };
 }
-async function handle8(request, env, ctx, url, sess) {
+async function handle9(request, env, ctx, url, sess) {
   if (!sess) return error("Unauthorised", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
@@ -15959,7 +16910,7 @@ async function handle8(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS2, addDays, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, FY_IDX, caseId, REMEDIAL_ORDER;
+var ensureTables2, FREQ_MONTHS, TYPE_LABEL, MONTHS2, addDays2, todayIso, FINISHED, TYPE_KEYWORDS, CASE_STEPS, STEP_KEYS, FY_STAGES, FY_STAGE_KEYS, CONCERTO_RANK, FY_UNSAT_STAGES, FY_IDX, caseId, REMEDIAL_ORDER;
 var init_concerto = __esm({
   "src/routes/concerto.js"() {
     init_http();
@@ -15970,7 +16921,7 @@ var init_concerto = __esm({
     FREQ_MONTHS = { fiveYear: 60, pat: 12, em: 12, pv: 12, ev: 12, pump: 1 };
     TYPE_LABEL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency lighting", pv: "PV", ev: "EV", pump: "Pump", other: "Other" };
     MONTHS2 = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-    addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+    addDays2 = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
     todayIso = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     FINISHED = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
     TYPE_KEYWORDS = {
@@ -16023,7 +16974,7 @@ var init_concerto = __esm({
 });
 
 // src/lib/batterypdf.js
-function fit2(str, size, maxW) {
+function fit3(str, size, maxW) {
   let s = S2(str);
   if (textWidth(s, size) <= maxW) return s;
   while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
@@ -16045,24 +16996,24 @@ function wrapLines(str, size, maxW, maxLines) {
   if (cur && lines.length < (maxLines || 6)) lines.push(cur);
   return lines.length ? lines : [""];
 }
-function header(doc, meta) {
-  doc.rect(0, 0, W4, 74, { fill: NAVY2 });
+function header2(doc, meta) {
+  doc.rect(0, 0, W4, 74, { fill: NAVY3 });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 26;
-      doc.image(meta.logo, M4, 24, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M5, 24, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  doc.text(W4 - M4, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W4 - M4, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
+  doc.text(W4 - M5, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W4 - M5, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
   let y = 92;
   const con = meta.contractor || {};
   const bits = [con.tradingTitle, meta.site ? "Site: " + meta.site : "", meta.certNumber ? "EM cert " + meta.certNumber : ""].filter(Boolean);
-  doc.text(M4, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
+  doc.text(M5, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
   y += 8;
-  doc.line(M4, y, W4 - M4, y, { stroke: HAIR2, lw: 0.8 });
+  doc.line(M5, y, W4 - M5, y, { stroke: HAIR2, lw: 0.8 });
   return y + 16;
 }
 function prepPhotos(list) {
@@ -16090,22 +17041,22 @@ function prepPhotos(list) {
 function itemBlock(doc, it, idx, y) {
   const { draw: photos, skipped } = prepPhotos(it.photos);
   const photoH = photos.length ? 96 : 0;
-  const noteLines = it.note ? wrapLines(it.note, 8.5, W4 - M4 * 2 - 24, 2) : [];
+  const noteLines = it.note ? wrapLines(it.note, 8.5, W4 - M5 * 2 - 24, 2) : [];
   const skipLine = skipped.length ? skipped.length + " photo" + (skipped.length > 1 ? "s" : "") + " on file not embedded: " + skipped.join("; ") : "";
   const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + (skipLine ? 11 : 0) + 14;
-  if (y + blockH > H2 - M4) {
+  if (y + blockH > H2 - M5) {
     doc.newPage(W4, H2);
-    y = M4 + 6;
+    y = M5 + 6;
   }
-  doc.rect(M4, y, W4 - M4 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
-  const px = M4 + 12;
+  doc.rect(M5, y, W4 - M5 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
+  const px = M5 + 12;
   let ty = y + 18;
   doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK3 });
-  if (it.site) doc.text(W4 - M4 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
+  if (it.site) doc.text(W4 - M5 - 12, ty, fit3(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
   ty += 18;
   doc.text(px, ty, "Battery: ", { size: 9, bold: true, color: [0.3, 0.36, 0.44] });
-  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W4 - M4 * 2 - 120), { size: 9, color: INK3 });
-  doc.text(W4 - M4 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
+  doc.text(px + textWidth("Battery: ", 9), ty, fit3(it.spec || "(spec to confirm)", 9, W4 - M5 * 2 - 120), { size: 9, color: INK3 });
+  doc.text(W4 - M5 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY3, alignRight: true });
   ty += 15;
   noteLines.forEach((l) => {
     doc.text(px, ty, l, { size: 8.5, color: MUTE2 });
@@ -16116,7 +17067,7 @@ function itemBlock(doc, it, idx, y) {
     let cx = px;
     for (const p of photos) {
       const w = Math.min(150, photoH * (p.w / p.h));
-      if (cx + w > W4 - M4 - 8) break;
+      if (cx + w > W4 - M5 - 8) break;
       try {
         if (p.rgb) doc.imageRGB(p.rgb.rgb, p.rgb.w, p.rgb.h, cx, ty, w, photoH, { deflated: !!p.rgb.deflated });
         else doc.image(p.b, cx, ty, w, photoH);
@@ -16127,27 +17078,27 @@ function itemBlock(doc, it, idx, y) {
     ty += photoH + 8;
   }
   if (skipLine) {
-    doc.text(px, ty, fit2(skipLine, 8, W4 - M4 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
+    doc.text(px, ty, fit3(skipLine, 8, W4 - M5 * 2 - 24), { size: 8, color: [0.72, 0.32, 0.1] });
   }
   return y + blockH + 12;
 }
 function buildBatteryEnquiryPdf(items, meta = {}) {
   const doc = new PdfDoc(W4, H2);
-  let y = header(doc, meta);
+  let y = header2(doc, meta);
   (items || []).forEach((it, idx) => {
     y = itemBlock(doc, it, idx, y);
   });
-  if (!(items || []).length) doc.text(M4, y, "No battery items.", { size: 10, color: MUTE2 });
+  if (!(items || []).length) doc.text(M5, y, "No battery items.", { size: 10, color: MUTE2 });
   return doc.bytes();
 }
-var W4, H2, M4, NAVY2, INK3, MUTE2, HAIR2, CARD2, S2;
+var W4, H2, M5, NAVY3, INK3, MUTE2, HAIR2, CARD2, S2;
 var init_batterypdf = __esm({
   "src/lib/batterypdf.js"() {
     init_pdf();
     W4 = 595;
     H2 = 842;
-    M4 = 36;
-    NAVY2 = [0, 0.204, 0.408];
+    M5 = 36;
+    NAVY3 = [0, 0.204, 0.408];
     INK3 = [0.09, 0.14, 0.22];
     MUTE2 = [0.42, 0.48, 0.56];
     HAIR2 = [0.85, 0.88, 0.92];
@@ -16157,7 +17108,7 @@ var init_batterypdf = __esm({
 });
 
 // src/lib/pumppdf.js
-function fit3(str, size, maxW) {
+function fit4(str, size, maxW) {
   str = S3(str);
   if (textWidth(str, size) <= maxW) return str;
   let s = str;
@@ -16260,36 +17211,36 @@ function ansOf(a) {
 function statusOf2(rec) {
   const fails = (rec.checks || []).filter((c) => ansOf(c.answer) === "no").length;
   const safe = (rec.safety || []).every((s) => ansOf(s.answer) === "yes");
-  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED2 };
-  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED2 } : { label: "ALL PASS", color: GREEN2 };
+  if (!safe) return { label: "SAFETY NOT CONFIRMED", color: RED3 };
+  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED3 } : { label: "ALL PASS", color: GREEN3 };
 }
-function header2(doc, rec, meta, slim) {
+function header3(doc, rec, meta, slim) {
   const y = 30, h = slim ? 40 : HEADER_H2;
-  cardBox2(doc, M5, y, CW2, h, slim ? 12 : 14, NAVY3);
+  cardBox2(doc, M6, y, CW2, h, slim ? 12 : 14, NAVY4);
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = slim ? 18 : 24;
-      doc.image(meta.logo, M5 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M6 + (slim ? 16 : 20), y + (slim ? 11 : 18), hh * (g.w / g.h), hh);
     } catch {
     }
   }
   if (slim) {
-    tracked2(doc, W5 - M5 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
-    doc.text(W5 - M5 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+    tracked2(doc, W5 - M6 - 16, y + 17, "Sump Pump Maintenance \u2014 continued", { size: 7, color: HEADSUB2, alignRight: true });
+    doc.text(W5 - M6 - 16, y + 31, S3(rec.storeName || ""), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
     return y + h;
   }
   const st = statusOf2(rec);
-  pill2(doc, M5 + 20, y + 52, st.label, { fill: st.color, size: 7 });
-  tracked2(doc, W5 - M5 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
-  doc.text(W5 - M5 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
-  if (rec.date) doc.text(W5 - M5 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M5 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  pill2(doc, M6 + 20, y + 52, st.label, { fill: st.color, size: 7 });
+  tracked2(doc, W5 - M6 - 20, y + 24, "Sump Pump Monthly Maintenance", { size: 7.5, color: HEADSUB2, track: 1.4, alignRight: true });
+  doc.text(W5 - M6 - 20, y + 47, S3(rec.storeName || "\u2014"), { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  if (rec.date) doc.text(W5 - M6 - 20, y + 64, "Serviced " + S3(rec.date), { size: 9, color: HEADSUB2, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W5 - M6 - 20, y + 77, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
   return y + h;
 }
 function footer2(doc, pageNo, pageCount) {
-  doc.text(M5, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
-  doc.text(W5 - M5, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
+  doc.text(M6, H3 - 22, "Sump pump monthly maintenance record. Generated by the Mostlane Portal.", { size: 7, color: FAINT2 });
+  doc.text(W5 - M6, H3 - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT2, alignRight: true });
 }
 function instrH(rec) {
   return CARD_PAD2 + 14 + instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).length * 11 + 4;
@@ -16303,35 +17254,35 @@ function detailsH2(rec) {
 }
 function instrCard(doc, y, rec) {
   const h = instrH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
+  cardBox2(doc, M6, y, CW2, h);
+  tracked2(doc, M6 + CARD_PAD2, y + 18, "Location & method \u2014 " + S3(rec.storeName || ""), { size: 6.5, color: ACCENT2 });
   let yy2 = y + 32;
   instrLines(rec.instructions, 8.5, CW2 - CARD_PAD2 * 2).forEach((l) => {
-    if (l) doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
+    if (l) doc.text(M6 + CARD_PAD2, yy2, l, { size: 8.5, color: l === l.toUpperCase() && /IMPORTANT/i.test(l) ? INK4 : MUTE3 });
     yy2 += 11;
   });
   return h;
 }
 function safetyCard(doc, y, rec) {
   const h = safetyH(rec);
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
+  cardBox2(doc, M6, y, CW2, h);
+  tracked2(doc, M6 + CARD_PAD2, y + 18, "Safety before starting", { size: 6.5, color: ACCENT2 });
   let yy2 = y + 32;
   (rec.safety || []).forEach((s) => {
     const ok = ansOf(s.answer) === "yes";
-    dot2(doc, M5 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN2 : RED2);
-    doc.text(M5 + CARD_PAD2 + 14, yy2, fit3(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
-    pill2(doc, W5 - M5 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN2 : RED2, size: 6.5, h: 12 });
+    dot2(doc, M6 + CARD_PAD2 + 4, yy2 - 3, 4, ok ? GREEN3 : RED3);
+    doc.text(M6 + CARD_PAD2 + 14, yy2, fit4(s.label, 8.5, CW2 - CARD_PAD2 * 2 - 70), { size: 8.5, color: INK4 });
+    pill2(doc, W5 - M6 - CARD_PAD2 - 40, yy2 - 10, ok ? "YES" : "NO", { fill: ok ? GREEN3 : RED3, size: 6.5, h: 12 });
     yy2 += 16;
   });
   return h;
 }
 function checksCard(doc, rows, startIndex, y, count) {
   const h = 20 + THEAD_H2 + rows.length * ROW_H2 + 12;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
-  if (count != null) doc.text(W5 - M5 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
-  const x0 = M5 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
+  cardBox2(doc, M6, y, CW2, h);
+  tracked2(doc, M6 + CARD_PAD2, y + 18, "Monthly maintenance checks", { size: 6.5, color: ACCENT2 });
+  if (count != null) doc.text(W5 - M6 - CARD_PAD2, y + 18, count + " checks", { size: 7.5, color: FAINT2, alignRight: true });
+  const x0 = M6 + CARD_PAD2, tw = CW2 - CARD_PAD2 * 2;
   const cItem = x0, wItem = tw * 0.7, cYes = x0 + tw * 0.76, cNo = x0 + tw * 0.85, cNa = x0 + tw * 0.94;
   const headY = y + 26 + THEAD_H2 - 8;
   tracked2(doc, cItem, headY, "Check", { size: 6, color: MUTE3, track: 0.6 });
@@ -16343,11 +17294,11 @@ function checksCard(doc, rows, startIndex, y, count) {
   let ry = y + 26 + THEAD_H2;
   doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR3, lw: 0.8 });
   rows.forEach((r, i) => {
-    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA2 });
+    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H2, { fill: ZEBRA3 });
     const txtY = ry + ROW_H2 - 6, a = ansOf(r.answer);
-    doc.text(cItem, txtY, fit3(r.label, 8, wItem), { size: 8, color: INK4 });
-    dot2(doc, cYes, txtY - 3, 3.4, GREEN2, a !== "yes");
-    dot2(doc, cNo, txtY - 3, 3.4, RED2, a !== "no");
+    doc.text(cItem, txtY, fit4(r.label, 8, wItem), { size: 8, color: INK4 });
+    dot2(doc, cYes, txtY - 3, 3.4, GREEN3, a !== "yes");
+    dot2(doc, cNo, txtY - 3, 3.4, RED3, a !== "no");
     dot2(doc, cNa, txtY - 3, 3.4, GREY4, a !== "na");
     ry += ROW_H2;
   });
@@ -16356,11 +17307,11 @@ function checksCard(doc, rows, startIndex, y, count) {
 function detailsCard2(doc, y, rec) {
   const h = detailsH2(rec);
   if (!h) return 0;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
+  cardBox2(doc, M6, y, CW2, h);
+  tracked2(doc, M6 + CARD_PAD2, y + 18, "Details of any check answered No", { size: 6.5, color: ACCENT2 });
   let yy2 = y + 32;
   wrap4(rec.detailsNo, 8.5, CW2 - CARD_PAD2 * 2, 8).forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
+    doc.text(M6 + CARD_PAD2, yy2, l, { size: 8.5, color: INK4 });
     yy2 += 11;
   });
   return h;
@@ -16384,23 +17335,23 @@ function photoPage(doc, rec, meta, pageIdx) {
   const top = 30 + 40 + GAP2;
   const gap = 12;
   const cw = (CW2 - gap) / 2, ch = 292;
-  cardBox2(doc, M5, top, CW2, H3 - 40 - top - 6);
-  tracked2(doc, M5 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
+  cardBox2(doc, M6, top, CW2, H3 - 40 - top - 6);
+  tracked2(doc, M6 + CARD_PAD2, top + 18, "Photos of maintenance" + (photos.length > PHOTOS_PER_PAGE ? " (" + (start + 1) + "\u2013" + (start + slice.length) + " of " + photos.length + ")" : ""), { size: 6.5, color: ACCENT2 });
   slice.forEach((p, i) => {
     const col = i % 2, row = Math.floor(i / 2);
-    const x = M5 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
+    const x = M6 + CARD_PAD2 + col * (cw - CARD_PAD2 + gap / 2), y = top + 30 + row * (ch + 10);
     const boxW = cw - CARD_PAD2 - gap / 2, boxH = ch - 18;
-    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA2 });
+    doc.roundRect(x, y, boxW, boxH, 8, { fill: ZEBRA3 });
     const drawn = drawImg(doc, p, x + 4, y + 4, boxW - 8, boxH - 8, { align: "center" });
     if (!drawn) doc.text(x + 10, y + boxH / 2, "Photo couldn't be embedded", { size: 8, color: FAINT2 });
-    doc.text(x + 2, y + boxH + 12, fit3(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
+    doc.text(x + 2, y + boxH + 12, fit4(start + i + 1 + ". " + (p.name || "Photo"), 7.5, boxW - 4), { size: 7.5, color: MUTE3 });
   });
   const last = pageIdx === photoPages(meta) - 1;
   if (last) {
     const extras = [].concat((meta.videos || []).map((n) => "Video: " + n + " (open the portal record to play)"), (meta.skipped || []).map((n) => "Not embedded: " + n));
     let yy2 = top + 30 + 2 * (ch + 10) + 6;
     extras.slice(0, 6).forEach((t) => {
-      doc.text(M5 + CARD_PAD2, yy2, fit3(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
+      doc.text(M6 + CARD_PAD2, yy2, fit4(t, 7.5, CW2 - CARD_PAD2 * 2), { size: 7.5, color: FAINT2 });
       yy2 += 11;
     });
   }
@@ -16409,23 +17360,23 @@ function signatureCard2(doc, y, rec, meta) {
   const declLines = wrap4(rec.declaration || "I confirm that all checks listed above have been carried out and that the sump pump and associated alarm system are in good working order, suitable for continued operation until the next scheduled monthly service.", 8.5, CW2 - 40, 4);
   const media = mediaLine(rec, meta);
   const h = CARD_PAD2 + 14 + declLines.length * 11 + (media ? 14 : 0) + 66;
-  cardBox2(doc, M5, y, CW2, h);
-  tracked2(doc, M5 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
+  cardBox2(doc, M6, y, CW2, h);
+  tracked2(doc, M6 + CARD_PAD2, y + 18, "Declaration", { size: 6.5, color: ACCENT2 });
   let yy2 = y + 32;
   declLines.forEach((l) => {
-    doc.text(M5 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
+    doc.text(M6 + CARD_PAD2, yy2, l, { size: 8.5, color: MUTE3 });
     yy2 += 11;
   });
   if (media) {
-    doc.text(M5 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
+    doc.text(M6 + CARD_PAD2, yy2 + 2, media, { size: 7.5, color: FAINT2 });
     yy2 += 14;
   }
   const agreed = ansOf(rec.declarationAgreed) === "yes" || rec.declarationAgreed === true;
-  pill2(doc, M5 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN2 : RED2, size: 6.5, h: 12 });
+  pill2(doc, M6 + CARD_PAD2, yy2 + 2, agreed ? "CONFIRMED" : "NOT CONFIRMED", { fill: agreed ? GREEN3 : RED3, size: 6.5, h: 12 });
   const bw = 200, y2 = y + h - 54;
   const blocks = [
-    { x: M5 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
-    { x: W5 - M5 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
+    { x: M6 + CARD_PAD2, sig: meta.engSig, name: rec.engineerName, label: "Engineer" },
+    { x: W5 - M6 - bw, sig: meta.dmSig, name: rec.dmName, label: "Store manager (DM)" }
   ];
   blocks.forEach((b) => {
     if (b.sig) drawImg(doc, b.sig, b.x, y2 - 8, Math.min(bw, 150), 34);
@@ -16462,13 +17413,13 @@ function buildPumpPdf(record, meta = {}) {
     if (idx > 0) doc.newPage(W5, H3);
     pageBg2(doc);
     if (pg.intro) {
-      header2(doc, rec, meta, false);
+      header3(doc, rec, meta, false);
       let yy2 = 30 + HEADER_H2 + GAP2;
       yy2 += instrCard(doc, yy2, rec) + GAP2;
       yy2 += safetyCard(doc, yy2, rec) + GAP2;
       checksCard(doc, pg.rows, pg.start, yy2, rec.checks.length);
     } else {
-      header2(doc, rec, meta, true);
+      header3(doc, rec, meta, true);
       checksCard(doc, pg.rows, pg.start, pg.top, null);
     }
     footer2(doc, idx + 1, totalPages);
@@ -16477,7 +17428,7 @@ function buildPumpPdf(record, meta = {}) {
   if (trailOwnPage) {
     doc.newPage(W5, H3);
     pageBg2(doc);
-    header2(doc, rec, meta, true);
+    header3(doc, rec, meta, true);
     footer2(doc, totalPages, totalPages);
     ty = slimTop;
   } else ty = lastBottom + GAP2;
@@ -16488,21 +17439,21 @@ function buildPumpPdf(record, meta = {}) {
   for (let p = 0; p < nPhotoPages; p++) {
     doc.newPage(W5, H3);
     pageBg2(doc);
-    header2(doc, rec, meta, true);
+    header3(doc, rec, meta, true);
     footer2(doc, before + p + 1, totalPages);
     photoPage(doc, rec, meta, p);
   }
   return doc.bytes();
 }
-var W5, H3, M5, CW2, NAVY3, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA2, ACCENT2, GREEN2, RED2, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
+var W5, H3, M6, CW2, NAVY4, INK4, MUTE3, FAINT2, BG2, CARD3, BORDER2, HAIR3, ZEBRA3, ACCENT2, GREEN3, RED3, GREY4, HEADSUB2, S3, ROW_H2, THEAD_H2, CARD_PAD2, GAP2, HEADER_H2, PHOTOS_PER_PAGE;
 var init_pumppdf = __esm({
   "src/lib/pumppdf.js"() {
     init_pdf();
     W5 = 595;
     H3 = 842;
-    M5 = 40;
-    CW2 = W5 - M5 * 2;
-    NAVY3 = [0, 0.204, 0.408];
+    M6 = 40;
+    CW2 = W5 - M6 * 2;
+    NAVY4 = [0, 0.204, 0.408];
     INK4 = [0.1, 0.13, 0.18];
     MUTE3 = [0.46, 0.51, 0.58];
     FAINT2 = [0.62, 0.66, 0.72];
@@ -16510,10 +17461,10 @@ var init_pumppdf = __esm({
     CARD3 = [1, 1, 1];
     BORDER2 = [0.886, 0.906, 0.933];
     HAIR3 = [0.92, 0.935, 0.955];
-    ZEBRA2 = [0.972, 0.98, 0.99];
+    ZEBRA3 = [0.972, 0.98, 0.99];
     ACCENT2 = [0.04, 0.42, 0.52];
-    GREEN2 = [0.09, 0.63, 0.29];
-    RED2 = [0.83, 0.16, 0.16];
+    GREEN3 = [0.09, 0.63, 0.29];
+    RED3 = [0.83, 0.16, 0.16];
     GREY4 = [0.6, 0.64, 0.7];
     HEADSUB2 = [0.78, 0.85, 0.93];
     S3 = (v) => toWinAnsi(String(v == null ? "" : v));
@@ -16534,7 +17485,7 @@ async function ensureTables__raw2(env) {
     created_at TEXT, updated_at TEXT, r2_final_key TEXT,
     PRIMARY KEY (tenant_id, id))`).run();
 }
-async function getConfig2(env, tid) {
+async function getConfig3(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "pump:config:" + tid).first();
   if (row && row.value) {
     try {
@@ -16723,7 +17674,7 @@ async function resignMedia(env, origin, rec) {
   }
   return rec;
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (method === "GET" && url.pathname === "/pump/media") {
     const key = url.searchParams.get("key") || "";
@@ -16754,11 +17705,11 @@ async function handle9(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig2(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig3(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig2(env, tid);
+      const cur = await getConfig3(env, tid);
       const next = { ...cur };
       if (typeof b.declaration === "string") next.declaration = b.declaration.slice(0, 800);
       if (b.contractor && typeof b.contractor === "object") next.contractor = b.contractor;
@@ -16778,13 +17729,13 @@ async function handle9(request, env, ctx, url, sess) {
     }
   }
   if (sub === "/stores" && method === "GET") {
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     return json({ ok: true, stores: (cfg.stores || []).map((s) => ({ id: s.id, name: s.name, siteCode: s.siteCode || "", client: s.client || "", address: s.address || "", postcode: s.postcode || "" })) }, {}, env, request);
   }
   if (sub === "/for-job" && method === "GET") {
     const jobId = q.get("jobId") || "";
     if (!jobId) return error("jobId required", 400, env, request);
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     const job = await getJob2(env, tid, jobId);
     let storeId = q.get("store") || job && job.pumpStore || "";
     const existing = await env.DB.prepare("SELECT * FROM pump_records WHERE tenant_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1").bind(tid, jobId).first();
@@ -16808,7 +17759,7 @@ async function handle9(request, env, ctx, url, sess) {
     if (id) rec = await loadRec(id);
     if (rec && rec.status === "final") return error("This record is finalised \u2014 reopen it from the office review to edit.", 409, env, request);
     if (!await canWrite(rec)) return error("Not allowed", 403, env, request);
-    const cfg = await getConfig2(env, tid);
+    const cfg = await getConfig3(env, tid);
     const store = storeById(cfg, String(b.store || rec && rec.store || "")) || null;
     const sanSig = (v) => {
       const s = String(v || "");
@@ -17133,7 +18084,7 @@ var init_pump = __esm({
 var certs_exports = {};
 __export(certs_exports, {
   fiveYearWorksCompleted: () => fiveYearWorksCompleted,
-  handle: () => handle10,
+  handle: () => handle11,
   reissueCleanCertForRemedialJob: () => reissueCleanCertForRemedialJob,
   upsertFiveYearFromJob: () => upsertFiveYearFromJob
 });
@@ -17896,7 +18847,7 @@ async function handleOrderInbound(env, tid, b, ctx, request) {
   }
   return json({ ok: true, id, created, matched: !!m, matchedKind: m ? m.kind : linkedJob ? "job" : null, status: linkedJob ? "linked" : status, jobId: linkedJob ? linkedJob.id : null }, {}, env, request);
 }
-async function getConfig3(env, tid) {
+async function getConfig4(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
   let c = null;
   try {
@@ -18522,7 +19473,7 @@ async function fiveYearTestedMap(env, tid) {
   _fyrTestedCache = { tid, at: now2, map };
   return map;
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -18577,11 +19528,11 @@ async function handle10(request, env, ctx, url, sess) {
     }
   };
   if (sub === "/config") {
-    if (method === "GET") return json({ ok: true, config: await getConfig3(env, tid) }, {}, env, request);
+    if (method === "GET") return json({ ok: true, config: await getConfig4(env, tid) }, {}, env, request);
     if (method === "POST") {
       if (!isOffice) return error("Office access required", 403, env, request);
       const b = await request.json().catch(() => ({}));
-      const cur = await getConfig3(env, tid);
+      const cur = await getConfig4(env, tid);
       const next = {
         client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
@@ -18871,7 +19822,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
-    const config = await getConfig3(env, tid);
+    const config = await getConfig4(env, tid);
     const job = await getJob3(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
@@ -18995,7 +19946,7 @@ PAT: Import certificate number ${num5}-${yr}`;
       url: "/cert-review.html",
       tag: "cert-review:" + cert.id
     };
-    const cfg = await getConfig3(env, tid);
+    const cfg = await getConfig4(env, tid);
     const chosen = (cfg.reviewers || []).filter((u) => String(u).toLowerCase() !== String(me).toLowerCase());
     if (chosen.length) {
       ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
@@ -19028,7 +19979,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     const oneRec = shapeRow2(cert);
     await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
-    return json({ ok: true, record: oneRec, config: await getConfig3(env, tid) }, {}, env, request);
+    return json({ ok: true, record: oneRec, config: await getConfig4(env, tid) }, {}, env, request);
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -19804,7 +20755,7 @@ PAT: Import certificate number ${num5}-${yr}`;
     const cert = await loadCert(String(q.get("certId") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow2(cert);
-    const cfg = await getConfig3(env, tid);
+    const cfg = await getConfig4(env, tid);
     const code = padCode2(cert.site_code || rec.siteCode) || "";
     const yr = String(cert.finalised_at || rec.contractor && rec.contractor.date || (/* @__PURE__ */ new Date()).toISOString()).slice(0, 4).slice(-2);
     const reference = `${code}-EM-${yr}`;
@@ -19944,7 +20895,7 @@ ${con.tradingTitle || "Mostlane"}`;
       }
     } else return error("certId or code required", 400, env, request);
     if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
-    const cfg = await getConfig3(env, tid);
+    const cfg = await getConfig4(env, tid);
     let logo = null;
     try {
       logo = logoBytes();
@@ -20414,7 +21365,7 @@ __export(sla_exports, {
   getJob: () => getJob,
   getSubconSender: () => getSubconSender,
   getSubconSenderCfg: () => getSubconSenderCfg,
-  handle: () => handle11,
+  handle: () => handle12,
   incidentKey: () => incidentKey,
   isDrainageJob: () => isDrainageJob,
   isKnownSubcon: () => isKnownSubcon,
@@ -20474,7 +21425,7 @@ function badScheduleIn(body) {
   }
   return null;
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -20482,7 +21433,7 @@ async function handle11(request, env, ctx, url, sess) {
   const subpath = url.pathname.replace(/^\/sla(?=\/|$)/, "") || "/";
   const searchParams = url.searchParams;
   if (subpath === "/config") {
-    if (method === "GET") return jsonResponse(await getConfig4(env, tenantId), headers);
+    if (method === "GET") return jsonResponse(await getConfig5(env, tenantId), headers);
     if (method === "POST") {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
@@ -22859,7 +23810,7 @@ async function handle11(request, env, ctx, url, sess) {
       const poRef = reused ? formatPoRef(job.subconPO.poNumber, sc.poDigits) : nextNo ? formatPoRef(nextNo, sc.poDigits) : "[new PO no.]";
       let hours = 0;
       try {
-        const cfg = await getConfig4(env, tenantId);
+        const cfg = await getConfig5(env, tenantId);
         hours = cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours || 0;
       } catch {
       }
@@ -22974,7 +23925,7 @@ async function handle11(request, env, ctx, url, sess) {
       const poRef = formatPoRef(poNumber, sc.poDigits);
       let hours = 0;
       try {
-        const cfg = await getConfig4(env, tenantId);
+        const cfg = await getConfig5(env, tenantId);
         hours = cfg.priorities && cfg.priorities[job.priority] && cfg.priorities[job.priority].hours || 0;
       } catch {
       }
@@ -25555,7 +26506,7 @@ async function saveJob(env, tenantId, job) {
   ).run();
 }
 async function createOrUpdateJobFromPayload(env, tenantId, body) {
-  const cfg = await getConfig4(env, tenantId);
+  const cfg = await getConfig5(env, tenantId);
   const id = body.id || (body.dedupeByRef || body.upsertByRef) && body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now2 = (/* @__PURE__ */ new Date()).toISOString();
@@ -25927,7 +26878,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
-    const cfg = await getConfig4(env, tenantId);
+    const cfg = await getConfig5(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now2, job.priority, cfg);
   }
   if (jobIsProject(job)) {
@@ -28023,7 +28974,7 @@ function inboundEngineerFor(cfg, priority) {
   }
   return "";
 }
-async function getConfig4(env, tenantId) {
+async function getConfig5(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_config'").bind(tenantId).first();
   return row ? JSON.parse(row.value) : DEFAULT_CONFIG3;
@@ -29287,7 +30238,7 @@ async function sendLoginCode(env, user, code) {
   }
   return sendEmail(env, { to: user.email, subject, html });
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/auth/login" && request.method === "POST") {
     const { username, password, deviceId: rawDeviceId } = await request.json().catch(() => ({}));
@@ -29631,7 +30582,7 @@ async function requireAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -30111,7 +31062,7 @@ function orderUsers(a, b) {
 init_http();
 init_auth();
 init_tenantdb();
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const path = url.pathname;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -30333,7 +31284,7 @@ function isSuppressed(rules, type, user, key) {
 
 // src/routes/assets.js
 init_push();
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -31259,7 +32210,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -31348,10 +32299,10 @@ async function handle16(request, env, ctx, url, sess) {
       b.engineer,
       b.date,
       b.site || null,
-      num2(b.standardHours),
-      num2(b.overtimeHours),
-      num2(b.travelTime),
-      num2(b.mileage),
+      num3(b.standardHours),
+      num3(b.overtimeHours),
+      num3(b.travelTime),
+      num3(b.mileage),
       b.notes || null,
       sess2.user.username
     ).run();
@@ -31613,7 +32564,7 @@ async function handle16(request, env, ctx, url, sess) {
   }
   return error("Unknown portal route", 404, env, request);
 }
-function num2(v) {
+function num3(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -31622,9 +32573,9 @@ function num2(v) {
 init_http();
 init_auth();
 init_sitelog_api();
-var SITELOG_API = "https://api.site-log.co.uk";
+var SITELOG_API = "https://api2.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -31665,7 +32616,7 @@ async function handle17(request, env, ctx, url, sess) {
   let res;
   try {
     if (env.SITELOG_DB) {
-      res = await handle5(new Request(target, init), env, ctx);
+      res = await handle6(new Request(target, init), env, ctx);
     } else {
       res = await fetch(target, init);
     }
@@ -32187,7 +33138,7 @@ async function ensureTables__raw4(env) {
 }
 var ensureTables5 = onceMigration(ensureTables__raw4);
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
-var num3 = (v) => {
+var num4 = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
@@ -32283,7 +33234,7 @@ async function clientUpdatesFor(env, tid, jobIds) {
   }
   return out;
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess || !sess.user) return error("Login required", 401, env, request);
   const tid = Number(await resolveTenantId(env, request)) || 1;
@@ -32412,13 +33363,13 @@ async function handle18(request, env, ctx, url, sess) {
       sets.push(col + "=?");
       vals.push(v);
     };
-    if ("cost" in b) put("cost", num3(b.cost));
+    if ("cost" in b) put("cost", num4(b.cost));
     if ("description" in b) put("description", String(b.description || "").slice(0, 4e3));
     if ("raisedAt" in b) put("raised_at", String(b.raisedAt || "").slice(0, 40));
     if ("siteCode" in b) put("site_code", String(b.siteCode || "").slice(0, 20));
     if ("siteName" in b) put("site_name", String(b.siteName || "").slice(0, 200));
     if ("reference" in b) put("reference", String(b.reference || "").slice(0, 200));
-    if ("quoteAmount" in b) put("quote_amount", num3(b.quoteAmount));
+    if ("quoteAmount" in b) put("quote_amount", num4(b.quoteAmount));
     if ("poNumber" in b) put("po_number", String(b.poNumber || "").slice(0, 60));
     if ("invoiceMonth" in b) put("invoice_month", String(b.invoiceMonth || "").slice(0, 7));
     if ("invoiceRef" in b) put("invoice_ref", String(b.invoiceRef || "").slice(0, 60));
@@ -32974,14 +33925,14 @@ var RUN_HOUR = 7;
 var RUN_MIN = 30;
 var CONCERTO_JOB = /Helpdesk action - (?:FM Approved|AM01|Re-open)|New Job Alert/i;
 var CLIENT_DOMAINS = /concerto\.co\.uk|jotform\.com|chapplins\.co\.uk/i;
-function london(d = /* @__PURE__ */ new Date()) {
+function london2(d = /* @__PURE__ */ new Date()) {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d).reduce((a, x) => {
     a[x.type] = x.value;
     return a;
   }, {});
   return { dow: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
 }
-var esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var esc4 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 var ukTime = (iso) => {
   try {
     return new Date(iso).toLocaleString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -33073,7 +34024,7 @@ async function runIntakeCheck(env, tid, { hours = 24, silenceHours = null, cosme
     issues.push({ kind: "sheet_pending", section: "sheet", ref: sheetOrderNo(p.reference), text: `${sheetOrderNo(p.reference)} has been waiting to go on the spreadsheet since ${ukTime(p.at)} (${p.tries || 0} tries): ${p.error || ""}`, fix: "Check the file isn't locked open/checked out; Email intake \u2192 Add it by hand." });
   }
   const sh = silenceHours || hours;
-  const start = london(new Date(now2.getTime() - sh * 36e5)), recent = emails.filter((e) => e.received_at >= new Date(now2.getTime() - sh * 36e5).toISOString());
+  const start = london2(new Date(now2.getTime() - sh * 36e5)), recent = emails.filter((e) => e.received_at >= new Date(now2.getTime() - sh * 36e5).toISOString());
   if (!recent.length && start.dow >= 1 && start.dow <= 5) issues.push({ kind: "silence", section: "intake", text: `No job emails at all reached the portal in the last ${sh} hours (a working day).`, fix: "Check the Outlook forwarding rule to the jobs@ address is still on, and Email Routing in Cloudflare." });
   return { since, until: now2.toISOString(), emails: emails.length, concertoJobs: jobs.length, issues };
 }
@@ -33082,7 +34033,7 @@ function renderEmail(res) {
   const groups = ["intake", "board", "sheet"].map((k) => {
     const list = res.issues.filter((i) => i.section === k);
     if (!list.length) return "";
-    return `<h3 style="margin:18px 0 6px;color:#003366;font-size:15px">${sec[k]} (${list.length})</h3><ul style="margin:0;padding-left:18px">` + list.map((i) => `<li style="margin:0 0 8px">${esc3(i.text)}${i.fix ? `<br><span style="color:#5b6b7b;font-size:13px">\u2192 ${esc3(i.fix)}</span>` : ""}</li>`).join("") + "</ul>";
+    return `<h3 style="margin:18px 0 6px;color:#003366;font-size:15px">${sec[k]} (${list.length})</h3><ul style="margin:0;padding-left:18px">` + list.map((i) => `<li style="margin:0 0 8px">${esc4(i.text)}${i.fix ? `<br><span style="color:#5b6b7b;font-size:13px">\u2192 ${esc4(i.fix)}</span>` : ""}</li>`).join("") + "</ul>";
   }).join("");
   return `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f2438;max-width:640px">
 <p>Morning \u2014 the daily intake check found <b>${res.issues.length} thing${res.issues.length === 1 ? "" : "s"}</b> to sort out
@@ -33103,7 +34054,7 @@ async function sendIntakeCheck(env, tid, res, { force = false } = {}) {
   return { ok: !!r.ok, sent: !!r.ok, to, via: r.via, error: r.error };
 }
 async function sweepIntakeCheck(env, tid = 1) {
-  const L2 = london();
+  const L2 = london2();
   if (L2.hour < RUN_HOUR || L2.hour === RUN_HOUR && L2.minute < RUN_MIN) return;
   const cfg = await getIntakeCheckConfig(env, tid);
   if (!cfg.enabled) return;
@@ -33906,7 +34857,7 @@ async function openSegmentRow(env, tenantId, username) {
     "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0) ORDER BY clock_in DESC LIMIT 1"
   ).bind(tenantId, username).first();
 }
-function mondayOf2(dateStr) {
+function mondayOf3(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   const dow2 = (d.getUTCDay() + 6) % 7;
   d.setUTCDate(d.getUTCDate() - dow2);
@@ -33931,7 +34882,7 @@ var leaveSeconds = (h) => {
 };
 async function weekDetail(env, tenantId, username, week) {
   const db = tenantDB(env, tenantId);
-  const monday = mondayOf2(isDateStr2(week) ? week : londonDate());
+  const monday = mondayOf3(isDateStr2(week) ? week : londonDate());
   const days = weekDays2(monday);
   const sunday = days[6];
   const { results } = await db.prepare(
@@ -33959,7 +34910,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -34087,7 +35038,7 @@ async function handle19(request, env, ctx, url, sess) {
   if (path === "/office/timesheet" && request.method === "GET") {
     if (!await isTimesheetAdmin(env, tenantId, me)) return error("Forbidden", 403, env, request);
     await autoCloseOverdue(env, tenantId, null);
-    const monday = mondayOf2(isDateStr2(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
+    const monday = mondayOf3(isDateStr2(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
     const days = weekDays2(monday);
     const sunday = days[6];
     const { results } = await db.prepare(
@@ -34177,7 +35128,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -34298,7 +35249,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -34474,7 +35425,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -34993,7 +35944,7 @@ async function getLockoutWaivers(env, tid) {
 async function lockedOutDrivers(env, db) {
   try {
     const s = await getSettings(db);
-    const week = mondayOf3(londonDate2());
+    const week = mondayOf4(londonDate2());
     if (Date.now() <= Date.parse(deadlineFor(week, s))) return /* @__PURE__ */ new Set();
     const rules = await getRules(env, db.tenantId);
     if (isGloballyPaused(rules)) return /* @__PURE__ */ new Set();
@@ -35062,12 +36013,12 @@ function londonToISO2(dateStr, hm) {
   }
   return (/* @__PURE__ */ new Date(`${dateStr}T${hm}:00Z`)).toISOString();
 }
-function mondayOf3(dateStr) {
+function mondayOf4(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
   return d.toISOString().slice(0, 10);
 }
-function addDays2(dateStr, n) {
+function addDays3(dateStr, n) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
@@ -35260,7 +36211,7 @@ function answerWord(v) {
 function deadlineFor(week, s) {
   const dow2 = Math.min(7, Math.max(1, Number(s.dueDow) || 5));
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(s.dueTime || "") ? s.dueTime : "17:00";
-  return londonToISO2(addDays2(week, dow2 - 1), hm);
+  return londonToISO2(addDays3(week, dow2 - 1), hm);
 }
 function shapeCheck(r) {
   if (!r) return null;
@@ -35293,7 +36244,7 @@ function shapeCheck(r) {
     override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null
   };
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -35408,7 +36359,7 @@ async function handle23(request, env, ctx, url, sess) {
       if (!driver) return error("No active driver is assigned to " + reg + " \u2014 pick an engineer to request the check from.", 400, env, request);
       un = driver.username;
     }
-    const dueAt = b.dueAt && Number.isFinite(Date.parse(b.dueAt)) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf3(londonDate2()), await getSettings(db));
+    const dueAt = b.dueAt && Number.isFinite(Date.parse(b.dueAt)) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf4(londonDate2()), await getSettings(db));
     const snooze = b.snooze === false ? 0 : 1;
     const s = await getSettings(db);
     const items = JSON.stringify({ checklist: s.checklist || [], equipment: s.equipment || [], photoSlots: s.photoSlots || [] });
@@ -35472,7 +36423,7 @@ async function handle23(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/config" && method === "GET") {
     const s = await getSettings(db);
-    const week = mondayOf3(londonDate2());
+    const week = mondayOf4(londonDate2());
     const mine = await db.prepare("SELECT * FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, me, week).first();
     const dueAt = deadlineFor(week, s);
     await ensureCustomTable(db);
@@ -35507,7 +36458,7 @@ async function handle23(request, env, ctx, url, sess) {
       customRow = await db.prepare("SELECT * FROM custom_van_checks WHERE tenant_id=? AND id=? AND username=?").bind(db.tenantId, customId, me).first();
       if (!customRow) return error("Custom check not found.", 404, env, request);
     }
-    let week = customId ? customId : mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
+    let week = customId ? customId : mondayOf4(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
     const vehicle = String(b.vehicle || sess.user.vehicle_assigned || "").trim();
     if (!vehicle) return error("No vehicle \u2014 enter the reg or ask the office to allocate one to you.", 400, env, request);
     const assignedVan = String(sess.user.vehicle_assigned || "").trim();
@@ -35591,7 +36542,7 @@ async function handle23(request, env, ctx, url, sess) {
   if (path === "/vancheck/week" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     const wk = url.searchParams.get("week");
-    const week = mondayOf3(wk && /^\d{4}-\d{2}-\d{2}$/.test(wk) ? wk : londonDate2());
+    const week = mondayOf4(wk && /^\d{4}-\d{2}-\d{2}$/.test(wk) ? wk : londonDate2());
     const s = await getSettings(db);
     const { results: drivers } = await db.prepare(
       "SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
@@ -35625,16 +36576,16 @@ async function handle23(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/matrix" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
-    const curWeek = mondayOf3(londonDate2());
+    const curWeek = mondayOf4(londonDate2());
     const toRaw = url.searchParams.get("to");
     const fromRaw = url.searchParams.get("from");
-    const to = mondayOf3(toRaw && /^\d{4}-\d{2}-\d{2}$/.test(toRaw) ? toRaw : curWeek);
-    let from = mondayOf3(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays2(to, -7 * 7));
+    const to = mondayOf4(toRaw && /^\d{4}-\d{2}-\d{2}$/.test(toRaw) ? toRaw : curWeek);
+    let from = mondayOf4(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays3(to, -7 * 7));
     const weeks = [];
     let w = from;
     while (w <= to && weeks.length < 80) {
       weeks.push(w);
-      w = addDays2(w, 7);
+      w = addDays3(w, 7);
     }
     if (!weeks.length) weeks.push(to);
     from = weeks[0];
@@ -35707,7 +36658,7 @@ async function handle23(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/remind-now" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
-    const week = mondayOf3(londonDate2());
+    const week = mondayOf4(londonDate2());
     const r = await remindDrivers(env, tenantId, week, {
       title: "Weekly van check due",
       body: "Please complete your weekly van check \u2014 tap to start.",
@@ -35721,7 +36672,7 @@ async function handle23(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
-    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const wk = mondayOf4(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
     if (existing) {
       let it = {};
@@ -35746,7 +36697,7 @@ async function handle23(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
-    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const wk = mondayOf4(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
     if (!existing) return json({ ok: true, notSkipped: true }, {}, env, request);
     let it = {};
@@ -35774,7 +36725,7 @@ async function handle23(request, env, ctx, url, sess) {
     const who = String(b.username || "").trim();
     let action = String(b.action || "");
     if (!who) return error("username required", 400, env, request);
-    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const wk = mondayOf4(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
     let it = {};
     if (existing) {
@@ -35841,7 +36792,7 @@ async function handle23(request, env, ctx, url, sess) {
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
     const wkIn = String(b.week || "").trim();
-    const week = mondayOf3(wkIn && /^\d{4}-\d{2}-\d{2}$/.test(wkIn) ? wkIn : londonDate2());
+    const week = mondayOf4(wkIn && /^\d{4}-\d{2}-\d{2}$/.test(wkIn) ? wkIn : londonDate2());
     const waivers = await getLockoutWaivers(env, db.tenantId);
     if (b.waived === false) delete waivers[who];
     else waivers[who] = week;
@@ -35862,7 +36813,7 @@ async function handle23(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);
-    const week = mondayOf3(londonDate2());
+    const week = mondayOf4(londonDate2());
     const dueAt = deadlineFor(week, s);
     const overdue = Date.now() > Date.parse(dueAt);
     const myVehicle = sess.user.vehicle_assigned || "";
@@ -35942,7 +36893,7 @@ async function sendWeeklyReminders(env, now2 = /* @__PURE__ */ new Date()) {
   const lonDate = londonDate2(d);
   const lonHour = Number(d.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
   const lonDow = d.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" });
-  const week = mondayOf3(lonDate);
+  const week = mondayOf4(lonDate);
   const isMonday7 = lonDow === "Mon" && lonHour === 7;
   let tenants = [];
   try {
@@ -36012,7 +36963,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -36267,7 +37218,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -36685,7 +37636,7 @@ async function computeDriverChecks(db) {
     };
   }).sort((a, b) => a.status === b.status ? a.name.localeCompare(b.name) : a.status === "due" ? -1 : 1);
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -37243,7 +38194,7 @@ async function sitelogSections(env, who) {
   }
   return out;
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -37342,10 +38293,10 @@ init_sitelog_api();
 init_once();
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
-  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
-      const res = await handle5(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      const res = await handle6(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
       if (res && res.ok) return res;
     } catch (e) {
     }
@@ -37356,7 +38307,7 @@ var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -38250,7 +39201,7 @@ async function handle28(request, env, ctx, url, sess) {
       for (const d of days) capByKey[d.user + "|" + d.date] = d.entries.reduce((a, e) => a + e.mins, 0);
       const { results } = await env.DB.prepare(
         "SELECT username, week, data FROM eng_timesheets WHERE tenant_id=? AND week>=? AND week<=?"
-      ).bind(tid, mondayOf4(from), to).all();
+      ).bind(tid, mondayOf5(from), to).all();
       for (const r of results || []) {
         let daysObj = {};
         try {
@@ -38566,7 +39517,7 @@ function parseLatLngPair(latIn, lngIn) {
 async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
+    const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + "/bulk-add-sites";
     const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
     const init = {
       method: "POST",
@@ -38576,7 +39527,7 @@ async function pushSiteToSiteLog(env, name, lat, lng, client) {
     let res;
     if (env.SITELOG_DB) {
       try {
-        res = await handle5(new Request(target, init), env);
+        res = await handle6(new Request(target, init), env);
       } catch (e) {
         res = null;
       }
@@ -38745,7 +39696,7 @@ function buildSiteSeries(labD, poD) {
   const min = days[0], max = days[days.length - 1];
   const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
   const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
-  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf4(d) : d.slice(0, 7);
+  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf5(d) : d.slice(0, 7);
   const labB = {}, poB = {};
   const roll = (src, dst) => {
     for (const [d, v] of Object.entries(src)) {
@@ -38767,7 +39718,7 @@ function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
       d.setUTCDate(d.getUTCDate() + 1);
     }
   } else if (mode === "week") {
-    let d = /* @__PURE__ */ new Date(mondayOf4(from) + "T12:00:00Z");
+    let d = /* @__PURE__ */ new Date(mondayOf5(from) + "T12:00:00Z");
     const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
     while (d <= end) {
       keys.push(d.toISOString().slice(0, 10));
@@ -39062,7 +40013,7 @@ function rangeOf(q) {
   }
   return { from, to };
 }
-function mondayOf4(dateStr) {
+function mondayOf5(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   const dow2 = (d.getUTCDay() + 6) % 7;
   d.setUTCDate(d.getUTCDate() - dow2);
@@ -39656,7 +40607,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -42332,7 +43283,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -42726,7 +43677,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L2, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -42932,7 +43883,7 @@ init_logo();
 var L = 56;
 var R = 539;
 var W6 = R - L;
-var NAVY4 = [0, 0.2, 0.41];
+var NAVY5 = [0, 0.2, 0.41];
 var TOP = 92;
 var BOTTOM = 772;
 var MONTHS3 = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -43007,7 +43958,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
     y = 96;
   }
   for (const ln of wrap6(String(docObj.title || "Document"), 20, W6, true)) {
-    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY4 });
+    doc.text(L, y, ln, { size: 20, bold: true, color: NAVY5 });
     y += 26;
   }
   y += 2;
@@ -43105,14 +44056,14 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
     if (/^#\s+/.test(line2)) {
       need(26);
       y += 6;
-      emitWords(L, line2.replace(/^#\s+/, ""), 15, { bold: true, color: NAVY4 }, 20);
+      emitWords(L, line2.replace(/^#\s+/, ""), 15, { bold: true, color: NAVY5 }, 20);
       y += 2;
       continue;
     }
     if (/^##\s+/.test(line2)) {
       need(20);
       y += 4;
-      emitWords(L, line2.replace(/^##\s+/, ""), 12, { bold: true, color: NAVY4 }, 16);
+      emitWords(L, line2.replace(/^##\s+/, ""), 12, { bold: true, color: NAVY5 }, 16);
       continue;
     }
     if (/^[-•]\s+/.test(line2)) {
@@ -43137,7 +44088,7 @@ function buildSignDocPdf(docObj = {}, sig = {}) {
   need(200);
   doc.hr(L, y, R, { grey: true });
   y += 20;
-  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY4 });
+  doc.text(L, y, "Signatures", { size: 13, bold: true, color: NAVY5 });
   y += 22;
   const block = (label2, name, sigJpeg, whenLine, extra) => {
     need(110);
@@ -43316,7 +44267,7 @@ function jpegOrNull(bytes, key) {
   if (!bytes) return null;
   return key && /\.jpg$/i.test(key) ? bytes : bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr7({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -43597,7 +44548,7 @@ function tenantOut(r) {
     current: r.is_current ? 1 : 0
   };
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -43917,7 +44868,7 @@ function normIso(s) {
   const m = String(s || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
   return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}` : null;
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("Accounts database not bound (PO_DB)", 500, env, request);
   const path = url.pathname.replace(/^\/accounts/, "") || "/";
@@ -45147,7 +46098,7 @@ async function toolFindVehicle(env, tid, caps2, query) {
     return { error: "vehicle lookup failed" };
   }
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
   const headers = corsHeaders(env, request);
@@ -45523,7 +46474,7 @@ init_http();
 init_auth();
 init_tenantdb();
 init_filesign();
-var CFG_KEY3 = "cctv:sites";
+var CFG_KEY4 = "cctv:sites";
 var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
 var VENDOR_PATH = {
   hik: "/ISAPI/Streaming/channels/{ch}/picture",
@@ -45548,7 +46499,7 @@ async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
   }
 }
 async function loadSites(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY3).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY4).first();
   let sites = [];
   try {
     sites = row ? JSON.parse(row.value) : [];
@@ -45559,7 +46510,7 @@ async function loadSites(db) {
 async function saveSites(db, sites) {
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(db.tenantId, CFG_KEY3, JSON.stringify(sites)).run();
+  ).bind(db.tenantId, CFG_KEY4, JSON.stringify(sites)).run();
 }
 function newId(prefix2) {
   return prefix2 + Math.abs(Date.now() ^ Math.floor(Math.random() * 1e9)).toString(36);
@@ -45578,7 +46529,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -45995,7 +46946,7 @@ function addDaysYMD(ymd2, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-function mondayOf5(ymd2) {
+function mondayOf6(ymd2) {
   const d = /* @__PURE__ */ new Date(ymd2 + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
   return d.toISOString().slice(0, 10);
@@ -46009,7 +46960,7 @@ function occurrence(task, now2) {
   const pad = (n) => String(n).padStart(2, "0");
   switch (task.recurrence) {
     case "weekly": {
-      const mon = mondayOf5(today);
+      const mon = mondayOf6(today);
       periodKey = "W:" + mon;
       startYMD = mon;
       const dow2 = Math.min(7, Math.max(1, Number(task.due_dow) || 5));
@@ -46138,7 +47089,7 @@ function shapeTask(t) {
     shared: !!t.shared
   };
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   const methodTop = request.method.toUpperCase();
   const subTop = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   if (subTop === "/inbound") {
@@ -46813,7 +47764,7 @@ async function seedIfEmpty(env, tid) {
     "sample"
   ).run();
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
@@ -47074,854 +48025,8 @@ async function handle38(request, env, ctx, url, sess) {
   return error("Not found: " + sub, 404, env, request);
 }
 
-// src/routes/sitelogts.js
-init_http();
-init_auth();
-init_email();
-init_logo();
-
-// src/lib/sitelogtspdf.js
-init_pdf();
-var PW = 842;
-var PH = 595;
-var M6 = 36;
-var NAVY5 = [0, 0.2, 0.4];
-var GREEN3 = [0.086, 0.639, 0.29];
-var RED3 = [0.863, 0.149, 0.149];
-var AMBER = [0.851, 0.467, 0.024];
-var ROW_RED = [0.996, 0.937, 0.937];
-var ROW_AMBER = [1, 0.969, 0.898];
-var ZEBRA3 = [0.973, 0.976, 0.984];
-var PURPLE = [0.486, 0.228, 0.929];
-var ROW_PURPLE = [0.953, 0.937, 1];
-var GRID = [0.85, 0.87, 0.9];
-function fit4(str, size, max) {
-  str = String(str == null ? "" : str);
-  if (textWidth(str, size) <= max) return str;
-  while (str.length > 1 && textWidth(str + "...", size) > max) str = str.slice(0, -1);
-  return str.trimEnd() + "...";
-}
-function fmtHM(mins) {
-  mins = Math.max(0, Math.round(Number(mins) || 0));
-  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
-}
-function mark(doc, cx, cy, ok) {
-  const r = 5.2;
-  doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: ok ? GREEN3 : RED3 });
-  const w = [1, 1, 1];
-  if (ok) {
-    doc.line(cx - 2.6, cy + 0.2, cx - 0.7, cy + 2.2, { stroke: w, lw: 1.4 });
-    doc.line(cx - 0.7, cy + 2.2, cx + 2.8, cy - 2.2, { stroke: w, lw: 1.4 });
-  } else {
-    doc.line(cx - 2.2, cy - 2.2, cx + 2.2, cy + 2.2, { stroke: w, lw: 1.4 });
-    doc.line(cx - 2.2, cy + 2.2, cx + 2.2, cy - 2.2, { stroke: w, lw: 1.4 });
-  }
-}
-function header3(doc, meta, subtitle) {
-  doc.rect(0, 0, PW, 58, { fill: NAVY5 });
-  if (meta.logo) {
-    try {
-      doc.image(meta.logo, M6, 12, 85, 34);
-    } catch (e) {
-    }
-  }
-  const x0 = meta.logo ? M6 + 98 : M6;
-  doc.text(x0, 28, meta.title || "SiteLog timesheet", { size: 16, bold: true, color: [1, 1, 1] });
-  doc.text(x0, 45, subtitle || meta.periodLabel || "", { size: 10, color: [0.85, 0.9, 1] });
-  doc.text(PW - M6, 28, meta.periodLabel || "", { size: 11, bold: true, color: [1, 1, 1], alignRight: true });
-  return 80;
-}
-function legend(doc, y) {
-  mark(doc, M6 + 5, y - 3, true);
-  doc.text(M6 + 14, y, "GPS verified at the site", { size: 8.5, grey: true });
-  mark(doc, M6 + 135, y - 3, false);
-  doc.text(M6 + 144, y, "Not verified (no location, auto sign-out, or edited by the office)", { size: 8.5, grey: true });
-  doc.rect(M6 + 418, y - 8, 10, 8, { fill: ROW_RED, stroke: [0.95, 0.7, 0.7], lw: 0.5 });
-  doc.text(M6 + 432, y, "Missed sign-out", { size: 8.5, grey: true });
-  doc.rect(M6 + 512, y - 8, 10, 8, { fill: ROW_AMBER, stroke: [0.95, 0.82, 0.6], lw: 0.5 });
-  doc.text(M6 + 526, y, "Still signed in", { size: 8.5, grey: true });
-  doc.rect(M6 + 606, y - 8, 10, 8, { fill: ROW_PURPLE, stroke: [0.8, 0.72, 0.98], lw: 0.5 });
-  doc.text(M6 + 620, y, "Scanned but not confirmed", { size: 8.5, grey: true });
-}
-function personTotals(p) {
-  let mins = 0, autoMins = 0, missed = 0, open = 0, unver = 0, scanned = 0;
-  for (const v of p.visits) {
-    if (v.state === "scanned") scanned++;
-    if (v.state !== "open") mins += v.mins || 0;
-    if (v.state === "auto") {
-      missed++;
-      autoMins += v.mins || 0;
-    }
-    if (v.state === "open") open++;
-    if (!v.inOk) unver++;
-    if (v.state !== "open" && !v.outOk) unver++;
-  }
-  return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
-}
-function summaryPage(doc, meta, people) {
-  let y = header3(doc, meta, "Summary \u2014 everyone");
-  const cols = [
-    { k: "name", x: M6, w: 200, label: "Person" },
-    { k: "company", x: M6 + 205, w: 150, label: "Company" },
-    { k: "visits", x: M6 + 410, label: "Visits", right: true },
-    { k: "hours", x: M6 + 500, label: "Hours on site", right: true },
-    { k: "missed", x: M6 + 600, label: "Missed sign-outs", right: true },
-    { k: "open", x: M6 + 680, label: "Still in", right: true },
-    { k: "unver", x: PW - M6 - 6, label: "Not verified", right: true }
-  ];
-  const head = () => {
-    doc.rect(M6, y, PW - 2 * M6, 18, { fill: [0.92, 0.94, 0.97] });
-    for (const c of cols) doc.text(c.x + (c.right ? 0 : 4), y + 12.5, c.label, { size: 8.5, bold: true, alignRight: !!c.right });
-    y += 18;
-  };
-  head();
-  const tot = { mins: 0, missed: 0, open: 0, unver: 0, visits: 0 };
-  people.forEach((p, i) => {
-    if (y > PH - 70) {
-      doc.newPage(PW, PH);
-      y = header3(doc, meta, "Summary \u2014 everyone (continued)");
-      head();
-    }
-    const t = personTotals(p);
-    tot.mins += t.mins;
-    tot.missed += t.missed;
-    tot.open += t.open;
-    tot.unver += t.unver;
-    tot.visits += t.visits;
-    const bad = t.missed || t.unver || t.scanned;
-    doc.rect(M6, y, PW - 2 * M6, 18, { fill: t.missed ? ROW_RED : t.scanned ? ROW_PURPLE : bad ? ROW_RED : i % 2 ? ZEBRA3 : [1, 1, 1] });
-    doc.text(M6 + 4, y + 12.5, fit4(p.name, 9.5, 195), { size: 9.5, bold: true });
-    doc.text(M6 + 209, y + 12.5, fit4(p.company || "", 9, 190), { size: 9, grey: true });
-    doc.text(M6 + 410, y + 12.5, String(t.visits), { size: 9.5, alignRight: true });
-    doc.text(M6 + 500, y + 12.5, fmtHM(t.mins), { size: 9.5, bold: true, alignRight: true });
-    doc.text(M6 + 600, y + 12.5, String(t.missed), { size: 9.5, bold: !!t.missed, alignRight: true, color: t.missed ? RED3 : null });
-    doc.text(M6 + 680, y + 12.5, String(t.open), { size: 9.5, alignRight: true, color: t.open ? AMBER : null });
-    doc.text(PW - M6 - 6, y + 12.5, String(t.unver), { size: 9.5, bold: !!t.unver, alignRight: true, color: t.unver ? RED3 : null });
-    y += 18;
-  });
-  if (!people.length) {
-    doc.text(M6 + 4, y + 16, "Nobody signed in to a site in this period.", { size: 10, grey: true });
-    y += 24;
-  }
-  doc.hr(M6, y + 2, PW - M6);
-  doc.text(M6 + 4, y + 16, "Total", { size: 10, bold: true });
-  doc.text(M6 + 410, y + 16, String(tot.visits), { size: 10, bold: true, alignRight: true });
-  doc.text(M6 + 500, y + 16, fmtHM(tot.mins), { size: 10, bold: true, alignRight: true });
-  doc.text(M6 + 600, y + 16, String(tot.missed), { size: 10, bold: true, alignRight: true, color: tot.missed ? RED3 : null });
-  doc.text(M6 + 680, y + 16, String(tot.open), { size: 10, bold: true, alignRight: true });
-  doc.text(PW - M6 - 6, y + 16, String(tot.unver), { size: 10, bold: true, alignRight: true, color: tot.unver ? RED3 : null });
-  y += 34;
-  doc.text(M6, y, "Hours on site include visits the system closed automatically (missed sign-outs) \u2014 those times are an assumption, not a scan.", { size: 8.5, grey: true });
-  y += 12;
-  doc.text(M6, y, "Purple rows: scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used because nothing else was recorded.", { size: 8.5, grey: true });
-  legend(doc, y + 18);
-}
-var VC = { date: M6, site: M6 + 72, inT: M6 + 330, inM: M6 + 372, outT: M6 + 392, outM: M6 + 434, hrs: M6 + 505, note: M6 + 520 };
-function personPages(doc, meta, p) {
-  doc.newPage(PW, PH);
-  let y = header3(doc, meta, `${p.name}${p.company ? " \u2014 " + p.company : ""}`);
-  const t = personTotals(p);
-  const chips = [
-    ["Hours on site", fmtHM(t.mins), null],
-    ["Visits", String(t.visits), null],
-    ["Missed sign-outs", String(t.missed), t.missed ? RED3 : null],
-    ["Not verified", String(t.unver), t.unver ? RED3 : null]
-  ];
-  if (t.scanned) chips.push(["Scanned, not confirmed", String(t.scanned), PURPLE]);
-  if (t.open) chips.push(["Still signed in", String(t.open), AMBER]);
-  let cx = M6;
-  for (const [lab, val2, col] of chips) {
-    doc.roundRect(cx, y, 130, 36, 6, { fill: [0.95, 0.96, 0.98] });
-    doc.text(cx + 10, y + 14, lab, { size: 8, grey: true });
-    doc.text(cx + 10, y + 30, val2, { size: 13, bold: true, color: col });
-    cx += 140;
-  }
-  y += 52;
-  const head = () => {
-    doc.rect(M6, y, PW - 2 * M6, 18, { fill: [0.92, 0.94, 0.97] });
-    const h = (x, s, r) => doc.text(x, y + 12.5, s, { size: 8.5, bold: true, alignRight: !!r });
-    h(VC.date + 4, "Date");
-    h(VC.site, "Site");
-    h(VC.inT, "Signed in");
-    h(VC.outT, "Signed out");
-    h(VC.hrs, "Hours", true);
-    h(VC.note, "Notes");
-    y += 18;
-  };
-  head();
-  let lastDate = "";
-  p.visits.forEach((v, i) => {
-    if (y > PH - 56) {
-      doc.newPage(PW, PH);
-      y = header3(doc, meta, `${p.name} (continued)`);
-      head();
-      lastDate = "";
-    }
-    const bg = v.state === "scanned" ? ROW_PURPLE : v.state === "auto" ? ROW_RED : v.state === "open" ? ROW_AMBER : i % 2 ? ZEBRA3 : [1, 1, 1];
-    doc.rect(M6, y, PW - 2 * M6, 20, { fill: bg });
-    if (v.date !== lastDate) {
-      doc.text(VC.date + 4, y + 13.5, v.date, { size: 9, bold: true });
-      if (lastDate) doc.line(M6, y, PW - M6, y, { stroke: GRID, lw: 0.6 });
-      lastDate = v.date;
-    }
-    doc.text(VC.site, y + 13.5, fit4(v.site, 9.5, 250), { size: 9.5 });
-    doc.text(VC.inT, y + 13.5, v.inTime || "", { size: 9.5, bold: true, color: v.scannedIn ? PURPLE : null });
-    mark(doc, VC.inM, y + 10, !!v.inOk);
-    if (v.state === "open" || v.state === "scanned" && !v.outTime) {
-      doc.text(VC.outT, y + 13.5, "\u2014", { size: 9.5, color: v.state === "open" ? AMBER : PURPLE });
-    } else {
-      doc.text(VC.outT, y + 13.5, v.outTime || (v.state === "scanned" ? "\u2014" : ""), { size: 9.5, bold: true, color: v.state === "auto" ? RED3 : v.state === "scanned" && v.scannedOut ? PURPLE : null });
-      mark(doc, VC.outM, y + 10, !!v.outOk);
-    }
-    doc.text(VC.hrs, y + 13.5, v.state === "open" || v.state === "scanned" && !v.scannedOut ? "\u2014" : fmtHM(v.mins), { size: 9.5, alignRight: true });
-    const note = v.note || "";
-    if (note) doc.text(VC.note, y + 13.5, fit4(note, 8.5, PW - M6 - VC.note - 4), {
-      size: 8.5,
-      bold: v.state === "auto" || v.state === "open" || v.state === "scanned",
-      color: v.state === "scanned" ? PURPLE : v.state === "auto" ? RED3 : v.state === "open" ? AMBER : [0.4, 0.45, 0.5]
-    });
-    y += 20;
-  });
-  if (!p.visits.length) {
-    doc.text(M6 + 4, y + 16, "No visits.", { size: 10, grey: true });
-    y += 24;
-  }
-  if (y < PH - 40) legend(doc, y + 22);
-}
-function buildSiteLogTimesheetPdf(meta) {
-  const people = meta.people || [];
-  const doc = new PdfDoc(PW, PH);
-  summaryPage(doc, meta, people);
-  for (const p of people) personPages(doc, meta, p);
-  const n = doc.pages.length;
-  const gen = meta.generatedAt ? `Generated ${meta.generatedAt}` : "";
-  for (let i = 0; i < n; i++) {
-    doc.lineOn(i, M6, PH - 26, PW - M6, { grey: true });
-    doc.textOn(i, M6, PH - 14, `Mostlane SiteLog \xB7 ${meta.periodLabel || ""}${gen ? " \xB7 " + gen : ""}`, { size: 7.5, grey: true });
-    doc.textOn(i, PW - M6, PH - 14, `Page ${i + 1} of ${n}`, { size: 7.5, grey: true, alignRight: true });
-  }
-  return doc.bytes();
-}
-
-// src/routes/sitelogts.js
-init_filesign();
-var CFG_KEY4 = (tid) => `sitelog:tsmail:${tid}`;
-var SENT_KEY = (tid) => `sitelog:tsmail:sent:${tid}`;
-var DAILY_FROM = "16:00";
-var DAILY_FORCE = "20:00";
-var WEEKLY_FROM = "07:00";
-async function readKV(env, tid, key) {
-  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
-  try {
-    return row && row.value ? JSON.parse(row.value) : null;
-  } catch {
-    return null;
-  }
-}
-async function writeKV(env, tid, key, obj) {
-  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(obj)).run();
-}
-async function getConfig5(env, tid) {
-  const c = await readKV(env, tid, CFG_KEY4(tid)) || {};
-  return {
-    enabled: c.enabled !== false,
-    daily: c.daily !== false,
-    weekly: c.weekly !== false,
-    recipients: Array.isArray(c.recipients) ? c.recipients.filter(Boolean) : []
-  };
-}
-function london2(d = /* @__PURE__ */ new Date()) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(d).map((x) => [x.type, x.value]));
-  return { key: `${p.year}-${p.month}-${p.day}`, hhmm: `${p.hour}:${p.minute}` };
-}
-function parseUtc(s) {
-  if (!s) return null;
-  s = String(s).trim();
-  const iso = s.includes("T") ? s : s.replace(" ", "T");
-  const d = new Date(/[zZ]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
-  return isNaN(d) ? null : d;
-}
-function addDays3(key, n) {
-  const d = /* @__PURE__ */ new Date(key + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-var dow = (key) => (/* @__PURE__ */ new Date(key + "T12:00:00Z")).getUTCDay();
-var mondayOf6 = (key) => addDays3(key, -((dow(key) + 6) % 7));
-function niceDate(key, opts) {
-  return (/* @__PURE__ */ new Date(key + "T12:00:00Z")).toLocaleDateString("en-GB", Object.assign({ timeZone: "UTC" }, opts));
-}
-function periodFor(kind, dateKey) {
-  if (kind === "weekly") {
-    const from = mondayOf6(dateKey), to = addDays3(from, 6);
-    const label2 = `Week ${niceDate(from, { day: "numeric", month: "short" })} \u2013 ${niceDate(to, { day: "numeric", month: "short", year: "numeric" })}`;
-    return { kind, from, to, label: label2, file: `SiteLog-week-${from}.pdf` };
-  }
-  return {
-    kind: "daily",
-    from: dateKey,
-    to: dateKey,
-    label: niceDate(dateKey, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", ""),
-    file: `SiteLog-${dateKey}.pdf`
-  };
-}
-var num4 = (v) => v === null || v === void 0 || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
-var SCAN_EARLY = 5 * 60;
-var SCAN_LATE = 21 * 60;
-var PRE_CONFIRM_MS = 20 * 6e4;
-var POST_SIGNOUT_MS = 30 * 6e4;
-var MIN_SPAN_MS = 30 * 6e4;
-var minsOfDay = (hhmm) => {
-  const [h, m] = hhmm.split(":").map(Number);
-  return h * 60 + m;
-};
-function plausible(d) {
-  const m = minsOfDay(london2(d).hhmm);
-  return m >= SCAN_EARLY && m <= SCAN_LATE;
-}
-async function loadUnconfirmedScans(db, from, to) {
-  try {
-    const r = await db.prepare(`
-      SELECT l.at, l.outcome, l.person_id, l.site, l.lat, l.lng, p.first_name, p.last_name, p.company
-      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
-      WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
-        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?
-      ORDER BY l.at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
-    return r.results || [];
-  } catch (e) {
-    return [];
-  }
-}
-async function loadPeriod(env, from, to) {
-  const db = env.SITELOG_DB;
-  if (!db) throw new Error("SiteLog database is not connected to this worker");
-  const res = await db.prepare(`
-    SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
-           COALESCE(v.auto_checkout,0) AS auto_checkout, v.transferred_to,
-           COALESCE(v.manual_entry,0) AS manual_entry, v.provided_site_name,
-           COALESCE(v.sign_in_verified,0) AS sign_in_verified,
-           COALESCE(v.sign_out_verified,0) AS sign_out_verified,
-           v.sign_in_distance_m, v.sign_out_distance_m,
-           v.lat AS in_lat, v.lng AS in_lng, v.out_lat, v.out_lng,
-           p.first_name, p.last_name, p.company
-    FROM visits v LEFT JOIN people p ON p.id = v.person_id
-    WHERE v.check_in_at >= ? AND v.check_in_at < ?
-    ORDER BY v.check_in_at`).bind(addDays3(from, -1), addDays3(to, 2)).all();
-  const scans = await loadUnconfirmedScans(db, from, to);
-  const today = london2().key;
-  const spans = /* @__PURE__ */ new Map();
-  for (const r of res.results || []) {
-    const a = parseUtc(r.check_in_at);
-    if (!a || !r.person_id) continue;
-    const b = parseUtc(r.check_out_at);
-    if (!spans.has(r.person_id)) spans.set(r.person_id, []);
-    spans.get(r.person_id).push([a.getTime(), b ? b.getTime() : Infinity]);
-  }
-  const insideVisit = (pid, t) => (spans.get(pid) || []).some(([a, b]) => t >= a - PRE_CONFIRM_MS && t <= b + POST_SIGNOUT_MS);
-  const scansBy = /* @__PURE__ */ new Map();
-  for (const s of scans) {
-    const d = parseUtc(s.at);
-    if (!d) continue;
-    s._d = d;
-    if (!scansBy.has(s.person_id)) scansBy.set(s.person_id, []);
-    scansBy.get(s.person_id).push(s);
-  }
-  const byPerson = /* @__PURE__ */ new Map();
-  const ensure7 = (key, first, last, company) => {
-    const name = [first, last].filter(Boolean).join(" ").trim() || "Unknown person";
-    if (!byPerson.has(key)) byPerson.set(key, { name, company: company || "", visits: [] });
-    return byPerson.get(key);
-  };
-  const dayLabel = (day) => niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
-  const m = (d) => Math.round(Number(d));
-  for (const r of res.results || []) {
-    const inD = parseUtc(r.check_in_at);
-    if (!inD) continue;
-    const day = london2(inD).key;
-    if (day < from || day > to) continue;
-    let outD = parseUtc(r.check_out_at);
-    const auto = Number(r.auto_checkout) === 1;
-    let state = !outD ? "open" : r.transferred_to ? "moved" : auto ? "auto" : Number(r.manual_entry) === 1 ? "manual" : "ok";
-    const inOk = Number(r.sign_in_verified) === 1;
-    let outOk = !!outD && Number(r.sign_out_verified) === 1 && !auto;
-    let note = "";
-    let scannedOut = null, scannedOutAt = null;
-    if ((state === "auto" || state === "open" && day < today) && r.person_id) {
-      const limit = outD ? outD.getTime() : Infinity;
-      for (const s of scansBy.get(r.person_id) || []) {
-        const t = s._d.getTime();
-        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 6e4 || t > limit) continue;
-        if (london2(s._d).key !== day || !plausible(s._d)) continue;
-        scannedOut = s._d;
-        scannedOutAt = s;
-      }
-    }
-    if (scannedOut) {
-      state = "scanned";
-      outD = scannedOut;
-      outOk = false;
-      note = "Scanned, not confirmed \u2014 sign-out time from a scan";
-    } else if (state === "auto") note = "Did not sign out \u2014 closed automatically";
-    else if (state === "open") note = "Still signed in";
-    else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
-    else if (state === "manual") note = "Added by the office";
-    if (!note) {
-      const bits = [];
-      if (inOk && r.sign_in_distance_m != null) bits.push(`in ${m(r.sign_in_distance_m)} m from site`);
-      if (outOk && r.sign_out_distance_m != null) bits.push(`out ${m(r.sign_out_distance_m)} m`);
-      if (!inOk) bits.push("sign-in location not checked");
-      if (!outOk) bits.push("sign-out location not checked");
-      note = bits.join(" \xB7 ");
-    }
-    const p = ensure7(r.person_id || [r.first_name, r.last_name].join(" "), r.first_name, r.last_name, r.company);
-    p.visits.push({
-      _t: inD.getTime(),
-      date: dayLabel(day),
-      site: r.site_code || r.provided_site_name || "",
-      inTime: london2(inD).hhmm,
-      outTime: outD ? london2(outD).hhmm : "",
-      mins: outD ? Math.max(0, (outD - inD) / 6e4) : 0,
-      inOk,
-      outOk,
-      state,
-      note,
-      scannedIn: false,
-      scannedOut: !!scannedOut,
-      pid: r.person_id || "",
-      vid: r.id,
-      day,
-      inLat: num4(r.in_lat),
-      inLng: num4(r.in_lng),
-      outLat: scannedOutAt ? num4(scannedOutAt.lat) : auto ? null : num4(r.out_lat),
-      outLng: scannedOutAt ? num4(scannedOutAt.lng) : auto ? null : num4(r.out_lng),
-      inDist: r.sign_in_distance_m,
-      outDist: r.sign_out_distance_m
-    });
-  }
-  for (const [pid, list] of scansBy) {
-    const ins = list.filter((s) => s.outcome === "confirm_check_in");
-    const used = /* @__PURE__ */ new Set();
-    for (let i = 0; i < ins.length; i++) {
-      const s = ins[i];
-      if (used.has(s)) continue;
-      const t = s._d.getTime(), day = london2(s._d).key;
-      if (day < from || day > to || !plausible(s._d) || insideVisit(pid, t)) {
-        used.add(s);
-        continue;
-      }
-      used.add(s);
-      const nextVisit = Math.min(...(spans.get(pid) || []).map(([a]) => a).filter((a) => a > t), Infinity);
-      let end = null, endScan = null;
-      for (let j = i + 1; j < ins.length; j++) {
-        const e = ins[j], et = e._d.getTime();
-        if (london2(e._d).key !== day || et >= nextVisit - PRE_CONFIRM_MS) break;
-        used.add(e);
-        if ((e.site || "") === (s.site || "") && et - t >= MIN_SPAN_MS && plausible(e._d)) {
-          end = e._d;
-          endScan = e;
-        } else if ((e.site || "") !== (s.site || "")) {
-          used.delete(e);
-          break;
-        }
-      }
-      const p = ensure7(pid, s.first_name, s.last_name, s.company);
-      p.visits.push({
-        _t: t,
-        date: dayLabel(day),
-        site: s.site || "",
-        inTime: london2(s._d).hhmm,
-        outTime: end ? london2(end).hhmm : "",
-        mins: end ? Math.max(0, (end - s._d) / 6e4) : 0,
-        inOk: false,
-        outOk: false,
-        state: "scanned",
-        scannedIn: true,
-        scannedOut: !!end,
-        note: end ? "Scanned, not confirmed \u2014 in & out times from scans" : "Scanned, not confirmed \u2014 no sign-out, hours not counted",
-        inDist: null,
-        outDist: null,
-        pid,
-        vid: "scan:" + s.at,
-        day,
-        inLat: num4(s.lat),
-        inLng: num4(s.lng),
-        outLat: endScan ? num4(endScan.lat) : null,
-        outLng: endScan ? num4(endScan.lng) : null
-      });
-    }
-  }
-  for (const p of byPerson.values()) {
-    p.visits.sort((a, b) => a._t - b._t);
-    for (const v of p.visits) delete v._t;
-  }
-  return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-async function buildPdf(env, kind, dateKey) {
-  const per = periodFor(kind, dateKey);
-  const people = await loadPeriod(env, per.from, per.to);
-  let logo = null;
-  try {
-    logo = logoBytes();
-  } catch (e) {
-  }
-  const now2 = london2();
-  const bytes = buildSiteLogTimesheetPdf({
-    title: kind === "weekly" ? "SiteLog weekly timesheet" : "SiteLog daily timesheet",
-    periodLabel: per.label,
-    generatedAt: `${niceDate(now2.key, { day: "numeric", month: "short", year: "numeric" })} ${now2.hhmm}`,
-    people,
-    logo
-  });
-  return { per, people, bytes };
-}
-function b64(bytes) {
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
-  return btoa(s);
-}
-var esc4 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-async function emailTimesheet(env, tid, kind, dateKey, recipients) {
-  const { per, people, bytes } = await buildPdf(env, kind, dateKey);
-  await addMapLinks(env, apiOrigin(env), people, MAP_TTL_EMAIL);
-  const pin = (u) => u ? ` <a href="${esc4(u)}" style="text-decoration:none" title="Show on a map">\u{1F4CD}</a>` : "";
-  const evRows = (p) => p.visits.map((v) => {
-    const out = v.state === "open" ? "still in" : v.outTime || "\u2014";
-    const bad = v.state === "auto" || v.state === "scanned";
-    return `<tr><td></td><td colspan="2" style="padding:1px 0 1px 10px;font-size:12.5px;color:${bad ? "#b45309" : "#475569"}">${kind === "weekly" ? esc4(v.date) + " \xB7 " : ""}${esc4(v.site)} \xB7 in ${esc4(v.inTime)}${v.inOk ? " \u2714" : " \u2718"}${pin(v.mapIn)} \u2192 out ${esc4(out)}${v.state === "open" ? "" : v.outOk ? " \u2714" : " \u2718"}${pin(v.mapOut)}` + (bad ? ` \xB7 ${esc4(v.note)}` : "") + `</td></tr>`;
-  }).join("");
-  const rows = people.map((p) => {
-    const t = personTotals(p);
-    const flag = [
-      t.missed ? `${t.missed} missed sign-out${t.missed > 1 ? "s" : ""}` : "",
-      t.scanned ? `${t.scanned} scanned but not confirmed` : "",
-      t.unver ? `${t.unver} not verified` : "",
-      t.open ? `${t.open} still in` : ""
-    ].filter(Boolean).join(" \xB7 ");
-    return `<tr><td style="padding:4px 10px 4px 0">${esc4(p.name)}</td><td style="padding:4px 10px;text-align:right"><b>${fmtHM(t.mins)}</b></td><td style="padding:4px 0;color:${flag ? "#dc2626" : "#16a34a"}">${flag ? esc4(flag) : "All verified"}</td></tr>` + evRows(p);
-  }).join("");
-  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a">
-    <p><b>SiteLog ${kind === "weekly" ? "weekly" : "daily"} timesheet \u2014 ${esc4(per.label)}</b></p>
-    ${people.length ? `<table style="border-collapse:collapse">${rows}</table>` : "<p>Nobody signed in to a site.</p>"}
-    <p style="color:#6b7280;font-size:12px">The full timesheet is attached as a PDF. A green tick means the phone was at the site when it signed in or out; a red cross means it was not checked (an automatic sign-out, an office edit, or a visit from before location checks began). "Scanned but not confirmed" means they scanned the QR code but never pressed Sign in / Sign out \u2014 the scan time is used where nothing else was recorded. Tap \u{1F4CD} to see on a map where the phone was for that sign-in or sign-out (links work for 90 days).</p></div>`;
-  const r = await sendEmail(env, {
-    to: recipients,
-    subject: `SiteLog ${kind === "weekly" ? "weekly " : ""}timesheet \u2014 ${per.label}`,
-    html,
-    attachments: [{ filename: per.file, content: b64(bytes) }]
-  });
-  return { ...r, people: people.length, period: per.label };
-}
-var MAP_PATH = "/sitelog-map";
-var MAP_TTL_EMAIL = 90 * 86400;
-var MAP_TTL_VIEW = 7 * 86400;
-function apiOrigin(env, url) {
-  return url ? url.origin : String(env.API_BASE_URL || "https://mostlane-api.jamie-def.workers.dev").replace(/\/$/, "");
-}
-async function addMapLinks(env, origin, people, ttl) {
-  if (!fileSigningEnabled(env)) return people;
-  for (const p of people) for (const v of p.visits) {
-    if (!v.pid) continue;
-    const key = (side) => [v.pid, v.day, v.vid, side].join("|");
-    if (v.inLat != null && v.inLng != null) v.mapIn = await signedFileUrl(env, origin, MAP_PATH, key("in"), ttl);
-    if (v.outLat != null && v.outLng != null) v.mapOut = await signedFileUrl(env, origin, MAP_PATH, key("out"), ttl);
-  }
-  return people;
-}
-function hav(a, b, c, d) {
-  const R2 = 6371e3, r = (x) => x * Math.PI / 180;
-  const s = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2;
-  return 2 * R2 * Math.asin(Math.sqrt(s));
-}
-var SCAN_LABEL = {
-  confirm_check_in: "Scanned \u2014 offered sign-in",
-  confirm_sign_out: "Scanned \u2014 offered sign-out",
-  checked_in: "Signed in",
-  checked_out: "Signed out",
-  first_visit: "Scanned \u2014 new phone",
-  unknown_site: "Refused \u2014 not at a site",
-  outside_site: "Refused \u2014 outside the site boundary",
-  outside_site_signed_in: "Refused \u2014 tried to sign out away from the site",
-  no_location: "Refused \u2014 no location"
-};
-async function personDayEvents(env, personId, dateKey) {
-  const db = env.SITELOG_DB;
-  const person = await db.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(personId).first();
-  const vis = (await db.prepare(`SELECT * FROM visits WHERE person_id = ? AND check_in_at >= ? AND check_in_at < ? ORDER BY check_in_at`).bind(personId, addDays3(dateKey, -1), addDays3(dateKey, 2)).all()).results || [];
-  let scans = [];
-  try {
-    scans = (await db.prepare(`SELECT at, kind, outcome, refused, site, nearest_site, lat, lng, accuracy, distance_m FROM scan_log
-      WHERE person_id = ? AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays3(dateKey, -1), addDays3(dateKey, 2)).all()).results || [];
-  } catch (e) {
-  }
-  const sites = (await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites WHERE COALESCE(archived,0) = 0").all()).results || [];
-  const siteBy = new Map(sites.map((x) => [x.site_name, x]));
-  const distTo = (name2, lat, lng) => {
-    const st = siteBy.get(name2);
-    return st && lat != null ? Math.round(hav(lat, lng, +st.lat, +st.lng)) : null;
-  };
-  const events = [];
-  for (const v of vis) {
-    const inD = parseUtc(v.check_in_at);
-    if (!inD || london2(inD).key !== dateKey) continue;
-    const auto = Number(v.auto_checkout) === 1;
-    if (num4(v.lat) != null) events.push({
-      id: v.id + ":in",
-      t: inD.toISOString(),
-      time: london2(inD).hhmm,
-      kind: "in",
-      label: "Signed in",
-      site: v.site_code,
-      lat: num4(v.lat),
-      lng: num4(v.lng),
-      acc: num4(v.accuracy),
-      ok: Number(v.sign_in_verified) === 1,
-      dist: distTo(v.site_code, num4(v.lat), num4(v.lng))
-    });
-    const outD = parseUtc(v.check_out_at);
-    if (outD && !auto && num4(v.out_lat) != null) events.push({
-      id: v.id + ":out",
-      t: outD.toISOString(),
-      time: london2(outD).hhmm,
-      kind: "out",
-      label: "Signed out",
-      site: v.site_code,
-      lat: num4(v.out_lat),
-      lng: num4(v.out_lng),
-      acc: num4(v.out_accuracy),
-      ok: Number(v.sign_out_verified) === 1,
-      dist: distTo(v.site_code, num4(v.out_lat), num4(v.out_lng))
-    });
-  }
-  for (const sc of scans) {
-    const d = parseUtc(sc.at);
-    if (!d || london2(d).key !== dateKey || num4(sc.lat) == null) continue;
-    if (sc.kind !== "scan" && !Number(sc.refused)) continue;
-    const site = sc.site || sc.nearest_site || "";
-    events.push({
-      id: "scan:" + sc.at,
-      t: d.toISOString(),
-      time: london2(d).hhmm,
-      kind: Number(sc.refused) ? "refused" : "scan",
-      label: SCAN_LABEL[sc.outcome] || "Scan \u2014 " + sc.outcome,
-      site,
-      lat: num4(sc.lat),
-      lng: num4(sc.lng),
-      acc: num4(sc.accuracy),
-      ok: null,
-      dist: sc.site ? distTo(sc.site, num4(sc.lat), num4(sc.lng)) : sc.distance_m != null ? Number(sc.distance_m) : null
-    });
-  }
-  events.sort((a, b) => a.t < b.t ? -1 : 1);
-  const want = new Set(events.map((e) => e.site).filter(Boolean));
-  for (const st of sites) {
-    if (want.size > 40) break;
-    if (events.some((e) => hav(e.lat, e.lng, +st.lat, +st.lng) <= 1e3)) want.add(st.site_name);
-  }
-  const drawSites = [...want].map((n) => siteBy.get(n)).filter(Boolean).map((x) => ({ name: x.site_name, lat: +x.lat, lng: +x.lng, radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }));
-  const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "Unknown person";
-  return { name, company: person && person.company || "", date: dateKey, events, sites: drawSites };
-}
-function mapPage(title, body, status = 200) {
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>${esc4(title)}</title>${body}`, {
-    status,
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" }
-  });
-}
-async function handleMap(request, env, ctx, url) {
-  if (request.method !== "GET") return mapPage("Not allowed", "</head><body>Not allowed</body></html>", 405);
-  const key = url.searchParams.get("key") || "";
-  if (!fileSigningEnabled(env) || !await verifyFileSig(env, key, url.searchParams))
-    return mapPage("Link expired", `</head><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#0f172a"><h2>This map link has expired or isn't valid</h2><p>Open the timesheet in the portal (Site Log) for a fresh link.</p></body></html>`, 403);
-  if (!env.SITELOG_DB) return mapPage("Unavailable", "</head><body>SiteLog is not connected.</body></html>", 503);
-  const [pid, day, vid, side] = key.split("|");
-  if (!pid || !/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return mapPage("Bad link", "</head><body>Bad link</body></html>", 400);
-  const data = await personDayEvents(env, pid, day);
-  data.focus = vid && vid.startsWith("scan:") ? vid : vid ? vid + ":" + (side === "out" ? "out" : "in") : "";
-  data.dayLabel = niceDate(day, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", "");
-  const json4 = JSON.stringify(data).replace(/</g, "\\u003c");
-  return mapPage(`${data.name} \u2014 ${data.dayLabel}`, `
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
-<style>
-  body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;background:#f4f6f9}
-  header{background:#003468;color:#fff;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
-  header h1{font-size:17px;margin:0} header div{font-size:13px;opacity:.85;margin-top:2px}
-  #map{height:58vh;min-height:300px}
-  ul{list-style:none;margin:0;padding:8px 12px 24px;max-width:760px}
-  li{background:#fff;border:1px solid #e2e6ec;border-radius:10px;padding:9px 12px;margin:6px 0;cursor:pointer;display:flex;gap:10px;align-items:baseline}
-  li.on{border-color:#003468;box-shadow:0 0 0 2px #00346833}
-  .t{font-weight:700;font-variant-numeric:tabular-nums;min-width:44px}
-  .d{font-size:12.5px;color:#64748b} .ok{color:#16a34a} .bad{color:#dc2626}
-  .dot{width:10px;height:10px;border-radius:50%;flex:none;align-self:center}
-  .note{font-size:12px;color:#64748b;padding:6px 14px 0;max-width:760px}
-</style></head><body>
-<header><h1 id="h"></h1><div id="sub"></div></header>
-<div id="map"></div>
-<p class="note">Pins show where the phone said it was. The blue circles are each site's sign-in boundary. GPS on a phone is usually accurate to 10\u201325 m (the faint ring round the selected pin).</p>
-<ul id="list"></ul>
-<script type="application/json" id="data">${json4}<\/script>
-<script>
-(function(){
-  var D = JSON.parse(document.getElementById("data").textContent);
-  var esc = function(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); };
-  document.getElementById("h").textContent = D.name + (D.company ? " \u2014 " + D.company : "");
-  document.getElementById("sub").textContent = D.dayLabel + " \xB7 " + D.events.length + " event" + (D.events.length==1?"":"s");
-  var COL = { in:"#16a34a", out:"#1d4ed8", scan:"#94a3b8", refused:"#dc2626" };
-  var map = L.map("map", { zoomControl:true });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    { maxZoom:20, subdomains:"abcd", attribution:"&copy; OpenStreetMap &copy; CARTO" }).addTo(map);
-  D.sites.forEach(function(s){
-    L.circle([s.lat,s.lng], { radius:s.radius, color:"#2563eb", weight:1, fillOpacity:.05 }).addTo(map);
-    L.circleMarker([s.lat,s.lng], { radius:4, color:"#1e3a8a", fillColor:"#1e3a8a", fillOpacity:1, weight:1 })
-      .addTo(map).bindTooltip(esc(s.name), { permanent:true, direction:"right", offset:[6,0], className:"" });
-  });
-  var marks = {}, acc = null, bounds = [];
-  function text(e){
-    var where = e.site ? esc(e.site) : "no site";
-    var dist = e.dist != null ? (e.dist + " m from " + (e.kind==="refused" && !e.ok ? "the nearest site" : "the site")) : "";
-    var gps = e.ok === true ? '<span class="ok">\u2714 GPS verified</span>' : e.ok === false ? '<span class="bad">\u2718 not verified</span>' : "";
-    return "<b>" + esc(e.time) + " \xB7 " + esc(e.label) + "</b><br>" + where + (dist ? " \xB7 " + dist : "") + (gps ? "<br>" + gps : "")
-      + (e.acc ? '<br><span style="color:#64748b">phone accuracy \xB1' + Math.round(e.acc) + ' m</span>' : "");
-  }
-  D.events.forEach(function(e){
-    var m = L.circleMarker([e.lat,e.lng], { radius:8, color:"#fff", weight:2, fillColor:COL[e.kind]||"#64748b", fillOpacity:1 })
-      .addTo(map).bindPopup(text(e));
-    marks[e.id] = { m:m, e:e }; bounds.push([e.lat,e.lng]);
-  });
-  function focus(id, pan){
-    var x = marks[id]; if (!x) return;
-    if (acc) map.removeLayer(acc);
-    if (x.e.acc) acc = L.circle([x.e.lat,x.e.lng], { radius:x.e.acc, color:COL[x.e.kind], weight:1, fillOpacity:.12 }).addTo(map);
-    Object.keys(marks).forEach(function(k){ marks[k].m.setRadius(k===id?12:8); });
-    if (pan) map.setView([x.e.lat,x.e.lng], 18);
-    x.m.openPopup();
-    [].forEach.call(document.querySelectorAll("#list li"), function(li){ li.classList.toggle("on", li.dataset.id===id); });
-  }
-  var list = document.getElementById("list");
-  list.innerHTML = D.events.map(function(e){
-    return '<li data-id="' + esc(e.id) + '"><span class="dot" style="background:' + (COL[e.kind]||"#64748b") + '"></span><span class="t">' + esc(e.time)
-      + '</span><span>' + esc(e.label) + '<div class="d">' + (e.kind === "refused" && e.site ? "nearest site: " : "") + (e.site ? esc(e.site) : "no site") + (e.dist != null ? " \xB7 " + e.dist + " m away" : "")
-      + (e.ok === true ? ' \xB7 <span class="ok">\u2714</span>' : e.ok === false ? ' \xB7 <span class="bad">\u2718</span>' : "") + '</div></span></li>';
-  }).join("") || '<li>No events with a location on this day.</li>';
-  list.addEventListener("click", function(ev){ var li = ev.target.closest("li[data-id]"); if (li) focus(li.dataset.id, true); });
-  if (D.focus && marks[D.focus]) { map.setView([marks[D.focus].e.lat, marks[D.focus].e.lng], 17); focus(D.focus, false); }
-  else if (bounds.length) map.fitBounds(bounds, { padding:[40,40], maxZoom:17 });
-  else if (D.sites.length) map.setView([D.sites[0].lat, D.sites[0].lng], 16);
-  else map.setView([50.86,-1.2], 9);
-})();
-<\/script></body></html>`);
-}
-async function sweepSitelogTimesheets(env, tid = 1) {
-  if (!env.SITELOG_DB) return;
-  const cfg = await getConfig5(env, tid);
-  if (!cfg.enabled || !cfg.recipients.length) return;
-  const now2 = london2();
-  const sent = await readKV(env, tid, SENT_KEY(tid)) || {};
-  if (cfg.weekly && dow(now2.key) === 1 && now2.hhmm >= WEEKLY_FROM) {
-    const lastMon = addDays3(now2.key, -7);
-    if (sent.weekly !== lastMon) {
-      const r = await emailTimesheet(env, tid, "weekly", lastMon, cfg.recipients);
-      if (r.ok || r.skipped) {
-        sent.weekly = lastMon;
-        await writeKV(env, tid, SENT_KEY(tid), sent);
-      }
-    }
-  }
-  if (cfg.daily && now2.hhmm >= DAILY_FROM && sent.daily !== now2.key) {
-    const people = await loadPeriod(env, now2.key, now2.key);
-    const visits = people.reduce((n, p) => n + p.visits.length, 0);
-    const open = people.reduce((n, p) => n + p.visits.filter((v) => v.state === "open").length, 0);
-    const force = now2.hhmm >= DAILY_FORCE;
-    if (!visits) {
-      if (force) {
-        sent.daily = now2.key;
-        await writeKV(env, tid, SENT_KEY(tid), sent);
-      }
-    } else if (!open || force) {
-      const r = await emailTimesheet(env, tid, "daily", now2.key, cfg.recipients);
-      if (r.ok || r.skipped) {
-        sent.daily = now2.key;
-        await writeKV(env, tid, SENT_KEY(tid), sent);
-      }
-    }
-  }
-}
-async function handle39(request, env, ctx, url, sess) {
-  if (!sess) return error("Not signed in", 401, env, request);
-  const tid = sess.tenantId;
-  const perms = await permissionsFor(env, tid, sess.user.username);
-  if (perms.FullAccess !== "Yes" && perms.SiteLogAdmin !== "Yes") return error("Needs the SiteLog admin permission", 403, env, request);
-  const path = url.pathname.replace(/^\/sitelog-ts(?=\/|$)/, "") || "/";
-  if (path === "/config" && request.method === "GET") {
-    return json({
-      ok: true,
-      config: await getConfig5(env, tid),
-      sent: await readKV(env, tid, SENT_KEY(tid)) || {},
-      emailConfigured: !!(env.RESEND_API_KEY || env.RESET_EMAIL_WEBHOOK),
-      sitelogConnected: !!env.SITELOG_DB
-    }, {}, env, request);
-  }
-  if (path === "/data" && request.method === "GET") {
-    const k = url.searchParams.get("kind") === "weekly" ? "weekly" : "daily";
-    const qd = url.searchParams.get("date") || "";
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : london2().key;
-    const per = periodFor(k, d);
-    let people;
-    try {
-      people = await loadPeriod(env, per.from, per.to);
-    } catch (e) {
-      return error(e.message || "SiteLog unavailable", 503, env, request);
-    }
-    await addMapLinks(env, apiOrigin(env, url), people, MAP_TTL_VIEW);
-    return json({
-      ok: true,
-      period: per,
-      today: london2().key,
-      people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
-    }, {}, env, request);
-  }
-  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
-  if (path === "/config" && request.method === "POST") {
-    const cur = await getConfig5(env, tid);
-    const recips = Array.isArray(body.recipients) ? body.recipients : typeof body.recipients === "string" ? body.recipients.split(/[,;\s]+/) : cur.recipients;
-    const clean = [...new Set(recips.map((s) => String(s).trim().toLowerCase()).filter((s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))].slice(0, 20);
-    const next = {
-      enabled: body.enabled === void 0 ? cur.enabled : !!body.enabled,
-      daily: body.daily === void 0 ? cur.daily : !!body.daily,
-      weekly: body.weekly === void 0 ? cur.weekly : !!body.weekly,
-      recipients: clean
-    };
-    await writeKV(env, tid, CFG_KEY4(tid), next);
-    return json({ ok: true, config: next }, {}, env, request);
-  }
-  const kind = body.kind === "weekly" ? "weekly" : "daily";
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || "") ? body.date : kind === "weekly" ? addDays3(london2().key, -7) : london2().key;
-  if (path === "/pdf" && request.method === "POST") {
-    const { per, bytes } = await buildPdf(env, kind, date);
-    return new Response(bytes, { headers: Object.assign({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${per.file}"`,
-      "Cache-Control": "no-store"
-    }, corsHeaders(env, request)) });
-  }
-  if (path === "/send" && request.method === "POST") {
-    const cfg = await getConfig5(env, tid);
-    if (!cfg.recipients.length) return error("Add at least one email address first", 400, env, request);
-    const r = await emailTimesheet(env, tid, kind, date, cfg.recipients);
-    if (!r.ok) return error(r.reason === "no provider" ? "Email isn't set up on the portal (RESEND_API_KEY)" : r.error || "Email failed", 502, env, request);
-    return json({ ok: true, sentTo: cfg.recipients, period: r.period, people: r.people }, {}, env, request);
-  }
-  return error("Not found", 404, env, request);
-}
+// src/index.js
+init_sitelogts();
 
 // src/routes/cablecalc.js
 init_http();
@@ -50277,13 +50382,13 @@ async function removeSiteFromPO(env, name) {
 async function applySiteLogRules(env, siteName, rules, visitorRules) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return false;
-    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const base = env.SITELOG_API || "https://api2.site-log.co.uk";
     const hdr = { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET };
     const call = async (path, init) => {
       const req = new Request(base + path, init);
       if (env.SITELOG_DB) {
         try {
-          const r = await handle5(req, env);
+          const r = await handle6(req, env);
           if (r && r.ok) return r;
         } catch {
         }
@@ -52990,117 +53095,117 @@ function safeArr(s) {
 // src/index.js
 init_timesheets();
 var ROUTES = [
-  ["*", "/auth", handle12],
+  ["*", "/auth", handle13],
   ["*", "/admin/login-history", loginHistory],
-  ["*", "/user", handle13],
+  ["*", "/user", handle14],
   // /user and /users
-  ["*", "/onboard", handle13],
+  ["*", "/onboard", handle14],
   // public self-registration (Pending)
-  ["*", "/hs-plan-config", handle13],
-  ["*", "/po-config", handle13],
-  ["*", "/device", handle14],
+  ["*", "/hs-plan-config", handle14],
+  ["*", "/po-config", handle14],
+  ["*", "/device", handle15],
   ["*", "/holiday", handle2],
-  ["*", "/asset", handle15],
+  ["*", "/asset", handle16],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle15],
+  ["*", "/transfer", handle16],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle15],
-  ["*", "/upload-asset-thumb", handle15],
-  ["*", "/delete-asset-image", handle15],
+  ["*", "/upload-asset-image", handle16],
+  ["*", "/upload-asset-thumb", handle16],
+  ["*", "/delete-asset-image", handle16],
   ["*", "/sla/workever", handle48],
   // Workever sync (longest prefix wins over /sla)
-  ["*", "/sla", handle11],
-  ["*", "/stats", handle24],
-  ["*", "/staff", handle25],
+  ["*", "/sla", handle12],
+  ["*", "/stats", handle25],
+  ["*", "/staff", handle26],
   // staff personal + company documents
-  ["*", "/hr/", handle26],
+  ["*", "/hr/", handle27],
   // employee records (qualifications, insurances, licences, licence checks)
-  ["*", "/privacy", handle27],
+  ["*", "/privacy", handle28],
   // GDPR data export + erasure
-  ["*", "/fleet", handle29],
+  ["*", "/fleet", handle30],
   // fleet reports + driver mapping
   ["*", "/push", handle],
   // web push subscriptions + test send
-  ["*", "/messages", handle30],
+  ["*", "/messages", handle31],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle31],
+  ["*", "/memos", handle32],
   // company memos (draft/send/sign)
-  ["*", "/documents", handle32],
+  ["*", "/documents", handle33],
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle3],
   // engineer timesheets + invoices + mileage
-  ["*", "/ai", handle35],
+  ["*", "/ai", handle36],
   // AI job assistant (draft → preview → create)
-  ["*", "/get-sites", handle6],
-  ["*", "/add-site", handle6],
-  ["*", "/update-site", handle6],
-  ["*", "/delete-site", handle6],
-  ["*", "/next-project-job-number", handle6],
-  ["*", "/upload-image", handle6],
-  ["*", "/customers", handle6],
-  ["*", "/import-sites", handle6],
-  ["*", "/sites", handle6],
+  ["*", "/get-sites", handle7],
+  ["*", "/add-site", handle7],
+  ["*", "/update-site", handle7],
+  ["*", "/delete-site", handle7],
+  ["*", "/next-project-job-number", handle7],
+  ["*", "/upload-image", handle7],
+  ["*", "/customers", handle7],
+  ["*", "/import-sites", handle7],
+  ["*", "/sites", handle7],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle28],
+  ["*", "/sites/register", handle29],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle28],
+  ["*", "/ledger", handle29],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle28],
+  ["*", "/costing", handle29],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle28],
+  ["*", "/exceptions", handle29],
   // needs-a-human-eye list
-  ["*", "/compliance", handle7],
+  ["*", "/compliance", handle8],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/chapplins", handle33],
+  ["*", "/chapplins", handle34],
   // Chapplins customer: site tenants (current/previous) + directory
-  ["*", "/settings", handle16],
-  ["*", "/oncall", handle16],
-  ["*", "/daily-logs", handle16],
-  ["*", "/notify", handle16],
+  ["*", "/settings", handle17],
+  ["*", "/oncall", handle17],
+  ["*", "/daily-logs", handle17],
+  ["*", "/notify", handle17],
   // notification audit log
-  ["*", "/prefs", handle16],
+  ["*", "/prefs", handle17],
   // per-user cross-device markers
-  ["*", "/menu-config", handle16],
+  ["*", "/menu-config", handle17],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle16],
+  ["*", "/audit", handle17],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle17],
-  ["*", "/sitelog-launch", handle17],
-  ["*", "/office", handle19],
+  ["*", "/sitelog", handle18],
+  ["*", "/sitelog-launch", handle18],
+  ["*", "/office", handle20],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle20],
+  ["*", "/key", handle21],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle21],
+  ["*", "/theme", handle22],
   // per-user colour theme + background
-  ["*", "/hs/", handle22],
+  ["*", "/hs/", handle23],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle23],
+  ["*", "/vancheck", handle24],
   // weekly van checks (form, grid, deadline badges)
   ["*", "/po", handle4],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/accounts", handle34],
+  ["*", "/accounts", handle35],
   // standalone Accounts capture (documents/statements + supplier tick-off; reads PO_DB)
-  ["*", "/cctv", handle36],
+  ["*", "/cctv", handle37],
   // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/email-intake", (req, env, ctx, url, sess) => handleApi(req, env, ctx, url, sess, worker.fetch)],
   // office view of the email→job intake (log, test box, re-run, allow-list)
-  ["*", "/tasks", handle37],
+  ["*", "/tasks", handle38],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/fbc", handle18],
+  ["*", "/fbc", handle19],
   // FBC (Fareham BC) job tracker — quotes, cost, invoice month/status, conversation log
-  ["*", "/concerto", handle8],
+  ["*", "/concerto", handle9],
   // Concerto PPM list (import the client's export, reconcile against the compliance chart)
-  ["*", "/certs", handle10],
+  ["*", "/certs", handle11],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/pump", handle9],
+  ["*", "/pump", handle10],
   // sump-pump monthly maintenance (per-store form + photo/video → office review → branded PDF)
-  ["*", "/sitelog-ts", handle39],
+  ["*", "/sitelog-ts", handle5],
   // SiteLog timesheet PDFs (FullAccess)
   ["*", "/sitelog-map", handleMap],
   // where a phone was for a sign-in/out (signed link, public)
   ["*", "/cablecalc", handle40],
   // Cable Calculator (BS 7671 single-circuit sizing / verification)
-  ["*", "/cpd", handle38],
+  ["*", "/cpd", handle39],
   // CPD training (electricians): read material + test → logged per user for the NICEIC audit
   ["*", "/prog", handle41],
   // job programmes (builder, revisions, client share links)
@@ -53129,7 +53234,7 @@ var worker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
-      return handle5(request, env, ctx);
+      return handle6(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {

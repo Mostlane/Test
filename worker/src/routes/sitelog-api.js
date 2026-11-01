@@ -2856,6 +2856,18 @@ async function handleInner(request, env, ctx) {
       return json({ visits: rows.results || [] });
     }
 
+    // GET /my-timesheet?deviceToken=&week=YYYY-MM-DD — the worker's own week,
+    // calculated exactly as the office timesheet is (sitelogts.personWeek).
+    if (url.pathname === "/my-timesheet" && request.method === "GET") {
+      const deviceToken = url.searchParams.get("deviceToken");
+      if (!deviceToken) return json({ error: "Missing deviceToken" }, 400);
+      const device = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ?").bind(String(deviceToken).slice(0, 128)).first();
+      if (!device) return json({ ok: false, error: "This phone isn't registered" }, 404);
+      const { personWeek } = await import("./sitelogts.js");
+      return json(await personWeek(env, device.person_id, url.searchParams.get("week") || ""));
+    }
+
     // GET /scan-log?days=7&refused=1 — admin: who tried to scan and what happened.
     if (url.pathname === "/scan-log" && request.method === "GET") {
       const guard = requireAdmin();
