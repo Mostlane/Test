@@ -6460,7 +6460,7 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   hours the office sees — missed sign-outs, scanned-not-confirmed, ✓/✗ location checks — week by week
   (‹ Earlier / Later ›), plus "Scans that didn't go through" from `scan_log` in plain English. The old
   client-side list (UTC days, its own maths) is kept only as a fallback (`loadHistoryListOld`). No
-  coordinates or ids are returned. Summary card still uses /my-visits (TODO: move it over too).
+  coordinates or ids are returned. **The Summary card now reads GET /my-summary?range=this_week|last_14|this_month|last_month|all** (`sitelogts.personSummary`, same loadPeriod — totals by site with open/missed/unconfirmed counts; the app falls back to the old /my-visits sum if it fails). /sync-event: a re-sent offline sign-out already applied returns `duplicate_ignored` (was a false pending row). Test `test-sitelog-offline.mjs`. **api.site-log.co.uk was retired 1 Nov 2026** (the `sitelog-api` worker had become an old PO-system copy; the address no longer resolves; delete that worker after 8 Nov). Only api2 is live.
 - **Timesheet PDFs emailed automatically** (`routes/sitelogts.js`, mounted `/sitelog-ts`,
   FullAccess; PDF `lib/sitelogtspdf.js`, A4 landscape): page 1 = everyone's hours (visits · hours ·
   missed sign-outs · still in · not verified), then a page per person — every visit with sign-in /
