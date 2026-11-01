@@ -88,19 +88,21 @@ const SCAN_EARLY = 5 * 60, SCAN_LATE = 21 * 60, PRE_CONFIRM_MS = 20 * 60000, POS
 const minsOfDay = hhmm => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
 function plausible(d) { const m = minsOfDay(london(d).hhmm); return m >= SCAN_EARLY && m <= SCAN_LATE; }
 
-async function loadUnconfirmedScans(db, from, to) {
+async function loadUnconfirmedScans(db, from, to, personId) {
   try {
     const r = await db.prepare(`
       SELECT l.at, l.outcome, l.person_id, l.site, l.lat, l.lng, p.first_name, p.last_name, p.company
       FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
       WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
-        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?
-      ORDER BY l.at`).bind(addDays(from, -1), addDays(to, 2)).all();
+        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+      ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all();
     return r.results || [];
   } catch (e) { return []; } // scan_log not created yet
 }
 
-export async function loadPeriod(env, from, to) {
+// opts.personId limits it to one person (the worker's own "My history" view).
+export async function loadPeriod(env, from, to, opts = {}) {
+  const personId = opts.personId || null;
   const db = env.SITELOG_DB;
   if (!db) throw new Error("SiteLog database is not connected to this worker");
   const res = await db.prepare(`
@@ -113,9 +115,9 @@ export async function loadPeriod(env, from, to) {
            v.lat AS in_lat, v.lng AS in_lng, v.out_lat, v.out_lng,
            p.first_name, p.last_name, p.company
     FROM visits v LEFT JOIN people p ON p.id = v.person_id
-    WHERE v.check_in_at >= ? AND v.check_in_at < ?
-    ORDER BY v.check_in_at`).bind(addDays(from, -1), addDays(to, 2)).all();
-  const scans = await loadUnconfirmedScans(db, from, to);
+    WHERE v.check_in_at >= ? AND v.check_in_at < ?${personId ? " AND v.person_id = ?" : ""}
+    ORDER BY v.check_in_at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all();
+  const scans = await loadUnconfirmedScans(db, from, to, personId);
   const today = london().key;
 
   // Every real visit per person (whole fetched window), for the overlap test.
@@ -243,6 +245,52 @@ export async function loadPeriod(env, from, to) {
     for (const v of p.visits) delete v._t;
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ── A worker's own week ("My hours" in the SiteLog app) ─────────────────────
+// Same calculation as the office timesheet (loadPeriod), so the worker sees
+// exactly the hours the office sees — plus the scans that didn't sign them in.
+const REFUSAL_TEXT = {
+  unknown_site: "You weren't at any SiteLog site",
+  outside_site: "You were too far from the site for it to sign you in or out",
+  outside_site_signed_in: "You tried to sign out away from the site",
+  no_location: "Your phone didn't send its location",
+  no_site_location: "The site has no location set yet — tell the office",
+  blocked: "Your SiteLog account is switched off — tell the office",
+  phone_denied: "Location was switched off for SiteLog on your phone",
+  phone_unavailable: "Your phone couldn't get a GPS fix",
+  phone_timeout: "Your phone took too long to find its location",
+  phone_no_fix: "Your phone had no location when you registered",
+};
+export async function personWeek(env, personId, weekKey) {
+  const today = london().key;
+  const from = mondayOf(/^\d{4}-\d{2}-\d{2}$/.test(weekKey || "") ? weekKey : today);
+  const to = addDays(from, 6);
+  const people = await loadPeriod(env, from, to, { personId });
+  const visits = people.length ? people[0].visits : [];
+  const days = [];
+  for (let k = from; k <= to; k = addDays(k, 1)) {
+    const vs = visits.filter(v => v.day === k);
+    const mins = vs.reduce((n, v) => n + (v.state === "open" ? 0 : v.mins || 0), 0);
+    days.push({ day: k, label: niceDate(k, { weekday: "long", day: "numeric", month: "short" }).replace(",", ""),
+      mins, visits: vs.map(v => ({ site: v.site, inTime: v.inTime, outTime: v.outTime, mins: v.mins,
+        state: v.state, inOk: v.inOk, outOk: v.outOk, note: v.note })) });
+  }
+  const totals = personTotals({ visits });
+  let refused = [];
+  try {
+    const r = await env.SITELOG_DB.prepare(`SELECT at, outcome, reason, site, nearest_site, distance_m FROM scan_log
+      WHERE person_id = ? AND refused = 1 AND at >= ? AND at < ? ORDER BY at DESC LIMIT 40`)
+      .bind(personId, from, addDays(to, 1)).all();
+    refused = (r.results || []).map(x => {
+      const d = parseUtc(x.at);
+      return { day: d ? london(d).key : "", time: d ? london(d).hhmm : "",
+        why: REFUSAL_TEXT[x.outcome] || x.reason || "The scan didn't go through",
+        site: x.site || x.nearest_site || "", distance: x.distance_m };
+    });
+  } catch (e) { /* scan_log not created yet */ }
+  return { ok: true, from, to, today, isThisWeek: from === mondayOf(today),
+    label: periodFor("weekly", from).label, days, totals, refused };
 }
 
 export async function buildPdf(env, kind, dateKey) {
