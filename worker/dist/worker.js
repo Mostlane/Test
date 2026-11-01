@@ -14146,7 +14146,7 @@ async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
   }
 }
 async function slCall(env, path, body) {
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const base = env.SITELOG_API || "https://api2.site-log.co.uk";
   const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
   const req = new Request(base + path, init);
   if (env.SITELOG_DB) {
@@ -32568,7 +32568,7 @@ function num3(v) {
 init_http();
 init_auth();
 init_sitelog_api();
-var SITELOG_API = "https://api.site-log.co.uk";
+var SITELOG_API = "https://api2.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
 async function handle18(request, env, ctx, url, sess) {
   const path = url.pathname;
@@ -38288,7 +38288,7 @@ init_sitelog_api();
 init_once();
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
-  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
       const res = await handle6(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
@@ -39512,7 +39512,7 @@ function parseLatLngPair(latIn, lngIn) {
 async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
+    const target = (env.SITELOG_API || "https://api2.site-log.co.uk") + "/bulk-add-sites";
     const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
     const init = {
       method: "POST",
@@ -50377,7 +50377,7 @@ async function removeSiteFromPO(env, name) {
 async function applySiteLogRules(env, siteName, rules, visitorRules) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return false;
-    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const base = env.SITELOG_API || "https://api2.site-log.co.uk";
     const hdr = { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET };
     const call = async (path, init) => {
       const req = new Request(base + path, init);
