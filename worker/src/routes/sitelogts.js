@@ -545,7 +545,7 @@ export async function personDayEvents(env, personId, dateKey) {
 function mapPage(title, body, status = 200) {
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc(title)}</title>${body}`, { status,
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" } });
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "strict-origin", "X-Robots-Tag": "noindex" } });
 }
 
 // GET /sitelog-map?key=<personId>|<date>|<visitId>|<in|out>&exp&sig  (PUBLIC, signed)
@@ -590,8 +590,8 @@ export async function handleMap(request, env, ctx, url) {
   document.getElementById("sub").textContent = D.dayLabel + " · " + D.events.length + " event" + (D.events.length==1?"":"s");
   var COL = { in:"#16a34a", out:"#1d4ed8", scan:"#94a3b8", refused:"#dc2626" };
   var map = L.map("map", { zoomControl:true });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    { maxZoom:20, subdomains:"abcd", attribution:"&copy; OpenStreetMap &copy; CARTO" }).addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom:19, attribution:"&copy; OpenStreetMap contributors" }).addTo(map);
   D.sites.forEach(function(s){
     L.circle([s.lat,s.lng], { radius:s.radius, color:"#2563eb", weight:1, fillOpacity:.05 }).addTo(map);
     L.circleMarker([s.lat,s.lng], { radius:4, color:"#1e3a8a", fillColor:"#1e3a8a", fillOpacity:1, weight:1 })
