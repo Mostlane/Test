@@ -370,7 +370,7 @@ export async function adminLogs(env, origin, { from, to, personId, site }) {
       SELECT l.at, l.outcome, l.reason, l.person_id, l.device_token, l.site, l.nearest_site, l.lat, l.lng, l.distance_m,
              p.first_name, p.last_name, p.company
       FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
-      WHERE l.refused = 1 AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+      WHERE l.refused = 1 AND COALESCE(l.kind,'') <> 'recheck' AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
       ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all()).results || [];
   } catch (e) { /* scan_log not created yet */ }
   const byKey = new Map(people.map(p => [p.pid || p.name, p]));
@@ -472,6 +472,7 @@ export async function liveNow(env, origin) {
     if (kind === "offered_out") {
       const ov = mine.find(v => v.site === r.site && v.tout == null && v.tin <= t);
       if (!ov) continue;                                                                    // already signed out / closed
+      if (t - ov.tin < 20 * 60000) continue;   // a "sign out?" minutes after signing in = the app re-checking, not a real scan (older app versions)
       visitId = ov.id;
     }
     const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "") + "|" + kind;
@@ -649,7 +650,7 @@ export async function personDayEvents(env, personId, dateKey) {
   let scans = [];
   try {
     scans = (await db.prepare(`SELECT at, kind, outcome, refused, site, nearest_site, lat, lng, accuracy, distance_m FROM scan_log
-      WHERE person_id = ? AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
+      WHERE person_id = ? AND COALESCE(kind,'') <> 'recheck' AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
   } catch (e) {}
   const sites = (await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites WHERE COALESCE(archived,0) = 0").all()).results || [];
   const siteBy = new Map(sites.map(x => [x.site_name, x]));

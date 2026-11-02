@@ -64,5 +64,10 @@ r = await call("GET", "/scan-log?days=7&refused=1", null, { "x-admin-secret": "s
 ok(r.body.ok && r.body.rows.length === 5 && r.body.rows.every(x => x.refused === 1), "admin sees refused rows");
 ok(r.body.rows.some(x => x.first_name === "Ryan"), "rows carry the person's name");
 
+// The app's own re-checks (auto:true) are logged as "recheck", never as a QR scan.
+r = await call("POST", "/scan", { deviceToken: "dev1", lat: 50.8255, lng: -0.1386, auto: true });
+ok(r.body.status && last().kind === "recheck", "automatic re-check logged as recheck");
+r = await call("POST", "/scan", { deviceToken: "dev1", lat: 50.8255, lng: -0.1386 });
+ok(last().kind === "scan", "a real scan is still a scan");
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
