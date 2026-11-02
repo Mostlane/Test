@@ -15138,14 +15138,23 @@ async function listStoreFiles(env, origin, tid, scheme, code) {
       pinned: r.pinned ? 1 : 0,
       size: r.size,
       date: r.doc_date || r.uploaded_at,
+      uploadedAt: r.uploaded_at || null,
       url: await signedFileUrl(env, origin, "/compliance/file", r.r2_key)
     });
   }
   for (const t of Object.keys(byType)) {
     const arr = byType[t];
     const anyPinned = arr.some((f) => f.pinned);
+    if (anyPinned) {
+      arr.forEach((f) => {
+        f.current = !!f.pinned;
+      });
+      continue;
+    }
+    let newest = 0;
+    for (let i = 1; i < arr.length; i++) if ((arr[i].uploadedAt || "") > (arr[newest].uploadedAt || "")) newest = i;
     arr.forEach((f, i) => {
-      f.current = anyPinned ? !!f.pinned : i === 0;
+      f.current = i === newest;
     });
   }
   return byType;
@@ -15266,7 +15275,7 @@ async function handle8(request, env, ctx, url, sess) {
   if (sub === "/file-url" && method === "GET") {
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
     const row = await env.DB.prepare(
-      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
+      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY pinned DESC, uploaded_at DESC, COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
     ).bind(tid, scheme, code, type).first();
     if (!row) return jr2({ error: "No file" }, headers, 404);
     return jr2({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);
