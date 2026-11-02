@@ -194,11 +194,16 @@ const run = async (E, raw, from) => { await ej.handleInboundEmail(msgOf(raw, fro
     const fm = await run(E2, rawSendContractor, "noreply@concerto.co.uk");
     ok("helpdesk FM Approved - Send to Contractor → job created", fm.outcome === "created" && E2.inbound[0] && E2.inbound[0].body.reference === "00099911", fm.outcome + " / " + fm.reason);
     const nt = await run(E2, rawNote, "noreply@concerto.co.uk");
-    ok("helpdesk G01. Add a note → added to the job card + a task, never a job",
+    ok("helpdesk G01. Add a note → quietly added to the job card, NO task, NO notification (routine)",
       nt.outcome === "note" && E2.inbound.length === 1 && E2.notes.length === 1 && E2.notes[0].body.incident === "00099912"
-      && E2.tasks.length === 1 && /Concerto note/.test(E2.tasks[0].body.title) && /job-view\.html/.test(E2.tasks[0].body.link)
-      && E2.tasks[0].body.assignee === "@office" && E2.tasks[0].body.shared === true,
+      && E2.tasks.length === 0 && /quietly/.test(nt.reason),
       nt.outcome + " / " + nt.reason + " / notes=" + E2.notes.length + " tasks=" + E2.tasks.length);
+    const urgentRaw = mail("noreply@concerto.co.uk", "Helpdesk action - G01. Add a note, photo or document : 00099912", "test-note-urg@concerto",
+      HELPDESK("G01. Add a note, photo or document", "00099912").replace("door hinge broken ACCESS TIMES: 7am-10pm", "URGENT please re-attend, store has had no power since this morning"));
+    const un = await run(E2, urgentRaw, "noreply@concerto.co.uk");
+    ok("helpdesk G01 URGENT note → office alerted, still NO task",
+      un.outcome === "note" && E2.tasks.length === 0 && /alerted/.test(un.reason),
+      un.outcome + " / " + un.reason + " / tasks=" + E2.tasks.length);
     const uk = await run(E2, rawUnknownAction, "noreply@concerto.co.uk");
     ok("helpdesk unrecognised action → held for a look (review)", uk.outcome === "review" && /unrecognised Concerto action/.test(uk.reason) && E2.inbound.length === 1, uk.outcome + " / " + uk.reason);
   }

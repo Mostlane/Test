@@ -5717,12 +5717,16 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Approved - Send to Contractor** → `job` (create/update); **G01. Add a note,
   photo or document** / **"Additional information has been added"** → `note`
   (kind:"note" → **outcome `note`**, never a job: emailjob `appendJobNote` POSTs
-  **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it to the
-  matching incident's job CARD (`job.events` timeline, prefers the OPEN job, else
-  the newest; 404 if we hold none) AND `createIntakeTask` raises a **📝 Concerto
-  note** task for the WHOLE OFFICE (category "Concerto notes", link → job-view,
-  `@office`+shared so the first person to press Done clears it for everyone) so it's
-  actioned + ticked off; no live job → the task alone); any OTHER action →
+  **/sla/inbound {action:"note"}** → sla.js `appendIncidentNote` appends it QUIETLY
+  to the matching incident's job CARD (`job.events` timeline, prefers the OPEN job,
+  else the newest; 404 if we hold none). **NO task is raised and NO notification
+  fires for a routine note (Jamie, Nov 2026 — "updating the job is enough")** — the
+  `createIntakeTask` call was removed from this branch (that task-create was also
+  what fired the per-note "New task" push). **ONLY a note whose words read as urgent
+  / an escalation / a complaint / a safety issue (`isUrgentNote`, a keyword regex in
+  emailjob.js) sends ONE office push** (`sendToPermission ["FullAccess","SLAAdmin"]`,
+  officeOnly, tag `note-urgent:<jobId>`) — still never a task. A note with no live
+  job just logs (outcome `note`); any OTHER action →
   `job`+missing → review. The completed→quoted→ordered RETURN (e.g. 00025826: dispatched Jul,
   came back Sep as BARE `00025826` AM01 + `Order 00025826/2` £2,105 seconds
   apart) is handled by /sla/inbound's existing matchSameIncident: bare dispatch →
@@ -5761,8 +5765,9 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   `CHAP-<n>`), else by the PROPERTY (`sla.js jobsByProperty`: first three address
   words must lead the job's site name/address, so 32A ≠ 32C; jobs found by id/ref
   `CHAP-` OR `storeType:"chapplins"` — the office renames refs to the address).
-  Appended to the job card + a shared "📝 Chapplins note" task; no job → task only.
-  Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
+  Appended QUIETLY to the job card — no task, no notification (same Nov 2026 rule
+  as Concerto notes); only an urgent/escalation note (`isUrgentNote`) pushes the
+  office. Remittance/invoice/statement subjects → dropped. **FBC P5** ("On next planned
   visit") → Priority 4 + "Client priority: P5 …" in the description; "Out of
   hours"-style lines no longer land in the address; `lookupSite` falls back to a
   unique EXACT site-name match when the form's postcode disagrees with the register

@@ -35017,6 +35017,10 @@ async function createIntakeTask(env, ctx, fetchSelf, { externalId, title, detail
   }
   return out;
 }
+var URGENT_NOTE_RE = /\b(urgent|asap|as soon as possible|emergenc\w*|escalat\w*|complaint|complain\w*|chas\w*|overdue|outstanding|unhappy|not attended|did ?n'?t attend|failed to attend|re-?attend|no[- ]?show|still (?:not|no|hasn'?t|haven'?t|waiting|outstanding)|when will|how (?:long|much longer)|unsafe|dangerous|health and safety|h&s|trip hazard|flood\w*|leak\w*|no (?:hot )?water|no power|sewage)\b/i;
+function isUrgentNote(text, action) {
+  return URGENT_NOTE_RE.test(String(text || "") + " " + String(action || ""));
+}
 async function cancelJob(env, ctx, fetchSelf, c, msg) {
   const body = {
     action: "cancel",
@@ -35112,28 +35116,30 @@ async function processEmail(env, ctx, fetchSelf, msg, opts = {}) {
       const n = r.note || {}, inc = r.incident || n.incident || "";
       const who = n.client === "chapplins" ? "Chapplins" : "Concerto";
       const what = inc || n.property || "";
-      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "\u2019s card + raise a task to action it" };
+      const urgent = isUrgentNote(n.text, who === "Concerto" ? n.action : "");
+      if (opts.dryRun) return { ...out2, outcome: "dryrun", reference: inc, reason: "Would add this " + who + " note to job " + (what || "?") + "\u2019s card quietly" + (urgent ? " + alert the office (reads as urgent) \u2014 no task" : " \u2014 no task, no notification") };
       let noted = null;
       try {
         noted = await appendJobNote(env, ctx, fetchSelf, { incident: inc, reference: inc, text: n.text || "", noteAction: n.action || "", at: msg.receivedAt, by: n.by, property: n.property, client: n.client });
       } catch {
       }
-      try {
-        await createIntakeTask(env, ctx, fetchSelf, {
-          externalId: "note:" + (msg.messageId || inc || subject + ":" + Date.now()),
-          title: "\u{1F4DD} " + who + " note \u2014 " + (noted && noted.reference ? "job " + noted.reference : inc ? "incident " + inc : n.property || "a job"),
-          detail: ((n.action && who === "Concerto" ? n.action + " \u2014 " : "") + (n.text || "")).slice(0, 400),
-          link: noted && noted.jobId ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
-          category: who + " notes"
-        });
-      } catch {
+      if (urgent) {
+        try {
+          await sendToPermission(env, Number(tid) || 1, ["FullAccess", "SLAAdmin"], {
+            title: "\u26A0\uFE0F " + who + " note \u2014 " + (noted && noted.reference ? noted.reference : inc || n.property || "a job"),
+            body: String(n.text || "").replace(/\s+/g, " ").trim().slice(0, 140) || "A note was added.",
+            url: noted && noted.jobId ? "/job-view.html?jobId=" + encodeURIComponent(noted.jobId) : "/email-intake.html",
+            tag: "note-urgent:" + (noted && noted.jobId ? noted.jobId : inc || msg.messageId || Date.now())
+          }, null, true);
+        } catch {
+        }
       }
       return {
         ...out2,
         outcome: "note",
         reference: noted && noted.reference || inc,
         jobId: noted && noted.jobId || "",
-        reason: noted && noted.jobId ? who + " note added to job " + (noted.reference || inc) + "\u2019s card + a task raised to action it" : who + " note on " + (what || "?") + " \u2014 no matching live job on the board, so a task was raised to action it"
+        reason: noted && noted.jobId ? who + " note added to job " + (noted.reference || inc) + "\u2019s card" + (urgent ? " + the office was alerted (reads as urgent)" : " (quietly \u2014 no task, no notification)") : who + " note on " + (what || "?") + " \u2014 no matching live job on the board" + (urgent ? ", so the office was alerted (reads as urgent)" : " (logged only \u2014 no task)")
       };
     }
     if (r.kind === "cancel") {
