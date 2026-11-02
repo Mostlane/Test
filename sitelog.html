@@ -104,6 +104,10 @@
     .osr-top{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; } .osr-t{ margin-left:auto; font-size:13px; color:#475569; }
     .osr-loc{ display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; margin-top:4px; font-size:13px; }
     .locv.ok{ color:#0e7a3b; font-weight:600; } .locv.no{ color:#b91c1c; font-weight:600; }
+    .sbtn{ border:1px solid var(--border); background:#fff; border-radius:999px; font:inherit; font-size:12.5px; font-weight:700; padding:4px 10px; cursor:pointer; }
+    .sbtn.go{ color:#0e7a3b; border-color:#bbe5c8; background:#f0fbf3; } .sbtn.x{ color:#b91c1c; border-color:#fecaca; padding:2px 9px; position:absolute; right:0; top:8px; }
+    .soft-r{ position:relative; padding-right:40px; }
+    .sbtn:disabled{ opacity:.5; }
     .soft{ margin-top:14px; padding:10px 12px; border:1px dashed #c4b5fd; background:#faf7ff; border-radius:12px; }
     .soft h3{ margin:0 0 4px; font-size:14px; color:#5b21b6; }
     .site-grp{ margin-bottom:10px; } .site-grp h3{ margin:0 0 4px; font-size:14px; color:#0f172a; }
@@ -244,8 +248,8 @@ async function loadOnSite(){
     const list = data.onSite || [], offered = data.offered || [];
     $("onSiteCount").textContent = `(${list.length})`;
     const loc = v => v.verified
-      ? `<span class="locv ok">${tick(true)} Location verified${v.distance != null ? ` · ${v.distance} m from site` : ""}</span>`
-      : `<span class="locv no">${tick(false)} ${v.manual ? "Added by the office — no location" : v.offline ? "Signed in offline — not checked" : "Location not verified"}</span>`;
+      ? `<span class="locv ok">${tick(true)} Location verified${v.distance != null ? ` · ${v.distance} m from site` : ""}</span>${v.officeNote ? ` <span class="muted" style="font-size:12px">${esc(v.officeNote)}</span>` : ""}`
+      : `<span class="locv no">${tick(false)} ${v.officeNote ? esc(v.officeNote) + " — scan was outside the boundary" : v.manual ? "Added by the office — no location" : v.offline ? "Signed in offline — not checked" : "Location not verified"}</span>`;
     let html = "";
     if(!list.length) html = `<div class="muted">Nobody is signed in to a site right now.</div>`;
     else {
@@ -257,24 +261,48 @@ async function loadOnSite(){
           <div class="osr-loc">${loc(v)} ${mapBtn(v.mapUrl)}</div></div>`).join("") + `</div>`).join("");
     }
     if(offered.length){
-      html += `<div class="soft"><h3>🟣 Sign-in offered, not tapped <span class="muted">(${offered.length})</span></h3>
-        <div class="muted" style="font-size:12.5px;margin:-2px 0 6px">Scanned the QR today but never pressed <b>Sign in</b> — they are <b>not</b> counted as on site.</div>` +
+      html += `<div class="soft"><h3>🟣 Scanned, not confirmed <span class="muted">(${offered.length})</span></h3>
+        <div class="muted" style="font-size:12.5px;margin:-2px 0 6px">Scanned the QR today but never pressed <b>Sign in</b> / <b>Sign out</b>. They aren't counted as signed in or out until you confirm it here or they scan again.</div>` +
         offered.map(o => {
           const where = o.inside === true ? `<span class="locv ok">${tick(true)} Inside the site boundary${o.distance != null ? ` · ${o.distance} m` : ""}</span>`
             : o.inside === false ? `<span class="locv no">${tick(false)} Outside the boundary · ${o.distance} m away</span>`
             : `<span class="locv no">${tick(false)} Location not known</span>`;
-          const what = o.kind === "new_phone" ? "New phone — registration offered" : "Soft scan — sign-in offered";
-          return `<div class="osr soft-r"><div class="osr-top"><b>${esc(o.name)}</b><span class="muted">${esc(o.company)}</span>
+          const what = o.kind === "new_phone" ? "New phone — registration offered" : o.kind === "offered_out" ? "Soft scan — sign-out offered" : "Soft scan — sign-in offered";
+          const ids = esc(JSON.stringify(o.ids || []));
+          const conv = o.kind === "offered" ? `<button class="sbtn go" data-soft="signin" data-ids="${ids}" data-who="${esc(o.name)}" data-site="${esc(o.site)}" data-t="${esc(o.firstTime)}">✓ Make it a sign-in</button>`
+            : o.kind === "offered_out" ? `<button class="sbtn go" data-soft="signout" data-ids="${ids}" data-who="${esc(o.name)}" data-site="${esc(o.site)}" data-t="${esc(o.time)}">✓ Make it a sign-out</button>` : "";
+          const x = `<button class="sbtn x" data-soft="dismiss" data-ids="${ids}" data-who="${esc(o.name)}" data-site="${esc(o.site)}" title="Remove this scan from the list">✕</button>`;
+          return `<div class="osr soft-r"><div class="osr-top"><b>${esc(o.name)}</b><span class="muted">${esc(o.company)}</span>${x}
             <span class="osr-t">${esc(o.site)} · ${esc(o.time)}${o.attempts > 1 ? ` (${o.attempts} scans from ${esc(o.firstTime)})` : ""}</span></div>
-            <div class="osr-loc"><span class="pill scn">${what}</span> ${where} ${mapBtn(o.mapUrl)}</div></div>`;
+            <div class="osr-loc"><span class="pill scn">${what}</span> ${where} ${mapBtn(o.mapUrl)} ${conv}</div></div>`;
         }).join("") + `</div>`;
     }
     $("onSiteList").classList.remove("muted");
     $("onSiteList").innerHTML = html;
+    $("onSiteList").querySelectorAll("[data-soft]").forEach(b => b.onclick = () => softAction(b));
   }catch(e){
     $("onSiteList").textContent = "";
     $("adminMsg").textContent = "Couldn't reach SiteLog: " + e.message;
   }
+}
+
+async function softAction(b){
+  const a = b.dataset.soft, who = b.dataset.who, site = b.dataset.site, t = b.dataset.t;
+  const msg = a === "dismiss" ? `Remove ${who}'s scan at ${site} from this list?\n\nIt's kept as a record but won't count anywhere.`
+    : a === "signin" ? `Sign ${who} in at ${site} from ${t}?\n\nUses the time and location of their scan. It will show as confirmed by you.`
+    : `Sign ${who} out of ${site} at ${t}?\n\nUses the time and location of their scan. It will show as confirmed by you.`;
+  const ok = window.MLUI ? await MLUI.confirm(msg, { title: a === "dismiss" ? "Remove scan" : a === "signin" ? "Make it a sign-in" : "Make it a sign-out",
+    okLabel: a === "dismiss" ? "Remove" : a === "signin" ? "Sign in" : "Sign out", danger: a === "dismiss" }) : confirm(msg);
+  if (!ok) return;
+  b.disabled = true;
+  try{
+    const r = await authFetch(`${API}/sitelog-ts/soft`, { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ action: a, ids: JSON.parse(b.dataset.ids || "[]") }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "Couldn't do that");
+    if (a !== "dismiss") alert(d.verified ? "Done ✓ — location verified from their scan." : "Done — their scan was outside the boundary, so it's marked not verified.");
+    loadOnSite(); loadToday && loadToday();
+  }catch(e){ b.disabled = false; alert(e.message); }
 }
 
 // ── Timesheet emails (daily + weekly PDF) ──
