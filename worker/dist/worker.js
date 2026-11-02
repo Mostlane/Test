@@ -24152,9 +24152,14 @@ async function handle12(request, env, ctx, url, sess) {
         } catch {
         }
       }
+      if ("note" in b) {
+        item.note = String(b.note || "").slice(0, 2e3);
+        item.noteBy = sess.user && sess.user.username || "";
+        item.noteAt = (/* @__PURE__ */ new Date()).toISOString();
+      }
       job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
       await saveJob(env, tenantId, job);
-      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done, note: item.note || "" }, headers);
     }
     if (parts[2] === "remedial-photo" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -25540,7 +25545,11 @@ function normAuditItems(input, existing) {
       donePhoto: was.donePhoto || null,
       doneAt: was.doneAt || null,
       doneBy: was.doneBy || null,
-      extraPhotos: Array.isArray(was.extraPhotos) ? was.extraPhotos : []
+      extraPhotos: Array.isArray(was.extraPhotos) ? was.extraPhotos : [],
+      // Optional per-item note — kept across re-saves (written via /audit-item).
+      note: raw.note != null ? String(raw.note).slice(0, 2e3) : was.note || "",
+      noteBy: was.noteBy || null,
+      noteAt: was.noteAt || null
     });
     if (out.length >= 200) break;
   }

@@ -2286,9 +2286,16 @@ export async function handle(request, env, ctx, url, sess) {
         item.extraPhotos = (item.extraPhotos || []).filter(k => k !== b.removeExtra);
         try { await env.JOB_FILES.delete(b.removeExtra); await env.JOB_FILES.delete(b.removeExtra + ".thumb"); } catch {}
       }
+      // Optional per-item note (engineer or office) — an added extra, never gates
+      // completion (the photo is what's required). Anyone on the job can set it.
+      if ("note" in b) {
+        item.note = String(b.note || "").slice(0, 2000);
+        item.noteBy = (sess.user && sess.user.username) || "";
+        item.noteAt = new Date().toISOString();
+      }
       job.updatedAt = new Date().toISOString();
       await saveJob(env, tenantId, job);
-      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done, note: item.note || "" }, headers);
     }
 
     // POST /sla/jobs/{id}/remedial-photo  -> attach a photo to a remedial item on an
@@ -3744,6 +3751,10 @@ function normAuditItems(input, existing) {
       doneAt: was.doneAt || null,
       doneBy: was.doneBy || null,
       extraPhotos: Array.isArray(was.extraPhotos) ? was.extraPhotos : [],
+      // Optional per-item note — kept across re-saves (written via /audit-item).
+      note: (raw.note != null ? String(raw.note).slice(0, 2000) : (was.note || "")),
+      noteBy: was.noteBy || null,
+      noteAt: was.noteAt || null,
     });
     if (out.length >= 200) break;                            // sane cap
   }
