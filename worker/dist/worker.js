@@ -12281,6 +12281,16 @@ async function handleInner(request, env, ctx) {
     ).all();
     return json4({ sites: rows.results || [] });
   }
+  if (url.pathname === "/site-stats" && request.method === "GET") {
+    const guardStats = requireAdmin2();
+    if (guardStats) return guardStats;
+    const rows = await env.SITELOG_DB.prepare(
+      `SELECT site_code AS site, COUNT(*) AS visits, MAX(check_in_at) AS last_visit,
+                SUM(CASE WHEN check_out_at IS NULL THEN 1 ELSE 0 END) AS on_site
+         FROM visits GROUP BY site_code`
+    ).all();
+    return json4({ ok: true, stats: rows.results || [] });
+  }
   if (url.pathname === "/update-site" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
@@ -12643,10 +12653,10 @@ async function handleInner(request, env, ctx) {
     const cat = String(body.category || "").trim() || null;
     const radius = body.radius !== void 0 ? Number(body.radius) : null;
     const oldName = String(body.oldName || "").trim();
-    const lookupName = oldName || name;
-    const existing = await env.SITELOG_DB.prepare(
+    const byName = (n) => env.SITELOG_DB.prepare(
       "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
-    ).bind(lookupName).first();
+    ).bind(n).first();
+    const existing = oldName && await byName(oldName) || await byName(name);
     if (existing) {
       const sets = ["site_name = ?"];
       const binds = [name];

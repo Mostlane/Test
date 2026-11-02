@@ -61,6 +61,23 @@
     .ptools{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
     .ptools input[type=search]{ flex:1 1 180px; font:inherit; border:1px solid var(--border); border-radius:10px; padding:9px 11px; }
     .dup{ border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:10px 12px; margin-bottom:8px; font-size:13.5px; }
+    .stbar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+    .stbar input[type=search]{ flex:1 1 180px; font:inherit; border:1px solid var(--border); border-radius:10px; padding:9px 10px; }
+    #stMap{ height:62vh; min-height:340px; border-radius:12px; border:1px solid var(--border); z-index:0; }
+    #stMap.adding{ cursor:crosshair; }
+    .stadd{ background:#fff4d6; color:#92400e; border-radius:10px; padding:9px 12px; font-size:14px; margin-bottom:8px; display:none; }
+    .stlist{ max-height:300px; overflow:auto; margin-top:10px; }
+    .strow{ display:flex; gap:10px; align-items:center; padding:9px 4px; border-bottom:1px solid #eef1f5; cursor:pointer; }
+    .strow:hover{ background:#f8fafc; } .strow .nm{ font-weight:700; } .strow .sub{ font-size:12.5px; color:var(--muted); }
+    .strow .r{ margin-left:auto; font-size:12.5px; color:var(--muted); text-align:right; white-space:nowrap; }
+    .strow.arch .nm{ color:var(--muted); text-decoration:line-through; }
+    .stdot{ width:12px; height:12px; border-radius:50%; flex:0 0 12px; }
+    .stf{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .stf label{ display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
+    .stf label.full{ grid-column:1/-1; }
+    .stf input, .stf textarea, .stf select{ font:inherit; color:#0f172a; border:1px solid var(--border); border-radius:10px; padding:9px 10px; box-sizing:border-box; width:100%; }
+    @media(max-width:520px){ .stf{ grid-template-columns:1fr; } }
+    .stpin{ display:inline-block; width:16px; height:16px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.4); }
     .mb{ position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; align-items:flex-end; justify-content:center; z-index:9000; }
     .mb.show{ display:flex; }
     .mc{ background:#fff; width:100%; max-width:560px; max-height:90vh; overflow:auto; border-radius:18px 18px 0 0; padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px)); box-sizing:border-box; }
@@ -174,6 +191,7 @@
       <button data-tab="now" class="on">🟢 Now</button>
       <button data-tab="logs">📋 Logs</button>
       <button data-tab="ts">🧾 Timesheet</button>
+      <button data-tab="sites">🗺 Sites</button>
       <button data-tab="people">👷 People <span class="cnt" id="trCount" style="display:none"></span></button>
       <button data-tab="settings">⚙ Settings</button>
     </div>
@@ -242,6 +260,23 @@
       <div class="msg" id="tsViewMsg"></div>
     </div>
     <div id="tsSheet"></div>
+  </div>
+
+  <div id="pane-sites" style="display:none;">
+    <div class="card">
+      <h2>🗺 SiteLog sites <span class="muted" id="stCount"></span></h2>
+      <p class="muted" style="margin:0 0 8px;">Every site a QR sign-in can land on. The circle is the boundary a phone must be inside. Tap a pin to change it, or add a new site.</p>
+      <div class="stbar">
+        <input type="search" id="stFind" placeholder="Find a site">
+        <label class="pill" style="cursor:pointer;background:#f1f5f9"><input type="checkbox" id="stArch" style="vertical-align:-2px"> show archived</label>
+        <button class="tsbtn primary" id="stAddBtn">＋ Add a site</button>
+      </div>
+      <div class="stadd" id="stAddHint">Tap the map where the new site is. <button class="tsbtn" id="stAddCancel" style="padding:5px 10px;margin-left:6px">Cancel</button></div>
+      <div id="stMap"></div>
+      <div class="msg" id="stMsg"></div>
+      <div class="stlist" id="stList"></div>
+    </div>
+    <div class="card" id="stEdit" style="display:none"></div>
   </div>
 
   <div id="pane-people" style="display:none;">
@@ -467,6 +502,7 @@ function showTab(t){
   if (t === "people") loadPeople();
   document.body.classList.toggle("wide", t === "ts");
   if (t === "ts" && !loaded.ts) { loaded.ts = true; initTs(); }
+  if (t === "sites") initSites();
   if (t === "settings" && !loaded.settings) { loaded.settings = true; loadTimesheetCfg(); }
   try { history.replaceState(null, "", "#" + t); } catch(e){}
 }
@@ -906,6 +942,232 @@ async function tsDownload(){
   finally { btn.disabled = false; btn.textContent = was; }
 }
 
+// ── Sites map ───────────────────────────────────────────────────────────────
+const ST = { sites:[], stats:{}, portal:null, map:null, layer:null, editLayer:null, edit:null, adding:false, loaded:false };
+const CAT_COL = { projects:"#1e66ff", cobra:"#0e7a3b", chapplins:"#7c3aed", site:"#d97706" };
+const catCol = c => CAT_COL[String(c||"").toLowerCase()] || "#64748b";
+const normSite = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g, "");
+function stMsg(t, err){ $("stMsg").className = "msg" + (err ? " err" : ""); $("stMsg").textContent = t || ""; }
+function loadLeaflet(){
+  if (window.L) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
+    const js = document.createElement("script"); js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = () => res(); js.onerror = () => rej(new Error("The map didn't load — check your connection.")); document.head.appendChild(js);
+  });
+}
+async function initSites(){
+  try { await loadLeaflet(); } catch(e){ stMsg(e.message, true); return; }
+  if (!ST.map) {
+    ST.map = L.map("stMap").setView([50.85, -1.2], 9);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(ST.map);
+    ST.layer = L.layerGroup().addTo(ST.map);
+    ST.map.on("click", e => { if (ST.adding) startNewSite(e.latlng); else if (ST.edit) movePin(e.latlng); });
+    $("stFind").addEventListener("input", () => renderSites());
+    $("stArch").onchange = () => renderSites();
+    $("stAddBtn").onclick = () => { closeSiteEdit(); setAdding(true); };
+    $("stAddCancel").onclick = () => setAdding(false);
+  }
+  setTimeout(() => ST.map.invalidateSize(), 60);
+  await loadSites(!ST.loaded);
+}
+async function loadSites(fit){
+  stMsg("Loading sites…");
+  try {
+    const [a, b] = await Promise.all([slGet("/sites"), slGet("/site-stats").catch(() => ({ stats: [] }))]);
+    ST.sites = a.sites || []; ST.stats = {};
+    (b.stats || []).forEach(x => { ST.stats[normSite(x.site)] = x; });
+    if (!ST.portal) {
+      try { const r = await authFetch(`${API}/get-sites?category=all`, { cache:"no-store" }); const d = await r.json(); ST.portal = Array.isArray(d) ? d : []; }
+      catch(e){ ST.portal = []; }
+    }
+    ST.loaded = true; stMsg("");
+    renderSites(fit === true);
+  } catch(e){ stMsg("Couldn't load sites: " + e.message, true); }
+}
+const portalFor = s => (ST.portal || []).find(p => p && normSite(p.siteName) === normSite(s.site_name)) || null;
+const isProjectSite = s => String((portalFor(s) || {}).client || s.category || "").toLowerCase() === "projects";
+function visibleSites(){
+  const q = $("stFind").value.trim().toLowerCase(), arch = $("stArch").checked;
+  return ST.sites.filter(s => (arch || Number(s.archived) !== 1) && (!q || (s.site_name + " " + (s.category || "")).toLowerCase().includes(q)));
+}
+function renderSites(fit){
+  const list = visibleSites(), pts = [];
+  ST.layer.clearLayers();
+  list.forEach(s => {
+    const lat = Number(s.lat), lng = Number(s.lng);
+    if (!isFinite(lat) || !isFinite(lng) || (ST.edit && ST.edit.id === s.id)) return;
+    const arch = Number(s.archived) === 1, col = arch ? "#94a3b8" : catCol(s.category), st = ST.stats[normSite(s.site_name)] || {};
+    L.circle([lat, lng], { radius: Number(s.radius_m) || 500, color: col, weight: 1.5, fillOpacity: .07, interactive: false }).addTo(ST.layer);
+    const m = L.circleMarker([lat, lng], { radius: 9, color: st.on_site ? "#0e7a3b" : "#fff", weight: st.on_site ? 4 : 2, fillColor: col, fillOpacity: 1 }).addTo(ST.layer);
+    m.bindTooltip(esc(s.site_name) + (st.on_site ? ` · ${st.on_site} on site now` : "") + (arch ? " · archived" : ""));
+    m.on("click", ev => { L.DomEvent.stopPropagation(ev); if (!ST.adding) editSite(s); });
+    pts.push([lat, lng]);
+  });
+  if (fit && pts.length) ST.map.fitBounds(pts, { padding: [30, 30], maxZoom: 14 });
+  $("stCount").textContent = `(${ST.sites.filter(s => Number(s.archived) !== 1).length} live)`;
+  const sorted = list.slice().sort((a, b) => String(a.site_name).localeCompare(String(b.site_name)));
+  $("stList").innerHTML = sorted.length ? sorted.map(s => {
+    const st = ST.stats[normSite(s.site_name)] || {}, arch = Number(s.archived) === 1;
+    const noPin = !isFinite(Number(s.lat)) || !isFinite(Number(s.lng));
+    const sub = [s.category || "—", (Number(s.radius_m) || 500) + " m boundary", noPin ? "⚠ no pin" : ""].filter(Boolean).join(" · ");
+    const right = st.on_site ? `<b style="color:#0e7a3b">${st.on_site} on site</b>` : (st.visits ? `${st.visits} visits<br>last ${esc(ago(st.last_visit))}` : "no visits yet");
+    return `<div class="strow${arch ? " arch" : ""}" data-id="${esc(s.id)}"><span class="stdot" style="background:${arch ? "#94a3b8" : catCol(s.category)}"></span>
+      <div><div class="nm">${esc(s.site_name)}</div><div class="sub">${esc(sub)}</div></div><div class="r">${right}</div></div>`;
+  }).join("") : '<div class="muted" style="padding:10px 0">No sites match.</div>';
+  $("stList").querySelectorAll(".strow").forEach(el => el.onclick = () => { const s = ST.sites.find(x => x.id === el.dataset.id); if (s) editSite(s); });
+}
+function setAdding(on){
+  ST.adding = !!on;
+  $("stAddHint").style.display = on ? "block" : "none";
+  $("stMap").classList.toggle("adding", !!on);
+  if (on) $("stMap").scrollIntoView({ behavior:"smooth", block:"center" });
+}
+function startNewSite(ll){
+  setAdding(false);
+  editSite({ id: null, site_name: "", lat: ll.lat, lng: ll.lng, radius_m: 500, category: "Site", archived: 0 }, true);
+  // Pre-fill the postcode from the pin (best effort).
+  fetch(`https://api.postcodes.io/postcodes?lon=${ll.lng}&lat=${ll.lat}&limit=1`).then(r => r.json()).then(d => {
+    const pc = d && d.result && d.result[0] && d.result[0].postcode;
+    if (pc && $("stPc") && !$("stPc").value) $("stPc").value = pc;
+  }).catch(() => {});
+}
+function pinText(){ const e = ST.edit; return `${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}`; }
+function movePin(ll){
+  const e = ST.edit; if (!e) return;
+  e.lat = ll.lat; e.lng = ll.lng; e.marker.setLatLng(ll); e.circle.setLatLng(ll);
+  if ($("stLL")) $("stLL").textContent = pinText();
+}
+function editSite(s, isNew){
+  closeSiteEdit(true);
+  const lat = Number(s.lat), lng = Number(s.lng), hasPin = isFinite(lat) && isFinite(lng);
+  const c = ST.map.getCenter();
+  ST.edit = { id: s.id, orig: s, isNew: !!isNew, lat: hasPin ? lat : c.lat, lng: hasPin ? lng : c.lng };
+  const e = ST.edit, radius = Number(s.radius_m) || 500;
+  ST.editLayer = L.layerGroup().addTo(ST.map);
+  e.circle = L.circle([e.lat, e.lng], { radius, color: "#b45309", weight: 2, dashArray: "6 4", fillOpacity: .12, interactive: false }).addTo(ST.editLayer);
+  e.marker = L.marker([e.lat, e.lng], { draggable: true, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
+    html: '<div style="width:20px;height:20px;border-radius:50%;background:#b45309;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)"></div>' }) }).addTo(ST.editLayer);
+  e.marker.on("drag", ev => movePin(ev.target.getLatLng()));
+  ST.map.setView([e.lat, e.lng], Math.max(ST.map.getZoom(), radius > 600 ? 14 : 16));
+  renderSites();
+  const p = isNew ? null : portalFor(s), proj = !isNew && isProjectSite(s), arch = Number(s.archived) === 1;
+  const st = isNew ? {} : (ST.stats[normSite(s.site_name)] || {});
+  const v = x => esc(x == null ? "" : String(x));
+  const link = isNew ? `<p class="muted" style="margin:0">It will be added to the portal Sites register as a <b>Site (office / yard / one-off)</b> with "Use for SiteLog sign-ins" ticked. For a <b>project</b>, use the <a href="project-new.html">new project wizard</a> instead — the project's site comes to SiteLog by itself.</p>`
+    : p ? `<p class="muted" style="margin:0">Portal site <b>${esc(p.siteNumber || "")}</b> (${esc(p.client || "")}) — a change to the name or pin is saved there too.</p>`
+    : `<p class="muted" style="margin:0">Not on the portal Sites register — this one exists in SiteLog only.</p>`;
+  $("stEdit").innerHTML = `
+    <h2>${isNew ? "＋ New site" : "✏️ " + esc(s.site_name)}</h2>
+    ${isNew ? "" : `<p class="muted" style="margin:-4px 0 10px">${st.visits ? `${st.visits} visits · last ${esc(ago(st.last_visit))}` : "No visits yet"}${st.on_site ? ` · <b style="color:#0e7a3b">${st.on_site} on site now</b>` : ""}${arch ? " · <b>archived</b>" : ""}</p>`}
+    <div class="stf">
+      <label class="full">Site name<input id="stName" value="${v(s.site_name)}" ${proj ? "readonly" : ""} placeholder="e.g. Mostlane Yard">
+        ${proj ? '<span style="font-size:12px">A project\'s name is changed on the project page.</span>' : ""}</label>
+      <label>Boundary (metres from the pin)<input id="stRad" type="number" min="25" max="5000" step="5" value="${radius}"></label>
+      <label>Postcode (moves the pin)<span style="display:flex;gap:6px"><input id="stPc" value="${v(p && p.postcode)}" placeholder="PO15 5RQ"><button class="tsbtn" id="stPcGo" type="button" style="padding:8px 10px">Go</button></span></label>
+      <label class="full" style="grid-column:1/-1"><input id="stRadR" type="range" min="25" max="1500" step="5" value="${Math.min(radius, 1500)}"></label>
+      <div class="full" style="grid-column:1/-1;font-size:13px">📍 <span id="stLL">${pinText()}</span> — drag the orange pin, or tap the map, to move it.</div>
+      <label class="full">Message for workers on arrival (one line each — blank uses the standard message)<textarea id="stRules" rows="3">${v(s.site_rules)}</textarea></label>
+      <label class="full">Message for visitors on arrival (blank uses the standard message)<textarea id="stRulesV" rows="3">${v(s.site_rules_visitor)}</textarea></label>
+      <div class="full" style="grid-column:1/-1">${link}</div>
+    </div>
+    <div class="tsbtns">
+      <button class="tsbtn primary" id="stSave">${isNew ? "Add site" : "Save"}</button>
+      <button class="tsbtn" id="stCancel">Cancel</button>
+      ${isNew ? "" : `<button class="tsbtn" id="stArchBtn" style="margin-left:auto;color:${arch ? "#0e7a3b" : "#b91c1c"}">${arch ? "♻ Restore" : "🗄 Archive"}</button>`}
+    </div>
+    <div class="msg" id="stEditMsg"></div>`;
+  $("stEdit").style.display = "block";
+  const setR = r => { r = Number(r) || 0; if (r >= 25) e.circle.setRadius(r); };
+  $("stRad").oninput = () => { setR($("stRad").value); $("stRadR").value = Math.min(Number($("stRad").value) || 0, 1500); };
+  $("stRadR").oninput = () => { $("stRad").value = $("stRadR").value; setR($("stRadR").value); };
+  $("stPcGo").onclick = postcodeToPin;
+  $("stPc").addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); postcodeToPin(); } });
+  $("stSave").onclick = saveSiteEdit;
+  $("stCancel").onclick = () => closeSiteEdit();
+  if ($("stArchBtn")) $("stArchBtn").onclick = toggleSiteArchive;
+  $("stEdit").scrollIntoView({ behavior:"smooth", block:"nearest" });
+  if (isNew) setTimeout(() => $("stName").focus(), 300);
+}
+async function postcodeToPin(){
+  const pc = $("stPc").value.trim(); if (!pc) return;
+  const m = $("stEditMsg"); m.className = "msg"; m.textContent = "Looking up " + pc + "…";
+  try {
+    const d = await (await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc))).json();
+    if (!d || !d.result) throw new Error("Postcode not recognised");
+    const ll = L.latLng(d.result.latitude, d.result.longitude);
+    movePin(ll); ST.map.setView(ll, 17); $("stPc").value = d.result.postcode;
+    m.textContent = "Pin moved to the middle of " + d.result.postcode + " — drag it onto the exact spot.";
+  } catch(e){ m.className = "msg err"; m.textContent = e.message; }
+}
+function closeSiteEdit(quiet){
+  if (ST.editLayer) { ST.editLayer.remove(); ST.editLayer = null; }
+  ST.edit = null; $("stEdit").style.display = "none"; $("stEdit").innerHTML = "";
+  if (!quiet && ST.layer) renderSites();
+}
+async function portalSave(p, body){
+  const r = await authFetch(`${API}/update-site?category=${encodeURIComponent(p.client)}`, { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(Object.assign({ siteNumber: p.siteNumber, client: p.client }, body)) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.success === false) throw new Error(d.error || ("HTTP " + r.status));
+}
+async function saveSiteEdit(){
+  const e = ST.edit, m = $("stEditMsg"), btn = $("stSave");
+  const name = $("stName").value.replace(/\s+/g, " ").trim(), radius = Math.round(Number($("stRad").value));
+  const rules = $("stRules").value.replace(/\r/g, "").trim(), rulesV = $("stRulesV").value.replace(/\r/g, "").trim();
+  m.className = "msg err";
+  if (!name) { m.textContent = "Give the site a name."; return; }
+  if (!(radius >= 25 && radius <= 5000)) { m.textContent = "The boundary must be between 25 and 5000 metres."; return; }
+  const clash = ST.sites.find(s => s.id !== e.id && normSite(s.site_name) === normSite(name));
+  if (clash) { m.textContent = `There is already a SiteLog site called "${clash.site_name}"${Number(clash.archived) === 1 ? " (archived — restore it instead)" : ""}.`; return; }
+  btn.disabled = true; m.className = "msg"; m.textContent = "Saving…";
+  try {
+    if (e.isNew) {
+      const r = await authFetch(`${API}/add-site?category=site`, { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ siteName: name, client: "site", lat: e.lat, lon: e.lng, postcode: $("stPc").value.trim(), siteLog: true, active: true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.success === false) throw new Error(d.error || ("HTTP " + r.status));
+      await slPost("/upsert-site", { siteName: name, lat: e.lat, lng: e.lng, radius, category: "Site", siteRules: rules, siteRulesVisitor: rulesV, archived: 0 });
+      ST.portal = null;
+      toast(`✅ ${name} added. Any SiteLog QR poster works there — the phone's location picks the site.`);
+    } else {
+      const o = e.orig, renamed = name !== o.site_name;
+      const moved = Math.abs(e.lat - Number(o.lat)) > 1e-7 || Math.abs(e.lng - Number(o.lng)) > 1e-7 || !isFinite(Number(o.lat));
+      // SiteLog first (awaited) — the portal's own sync then finds it by its new name.
+      await slPost("/upsert-site", { siteName: name, oldName: renamed ? o.site_name : undefined, lat: e.lat, lng: e.lng, radius, siteRules: rules, siteRulesVisitor: rulesV });
+      const p = portalFor(o);
+      let warn = "";
+      if (p && Number(o.archived) !== 1 && (renamed || moved)) {
+        const body = { siteName: name, lat: e.lat, lon: e.lng };
+        if (String(p.client).toLowerCase() !== "projects") body.siteLog = true;
+        try { await portalSave(p, body); ST.portal = null; }
+        catch(err){ warn = " The portal Sites register didn't update (" + err.message + ") — change it there too."; }
+      }
+      toast("✅ Saved." + warn);
+    }
+    closeSiteEdit(true);
+    await loadSites();
+  } catch(err){ m.className = "msg err"; m.textContent = "Couldn't save: " + err.message; }
+  finally { if ($("stSave")) $("stSave").disabled = false; }
+}
+async function toggleSiteArchive(){
+  const o = ST.edit.orig, arch = Number(o.archived) === 1, st = ST.stats[normSite(o.site_name)] || {}, proj = isProjectSite(o);
+  if (!arch) {
+    const msg = `Archive "${o.site_name}"? Phones will no longer sign in there. Its visits and history are kept, and you can restore it any time.` +
+      (st.on_site ? `\n\n⚠️ ${st.on_site} ${st.on_site === 1 ? "person is" : "people are"} signed in there right now.` : "") +
+      (proj ? "\n\nThis is a project site: to stop it for good, also mark the project complete or archived." : "");
+    if (!await ask(msg, { title: "Archive site", okLabel: "Archive", danger: true })) return;
+  }
+  const m = $("stEditMsg"); m.className = "msg"; m.textContent = arch ? "Restoring…" : "Archiving…";
+  try {
+    await slPost("/upsert-site", { siteName: o.site_name, archived: arch ? 0 : 1 });
+    const p = portalFor(o);
+    if (p && !proj) { try { await portalSave(p, { siteLog: arch }); ST.portal = null; } catch(e){} }
+    closeSiteEdit(true);
+    await loadSites();
+  } catch(e){ m.className = "msg err"; m.textContent = e.message; }
+}
+
 // ── Start-up (admins) — last, once everything above is defined ──
 if (IS_ADMIN) {
   $("tabs").style.display = "flex";
@@ -914,7 +1176,7 @@ if (IS_ADMIN) {
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   loadTransfers();
   const h = (location.hash || "").slice(1);
-  showTab(["now","logs","ts","people","settings"].includes(h) ? h : "now");
+  showTab(["now","logs","ts","sites","people","settings"].includes(h) ? h : "now");
   setInterval(() => { if (document.visibilityState === "visible" && $("pane-now").style.display === "block") loadOnSite(); }, 60000);
 }
 

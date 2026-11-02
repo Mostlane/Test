@@ -1303,6 +1303,19 @@ async function handleInner(request, env, ctx) {
       return json({ sites: rows.results || [] });
     }
 
+    // GET /site-stats — per site: visits, last visit, people signed in now (admin).
+    // Powers the portal's Sites map.
+    if (url.pathname === "/site-stats" && request.method === "GET") {
+      const guardStats = requireAdmin();
+      if (guardStats) return guardStats;
+      const rows = await env.SITELOG_DB.prepare(
+        `SELECT site_code AS site, COUNT(*) AS visits, MAX(check_in_at) AS last_visit,
+                SUM(CASE WHEN check_out_at IS NULL THEN 1 ELSE 0 END) AS on_site
+         FROM visits GROUP BY site_code`
+      ).all();
+      return json({ ok: true, stats: rows.results || [] });
+    }
+
     // POST /update-site
     if (url.pathname === "/update-site" && request.method === "POST") {
       const guard = requireAdmin();
@@ -1810,10 +1823,12 @@ async function handleInner(request, env, ctx) {
       const radius = body.radius !== undefined ? Number(body.radius) : null;
       const oldName = String(body.oldName || "").trim();
       // Lookup: prefer the old name (rename), else the new name.
-      const lookupName = oldName || name;
-      const existing = await env.SITELOG_DB.prepare(
+      // If the old name isn't there any more (another caller already renamed it),
+      // fall back to the new name — never create a second copy of the same site.
+      const byName = n => env.SITELOG_DB.prepare(
         "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
-      ).bind(lookupName).first();
+      ).bind(n).first();
+      const existing = (oldName && await byName(oldName)) || await byName(name);
       if (existing) {
         const sets = ["site_name = ?"]; const binds = [name];
         if (lat !== null && isFiniteNumber(lat)) { sets.push("lat = ?"); binds.push(lat); }
