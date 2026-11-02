@@ -9,6 +9,8 @@
   Cache-Control: no-cache
 /van-check-gate.js
   Cache-Control: no-cache
+/timesheet-gate.js
+  Cache-Control: no-cache
 /day-timesheet.js
   Cache-Control: no-cache
 /auth.js

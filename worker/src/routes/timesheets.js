@@ -41,6 +41,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
 import { approvedLeaveInRange, bankHolidaysInRange } from "./holidays.js";
 import { sendToUser } from "./push.js";
+import { sendEmail } from "../lib/email.js";
 
 // Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
 // user — an approved holiday auto-shows on the timesheet without any entry.
@@ -88,6 +89,9 @@ async function ensureTables(env) {
     hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
     r2_key TEXT, at TEXT,
     UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+  // Stamped once the invoice PDF has been auto-emailed to the accounts inbox
+  // (so the weekly email sweep never sends the same invoice twice).
+  try { await env.DB.prepare("ALTER TABLE eng_invoices ADD COLUMN emailed_at TEXT").run(); } catch {}
   // Known round-trip mileage per site (from the base postcode) — the register
   // the admin edits; engineer mileage rows auto-fill from it.
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
@@ -511,7 +515,9 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
   radiusMiles: 10, overtimeThresholdH: 8, dueDow: 3, dueTime: "12:00", remindersOn: true,
-  basePostcode: "PO15 5RQ", company: "Mostlane" };
+  basePostcode: "PO15 5RQ", company: "Mostlane",
+  // Weekly auto-email of submitted self-employed invoices to the accounts inbox.
+  emailInvoices: true, emailDow: 3, emailTime: "13:00", invoiceEmail: "accounts@mostlane.com" };
 const VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
 const normReg = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 // Timesheet reminders are ON unless explicitly turned off in Settings.
@@ -1278,6 +1284,68 @@ function tsDeadlineFor(monday, cfg) {
   const ms = naive - londonOffsetMinutes(naive) * 60000;
   return { ms, iso: new Date(ms).toISOString(), dow, hh, mm, label: DOW_NAME[dow] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
 }
+// ── Per-user reminder mode + "has last week been done?" ─────────────────────
+// Each person's mode (set on timesheets-admin → Settings): "off" | "timesheet"
+// (must complete last week's hours) | "invoice" (self-employed — must submit
+// last week's invoice). Unset preserves the old behaviour: anyone with the
+// EngTimesheet permission is chased for their timesheet, everyone else is off —
+// so the office just flips self-employed people to "invoice" / anyone to "off".
+const REMINDER_MODES = new Set(["off", "timesheet", "invoice"]);
+async function reminderModeFor(env, tid, cfg, username) {
+  const mine = (cfg.byUser && cfg.byUser[username]) || {};
+  if (REMINDER_MODES.has(mine.reminder)) return mine.reminder;
+  // Opt-IN: nobody is reminded/locked until the office sets their mode on
+  // timesheets-admin → Settings. (Jamie: "user by user basis that I set".)
+  return "off";
+}
+function weekHasContent(days) {
+  for (const d of Object.values(days || {})) {
+    if (!d) continue;
+    if (toMin(d.start) != null && toMin(d.finish) != null) return true;
+    if (d.jobHours && Object.values(d.jobHours).some(h => parseFloat(h) > 0)) return true;
+    if (parseFloat(d.hours) > 0) return true;
+  }
+  return false;
+}
+// Has this person satisfied LAST week's timesheet obligation? Office-approved or
+// already-invoiced weeks count as done; a week with booked jobs still missing
+// hours is not; otherwise it's done once they've filled anything in.
+async function timesheetDoneFor(env, tid, username, monday, cfg) {
+  const { days, approval } = await loadWeek(env, tid, username, monday);
+  if (approval) return true;
+  if (await invoiceFor(env, tid, username, monday)) return true;
+  const gaps = await timesheetGaps(env, tid, username, monday, cfg);
+  if (gaps.count > 0) return false;
+  return weekHasContent(days);
+}
+// The caller's reminder state for a week — the ONE source for /ts/outstanding,
+// the push sweep and the blocking gate.
+async function reminderStateFor(env, tid, cfg, username, monday) {
+  const mode = await reminderModeFor(env, tid, cfg, username);
+  const dl = tsDeadlineFor(monday, cfg);
+  const base = { mode, week: monday, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+  if (mode === "off" || !remindersEnabled(cfg)) return { ...base, due: false };
+  const done = mode === "invoice"
+    ? !!(await invoiceFor(env, tid, username, monday))
+    : await timesheetDoneFor(env, tid, username, monday, cfg);
+  return { ...base, due: !done };
+}
+// base64 a byte array in chunks (avoids a stack blow-up on a big PDF).
+function bytesToB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const escHtml = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Which London day-of-week (0 Sun..6 Sat) + hour it is now.
+function londonDowHour(now = new Date()) {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dow = names.indexOf(now.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" }));
+  const hour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  const date = now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  return { dow, hour, date };
+}
+
 // Jobs the engineer was scheduled on, per London day: { date: [{jobId, ref, site}] }.
 async function assignedJobsByDay(env, tid, username, monday) {
   const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
@@ -1327,27 +1395,83 @@ export async function sweepTimesheetReminders(env, tid = 1) {
   try {
     const cfg = await getCfg(env, tid);
     if (!remindersEnabled(cfg)) return;   // reminders switched off in Settings
-    const curMon = mondayOf(new Date().toISOString().slice(0, 10));
+    // Daily nudge at ~08:00 London, from the Monday last week ends through the
+    // deadline day, to anyone whose last-week obligation (timesheet OR invoice)
+    // is still outstanding. Deduped per (week, London date). The hard gate
+    // carries it once the deadline has passed.
+    const L = londonDowHour();
+    if (L.hour !== 8) return;
+    const curMon = mondayOf(L.date);
     const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
     const dl = tsDeadlineFor(prevMon, cfg);
-    const nowMs = Date.now();
-    if (nowMs < dl.ms - 3 * 3600e3 || nowMs > dl.ms) return;   // only the 3h run-up to the deadline
+    if (Date.now() > dl.ms + 24 * 3600e3) return;   // stop a day past the deadline
     const key = "ts:reminded:" + tid;
     let sent = [];
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); if (row && row.value) sent = JSON.parse(row.value) || []; } catch {}
-    if (sent.includes(prevMon)) return;
+    const slot = prevMon + ":" + L.date;
+    if (sent.includes(slot)) return;
     const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
     for (const u of users || []) {
-      if (!(await hasEngTimesheet(env, tid, u.username))) continue;   // timesheet-permission engineers only
-      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
-      if (g.count > 0) await sendToUser(env, tid, u.username, {
-        title: "Timesheet due", body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours — complete last week's timesheet by " + dl.label + ".",
+      const st = await reminderStateFor(env, tid, cfg, u.username, prevMon);
+      if (st.mode === "off" || !st.due) continue;
+      const inv = st.mode === "invoice";
+      await sendToUser(env, tid, u.username, {
+        title: inv ? "Invoice due" : "Timesheet due",
+        body: inv
+          ? "Last week's invoice hasn't been sent in — submit it on your timesheet by " + dl.label + "."
+          : "Last week's timesheet still needs completing — enter your hours by " + dl.label + ".",
         url: "/engineer-timesheet.html?week=" + prevMon, tag: "ts-due:" + prevMon
       });
     }
-    sent.push(prevMon); sent = sent.slice(-8);
+    sent.push(slot); sent = sent.slice(-30);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {}
+}
+
+// Cron: email each submitted self-employed invoice PDF to the accounts inbox,
+// on the day/time set in Settings (default Wednesday 13:00 London). Forwards
+// every invoice from the last ~5 weeks not yet emailed — so a late one is caught
+// on the next run — and marks each emailed_at so it's only ever sent once.
+export async function sweepTimesheetInvoiceEmails(env, tid = 1) {
+  try {
+    await ensureTables(env);
+    const cfg = await getCfg(env, tid);
+    if (cfg.defaults && cfg.defaults.emailInvoices === false) return;   // switched off
+    const to = String((cfg.defaults && cfg.defaults.invoiceEmail) || "accounts@mostlane.com").trim();
+    if (!to) return;
+    const L = londonDowHour();
+    const wantDow = Number(cfg.defaults && cfg.defaults.emailDow != null ? cfg.defaults.emailDow : 3);
+    const wantHour = parseInt(String((cfg.defaults && cfg.defaults.emailTime) || "13:00").split(":")[0], 10) || 0;
+    if (L.dow !== wantDow || L.hour !== wantHour) return;
+    const cutoff = new Date(Date.now() - 35 * 86400e3).toISOString();
+    let rows = [];
+    try {
+      const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+      rows = r.results || [];
+    } catch { return; }
+    if (!rows.length) return;
+    const names = {};
+    try { const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all(); for (const u of r.results || []) names[u.username] = displayName(u); } catch {}
+    for (const inv of rows) {
+      try {
+        const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
+        if (!obj) continue;   // PDF missing / not ready — retried next run
+        const b64 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
+        const who = names[inv.username] || inv.username;
+        const wkTxt = new Date(inv.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+        const subject = "Invoice #" + inv.number + " — " + who + " — w/c " + wkTxt;
+        const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who)
+          + "</b> for the week commencing " + escHtml(wkTxt) + ".</p>"
+          + "<p>Total: <b>" + money(inv.total || 0) + "</b></p>"
+          + "<p style=\"color:#667;font-size:12px\">Sent automatically from the Mostlane portal timesheet system.</p>";
+        const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
+        const res = await sendEmail(env, { to, subject, html, attachments: [{ filename: fn, content: b64 }] });
+        if (res && res.ok !== false) {
+          await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind(new Date().toISOString(), tid, inv.id).run();
+        }
+      } catch {}
+    }
   } catch {}
 }
 
@@ -1590,16 +1714,22 @@ export async function handle(request, env, ctx, url, sess) {
   // ── GET /ts/outstanding — the caller's last completed week's missing hours ──
   // Drives the "complete your timesheet" reminder (attention gate + push).
   if (sub === "/outstanding" && method === "GET") {
-    // Only engineers with the EngTimesheet permission are chased, and only when
-    // reminders are switched on in Settings.
-    if (!remindersEnabled(cfg) || !(await hasEngTimesheet(env, tid, me)))
-      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
+    // Mode-aware: a "timesheet" person owes last week's hours, an "invoice"
+    // person owes last week's invoice, "off" owes nothing. Drives the home
+    // attention note (snoozeable) AND the blocking timesheet-gate (overdue).
     const curMon = mondayOf(new Date().toISOString().slice(0, 10));
     const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
-    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
-    return json({ ok: true, week: prevMon, dueAt: prev.dueAt, dueLabel: prev.dueLabel,
-      overdue: prev.overdue, count: prev.count, missing: prev.missing }, {}, env, request);
+    const st = await reminderStateFor(env, tid, cfg, me, prevMon);
+    let count = 0, missing = [];
+    if (st.due && st.mode === "timesheet") { const g = await timesheetGaps(env, tid, me, prevMon, cfg); count = g.count; missing = g.missing; }
+    else if (st.due) count = 1;
+    const sun = weekDays(prevMon)[6];
+    const weekLabel = new Date(prevMon + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+      + " – " + new Date(sun + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    return json({ ok: true, mode: st.mode, kind: st.mode, week: prevMon, weekLabel,
+      due: st.due, overdue: st.overdue, dueAt: st.dueAt, dueLabel: st.dueLabel,
+      count, missing }, {}, env, request);
   }
 
   // ── GET /ts/my — own week (or a viewed engineer's, for an admin) ──────────
@@ -2410,10 +2540,13 @@ export async function handle(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      return json({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser,
-        users: (users || []).map(u => ({ username: u.username, name: displayName(u),
-          employment: u.employment_type || "Employed", selfEmployed: isSelfEmployed(u),
-          effective: effectiveCfg(cfg, u) })) }, {}, env, request);
+      const uList = await Promise.all((users || []).map(async u => ({
+        username: u.username, name: displayName(u),
+        employment: u.employment_type || "Employed", selfEmployed: isSelfEmployed(u),
+        reminder: (cfg.byUser && cfg.byUser[u.username] && cfg.byUser[u.username].reminder) || "",
+        effReminder: await reminderModeFor(env, tid, cfg, u.username),
+        effective: effectiveCfg(cfg, u) })));
+      return json({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser, users: uList }, {}, env, request);
     }
 
     if (sub === "/admin/config" && method === "POST") {
@@ -2428,6 +2561,7 @@ export async function handle(request, env, ctx, url, sess) {
             if (k in v) { const n = parseFloat(v[k]); if (isFinite(n) && n >= 0) mine[k] = n; else delete mine[k]; }
           }
           if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
+          if ("reminder" in v) { if (REMINDER_MODES.has(v.reminder)) mine.reminder = v.reminder; else delete mine.reminder; }
           if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
           if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/))
             .map(s => String(s).trim()).filter(Boolean).slice(0, 5);

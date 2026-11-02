@@ -2468,6 +2468,10 @@ async function ensureTables(env) {
     hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
     r2_key TEXT, at TEXT,
     UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE eng_invoices ADD COLUMN emailed_at TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
     tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
     name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
@@ -3806,6 +3810,48 @@ function tsDeadlineFor(monday, cfg) {
   const ms = naive - londonOffsetMinutes(naive) * 6e4;
   return { ms, iso: new Date(ms).toISOString(), dow: dow2, hh, mm, label: DOW_NAME[dow2] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
 }
+async function reminderModeFor(env, tid, cfg, username) {
+  const mine = cfg.byUser && cfg.byUser[username] || {};
+  if (REMINDER_MODES.has(mine.reminder)) return mine.reminder;
+  return "off";
+}
+function weekHasContent(days) {
+  for (const d of Object.values(days || {})) {
+    if (!d) continue;
+    if (toMin(d.start) != null && toMin(d.finish) != null) return true;
+    if (d.jobHours && Object.values(d.jobHours).some((h) => parseFloat(h) > 0)) return true;
+    if (parseFloat(d.hours) > 0) return true;
+  }
+  return false;
+}
+async function timesheetDoneFor(env, tid, username, monday, cfg) {
+  const { days, approval } = await loadWeek(env, tid, username, monday);
+  if (approval) return true;
+  if (await invoiceFor(env, tid, username, monday)) return true;
+  const gaps = await timesheetGaps(env, tid, username, monday, cfg);
+  if (gaps.count > 0) return false;
+  return weekHasContent(days);
+}
+async function reminderStateFor(env, tid, cfg, username, monday) {
+  const mode = await reminderModeFor(env, tid, cfg, username);
+  const dl = tsDeadlineFor(monday, cfg);
+  const base = { mode, week: monday, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+  if (mode === "off" || !remindersEnabled(cfg)) return { ...base, due: false };
+  const done = mode === "invoice" ? !!await invoiceFor(env, tid, username, monday) : await timesheetDoneFor(env, tid, username, monday, cfg);
+  return { ...base, due: !done };
+}
+function bytesToB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return btoa(s);
+}
+function londonDowHour(now2 = /* @__PURE__ */ new Date()) {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dow2 = names.indexOf(now2.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" }));
+  const hour = Number(now2.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  const date = now2.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  return { dow: dow2, hour, date };
+}
 async function assignedJobsByDay(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -3874,13 +3920,14 @@ async function sweepTimesheetReminders(env, tid = 1) {
   try {
     const cfg = await getCfg(env, tid);
     if (!remindersEnabled(cfg)) return;
-    const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const L2 = londonDowHour();
+    if (L2.hour !== 8) return;
+    const curMon = mondayOf(L2.date);
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
     const dl = tsDeadlineFor(prevMon, cfg);
-    const nowMs = Date.now();
-    if (nowMs < dl.ms - 3 * 36e5 || nowMs > dl.ms) return;
+    if (Date.now() > dl.ms + 24 * 36e5) return;
     const key = "ts:reminded:" + tid;
     let sent = [];
     try {
@@ -3888,21 +3935,69 @@ async function sweepTimesheetReminders(env, tid = 1) {
       if (row && row.value) sent = JSON.parse(row.value) || [];
     } catch {
     }
-    if (sent.includes(prevMon)) return;
+    const slot = prevMon + ":" + L2.date;
+    if (sent.includes(slot)) return;
     const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
     for (const u of users || []) {
-      if (!await hasEngTimesheet(env, tid, u.username)) continue;
-      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
-      if (g.count > 0) await sendToUser(env, tid, u.username, {
-        title: "Timesheet due",
-        body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours \u2014 complete last week's timesheet by " + dl.label + ".",
+      const st = await reminderStateFor(env, tid, cfg, u.username, prevMon);
+      if (st.mode === "off" || !st.due) continue;
+      const inv = st.mode === "invoice";
+      await sendToUser(env, tid, u.username, {
+        title: inv ? "Invoice due" : "Timesheet due",
+        body: inv ? "Last week's invoice hasn't been sent in \u2014 submit it on your timesheet by " + dl.label + "." : "Last week's timesheet still needs completing \u2014 enter your hours by " + dl.label + ".",
         url: "/engineer-timesheet.html?week=" + prevMon,
         tag: "ts-due:" + prevMon
       });
     }
-    sent.push(prevMon);
-    sent = sent.slice(-8);
+    sent.push(slot);
+    sent = sent.slice(-30);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {
+  }
+}
+async function sweepTimesheetInvoiceEmails(env, tid = 1) {
+  try {
+    await ensureTables(env);
+    const cfg = await getCfg(env, tid);
+    if (cfg.defaults && cfg.defaults.emailInvoices === false) return;
+    const to = String(cfg.defaults && cfg.defaults.invoiceEmail || "accounts@mostlane.com").trim();
+    if (!to) return;
+    const L2 = londonDowHour();
+    const wantDow = Number(cfg.defaults && cfg.defaults.emailDow != null ? cfg.defaults.emailDow : 3);
+    const wantHour = parseInt(String(cfg.defaults && cfg.defaults.emailTime || "13:00").split(":")[0], 10) || 0;
+    if (L2.dow !== wantDow || L2.hour !== wantHour) return;
+    const cutoff = new Date(Date.now() - 35 * 864e5).toISOString();
+    let rows = [];
+    try {
+      const r = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND (emailed_at IS NULL OR emailed_at='') AND at>=? ORDER BY at").bind(tid, cutoff).all();
+      rows = r.results || [];
+    } catch {
+      return;
+    }
+    if (!rows.length) return;
+    const names = {};
+    try {
+      const r = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of r.results || []) names[u.username] = displayName(u);
+    } catch {
+    }
+    for (const inv of rows) {
+      try {
+        const obj = inv.r2_key ? await env.JOB_FILES.get(inv.r2_key) : null;
+        if (!obj) continue;
+        const b642 = bytesToB64(new Uint8Array(await obj.arrayBuffer()));
+        const who = names[inv.username] || inv.username;
+        const wkTxt = (/* @__PURE__ */ new Date(inv.week + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+        const subject = "Invoice #" + inv.number + " \u2014 " + who + " \u2014 w/c " + wkTxt;
+        const html = "<p>Please find attached invoice <b>#" + inv.number + "</b> from <b>" + escHtml(who) + "</b> for the week commencing " + escHtml(wkTxt) + ".</p><p>Total: <b>" + money(inv.total || 0) + '</b></p><p style="color:#667;font-size:12px">Sent automatically from the Mostlane portal timesheet system.</p>';
+        const fn = "Invoice-" + inv.number + "-" + inv.week + ".pdf";
+        const res = await sendEmail(env, { to, subject, html, attachments: [{ filename: fn, content: b642 }] });
+        if (res && res.ok !== false) {
+          await env.DB.prepare("UPDATE eng_invoices SET emailed_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), tid, inv.id).run();
+        }
+      } catch {
+      }
+    }
   } catch {
   }
 }
@@ -4165,21 +4260,31 @@ async function handle3(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/outstanding" && method === "GET") {
-    if (!remindersEnabled(cfg) || !await hasEngTimesheet(env, tid, me))
-      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
     const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
-    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
+    const st = await reminderStateFor(env, tid, cfg, me, prevMon);
+    let count = 0, missing = [];
+    if (st.due && st.mode === "timesheet") {
+      const g = await timesheetGaps(env, tid, me, prevMon, cfg);
+      count = g.count;
+      missing = g.missing;
+    } else if (st.due) count = 1;
+    const sun = weekDays(prevMon)[6];
+    const weekLabel = (/* @__PURE__ */ new Date(prevMon + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " \u2013 " + (/* @__PURE__ */ new Date(sun + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     return json({
       ok: true,
+      mode: st.mode,
+      kind: st.mode,
       week: prevMon,
-      dueAt: prev.dueAt,
-      dueLabel: prev.dueLabel,
-      overdue: prev.overdue,
-      count: prev.count,
-      missing: prev.missing
+      weekLabel,
+      due: st.due,
+      overdue: st.overdue,
+      dueAt: st.dueAt,
+      dueLabel: st.dueLabel,
+      count,
+      missing
     }, {}, env, request);
   }
   if (sub === "/my" && method === "GET") {
@@ -5110,18 +5215,16 @@ async function handle3(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      return json({
-        ok: true,
-        defaults: cfg.defaults,
-        byUser: cfg.byUser,
-        users: (users || []).map((u) => ({
-          username: u.username,
-          name: displayName(u),
-          employment: u.employment_type || "Employed",
-          selfEmployed: isSelfEmployed(u),
-          effective: effectiveCfg(cfg, u)
-        }))
-      }, {}, env, request);
+      const uList = await Promise.all((users || []).map(async (u) => ({
+        username: u.username,
+        name: displayName(u),
+        employment: u.employment_type || "Employed",
+        selfEmployed: isSelfEmployed(u),
+        reminder: cfg.byUser && cfg.byUser[u.username] && cfg.byUser[u.username].reminder || "",
+        effReminder: await reminderModeFor(env, tid, cfg, u.username),
+        effective: effectiveCfg(cfg, u)
+      })));
+      return json({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser, users: uList }, {}, env, request);
     }
     if (sub === "/admin/config" && method === "POST") {
       const b = await request.json().catch(() => ({}));
@@ -5142,6 +5245,10 @@ async function handle3(request, env, ctx, url, sess) {
             }
           }
           if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
+          if ("reminder" in v) {
+            if (REMINDER_MODES.has(v.reminder)) mine.reminder = v.reminder;
+            else delete mine.reminder;
+          }
           if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
           if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
         }
@@ -5152,7 +5259,7 @@ async function handle3(request, env, ctx, url, sess) {
   }
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
-var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES;
+var CFG_KEY, INV_PREFIX, isDateStr, toMin, normPc, round1, money, TABLES_ENSURED, TS_ACTIVE, MAX_SEG_MS, normKey, DEFAULTS, VERIFY_KEY, normReg, remindersEnabled, DOW3, DOW_NAME, PO_MAP, PO_MAP_AT, PO_TABLES, PO_BLOB, PO_PROBE, PO_ORD, PO_ORD_CACHE, ROAD_FACTOR, DRIVE_MEMO, DRIVE_MEMO_TTL, AT_HOME_MILES, REMINDER_MODES, escHtml;
 var init_timesheets = __esm({
   "src/routes/timesheets.js"() {
     init_http();
@@ -5161,6 +5268,7 @@ var init_timesheets = __esm({
     init_pdf();
     init_holidays();
     init_push();
+    init_email();
     CFG_KEY = (tid) => `engts:cfg:${tid}`;
     INV_PREFIX = (tid) => `invoices/${tid}/`;
     isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -5186,7 +5294,12 @@ var init_timesheets = __esm({
       dueTime: "12:00",
       remindersOn: true,
       basePostcode: "PO15 5RQ",
-      company: "Mostlane"
+      company: "Mostlane",
+      // Weekly auto-email of submitted self-employed invoices to the accounts inbox.
+      emailInvoices: true,
+      emailDow: 3,
+      emailTime: "13:00",
+      invoiceEmail: "accounts@mostlane.com"
     };
     VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
     normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -5199,6 +5312,8 @@ var init_timesheets = __esm({
     DRIVE_MEMO = /* @__PURE__ */ new Map();
     DRIVE_MEMO_TTL = 12 * 3600 * 1e3;
     AT_HOME_MILES = 1;
+    REMINDER_MODES = /* @__PURE__ */ new Set(["off", "timesheet", "invoice"]);
+    escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 });
 
@@ -9790,8 +9905,10 @@ function personTotals(p) {
       autoMins += v.mins || 0;
     }
     if (v.state === "open") open++;
-    if (!v.inOk) unver++;
-    if (v.state !== "open" && !v.outOk) unver++;
+    if (v.state !== "scanned") {
+      if (!v.inOk) unver++;
+      if (v.state !== "open" && !v.outOk) unver++;
+    }
   }
   return { mins, autoMins, missed, open, unver, scanned, visits: p.visits.length };
 }
@@ -9963,16 +10080,22 @@ var init_sitelogtspdf = __esm({
 var sitelogts_exports = {};
 __export(sitelogts_exports, {
   addMapLinks: () => addMapLinks,
+  adminLogs: () => adminLogs,
   apiOrigin: () => apiOrigin,
   buildPdf: () => buildPdf,
   emailTimesheet: () => emailTimesheet,
   getConfig: () => getConfig2,
   handle: () => handle5,
   handleMap: () => handleMap,
+  liveNow: () => liveNow,
   loadPeriod: () => loadPeriod,
+  logPickers: () => logPickers,
   periodFor: () => periodFor,
   personDayEvents: () => personDayEvents,
+  personSummary: () => personSummary,
   personWeek: () => personWeek,
+  softScanAction: () => softScanAction,
+  summaryRange: () => summaryRange,
   sweepSitelogTimesheets: () => sweepSitelogTimesheets
 });
 async function readKV(env, tid, key) {
@@ -10040,13 +10163,34 @@ function plausible(d) {
   const m = minsOfDay(london(d).hhmm);
   return m >= SCAN_EARLY && m <= SCAN_LATE;
 }
+async function ensureSoftCols(db) {
+  if (softReady.has(db)) return;
+  for (const sql of [
+    "ALTER TABLE scan_log ADD COLUMN dismissed_at TEXT",
+    "ALTER TABLE scan_log ADD COLUMN dismissed_by TEXT",
+    "ALTER TABLE scan_log ADD COLUMN dismissed_as TEXT",
+    "ALTER TABLE visits ADD COLUMN office_from_scan TEXT"
+  ]) {
+    try {
+      await db.prepare(sql).run();
+    } catch (e) {
+    }
+  }
+  try {
+    await db.prepare("SELECT dismissed_at FROM scan_log LIMIT 0").all();
+    await db.prepare("SELECT office_from_scan FROM visits LIMIT 0").all();
+    softReady.add(db);
+  } catch (e) {
+  }
+}
 async function loadUnconfirmedScans(db, from, to, personId) {
+  await ensureSoftCols(db);
   try {
     const r = await db.prepare(`
       SELECT l.at, l.outcome, l.person_id, l.site, l.lat, l.lng, p.first_name, p.last_name, p.company
       FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
       WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out')
-        AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+        AND l.dismissed_at IS NULL AND l.person_id IS NOT NULL AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
       ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all();
     return r.results || [];
   } catch (e) {
@@ -10054,13 +10198,14 @@ async function loadUnconfirmedScans(db, from, to, personId) {
   }
 }
 async function loadPeriod(env, from, to, opts = {}) {
+  await ensureSoftCols(env.SITELOG_DB);
   const personId = opts.personId || null;
   const db = env.SITELOG_DB;
   if (!db) throw new Error("SiteLog database is not connected to this worker");
   const res = await db.prepare(`
     SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
            COALESCE(v.auto_checkout,0) AS auto_checkout, v.transferred_to,
-           COALESCE(v.manual_entry,0) AS manual_entry, v.provided_site_name,
+           COALESCE(v.manual_entry,0) AS manual_entry, v.provided_site_name, v.office_from_scan,
            COALESCE(v.sign_in_verified,0) AS sign_in_verified,
            COALESCE(v.sign_out_verified,0) AS sign_out_verified,
            v.sign_in_distance_m, v.sign_out_distance_m,
@@ -10126,7 +10271,7 @@ async function loadPeriod(env, from, to, opts = {}) {
     } else if (state === "auto") note = "Did not sign out \u2014 closed automatically";
     else if (state === "open") note = "Still signed in";
     else if (state === "moved") note = `Signed in at ${r.transferred_to} \u2014 closed here`;
-    else if (state === "manual") note = "Added by the office";
+    else if (state === "manual") note = r.office_from_scan ? "" : "Added by the office";
     if (!note) {
       const bits = [];
       if (inOk && r.sign_in_distance_m != null) bits.push(`in ${m(r.sign_in_distance_m)} m from site`);
@@ -10135,6 +10280,7 @@ async function loadPeriod(env, from, to, opts = {}) {
       if (!outOk) bits.push("sign-out location not checked");
       note = bits.join(" \xB7 ");
     }
+    if (r.office_from_scan) note = r.office_from_scan + (note ? " \xB7 " + note : "");
     const p = ensure7(r.person_id || [r.first_name, r.last_name].join(" "), r.first_name, r.last_name, r.company);
     p.visits.push({
       _t: inD.getTime(),
@@ -10214,7 +10360,10 @@ async function loadPeriod(env, from, to, opts = {}) {
   }
   for (const p of byPerson.values()) {
     p.visits.sort((a, b) => a._t - b._t);
-    for (const v of p.visits) delete v._t;
+    for (const v of p.visits) {
+      v.inMs = v._t;
+      delete v._t;
+    }
   }
   return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -10272,6 +10421,315 @@ async function personWeek(env, personId, weekKey2) {
     totals,
     refused
   };
+}
+function summaryRange(range, today) {
+  const [y, mo] = today.split("-").map(Number);
+  const first = (yy2, mm) => {
+    const d = new Date(Date.UTC(yy2, mm - 1, 1));
+    return d.toISOString().slice(0, 10);
+  };
+  if (range === "last_14") return { from: addDays(today, -13), to: today, label: "Last 14 days" };
+  if (range === "this_month") return { from: first(y, mo), to: today, label: "This month" };
+  if (range === "last_month") return { from: first(y, mo - 1), to: addDays(first(y, mo), -1), label: "Last month" };
+  if (range === "all") return { from: null, to: today, label: "All time" };
+  return { from: mondayOf2(today), to: today, label: "This week" };
+}
+async function personSummary(env, personId, range) {
+  const today = london().key;
+  const r = summaryRange(range, today);
+  let from = r.from;
+  if (!from) {
+    const first = await env.SITELOG_DB.prepare("SELECT MIN(check_in_at) AS t FROM visits WHERE person_id = ?").bind(personId).first();
+    const d = first && parseUtc(first.t);
+    from = d ? london(d).key : today;
+  }
+  const people = await loadPeriod(env, from, r.to, { personId });
+  const visits = people.length ? people[0].visits : [];
+  const bySite = /* @__PURE__ */ new Map();
+  for (const v of visits) {
+    const k = v.site || "Unknown site";
+    if (!bySite.has(k)) bySite.set(k, { site: k, mins: 0, visits: 0, open: 0, missed: 0, scanned: 0 });
+    const e = bySite.get(k);
+    e.visits++;
+    if (v.state === "open") e.open++;
+    else e.mins += v.mins || 0;
+    if (v.state === "auto") e.missed++;
+    if (v.state === "scanned") e.scanned++;
+  }
+  const sites = [...bySite.values()].map((e) => ({ ...e, mins: Math.round(e.mins) })).sort((a, b) => b.mins - a.mins);
+  const t = personTotals({ visits });
+  return {
+    ok: true,
+    range: range || "this_week",
+    label: r.label,
+    from,
+    to: r.to,
+    today,
+    totals: { ...t, mins: Math.round(t.mins), sites: sites.length },
+    sites
+  };
+}
+async function adminLogs(env, origin, { from, to, personId, site }) {
+  const today = london().key;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to || "")) to = today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) from = to;
+  if (from > to) [from, to] = [to, from];
+  if (addDays(from, MAX_RANGE_DAYS) < to) from = addDays(to, -MAX_RANGE_DAYS);
+  const db = env.SITELOG_DB;
+  const people = await loadPeriod(env, from, to, { personId: personId || null });
+  for (const p of people) {
+    p.pid = (p.visits.find((v) => v.pid) || {}).pid || "";
+    if (site) p.visits = p.visits.filter((v) => v.site === site);
+  }
+  await addMapLinks(env, origin, people, MAP_TTL_VIEW);
+  let refused = [];
+  try {
+    refused = (await db.prepare(`
+      SELECT l.at, l.outcome, l.reason, l.person_id, l.device_token, l.site, l.nearest_site, l.lat, l.lng, l.distance_m,
+             p.first_name, p.last_name, p.company
+      FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+      WHERE l.refused = 1 AND COALESCE(l.kind,'') <> 'recheck' AND l.at >= ? AND l.at < ?${personId ? " AND l.person_id = ?" : ""}
+      ORDER BY l.at`).bind(...[addDays(from, -1), addDays(to, 2)].concat(personId ? [personId] : [])).all()).results || [];
+  } catch (e) {
+  }
+  const byKey = new Map(people.map((p) => [p.pid || p.name, p]));
+  const canSign = fileSigningEnabled(env);
+  for (const r of refused) {
+    const d = parseUtc(r.at);
+    if (!d) continue;
+    const day = london(d).key;
+    if (day < from || day > to) continue;
+    const where = r.site || r.nearest_site || "";
+    if (site && where !== site) continue;
+    const key = r.person_id || "dev:" + (r.device_token || "?").slice(0, 8);
+    let p = byKey.get(key);
+    if (!p) {
+      const name = r.person_id ? [r.first_name, r.last_name].filter(Boolean).join(" ") || "Unknown person" : "Unregistered phone";
+      p = { pid: r.person_id || "", name, company: r.company || "", visits: [] };
+      byKey.set(key, p);
+      people.push(p);
+    }
+    p.refused = p.refused || [];
+    let mapUrl = null;
+    if (canSign && r.person_id && num(r.lat) != null)
+      mapUrl = await signedFileUrl(env, origin, MAP_PATH, [r.person_id, day, "scan:" + r.at, "x"].join("|"), MAP_TTL_VIEW);
+    p.refused.push({
+      day,
+      date: niceDate(day, { weekday: "short", day: "numeric", month: "short" }).replace(",", ""),
+      time: london(d).hhmm,
+      site: where,
+      why: REFUSAL_TEXT[r.outcome] || r.reason || "The scan didn't go through",
+      distance: r.distance_m != null ? Math.round(Number(r.distance_m)) : null,
+      mapUrl,
+      hasLocation: num(r.lat) != null
+    });
+  }
+  const nowMs = Date.now();
+  const out = people.filter((p) => p.visits.length || p.refused && p.refused.length).map((p) => {
+    const t = personTotals(p);
+    const soFarOf = (v) => v.state === "open" && v.inMs ? Math.max(0, Math.round((nowMs - v.inMs) / 6e4)) : 0;
+    const soFar = p.visits.reduce((n, v) => n + soFarOf(v), 0);
+    const refusedN = (p.refused || []).length;
+    return {
+      pid: p.pid,
+      name: p.name,
+      company: p.company,
+      refused: p.refused || [],
+      visits: p.visits.map((v) => ({
+        day: v.day,
+        date: v.date,
+        site: v.site,
+        inTime: v.inTime,
+        outTime: v.outTime,
+        mins: Math.round(v.mins || 0),
+        state: v.state,
+        note: v.note,
+        inOk: v.inOk,
+        outOk: v.outOk,
+        inDist: v.inDist != null ? Math.round(Number(v.inDist)) : null,
+        outDist: v.outDist != null ? Math.round(Number(v.outDist)) : null,
+        mapIn: v.mapIn || null,
+        mapOut: v.mapOut || null,
+        scannedIn: !!v.scannedIn,
+        scannedOut: !!v.scannedOut,
+        soFar: soFarOf(v)
+      })),
+      totals: {
+        ...t,
+        mins: Math.round(t.mins),
+        soFar,
+        refused: refusedN,
+        issues: t.missed + t.open + t.scanned + refusedN
+      }
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  const sum = out.reduce(
+    (a, p) => {
+      a.mins += p.totals.mins;
+      a.soFar += p.totals.soFar;
+      a.visits += p.totals.visits;
+      a.missed += p.totals.missed;
+      a.open += p.totals.open;
+      a.scanned += p.totals.scanned;
+      a.refused += p.totals.refused;
+      a.unver += p.totals.unver;
+      return a;
+    },
+    { people: out.length, mins: 0, soFar: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 }
+  );
+  return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
+}
+async function liveNow(env, origin) {
+  const db = env.SITELOG_DB;
+  const today = london().key, nowMs = Date.now();
+  const canSign = fileSigningEnabled(env);
+  await ensureSoftCols(db);
+  const sites = new Map(((await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites").all()).results || []).map((x) => [x.site_name, { lat: num(x.lat), lng: num(x.lng), radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }]));
+  const nameOf = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
+  const open = (await db.prepare(`SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.lat, v.lng, v.accuracy,
+      v.sign_in_verified, v.sign_in_distance_m, COALESCE(v.manual_entry,0) AS manual, COALESCE(v.offline_synced,0) AS offline, v.office_from_scan,
+      p.first_name, p.last_name, p.company
+    FROM visits v JOIN people p ON p.id = v.person_id
+    WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0 ORDER BY v.site_code, v.check_in_at`).all()).results || [];
+  const onSite = [];
+  for (const r of open) {
+    const d = parseUtc(r.check_in_at);
+    if (!d) continue;
+    const day = london(d).key;
+    const hasLoc = num(r.lat) != null && num(r.lng) != null;
+    onSite.push({
+      visitId: r.id,
+      pid: r.person_id,
+      name: nameOf(r) || "Unknown",
+      company: r.company || "",
+      site: r.site_code || "",
+      inTime: london(d).hhmm,
+      inDay: day,
+      notToday: day !== today,
+      soFar: Math.max(0, Math.round((nowMs - d) / 6e4)),
+      verified: Number(r.sign_in_verified) === 1,
+      distance: r.sign_in_distance_m != null ? Math.round(Number(r.sign_in_distance_m)) : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null,
+      manual: !!r.manual,
+      offline: !!r.offline,
+      officeNote: r.office_from_scan || "",
+      mapUrl: canSign && hasLoc ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, day, r.id, "in"].join("|"), MAP_TTL_VIEW) : null
+    });
+  }
+  const since = new Date(nowMs - 26 * 36e5).toISOString();
+  const scans = ((await db.prepare(`SELECT l.id, l.at, l.outcome, l.person_id, l.device_token, l.site, l.lat, l.lng, l.accuracy,
+      p.first_name, p.last_name, p.company
+    FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+    WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','confirm_sign_out','first_visit') AND l.dismissed_at IS NULL
+      AND l.at >= ? ORDER BY l.at`).bind(since).all()).results || []).filter((r) => {
+    const d = parseUtc(r.at);
+    return d && london(d).key === today;
+  });
+  const pids = [...new Set(scans.map((r) => r.person_id).filter(Boolean))];
+  const visitsBy = /* @__PURE__ */ new Map();
+  if (pids.length) {
+    const vs = (await db.prepare(`SELECT id, person_id, site_code, check_in_at, check_out_at FROM visits WHERE person_id IN (${pids.map(() => "?").join(",")})
+        AND (check_out_at IS NULL OR check_in_at >= ? OR check_out_at >= ?)`).bind(...pids, since.replace("T", " ").slice(0, 19), since.replace("T", " ").slice(0, 19)).all()).results || [];
+    for (const v of vs) {
+      const di = parseUtc(v.check_in_at), dout = parseUtc(v.check_out_at);
+      if (di) (visitsBy.get(v.person_id) || visitsBy.set(v.person_id, []).get(v.person_id)).push({ id: v.id, site: v.site_code, tin: +di, tout: dout ? +dout : null });
+    }
+  }
+  const byKey = /* @__PURE__ */ new Map();
+  for (const r of scans) {
+    const d = parseUtc(r.at), t = +d, mine = visitsBy.get(r.person_id) || [];
+    let kind = r.outcome === "first_visit" ? "new_phone" : r.outcome === "confirm_sign_out" ? "offered_out" : "offered";
+    let visitId = null;
+    if (kind === "offered" && mine.some((v) => v.tin >= t - 6e4)) continue;
+    if (kind === "offered_out") {
+      const ov = mine.find((v) => v.site === r.site && v.tout == null && v.tin <= t);
+      if (!ov) continue;
+      if (t - ov.tin < 20 * 6e4) continue;
+      visitId = ov.id;
+    }
+    const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "") + "|" + kind;
+    const prev = byKey.get(key);
+    const site = sites.get(r.site);
+    const lat = num(r.lat), lng = num(r.lng);
+    const dist = site && site.lat != null && lat != null ? Math.round(hav(lat, lng, site.lat, site.lng)) : null;
+    byKey.set(key, {
+      pid: r.person_id || "",
+      name: r.person_id ? nameOf(r) || "Unknown" : "Unregistered phone",
+      company: r.company || "",
+      site: r.site || "",
+      time: london(d).hhmm,
+      firstTime: prev ? prev.firstTime : london(d).hhmm,
+      attempts: (prev ? prev.attempts : 0) + 1,
+      kind,
+      visitId,
+      ids: (prev ? prev.ids : []).concat(r.id),
+      firstId: prev ? prev.firstId : r.id,
+      lastId: r.id,
+      distance: dist,
+      inside: dist != null && site ? dist <= site.radius : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null,
+      mapUrl: canSign && r.person_id && lat != null ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, today, "scan:" + r.at, "x"].join("|"), MAP_TTL_VIEW) : null
+    });
+  }
+  const offered = [...byKey.values()].sort((a, b) => b.time.localeCompare(a.time));
+  return { ok: true, today, onSite, offered };
+}
+async function softScanAction(env, by, body) {
+  const db = env.SITELOG_DB;
+  await ensureSoftCols(db);
+  const action = String(body.action || "");
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 50);
+  if (!ids.length || !["dismiss", "signin", "signout"].includes(action)) return { status: 400, body: { error: "Nothing to do" } };
+  const rows = (await db.prepare(`SELECT id, at, outcome, person_id, site, lat, lng, accuracy, dismissed_at FROM scan_log
+    WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY at`).bind(...ids).all()).results || [];
+  if (!rows.length) return { status: 404, body: { error: "Those scans weren't found" } };
+  if (rows.every((r) => r.dismissed_at)) return { status: 409, body: { error: "Already dealt with" } };
+  const now2 = (/* @__PURE__ */ new Date()).toISOString();
+  const mark2 = (as) => db.prepare(`UPDATE scan_log SET dismissed_at = ?, dismissed_by = ?, dismissed_as = ?
+    WHERE id IN (${rows.map(() => "?").join(",")}) AND dismissed_at IS NULL`).bind(now2, by, as, ...rows.map((r) => r.id)).run();
+  if (action === "dismiss") {
+    await mark2("dismissed");
+    return { status: 200, body: { ok: true, done: "dismissed" } };
+  }
+  const pick = action === "signin" ? rows[0] : rows[rows.length - 1];
+  if (!pick.person_id) return { status: 400, body: { error: "This phone isn't registered to anyone, so it can't be signed in." } };
+  const d = parseUtc(pick.at);
+  const sql = d.toISOString().replace("T", " ").slice(0, 19);
+  const site = await db.prepare("SELECT lat, lng, radius_m FROM sites WHERE site_name = ?").bind(pick.site).first();
+  const lat = num(pick.lat), lng = num(pick.lng);
+  const dist = site && num(site.lat) != null && lat != null ? Math.round(hav(lat, lng, Number(site.lat), Number(site.lng))) : null;
+  const radius = site && Number(site.radius_m) > 0 ? Number(site.radius_m) : 500;
+  const inside = dist != null && dist <= radius ? 1 : 0;
+  const note = `${action === "signin" ? "Sign-in" : "Sign-out"} confirmed by ${by} from a scan at ${london(d).hhmm}`;
+  if (action === "signin") {
+    if (pick.outcome !== "confirm_check_in") return { status: 400, body: { error: "That scan didn't offer a sign-in" } };
+    const open = await db.prepare("SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL").bind(pick.person_id, pick.site).first();
+    if (open) return { status: 409, body: { error: "They're already signed in there" } };
+    const id = crypto.randomUUID();
+    await db.prepare(`INSERT INTO visits (id, person_id, site_code, check_in_at, lat, lng, accuracy, sign_in_confirmed, hs_ack,
+        sign_in_verified, sign_in_distance_m, manual_entry, served_by, office_from_scan)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, 1, 'mostlane-api', ?)`).bind(id, pick.person_id, pick.site, sql, lat, lng, num(pick.accuracy), inside, dist, note).run();
+    await mark2("signed_in");
+    return { status: 200, body: { ok: true, done: "signed_in", visitId: id, verified: !!inside } };
+  }
+  if (pick.outcome !== "confirm_sign_out") return { status: 400, body: { error: "That scan didn't offer a sign-out" } };
+  const v = await db.prepare(`SELECT id, check_in_at FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL
+    ORDER BY check_in_at DESC LIMIT 1`).bind(pick.person_id, pick.site).first();
+  if (!v) return { status: 409, body: { error: "They're not signed in there any more" } };
+  const vin = parseUtc(v.check_in_at);
+  if (vin && +vin > +d) return { status: 409, body: { error: "That scan was before their current sign-in" } };
+  await db.prepare(`UPDATE visits SET check_out_at = ?, out_lat = ?, out_lng = ?, out_accuracy = ?, sign_out_confirmed = 1,
+      sign_out_verified = ?, sign_out_distance_m = ?, office_from_scan = COALESCE(office_from_scan || ' \xB7 ', '') || ?
+    WHERE id = ? AND check_out_at IS NULL`).bind(sql, lat, lng, num(pick.accuracy), inside, dist, note, v.id).run();
+  await mark2("signed_out");
+  return { status: 200, body: { ok: true, done: "signed_out", visitId: v.id, verified: !!inside } };
+}
+async function logPickers(env) {
+  const db = env.SITELOG_DB;
+  const people = ((await db.prepare(`SELECT id, first_name, last_name, company, COALESCE(archived,0) AS archived FROM people
+    WHERE COALESCE(is_transfer_pending,0) = 0 ORDER BY first_name, last_name`).all()).results || []).map((p) => ({ id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" ") || "Unnamed", company: p.company || "", archived: !!p.archived }));
+  const sites = ((await db.prepare("SELECT site_name FROM sites WHERE COALESCE(archived,0) = 0 ORDER BY site_name").all()).results || []).map((s) => s.site_name);
+  return { ok: true, people, sites };
 }
 async function buildPdf(env, kind, dateKey) {
   const per = periodFor(kind, dateKey);
@@ -10352,7 +10810,7 @@ async function personDayEvents(env, personId, dateKey) {
   let scans = [];
   try {
     scans = (await db.prepare(`SELECT at, kind, outcome, refused, site, nearest_site, lat, lng, accuracy, distance_m FROM scan_log
-      WHERE person_id = ? AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
+      WHERE person_id = ? AND COALESCE(kind,'') <> 'recheck' AND at >= ? AND at < ? ORDER BY at`).bind(personId, addDays(dateKey, -1), addDays(dateKey, 2)).all()).results || [];
   } catch (e) {
   }
   const sites = (await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites WHERE COALESCE(archived,0) = 0").all()).results || [];
@@ -10427,7 +10885,7 @@ function mapPage(title, body, status = 200) {
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc3(title)}</title>${body}`, {
     status,
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" }
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "strict-origin", "X-Robots-Tag": "noindex" }
   });
 }
 async function handleMap(request, env, ctx, url) {
@@ -10471,8 +10929,8 @@ async function handleMap(request, env, ctx, url) {
   document.getElementById("sub").textContent = D.dayLabel + " \xB7 " + D.events.length + " event" + (D.events.length==1?"":"s");
   var COL = { in:"#16a34a", out:"#1d4ed8", scan:"#94a3b8", refused:"#dc2626" };
   var map = L.map("map", { zoomControl:true });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    { maxZoom:20, subdomains:"abcd", attribution:"&copy; OpenStreetMap &copy; CARTO" }).addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom:19, attribution:"&copy; OpenStreetMap contributors" }).addTo(map);
   D.sites.forEach(function(s){
     L.circle([s.lat,s.lng], { radius:s.radius, color:"#2563eb", weight:1, fillOpacity:.05 }).addTo(map);
     L.circleMarker([s.lat,s.lng], { radius:4, color:"#1e3a8a", fillColor:"#1e3a8a", fillOpacity:1, weight:1 })
@@ -10583,6 +11041,42 @@ async function handle5(request, env, ctx, url, sess) {
       people: people.map((p) => Object.assign({}, p, { totals: personTotals(p) }))
     }, {}, env, request);
   }
+  if (path === "/logs" && request.method === "GET") {
+    const q = url.searchParams;
+    try {
+      return json(await adminLogs(env, apiOrigin(env, url), {
+        from: q.get("from"),
+        to: q.get("to"),
+        personId: q.get("person") || "",
+        site: q.get("site") || ""
+      }), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
+  if (path === "/soft" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    try {
+      const r = await softScanAction(env, sess && sess.user && sess.user.username || "office", b);
+      return json(r.body, { status: r.status }, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
+  if (path === "/now" && request.method === "GET") {
+    try {
+      return json(await liveNow(env, apiOrigin(env, url)), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
+  if (path === "/pickers" && request.method === "GET") {
+    try {
+      return json(await logPickers(env), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
   const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
   if (path === "/config" && request.method === "POST") {
     const cur = await getConfig2(env, tid);
@@ -10616,7 +11110,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   return error("Not found", 404, env, request);
 }
-var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, REFUSAL_TEXT, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
+var CFG_KEY3, SENT_KEY, DAILY_FROM, DAILY_FORCE, WEEKLY_FROM, dow, mondayOf2, num, SCAN_EARLY, SCAN_LATE, PRE_CONFIRM_MS, POST_SIGNOUT_MS, MIN_SPAN_MS, minsOfDay, softReady, REFUSAL_TEXT, MAX_RANGE_DAYS, esc3, MAP_PATH, MAP_TTL_EMAIL, MAP_TTL_VIEW, SCAN_LABEL;
 var init_sitelogts = __esm({
   "src/routes/sitelogts.js"() {
     init_http();
@@ -10642,6 +11136,7 @@ var init_sitelogts = __esm({
       const [h, m] = hhmm.split(":").map(Number);
       return h * 60 + m;
     };
+    softReady = /* @__PURE__ */ new WeakSet();
     REFUSAL_TEXT = {
       unknown_site: "You weren't at any SiteLog site",
       outside_site: "You were too far from the site for it to sign you in or out",
@@ -10654,6 +11149,7 @@ var init_sitelogts = __esm({
       phone_timeout: "Your phone took too long to find its location",
       phone_no_fix: "Your phone had no location when you registered"
     };
+    MAX_RANGE_DAYS = 93;
     esc3 = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     MAP_PATH = "/sitelog-map";
     MAP_TTL_EMAIL = 90 * 86400;
@@ -11364,7 +11860,7 @@ async function handle6(request, env, ctx) {
     const outcome = out.status || (out.ok === false ? "error" : res.ok ? "ok" : "http_" + res.status);
     const refused = !res.ok || out.ok === false || !SCAN_OK.has(outcome);
     const p = logScan(env, {
-      kind,
+      kind: kind === "scan" && body.auto === true ? "recheck" : kind,
       outcome,
       refused,
       reason: out.error || out.reason || null,
@@ -11860,6 +12356,7 @@ async function handleInner(request, env, ctx) {
                COALESCE(is_main,0) as is_main,
                portal_username,
                COALESCE(doc_access_always,0) as doc_access_always,
+               COALESCE(is_transfer_pending,0) as is_transfer_pending,
                (SELECT COUNT(*) FROM visits WHERE visits.person_id = people.id) AS visit_count,
                (SELECT COUNT(*) FROM devices WHERE devices.person_id = people.id) AS device_count,
                (SELECT MAX(last_seen) FROM devices WHERE devices.person_id = people.id) AS device_last_seen
@@ -12047,6 +12544,12 @@ async function handleInner(request, env, ctx) {
     try {
       await env.SITELOG_DB.prepare(
         `UPDATE document_attendees SET person_id = ? WHERE person_id IN (${placeholders})`
+      ).bind(primaryId, ...mergeIds).run();
+    } catch (e) {
+    }
+    try {
+      await env.SITELOG_DB.prepare(
+        `UPDATE scan_log SET person_id = ? WHERE person_id IN (${placeholders})`
       ).bind(primaryId, ...mergeIds).run();
     } catch (e) {
     }
@@ -12632,7 +13135,13 @@ async function handleInner(request, env, ctx) {
       "SELECT id, check_in_at FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL ORDER BY check_in_at DESC"
     ).bind(device.person_id, siteCode).first();
     if (intent === "out") {
-      if (!openVisit) return await logPending(siteCode, "no_open_visit");
+      if (!openVisit) {
+        const done = await env.SITELOG_DB.prepare(
+          "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at = ? AND COALESCE(offline_synced,0) = 1 LIMIT 1"
+        ).bind(device.person_id, siteCode, occurredSql).first();
+        if (done) return json4({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+        return await logPending(siteCode, "no_open_visit");
+      }
       const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
       await env.SITELOG_DB.prepare(
         "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1, out_lat = ?, out_lng = ?, out_accuracy = ?, sign_out_verified = 1, sign_out_distance_m = ? WHERE id = ? AND check_out_at IS NULL"
@@ -12945,6 +13454,16 @@ async function handleInner(request, env, ctx) {
     const { personWeek: personWeek2 } = await Promise.resolve().then(() => (init_sitelogts(), sitelogts_exports));
     return json4(await personWeek2(env, device.person_id, url.searchParams.get("week") || ""));
   }
+  if (url.pathname === "/my-summary" && request.method === "GET") {
+    const deviceToken = url.searchParams.get("deviceToken");
+    if (!deviceToken) return json4({ error: "Missing deviceToken" }, 400);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(String(deviceToken).slice(0, 128)).first();
+    if (!device) return json4({ ok: false, error: "This phone isn't registered" }, 404);
+    const { personSummary: personSummary2 } = await Promise.resolve().then(() => (init_sitelogts(), sitelogts_exports));
+    return json4(await personSummary2(env, device.person_id, url.searchParams.get("range") || "this_week"));
+  }
   if (url.pathname === "/scan-log" && request.method === "GET") {
     const guard = requireAdmin2();
     if (guard) return guard;
@@ -13244,6 +13763,27 @@ async function handleInner(request, env, ctx) {
     const guard = requireAdmin2();
     if (guard) return guard;
     const site = url.searchParams.get("site") || "";
+    if (!site) {
+      const all = await env.SITELOG_DB.prepare(`
+          SELECT v.id as visit_id, v.person_id, v.site_code, v.check_in_at, p.first_name, p.last_name, p.company
+          FROM visits v
+          JOIN people p ON v.person_id = p.id
+          WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
+          ORDER BY v.site_code, v.check_in_at
+        `).all();
+      const people2 = (all.results || []).map((r) => {
+        const t = r.check_in_at ? String(r.check_in_at) : "";
+        return {
+          visit_id: r.visit_id,
+          person_id: r.person_id || "",
+          name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+          company: r.company || "",
+          site: r.site_code || "",
+          check_in_at: t && !/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t.replace(" ", "T") + "Z" : t
+        };
+      });
+      return json4({ people: people2 });
+    }
     const rows = await env.SITELOG_DB.prepare(`
         SELECT v.id as visit_id, v.person_id, p.first_name, p.last_name, p.company
         FROM visits v
@@ -32605,6 +33145,9 @@ async function handle18(request, env, ctx, url, sess) {
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
   const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
   const target = SITELOG_API + sub + url.search;
+  const money3 = perms.FullAccess === "Yes";
+  if (!money3 && MONEY_ONLY_PATHS.has(sub))
+    return error("Only Full Access users can see SiteLog costs", 403, env, request);
   const init = {
     method: request.method,
     headers: { "x-admin-secret": env.SITELOG_ADMIN_SECRET }
@@ -32612,6 +33155,15 @@ async function handle18(request, env, ctx, url, sess) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.headers["Content-Type"] = request.headers.get("Content-Type") || "application/json";
     init.body = await request.arrayBuffer();
+    if (!money3 && MONEY_WRITE_PATHS.has(sub)) {
+      try {
+        const b = JSON.parse(new TextDecoder().decode(init.body) || "{}");
+        init.body = JSON.stringify(stripMoneyFromBody(b));
+        init.headers["Content-Type"] = "application/json";
+      } catch (e) {
+        return error("Bad request body", 400, env, request);
+      }
+    }
   }
   let res;
   try {
@@ -32624,11 +33176,44 @@ async function handle18(request, env, ctx, url, sess) {
     return error("SiteLog API unreachable: " + e.message, 502, env, request);
   }
   const headers = new Headers(corsHeaders(env, request));
+  if (!money3 && MONEY_READ_PATHS.has(sub) && res.ok) {
+    const data = await res.json().catch(() => null);
+    headers.set("Content-Type", "application/json");
+    return new Response(JSON.stringify(stripMoneyFromPeople(data)), { status: res.status, headers });
+  }
   const ct = res.headers.get("Content-Type");
   if (ct) headers.set("Content-Type", ct);
   const cd = res.headers.get("Content-Disposition");
   if (cd) headers.set("Content-Disposition", cd);
   return new Response(res.body, { status: res.status, headers });
+}
+var MONEY_FIELDS = [
+  "hourly_rate",
+  "hourlyRate",
+  "fuel_rate",
+  "fuelRate",
+  "fuel_paid",
+  "fuelPaid",
+  "travel_time_paid",
+  "travelTimePaid",
+  "travel_status",
+  "travelStatus",
+  "travel_cap_type",
+  "travelCapType",
+  "travel_cap_value",
+  "travelCapValue"
+];
+var MONEY_ONLY_PATHS = /* @__PURE__ */ new Set(["/job-costing"]);
+var MONEY_WRITE_PATHS = /* @__PURE__ */ new Set(["/update-engineer", "/add-engineer"]);
+var MONEY_READ_PATHS = /* @__PURE__ */ new Set(["/engineers"]);
+function stripMoneyFromBody(b) {
+  const out = { ...b || {} };
+  for (const k of MONEY_FIELDS) delete out[k];
+  return out;
+}
+function stripMoneyFromPeople(data) {
+  if (!data || !Array.isArray(data.engineers)) return data;
+  return { ...data, money: false, engineers: data.engineers.map(stripMoneyFromBody) };
 }
 function b64u(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -53338,6 +53923,7 @@ var worker = {
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
       ctx.waitUntil(sweepTimesheetReminders(env).catch((e) => console.error("scheduled timesheet reminder:", e)));
+      ctx.waitUntil(sweepTimesheetInvoiceEmails(env).catch((e) => console.error("scheduled invoice email:", e)));
       ctx.waitUntil(sweepStaffRecordReminders(env).catch((e) => console.error("scheduled staff-record reminder:", e)));
       if (env.SITELOG_DB) ctx.waitUntil(sweepAutoClose(env).catch((e) => console.error("scheduled sitelog auto-close:", e)));
     }
