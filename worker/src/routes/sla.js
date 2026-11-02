@@ -3709,9 +3709,10 @@ function firestopMissing(job) {
 function isAuditJob(job) { return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
 function auditMissing(job) {
   const items = (job && job.auditItems) || [];
-  const outstanding = items.filter(it => !(it && it.done && it.donePhoto));
+  const tasks = items.filter(it => it && !it.header);   // section headers aren't completable
+  const outstanding = tasks.filter(it => !(it.done && it.donePhoto));
   if (!outstanding.length) return [];
-  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+  return [`a completion photo on ${outstanding.length} of ${tasks.length} audit item${tasks.length === 1 ? "" : "s"}`];
 }
 // Normalise a builder's audit-item list into the stored shape, PRESERVING each
 // item's completion state + photos from the existing job (matched by id) so an
@@ -3723,6 +3724,12 @@ function normAuditItems(input, existing) {
   const out = [];
   for (const raw of input) {
     if (!raw) continue;
+    if (raw.header) {                                        // a section header — no photo/completion
+      const ht = String(raw.text || raw.title || "").trim();
+      if (ht) out.push({ id: String(raw.id || "") || crypto.randomUUID(), text: ht.slice(0, 2000), header: true });
+      if (out.length >= 200) break;
+      continue;
+    }
     const text = String(raw.text || raw.title || "").trim();
     if (!text && !(raw.id && prev[raw.id])) continue;       // drop blank new rows
     const id = String(raw.id || "") || crypto.randomUUID();
