@@ -401,6 +401,67 @@ export async function adminLogs(env, origin, { from, to, personId, site }) {
     { people: out.length, mins: 0, soFar: 0, visits: 0, missed: 0, open: 0, scanned: 0, refused: 0, unver: 0 });
   return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
 }
+// The Now tab: who is signed in (with the sign-in's location check + map), and
+// today's sign-ins that were OFFERED but never tapped ("soft scans").
+export async function liveNow(env, origin) {
+  const db = env.SITELOG_DB;
+  const today = london().key, nowMs = Date.now();
+  const canSign = fileSigningEnabled(env);
+  const sites = new Map(((await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites").all()).results || [])
+    .map(x => [x.site_name, { lat: num(x.lat), lng: num(x.lng), radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }]));
+  const nameOf = r => [r.first_name, r.last_name].filter(Boolean).join(" ");
+
+  const open = (await db.prepare(`SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.lat, v.lng, v.accuracy,
+      v.sign_in_verified, v.sign_in_distance_m, COALESCE(v.manual_entry,0) AS manual, COALESCE(v.offline_synced,0) AS offline,
+      p.first_name, p.last_name, p.company
+    FROM visits v JOIN people p ON p.id = v.person_id
+    WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0 ORDER BY v.site_code, v.check_in_at`).all()).results || [];
+  const onSite = [];
+  for (const r of open) {
+    const d = parseUtc(r.check_in_at); if (!d) continue;
+    const day = london(d).key;
+    const hasLoc = num(r.lat) != null && num(r.lng) != null;
+    onSite.push({ visitId: r.id, pid: r.person_id, name: nameOf(r) || "Unknown", company: r.company || "", site: r.site_code || "",
+      inTime: london(d).hhmm, inDay: day, notToday: day !== today, soFar: Math.max(0, Math.round((nowMs - d) / 60000)),
+      verified: Number(r.sign_in_verified) === 1, distance: r.sign_in_distance_m != null ? Math.round(Number(r.sign_in_distance_m)) : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null, manual: !!r.manual, offline: !!r.offline,
+      mapUrl: canSign && hasLoc ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, day, r.id, "in"].join("|"), MAP_TTL_VIEW) : null });
+  }
+
+  // Offered-but-not-tapped: today's scans that showed Sign in (or the new-phone form) with no sign-in after them.
+  const since = new Date(nowMs - 26 * 3600e3).toISOString();
+  const scans = ((await db.prepare(`SELECT l.at, l.outcome, l.person_id, l.device_token, l.site, l.lat, l.lng, l.accuracy,
+      p.first_name, p.last_name, p.company
+    FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+    WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','first_visit') AND l.at >= ? ORDER BY l.at`).bind(since).all()).results || [])
+    .filter(r => { const d = parseUtc(r.at); return d && london(d).key === today; });
+  const pids = [...new Set(scans.map(r => r.person_id).filter(Boolean))];
+  const visitsBy = new Map();
+  if (pids.length) {
+    const vs = (await db.prepare(`SELECT person_id, site_code, check_in_at FROM visits WHERE person_id IN (${pids.map(() => "?").join(",")}) AND check_in_at >= ?`)
+      .bind(...pids, since.replace("T", " ").slice(0, 19)).all()).results || [];
+    for (const v of vs) { const d = parseUtc(v.check_in_at); if (d) (visitsBy.get(v.person_id) || visitsBy.set(v.person_id, []).get(v.person_id)).push({ site: v.site_code, t: +d }); }
+  }
+  const byKey = new Map();
+  for (const r of scans) {
+    const d = parseUtc(r.at);
+    // Signed in after this scan (any site) = the offer was taken up, or moved on to a real sign-in.
+    if (r.person_id && (visitsBy.get(r.person_id) || []).some(v => v.t >= +d - 60000)) continue;
+    const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "");
+    const prev = byKey.get(key);
+    const site = sites.get(r.site);
+    const lat = num(r.lat), lng = num(r.lng);
+    const dist = site && site.lat != null && lat != null ? Math.round(hav(lat, lng, site.lat, site.lng)) : null;
+    byKey.set(key, { pid: r.person_id || "", name: r.person_id ? (nameOf(r) || "Unknown") : "Unregistered phone",
+      company: r.company || "", site: r.site || "", time: london(d).hhmm, firstTime: prev ? prev.firstTime : london(d).hhmm,
+      attempts: (prev ? prev.attempts : 0) + 1, kind: r.outcome === "first_visit" ? "new_phone" : "offered",
+      distance: dist, inside: dist != null && site ? dist <= site.radius : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null,
+      mapUrl: canSign && r.person_id && lat != null ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, today, "scan:" + r.at, "x"].join("|"), MAP_TTL_VIEW) : null });
+  }
+  const offered = [...byKey.values()].sort((a, b) => b.time.localeCompare(a.time));
+  return { ok: true, today, onSite, offered };
+}
 // People + sites for the Logs pickers.
 export async function logPickers(env) {
   const db = env.SITELOG_DB;
@@ -700,6 +761,10 @@ export async function handle(request, env, ctx, url, sess) {
       return json(await adminLogs(env, apiOrigin(env, url), { from: q.get("from"), to: q.get("to"),
         personId: q.get("person") || "", site: q.get("site") || "" }), {}, env, request);
     } catch (e) { return error(e.message || "SiteLog unavailable", 503, env, request); }
+  }
+  if (path === "/now" && request.method === "GET") {
+    try { return json(await liveNow(env, apiOrigin(env, url)), {}, env, request); }
+    catch (e) { return error(e.message || "SiteLog unavailable", 503, env, request); }
   }
   if (path === "/pickers" && request.method === "GET") {
     try { return json(await logPickers(env), {}, env, request); }

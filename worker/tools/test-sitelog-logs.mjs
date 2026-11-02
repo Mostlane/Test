@@ -14,13 +14,13 @@ function d1(db) {
 }
 const sl = new DatabaseSync(":memory:");
 sl.exec(`CREATE TABLE people (id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, company TEXT, archived INTEGER DEFAULT 0, is_transfer_pending INTEGER DEFAULT 0);
-CREATE TABLE visits (id TEXT PRIMARY KEY, person_id TEXT, site_code TEXT, check_in_at TEXT, check_out_at TEXT, auto_checkout INTEGER DEFAULT 0, transferred_to TEXT, manual_entry INTEGER DEFAULT 0, provided_site_name TEXT, sign_in_verified INTEGER DEFAULT 0, sign_out_verified INTEGER DEFAULT 0, sign_in_distance_m REAL, sign_out_distance_m REAL, lat REAL, lng REAL, accuracy REAL, out_lat REAL, out_lng REAL, out_accuracy REAL);
+CREATE TABLE visits (id TEXT PRIMARY KEY, person_id TEXT, site_code TEXT, check_in_at TEXT, check_out_at TEXT, auto_checkout INTEGER DEFAULT 0, transferred_to TEXT, manual_entry INTEGER DEFAULT 0, provided_site_name TEXT, sign_in_verified INTEGER DEFAULT 0, sign_out_verified INTEGER DEFAULT 0, sign_in_distance_m REAL, sign_out_distance_m REAL, lat REAL, lng REAL, accuracy REAL, out_lat REAL, out_lng REAL, out_accuracy REAL, offline_synced INTEGER DEFAULT 0);
 CREATE TABLE sites (site_name TEXT, lat REAL, lng REAL, radius_m INTEGER, archived INTEGER DEFAULT 0);
 CREATE TABLE scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, kind TEXT, outcome TEXT, refused INTEGER DEFAULT 0, reason TEXT, device_token TEXT, person_id TEXT, site TEXT, lat REAL, lng REAL, accuracy REAL, distance_m INTEGER, nearest_site TEXT, detail TEXT);
 INSERT INTO sites VALUES ('Site A',50.8,-1.1,500,0),('Site B',50.9,-1.2,500,0);
 INSERT INTO people (id,first_name,last_name,company) VALUES ('p1','User','One','Mostlane'),('p2','User','Two','DCI'),('p3','User','Three','X');
 INSERT INTO people (id,first_name,last_name,company,is_transfer_pending) VALUES ('tmp','User','One','Mostlane',1);
-INSERT INTO visits VALUES
+INSERT INTO visits (id,person_id,site_code,check_in_at,check_out_at,auto_checkout,transferred_to,manual_entry,provided_site_name,sign_in_verified,sign_out_verified,sign_in_distance_m,sign_out_distance_m,lat,lng,accuracy,out_lat,out_lng,out_accuracy) VALUES
  ('v1','p1','Site A','2026-10-12 07:00:00','2026-10-12 15:00:00',0,NULL,0,NULL,1,1,20,30,50.8,-1.1,10,50.8,-1.1,10),
  ('v2','p1','Site B','2026-10-13 07:00:00','2026-10-13 15:00:00',1,NULL,0,NULL,1,0,15,NULL,50.9,-1.2,10,NULL,NULL,NULL),
  ('v3','p2','Site A','2026-10-12 08:00:00','2026-10-12 12:00:00',0,NULL,0,NULL,1,1,10,10,50.8,-1.1,10,50.8,-1.1,10),
@@ -65,4 +65,18 @@ r = await ts.adminLogs(env, O, { from: todayIso, to: todayIso, personId: "p3" })
 const op = r.people[0];
 ok(op && op.visits[0].state === "open" && op.visits[0].soFar >= 88 && op.visits[0].soFar <= 92 && op.totals.mins === 0 && op.totals.soFar >= 88, "open visit shows ~90 min so far, not in hours");
 ok(r.summary.soFar >= 88 && op.totals.unver === 0, "summary carries time so far; verified sign-in isn't 'not checked'");
+// Now tab: on site with location check, plus offered-but-not-tapped scans.
+const isoAgo = m => new Date(Date.now() - m * 60000).toISOString();
+sl.exec(`INSERT INTO scan_log (at,kind,outcome,refused,person_id,site,lat,lng,accuracy,device_token) VALUES
+ ('${isoAgo(30)}','scan','confirm_check_in',0,'p2','Site A',50.8001,-1.1,8,'d2'),
+ ('${isoAgo(20)}','scan','confirm_check_in',0,'p2','Site A',50.8001,-1.1,8,'d2'),
+ ('${isoAgo(25)}','scan','first_visit',0,NULL,'Site B',50.9,-1.2,7,'newphone1'),
+ ('${isoAgo(100)}','scan','confirm_check_in',0,'p3','Site A',50.8,-1.1,9,'d3')`);
+const nw = await ts.liveNow(env, O);
+const me = nw.onSite.find(x => x.pid === "p3");
+ok(me && me.verified === true && me.distance === 12 && me.mapUrl && me.soFar >= 88, "on site: verified tick, distance, map link, time so far");
+ok(nw.offered.length === 2, "two soft scans: p2 (twice, merged) + new phone; p3's offer was taken up by a sign-in");
+const p2o = nw.offered.find(x => x.pid === "p2");
+ok(p2o && p2o.attempts === 2 && p2o.inside === true && p2o.distance <= 20 && p2o.mapUrl && p2o.kind === "offered", "soft scan: who/where/inside boundary/map, repeat scans merged");
+ok(nw.offered.some(x => x.kind === "new_phone" && x.name === "Unregistered phone" && !x.mapUrl), "new phone shown, no map");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

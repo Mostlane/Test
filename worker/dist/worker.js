@@ -9972,6 +9972,7 @@ __export(sitelogts_exports, {
   getConfig: () => getConfig2,
   handle: () => handle5,
   handleMap: () => handleMap,
+  liveNow: () => liveNow,
   loadPeriod: () => loadPeriod,
   logPickers: () => logPickers,
   periodFor: () => periodFor,
@@ -10439,6 +10440,85 @@ async function adminLogs(env, origin, { from, to, personId, site }) {
   );
   return { ok: true, from, to, today, maps: canSign, people: out, summary: sum };
 }
+async function liveNow(env, origin) {
+  const db = env.SITELOG_DB;
+  const today = london().key, nowMs = Date.now();
+  const canSign = fileSigningEnabled(env);
+  const sites = new Map(((await db.prepare("SELECT site_name, lat, lng, radius_m FROM sites").all()).results || []).map((x) => [x.site_name, { lat: num(x.lat), lng: num(x.lng), radius: Number(x.radius_m) > 0 ? Number(x.radius_m) : 500 }]));
+  const nameOf = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
+  const open = (await db.prepare(`SELECT v.id, v.person_id, v.site_code, v.check_in_at, v.lat, v.lng, v.accuracy,
+      v.sign_in_verified, v.sign_in_distance_m, COALESCE(v.manual_entry,0) AS manual, COALESCE(v.offline_synced,0) AS offline,
+      p.first_name, p.last_name, p.company
+    FROM visits v JOIN people p ON p.id = v.person_id
+    WHERE v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0 ORDER BY v.site_code, v.check_in_at`).all()).results || [];
+  const onSite = [];
+  for (const r of open) {
+    const d = parseUtc(r.check_in_at);
+    if (!d) continue;
+    const day = london(d).key;
+    const hasLoc = num(r.lat) != null && num(r.lng) != null;
+    onSite.push({
+      visitId: r.id,
+      pid: r.person_id,
+      name: nameOf(r) || "Unknown",
+      company: r.company || "",
+      site: r.site_code || "",
+      inTime: london(d).hhmm,
+      inDay: day,
+      notToday: day !== today,
+      soFar: Math.max(0, Math.round((nowMs - d) / 6e4)),
+      verified: Number(r.sign_in_verified) === 1,
+      distance: r.sign_in_distance_m != null ? Math.round(Number(r.sign_in_distance_m)) : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null,
+      manual: !!r.manual,
+      offline: !!r.offline,
+      mapUrl: canSign && hasLoc ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, day, r.id, "in"].join("|"), MAP_TTL_VIEW) : null
+    });
+  }
+  const since = new Date(nowMs - 26 * 36e5).toISOString();
+  const scans = ((await db.prepare(`SELECT l.at, l.outcome, l.person_id, l.device_token, l.site, l.lat, l.lng, l.accuracy,
+      p.first_name, p.last_name, p.company
+    FROM scan_log l LEFT JOIN people p ON p.id = l.person_id
+    WHERE l.kind = 'scan' AND l.outcome IN ('confirm_check_in','first_visit') AND l.at >= ? ORDER BY l.at`).bind(since).all()).results || []).filter((r) => {
+    const d = parseUtc(r.at);
+    return d && london(d).key === today;
+  });
+  const pids = [...new Set(scans.map((r) => r.person_id).filter(Boolean))];
+  const visitsBy = /* @__PURE__ */ new Map();
+  if (pids.length) {
+    const vs = (await db.prepare(`SELECT person_id, site_code, check_in_at FROM visits WHERE person_id IN (${pids.map(() => "?").join(",")}) AND check_in_at >= ?`).bind(...pids, since.replace("T", " ").slice(0, 19)).all()).results || [];
+    for (const v of vs) {
+      const d = parseUtc(v.check_in_at);
+      if (d) (visitsBy.get(v.person_id) || visitsBy.set(v.person_id, []).get(v.person_id)).push({ site: v.site_code, t: +d });
+    }
+  }
+  const byKey = /* @__PURE__ */ new Map();
+  for (const r of scans) {
+    const d = parseUtc(r.at);
+    if (r.person_id && (visitsBy.get(r.person_id) || []).some((v) => v.t >= +d - 6e4)) continue;
+    const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "");
+    const prev = byKey.get(key);
+    const site = sites.get(r.site);
+    const lat = num(r.lat), lng = num(r.lng);
+    const dist = site && site.lat != null && lat != null ? Math.round(hav(lat, lng, site.lat, site.lng)) : null;
+    byKey.set(key, {
+      pid: r.person_id || "",
+      name: r.person_id ? nameOf(r) || "Unknown" : "Unregistered phone",
+      company: r.company || "",
+      site: r.site || "",
+      time: london(d).hhmm,
+      firstTime: prev ? prev.firstTime : london(d).hhmm,
+      attempts: (prev ? prev.attempts : 0) + 1,
+      kind: r.outcome === "first_visit" ? "new_phone" : "offered",
+      distance: dist,
+      inside: dist != null && site ? dist <= site.radius : null,
+      accuracy: r.accuracy != null ? Math.round(Number(r.accuracy)) : null,
+      mapUrl: canSign && r.person_id && lat != null ? await signedFileUrl(env, origin, MAP_PATH, [r.person_id, today, "scan:" + r.at, "x"].join("|"), MAP_TTL_VIEW) : null
+    });
+  }
+  const offered = [...byKey.values()].sort((a, b) => b.time.localeCompare(a.time));
+  return { ok: true, today, onSite, offered };
+}
 async function logPickers(env) {
   const db = env.SITELOG_DB;
   const people = ((await db.prepare(`SELECT id, first_name, last_name, company, COALESCE(archived,0) AS archived FROM people
@@ -10765,6 +10845,13 @@ async function handle5(request, env, ctx, url, sess) {
         personId: q.get("person") || "",
         site: q.get("site") || ""
       }), {}, env, request);
+    } catch (e) {
+      return error(e.message || "SiteLog unavailable", 503, env, request);
+    }
+  }
+  if (path === "/now" && request.method === "GET") {
+    try {
+      return json(await liveNow(env, apiOrigin(env, url)), {}, env, request);
     } catch (e) {
       return error(e.message || "SiteLog unavailable", 503, env, request);
     }
