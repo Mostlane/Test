@@ -84,6 +84,7 @@ export function periodFor(kind, dateKey) {
 // So is one within 30 min AFTER a sign-out: that's someone leaving, not arriving.
 // Every such visit is state "scanned" and flagged "Scanned but not confirmed".
 const num = v => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v))) ? null : Number(v);
+const EARLY_OUT_MS = 60 * 60000;
 const SCAN_EARLY = 5 * 60, SCAN_LATE = 21 * 60, PRE_CONFIRM_MS = 20 * 60000, POST_SIGNOUT_MS = 30 * 60000, MIN_SPAN_MS = 30 * 60000;
 const minsOfDay = hhmm => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
 function plausible(d) { const m = minsOfDay(london(d).hhmm); return m >= SCAN_EARLY && m <= SCAN_LATE; }
@@ -176,7 +177,10 @@ export async function loadPeriod(env, from, to, opts = {}) {
       const limit = outD ? outD.getTime() : Infinity;
       for (const s of scansBy.get(r.person_id) || []) {
         const t = s._d.getTime();
-        if (s.outcome !== "confirm_sign_out" || t <= inD.getTime() + 60000 || t > limit) continue;
+        // A "sign out?" offer in the first hour after signing in is the app re-checking
+        // itself (unlock / reopen), not someone leaving — before 2 Nov those were logged
+        // as scans. Using one would cut a full day to minutes (Oleh 28 Oct: 08:17).
+        if (s.outcome !== "confirm_sign_out" || t < inD.getTime() + EARLY_OUT_MS || t > limit) continue;
         if (london(s._d).key !== day || !plausible(s._d)) continue;
         scannedOut = s._d; scannedOutAt = s;
       }
@@ -472,7 +476,7 @@ export async function liveNow(env, origin) {
     if (kind === "offered_out") {
       const ov = mine.find(v => v.site === r.site && v.tout == null && v.tin <= t);
       if (!ov) continue;                                                                    // already signed out / closed
-      if (t - ov.tin < 20 * 60000) continue;   // a "sign out?" minutes after signing in = the app re-checking, not a real scan (older app versions)
+      if (t - ov.tin < EARLY_OUT_MS) continue;   // a "sign out?" within an hour of signing in = the app re-checking, not a real scan (older app versions)
       visitId = ov.id;
     }
     const key = (r.person_id || "dev:" + (r.device_token || "?")) + "|" + (r.site || "") + "|" + kind;

@@ -158,6 +158,22 @@ ok(all.from === "2026-10-05" && all.totals.visits >= sm.totals.visits, "all time
 ok((await ts.personSummary(env, "p2", "all")).sites.some(x => x.missed === 1), "missed sign-out flagged per site");
 ok((await ts.personSummary(env, "nobody", "all")).sites.length === 0, "summary: nobody else's visits");
 
+// ── A "sign out?" within an hour of signing in is the app re-checking, not leaving (Oleh 28 Oct) ──
+sl.exec(`INSERT INTO people VALUES ('p11','Early','Out',''),('p12','Half','Day','');
+INSERT INTO visits (id,person_id,site_code,check_in_at,check_out_at,auto_checkout,sign_in_verified,sign_out_verified) VALUES
+ ('e11','p11','Jubilee','2026-10-28 08:02:10','2026-10-28 16:00:00',1,1,0),
+ ('e12','p12','Jubilee','2026-10-31 08:24:19','2026-10-31 16:00:00',1,1,0);
+INSERT INTO scan_log (at,kind,outcome,person_id,site) VALUES
+ ('2026-10-28T08:17:55.577Z','scan','confirm_sign_out','p11','Jubilee'),
+ ('2026-10-28T08:17:55.584Z','scan','confirm_sign_out','p11','Jubilee'),
+ ('2026-10-31T08:35:19.000Z','scan','confirm_sign_out','p12','Jubilee'),
+ ('2026-10-31T12:01:55.000Z','scan','confirm_sign_out','p12','Jubilee');`);
+at("2026-11-02T12:00:00Z");
+const eo = await ts.loadPeriod(env, "2026-10-28", "2026-10-31");
+const e11 = eo.find(p => p.id === "p11").visits[0], e12 = eo.find(p => p.id === "p12").visits[0];
+ok(e11.state === "auto" && e11.outTime === "16:00" && Math.round(e11.mins) === 478, "sign-out offer 15 min after sign-in ignored → missed sign-out at 16:00");
+ok(e12.state === "scanned" && e12.outTime === "12:01", "a later sign-out offer still used; the 11-min one ignored");
+
 // ── Timesheet tab: any dates, chosen people ──
 const rp = ts.rangePeriod;
 ok(rp("2026-10-05","2026-10-11").label === "5 Oct – 11 Oct 2026" && rp("2026-10-05","2026-10-11").kind === "range", "range: label + kind");
