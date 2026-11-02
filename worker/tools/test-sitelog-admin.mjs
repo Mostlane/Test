@@ -53,4 +53,10 @@ r = await call("office", "/sitelog/merge-people", { primaryId: "p1", mergeIds: [
 ok(r.status === 200 && sl.prepare("SELECT COUNT(*) n FROM people").get().n === 1, "duplicates merged");
 ok(sl.prepare("SELECT person_id FROM visits WHERE id='v1'").get().person_id === "p1", "visits follow the kept person");
 ok(sl.prepare("SELECT person_id FROM scan_log").get().person_id === "p1", "scan log follows the kept person");
+// On site now: no site named = everyone with an open visit, any site.
+sl.exec(`INSERT INTO visits (id,person_id,site_code,check_in_at,check_out_at) VALUES ('v2','p1','Site B','2026-11-02 07:55:48',NULL),('v3','p1','Site A','2026-11-02 08:10:00','2026-11-02 09:00:00')`);
+r = await call("office", "/sitelog/on-site");
+ok(r.status === 200 && r.body.people.length === 1 && r.body.people[0].site === "Site B" && r.body.people[0].check_in_at === "2026-11-02T07:55:48Z", "on-site with no site lists every open visit");
+r = await call("office", "/sitelog/on-site?site=Site%20B");
+ok(r.status === 200 && r.body.people.length === 1, "on-site for one site still works");
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
