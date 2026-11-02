@@ -784,8 +784,10 @@ export async function handle(request, env, ctx) {
     try { out = await res.clone().json(); } catch (e) {}
     const outcome = out.status || (out.ok === false ? "error" : (res.ok ? "ok" : "http_" + res.status));
     const refused = !res.ok || out.ok === false || !SCAN_OK.has(outcome);
+    // The app re-checks on its own (every minute while open, and whenever it comes back on screen).
+    // Those are logged as "recheck", not as a QR scan, so they never look like a person scanning.
     const p = logScan(env, {
-      kind, outcome, refused, reason: out.error || out.reason || null,
+      kind: kind === "scan" && body.auto === true ? "recheck" : kind, outcome, refused, reason: out.error || out.reason || null,
       deviceToken: body.deviceToken || body.device_token || readDidCookie(request) || null,
       site: out.site || body.site || null, lat: body.lat, lng: body.lng, accuracy: body.accuracy,
       distance: out.distance_m, nearest: out.nearestSite || null
