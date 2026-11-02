@@ -948,27 +948,35 @@ const CAT_COL = { projects:"#1e66ff", cobra:"#0e7a3b", chapplins:"#7c3aed", site
 const catCol = c => CAT_COL[String(c||"").toLowerCase()] || "#64748b";
 const normSite = s => String(s||"").toLowerCase().replace(/[^a-z0-9]/g, "");
 function stMsg(t, err){ $("stMsg").className = "msg" + (err ? " err" : ""); $("stMsg").textContent = t || ""; }
-function loadLeaflet(){
-  if (window.L) return Promise.resolve();
-  return new Promise((res, rej) => {
-    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
-    const js = document.createElement("script"); js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    js.onload = () => res(); js.onerror = () => rej(new Error("The map didn't load — check your connection.")); document.head.appendChild(js);
+const GMAPS_KEY = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM";   // the portal's restricted browser key (same as sites.html)
+const llOf = p => p && typeof p.lat === "function" ? { lat: p.lat(), lng: p.lng() } : p;
+function loadGMaps(){
+  if (window.google && google.maps && google.maps.Map) return Promise.resolve();
+  if (window.__stMapsP) return window.__stMapsP;
+  window.__stMapsP = new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error("Google Maps didn't load — check your connection.")), 15000);
+    window.__stMapsReady = () => { clearTimeout(t); res(); };
+    const js = document.createElement("script");
+    js.src = "https://maps.googleapis.com/maps/api/js?key=" + GMAPS_KEY + "&callback=__stMapsReady&loading=async";
+    js.async = true; js.onerror = () => { clearTimeout(t); window.__stMapsP = null; rej(new Error("Google Maps didn't load — check your connection.")); };
+    document.head.appendChild(js);
   });
+  return window.__stMapsP;
 }
+function clearLayer(arr){ (arr || []).forEach(o => { try { o.setMap(null); } catch(e){} }); return []; }
 async function initSites(){
-  try { await loadLeaflet(); } catch(e){ stMsg(e.message, true); return; }
+  try { await loadGMaps(); } catch(e){ stMsg(e.message, true); return; }
   if (!ST.map) {
-    ST.map = L.map("stMap").setView([50.85, -1.2], 9);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(ST.map);
-    ST.layer = L.layerGroup().addTo(ST.map);
-    ST.map.on("click", e => { if (ST.adding) startNewSite(e.latlng); else if (ST.edit) movePin(e.latlng); });
+    ST.map = new google.maps.Map($("stMap"), { center: { lat: 50.85, lng: -1.2 }, zoom: 9,
+      mapTypeControl: true, mapTypeControlOptions: { mapTypeIds: ["roadmap", "hybrid"] },
+      streetViewControl: false, fullscreenControl: true, clickableIcons: false, gestureHandling: "cooperative" });
+    ST.layer = [];
+    ST.map.addListener("click", e => { const ll = llOf(e.latLng); if (ST.adding) startNewSite(ll); else if (ST.edit) movePin(ll); });
     $("stFind").addEventListener("input", () => renderSites());
     $("stArch").onchange = () => renderSites();
     $("stAddBtn").onclick = () => { closeSiteEdit(); setAdding(true); };
     $("stAddCancel").onclick = () => setAdding(false);
   }
-  setTimeout(() => ST.map.invalidateSize(), 60);
   await loadSites(!ST.loaded);
 }
 async function loadSites(fit){
@@ -993,18 +1001,26 @@ function visibleSites(){
 }
 function renderSites(fit){
   const list = visibleSites(), pts = [];
-  ST.layer.clearLayers();
+  ST.layer = clearLayer(ST.layer);
   list.forEach(s => {
     const lat = Number(s.lat), lng = Number(s.lng);
     if (!isFinite(lat) || !isFinite(lng) || (ST.edit && ST.edit.id === s.id)) return;
     const arch = Number(s.archived) === 1, col = arch ? "#94a3b8" : catCol(s.category), st = ST.stats[normSite(s.site_name)] || {};
-    L.circle([lat, lng], { radius: Number(s.radius_m) || 500, color: col, weight: 1.5, fillOpacity: .07, interactive: false }).addTo(ST.layer);
-    const m = L.circleMarker([lat, lng], { radius: 9, color: st.on_site ? "#0e7a3b" : "#fff", weight: st.on_site ? 4 : 2, fillColor: col, fillOpacity: 1 }).addTo(ST.layer);
-    m.bindTooltip(esc(s.site_name) + (st.on_site ? ` · ${st.on_site} on site now` : "") + (arch ? " · archived" : ""));
-    m.on("click", ev => { L.DomEvent.stopPropagation(ev); if (!ST.adding) editSite(s); });
+    ST.layer.push(new google.maps.Circle({ map: ST.map, center: { lat, lng }, radius: Number(s.radius_m) || 500,
+      strokeColor: col, strokeWeight: 1.5, strokeOpacity: .9, fillColor: col, fillOpacity: .08, clickable: false }));
+    const m = new google.maps.Marker({ map: ST.map, position: { lat, lng },
+      title: s.site_name + (st.on_site ? ` · ${st.on_site} on site now` : "") + (arch ? " · archived" : ""),
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: col, fillOpacity: 1,
+        strokeColor: st.on_site ? "#0e7a3b" : "#fff", strokeWeight: st.on_site ? 4 : 2 } });
+    ST.layer.push(m);
+    m.addListener("click", () => { if (!ST.adding) editSite(s); });
     pts.push([lat, lng]);
   });
-  if (fit && pts.length) ST.map.fitBounds(pts, { padding: [30, 30], maxZoom: 14 });
+  if (fit && pts.length) {
+    const b = new google.maps.LatLngBounds(); pts.forEach(p => b.extend({ lat: p[0], lng: p[1] }));
+    ST.map.fitBounds(b, 40);
+    google.maps.event.addListenerOnce(ST.map, "idle", () => { if (ST.map.getZoom() > 14) ST.map.setZoom(14); });
+  }
   $("stCount").textContent = `(${ST.sites.filter(s => Number(s.archived) !== 1).length} live)`;
   const sorted = list.slice().sort((a, b) => String(a.site_name).localeCompare(String(b.site_name)));
   $("stList").innerHTML = sorted.length ? sorted.map(s => {
@@ -1035,21 +1051,24 @@ function startNewSite(ll){
 function pinText(){ const e = ST.edit; return `${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}`; }
 function movePin(ll){
   const e = ST.edit; if (!e) return;
-  e.lat = ll.lat; e.lng = ll.lng; e.marker.setLatLng(ll); e.circle.setLatLng(ll);
+  ll = llOf(ll); e.lat = ll.lat; e.lng = ll.lng; e.marker.setPosition(ll); e.circle.setCenter(ll);
   if ($("stLL")) $("stLL").textContent = pinText();
 }
 function editSite(s, isNew){
   closeSiteEdit(true);
   const lat = Number(s.lat), lng = Number(s.lng), hasPin = isFinite(lat) && isFinite(lng);
-  const c = ST.map.getCenter();
+  const c = llOf(ST.map.getCenter());
   ST.edit = { id: s.id, orig: s, isNew: !!isNew, lat: hasPin ? lat : c.lat, lng: hasPin ? lng : c.lng };
   const e = ST.edit, radius = Number(s.radius_m) || 500;
-  ST.editLayer = L.layerGroup().addTo(ST.map);
-  e.circle = L.circle([e.lat, e.lng], { radius, color: "#b45309", weight: 2, dashArray: "6 4", fillOpacity: .12, interactive: false }).addTo(ST.editLayer);
-  e.marker = L.marker([e.lat, e.lng], { draggable: true, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
-    html: '<div style="width:20px;height:20px;border-radius:50%;background:#b45309;border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)"></div>' }) }).addTo(ST.editLayer);
-  e.marker.on("drag", ev => movePin(ev.target.getLatLng()));
-  ST.map.setView([e.lat, e.lng], Math.max(ST.map.getZoom(), radius > 600 ? 14 : 16));
+  e.circle = new google.maps.Circle({ map: ST.map, center: { lat: e.lat, lng: e.lng }, radius,
+    strokeColor: "#b45309", strokeWeight: 2, fillColor: "#b45309", fillOpacity: .14, clickable: false });
+  e.marker = new google.maps.Marker({ map: ST.map, position: { lat: e.lat, lng: e.lng }, draggable: true, zIndex: 999,
+    title: "Drag me to the exact spot",
+    icon: { path: google.maps.SymbolPath.CIRCLE, scale: 11, fillColor: "#b45309", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 3 } });
+  e.marker.addListener("drag", ev => movePin(ev.latLng));
+  ST.editLayer = [e.circle, e.marker];
+  ST.map.setCenter({ lat: e.lat, lng: e.lng });
+  ST.map.setZoom(Math.max(ST.map.getZoom() || 9, radius > 600 ? 14 : 16));
   renderSites();
   const p = isNew ? null : portalFor(s), proj = !isNew && isProjectSite(s), arch = Number(s.archived) === 1;
   const st = isNew ? {} : (ST.stats[normSite(s.site_name)] || {});
@@ -1095,13 +1114,13 @@ async function postcodeToPin(){
   try {
     const d = await (await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc))).json();
     if (!d || !d.result) throw new Error("Postcode not recognised");
-    const ll = L.latLng(d.result.latitude, d.result.longitude);
-    movePin(ll); ST.map.setView(ll, 17); $("stPc").value = d.result.postcode;
+    const ll = { lat: d.result.latitude, lng: d.result.longitude };
+    movePin(ll); ST.map.setCenter(ll); ST.map.setZoom(17); $("stPc").value = d.result.postcode;
     m.textContent = "Pin moved to the middle of " + d.result.postcode + " — drag it onto the exact spot.";
   } catch(e){ m.className = "msg err"; m.textContent = e.message; }
 }
 function closeSiteEdit(quiet){
-  if (ST.editLayer) { ST.editLayer.remove(); ST.editLayer = null; }
+  if (ST.editLayer) { clearLayer(ST.editLayer); ST.editLayer = null; }
   ST.edit = null; $("stEdit").style.display = "none"; $("stEdit").innerHTML = "";
   if (!quiet && ST.layer) renderSites();
 }
