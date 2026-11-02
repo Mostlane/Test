@@ -12236,6 +12236,8 @@ async function handleInner(request, env, ctx) {
     return json4({ ok: true });
   }
   if (url.pathname === "/sites" && request.method === "GET") {
+    const guardSites = requireAdmin2();
+    if (guardSites) return guardSites;
     await ensureOfflineSchema(env);
     const rows = await env.SITELOG_DB.prepare(
       "SELECT * FROM sites ORDER BY site_name ASC"
@@ -14663,11 +14665,18 @@ async function ensureCustomer(env, tenantId, id) {
     "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
   ).bind(db.tenantId, id, prettify(id)).run();
 }
+function siteLogEligible(site) {
+  return String(site && site.client || "").toLowerCase().trim() === "projects" || !!(site && site.siteLog === true);
+}
 async function syncSiteToSiteLog(env, site, oldName) {
   try {
     if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "no-secret" };
     const name = String(site.siteName || "").trim();
     if (!name) return { ok: false, reason: "no-name" };
+    if (!siteLogEligible(site)) {
+      if (site.siteLog === false) return await removeSiteFromSiteLog(env, oldName || name, { archive: true });
+      return { ok: false, reason: "not-sitelog-site" };
+    }
     const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
     const body = {
       siteName: name,
@@ -15605,7 +15614,7 @@ async function handle8(request, env, ctx, url, sess) {
               d.lon = meta.lng;
             }
             await env.DB.prepare("UPDATE sites SET data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(d), tid, s.client, siteNo).run();
-            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client, siteLog: d.siteLog }));
           }
         }
       } catch {
@@ -38871,6 +38880,7 @@ init_filesign();
 init_push();
 
 // src/routes/costing.js
+init_sites();
 init_http();
 init_auth();
 init_timesheets();
@@ -38941,7 +38951,7 @@ async function handle29(request, env, ctx, url, sess) {
         num5
       ).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      if (ll && siteLogEligible({ client, siteLog: data.siteLog })) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
       return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/add") {
@@ -38966,7 +38976,7 @@ async function handle29(request, env, ctx, url, sess) {
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num5, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
+      if (ll && siteLogEligible({ client })) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
       return json({ ok: true, client, siteNumber: num5, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
